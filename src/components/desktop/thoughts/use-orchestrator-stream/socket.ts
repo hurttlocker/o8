@@ -335,6 +335,40 @@ export function createOrchestratorMessageHandler(
         break;
       }
 
+      // #2142 — the server retried this turn and threw the previous attempt
+      // away. Its narration is already rendered in the live bubble (settle only
+      // ever gated the terminal events, so every token streamed before the
+      // false dispatch could be detected). Clear it here, or the retry's reply
+      // appends to it and the operator reads two turns as one.
+      case 'retry': {
+        const current = options.currentAssistantRef.current;
+        if (current) {
+          current.chunks = [];
+          current.thinkingChunks = [];
+          current.thinkingStartedAt = null;
+          current.thinkingDurationMs = null;
+          setTranscriptMessages((prev) => {
+            const index = prev.findIndex((message) => message.id === current.id);
+            if (index < 0) return prev;
+            const next = [...prev];
+            next[index] = { ...next[index], text: '', thinking: undefined, thinkingActive: false };
+            return next;
+          });
+        }
+        const notice = typeof msg.data?.notice === 'string' ? msg.data.notice : '';
+        if (notice && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cortex:orchestrator-notice', {
+            detail: {
+              kind: 'orchestrator-turn-retry',
+              noticeId: `orch-retry-${current?.id ?? 'turn'}-${msg.data?.attempt ?? 2}`,
+              message: notice,
+              repoPath: typeof msg.data?.repoPath === 'string' ? msg.data.repoPath : undefined,
+            },
+          }));
+        }
+        break;
+      }
+
       case 'output': {
         const text = typeof msg.data?.text === 'string' ? msg.data.text : '';
         const isThinkingMarker = msg.data?.thinking === true;

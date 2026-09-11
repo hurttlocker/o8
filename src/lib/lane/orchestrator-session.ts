@@ -32,6 +32,11 @@ import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { fingerprintMcpConfig, firstMcpConfigDivergence } from '@/lib/lane/orchestrator-mcp-fingerprint';
 import { buildOrchestratorArgs } from '@/lib/lane/orchestrator-spawn-args';
+import {
+  isFalseDispatchTurn,
+  runTurnWithFalseDispatchRetry,
+  type FalseDispatchAttemptResult,
+} from '@/lib/lane/orchestrator-false-dispatch';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 import {
@@ -555,7 +560,7 @@ interface OrchestratorProcConfig {
 interface OrchestratorActiveTurn {
   onEvent: (e: OrchestratorEvent) => void;
   captureEvent: (e: OrchestratorEvent) => void;
-  resolve: () => void;
+  resolve: (outcome: FalseDispatchAttemptResult) => void;
   reject: (err: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
   abortSignal: AbortSignal | null;
@@ -684,8 +689,21 @@ export function detectPermissionRequest(raw: Record<string, unknown>): boolean {
 
 /** Settle the active turn — emit `done` (+ an error event on a bad crash), run
  *  the narrate-and-exit / false-dispatch telemetry, resolve, and (if the proc is
- *  still alive) leave it READY + schedule the idle reap. */
-function settleOrchestratorTurn(session: OrchestratorSession, w: WarmState, error: Error | null): void {
+ *  still alive) leave it READY + schedule the idle reap.
+ *
+ *  `completedResult` (#2142) means this settle came from a real stream `result`
+ *  — the model finished the turn on its own. It defaults to FALSE so every other
+ *  call site (watchdog timeout, user abort, stdin write failure, plan-mode
+ *  LOCKOUT, crash-tail end, proc close, dead rehydrated turn) is excluded from
+ *  false-dispatch handling by construction. Those turns are already abnormal;
+ *  a turn that was killed mid-narration has no business being retried as a
+ *  hallucinated dispatch. */
+function settleOrchestratorTurn(
+  session: OrchestratorSession,
+  w: WarmState,
+  error: Error | null,
+  completedResult = false,
+): void {
   const turn = w.activeTurn;
   if (!turn || turn.settled) return;
   const hadCrashRecord = !!turn.crashRecord;
@@ -703,26 +721,45 @@ function settleOrchestratorTurn(session: OrchestratorSession, w: WarmState, erro
   w.lastUsedAt = Date.now();
   if (turn.turnSessionId) session.claudeSessionId = turn.turnSessionId;
 
+  let falseDispatch = false;
   if (!error) {
     const tail = turn.lastAssistantText.trim().slice(-1200);
     const hasSummaryMarker = /VERDICT\s*[#-]|Dispatched\s+\d+\s+agent/i.test(tail);
     if (turn.sawToolUseAfterText || !hasSummaryMarker) {
+      // #2142 decision — narrate-and-exit stays a warn. Its condition
+      // (`sawToolUseAfterText || !hasSummaryMarker`) is true for most ordinary
+      // turns: any turn that ends without a VERDICT/"Dispatched N agent" marker
+      // trips it, which is nearly every healthy conversational reply. Acting on
+      // it would fail turns wholesale. False dispatch is the opposite shape — a
+      // specific contradiction between what the turn DID and what it SAID — so
+      // only that one is promoted to a failure here.
       console.warn(`[orchestrator-session] narrate-and-exit suspected for ${session.sessionName}: sawToolUseAfterText=${turn.sawToolUseAfterText} hasSummaryMarker=${hasSummaryMarker} tailLen=${tail.length}`);
     }
-    const dispatchClaimPattern = /\b(dispatched|launched|fired|launching|polling|kicked off)\b/i;
-    if (turn.launchAgentCallCount === 0 && dispatchClaimPattern.test(turn.lastAssistantText)) {
-      console.warn(`[orchestrator-session] FALSE-DISPATCH suspected for ${session.sessionName}: launchAgentCallCount=0 but text claims dispatch — text sample: ${JSON.stringify(turn.lastAssistantText.slice(-200))}`);
+    falseDispatch = isFalseDispatchTurn({
+      completedResult,
+      error,
+      launchAgentCallCount: turn.launchAgentCallCount,
+      assistantText: turn.lastAssistantText,
+    });
+    if (falseDispatch) {
+      console.warn(`[orchestrator-session] FALSE-DISPATCH for ${session.sessionName}: launchAgentCallCount=0 but text claims dispatch — text sample: ${JSON.stringify(turn.lastAssistantText.slice(-200))}`);
     }
   }
 
-  turn.onEvent({ type: 'done', sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}) });
+  // A false-dispatch turn must NOT report success. Withhold `done` and hand it
+  // to the retry driver, which replays it only if the LAST attempt also fails
+  // (so the client latch still releases) and drops it for a discarded attempt.
+  const done: Extract<OrchestratorEvent, { type: 'done' }> = {
+    type: 'done', sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}),
+  };
+  if (!falseDispatch) turn.onEvent(done);
   if (error) turn.onEvent({ type: 'error', error: error.message });
 
   if ((session.proc || hadCrashRecord) && session.status !== 'dead') {
     session.status = 'ready';
     scheduleIdleReap(session, w);
   }
-  turn.resolve();
+  turn.resolve({ falseDispatch, withheldDone: falseDispatch ? done : null });
 }
 
 function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState, line: string): boolean {
@@ -743,7 +780,9 @@ function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState, line: 
   processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
   if (raw.type === 'result') {
     turn.usage = parseOrchestratorTurnUsage(raw);
-    settleOrchestratorTurn(session, w, null);
+    // The ONLY settle that passes completedResult — the model ran the turn to
+    // completion itself, so its claims are its own and the detector applies.
+    settleOrchestratorTurn(session, w, null, true);
     return false;
   }
   return true;
@@ -1006,138 +1045,148 @@ export async function sendToOrchestrator(
     }
   }
 
-  session.status = 'busy';
-  clearIdleTimer(w);
-
-  // Build the message payload (attachments → image blocks). Same CLI contract
-  // as interactive-session.ts; the message is written to the RESIDENT proc's
-  // still-open stdin (no stdin.end() — the proc lives on for the next turn).
+  // Attachments → image blocks. Same CLI contract as interactive-session.ts;
+  // the message is written to the RESIDENT proc's still-open stdin (no
+  // stdin.end() — the proc lives on for the next turn).
   const imageBlocks = (options.attachments ?? [])
     .map(attachmentToImageBlock)
     .filter((block): block is NonNullable<typeof block> => block !== null);
-  const content: string | Array<Record<string, unknown>> = imageBlocks.length > 0
-    ? [{ type: 'text', text: message }, ...imageBlocks]
-    : message;
-  const payload = `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
 
-  return new Promise<void>((resolvePromise, rejectPromise) => {
-    const proc = session.proc;
-    if (!proc || !proc.stdin || proc.stdin.destroyed) {
-      session.status = 'dead';
-      const e = new Error('Orchestrator resident proc stdin is not writable');
-      onEvent({ type: 'error', error: e.message });
-      rejectPromise(e);
-      return;
-    }
+  // #2142 — one turn, up to two attempts. The retry re-enters HERE, not through
+  // sendToOrchestrator: the carrier, MCP config and warm proc resolved above are
+  // reused as-is, and the correction rides the same warm session so the packet
+  // plan from attempt 1 is still in the model's context.
+  const runAttempt = (attemptMessage: string, attempt: 1 | 2): Promise<FalseDispatchAttemptResult> => {
+    // Attachments belong to the operator's message only — the correction turn is
+    // text, and re-sending images would double them into the session context.
+    const content: string | Array<Record<string, unknown>> = imageBlocks.length > 0 && attempt === 1
+      ? [{ type: 'text', text: attemptMessage }, ...imageBlocks]
+      : attemptMessage;
+    const payload = `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
+    session.status = 'busy';
+    clearIdleTimer(w);
 
-    const crashOffset = w.crashStdoutPath ? fileSize(w.crashStdoutPath) : 0;
-    const crashRecord = crashSurvivableOrchestratorEnabled() && w.crashStdoutPath && w.crashStderrPath && proc.pid
-      ? createOrchestratorTurnRecordForFiles({
-          backend: 'claude',
-          sessionName: session.sessionName,
-          repoPath: session.repoPath,
-          threadId: options.crashSurvival?.threadId ?? session.threadId,
-          pid: proc.pid,
-          stdoutPath: w.crashStdoutPath,
-          stderrPath: w.crashStderrPath,
-          stdoutOffset: crashOffset,
-          assistantMessageId: options.crashSurvival?.assistantMessageId ?? null,
-          assistantStartedAtMs: options.crashSurvival?.assistantStartedAtMs ?? null,
-          model,
-        })
-      : null;
-
-    // #457 — Hang watchdog. Kills the resident proc (surfacing WHY) if the turn
-    // never settles on a `result`.
-    const timeout = setTimeout(() => {
-      console.warn(`[orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
-      const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
-      onEvent({
-        type: 'error',
-        error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
-      });
-      settleOrchestratorTurn(session, w, null);
-      killOrchestratorProc(session, w);
-    }, PROCESS_TIMEOUT_MS);
-
-    const turn: OrchestratorActiveTurn = {
-      onEvent,
-      captureEvent: () => {},
-      resolve: resolvePromise,
-      reject: rejectPromise,
-      timeout,
-      abortSignal: options.signal ?? null,
-      abortListener: null,
-      settled: false,
-      toolTracker: createToolCallTracker(),
-      turnSessionId: session.claudeSessionId,
-      cost: null,
-      lastAssistantText: '',
-      sawToolUseAfterText: false,
-      launchAgentCallCount: 0,
-      crashRecord,
-      stopCrashTail: null,
-    };
-    // Narrate-and-exit / false-dispatch telemetry state lives on the turn.
-    turn.captureEvent = (e: OrchestratorEvent) => {
-      if (e.type === 'text') {
-        turn.lastAssistantText += e.text;
-        turn.sawToolUseAfterText = false;
-      } else if (e.type === 'tool_use') {
-        turn.sawToolUseAfterText = true;
-        if (e.name === 'cortex_launch_agent' || e.name === 'mcp__cortex__cortex_launch_agent') {
-          turn.launchAgentCallCount += 1;
-        }
-      }
-      onEvent(e);
-    };
-    w.activeTurn = turn;
-    if (crashRecord) {
-      turn.stopCrashTail = tailJsonlFile({
-        filePath: crashRecord.stdoutPath,
-        fromOffset: crashOffset,
-        alive: () => !!session.proc && isPidAlive(crashRecord.pid) && !turn.settled,
-        onLine: (line) => handleClaudeJsonLine(session, w, line),
-        onEnd: () => {
-          if (!turn.settled) {
-            const stderr = existsSync(crashRecord.stderrPath)
-              ? (() => {
-                  try { return readFileSync(crashRecord.stderrPath, 'utf8').trim(); } catch { return ''; }
-                })()
-              : '';
-            settleOrchestratorTurn(session, w, stderr ? new Error(stderr.slice(0, 500)) : null);
-          }
-        },
-      });
-    }
-
-    // #624 — User interrupt. Kills the resident proc (sacrificed for the
-    // interrupt; the next turn spawns cold) and settles this turn.
-    if (options.signal) {
-      if (options.signal.aborted) {
-        settleOrchestratorTurn(session, w, null);
-        killOrchestratorProc(session, w);
+    return new Promise<FalseDispatchAttemptResult>((resolvePromise, rejectPromise) => {
+      const proc = session.proc;
+      if (!proc || !proc.stdin || proc.stdin.destroyed) {
+        session.status = 'dead';
+        const e = new Error('Orchestrator resident proc stdin is not writable');
+        onEvent({ type: 'error', error: e.message });
+        rejectPromise(e);
         return;
       }
-      turn.abortListener = () => {
-        console.log(`[orchestrator-session] User interrupt — killing ${session.sessionName}`);
+
+      const crashOffset = w.crashStdoutPath ? fileSize(w.crashStdoutPath) : 0;
+      const crashRecord = crashSurvivableOrchestratorEnabled() && w.crashStdoutPath && w.crashStderrPath && proc.pid
+        ? createOrchestratorTurnRecordForFiles({
+            backend: 'claude',
+            sessionName: session.sessionName,
+            repoPath: session.repoPath,
+            threadId: options.crashSurvival?.threadId ?? session.threadId,
+            pid: proc.pid,
+            stdoutPath: w.crashStdoutPath,
+            stderrPath: w.crashStderrPath,
+            stdoutOffset: crashOffset,
+            assistantMessageId: options.crashSurvival?.assistantMessageId ?? null,
+            assistantStartedAtMs: options.crashSurvival?.assistantStartedAtMs ?? null,
+            model,
+          })
+        : null;
+
+      // #457 — Hang watchdog. Kills the resident proc (surfacing WHY) if the turn
+      // never settles on a `result`.
+      const timeout = setTimeout(() => {
+        console.warn(`[orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
+        const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
+        onEvent({
+          type: 'error',
+          error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
+        });
         settleOrchestratorTurn(session, w, null);
         killOrchestratorProc(session, w);
-      };
-      options.signal.addEventListener('abort', turn.abortListener, { once: true });
-    }
+      }, PROCESS_TIMEOUT_MS);
 
-    try {
-      proc.stdin.write(payload, 'utf8', (error?: Error | null) => {
-        if (error) {
-          console.warn(`[orchestrator-session] stdin write failed for ${session.sessionName}:`, error);
-          session.status = 'dead';
-          settleOrchestratorTurn(session, w, error);
+      const turn: OrchestratorActiveTurn = {
+        onEvent,
+        captureEvent: () => {},
+        resolve: resolvePromise,
+        reject: rejectPromise,
+        timeout,
+        abortSignal: options.signal ?? null,
+        abortListener: null,
+        settled: false,
+        toolTracker: createToolCallTracker(),
+        turnSessionId: session.claudeSessionId,
+        cost: null,
+        lastAssistantText: '',
+        sawToolUseAfterText: false,
+        launchAgentCallCount: 0,
+        crashRecord,
+        stopCrashTail: null,
+      };
+      // Narrate-and-exit / false-dispatch telemetry state lives on the turn.
+      turn.captureEvent = (e: OrchestratorEvent) => {
+        if (e.type === 'text') {
+          turn.lastAssistantText += e.text;
+          turn.sawToolUseAfterText = false;
+        } else if (e.type === 'tool_use') {
+          turn.sawToolUseAfterText = true;
+          if (e.name === 'cortex_launch_agent' || e.name === 'mcp__cortex__cortex_launch_agent') {
+            turn.launchAgentCallCount += 1;
+          }
         }
-      });
-    } catch (error) {
-      session.status = 'dead';
-      settleOrchestratorTurn(session, w, error instanceof Error ? error : new Error(String(error)));
-    }
-  });
+        onEvent(e);
+      };
+      w.activeTurn = turn;
+      if (crashRecord) {
+        turn.stopCrashTail = tailJsonlFile({
+          filePath: crashRecord.stdoutPath,
+          fromOffset: crashOffset,
+          alive: () => !!session.proc && isPidAlive(crashRecord.pid) && !turn.settled,
+          onLine: (line) => handleClaudeJsonLine(session, w, line),
+          onEnd: () => {
+            if (!turn.settled) {
+              const stderr = existsSync(crashRecord.stderrPath)
+                ? (() => {
+                    try { return readFileSync(crashRecord.stderrPath, 'utf8').trim(); } catch { return ''; }
+                  })()
+                : '';
+              settleOrchestratorTurn(session, w, stderr ? new Error(stderr.slice(0, 500)) : null);
+            }
+          },
+        });
+      }
+
+      // #624 — User interrupt. Kills the resident proc (sacrificed for the
+      // interrupt; the next turn spawns cold) and settles this turn.
+      if (options.signal) {
+        if (options.signal.aborted) {
+          settleOrchestratorTurn(session, w, null);
+          killOrchestratorProc(session, w);
+          return;
+        }
+        turn.abortListener = () => {
+          console.log(`[orchestrator-session] User interrupt — killing ${session.sessionName}`);
+          settleOrchestratorTurn(session, w, null);
+          killOrchestratorProc(session, w);
+        };
+        options.signal.addEventListener('abort', turn.abortListener, { once: true });
+      }
+
+      try {
+        proc.stdin.write(payload, 'utf8', (error?: Error | null) => {
+          if (error) {
+            console.warn(`[orchestrator-session] stdin write failed for ${session.sessionName}:`, error);
+            session.status = 'dead';
+            settleOrchestratorTurn(session, w, error);
+          }
+        });
+      } catch (error) {
+        session.status = 'dead';
+        settleOrchestratorTurn(session, w, error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  };
+
+  return runTurnWithFalseDispatchRetry({ message, onEvent, runAttempt });
 }

@@ -209,6 +209,44 @@ describe('orchestrator socket — first-turn streaming race', () => {
     expect(h.messagesRef.current[h.messagesRef.current.length - 1]?.toolCalls?.[0]?.name).toBe('Bash');
   });
 
+  // #2142 — the server retried the turn and threw the previous attempt away.
+  // Its narration is already in the live bubble (settle only ever gated the
+  // terminal events), so the client must clear it or the retry's reply appends
+  // to it and the operator reads two turns glued into one.
+  it('a retry boundary clears the discarded attempt out of the live bubble', () => {
+    const current: CurrentAssistantStreamState = {
+      id: 'assistant-1',
+      chunks: ['I dispatched three agents. ', 'Send me a message when you want me to review.'],
+      thinkingChunks: ['planning'],
+      epoch: 0,
+    };
+    const assistant: MobileTranscriptEntry = {
+      id: 'assistant-1',
+      role: 'assistant',
+      text: 'I dispatched three agents. Send me a message when you want me to review.',
+    };
+    const h = makeHarness({ status: 'busy', current, messages: [userMsg, assistant] });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'retry',
+      data: { assistantMessageId: 'assistant-1', attempt: 2, reason: 'false-dispatch', notice: 'Discarding it and retrying the turn once.' },
+    });
+
+    expect(h.currentAssistantRef.current?.chunks).toEqual([]);
+    expect(h.currentAssistantRef.current?.thinkingChunks).toEqual([]);
+    const cleared = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      [userMsg, assistant],
+    );
+    expect(cleared.find((m) => m.id === 'assistant-1')?.text).toBe('');
+
+    // The retry's tokens land in a bubble holding ONLY the retry.
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'Launched lane-a, lane-b, lane-c.', assistantMessageId: 'assistant-1' } });
+    expect(h.currentAssistantRef.current?.chunks).toEqual(['Launched lane-a, lane-b, lane-c.']);
+    expect(h.currentAssistantRef.current?.chunks.join('')).not.toContain('I dispatched three agents');
+  });
+
   it('a LIVE (non-snapshot) "ready" still finalizes the streamed turn', () => {
     const current: CurrentAssistantStreamState = { id: 'a1', chunks: ['x'], thinkingChunks: [], epoch: 0 };
     const h = makeHarness({ status: 'busy', current });

@@ -135,6 +135,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import { createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
@@ -1255,6 +1256,22 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
       });
       reboundAssistantText.delete(record.id);
       reboundOrchestratorRecords.delete(record.id);
+      break;
+    // #2142 — same attempt boundary on the crash-rehydrate replay path.
+    case 'turn_retry':
+      reboundAssistantText.set(record.id, '');
+      if (threadId && assistantMessageId) {
+        try {
+          truncateMobileOrchestratorThreadFromMessage({ tabId: threadId, messageId: assistantMessageId });
+        } catch (trimErr) {
+          console.warn('[orchestrator-rehydrate] failed to drop discarded attempt text', trimErr);
+        }
+      }
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'retry',
+        data: { repoPath, threadId, assistantMessageId, attempt: event.attempt, reason: event.reason, notice: event.notice, backend },
+      });
       break;
     case 'collide_phase':
     case 'collide_proposal':
@@ -5135,8 +5152,9 @@ async function handleOrchestratorSendMsgOnce(
     : `user-${turnStartedAtMs}`;
   const assistantMessageId = isThreadBacked ? `assistant-${turnStartedAtMs}` : null;
   const assistantStartedAtMs = turnStartedAtMs;
-  let assistantTextAccum = '';
-  let lastPersistedAssistantText = '';
+  // #2142 — per-ATTEMPT, not per-message. A retried turn discards everything the
+  // rejected attempt streamed so the retry's reply is not appended to it.
+  const assistantText = createAssistantTextBuffer();
   let activeAssistantModel = model ?? null;
   // Incremental persistence (2026-06-22): persist the streamed assistant text
   // every ~1.5s WHILE the turn runs, not only at terminal points. Without this,
@@ -5155,13 +5173,13 @@ async function handleOrchestratorSendMsgOnce(
   ) => {
     if (!isThreadBacked || !assistantMessageId) return;
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
-    if (!assistantTextAccum || (assistantTextAccum === lastPersistedAssistantText && !receipt)) return;
+    if (!assistantText.shouldPersist(!!receipt)) return;
     try {
       const updatedThread = upsertMobileOrchestratorAssistantMessage({
         tabId: threadId,
         repoPath,
         messageId: assistantMessageId,
-        content: assistantTextAccum,
+        content: assistantText.value,
         backend: backendId,
         agent: activeAgentTag,
         sessionId,
@@ -5176,7 +5194,7 @@ async function handleOrchestratorSendMsgOnce(
         } : {}),
         timestampMs: assistantStartedAtMs,
       });
-      lastPersistedAssistantText = assistantTextAccum;
+      assistantText.markPersisted();
       if (updatedThread) {
         broadcast({
           channel: 'orchestrator-threads',
@@ -5442,7 +5460,7 @@ async function handleOrchestratorSendMsgOnce(
         switch (event.type) {
           case 'text':
             if (isThreadBacked) {
-              assistantTextAccum += event.text;
+              assistantText.append(event.text);
               // Throttled mid-stream persist so a wedged turn's reply survives a
               // reload instead of dropping to user-only on disk.
               if (Date.now() - lastIncrementalPersistAt > INCREMENTAL_PERSIST_MS) {
@@ -5510,7 +5528,7 @@ async function handleOrchestratorSendMsgOnce(
             break;
 
           // ── Collide (MoA) — proposer pre-roll. Forwarded to the faint card; NEVER
-          //    accumulated into assistantTextAccum so only the aggregator's reply is
+          //    accumulated into the assistant text buffer so only the aggregator's reply is
           //    the persisted, visible answer.
           case 'collide_phase':
             wsMsg = JSON.stringify({
@@ -5580,6 +5598,42 @@ async function handleOrchestratorSendMsgOnce(
               channel: 'orchestrator',
               event: 'collide-proposal',
               data: { proposer: event.proposer, text: event.text, breach: event.breach ?? false, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
+            });
+            break;
+
+          // #2142 — attempt boundary. The rejected attempt already streamed its
+          //    narration into this bubble and (past the 1.5s incremental persist)
+          //    onto disk. Drop both before the retry's first token, otherwise the
+          //    two turns concatenate into one reply with no separator.
+          case 'turn_retry':
+            assistantText.discard();
+            if (isThreadBacked && assistantMessageId) {
+              try {
+                const trimmedThread = truncateMobileOrchestratorThreadFromMessage({
+                  tabId: threadId,
+                  messageId: assistantMessageId,
+                });
+                if (trimmedThread) {
+                  broadcast({ channel: 'orchestrator-threads', event: 'upsert', data: { thread: trimmedThread } });
+                }
+              } catch (trimErr) {
+                console.warn('[ws-server][orchestrator] failed to drop discarded attempt text', trimErr);
+              }
+            }
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'retry',
+              data: {
+                repoPath,
+                threadId,
+                assistantMessageId,
+                attempt: event.attempt,
+                reason: event.reason,
+                notice: event.notice,
+                backend: turnBackend.id,
+                model: effectiveTurnModel,
+                agent: turnAgentTag,
+              },
             });
             break;
 
