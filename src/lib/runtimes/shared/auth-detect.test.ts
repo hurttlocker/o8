@@ -59,6 +59,23 @@ const {
   getRuntimeAuthSnapshot,
   invalidateRuntimeAuthCache,
 } = await import("./auth-detect");
+const { setOpencodeCliProbeDependenciesForTests } =
+  await import("./opencode-readiness");
+
+/**
+ * Stands in for the OpenCode 2 CLI. `auth list` answers the way an install that
+ * keeps its credentials server-side answers: exit 0, empty array. `models` names
+ * only what such an install can actually resolve.
+ */
+function stubOpencodeCli(models: string[], authList = "[]"): void {
+  setOpencodeCliProbeDependenciesForTests({
+    run: async (args: string[]) => {
+      if (args[0] === "models") return `${models.join("\n")}\n`;
+      if (args[0] === "auth") return authList;
+      throw new Error(`unexpected opencode probe: ${args.join(" ")}`);
+    },
+  });
+}
 const createMissionRoute =
   await import("@/app/api/orchestrator/create-mission/route");
 const operatorDefaultsRoute =
@@ -114,6 +131,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  setOpencodeCliProbeDependenciesForTests(null);
   authFixture.installed = new Set(["opencode2"]);
   invalidateRuntimeAuthCache();
   rmSync(path.join(authFixture.home, ".config"), {
@@ -180,7 +198,8 @@ describe("OpenCode readiness preflight", () => {
     ).toHaveLength(1);
   });
 
-  it("reports the trusted keyless default as ready without claiming authentication", async () => {
+  it("reports a CLI that lists resolvable models as ready without claiming authentication", async () => {
+    stubOpencodeCli(["opencode/nemotron-3.5-lightning-free"]);
     invalidateRuntimeAuthCache();
     const snapshot = await getRuntimeAuthSnapshot();
     const status = snapshot.statuses.opencode;
@@ -192,8 +211,7 @@ describe("OpenCode readiness preflight", () => {
       runtime: "opencode",
       unavailableReason: null,
     });
-    expect(status.detail).toContain("default model");
-    expect(status.detail).toContain("keyless dispatch");
+    expect(status.detail).toContain("lists models it can resolve");
     expect(status.fix).toBe("No action needed.");
 
     const response = await operatorDefaultsRoute.GET(new Request(
@@ -209,6 +227,79 @@ describe("OpenCode readiness preflight", () => {
         }),
       ]),
     });
+  });
+
+  it("dispatches a model the CLI resolves when `auth list` answers with an empty payload", async () => {
+    // OpenCode 2 keeps credentials server-side, so `auth list --format json`
+    // exits 0 with [] on a fully connected machine. The model listing is the
+    // evidence that survives that: this install resolves both of these.
+    stubOpencodeCli([
+      "opencode/nemotron-3.5-lightning-free",
+      "openrouter/deepseek/deepseek-v4.1-flash",
+    ]);
+    invalidateRuntimeAuthCache();
+
+    await expect(
+      assertRuntimeDispatchable(
+        "opencode",
+        "openrouter/deepseek/deepseek-v4.1-flash",
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertRuntimeDispatchable("opencode", "opencode/nemotron-3.5-lightning-free"),
+    ).resolves.toBeUndefined();
+    // An effort pin resolves through the base model the listing names.
+    await expect(
+      assertRuntimeDispatchable(
+        "opencode",
+        "opencode/nemotron-3.5-lightning-free/high",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still refuses a provider the CLI cannot resolve when the payload is empty", async () => {
+    stubOpencodeCli(["opencode/nemotron-3.5-lightning-free"]);
+    invalidateRuntimeAuthCache();
+
+    await expect(
+      assertRuntimeDispatchable(
+        "opencode",
+        "openrouter/deepseek/deepseek-v4.1-flash",
+      ),
+    ).rejects.toMatchObject({
+      code: "dispatch_cli_auth_unavailable",
+      status: {
+        ready: false,
+        unavailableReason: "needs_auth",
+        detail: expect.stringContaining(
+          'provider "openrouter" has no credential evidence',
+        ),
+      },
+    });
+  });
+
+  it("keeps the credential-file answer when the CLI cannot be asked at all", async () => {
+    // No stub: the probes fail the way a missing or hanging CLI fails them.
+    const authPath = path.join(
+      authFixture.home,
+      ".local",
+      "share",
+      "opencode",
+      "auth.json",
+    );
+    mkdirSync(path.dirname(authPath), { recursive: true });
+    writeFileSync(
+      authPath,
+      JSON.stringify({ openrouter: { type: "api", key: "test-key" } }),
+    );
+    invalidateRuntimeAuthCache();
+
+    await expect(
+      assertRuntimeDispatchable(
+        "opencode",
+        "openrouter/deepseek/deepseek-v4.1-flash",
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it.each([
@@ -577,14 +668,31 @@ describe("OpenCode readiness preflight", () => {
     expect(await response.json()).toMatchObject({ ok: true });
   });
 
-  it("accepts the known zero-setup OpenCode model through the real create-mission route", async () => {
+  it("accepts a zero-setup OpenCode model the CLI lists, through the real create-mission route", async () => {
+    // Zero-setup models are whichever free-tier ids this install resolves, not a
+    // list baked in here that goes stale the day the free tier changes.
+    stubOpencodeCli(["opencode/nemotron-3.5-lightning-free"]);
     invalidateRuntimeAuthCache();
 
     const response = await createMissionRoute.POST(
-      createMissionRequest("opencode/deepseek-v4-flash-free", 91_761_004),
+      createMissionRequest("opencode/nemotron-3.5-lightning-free", 91_761_004),
     );
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({ ok: true });
+  });
+
+  it("refuses a free-tier model this install does not list, through the real create-mission route", async () => {
+    stubOpencodeCli(["opencode/nemotron-3.5-lightning-free"]);
+    invalidateRuntimeAuthCache();
+
+    const response = await createMissionRoute.POST(
+      createMissionRequest("opencode/retired-flash-free", 91_761_010),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: { code: "dispatch_cli_auth_unavailable" },
+    });
   });
 
   it("uses inherited and configured provider env credentials without exposing their values", async () => {

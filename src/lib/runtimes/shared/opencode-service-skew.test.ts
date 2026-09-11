@@ -36,6 +36,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const {
   probeOpencodeServiceVersion,
+  setOpencodeCliProbeDependenciesForTests,
   setOpencodeServiceProbeDependenciesForTests,
 } = await import('./opencode-readiness');
 const {
@@ -68,6 +69,21 @@ function createMissionRequest(): NextRequest {
   });
 }
 
+/**
+ * An install whose credentials live server-side: `auth list` answers with an
+ * empty array, and the model listing names what it can actually resolve. Keeps
+ * this file's subject the resident service version rather than readiness.
+ */
+function stubOpencodeCli(): void {
+  setOpencodeCliProbeDependenciesForTests({
+    run: async (args: string[]) => {
+      if (args[0] === 'models') return 'opencode/deepseek-v4-flash-free\n';
+      if (args[0] === 'auth') return '[]';
+      throw new Error(`Unexpected OpenCode probe: ${args.join(' ')}`);
+    },
+  });
+}
+
 function serviceRun(serviceVersion: () => string) {
   return vi.fn(async (args: string[]) => {
     if (args[0] === '--version') return 'opencode2 v0.0.0-beta-17794\n';
@@ -93,10 +109,12 @@ beforeEach(() => {
   vi.stubEnv('OPENCODE_CONFIG_CONTENT', '');
   vi.stubEnv('OPENCODE_AUTH_CONTENT', '');
   setOpencodeServiceProbeDependenciesForTests(null);
+  stubOpencodeCli();
   invalidateRuntimeAuthCache();
 });
 
 afterEach(() => {
+  setOpencodeCliProbeDependenciesForTests(null);
   setOpencodeServiceProbeDependenciesForTests(null);
   invalidateRuntimeAuthCache();
   vi.unstubAllEnvs();
