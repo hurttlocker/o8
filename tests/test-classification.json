@@ -683,6 +683,14 @@
       ]
     },
     {
+      "path": "src/lib/workspace/dependency-cache-retention-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/workspace/dependency-image-device-authority.test.ts",
       "reasons": [
         "apfs-tool",

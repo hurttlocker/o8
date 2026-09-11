@@ -7,6 +7,7 @@ import {
   DEFAULT_VOICE,
   CLIENT_SECRETS_URL,
   REALTIME_TOKEN_TTL_SECONDS,
+  assertRealtimeCapableModel,
   buildClientSecretsBody,
 } from '@/lib/voice/realtime-session-config';
 
@@ -39,6 +40,17 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const voice = typeof (body as { voice?: unknown })?.voice === 'string' ? (body as { voice: string }).voice : DEFAULT_VOICE;
   const model = typeof (body as { model?: unknown })?.model === 'string' ? (body as { model: string }).model : REALTIME_MODEL;
+
+  // Refuse a non-realtime model id BEFORE spending a mint on it. OpenAI hands
+  // back a token for ids the realtime transport rejects, so the failure would
+  // otherwise surface at the SDP exchange with nothing naming the model.
+  const modelCheck = assertRealtimeCapableModel(model);
+  if (!modelCheck.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'unsupported_realtime_model', detail: modelCheck.reason, reason: modelCheck.reason },
+      { status: 400 },
+    );
+  }
 
   const byokKey = await resolveOpenAIKey();
   const access = await resolveRealtimeAccess(Boolean(byokKey));

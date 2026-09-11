@@ -18,6 +18,8 @@ import {
   PHONE_CODE_TOOL_NAMES,
   selectPhoneCodeTools,
   selectPhoneRealtimeModel,
+  REALTIME_CAPABLE_MODELS,
+  assertRealtimeCapableModel,
   buildRealtimeMintSession,
   buildClientSecretsBody,
   buildCodexRealtimeStartParams,
@@ -250,5 +252,43 @@ describe('realtime-session-config — shared assembler', () => {
     expect(selection.missing).toContain('git_status');
     expect(selection.missing).toContain('o8_dispatch');
     expect(selection.missing).toHaveLength(PHONE_CODE_TOOL_NAMES.length - 1);
+  });
+});
+
+describe('assertRealtimeCapableModel — the mint-time model gate (#2165)', () => {
+  it('accepts every allow-listed id', () => {
+    for (const model of REALTIME_CAPABLE_MODELS) {
+      expect(assertRealtimeCapableModel(model)).toEqual({ ok: true });
+    }
+  });
+
+  it('carries both shipping constants, so neither mint can gate itself out', () => {
+    expect(REALTIME_CAPABLE_MODELS).toContain(REALTIME_MODEL);
+    expect(REALTIME_CAPABLE_MODELS).toContain(REALTIME_FLAGSHIP_MODEL);
+  });
+
+  it('rejects a chat-only model id, naming it and the accepted set', () => {
+    const result = assertRealtimeCapableModel('gpt-live-1');
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.reason).toContain('gpt-live-1');
+    expect(result.reason).toContain(REALTIME_MODEL);
+    expect(result.reason).toContain(REALTIME_FLAGSHIP_MODEL);
+    expect(result.allowed).toEqual([...REALTIME_CAPABLE_MODELS]);
+  });
+
+  it('rejects a typo of a real id — near-misses are the failure mode this catches', () => {
+    const typo = `${REALTIME_MODEL}i`;
+    const result = assertRealtimeCapableModel(typo);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.reason).toContain(typo);
+  });
+
+  it('rejects an empty id without pretending a model was named', () => {
+    const result = assertRealtimeCapableModel('   ');
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.reason).toContain('empty model id');
   });
 });
