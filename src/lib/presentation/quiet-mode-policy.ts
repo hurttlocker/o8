@@ -21,6 +21,7 @@ export type QuietModeNoticeKind =
   | 'error'
   | 'update-available'
   | 'review-ready'
+  | 'background-brain-done'
   | 'coach-card'
   | 'status-pill'
   | 'toast'
@@ -32,6 +33,7 @@ export const QUIET_MODE_NOTICE_KINDS: readonly QuietModeNoticeKind[] = Object.fr
   'error',
   'update-available',
   'review-ready',
+  'background-brain-done',
   'coach-card',
   'status-pill',
   'toast',

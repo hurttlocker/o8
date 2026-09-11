@@ -58,6 +58,10 @@ pub enum NoticeKind {
     UpdateAvailable,
     /// A packet flipped to awaiting_review. Suppressible.
     ReviewReady,
+    /// A background-brain task finished and posted its native banner.
+    /// Suppressible, and governed by quiet mode alone — it has no standing
+    /// preference of its own the way review notifications do.
+    BackgroundBrainDone,
     /// Guided-discovery / onboarding coachmark. Suppressible.
     CoachCard,
     /// A count pill (escalated / review / merge). Suppressible.
@@ -76,6 +80,7 @@ impl NoticeKind {
             NoticeKind::Error => "error",
             NoticeKind::UpdateAvailable => "update-available",
             NoticeKind::ReviewReady => "review-ready",
+            NoticeKind::BackgroundBrainDone => "background-brain-done",
             NoticeKind::CoachCard => "coach-card",
             NoticeKind::StatusPill => "status-pill",
             NoticeKind::Toast => "toast",
@@ -202,10 +207,15 @@ pub fn should_deliver_review_notification(quiet_mode: bool, setting_enabled: boo
     setting_enabled
 }
 
+/// The guard every suppressible native surface calls before it paints.
+pub fn notice_blocked(kind: NoticeKind) -> bool {
+    is_quiet_mode_active() && quiet_mode_suppresses(kind)
+}
+
 /// Guard for every overlay `show` / `arm` entry point: while quiet mode is on,
 /// an overlay must not come back on its own schedule.
 pub fn overlay_show_blocked() -> bool {
-    is_quiet_mode_active() && quiet_mode_suppresses(NoticeKind::OverlayWindow)
+    notice_blocked(NoticeKind::OverlayWindow)
 }
 
 /// Enter or leave quiet mode against a concrete window set. Returns the new
@@ -440,6 +450,7 @@ mod tests {
         }
         for kind in [
             NoticeKind::ReviewReady,
+            NoticeKind::BackgroundBrainDone,
             NoticeKind::CoachCard,
             NoticeKind::StatusPill,
             NoticeKind::Toast,
@@ -449,6 +460,29 @@ mod tests {
                 quiet_mode_suppresses(kind),
                 "{} is a convenience surface and must be suppressed",
                 kind.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn the_background_brain_banner_is_governed_by_quiet_mode_alone() {
+        // It carries no standing on/off preference the way review notifications
+        // do, so classification is the whole decision: suppressible means quiet
+        // mode is the only thing that can silence it.
+        assert_eq!(NoticeKind::BackgroundBrainDone.as_str(), "background-brain-done");
+        assert!(quiet_mode_suppresses(NoticeKind::BackgroundBrainDone));
+        // `notice_blocked` is `is_quiet_mode_active() && quiet_mode_suppresses`,
+        // asserted here against an explicit mode rather than the process global
+        // so the case cannot depend on test ordering.
+        for (quiet, expected) in [(false, false), (true, true)] {
+            assert_eq!(
+                quiet && quiet_mode_suppresses(NoticeKind::BackgroundBrainDone),
+                expected,
+                "background-brain-done must be blocked only while quiet mode runs"
+            );
+            assert!(
+                !(quiet && quiet_mode_suppresses(NoticeKind::Approval)),
+                "an approval is never blocked, quiet mode or not"
             );
         }
     }
