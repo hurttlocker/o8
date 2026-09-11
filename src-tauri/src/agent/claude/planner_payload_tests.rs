@@ -74,6 +74,7 @@ fn ctx_for(task_id: &str) -> TaskCtx {
         crop_png_base64: None,
         edit: None,
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        escalate_available: false,
     }
 }
 

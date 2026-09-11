@@ -51,6 +51,7 @@ async fn active_remote_tool_uses_ssh_at_the_process_spawn_seam() {
         crop_png_base64: None,
         edit: None,
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        escalate_available: false,
     };
     let result = dispatch_tool_call_with_spawner(
         "agent_turn",
@@ -101,6 +102,7 @@ async fn remote_prompt_injection_reaches_adapter_only_inside_untrusted_envelope(
         crop_png_base64: None,
         edit: None,
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        escalate_available: false,
     };
     let result = dispatch_tool_call_with_spawner("agent_turn_result", json!({}), &ctx, spawner)
         .await

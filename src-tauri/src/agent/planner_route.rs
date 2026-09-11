@@ -297,7 +297,7 @@ pub(crate) struct BrainSetting {
     pub model: Option<String>,
 }
 
-fn locate_planner_binary(adapter: &PlannerAdapter) -> Option<String> {
+pub(crate) fn locate_planner_binary(adapter: &PlannerAdapter) -> Option<String> {
     crate::cli_locate::resolve_binary(adapter.binary, adapter.binary_env)
 }
 
@@ -307,6 +307,39 @@ pub(crate) fn resolve() -> PlannerRouting {
 
 pub(crate) fn resolve_bound(engine: &str, model: &str, effort: &str) -> PlannerRouting {
     resolve_bound_with(engine, model, effort, locate_planner_binary)
+}
+
+/// Seat ONE named adapter for the Symon FRONT brain (#2164), or `None` when its
+/// binary is missing — the front seat falls back on its own terms rather than
+/// walking this registry's background fallback order.
+///
+/// The rung differs from `resolve`: with no operator tier the front seat takes
+/// the WORKER rung, because it is the fast lane the operator talks to and it
+/// must never inherit a builder default they did not ask for. The model pin is
+/// the same one the background seat honors, and it still only rides the adapter
+/// it validates for.
+///
+/// The locator is injected: a "this CLI is not installed" case cannot be staged
+/// on a machine that HAS the CLI — a missing env override just falls through to
+/// the PATH scan — so absence is tested through this seam, the way
+/// `only_opencode_installed_routes_the_planner_through_opencode` does.
+pub(crate) fn seat_front_adapter_with<F>(
+    id: &str,
+    tier: Option<PlannerTier>,
+    pin: Option<&str>,
+    mut locate: F,
+) -> Option<PlannerSelection>
+where
+    F: FnMut(&PlannerAdapter) -> Option<String>,
+{
+    let adapter = adapter_by_id(id)?;
+    let binary = locate(adapter)?;
+    Some(selection_for(
+        adapter,
+        binary,
+        Some(tier.unwrap_or(PlannerTier::Worker)),
+        pin,
+    ))
 }
 
 /// The `--effort` flag a Claude planner model is spawned with, or `None` to
@@ -352,7 +385,7 @@ fn read_operator_defaults() -> Option<Value> {
 /// straight off disk rather than through `stt::keys`' mtime cache: the planner
 /// resolves once per task, and a plain read keeps one file as the truth with no
 /// second cached copy to go stale.
-fn read_voice_prefs() -> Option<Value> {
+pub(crate) fn read_voice_prefs() -> Option<Value> {
     let raw = std::fs::read_to_string(super::agent_data_dir().join("dictation.json")).ok()?;
     serde_json::from_str::<Value>(&raw).ok()
 }
@@ -623,10 +656,17 @@ pub struct SymonBrainState {
     /// through to another entry.
     pub fell_back_from: Option<String>,
     pub detail: Option<&'static str>,
+    /// The FRONT seat (#2164) — the Right-Option gesture's own choice, resolved
+    /// through the same registry plus the built-in Gemini loop. Default (empty)
+    /// in the pure-resolution unit tests; `brain_state` fills it for the panel.
+    pub front: super::front_brain::SymonFrontBrainState,
 }
 
 pub fn brain_state() -> SymonBrainState {
-    brain_state_with(&read_brain_setting(), preferred_provider(), locate_planner_binary)
+    let mut state =
+        brain_state_with(&read_brain_setting(), preferred_provider(), locate_planner_binary);
+    state.front = super::front_brain::state();
+    state
 }
 
 fn brain_state_with<F>(
@@ -661,6 +701,7 @@ where
         resolved_effort: None,
         fell_back_from: None,
         detail: None,
+        front: super::front_brain::SymonFrontBrainState::default(),
     };
     match routing {
         PlannerRouting::Selected(selection) => {

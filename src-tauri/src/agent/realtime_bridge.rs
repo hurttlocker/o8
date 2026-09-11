@@ -163,6 +163,7 @@ pub async fn symon_transport_invoke_tool(
         crop_png_base64: None,
         edit: None,
         cancel: Arc::new(AtomicBool::new(false)),
+        escalate_available: false,
     };
     tools::dispatch_tool_call(&name, args, &ctx).await
 }
@@ -207,6 +208,7 @@ async fn realtime_invoke_tool_inner(
         crop_png_base64: None,
         edit: None,
         cancel,
+        escalate_available: false,
     };
 
     // Same safety gate as the cascaded loop: ReadOnly passes straight through,

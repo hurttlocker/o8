@@ -79,6 +79,7 @@ pub async fn run_eval(app: tauri::AppHandle, models: Vec<String>) -> String {
                 crop_png_base64: None,
                 edit: None,
                 cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                escalate_available: false,
             };
             let started = Instant::now();
             let result = if model.contains('/') {

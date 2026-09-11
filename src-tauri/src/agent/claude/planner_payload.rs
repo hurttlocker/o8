@@ -76,10 +76,13 @@ fn one_line(text: &str) -> String {
 
 /// Every tool the planner may call, in deterministic order.
 ///
-/// `escalate` is stripped: the background brain DOES the work, and handing the
-/// task to another background brain is the infinite-handoff loop. Name order
-/// (rather than source order) is what keeps the prefix byte-stable — the MCP
-/// tools on the tail arrive over HTTP and carry no order of their own.
+/// `escalate` is stripped: it is not invariant. The background brain DOES the
+/// work, so handing the task on again is the infinite-handoff loop, and on a
+/// front turn the handoff exists only when it would land on a DIFFERENT seat
+/// (#2164) — a per-task fact that must never move the cached prefix. When it
+/// does exist, `escalate_block` appends it after the prefix. Name order (rather
+/// than source order) is what keeps the prefix byte-stable — the MCP tools on
+/// the tail arrive over HTTP and carry no order of their own.
 pub(crate) fn catalog_tools() -> Vec<Value> {
     let mut tools: Vec<Value> = crate::agent::tools::enabled_tools()
         .into_iter()
@@ -184,6 +187,22 @@ fn catalog_block(tools: &[Value]) -> (String, usize) {
     (block, full.len())
 }
 
+/// The one per-task tool (#2164): offered when this turn's front seat differs
+/// from the seat `escalate` would hand to, and never on a background task.
+/// Carries its full schema, so taking the handoff costs no lookup turn.
+fn escalate_block() -> Option<String> {
+    let tool = crate::agent::tools::enabled_tools()
+        .into_iter()
+        .find(|tool| tool_name(tool) == "escalate")?;
+    Some(format!(
+        "\n\nALSO AVAILABLE on this task — a background brain on a different seat, \
+         which you hand long multi-step work to instead of doing it inline:\n{}\n\
+         PARAMETERS (no lookup needed):\n{}\n",
+        compact_line(&tool),
+        serde_json::to_string(&schema_only(&tool)).unwrap_or_default()
+    ))
+}
+
 /// Persona → planner contract → tool catalog. The same bytes on every task.
 pub(crate) fn invariant_prefix() -> (String, usize) {
     let tools = catalog_tools();
@@ -203,6 +222,11 @@ pub(crate) fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> FirstTurn {
     let (mut prompt, tool_defs) = invariant_prefix();
 
     // ---- everything below here is per-task; nothing above it may be ----
+    if ctx.escalate_available {
+        if let Some(block) = escalate_block() {
+            prompt.push_str(&block);
+        }
+    }
     prompt.push_str("\n\n--- RIGHT NOW ---\n");
     prompt.push_str(&crate::agent::system_prompt_task_context());
     if let Some(convo) = crate::agent::conversation_context() {

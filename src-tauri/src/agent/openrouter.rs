@@ -29,8 +29,14 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     // Gemini-format specs {name, description, parameters} wrap cleanly into
     // OpenAI's {type:"function", function:{...}} — `parameters` == the schema.
     let escalation = super::router::load_config().voice_escalation;
+    // #2164: same rule as the other front loops — no handoff when the
+    // background brain would land on this seat.
     let tools_json: Vec<Value> = tools::enabled_tools_for(&escalation)
-        .iter()
+        .into_iter()
+        .filter(|tool| {
+            ctx.escalate_available
+                || tool.get("name").and_then(|name| name.as_str()) != Some("escalate")
+        })
         .map(|spec| json!({ "type": "function", "function": spec }))
         .collect();
 
