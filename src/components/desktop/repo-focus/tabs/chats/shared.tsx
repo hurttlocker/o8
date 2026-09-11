@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Folder as IconoirFolder } from 'iconoir-react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '../../../lucide-shims';
@@ -28,6 +28,7 @@ export function SectionLabel({
   countTone,
   collapsed,
   onToggle,
+  action,
 }: {
   label: string;
   compact?: boolean;
@@ -35,6 +36,9 @@ export function SectionLabel({
   countTone?: string;
   collapsed?: boolean;
   onToggle?: () => void;
+  /** Section-level affordance (#2154's Agents "Clear"). Rendered OUTSIDE the
+   *  toggle button — a button inside a button is invalid markup. */
+  action?: ReactNode;
 }) {
   const commonStyle = {
     paddingTop: compact ? 7 : 10,
@@ -71,7 +75,7 @@ export function SectionLabel({
     );
   }
 
-  return (
+  const toggle = (
     <button
       type="button"
       aria-expanded={!collapsed}
@@ -107,6 +111,17 @@ export function SectionLabel({
         </span>
       ) : null}
     </button>
+  );
+
+  if (!action) return toggle;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>{toggle}</div>
+      <div style={{ display: 'flex', alignItems: 'center', paddingRight: 6, flexShrink: 0 }}>
+        {action}
+      </div>
+    </div>
   );
 }
 

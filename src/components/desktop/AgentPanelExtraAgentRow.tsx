@@ -128,6 +128,16 @@ export function canArchiveExtraAgent(row: ExtraAgentRow): boolean {
     || row.laneStatus === 'archived';
 }
 
+/**
+ * #2154 — rows the Agents header's bulk clear retires. Only lane-terminal
+ * statuses qualify (the server clears exactly this set), so a running,
+ * reviewing or awaiting_* lane is never swept up by a clear. Already-archived
+ * rows aren't on the rail to begin with.
+ */
+export function isClearableExtraAgent(row: ExtraAgentRow): boolean {
+  return row.laneStatus === 'failed' || row.laneStatus === 'completed';
+}
+
 export function ExtraAgentRowView({
   row,
   active,

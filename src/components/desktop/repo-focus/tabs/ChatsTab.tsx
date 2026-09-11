@@ -197,7 +197,7 @@ export function ChatsTab({
   useEffect(() => {
     if (variant !== 'mini') return;
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const res = await fetch('/api/lanes?active=false', { cache: 'no-store' });
         if (!res.ok || cancelled) return;
@@ -209,8 +209,16 @@ export function ChatsTab({
       } catch {
         // silent — best-effort
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    void load();
+    // #2154 — a lane archived from the Agents rail must land HERE right away,
+    // not after a reload; otherwise clearing the rail looks like deletion.
+    const onLifecycle = () => { void load(); };
+    window.addEventListener('o8:lifecycle-reconcile', onLifecycle);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('o8:lifecycle-reconcile', onLifecycle);
+    };
   }, [variant]);
 
   const withHistoryBusy = useCallback(async (tabId: string, action: () => Promise<void>) => {

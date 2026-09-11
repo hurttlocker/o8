@@ -18,6 +18,7 @@ const stateMocks = vi.hoisted(() => ({
   archiveOwned: vi.fn(),
   getLane: vi.fn(),
   archiveLane: vi.fn(),
+  findLaneBySession: vi.fn(),
 }));
 
 vi.mock('@/lib/codex/owned', () => ({
@@ -55,6 +56,7 @@ vi.mock('@/lib/prime-agent/owned', () => ({
 vi.mock('@/lib/lane/registry', () => ({
   getLane: stateMocks.getLane,
   archiveLane: stateMocks.archiveLane,
+  findLaneBySession: stateMocks.findLaneBySession,
 }));
 vi.mock('@/lib/runtime/inventory', () => ({ invalidateRuntimeInventoryCache: vi.fn() }));
 vi.mock('@/lib/runtime/owned-session-archive', () => ({
@@ -90,6 +92,7 @@ beforeEach(() => {
   stateMocks.pi.mockResolvedValue('active');
   stateMocks.prime.mockResolvedValue('archived');
   stateMocks.getLane.mockReturnValue(null);
+  stateMocks.findLaneBySession.mockReturnValue(null);
   stateMocks.archiveLane.mockReturnValue(null);
   stateMocks.archiveOwned.mockResolvedValue(null);
   __resetIdempotencyStoreForTests();
@@ -173,6 +176,32 @@ describe('POST /api/runtime/archive', () => {
     }));
 
     expect(response.status).toBe(409);
+    expect(stateMocks.archiveLane).not.toHaveBeenCalled();
+  });
+
+  it('retires the lane behind an archived session so the rail row leaves', async () => {
+    const sessionKey = 'codex-owned:lane-failed';
+    const lane = { id: 'lane-failed', sessionKey, status: 'failed' };
+    stateMocks.archiveOwned.mockResolvedValue({ archived: true, note: 'Session archived.' });
+    stateMocks.findLaneBySession.mockReturnValue(lane);
+    stateMocks.archiveLane.mockReturnValue({ ...lane, status: 'archived' });
+
+    const response = await POST(post({ sessionKey, clientMutationId: 'archive-failed-session' }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, archived: true, laneId: lane.id });
+    expect(stateMocks.archiveLane).toHaveBeenCalledWith(lane.id, 'user');
+  });
+
+  it('leaves a live lane running when only its session was archived', async () => {
+    const sessionKey = 'codex-owned:lane-reviewing';
+    stateMocks.archiveOwned.mockResolvedValue({ archived: true, note: 'Session archived.' });
+    stateMocks.findLaneBySession.mockReturnValue({ id: 'lane-reviewing', sessionKey, status: 'reviewing' });
+
+    const response = await POST(post({ sessionKey, clientMutationId: 'archive-reviewing-session' }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toMatchObject({ laneId: 'lane-reviewing' });
     expect(stateMocks.archiveLane).not.toHaveBeenCalled();
   });
 
