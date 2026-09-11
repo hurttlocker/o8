@@ -8,6 +8,8 @@ o8 is maintained by one person, and review capacity is limited. Small, focused c
 - Reliability and performance improvements with evidence.
 - New runtime adapters that follow the six-file recipe in [`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md).
 
+[`ROADMAP.md`](./ROADMAP.md) is the map of what is open and what each arc has to satisfy to be finished. Work that appears there has already been scoped and accepted.
+
 ## What we do not accept
 
 - Large refactors without prior agreement.
@@ -15,6 +17,14 @@ o8 is maintained by one person, and review capacity is limited. Small, focused c
 - Style-only churn, dependency reshuffling, or rewrites that do not change behavior.
 
 Open an issue before starting any non-trivial change. An issue is not a promise that a pull request will be accepted, but it can prevent both sides from spending time on work that does not fit the project.
+
+## Claiming work
+
+Find work through [`ROADMAP.md`](./ROADMAP.md). Each open arc there links to one tracking issue, and that issue's checklist lists its children. Pick an unchecked child labeled `claimable`: those have a brief that is complete enough to start from.
+
+Comment "claiming" on the child issue. A maintainer flips the label to `claimed`, which expires seven days after the claim comment if no pull request links to the issue. That keeps an issue from sitting reserved by someone who moved on, and reclaiming it later is fine.
+
+Branch from `main` in your fork, one branch per issue. Your pull request body needs an "Evidence" section that names the commit you tested and the exact commands you ran, with their results. A reviewer other than the author verifies the change, and a maintainer merges it. Pull requests carrying the `needs-review` label are the ones waiting on that independent review.
 
 ## Pull requests
 
