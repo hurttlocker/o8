@@ -14,7 +14,7 @@ import {
   CLAUDE_PROBE_TIMEOUT_MS,
   probeClaudeLoginState,
 } from '@/lib/runtimes/shared/claude-login-probe';
-import { opencodeCredentialProviders } from '@/lib/runtimes/shared/opencode-readiness';
+import { opencodeAuthenticatedProviders } from '@/lib/runtimes/shared/opencode-readiness';
 import { hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -336,7 +336,7 @@ async function detectOpenCode(deadlineAt?: number): Promise<DetectedTool> {
 
   const readiness = detected ? await detectRuntimeAuthStatus('opencode') : null;
   if (detected) {
-    authedProviders = [...await opencodeCredentialProviders(homedir())].sort();
+    authedProviders = [...await opencodeAuthenticatedProviders(homedir(), path)].sort();
   }
   const authPresent = readiness?.authenticated === true;
   const ready = readiness?.ready === true;

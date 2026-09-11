@@ -25,7 +25,7 @@ import {
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   localProviderIds,
-  opencodeCredentialProviders,
+  opencodeAuthenticatedProviders,
   probeOpencodeServiceVersion,
   providerHasConfiguredCredential,
   providerIdForModel,
@@ -174,7 +174,7 @@ async function opencodeModelStatus(
   }
 
   const [credentialProviders, config] = await Promise.all([
-    opencodeCredentialProviders(os.homedir()),
+    opencodeAuthenticatedProviders(os.homedir(), status.binaryPath),
     readOpencodeConfig(os.homedir(), cwd),
   ]);
   const localProviders = localProviderIds(config);
@@ -357,7 +357,7 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
   }
 
   const [credentialProviders, config, serviceVersion] = await Promise.all([
-    opencodeCredentialProviders(os.homedir()),
+    opencodeAuthenticatedProviders(os.homedir(), binaryPath),
     readOpencodeConfig(os.homedir()),
     probeOpencodeServiceVersion(binaryPath),
   ]);

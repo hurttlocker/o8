@@ -511,3 +511,81 @@ export async function probeOpencodeServiceVersion(
     serviceVersion,
   };
 }
+
+export interface OpencodeAuthListProbeDependencies {
+  run(args: string[]): Promise<string>;
+}
+
+let authListProbeDependenciesForTests: OpencodeAuthListProbeDependencies | null = null;
+
+export function setOpencodeAuthListProbeDependenciesForTests(
+  dependencies: OpencodeAuthListProbeDependencies | null,
+): void {
+  authListProbeDependenciesForTests = dependencies;
+}
+
+async function runOpencodeJsonProbe(binaryPath: string, args: string[]): Promise<string> {
+  const invocation = cliInvocation(binaryPath, args);
+  const { stdout } = await execFileAsync(invocation.command, invocation.args, {
+    windowsHide: true,
+    timeout: SERVICE_PROBE_TIMEOUT_MS,
+    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    maxBuffer: 64 * 1024,
+  });
+  return stdout;
+}
+
+/**
+ * Provider ids the CLI itself reports as connected, covering credentials it
+ * keeps in its own store as well as provider environment keys. Returns null
+ * when the CLI cannot answer — an indeterminate probe must never be read as
+ * "no providers", which is the failure this exists to stop.
+ */
+export async function opencodeCliProviders(
+  binaryPath?: string | null,
+  dependencies?: OpencodeAuthListProbeDependencies,
+): Promise<Set<string> | null> {
+  const injected = dependencies ?? authListProbeDependenciesForTests;
+  const run = injected
+    ? injected.run
+    : binaryPath
+      ? (args: string[]) => runOpencodeJsonProbe(binaryPath, args)
+      : null;
+  if (!run) return null;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(await run(["auth", "list", "--format", "json"]));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(payload)) return null;
+
+  const providers = new Set<string>();
+  let recognized = 0;
+  for (const entry of payload) {
+    if (!isRecord(entry)) continue;
+    const id = typeof entry.id === "string" ? entry.id.trim() : "";
+    if (!id || !Array.isArray(entry.connections)) continue;
+    recognized += 1;
+    if (entry.connections.length > 0) providers.add(id);
+  }
+  // A payload we could not read at all is indeterminate, not empty.
+  return payload.length > 0 && recognized === 0 ? null : providers;
+}
+
+/**
+ * Every provider this OpenCode install can dispatch through: what the CLI
+ * reports, unioned with the credential file older installs still write.
+ */
+export async function opencodeAuthenticatedProviders(
+  home: string,
+  binaryPath?: string | null,
+): Promise<Set<string>> {
+  const [stored, reported] = await Promise.all([
+    opencodeCredentialProviders(home),
+    opencodeCliProviders(binaryPath),
+  ]);
+  if (reported) for (const provider of reported) stored.add(provider);
+  return stored;
+}
