@@ -125,6 +125,13 @@ export function taskSignal(task: TaskPoolTask): string | null {
   switch (value) {
     case 'zero_diff_failed':
       return 'No changes produced';
+    // #2141 — a dead runtime and a deliberate no-op are different outcomes.
+    case 'zero_diff_runtime_error':
+      return 'Runtime errored before writing';
+    case 'zero_diff_runtime_error_requeued':
+      return 'Runtime errored — retrying';
+    case 'zero_diff_unclassified':
+      return 'No changes, cause unknown';
     case 'silent_exit_work_present':
       return 'Work present';
     case 'review_ready':

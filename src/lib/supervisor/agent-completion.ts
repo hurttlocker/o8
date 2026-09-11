@@ -94,7 +94,6 @@ export async function handleAgentCompletion(
         }
         if (probe.noChangesProduced) {
           const packetId = lane.packetId?.trim();
-          const now = new Date().toISOString();
           const { captureSettledReadOnlyCompletionContext, completeReadOnlyZeroDiffLane, isReadOnlyPacketLane, } = await guard.wait(() => import('@/lib/orchestrator/read-only-completion'));
           let readOnlyContext = null;
           if (isReadOnlyPacketLane(lane) && packetId && lane.sessionKey) {
@@ -145,36 +144,63 @@ export async function handleAgentCompletion(
               detail,
             };
           }
-          const failedLane = setLaneStatus(lane.id, 'failed', 'system', 'zero_diff_failed');
-          if (packetId) {
+          // #2141 — an empty worktree has two causes and only one is worth
+          // retrying. A runtime that ERRORED before writing anything is the
+          // most transient failure we own and has no partial work to lose; a
+          // run that finished cleanly and legitimately changed nothing must
+          // never be retried or a no-op packet loops forever. The normalized
+          // transcript is the signal that separates them.
+          const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
+          const {
+            markZeroDiffTerminal,
+            readZeroDiffClassification,
+            requeueZeroDiffRuntimeFault,
+          } = await guard.wait(() => import('@/lib/supervisor/zero-diff-runtime-fault'));
+          const zeroDiff = await guard.wait(() => readZeroDiffClassification(lane.sessionKey ?? surfaceId));
+          if (zeroDiff.cause === 'runtime_error') {
             try {
-              const { withLockedState } = await guard.wait(() => import('@/lib/orchestrator/control-plane'));
-              await guard.wait(() => withLockedState((state) => {
-                guard.check();
-                const packet = state.packets.find((candidate) => candidate.id === packetId);
-                if (!packet)
-                  return;
-                packet.status = 'failed';
-                packet.blockedReason = 'no_changes_produced';
-                packet.lastEventAt = now;
-                packet.lastEventLabel = 'zero_diff_failed';
-                if (packet.lane) {
-                  packet.lane = {
-                    ...packet.lane,
-                    laneId: failedLane?.id ?? lane.id,
-                    sessionKey: failedLane?.sessionKey ?? lane.sessionKey ?? surfaceId,
-                    lastEventAt: now,
-                    lastEventLabel: 'zero_diff_failed',
-                  };
-                }
+              const requeue = await guard.wait(() => requeueZeroDiffRuntimeFault({
+                lane,
+                packetId,
+                worktreePath: completionCwd,
+                detail: zeroDiff.detail,
               }));
+              if (requeue.requeued) {
+                // This RUN failed — the lane is terminal and the retry mints a
+                // fresh one. `block: true` is what records it as failed instead
+                // of leaving the operator waiting on a finished agent.
+                setLaneStatus(lane.id, 'failed', 'system', 'zero_diff_runtime_error_requeued');
+                const requeuedDetail = `${label} errored before writing anything (${zeroDiff.detail}). Re-queued - retry ${requeue.retryNumber}/${requeue.cap}.`;
+                console.warn(`[supervisor] ${requeuedDetail}`);
+                void triggerHeadlessSprintTick().catch((error) => {
+                  console.error(`[supervisor] Failed to trigger the zero-diff retry dispatch for ${label}:`, error);
+                });
+                return {
+                  block: true,
+                  detail: requeuedDetail,
+                };
+              }
             } catch (error) {
               guard.check();
-              console.error(`[supervisor] Failed to persist no_changes_produced for packet ${packetId}:`, error);
+              console.error(`[supervisor] Zero-diff runtime retry failed for ${label}:`, error);
             }
           }
-          const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
-          const detail = `${label} completed with no changes - needs redispatch with clearer guidance.`;
+          try {
+            await guard.wait(() => markZeroDiffTerminal({
+              lane,
+              packetId,
+              sessionKey: surfaceId,
+              cause: zeroDiff.cause,
+            }));
+          } catch (error) {
+            guard.check();
+            console.error(`[supervisor] Failed to persist the zero-diff outcome for ${label}:`, error);
+          }
+          const detail = zeroDiff.cause === 'runtime_error'
+            ? `${label} errored before writing anything (${zeroDiff.detail}) and its retry budget is spent - operator input is required.`
+            : zeroDiff.cause === 'clean_no_op'
+              ? `${label} completed with no changes - needs redispatch with clearer guidance.`
+              : `${label} completed with no changes, and the runtime gave no evidence either way (${zeroDiff.detail}) - operator input is required.`;
           console.warn(`[supervisor] ${detail}`);
           return {
             block: true,

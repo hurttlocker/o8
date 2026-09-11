@@ -333,6 +333,14 @@ export interface OrchestratorPacket {
    */
   launchAttempts?: number;
   /**
+   * Zero-diff runtime-fault retry budget spent (#2141). Same lifecycle as
+   * {@link stallRetries}: a worker that errors before writing anything gets one
+   * fresh dispatch, and the count lives ON the packet because the retry mints a
+   * new lane, so any per-lane counter would reset and bound nothing. Reset only
+   * by operator reset_packet.
+   */
+  zeroDiffRuntimeRetries?: number;
+  /**
    * Operator hit Stop — terminal "do not re-dispatch" marker. Checked first in
    * getDispatchBlocker so NO path (headless loop, stall escalation, ralph
    * requeue) can relaunch it. Cleared by reset_packet / explicit relaunch.

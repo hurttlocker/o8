@@ -90,6 +90,8 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
   // a reset gives a fresh stall budget and re-enables dispatch.
   packet.stallRetries = 0;
+  // #2141 — and the zero-diff runtime-fault budget.
+  packet.zeroDiffRuntimeRetries = 0;
   advancePacketStorageAdmissionEpoch(packet);
   packet.launchAttempts = 0;
   packet.operatorStopped = false;

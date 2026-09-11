@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
 import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import { settledCompletionStatus, watchedAgentOutcome } from './fleet-outcome';
 import { retryWatchedAgent } from './retry-watched-agent';
 import type {
   AgentStatusEntry,
@@ -620,6 +621,10 @@ async function handleStatusChange(
       return;
     }
     if (completionDecision?.block) {
+      // #2141 — the runtime said `finished`, the completion callback said the
+      // lane failed. Settle on the callback's verdict BEFORE persisting, or
+      // the fleet summary counts a failed lane among the completed ones.
+      watched.lastStatus = settledCompletionStatus(true);
       recordWatchedAgentEvent(watched, now);
       persistWatchedAgent(watched);
       callbacks.broadcastAgentUpdate({
@@ -898,14 +903,10 @@ function buildFleetStatusSummaries(repoPath?: string): SupervisorFleetStatusSumm
       || agent.lastStatus === 'launching'
     )).length;
     const idleAgents = agents.filter((agent) => isIdleAgent(agent)).length;
-    const completedAgents = agents.filter((agent) => (
-      agent.completionReported && agent.lastStatus === 'finished'
-    )).length;
-    const failedAgents = agents.filter((agent) => (
-      agent.completionReported
-      && (agent.lastStatus === 'failed' || agent.lastStatus === 'interrupted')
-    )).length;
-    const pendingAgents = Math.max(0, agents.length - completedAgents - failedAgents);
+    const outcomes = agents.map(watchedAgentOutcome);
+    const completedAgents = outcomes.filter((outcome) => outcome === 'completed').length;
+    const failedAgents = outcomes.filter((outcome) => outcome === 'failed').length;
+    const pendingAgents = outcomes.filter((outcome) => outcome === 'pending').length;
     const nextPollAt = agents.reduce<number | null>((next, agent) => {
       if (next === null) return agent.nextPollAt;
       return Math.min(next, agent.nextPollAt);
