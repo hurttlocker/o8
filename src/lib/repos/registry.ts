@@ -2,6 +2,7 @@ import 'server-only';
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -467,6 +468,32 @@ export async function listRepos() {
 export async function listReposFresh() {
   const store = await readStoreFresh();
   return store.repos;
+}
+
+/**
+ * Synchronous pool lookup by id. Orchestrator thread-project validation has to
+ * resolve virtual `repo:<id>` project ids on a synchronous path and cannot
+ * await `listRepos()` (#2140). Shares the async read's cache and normalization
+ * so both see the same pool; a missing or unreadable registry reads as an
+ * empty pool, which the caller already handles as an unresolvable id.
+ */
+export function findRepoByIdSync(id: string): RepoRegistryEntry | null {
+  if (!_cachedStore || Date.now() - _cachedStore.ts >= STORE_CACHE_TTL_MS) {
+    try {
+      const parsed = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8')) as Partial<RepoRegistryStore> | null;
+      if (!parsed || !Array.isArray(parsed.repos)) return null;
+      _cachedStore = {
+        value: {
+          version: 1,
+          repos: sortRepos((parsed.repos as RepoRegistryEntry[]).map(normalizeRepoEntry)),
+        },
+        ts: Date.now(),
+      };
+    } catch {
+      return null;
+    }
+  }
+  return _cachedStore.value.repos.find((repo) => repo.id === id) ?? null;
 }
 
 export async function findRepoByLocalPath(localPath: string) {
