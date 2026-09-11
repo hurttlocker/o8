@@ -125,3 +125,60 @@ describe('o8 active composer typing', () => {
     expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('No visible active composer.') });
   });
 });
+
+describe('o8 window tools', () => {
+  it('registers both window tools with handlers', () => {
+    for (const name of ['o8_view_windows', 'o8_view_manage_window']) {
+      expect(O8_WEBVIEW_TOOLS.some((tool) => tool.name === name), name).toBe(true);
+      expect(createO8WebviewToolHandlers(() => {
+        throw new Error('not used');
+      })[name], name).toBeTypeOf('function');
+    }
+  });
+
+  it('reports which window holds focus', async () => {
+    const client = {
+      listWindows: async () => ({
+        windows: [
+          { label: 'main', visible: true, focused: false },
+          { label: 'agent-partials', visible: true, focused: true },
+        ],
+      }),
+    } as unknown as O8WebviewClient;
+
+    const result = await createO8WebviewToolHandlers(() => client).o8_view_windows({});
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining('agent-partials') });
+  });
+
+  it('focuses a window by label', async () => {
+    const calls: Array<{ operation: string; windowLabel?: string }> = [];
+    const client = {
+      manageWindow: async (opts: { operation: string; windowLabel?: string }) => {
+        calls.push(opts);
+        return { ok: true };
+      },
+    } as unknown as O8WebviewClient;
+
+    const result = await createO8WebviewToolHandlers(() => client)
+      .o8_view_manage_window({ operation: 'focus', windowLabel: 'main' });
+
+    expect(result.isError).not.toBe(true);
+    expect(calls).toEqual([{ operation: 'focus', windowLabel: 'main' }]);
+  });
+
+  it('refuses operations the agent surface does not offer', async () => {
+    const client = {
+      manageWindow: async () => {
+        throw new Error('must not reach the client');
+      },
+    } as unknown as O8WebviewClient;
+
+    const result = await createO8WebviewToolHandlers(() => client)
+      .o8_view_manage_window({ operation: 'close' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining('Unsupported window operation') });
+  });
+});
