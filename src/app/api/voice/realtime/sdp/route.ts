@@ -8,6 +8,7 @@ import {
   CLIENT_SECRETS_URL,
   REALTIME_CALLS_URL,
   REALTIME_TOKEN_TTL_SECONDS,
+  assertRealtimeCapableModel,
   buildClientSecretsBody,
 } from '@/lib/voice/realtime-session-config';
 
@@ -42,6 +43,16 @@ export async function POST(request: NextRequest) {
   }
   const model = typeof body?.model === 'string' ? body.model : REALTIME_MODEL;
   const voice = typeof body?.voice === 'string' ? body.voice : DEFAULT_VOICE;
+
+  // Same gate as the desk mint: a model the realtime endpoint will not accept
+  // fails here, naming itself, instead of as an opaque SDP-exchange failure.
+  const modelCheck = assertRealtimeCapableModel(model);
+  if (!modelCheck.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'unsupported_realtime_model', detail: modelCheck.reason, reason: modelCheck.reason },
+      { status: 400 },
+    );
+  }
 
   const byokKey = await resolveOpenAIKey();
   const access = await resolveRealtimeAccess(Boolean(byokKey));
