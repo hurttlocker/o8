@@ -133,6 +133,7 @@ export function metricObservations(receipt) {
       metric,
       scale: receipt?.fixture?.scale ?? null,
       spec,
+      measurementMethod: scenarios[spec.scenario]?.measurementMethod ?? null,
       ...statisticValue(scenarios[spec.scenario], spec.statistic),
     });
   }
@@ -162,7 +163,12 @@ export function evaluateInteractionBudgets(receipt, baseline = null, { forceAbso
   const results = metricObservations(receipt).map((observation) => {
     const baselineMetric = baselineMetrics[`${observation.metric}@${observation.scale}`]
       ?? baselineMetrics[observation.metric];
-    const delta = classifyDelta(observation.metric, observation.value, baselineMetric?.value);
+    const compatibleMethod = (observation.measurementMethod ?? null) === (baselineMetric?.measurementMethod ?? null);
+    const delta = baselineMetric && !compatibleMethod
+      ? { baselineValue: baselineMetric.value, deltaValue: null, deltaStatus: 'incomparable',
+        deltaReason: 'baseline measurement method differs; collect a matching observation' }
+      : classifyDelta(observation.metric, observation.value, baselineMetric?.value);
+    delta.measurementMethod = observation.measurementMethod ?? null;
     if (!Number.isFinite(observation.value)) {
       return {
         metric: observation.metric,
@@ -206,7 +212,8 @@ export function evaluateInteractionBudgets(receipt, baseline = null, { forceAbso
     buildMode,
     absoluteApplies,
     baselineSource: baseline?.source ?? null,
-    status: failed.length > 0 || regressed.length > 0 ? 'fail' : unavailable.length > 0 ? 'incomplete' : 'pass',
+    status: failed.length > 0 || regressed.length > 0 ? 'fail'
+      : unavailable.length > 0 || results.some(result => result.deltaStatus === 'incomparable') ? 'incomplete' : 'pass',
     failed: failed.map((result) => result.metric),
     regressed: regressed.map((result) => result.metric),
     unavailable: unavailable.map((result) => ({ metric: result.metric, reason: result.reason })),
