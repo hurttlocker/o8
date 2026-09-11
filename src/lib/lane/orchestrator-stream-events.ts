@@ -15,6 +15,15 @@ export type OrchestratorEvent =
   //    text is buffered, not streamed, so it never pollutes the visible answer
   //    or the persisted assistant text; these two carry it to the faint pre-roll
   //    card. The aggregator's reply still flows through `text` as the sole answer.
+  // ── Attempt boundary (#2142). Emitted between the attempts of a retried turn
+  //    (today: a detected false dispatch). Everything the discarded attempt
+  //    streamed — text, thinking, tool pills — is already in the operator's
+  //    bubble and in the incrementally-persisted assistant row by the time the
+  //    detector can fire, because settle only ever gated the terminal events.
+  //    Consumers MUST drop that content on this event; otherwise the retry's
+  //    narration is appended to the discarded one and both ship as a single
+  //    glued-together reply.
+  | { type: 'turn_retry'; attempt: number; reason: string; notice: string }
   | { type: 'collide_phase'; phase: 'proposing' | 'synthesizing'; proposers?: string[] }
   | { type: 'collide_proposal'; proposer: string; text: string; breach?: boolean }
   // ── Handoff (#1730) — the responding agent changed mid-thread. Emitted at the
