@@ -28,6 +28,7 @@ pub mod ledger;
 pub mod machine;
 pub mod memory;
 pub mod o8_http;
+pub mod opencode;
 pub mod openrouter;
 mod plan;
 mod plan_validation;
@@ -472,7 +473,7 @@ fn next_task_id() -> String {
     next_task_id_with_prefix("task")
 }
 
-/// Task id with a custom prefix — background Claude tasks use `claude-task-` so
+/// Task id with a custom prefix — background brain tasks use `claude-task-` so
 /// the dock can tell a quiet background run from the live voice capsule.
 fn next_task_id_with_prefix(prefix: &str) -> String {
     let n = TASK_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -1517,7 +1518,7 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
 pub struct SymonTextPlannerInfo {
     available: bool,
     engine: Option<&'static str>,
-    model: Option<&'static str>,
+    model: Option<String>,
     effort: Option<&'static str>,
     tools: Vec<Value>,
     detail: Option<&'static str>,
@@ -1545,6 +1546,10 @@ fn text_task_id(session_id: &str, turn_id: &str) -> Result<String, String> {
     Ok(format!("symon-text:{session_id}:{turn_id}"))
 }
 
+/// Why a resolved seat can still be unusable on the bound text surface.
+pub(crate) const UNBINDABLE_TEXT_PLANNER_MESSAGE: &str =
+    "the selected Symon brain runs its runtime's own configured model, which the text surface cannot pin yet — choose a brain with a model id in Settings → Voice";
+
 pub fn symon_text_planner_info(
     engine: Option<&str>,
     model: Option<&str>,
@@ -1560,13 +1565,27 @@ pub fn symon_text_planner_info(
         },
     };
     match routing {
+        // The text surface resumes a session from a BOUND (engine, model,
+        // effort) triple, so a seat that carries no o8-side model id — an
+        // adapter running whatever model the operator configured for it — is
+        // reported unavailable HERE with the real reason, rather than passed on
+        // as a half-filled triple that reads downstream as "nothing installed".
+        // The voice + escalation paths take that seat happily; only this bound
+        // surface needs the id.
+        planner_route::PlannerRouting::Selected(selection) if selection.model.is_none() => {
+            SymonTextPlannerInfo {
+                available: false,
+                engine: None,
+                model: None,
+                effort: None,
+                tools: Vec::new(),
+                detail: Some(UNBINDABLE_TEXT_PLANNER_MESSAGE),
+            }
+        }
         planner_route::PlannerRouting::Selected(selection) => SymonTextPlannerInfo {
             available: true,
-            engine: Some(match selection.provider {
-                planner_route::PlannerProvider::Claude => "claude",
-                planner_route::PlannerProvider::Codex => "codex",
-            }),
-            model: Some(selection.model),
+            engine: Some(selection.provider.id),
+            model: selection.model.clone(),
             effort: Some(selection.effort),
             tools: tools::enabled_tools(),
             detail: None,
@@ -1617,22 +1636,32 @@ pub async fn run_symon_text_turn(
         session_id,
         call_id: turn_id,
     };
-    let result = match selection.provider {
-        planner_route::PlannerProvider::Claude => {
+    let result = match selection.provider.transport {
+        planner_route::PlannerTransport::ClaudeStreamJson => {
             claude::run_phone_text_loop_with_binary(
                 &selection.binary,
-                selection.model,
+                selection.model_label(),
                 &prompt,
                 &ctx,
                 correlation,
             )
             .await
         }
-        planner_route::PlannerProvider::Codex => {
+        planner_route::PlannerTransport::CodexAppServer => {
             codex::run_phone_text_loop(
                 &selection.binary,
-                selection.model,
+                selection.model_label(),
                 selection.effort,
+                &prompt,
+                &ctx,
+                correlation,
+            )
+            .await
+        }
+        planner_route::PlannerTransport::OpencodeRun => {
+            opencode::run_phone_text_loop(
+                &selection.binary,
+                selection.model.as_deref(),
                 &prompt,
                 &ctx,
                 correlation,
@@ -1746,7 +1775,7 @@ async fn run_agent_inner(
         return Err("Empty request".into());
     }
 
-    let is_background_claude_task = task_prefix == Some("claude-task");
+    let is_background_brain_task = task_prefix == Some("claude-task");
     let task_id = match task_prefix {
         Some(prefix) => next_task_id_with_prefix(prefix),
         None => next_task_id(),
@@ -1775,11 +1804,8 @@ async fn run_agent_inner(
                 // the frontier orchestrator model (#2155).
                 log::info!(
                     "[symon-agent] planner seat: {} {} (effort {})",
-                    match selection.provider {
-                        planner_route::PlannerProvider::Claude => "claude",
-                        planner_route::PlannerProvider::Codex => "codex",
-                    },
-                    selection.model,
+                    selection.provider.id,
+                    selection.model_label(),
                     selection.effort
                 );
                 Some(selection)
@@ -1903,7 +1929,7 @@ async fn run_agent_inner(
     // Explicit overrides remain for the background-Claude and evaluation paths.
     let model = planner_selection
         .as_ref()
-        .map(|selection| selection.model.to_string())
+        .map(|selection| selection.model_label().to_string())
         .unwrap_or_else(|| {
             model_override.unwrap_or_else(|| router::load_config().mac_native_action)
         });
@@ -1920,16 +1946,30 @@ async fn run_agent_inner(
         llm_prompt.push_str(note);
     }
     let loop_result = if let Some(selection) = planner_selection {
-        match selection.provider {
-            planner_route::PlannerProvider::Claude => {
-                claude::run_loop_with_binary(&selection.binary, selection.model, &llm_prompt, &ctx)
-                    .await
+        match selection.provider.transport {
+            planner_route::PlannerTransport::ClaudeStreamJson => {
+                claude::run_loop_with_binary(
+                    &selection.binary,
+                    selection.model_label(),
+                    &llm_prompt,
+                    &ctx,
+                )
+                .await
             }
-            planner_route::PlannerProvider::Codex => {
+            planner_route::PlannerTransport::CodexAppServer => {
                 codex::run_loop(
                     &selection.binary,
-                    selection.model,
+                    selection.model_label(),
                     selection.effort,
+                    &llm_prompt,
+                    &ctx,
+                )
+                .await
+            }
+            planner_route::PlannerTransport::OpencodeRun => {
+                opencode::run_loop(
+                    &selection.binary,
+                    selection.model.as_deref(),
                     &llm_prompt,
                     &ctx,
                 )
@@ -2039,7 +2079,7 @@ async fn run_agent_inner(
                 done_payload["sources"] = json!(result.brain_sources);
             }
             emit_agent_event(&app, done_payload);
-            if is_background_claude_task {
+            if is_background_brain_task {
                 symon_task_bridge::send_task_complete(&task_id, "done", &prompt, &clean_text).await;
             }
             if let Some(glint) = glint_for(&result.tool_calls_json) {
@@ -2060,7 +2100,7 @@ async fn run_agent_inner(
                 &app,
                 json!({ "taskId": task_id, "kind": "status", "status": "failed", "result": e }),
             );
-            if is_background_claude_task {
+            if is_background_brain_task {
                 symon_task_bridge::send_task_complete(&task_id, "failed", &prompt, &e).await;
             }
             Err(e)
@@ -2128,17 +2168,22 @@ pub fn spawn_agent_with_spatial(
     });
 }
 
-/// Spawn a BACKGROUND task on the text-planner brain — the async target of
-/// `escalate(target:"claude_brain")`. Sibling of `spawn_agent`, with a
-/// `claude-task-` id prefix so the dock can treat it as a quiet background run
-/// distinct from the live voice capsule. Fire-and-forget: results reach the
-/// user via dock events + TTS.
+/// Spawn a BACKGROUND task on the text-planner brain — the async target of the
+/// `escalate` handoff. Sibling of `spawn_agent`, with a `claude-task-` id
+/// prefix so the dock can treat it as a quiet background run distinct from the
+/// live voice capsule. Fire-and-forget: results reach the user via dock events
+/// + TTS.
 ///
-/// The seat is resolved through the SHARED planner route (#2155) — no model
-/// override — so this background handoff runs the worker/builder tier and
-/// honors the operator's provider choice instead of pinning the frontier
-/// orchestrator model the way it used to.
-pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
+/// The seat is resolved through the SHARED planner registry (#2155, #2156) —
+/// no model override — so this handoff runs whichever adapter the operator's
+/// Symon brain setting selects, on its worker/builder rung, instead of pinning
+/// the frontier orchestrator model the way it used to. `run_agent_inner` logs
+/// the resolved seat.
+///
+/// The id prefix and the `escalate` target values stay as they are: the dock,
+/// the pill surface and the tool schema all key off those literals, and
+/// renaming them would break callers without changing what runs.
+pub fn spawn_background_brain_task(app: tauri::AppHandle, task: String) {
     let task = task.trim().to_string();
     if task.is_empty() {
         return;
@@ -2150,16 +2195,19 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
         {
             Ok(rt) => rt,
             Err(e) => {
-                log::error!("[symon-agent] failed to build claude-task runtime: {e}");
+                log::error!("[symon-agent] failed to build background brain runtime: {e}");
                 return;
             }
         };
-        log::info!("[symon-agent] claude-task: {} chars", task.len());
+        log::info!("[symon-agent] background brain task: {} chars", task.len());
         match rt.block_on(async {
             run_agent_inner(app, task, None, Some("claude-task"), None).await
         }) {
-            Ok(text) => log::info!("[symon-agent] claude-task done: {} chars", text.len()),
-            Err(e) => log::warn!("[symon-agent] claude-task failed: {e}"),
+            Ok(text) => log::info!(
+                "[symon-agent] background brain task done: {} chars",
+                text.len()
+            ),
+            Err(e) => log::warn!("[symon-agent] background brain task failed: {e}"),
         }
     });
 }

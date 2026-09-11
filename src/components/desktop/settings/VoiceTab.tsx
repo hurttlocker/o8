@@ -13,7 +13,7 @@
  * icon components inside the Tauri webview).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   isTauri,
   accessibilityPermissionGranted,
@@ -28,7 +28,9 @@ import {
   voicePrefsGet,
   voicePrefsSet,
   externalKeyboardFnState,
+  symonBrainState,
   type ExternalKeyboardFnState,
+  type SymonBrainState,
 } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
@@ -149,6 +151,10 @@ export function VoiceTab() {
   // #2158: the EFFECTIVE remap state — the pref ANDed with "a non-Apple external
   // keyboard is attached". Null until the first read (or outside Tauri).
   const [externalFn, setExternalFn] = useState<ExternalKeyboardFnState | null>(null);
+  // #2156: the Symon brain seat — the stored provider/tier/model pin plus the
+  // seat the native planner registry resolves right now.
+  const [brain, setBrain] = useState<SymonBrainState | null>(null);
+  const [brainModelInput, setBrainModelInput] = useState('');
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -183,6 +189,9 @@ export function VoiceTab() {
       Boolean(prefs && (prefs as Record<string, unknown>).external_symon_left_control === true),
     );
     setExternalFn(await externalKeyboardFnState().catch(() => null));
+    const nextBrain = await symonBrainState().catch(() => null);
+    setBrain(nextBrain);
+    setBrainModelInput(nextBrain?.model ?? '');
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
     if (bg) void backgroundModeSet(false);
@@ -245,6 +254,28 @@ export function VoiceTab() {
     setExternalFn(await externalKeyboardFnState().catch(() => null));
   }, []);
 
+  // Every brain write goes through the voice pref store and then re-reads the
+  // native seat, so the status line shows what the NEXT task will actually run
+  // — including a pick whose CLI is missing.
+  const writeBrainPref = useCallback(async (key: string, value: string) => {
+    await voicePrefsSet(key, value);
+    setBrain(await symonBrainState().catch(() => null));
+  }, []);
+
+  const handleBrainProvider = useCallback((next: string) => {
+    setBrain((current) => (current ? { ...current, provider: next } : current));
+    void writeBrainPref('symon_brain_provider', next);
+  }, [writeBrainPref]);
+
+  const handleBrainTier = useCallback((next: string) => {
+    setBrain((current) => (current ? { ...current, tier: next } : current));
+    void writeBrainPref('symon_brain_tier', next);
+  }, [writeBrainPref]);
+
+  const handleBrainModel = useCallback(async () => {
+    await writeBrainPref('symon_brain_model', brainModelInput.trim());
+  }, [brainModelInput, writeBrainPref]);
+
   const handleGroqKeySave = useCallback(async () => {
     const key = groqKeyInput.trim();
     if (!key) return;
@@ -279,6 +310,43 @@ export function VoiceTab() {
     : fnHijacked
       ? <ValuePill tone="destructive">Needs change</ValuePill>
       : <ValuePill>Not set</ValuePill>;
+
+  // #2156: the provider choices ARE the native planner registry — the panel
+  // renders whatever adapters the Rust side registers rather than a second list
+  // that can drift from it.
+  const brainProviderOptions = useMemo(
+    () => [
+      { value: 'auto', label: 'Auto' },
+      ...(brain?.adapters ?? []).map((adapter) => ({ value: adapter.id, label: adapter.label })),
+    ],
+    [brain],
+  );
+  const resolvedSeat = brain?.resolvedProvider
+    ? [
+      brain.resolvedLabel ?? brain.resolvedProvider,
+      brain.resolvedModel ?? 'configured model',
+      brain.resolvedEffort ?? 'default',
+    ].join(' · ')
+    : null;
+  // Says what the NEXT task will run, so a pick whose CLI is missing reads as a
+  // fallback instead of silently doing something else.
+  const brainStatus = !brain
+    ? 'Reading the installed agent CLIs…'
+    : brain.detail
+      ? brain.detail
+      : brain.fellBackFrom
+        ? `Not installed: ${brain.fellBackFrom} — falling back to ${resolvedSeat}`
+        : `Resolved: ${resolvedSeat}`;
+  const brainStatusTone = brain?.detail
+    ? '#d94f3a'
+    : brain?.fellBackFrom
+      ? RAMS_ACCENT
+      : 'var(--t-text-faint)';
+  const brainModelPlaceholder = brain?.adapters.find(
+    (adapter) => adapter.id === brain.resolvedProvider,
+  )?.runtimeConfiguredModel
+    ? 'provider/model'
+    : 'model id';
 
   return (
     <div
@@ -525,7 +593,10 @@ export function VoiceTab() {
           </section>
 
           <section style={{ marginTop: 28 }}>
-            <SettingsGroup header="Voice brain">
+            <SettingsGroup
+              header="Voice brain"
+              footnote="Auto follows the runtime you picked for the orchestrator. A runtime you pick here whose CLI isn't installed falls through to one that is, and the line above says which."
+            >
               <SettingsRow
                 icon={<BrainGlyph />}
                 label="Escalation"
@@ -540,6 +611,100 @@ export function VoiceTab() {
                       { value: 'deep', label: 'Deep' },
                     ]}
                   />
+                }
+                divider
+              />
+              <SettingsRow
+                icon={<BrainGlyph />}
+                label="Symon brain"
+                subtitle={
+                  <>
+                    Which installed agent CLI runs the background brain.
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 4,
+                        color: brainStatusTone,
+                      }}
+                    >
+                      {brainStatus}
+                    </span>
+                  </>
+                }
+                accessory={
+                  <SettingsSegmented
+                    value={brain?.provider ?? 'auto'}
+                    onChange={handleBrainProvider}
+                    options={brainProviderOptions}
+                  />
+                }
+                divider
+              />
+              <SettingsRow
+                icon={<BrainGlyph />}
+                label="Seat"
+                subtitle="Worker is the cheap everyday rung; Builder runs the stronger model at full reasoning."
+                accessory={
+                  <SettingsSegmented
+                    value={brain?.tier ?? 'auto'}
+                    onChange={handleBrainTier}
+                    options={[
+                      { value: 'auto', label: 'Auto' },
+                      { value: 'worker', label: 'Worker' },
+                      { value: 'builder', label: 'Builder' },
+                    ]}
+                  />
+                }
+                divider
+              />
+              <SettingsRow
+                icon={<BrainGlyph />}
+                label="Model pin"
+                subtitle="Optional. Overrides the seat above — leave empty to let the runtime choose."
+                accessory={
+                  <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      value={brainModelInput}
+                      onChange={(e) => setBrainModelInput(e.target.value)}
+                      placeholder={brainModelPlaceholder}
+                      spellCheck={false}
+                      style={{
+                        width: 210,
+                        height: 26,
+                        paddingLeft: 9,
+                        paddingRight: 9,
+                        fontSize: 12,
+                        fontWeight: 300,
+                        fontFamily: APP_FONT_STACK,
+                        color: 'var(--t-text)',
+                        background: 'var(--t-input-bg)',
+                        border: '1px solid var(--t-divider)',
+                        borderRadius: 7,
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { void handleBrainModel(); }}
+                      disabled={brainModelInput.trim() === (brain?.model ?? '')}
+                      style={{
+                        height: 26,
+                        paddingLeft: 10,
+                        paddingRight: 10,
+                        fontSize: 12,
+                        fontWeight: 300,
+                        letterSpacing: '-0.1px',
+                        fontFamily: APP_FONT_STACK,
+                        color: 'var(--t-text)',
+                        background: 'var(--t-input-bg)',
+                        border: '1px solid var(--t-divider)',
+                        borderRadius: 7,
+                        cursor: brainModelInput.trim() === (brain?.model ?? '') ? 'default' : 'pointer',
+                      }}
+                    >
+                      {brainModelInput.trim() ? 'Save' : 'Clear'}
+                    </button>
+                  </span>
                 }
               />
             </SettingsGroup>

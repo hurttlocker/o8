@@ -504,6 +504,36 @@ export async function externalKeyboardFnState(): Promise<ExternalKeyboardFnState
   return invoke<ExternalKeyboardFnState>('external_keyboard_fn_state');
 }
 
+/** One entry of the native planner registry (#2156). `runtimeConfiguredModel`
+ * marks an adapter that runs whatever model the operator configured for it, so
+ * the panel says that instead of showing an empty model. */
+export interface SymonBrainAdapterState {
+  id: string;
+  label: string;
+  installed: boolean;
+  runtimeConfiguredModel: boolean;
+}
+
+/** The Symon brain seat (#2156): the stored setting, which planner adapters are
+ * installed, and the seat the registry resolves right now. `fellBackFrom` names
+ * the chosen provider when its CLI is missing and another entry took the seat. */
+export interface SymonBrainState {
+  provider: string;
+  tier: string;
+  model: string | null;
+  adapters: SymonBrainAdapterState[];
+  resolvedProvider: string | null;
+  resolvedLabel: string | null;
+  resolvedModel: string | null;
+  resolvedEffort: string | null;
+  fellBackFrom: string | null;
+  detail: string | null;
+}
+
+export async function symonBrainState(): Promise<SymonBrainState | null> {
+  return invoke<SymonBrainState>('symon_brain_state');
+}
+
 export interface SymonMemoryEntry {
   id: number;
   fact: string;

@@ -5695,6 +5695,17 @@ fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> 
     Ok(())
 }
 
+/// The Symon brain seat (#2156): the operator's stored provider / tier / model
+/// pin, which planner adapters are actually installed, and the seat the
+/// registry resolves right now. Settings → Voice renders the resolved line
+/// under the control so a pick whose CLI is missing reads as a fallback rather
+/// than silently doing something else.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_brain_state() -> crate::agent::planner_route::SymonBrainState {
+    crate::agent::planner_route::brain_state()
+}
+
 /// Live state of the external-keyboard Fn substitute (#2158): the stored pref,
 /// whether the Control-as-Fn remap is actually armed right now, and the product
 /// name of the keyboard arming it. Settings → Voice renders this under the
@@ -7923,6 +7934,8 @@ pub fn run() {
             voice_prefs_set,
             #[cfg(target_os = "macos")]
             external_keyboard_fn_state,
+            #[cfg(target_os = "macos")]
+            symon_brain_state,
             #[cfg(target_os = "macos")]
             symon_memory_get,
             #[cfg(target_os = "macos")]
