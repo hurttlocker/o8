@@ -21,6 +21,10 @@ const h = vi.hoisted(() => ({
   resolveRealtimeAccess: vi.fn(),
   findRepoByLocalPath: vi.fn(),
   persistSymonScopeGrant: vi.fn(),
+  // Stands in for a bad model CONSTANT (the #2165 failure mode): the phone mint
+  // never takes its model from the request, so the only honest way to drive a
+  // rejected model through the real handler is to make the selector return one.
+  phoneModel: { value: null as string | null },
 }));
 
 vi.mock('@/lib/mcp/o8-webview-client', () => ({
@@ -36,6 +40,16 @@ vi.mock('@/lib/voice/realtime-access', () => ({ resolveRealtimeAccess: h.resolve
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: h.resolveRequestPrincipal }));
 vi.mock('@/lib/mobile/device-registry', () => ({ resolveDeviceByToken: h.resolveDeviceByToken }));
 vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: h.findRepoByLocalPath }));
+vi.mock('@/lib/voice/realtime-session-config', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/voice/realtime-session-config')>();
+  return {
+    ...original,
+    selectPhoneRealtimeModel: (input: Parameters<typeof original.selectPhoneRealtimeModel>[0]) =>
+      h.phoneModel.value
+        ? { model: h.phoneModel.value, variant: 'mini' as const }
+        : original.selectPhoneRealtimeModel(input),
+  };
+});
 vi.mock('@/lib/mobile/symon-agent-registry', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/mobile/symon-agent-registry')>();
   return { ...original, persistSymonScopeGrant: h.persistSymonScopeGrant };
@@ -90,6 +104,7 @@ beforeEach(() => {
   h.resolveRealtimeAccess.mockReset();
   h.findRepoByLocalPath.mockReset();
   h.persistSymonScopeGrant.mockReset();
+  h.phoneModel.value = null;
   delete (globalThis as { __o8BrowserAgentClient?: unknown }).__o8BrowserAgentClient;
   h.resolveRequestPrincipal.mockReturnValue('operator');
   h.resolveChatGPTRealtimeCredential.mockResolvedValue(null);
@@ -595,5 +610,36 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     const json = await res.json();
     expect(json.error).toBe('mint_failed');
     expect(json.detail).toContain('bad request');
+  });
+
+  it('400: refuses a model the realtime endpoint will not accept, before OpenAI', async () => {
+    h.phoneModel.value = 'gpt-live-1';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.error).toBe('unsupported_realtime_model');
+    expect(json.detail).toContain('gpt-live-1');
+    expect(json.detail).toContain('gpt-realtime-2.1-mini');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('400: a rejected model never preempts the live desk session or mints a scope', async () => {
+    h.phoneModel.value = 'gpt-realtime-2.1-minii'; // near-miss typo
+    bridgeReady(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).detail).toContain('gpt-realtime-2.1-minii');
+    expect(h.evalJs).not.toHaveBeenCalled();
+    expect(h.persistSymonScopeGrant).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

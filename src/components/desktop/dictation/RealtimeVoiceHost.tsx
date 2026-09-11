@@ -175,6 +175,9 @@ export function RealtimeVoiceHost() {
   const respondingRef = useRef(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [status, setStatus] = useState<RealtimeStatus>('idle');
+  // Why the session failed (e.g. a model the realtime endpoint refuses). The
+  // pill shows this instead of the generic "Voice unavailable" when we have it.
+  const [statusDetail, setStatusDetail] = useState<string | null>(null);
 
   const clearIdle = useCallback(() => {
     if (idleTimerRef.current) {
@@ -223,7 +226,10 @@ export function RealtimeVoiceHost() {
     console.log(`${LOG} starting realtime voice (voice=${voice})`);
     sessionRef.current = startRealtimeSession({
       voice,
-      onStatus: (s) => setStatus(s),
+      onStatus: (s, detail) => {
+        setStatus(s);
+        setStatusDetail(s === 'error' && detail ? detail : null);
+      },
       onEvent: (e) => {
         const t = typeof e.type === 'string' ? e.type : '';
         // HARD-GATE the idle clock on a responding flag. We must NOT lean on
@@ -498,14 +504,24 @@ export function RealtimeVoiceHost() {
   // Auto-clear the transient error pill after a few seconds.
   useEffect(() => {
     if (status !== 'error') return;
-    const t = setTimeout(() => setStatus('idle'), 3500);
+    const t = setTimeout(() => {
+      setStatus('idle');
+      setStatusDetail(null);
+    }, 3500);
     return () => clearTimeout(t);
   }, [status]);
 
   const connecting = status === 'requesting-mic' || status === 'connecting';
   const visible = connecting || status === 'live' || status === 'error';
   const dotColor = status === 'error' ? '#ef4444' : status === 'live' ? '#34d399' : '#f59e0b';
-  const label = status === 'error' ? 'Voice unavailable' : connecting ? 'Connecting…' : 'Voice live';
+  // Lead with the failure's own first sentence when we have one — a refused
+  // model names itself there; the full reason stays on the hover title.
+  const errorHeadline = statusDetail
+    ? (statusDetail.split('. ')[0] || statusDetail).slice(0, 80)
+    : null;
+  const label = status === 'error'
+    ? (errorHeadline ?? 'Voice unavailable')
+    : connecting ? 'Connecting…' : 'Voice live';
 
   // A fixed, full-width, click-through container handles centering so the pill's
   // own framer transform (y/scale) never fights a translateX centering hack.
@@ -529,7 +545,9 @@ export function RealtimeVoiceHost() {
           <motion.button
             type="button"
             onClick={() => stop()}
-            title="Voice-to-voice is on — double-tap right ⌘ or click to stop"
+            title={status === 'error' && statusDetail
+              ? statusDetail
+              : 'Voice-to-voice is on — double-tap right ⌘ or click to stop'}
             initial={{ opacity: 0, y: -8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.96 }}

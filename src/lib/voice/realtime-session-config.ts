@@ -23,6 +23,46 @@
 // desk mint, the sdp relay, and the Agent-mode mint can never drift apart.
 export const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
 export const REALTIME_FLAGSHIP_MODEL = 'gpt-realtime-2.1';
+
+/**
+ * Model ids the OpenAI realtime endpoint actually accepts.
+ *
+ * `POST /v1/realtime/client_secrets` mints a token for ids the realtime
+ * transport later refuses — the mint returns 200 and the failure only lands at
+ * the WebSocket/SDP exchange as `invalid_model: "not supported in realtime
+ * mode"`, far from the constant that caused it. Every mint route checks the
+ * requested model against this list first so a bad constant or a bad override
+ * fails at the mint with the model named, not as a mute connect failure later.
+ *
+ * Kept next to {@link REALTIME_MODEL} so switching models touches ONE place.
+ */
+export const REALTIME_CAPABLE_MODELS = [
+  REALTIME_FLAGSHIP_MODEL,
+  REALTIME_MODEL,
+  'gpt-realtime-2',
+  'gpt-realtime',
+] as const;
+
+export type RealtimeModelCheck =
+  | { ok: true }
+  | { ok: false; reason: string; allowed: string[] };
+
+/**
+ * Pure guard: is this a realtime-capable model id? The rejection reason names
+ * the offending model AND the accepted set, because that string is what the
+ * desk and the phone show the operator in place of a generic connect failure.
+ */
+export function assertRealtimeCapableModel(model: string): RealtimeModelCheck {
+  const allowed = [...REALTIME_CAPABLE_MODELS];
+  const candidate = typeof model === 'string' ? model.trim() : '';
+  if ((REALTIME_CAPABLE_MODELS as readonly string[]).includes(candidate)) return { ok: true };
+  const named = candidate ? `"${candidate}"` : 'an empty model id';
+  return {
+    ok: false,
+    reason: `${named} is not accepted by the OpenAI realtime endpoint. Realtime-capable models: ${allowed.join(', ')}.`,
+    allowed,
+  };
+}
 export type PhoneCodeModelVariant = 'mini' | 'flagship';
 export type PhoneCodeModelExperiment = PhoneCodeModelVariant | 'ab';
 export type PhoneRealtimeExperience = 'repository-catch-up';

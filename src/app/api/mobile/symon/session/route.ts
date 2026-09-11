@@ -31,6 +31,7 @@ import {
   REALTIME_BASE_URL,
   CLIENT_SECRETS_URL,
   REALTIME_TOKEN_TTL_SECONDS,
+  assertRealtimeCapableModel,
   buildClientSecretsBody,
 } from '@/lib/voice/realtime-session-config';
 
@@ -386,6 +387,31 @@ export async function POST(request: NextRequest) {
   }
   const workspaceContext = resolvedScope.context;
 
+  const requestedModelVariant = principal === 'operator'
+    ? request.headers.get('x-o8-symon-code-model')
+    : null;
+  const modelSelection = selectPhoneRealtimeModel({
+    workspaceMode: resolvedScope.workspaceMode,
+    experiment: process.env.O8_SYMON_CODE_REALTIME_EXPERIMENT,
+    bucketKey: `${subject.subject}:${subject.deviceId ?? 'operator'}:${resolvedScope.repoId ?? 'life'}`,
+    operatorOverride: requestedModelVariant,
+    experience: workspaceContext.launchKind,
+  });
+  const model = modelSelection.model;
+
+  // Resolved BEFORE the webview bridge and the mint: a model the realtime
+  // endpoint will not accept must not preempt a live desk session or burn a
+  // mint. OpenAI returns a token for such ids and only refuses them at the
+  // WebRTC/WebSocket exchange, where nothing names the model.
+  const modelCheck = assertRealtimeCapableModel(model);
+  if (!modelCheck.ok) {
+    console.warn(`${LOG} unsupported_realtime_model: ${modelCheck.reason}`);
+    return NextResponse.json(
+      { ok: false, error: 'unsupported_realtime_model', detail: modelCheck.reason },
+      { status: 400 },
+    );
+  }
+
   // Subscription voice wins whenever the standard Codex ChatGPT-OAuth session
   // is present. This is the proven #1616 path: the OAuth bearer mints the same
   // short-lived Realtime client secret as BYOK, so the phone keeps the existing
@@ -443,17 +469,6 @@ export async function POST(request: NextRequest) {
   }
 
   const sessionId = `sym-${randomUUID()}`;
-  const requestedModelVariant = principal === 'operator'
-    ? request.headers.get('x-o8-symon-code-model')
-    : null;
-  const modelSelection = selectPhoneRealtimeModel({
-    workspaceMode: resolvedScope.workspaceMode,
-    experiment: process.env.O8_SYMON_CODE_REALTIME_EXPERIMENT,
-    bucketKey: `${subject.subject}:${subject.deviceId ?? 'operator'}:${resolvedScope.repoId ?? 'life'}`,
-    operatorOverride: requestedModelVariant,
-    experience: workspaceContext.launchKind,
-  });
-  const model = modelSelection.model;
   const voice = bridge.voice;
   let phoneBridgeTools = bridge.tools;
   if (workspaceContext.workspaceMode === 'code') {
