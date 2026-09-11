@@ -147,6 +147,10 @@ pub fn show(
     anchor: Option<crate::live_dictation::CaretAnchor>,
 ) {
     use tauri::Manager;
+    // #2147 — quiet mode owns overlay visibility for its duration.
+    if crate::presentation::overlay_show_blocked() {
+        return;
+    }
     let Some(window) = app.get_webview_window(PARTIALS_LABEL) else {
         return;
     };

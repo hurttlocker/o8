@@ -2279,6 +2279,12 @@
       ]
     },
     {
+      "path": "tests/quiet-mode-settings-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/quota-fallback-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2490,6 +2496,12 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/review-ready-coalescer-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

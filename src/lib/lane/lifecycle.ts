@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { packetStatusFromLaneStatus } from '@/lib/orchestrator/packet-state';
 import { recordLaneEvent } from '@/lib/orchestrator/runtime-status';
-import { notifyReviewReady } from '@/lib/push/notify';
+import { enqueueReviewReady } from '@/lib/push/review-ready-coalescer';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { LaneLifecycleEventPayload } from '@/lib/realtime/types';
 import type { Lane, LaneStatus } from './types';
@@ -48,8 +48,14 @@ export function publishLaneLifecycleEvent(
   // the lane-lifecycle WS channel; the push was the missing third leg, so an
   // away operator never heard that review-ready work existed and stale lanes
   // aged unseen into reaper territory.
+  //
+  // #2150 — the flip is COALESCED, not notified directly. A parallel dispatch
+  // reaches this edge three times in a second, and three banners over a screen
+  // share is what the operator actually complained about. The coalescer also
+  // owns the on/off setting and the quiet-mode override, so every dispatch path
+  // inherits both from this one chokepoint.
   if (payload.status === 'reviewing' && previousStatus !== 'reviewing') {
-    notifyReviewReady({
+    enqueueReviewReady({
       laneId: payload.laneId,
       label: lane.label,
       packetId: payload.packetId,

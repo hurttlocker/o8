@@ -113,6 +113,11 @@ export function notifyOrchestratorReady(opts: {
  * the lane-lifecycle WS event + MCP ring-buffer entry; no push ever fired, so
  * an away operator (or a phone) never heard that review-ready work existed —
  * and stale review-ready lanes aged into reaper territory unseen.
+ *
+ * NOT the entry point any more (#2150): `publishLaneLifecycleEvent` goes through
+ * `review-ready-coalescer.ts`, which batches a parallel dispatch into one
+ * notification and applies the on/off setting plus the quiet-mode override. A
+ * direct call here bypasses both — use the coalescer.
  */
 export function notifyReviewReady(opts: {
   laneId: string;
