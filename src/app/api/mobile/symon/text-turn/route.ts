@@ -21,8 +21,12 @@ export async function POST(request: NextRequest) {
   const planner = body?.planner && typeof body.planner === 'object' && !Array.isArray(body.planner)
     ? body.planner as Record<string, unknown>
     : null;
+  // The engine is a native planner registry entry id, so the shape is checked
+  // here and the id itself is verified by the native bound resolve — an unknown
+  // one is refused there rather than pinned to a hardcoded pair (#2176).
   const selection: SymonTextPlannerSelection | null = planner
-    && (planner.engine === 'claude' || planner.engine === 'codex')
+    && typeof planner.engine === 'string'
+    && /^[a-z0-9-]{1,32}$/.test(planner.engine)
     && typeof planner.model === 'string'
     && typeof planner.effort === 'string'
     ? { engine: planner.engine, model: planner.model, effort: planner.effort }

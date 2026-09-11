@@ -580,7 +580,9 @@ pub(crate) async fn run_text_planner_loop<S: TextPlannerSession>(
     ctx: &TaskCtx,
     provider: &'static str,
 ) -> Result<LoopResult, String> {
-    run_text_planner_loop_inner(session, model, intent, ctx, provider, None).await
+    run_text_planner_loop_inner(session, model, intent, ctx, provider, None)
+        .await
+        .map(|(result, _session)| result)
 }
 
 pub(crate) async fn run_text_planner_loop_correlated<S: TextPlannerSession>(
@@ -591,6 +593,23 @@ pub(crate) async fn run_text_planner_loop_correlated<S: TextPlannerSession>(
     provider: &'static str,
     correlation: ConfirmCorrelation,
 ) -> Result<LoopResult, String> {
+    run_text_planner_loop_inner(session, model, intent, ctx, provider, Some(correlation))
+        .await
+        .map(|(result, _session)| result)
+}
+
+/// The correlated loop, handing the session back with the result so the caller
+/// can read the adapter's resume handle off it (#2176). A failed turn keeps
+/// today's shape — the error is returned and the session is dropped, because
+/// there is no thread worth carrying forward from one.
+pub(crate) async fn run_text_planner_loop_correlated_resumable<S: TextPlannerSession>(
+    session: S,
+    model: &str,
+    intent: &str,
+    ctx: &TaskCtx,
+    provider: &'static str,
+    correlation: ConfirmCorrelation,
+) -> Result<(LoopResult, S), String> {
     run_text_planner_loop_inner(session, model, intent, ctx, provider, Some(correlation)).await
 }
 
@@ -601,7 +620,7 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
     ctx: &TaskCtx,
     provider: &'static str,
     correlation: Option<ConfirmCorrelation>,
-) -> Result<LoopResult, String> {
+) -> Result<(LoopResult, S), String> {
     let mut tool_call_log: Vec<Value> = Vec::new();
     let mut brain_sources: Vec<Value> = Vec::new();
     let mut result_text = String::new();
@@ -792,12 +811,15 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
         result_text = "Done.".to_string();
     }
 
-    Ok(LoopResult {
-        result_text,
-        model_used: model.to_string(),
-        tool_calls_json: Value::Array(tool_call_log).to_string(),
-        brain_sources,
-    })
+    Ok((
+        LoopResult {
+            result_text,
+            model_used: model.to_string(),
+            tool_calls_json: Value::Array(tool_call_log).to_string(),
+            brain_sources,
+        },
+        session,
+    ))
 }
 
 pub(crate) fn text_tool_result_message(tool_name: &str, tool_result: &Value) -> String {

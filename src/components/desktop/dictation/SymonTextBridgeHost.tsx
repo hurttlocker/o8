@@ -6,9 +6,12 @@ import type { SymonTextPlannerSelection } from '@/lib/mobile/symon-text-eval';
 
 interface SymonTextPlannerInfo {
   available: boolean;
-  engine?: 'claude' | 'codex';
+  /** Native planner registry entry id — the seat's identity. */
+  engine?: string;
   model?: string;
   effort?: string;
+  /** The seat named the way the Settings → Voice status line names it. */
+  seat?: string;
   tools?: Array<Record<string, unknown>>;
   detail?: string;
 }

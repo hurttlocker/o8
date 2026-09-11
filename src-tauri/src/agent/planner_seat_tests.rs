@@ -161,6 +161,29 @@ impl SeatFixture {
         }
     }
 
+    /// Wait for `expected` fixture spawns and return each one's argv on its
+    /// own. The fixture appends to a single capture file and closes every run
+    /// with `__END__`, so a multi-turn path is read run by run rather than as
+    /// one flattened list.
+    fn captured_runs(&self, expected: usize) -> Vec<Vec<String>> {
+        for _ in 0..200 {
+            let captured = std::fs::read_to_string(&self.capture).unwrap_or_default();
+            if captured.matches("__END__").count() >= expected {
+                return captured
+                    .split("__END__")
+                    .take(expected)
+                    .map(|run| {
+                        run.lines()
+                            .filter_map(|line| line.strip_prefix("argv ").map(str::to_string))
+                            .collect()
+                    })
+                    .collect();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        panic!("fixture recorded fewer than {expected} runs");
+    }
+
     /// Wait for the spawned fixture to finish writing its argv.
     fn captured_argv(&self) -> Vec<String> {
         for _ in 0..200 {
@@ -403,37 +426,132 @@ fn an_operator_model_pin_reaches_the_open_seat_spawn() {
     assert_eq!(argv[model_at + 1], "openrouter/some-model");
 }
 
-/// The bound text surface (phone / managed messages) resumes from an
-/// `(engine, model, effort)` triple. A seat whose model comes from the runtime's
-/// own config cannot supply one, so the info call says exactly that instead of
-/// handing down a half-filled triple that reads as "nothing installed".
+/// The bound text surface (phone / managed messages) binds a seat by its
+/// registry id, not by a model triple (#2176). This drives the REAL entry
+/// points — `symon_text_planner_info` for what the surface is told, then the
+/// bound run path twice on one conversation — because the registry resolving
+/// an open seat proves nothing if the surface the operator texts cannot take
+/// it.
 #[cfg(unix)]
-#[test]
-fn a_runtime_configured_seat_is_reported_unbindable_to_the_text_surface() {
-    let _fixture = SeatFixture::with_brain_setting(
+#[tokio::test]
+async fn the_open_seat_binds_the_text_surface_and_the_next_turn_resumes_it() {
+    let fixture = SeatFixture::with_brain_setting(
         "codex",
         Some(json!({ "symon_brain_provider": "opencode" })),
     );
-    // The voice path takes this seat.
-    let planner_route::PlannerRouting::Selected(selection) = planner_route::resolve() else {
-        panic!("the opencode fixture binary is installed");
-    };
-    assert_eq!(selection.provider.id, "opencode");
+    bound_seat::reset();
 
-    // The bound surface does not, and says why.
-    let info = symon_text_planner_info(None, None, None);
-    let rendered = serde_json::to_value(&info).unwrap();
-    assert_eq!(rendered["available"], serde_json::Value::Bool(false));
-    assert_eq!(rendered["detail"], UNBINDABLE_TEXT_PLANNER_MESSAGE);
-
-    // A seat that DOES carry a model id is still reported available.
-    std::fs::write(
-        _fixture.dir.join("dictation.json"),
-        json!({ "symon_brain_provider": "codex" }).to_string(),
-    )
-    .unwrap();
+    // What the surface is told: a seat with no o8-side model id is BINDABLE,
+    // and it is named the way Settings → Voice names it.
     let rendered = serde_json::to_value(symon_text_planner_info(None, None, None)).unwrap();
     assert_eq!(rendered["available"], serde_json::Value::Bool(true));
-    assert_eq!(rendered["engine"], "codex");
-    assert_eq!(rendered["model"], planner_route::DEFAULT_CODEX_PLANNER_MODEL);
+    assert_eq!(rendered["engine"], "opencode");
+    assert_eq!(rendered["model"], planner_route::RUNTIME_CONFIGURED_MODEL);
+    assert_eq!(rendered["effort"], planner_route::RUNTIME_CONFIGURED_EFFORT);
+    assert_eq!(rendered["seat"], "opencode · runtime-configured");
+
+    // And the triple it just handed out comes back through the BOUND entry —
+    // the surface re-presents it on every later turn.
+    let bound = serde_json::to_value(symon_text_planner_info(
+        Some("opencode"),
+        Some(planner_route::RUNTIME_CONFIGURED_MODEL),
+        Some(planner_route::RUNTIME_CONFIGURED_EFFORT),
+    ))
+    .unwrap();
+    assert_eq!(bound["available"], serde_json::Value::Bool(true));
+    assert_eq!(bound["engine"], "opencode");
+    assert_eq!(bound["seat"], "opencode · runtime-configured");
+
+    // Two real turns on one conversation, through the run path the Tauri
+    // command calls. `app: None` is the headless seam.
+    let session_id = "symon-text-2176";
+    for turn_id in ["turn-1", "turn-2"] {
+        let result = run_symon_text_turn_with(
+            None,
+            session_id.to_string(),
+            turn_id.to_string(),
+            "what is on my calendar?".to_string(),
+            "opencode".to_string(),
+            planner_route::RUNTIME_CONFIGURED_MODEL.to_string(),
+            planner_route::RUNTIME_CONFIGURED_EFFORT.to_string(),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{turn_id} must reach the open seat: {error}"));
+        assert_eq!(result.text, "All set.");
+    }
+
+    let runs = fixture.captured_runs(2);
+    assert!(
+        !runs[0].iter().any(|arg| arg == "--session"),
+        "turn 1 opens the thread: {:?}",
+        runs[0]
+    );
+    let resumed_at = runs[1]
+        .iter()
+        .position(|arg| arg == "--session")
+        .unwrap_or_else(|| panic!("turn 2 must resume turn 1's thread: {:?}", runs[1]));
+    assert_eq!(runs[1][resumed_at + 1], "ses_fixture");
+    // The marker is a binding token, never a model — it must not have reached
+    // the CLI.
+    for run in &runs {
+        assert!(
+            !run.iter().any(|arg| arg == "--model"),
+            "the runtime-configured seat is spawned with no o8-chosen model: {run:?}"
+        );
+        assert!(
+            !run.iter().any(|arg| arg == planner_route::RUNTIME_CONFIGURED_MODEL),
+            "the binding marker must never ride the spawn: {run:?}"
+        );
+    }
+    bound_seat::reset();
+}
+
+/// With the Symon brain setting UNSET, the bound surface is told exactly what
+/// it was told before the marker existed — same engine, same model id, same
+/// effort — for both orchestrator backends. The default path never learns a
+/// new shape.
+#[cfg(unix)]
+#[test]
+fn an_unset_brain_setting_projects_the_triple_it_always_did() {
+    for (backend, engine, model, effort) in [
+        ("codex", "codex", planner_route::DEFAULT_CODEX_PLANNER_MODEL, "high"),
+        ("claude", "claude", crate::models::CLAUDE_SONNET_5, "medium"),
+    ] {
+        let _fixture = SeatFixture::new(backend);
+        let rendered = serde_json::to_value(symon_text_planner_info(None, None, None)).unwrap();
+        assert_eq!(rendered["available"], serde_json::Value::Bool(true), "{backend}");
+        assert_eq!(rendered["engine"], engine, "{backend}");
+        assert_eq!(rendered["model"], model, "{backend}");
+        assert_eq!(rendered["effort"], effort, "{backend}");
+
+        // The triple it hands out still round-trips through the bound entry.
+        let bound =
+            serde_json::to_value(symon_text_planner_info(Some(engine), Some(model), Some(effort)))
+                .unwrap();
+        assert_eq!(bound["available"], serde_json::Value::Bool(true), "{backend}");
+        assert_eq!(bound["model"], model, "{backend}");
+
+        // And a seat that HAS a model id refuses the open seat's binding
+        // marker, so a stale binding cannot claim it.
+        let marked = serde_json::to_value(symon_text_planner_info(
+            Some(engine),
+            Some(planner_route::RUNTIME_CONFIGURED_MODEL),
+            Some(planner_route::RUNTIME_CONFIGURED_EFFORT),
+        ))
+        .unwrap();
+        assert_eq!(marked["available"], serde_json::Value::Bool(false), "{backend}");
+    }
+}
+
+/// The seat line the bound surface reports is the one Settings → Voice renders
+/// — `label · model · effort`, collapsed for a runtime-configured seat.
+#[cfg(unix)]
+#[test]
+fn the_bound_surface_names_the_seat_the_way_settings_does() {
+    let _fixture = SeatFixture::new("codex");
+    let rendered = serde_json::to_value(symon_text_planner_info(None, None, None)).unwrap();
+    assert_eq!(
+        rendered["seat"],
+        format!("Codex · {} · high", planner_route::DEFAULT_CODEX_PLANNER_MODEL)
+    );
 }

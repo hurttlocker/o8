@@ -55,6 +55,15 @@ pub(crate) const WORKER_CODEX_PLANNER_MODEL: &str = crate::models::CODEX_GPT_5_6
 /// operator's own runtime config rather than from o8.
 pub(crate) const RUNTIME_CONFIGURED_EFFORT: &str = "default";
 
+/// The `model` half of the bound surface's triple for a seat that has no
+/// o8-side model id (#2176). It is a MARKER, never a model: `accepts_model`
+/// refuses it as an operator pin, and `resolve_bound` translates it back to
+/// "no model" before the selection reaches a spawn, so it can never ride a
+/// CLI's `--model` flag. Binding identity for such a seat is the registry id
+/// plus the per-session handle in `bound_seat`; this keeps the triple shape
+/// intact for callers that already speak it.
+pub(crate) const RUNTIME_CONFIGURED_MODEL: &str = "runtime-configured";
+
 /// Voice-pref keys for the Symon brain setting. Written by `voice_prefs_set`
 /// (→ `stt::keys::set_pref`) and read back out of the same JSON file here, so a
 /// settings change applies to the next task with no relaunch.
@@ -146,12 +155,20 @@ pub(crate) struct PlannerAdapter {
 }
 
 impl PlannerAdapter {
+    /// True when this adapter runs whatever model the operator configured for
+    /// it, so o8 holds no model id to bind the text surface with.
+    pub(crate) fn runtime_configured_model(&self) -> bool {
+        self.worker_model.is_none()
+    }
+
     /// Does this adapter accept `model` as an operator pin? Catalog adapters
     /// allow-list their ids (a raw CLI value must never reach the spawn);
     /// open-catalog adapters validate the `provider/model` shape instead.
     pub(crate) fn accepts_model(&self, model: &str) -> bool {
         let model = model.trim();
-        if model.is_empty() {
+        // The bound surface's marker is not a model and must never reach a
+        // spawn — `resolve_bound` is the only place that understands it.
+        if model.is_empty() || model == RUNTIME_CONFIGURED_MODEL {
             return false;
         }
         if !self.pinnable_models.is_empty() {
@@ -279,6 +296,26 @@ impl PlannerSelection {
     /// back to the adapter id when the seat carries no o8-side model.
     pub(crate) fn model_label(&self) -> &str {
         self.model.as_deref().unwrap_or(self.provider.id)
+    }
+
+    /// The `model` the bound (phone / managed-messages) surface carries for
+    /// this seat: the o8-side id when the seat has one, and the
+    /// runtime-configured marker when its model comes from the operator's own
+    /// runtime config. Round-trips back through `resolve_bound`.
+    pub(crate) fn bound_model(&self) -> &str {
+        self.model.as_deref().unwrap_or(RUNTIME_CONFIGURED_MODEL)
+    }
+
+    /// The seat named the way the Settings → Voice status line names it —
+    /// `label · model · effort`. A seat that takes BOTH its model and its
+    /// reasoning from the operator's own runtime config collapses to
+    /// `label · runtime-configured`, because spelling out a model o8 did not
+    /// choose and an effort it did not pass says nothing.
+    pub(crate) fn seat_line(&self) -> String {
+        match &self.model {
+            Some(model) => format!("{} · {model} · {}", self.provider.label, self.effort),
+            None => format!("{} · {RUNTIME_CONFIGURED_MODEL}", self.provider.label),
+        }
     }
 }
 
@@ -579,13 +616,22 @@ where
     let Some(adapter) = adapter_by_id(engine) else {
         return unavailable;
     };
-    if !adapter.accepts_model(model) || !adapter.accepts_effort(effort) {
+    // Bind by seat identity, not by model triple (#2176): a seat whose model
+    // comes from the operator's own runtime config carries the marker in the
+    // model slot, and it is translated back to "no model" here so the spawn is
+    // the same one the voice path makes.
+    let runtime_configured =
+        adapter.runtime_configured_model() && model.trim() == RUNTIME_CONFIGURED_MODEL;
+    if !adapter.accepts_effort(effort) {
+        return unavailable;
+    }
+    if !runtime_configured && !adapter.accepts_model(model) {
         return unavailable;
     }
     let Some(binary) = locate(adapter) else {
         return unavailable;
     };
-    let model = effective_model_for(adapter, model);
+    let model = (!runtime_configured).then(|| effective_model_for(adapter, model));
     PlannerRouting::Selected(PlannerSelection {
         provider: adapter,
         binary,
@@ -594,11 +640,13 @@ where
         // value. The Codex path applies the request verbatim, and an adapter
         // that takes its reasoning from the operator's config reports that.
         effort: match adapter.effort {
-            PlannerEffort::ClaudeBuilderFlag => claude_planner_effort(&model),
+            PlannerEffort::ClaudeBuilderFlag => {
+                model.as_deref().map_or("medium", claude_planner_effort)
+            }
             PlannerEffort::CodexReasoningEffort => static_effort(effort),
             PlannerEffort::RuntimeConfigured => RUNTIME_CONFIGURED_EFFORT,
         },
-        model: Some(model),
+        model,
     })
 }
 
@@ -683,7 +731,7 @@ where
             id: adapter.id,
             label: adapter.label,
             installed: locate(adapter).is_some(),
-            runtime_configured_model: adapter.worker_model.is_none(),
+            runtime_configured_model: adapter.runtime_configured_model(),
         })
         .collect();
     let routing = resolve_with(setting, preferred, &mut locate);

@@ -19,7 +19,7 @@ export interface SymonTextSessionRecord extends SymonClientSubject {
   sessionId: string;
   model: string;
   effort: string;
-  engine: 'claude' | 'codex';
+  engine: string;
   workspaceMode: SymonWorkspaceMode;
   repoId: string | null;
   repoPath: string | null;

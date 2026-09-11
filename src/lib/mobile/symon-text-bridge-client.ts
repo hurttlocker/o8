@@ -13,9 +13,12 @@ const BRIDGE_TIMEOUT_MS = 5_000;
 
 export interface SymonTextPlannerInfo {
   available?: boolean;
-  engine?: 'claude' | 'codex';
+  engine?: string;
   model?: string;
   effort?: string;
+  /** The seat named the way the Settings → Voice status line names it, e.g.
+   *  `Codex · gpt-5.6-sol · high` or `opencode · runtime-configured`. */
+  seat?: string;
   tools?: Array<Record<string, unknown>>;
   detail?: string;
 }

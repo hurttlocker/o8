@@ -1,5 +1,11 @@
+/** The seat the bound text surface is bound to. `engine` is the native planner
+ *  registry's entry id — the seat's identity — and the model/effort pair is the
+ *  projection of it. A seat whose model comes from the runtime's own config
+ *  reports the registry's `runtime-configured` marker in `model` (#2176); the
+ *  native side translates it back before any spawn, and what actually resumes
+ *  such a seat is a handle kept native-side, never carried here. */
 export interface SymonTextPlannerSelection {
-  engine: 'claude' | 'codex';
+  engine: string;
   model: string;
   effort: string;
 }
