@@ -128,6 +128,16 @@ export function canArchiveExtraAgent(row: ExtraAgentRow): boolean {
     || row.laneStatus === 'archived';
 }
 
+/**
+ * #2154 — rows the Agents header's bulk clear retires. Only lane-terminal
+ * statuses qualify (the server clears exactly this set), so a running,
+ * reviewing or awaiting_* lane is never swept up by a clear. Already-archived
+ * rows aren't on the rail to begin with.
+ */
+export function isClearableExtraAgent(row: ExtraAgentRow): boolean {
+  return row.laneStatus === 'failed' || row.laneStatus === 'completed';
+}
+
 export function ExtraAgentRowView({
   row,
   active,
@@ -198,6 +208,9 @@ export function ExtraAgentRowView({
   return (
     <button
       type="button"
+      // Stable handle for AT/automation (#2146): row.key is `lane:<id>` /
+      // `agent:<sessionKey>`, so it survives a rename of row.name.
+      data-o8-agent-row={row.key}
       disabled={!canInteract}
       onClick={handleClick}
       onContextMenu={(event) => {
