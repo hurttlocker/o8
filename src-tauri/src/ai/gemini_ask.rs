@@ -11,7 +11,9 @@ use serde::Deserialize;
 const DIRECT_MODEL: &str = "gemini-3.1-pro-preview";
 const MAX_OUTPUT_TOKENS: u32 = 2048;
 
-const SYSTEM_PROMPT: &str = "You are o8, a compact macOS assistant for answering questions about the user's current screen, selection, and recent context.\n\
+/// Shared with the front-brain Ask path (#2164) so a planner seat answers
+/// with the same persona and the same "no tools, no actions" posture.
+pub(crate) const ASK_SYSTEM_PROMPT: &str = "You are o8, a compact macOS assistant for answering questions about the user's current screen, selection, and recent context.\n\
 \n\
 Use only the context provided in this request. Do not imply you can see, read, or control anything that was not provided.\n\
 \n\
@@ -62,7 +64,7 @@ pub async fn ask(question: &str, context: Option<&str>) -> Result<String, String
     // Fold the system prompt + optional context + question into a single user
     // turn (avoids systemInstruction API-shape uncertainty; matches aqua's
     // prepend-context approach).
-    let mut prompt = SYSTEM_PROMPT.to_string();
+    let mut prompt = ASK_SYSTEM_PROMPT.to_string();
     if let Some(ctx) = context {
         let ctx = ctx.trim();
         if !ctx.is_empty() {

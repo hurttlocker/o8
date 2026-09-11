@@ -37,7 +37,15 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let client = http_client();
 
     let escalation = super::router::load_config().voice_escalation;
-    let tool_specs = tools::enabled_tools_for(&escalation);
+    // #2164: the handoff is also withheld when the background brain would
+    // resolve to this very seat — there would be nothing to escalate to.
+    let tool_specs: Vec<Value> = tools::enabled_tools_for(&escalation)
+        .into_iter()
+        .filter(|tool| {
+            ctx.escalate_available
+                || tool.get("name").and_then(|name| name.as_str()) != Some("escalate")
+        })
+        .collect();
 
     // Gemini folds the system prompt into the first user turn (matches
     // gemini_ask.rs — avoids systemInstruction shape uncertainty). When the

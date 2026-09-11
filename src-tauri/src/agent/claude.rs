@@ -32,7 +32,7 @@
 //! spawn (`--tools ""`), not just discouraged by the planner contract, so a
 //! contract-ignoring turn still has nothing to execute.
 
-use super::{tools, ConfirmCorrelation, LoopResult, TaskCtx};
+use super::{ConfirmCorrelation, LoopResult, TaskCtx};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -122,7 +122,7 @@ pub(crate) fn ensure_empty_mcp_config() -> Result<String, String> {
 /// When a screenshot rides the turn it is sent as an image block (see
 /// `ClaudeSession::send_turn`) and this prompt teaches the screen + draw
 /// protocol — the selected Claude model sees it directly, with no Gemini middleman.
-fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
+pub(crate) fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
     let mut s = super::system_prompt();
     if let Some(convo) = super::conversation_context() {
         s.push_str("\n\n");
@@ -150,12 +150,10 @@ fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
             s.push_str(&feedback);
         }
     }
-    // The background brain DOES the work — strip `escalate` so it can't re-hand
-    // the task back to another Claude task (infinite-handoff guard).
-    let tool_specs: Vec<Value> = tools::enabled_tools()
-        .into_iter()
-        .filter(|t| t.get("name").and_then(|n| n.as_str()) != Some("escalate"))
-        .collect();
+    // `escalate` is withheld unless this turn's front seat differs from the seat
+    // the handoff would land on (#2164). A background brain task never carries
+    // that flag, so it keeps the infinite-handoff guard it always had.
+    let tool_specs: Vec<Value> = super::front_brain::planner_tool_specs(ctx);
     let tools_json =
         serde_json::to_string_pretty(&tool_specs).unwrap_or_else(|_| "[]".to_string());
     s.push_str(PLANNER_CONTRACT);

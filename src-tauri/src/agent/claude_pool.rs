@@ -111,10 +111,12 @@ pub fn acquire(bin: &str, model: &str, mcp_cfg: &str) -> Option<ClaudeSession> {
 /// far more keydowns than it serves.
 /// Called from the Right-Option down edge (`fn_hotkey::begin_agent_dictation`).
 pub fn prewarm_agent() {
-    let super::planner_route::PlannerRouting::Selected(selection) =
-        super::planner_route::resolve()
-    else {
-        return;
+    // #2164: the keydown warms the FRONT seat. Under the default `auto` that is
+    // the same seat the background brain resolves, but an operator who pinned a
+    // front brain must not have the other model booted for them.
+    let routing = super::front_brain::resolve();
+    let Some(selection) = routing.planner_selection() else {
+        return; // the built-in Gemini loop has no process to warm.
     };
     if selection.provider.transport != super::planner_route::PlannerTransport::ClaudeStreamJson {
         return;

@@ -59,7 +59,7 @@ pub(crate) struct CodexSession {
 }
 
 impl CodexSession {
-    fn new(binary: &str, model: &str, effort: &str) -> Self {
+    pub(crate) fn new(binary: &str, model: &str, effort: &str) -> Self {
         Self {
             binary: binary.to_string(),
             model: model.to_string(),

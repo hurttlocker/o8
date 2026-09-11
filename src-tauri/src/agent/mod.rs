@@ -23,6 +23,7 @@ pub mod edit_ctx;
 pub mod eval;
 pub mod event_kit;
 mod execution;
+pub mod front_brain;
 pub mod gemini;
 pub mod ledger;
 pub mod machine;
@@ -49,6 +50,10 @@ pub mod worker_pulse;
 #[cfg(test)]
 #[path = "planner_seat_tests.rs"]
 mod planner_seat_tests;
+
+#[cfg(test)]
+#[path = "front_brain_tests.rs"]
+mod front_brain_tests;
 
 pub(crate) use execution::{
     execute_cascaded_tool_call, execute_realtime_tool_call, execute_text_tool_call,
@@ -99,6 +104,11 @@ pub struct TaskCtx {
     /// check it between turns and bail; `run_agent_inner` skips the spoken
     /// result so a cancelled task goes quiet instead of talking over the user.
     pub cancel: Arc<AtomicBool>,
+    /// May this task offer `escalate`? False everywhere except a front voice
+    /// turn whose seat differs from the seat the handoff would land on (#2164)
+    /// — a background brain task keeps the infinite-handoff guard, and the
+    /// phone/realtime surfaces keep the posture they already had.
+    pub escalate_available: bool,
 }
 
 impl TaskCtx {
@@ -1631,6 +1641,7 @@ pub async fn run_symon_text_turn(
         crop_png_base64: None,
         edit: None,
         cancel,
+        escalate_available: false,
     };
     let correlation = ConfirmCorrelation {
         session_id,
@@ -1792,11 +1803,22 @@ async fn run_agent_inner(
     );
     crate::sound::play_sound("Pop");
 
-    // Normal voice turns choose from the same native CLI inventory used at
-    // bootstrap. Resolve before screen/edit capture so a machine with no agent
-    // CLI gets one explicit dock state instead of paying capture latency and
-    // falling through to a provider-specific "spawn failed".
-    let planner_selection = if model_override.is_none() {
+    // The FRONT seat (#2164) reads the same registry the background brain does,
+    // plus the built-in Gemini loop — so the gesture always has a brain even on
+    // a machine with no agent CLI, and a chosen seat whose binary is missing
+    // falls back out loud. Background brain tasks keep the #2155/#2156 route
+    // exactly: the registry, or an explicit "no agent CLI" dock state.
+    // Resolved before screen/edit capture so a dead end costs no capture latency.
+    let front_routing = if model_override.is_none() && !is_background_brain_task {
+        let routing = front_brain::resolve();
+        routing.log_seat("agent");
+        Some(routing)
+    } else {
+        None
+    };
+    let planner_selection = if let Some(routing) = front_routing.as_ref() {
+        routing.planner_selection().cloned()
+    } else if model_override.is_none() {
         match planner_route::resolve() {
             planner_route::PlannerRouting::Selected(selection) => {
                 // One line per task naming the seat — the operator's receipt
@@ -1881,6 +1903,9 @@ async fn run_agent_inner(
         crop_png_base64: spatial_crop,
         edit,
         cancel: cancel.clone(),
+        escalate_available: front_routing
+            .as_ref()
+            .is_some_and(|routing| routing.escalate_available),
     };
 
     // Dropped-file context rides the LLM prompt only — the task store keeps
@@ -1930,6 +1955,11 @@ async fn run_agent_inner(
     let model = planner_selection
         .as_ref()
         .map(|selection| selection.model_label().to_string())
+        .or_else(|| {
+            front_routing
+                .as_ref()
+                .and_then(|routing| routing.gemini_model().map(str::to_string))
+        })
         .unwrap_or_else(|| {
             model_override.unwrap_or_else(|| router::load_config().mac_native_action)
         });
@@ -1976,6 +2006,13 @@ async fn run_agent_inner(
                 .await
             }
         }
+    } else if let Some(gemini_model) = front_routing
+        .as_ref()
+        .and_then(front_brain::FrontRouting::gemini_model)
+    {
+        // The front seat's built-in loop — Gemini's own functionCall protocol,
+        // the one brain that needs a key rather than a binary (#2164).
+        gemini::run_loop(gemini_model, &llm_prompt, &ctx).await
     } else if model.starts_with("claude") {
         claude::run_loop(&model, &llm_prompt, &ctx).await
     } else if model.contains('/') {

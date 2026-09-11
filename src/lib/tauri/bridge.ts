@@ -517,6 +517,26 @@ export interface SymonBrainAdapterState {
 /** The Symon brain seat (#2156): the stored setting, which planner adapters are
  * installed, and the seat the registry resolves right now. `fellBackFrom` names
  * the chosen provider when its CLI is missing and another entry took the seat. */
+/** One selectable front-brain seat (#2164) — the built-in Gemini loop plus
+ *  every planner adapter, rendered from the native registry. */
+export interface SymonFrontBrainOption {
+  id: string;
+  label: string;
+  installed: boolean;
+}
+
+/** The seat the Right-Option gesture takes: the stored choice, what this
+ *  machine can run, and what the NEXT gesture will actually use. */
+export interface SymonFrontBrainState {
+  choice: string;
+  options: SymonFrontBrainOption[];
+  resolvedId: string | null;
+  resolvedLabel: string | null;
+  resolvedModel: string | null;
+  fellBackFrom: string | null;
+  escalateAvailable: boolean;
+}
+
 export interface SymonBrainState {
   provider: string;
   tier: string;
@@ -528,6 +548,7 @@ export interface SymonBrainState {
   resolvedEffort: string | null;
   fellBackFrom: string | null;
   detail: string | null;
+  front: SymonFrontBrainState;
 }
 
 export async function symonBrainState(): Promise<SymonBrainState | null> {

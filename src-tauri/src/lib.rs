@@ -5777,10 +5777,15 @@ fn dictation_history_delete(id: String) {
     dictation_history::delete(&id);
 }
 
-/// Ask Gemini `question` on a dedicated OS thread, emit the answer to the webview
-/// (`o8:ask-answer` / `o8:ask-error`), and SPEAK it through the TTS engine.
-/// Shared by the `ask_question` command (text) and the Right-Option voice path
-/// (`run_finalize`). macOS only. Gemini only — NEVER Anthropic.
+/// Answer `question` on the Symon FRONT brain on a dedicated OS thread, emit the
+/// answer to the webview (`o8:ask-answer` / `o8:ask-error`), and SPEAK it
+/// through the TTS engine. Shared by the `ask_question` command (text) and the
+/// Right-Option voice path (`run_finalize`). macOS only.
+///
+/// #2164: the seat is whatever the front-brain setting resolves — the built-in
+/// Gemini call it always made, or one tools-withheld turn on a planner seat.
+/// The Anthropic billing rule is unchanged: a Claude seat is reached only by
+/// spawning the CLI, never by a direct provider call from o8's backend.
 #[cfg(target_os = "macos")]
 fn spawn_ask_and_speak(app: tauri::AppHandle, question: String) {
     use tauri::Emitter;
@@ -5800,7 +5805,7 @@ fn spawn_ask_and_speak(app: tauri::AppHandle, question: String) {
             }
         };
         log::info!("[ask] question: {} chars", question.len());
-        match rt.block_on(async { ai::gemini_ask::ask(&question, None).await }) {
+        match rt.block_on(async { agent::front_brain::ask(&question, None).await }) {
             Ok(answer) => {
                 log::info!("[ask] answer: {} chars", answer.len());
                 let answer_payload = serde_json::json!({ "question": question, "answer": answer });

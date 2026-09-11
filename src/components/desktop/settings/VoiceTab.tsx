@@ -267,6 +267,14 @@ export function VoiceTab() {
     void writeBrainPref('symon_brain_provider', next);
   }, [writeBrainPref]);
 
+  // #2164: the FRONT seat — what Right-Option runs, Ask and Agent alike.
+  const handleFrontBrain = useCallback((next: string) => {
+    setBrain((current) => (
+      current ? { ...current, front: { ...current.front, choice: next } } : current
+    ));
+    void writeBrainPref('symon_front_brain', next);
+  }, [writeBrainPref]);
+
   const handleBrainTier = useCallback((next: string) => {
     setBrain((current) => (current ? { ...current, tier: next } : current));
     void writeBrainPref('symon_brain_tier', next);
@@ -328,18 +336,41 @@ export function VoiceTab() {
       brain.resolvedEffort ?? 'default',
     ].join(' · ')
     : null;
+  const front = brain?.front ?? null;
+  const frontBrainOptions = useMemo(
+    () => [
+      { value: 'auto', label: 'Auto' },
+      ...(front?.options ?? []).map((option) => ({ value: option.id, label: option.label })),
+    ],
+    [front],
+  );
+  // Under Auto the front seat IS the background seat, which is also why the
+  // handoff is withheld — saying so beats repeating the same model twice.
+  const frontSeatSameAsBackground = Boolean(
+    front?.resolvedId && front.resolvedId === brain?.resolvedProvider
+      && front.resolvedModel === brain?.resolvedModel,
+  );
+  const frontSeat = front?.resolvedLabel ?? front?.resolvedId ?? null;
+  const frontStatus = !front || !frontSeat
+    ? null
+    : front.fellBackFrom
+      ? `Front brain: ${front.fellBackFrom} not installed — using ${frontSeat}`
+      : frontSeatSameAsBackground
+        ? `Front brain: same as background${front.choice === 'auto' ? ' (auto)' : ''}`
+        : `Front brain: ${frontSeat}${front.resolvedModel && front.resolvedModel !== frontSeat ? ` · ${front.resolvedModel}` : ''}`;
   // Says what the NEXT task will run, so a pick whose CLI is missing reads as a
   // fallback instead of silently doing something else.
-  const brainStatus = !brain
+  const backgroundStatus = !brain
     ? 'Reading the installed agent CLIs…'
     : brain.detail
       ? brain.detail
       : brain.fellBackFrom
         ? `Not installed: ${brain.fellBackFrom} — falling back to ${resolvedSeat}`
-        : `Resolved: ${resolvedSeat}`;
+        : `Background: ${resolvedSeat}`;
+  const brainStatus = frontStatus ? `${frontStatus} · ${backgroundStatus}` : backgroundStatus;
   const brainStatusTone = brain?.detail
     ? '#d94f3a'
-    : brain?.fellBackFrom
+    : brain?.fellBackFrom || front?.fellBackFrom
       ? RAMS_ACCENT
       : 'var(--t-text-faint)';
   const brainModelPlaceholder = brain?.adapters.find(
@@ -610,6 +641,19 @@ export function VoiceTab() {
                       { value: 'auto', label: 'Auto' },
                       { value: 'deep', label: 'Deep' },
                     ]}
+                  />
+                }
+                divider
+              />
+              <SettingsRow
+                icon={<BrainGlyph />}
+                label="Front brain"
+                subtitle="Which brain the Right-Option gesture runs. Ask and Agent both take this seat; Auto follows the background brain below."
+                accessory={
+                  <SettingsSegmented
+                    value={front?.choice ?? 'auto'}
+                    onChange={handleFrontBrain}
+                    options={frontBrainOptions}
                   />
                 }
                 divider
