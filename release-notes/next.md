@@ -1,2 +1,8 @@
-- Verify the current worker process before confirming Stop, even when an earlier turn already finished.
-- Keep Stop unconfirmed while a new worker turn is preparing, and avoid counting an already-idle session as newly interrupted.
+- Recover pending review queues when the desktop API restarts, and preserve worker ownership across execution carriers.
+- Reduce terminal decoding allocations and record the accepted Mac interaction baseline for future regression checks.
+- Bound completed dependency-download caches by size, count, and age while preserving active installs, installed dependencies, and legacy caches.
+- Choose Symon's front and background brains in Voice settings through the shared planner registry.
+- Keep the background planner on the worker tier by default, reuse its Codex server, and trim repeated first-turn instructions.
+- Resume the open-runtime text planner on its existing conversation, with session handles fenced to the runtime that created them.
+- Add presentation quiet mode and a review-notification setting with coalesced notices.
+- Scope the Control-key Fn substitute to an attached external keyboard and reject unsupported realtime model selections before connection.
