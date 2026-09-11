@@ -361,6 +361,10 @@ fn run_left_control_completion(action: LeftControlCompletionAction) {
     }
 }
 
+/// Arm or disarm the Control-as-Fn substitute in the live event tap. This takes
+/// the EFFECTIVE value, not the operator's pref: `external_keyboard::apply` is
+/// the only caller, and it has already ANDed the pref with "a non-Apple external
+/// keyboard is attached" (#2158).
 #[cfg(target_os = "macos")]
 pub fn set_external_left_control_fn(enabled: bool) {
     EXTERNAL_LEFT_CONTROL_FN.store(enabled, Ordering::SeqCst);
@@ -1373,10 +1377,16 @@ pub fn start(app: tauri::AppHandle) {
         EventField,
     };
 
-    set_external_left_control_fn(crate::stt::keys::config_bool(
+    // #2158: the pref is now "remap Control while a non-Apple external keyboard
+    // is attached", so it is handed to the device watcher rather than straight
+    // into the tap atomic. The watcher owns every write to
+    // EXTERNAL_LEFT_CONTROL_FN from here on, and re-evaluates on a 2s poll so a
+    // keyboard swap re-arms or disarms Control without a Settings visit.
+    crate::external_keyboard::set_pref_enabled(crate::stt::keys::config_bool(
         "external_symon_left_control",
         false,
     ));
+    crate::external_keyboard::start_watcher();
 
     // Stash the app handle so the off-tap worker threads can drive the screen
     // dock pill window (show on Fn-down, hide on brush/error). Ignore a second

@@ -490,6 +490,20 @@ export async function voicePrefsSet(key: string, value: unknown): Promise<void> 
   await invoke('voice_prefs_set', { key, value });
 }
 
+/** Live state of the external-keyboard Fn substitute (#2158). `enabled` is the
+ * stored preference; `active` is whether bottom-left Control is actually
+ * mirroring Fn right now, which additionally requires a non-Apple external
+ * keyboard to be attached. `keyboard` names the board arming it. */
+export interface ExternalKeyboardFnState {
+  enabled: boolean;
+  active: boolean;
+  keyboard: string | null;
+}
+
+export async function externalKeyboardFnState(): Promise<ExternalKeyboardFnState | null> {
+  return invoke<ExternalKeyboardFnState>('external_keyboard_fn_state');
+}
+
 export interface SymonMemoryEntry {
   id: number;
   fact: string;
