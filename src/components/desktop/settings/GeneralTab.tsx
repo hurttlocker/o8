@@ -35,6 +35,7 @@ import {
   isTauri,
   type DesktopClosePreference,
 } from '@/lib/tauri/bridge';
+import { primeQuietMode, setQuietMode, syncReviewNotificationSetting } from '@/lib/presentation/quiet-mode-client';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
@@ -53,6 +54,27 @@ function PowerIcon() {
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
       <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
       <line x1="12" y1="2" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+function PresentIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M12 16v4" />
+      <path d="M8 20h8" />
+    </svg>
+  );
+}
+
+function BellOffIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 8a6 6 0 0 0-9.3-5" />
+      <path d="M6 9c0 7-3 7-3 9h13" />
+      <path d="M10 21h4" />
+      <line x1="3" y1="3" x2="21" y2="21" />
     </svg>
   );
 }
@@ -149,6 +171,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
   const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
+  const [quietModeBusy, setQuietModeBusy] = useState(false);
 
   const loadDefaults = useCallback(async () => {
     try {
@@ -157,7 +180,13 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load settings.');
       }
-      setData(payload as OperatorDefaultsResponse);
+      const defaults = payload as OperatorDefaultsResponse;
+      setData(defaults);
+      // Quiet mode and the review-banner preference are enforced in the native
+      // shell (overlay windows and the macOS banner live outside this document),
+      // so every read pushes the current values down to it.
+      primeQuietMode(defaults.values?.presentationQuietMode === true);
+      void syncReviewNotificationSetting(defaults.values?.notificationsReviewReady !== 'off');
       setNotice(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Failed to load settings.');
@@ -186,6 +215,22 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       setBusyField(null);
     }
   }, []);
+
+  // Quiet mode is not a plain field write: the native shell has to take the
+  // overlay windows down (and put them back) around the persist, so it goes
+  // through the quiet-mode client rather than `updateField`.
+  const toggleQuietMode = useCallback(async (next: boolean) => {
+    setQuietModeBusy(true);
+    setNotice(null);
+    try {
+      await setQuietMode(next);
+      await loadDefaults();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Quiet mode could not be saved.');
+    } finally {
+      setQuietModeBusy(false);
+    }
+  }, [loadDefaults]);
 
   const values = data?.values;
   const sources = data?.sources;
@@ -300,6 +345,38 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       ) : null}
 
       <section style={{ marginTop: tauri ? 28 : 0 }}>
+        <SettingsGroup
+          header="Presentation"
+          footnote="Quiet mode is for a screen share, a demo, or a recording. It takes down the overlay windows o8 floats outside its own frame, stops onboarding cards, count pills and toasts, and silences review notifications. Approvals and errors still come through. Quiet mode hides noise, not the fact that o8 is blocked on you."
+        >
+          <SettingsRow
+            icon={<PresentIcon />}
+            label="Quiet mode"
+            subtitle={quietModeBusy
+              ? 'Applying…'
+              : 'Suppress overlays, coach cards, non-critical pills and toasts, and review notifications'}
+            checked={values?.presentationQuietMode === true}
+            disabled={!values || quietModeBusy}
+            onToggle={(next) => { void toggleQuietMode(next); }}
+            divider
+          />
+          <SettingsRow
+            icon={<BellOffIcon />}
+            label="Review notifications"
+            subtitle={values?.presentationQuietMode === true
+              ? 'Held off while quiet mode is on'
+              : 'Raise a desktop notification when a packet is ready for review. A parallel dispatch arrives as one notification, not one per packet.'}
+            checked={values ? values.notificationsReviewReady === 'on' : true}
+            disabled={!values || busyField === 'notificationsReviewReady' || values.presentationQuietMode === true}
+            onToggle={(next) => {
+              void updateField('notificationsReviewReady', next ? 'on' : 'off');
+              void syncReviewNotificationSetting(next);
+            }}
+          />
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Privacy"
           footnote="Product usage sends only the allowlisted event name and coarse booleans or runtime enum shown in the privacy documentation. Crash reports are a separate control and can contain scrubbed error context. All sharing is optional and off by default."

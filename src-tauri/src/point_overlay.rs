@@ -490,6 +490,10 @@ mod overlay {
         if tags.is_empty() {
             return;
         }
+        // #2147 — quiet mode owns overlay visibility for its duration.
+        if crate::presentation::overlay_show_blocked() {
+            return;
+        }
         let (points, stats) = resolve_points(screen, tags);
         log::info!(
             "[symon-localization] {}",

@@ -141,6 +141,7 @@ export function baselineFromReceipt(receipt) {
         value: result.value,
         statistic: result.statistic,
         scale: run.scale,
+        ...(result.measurementMethod ? { measurementMethod: result.measurementMethod } : {}),
       };
     }
   }

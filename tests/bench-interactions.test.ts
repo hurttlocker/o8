@@ -86,6 +86,22 @@ function receipt(overrides: Record<string, unknown> = {}) {
 }
 
 describe('interaction fixtures', () => {
+  it('does not compare startup observations made with different measurement methods', () => {
+    const current = receipt();
+    Object.assign(current.scenarios.first_interaction_accepted_ms, { measurementMethod: 'page-readiness-plus-trusted-input-paint-v1' });
+    const result = evaluateInteractionBudgets(current, { metrics: {
+      'first_interaction_accepted_ms@50': { value: 200 },
+    } });
+    const startup = result.results.find((entry) => entry.metric === 'first_interaction_accepted_ms');
+    expect(startup?.deltaStatus).toBe('incomparable');
+    expect(startup?.deltaValue).toBeNull();
+    expect(startup?.baselineValue).toBe(200);
+    const compatible = evaluateInteractionBudgets(current, { metrics: {
+      'first_interaction_accepted_ms@50': { value: 200, measurementMethod: 'page-readiness-plus-trusted-input-paint-v1' },
+    } });
+    expect(compatible.results.find((entry) => entry.metric === 'first_interaction_accepted_ms')?.deltaStatus).toBe('unchanged');
+  });
+
   it('produces the same plan and digest for the same scale and seed', () => {
     const first = buildFixturePlan(250, 4242);
     const second = buildFixturePlan(250, 4242);

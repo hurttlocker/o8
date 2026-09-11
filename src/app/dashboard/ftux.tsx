@@ -1,6 +1,9 @@
 import type { CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
+import { noticeIsVisible } from '@/lib/presentation/quiet-mode-policy';
+import { useQuietMode } from '@/lib/presentation/quiet-mode-client';
+
 export const FTUX_REVEAL_DURATION_MS = 5200;
 export const FTUX_SPRING_TRANSITION = { type: 'spring' as const, stiffness: 400, damping: 30 };
 export const FTUX_AGENT_PANEL_TARGET_WIDTH = 280;
@@ -37,9 +40,13 @@ export function GuidedDiscoveryHalo({
   active: boolean;
   borderRadius?: number;
 }) {
+  // #2147 — the halo is onboarding chrome, so quiet mode owns it. Gating here
+  // rather than at each call site means a coachmark added later inherits it.
+  const quietMode = useQuietMode();
+  const show = active && noticeIsVisible('coach-card', quietMode);
   return (
     <AnimatePresence initial={false}>
-      {active ? (
+      {show ? (
         <motion.div
           initial={{ opacity: 0, scale: 0.985 }}
           animate={{
@@ -82,9 +89,13 @@ export function GuidedDiscoveryCoachmark({
   actions?: GuidedDiscoveryAction[];
   maxWidth?: number;
 }) {
+  // #2147 — every guided-discovery card routes through this one component, so
+  // this is the whole "suppress onboarding/coach cards" clause.
+  const quietMode = useQuietMode();
+  const show = visible && noticeIsVisible('coach-card', quietMode);
   return (
     <AnimatePresence initial={false}>
-      {visible ? (
+      {show ? (
         <motion.div
           initial={{ opacity: 0, y: position.startsWith('bottom') ? 16 : -16, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
