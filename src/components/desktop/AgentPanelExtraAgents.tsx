@@ -633,10 +633,15 @@ function AgentPanelExtraAgentsBase({
       </div>
       {/* layout="position" springs a row to its new slot when a band change
           re-sorts the list — without it, a working row that flips to needs-you
-          teleports (rig finding 2026-07-31). Position-only: rows never resize. */}
-      {!collapsed ? rankedRows.map(({ row, band }) => (
+          teleports (rig finding 2026-07-31). Position-only: rows never resize.
+          The role=list wrapper reproduces the section's own flex column so it
+          is layout-neutral while giving AT grouping + position (#2146). */}
+      {!collapsed ? (
+        <div role="list" aria-label="Agents" style={{ display: 'flex', flexDirection: 'column' }}>
+        {rankedRows.map(({ row, band }) => (
         <motion.div
           key={row.key}
+          role="listitem"
           layout="position"
           transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         >
@@ -659,7 +664,9 @@ function AgentPanelExtraAgentsBase({
           }}
         />
         </motion.div>
-      )) : null}
+        ))}
+        </div>
+      ) : null}
       {actionMenu ? (
         <ExtraAgentActionMenu
           state={actionMenu}
