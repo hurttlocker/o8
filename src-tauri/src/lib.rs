@@ -7872,6 +7872,7 @@ pub fn run() {
             voice_prefs_set,
             #[cfg(target_os = "macos")]
             external_keyboard_fn_state,
+            #[cfg(target_os = "macos")]
             symon_brain_state,
             #[cfg(target_os = "macos")]
             symon_memory_get,
