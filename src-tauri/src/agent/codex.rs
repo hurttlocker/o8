@@ -20,12 +20,15 @@
 //!   at `read-only` with no network.
 //! * `--disable plugins --disable apps` keeps plugin-provided MCP servers out
 //!   of the seat.
-//! * `-c mcp_servers={}` does NOT clear the table — the CLI merges it rather
-//!   than replacing it, and there is no general disable — so an MCP server
-//!   declared in the operator's `config.toml` still starts. Per-key overrides
-//!   replace the entry wholesale and fail its transport validation, so they are
-//!   not a fix. What keeps the seat safe is the pair it always relied on: the
-//!   read-only sandbox and the JSON-only planner contract.
+//! * Each MCP server declared in the operator's `config.toml` is switched off
+//!   by name with `-c mcp_servers.<name>.enabled=false`, so the planner session
+//!   starts no MCP children at all. `-c mcp_servers={}` is kept ahead of them
+//!   as a cheap belt for other CLI builds, but on 0.153.4 it is a no-op: the
+//!   override merges into the table rather than replacing it. The per-name
+//!   disable is what actually works, and it only works for a server the config
+//!   file really declares — naming one it does not makes the CLI reject its own
+//!   bootstrap, which is why the names are read from that file rather than
+//!   guessed.
 //!
 //! `codex exec` stays as the fallback. `app-server` is flagged experimental, so
 //! if the handshake fails (an older CLI, a protocol change) the session
@@ -221,6 +224,48 @@ impl CodexSession {
     }
 }
 
+/// Names of the MCP servers the operator's `config.toml` declares, read from
+/// their own Codex home. Only the file's own names are returned, because
+/// `-c mcp_servers.<name>.enabled=false` for a server the file does not declare
+/// creates a transport-less entry and the CLI refuses to boot on it.
+///
+/// Deliberately a section-header scan rather than a TOML parse: this reads a
+/// config o8 does not own, and the only thing it needs is which `[mcp_servers.x]`
+/// tables exist. Bare keys only — a quoted name would need quoting inside the
+/// dotted override path, and getting that wrong costs a boot. A miss here is a
+/// failed handshake at worst, which drops the session onto the `exec` fallback.
+fn config_mcp_server_names() -> Vec<String> {
+    let home = match std::env::var("CODEX_HOME") {
+        Ok(home) if !home.trim().is_empty() => PathBuf::from(home),
+        _ => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".codex"),
+    };
+    let Ok(config) = std::fs::read_to_string(home.join("config.toml")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = Vec::new();
+    for line in config.lines().map(str::trim) {
+        let Some(rest) = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+            .and_then(|rest| rest.strip_prefix("mcp_servers."))
+        else {
+            continue;
+        };
+        let name = rest.split('.').next().unwrap_or_default();
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            continue;
+        }
+        if !names.iter().any(|seen| seen == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
 /// A LIVE `codex app-server` child held across a task's turns. NDJSON JSON-RPC
 /// over stdio: one `turn/start` request per planner turn, pumped until this
 /// thread's `turn/completed` notification arrives.
@@ -237,7 +282,7 @@ impl AppServerSession {
     /// `config.toml` says. `model` and `effort` are `planner_route`'s
     /// allow-listed catalog constants, never free text.
     fn override_args(model: &str, effort: &str) -> Vec<String> {
-        vec![
+        let mut args = vec![
             "app-server".to_string(),
             "--stdio".to_string(),
             "-c".to_string(),
@@ -257,7 +302,14 @@ impl AppServerSession {
             "plugins".to_string(),
             "--disable".to_string(),
             "apps".to_string(),
-        ]
+        ];
+        // …and the config-declared ones are switched off by name, which is the
+        // override the CLI actually honors.
+        for name in config_mcp_server_names() {
+            args.push("-c".to_string());
+            args.push(format!("mcp_servers.{name}.enabled=false"));
+        }
+        args
     }
 
     fn start(binary: &str, model: &str, effort: &str) -> Result<Self, String> {

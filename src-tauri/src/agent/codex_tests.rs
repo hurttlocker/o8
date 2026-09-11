@@ -56,6 +56,7 @@ struct CodexFixture {
     dir: std::path::PathBuf,
     binary: std::path::PathBuf,
     capture: std::path::PathBuf,
+    previous_codex_home: Option<std::ffi::OsString>,
     previous_app_server: Option<std::ffi::OsString>,
     previous_capture: Option<std::ffi::OsString>,
     _guard: std::sync::MutexGuard<'static, ()>,
@@ -63,9 +64,10 @@ struct CodexFixture {
 
 #[cfg(unix)]
 impl CodexFixture {
-    /// Build the fixture binary and point the capture file at a throwaway path.
-    /// The planner writes nothing to disk, so no data dir or Codex home is
-    /// swapped here — the fixture binary never reads either.
+    /// Build the fixture binary, point the capture file at a throwaway path, and
+    /// stand up a Codex home whose `config.toml` declares two MCP servers so the
+    /// per-server disable has real names to read. Nothing is written to the
+    /// operator's own Codex home and no credential file is involved.
     fn new(app_server: bool) -> Self {
         let guard = crate::DATA_DIR_ENV_TEST_LOCK
             .lock()
@@ -78,13 +80,29 @@ impl CodexFixture {
                 .unwrap()
                 .as_nanos()
         ));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join("codex-home")).unwrap();
+        std::fs::write(
+            dir.join("codex-home/config.toml"),
+            "model = \"gpt-6-frontier\"\n\
+             sandbox_mode = \"danger-full-access\"\n\
+             \n\
+             [mcp_servers.node_repl]\n\
+             command = \"/bin/true\"\n\
+             \n\
+             [mcp_servers.node_repl.env]\n\
+             EXAMPLE = \"1\"\n\
+             \n\
+             [mcp_servers.shell-tools]\n\
+             command = \"/bin/true\"\n",
+        )
+        .unwrap();
         let binary = dir.join("codex-fixture");
         let capture = dir.join("capture.txt");
         std::fs::write(&binary, CODEX_FIXTURE).unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let fixture = Self {
+            previous_codex_home: std::env::var_os("CODEX_HOME"),
             previous_app_server: std::env::var_os("FIXTURE_APP_SERVER"),
             previous_capture: std::env::var_os("FIXTURE_CAPTURE"),
             dir: dir.clone(),
@@ -92,6 +110,7 @@ impl CodexFixture {
             capture: capture.clone(),
             _guard: guard,
         };
+        std::env::set_var("CODEX_HOME", dir.join("codex-home"));
         std::env::set_var("FIXTURE_APP_SERVER", if app_server { "1" } else { "0" });
         std::env::set_var("FIXTURE_CAPTURE", &capture);
         fixture
@@ -131,6 +150,7 @@ impl CodexFixture {
 impl Drop for CodexFixture {
     fn drop(&mut self) {
         for (key, value) in [
+            ("CODEX_HOME", &self.previous_codex_home),
             ("FIXTURE_APP_SERVER", &self.previous_app_server),
             ("FIXTURE_CAPTURE", &self.previous_capture),
         ] {
@@ -218,6 +238,26 @@ fn resident_app_server_serves_both_turns_from_one_process() {
             "missing `-c {expected}`: {argv:?}"
         );
     }
+    // Every MCP server the operator's config declares is switched off by name —
+    // the sub-table (`[mcp_servers.node_repl.env]`) must not produce a second
+    // entry, and a name is never invented.
+    for name in ["node_repl", "shell-tools"] {
+        let expected = format!("mcp_servers.{name}.enabled=false");
+        assert_eq!(
+            argv.windows(2)
+                .filter(|pair| pair[0] == "-c" && pair[1] == expected)
+                .count(),
+            1,
+            "expected exactly one `-c {expected}`: {argv:?}"
+        );
+    }
+    assert_eq!(
+        argv.iter()
+            .filter(|arg| arg.contains(".enabled=false"))
+            .count(),
+        2,
+        "no server may be disabled that the config does not declare: {argv:?}"
+    );
     assert!(argv.windows(2).any(|pair| pair == ["--disable", "plugins"]));
     assert!(argv.windows(2).any(|pair| pair == ["--disable", "apps"]));
     assert!(
@@ -252,4 +292,34 @@ fn app_server_boot_failure_degrades_to_per_turn_exec_and_resumes() {
     assert!(execs[1]
         .iter()
         .any(|arg| arg == "model_reasoning_effort=xhigh"));
+}
+
+#[cfg(unix)]
+#[test]
+fn mcp_server_names_come_only_from_declared_bare_key_tables() {
+    let fixture = CodexFixture::new(true);
+    let home = fixture.dir.join("codex-home");
+    std::fs::write(
+        home.join("config.toml"),
+        "[mcp_servers.node_repl]\n\
+         command = \"/bin/true\"\n\
+         [mcp_servers.node_repl.env]\n\
+         EXAMPLE = \"1\"\n\
+         [mcp_servers.shell-tools]\n\
+         command = \"/bin/true\"\n\
+         [mcp_servers.\"quoted name\"]\n\
+         command = \"/bin/true\"\n\
+         [projects.somewhere]\n\
+         trust_level = \"trusted\"\n",
+    )
+    .unwrap();
+    // Sub-tables collapse to one name, and a quoted key is skipped rather than
+    // guessed — naming a server the CLI cannot resolve fails its whole boot.
+    assert_eq!(
+        config_mcp_server_names(),
+        vec!["node_repl".to_string(), "shell-tools".to_string()]
+    );
+
+    std::fs::remove_file(home.join("config.toml")).unwrap();
+    assert!(config_mcp_server_names().is_empty());
 }
