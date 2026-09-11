@@ -132,17 +132,41 @@ const SYMON_SYSTEM_PROMPT_V1: &str = include_str!(concat!(
     "/../src/lib/prompts/v1/symon-native-system.txt"
 ));
 
-/// Shared system prompt: the agent persona + current-time grounding. Spoken
-/// aloud, so it asks for short, markdown-free replies.
-pub(crate) fn system_prompt() -> String {
-    let when = chrono::Local::now()
-        .format("%A, %B %-d %Y, %-I:%M %p")
-        .to_string();
-    let mut prompt = SYMON_SYSTEM_PROMPT_V1
+/// Opening words of the persona file's closing time sentence. Everything
+/// before it is the same bytes on every task; everything from it on is
+/// per-task — the clock, the active skill, the operator's memory facts. The
+/// planner sends the two halves separately so a provider prompt cache can hit
+/// on the invariant half (#2157); `system_prompt()` still joins them.
+const PERSONA_TIME_SENTENCE: &str = "The current local time is";
+
+fn persona_collapsed() -> String {
+    SYMON_SYSTEM_PROMPT_V1
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .replace("{CURRENT_LOCAL_TIME}", &when);
+}
+
+/// The persona alone — no clock, no operator state, so the same bytes on
+/// every task.
+pub(crate) fn system_prompt_invariant() -> String {
+    let collapsed = persona_collapsed();
+    match collapsed.find(PERSONA_TIME_SENTENCE) {
+        Some(at) => collapsed[..at].trim_end().to_string(),
+        None => collapsed,
+    }
+}
+
+/// The per-task half: current-time grounding, the active skill, and the
+/// operator-approved memory facts.
+pub(crate) fn system_prompt_task_context() -> String {
+    let when = chrono::Local::now()
+        .format("%A, %B %-d %Y, %-I:%M %p")
+        .to_string();
+    let collapsed = persona_collapsed();
+    let mut prompt = match collapsed.find(PERSONA_TIME_SENTENCE) {
+        Some(at) => collapsed[at..].replace("{CURRENT_LOCAL_TIME}", &when),
+        None => format!("{PERSONA_TIME_SENTENCE} {when}."),
+    };
     if let Some(skill_prompt) = skills::active_prompt() {
         prompt.push_str("\n\n");
         prompt.push_str(&skill_prompt);
@@ -152,6 +176,16 @@ pub(crate) fn system_prompt() -> String {
         prompt.push_str(&memory_prompt);
     }
     prompt
+}
+
+/// Shared system prompt: the agent persona + current-time grounding. Spoken
+/// aloud, so it asks for short, markdown-free replies.
+pub(crate) fn system_prompt() -> String {
+    format!(
+        "{} {}",
+        system_prompt_invariant(),
+        system_prompt_task_context()
+    )
 }
 
 /// Turn a spoken Control+Fn instruction into text for the captured caret. This
