@@ -352,6 +352,38 @@ function HeaderPillStrip({
     });
   }, []);
 
+  // Roving tabindex for the tablist (#2146). MANUAL activation: arrows move
+  // focus, Enter/Space selects. Automatic activation would swap the whole
+  // workspace session on every arrow press — APG's stated reason to prefer
+  // manual when revealing a panel is expensive.
+  const [focusedTabId, setFocusedTabId] = useState<string | null>(null);
+  const rovingTabId = tabs.some((tab) => tab.id === focusedTabId)
+    ? focusedTabId
+    : (activeTabId ?? tabs[0]?.id ?? null);
+
+  const focusTabAt = useCallback((index: number) => {
+    const next = tabs[((index % tabs.length) + tabs.length) % tabs.length];
+    if (!next) return;
+    setFocusedTabId(next.id);
+    // Match on the stable data attribute rather than CSS.escape'ing an
+    // arbitrary tab id into a selector.
+    Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-o8-workspace-tab]') ?? [])
+      .find((node) => node.dataset.o8WorkspaceTab === next.id)
+      ?.focus();
+  }, [tabs]);
+
+  const handleStripKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (tabs.length === 0) return;
+    const current = tabs.findIndex((tab) => tab.id === rovingTabId);
+    const from = current < 0 ? 0 : current;
+    if (event.key === 'ArrowRight') focusTabAt(from + 1);
+    else if (event.key === 'ArrowLeft') focusTabAt(from - 1);
+    else if (event.key === 'Home') focusTabAt(0);
+    else if (event.key === 'End') focusTabAt(tabs.length - 1);
+    else return;
+    event.preventDefault();
+  }, [focusTabAt, rovingTabId, tabs]);
+
   const handleSelect = useCallback((tabId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-select-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
   }, [workspaceId]);
@@ -436,6 +468,10 @@ function HeaderPillStrip({
     >
       <div
         ref={scrollRef}
+        role="tablist"
+        aria-label="Open sessions"
+        aria-orientation="horizontal"
+        onKeyDown={handleStripKeyDown}
         style={{
           flex: 1,
           minWidth: 0,
@@ -462,6 +498,9 @@ function HeaderPillStrip({
           <motion.div
             key={tab.id}
             layout
+            // role=presentation keeps the animation wrapper out of the way so
+            // the tablist still owns role=tab children through it (#2146).
+            role="presentation"
             data-pill-active={tab.id === activeTabId ? 'true' : undefined}
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -472,10 +511,12 @@ function HeaderPillStrip({
             <HeaderPill
               tab={tab}
               active={tab.id === activeTabId}
+              tabStop={tab.id === rovingTabId}
               crowded={crowded}
               crowdedLabel={crowdedLabels.get(tab.id) ?? null}
               onSelect={handleSelect}
               onClose={handleClose}
+              onFocusTab={setFocusedTabId}
             />
           </motion.div>
         ))}
@@ -507,10 +548,12 @@ function HeaderPillStrip({
 function HeaderPill({
   tab,
   active,
+  tabStop,
   crowded,
   crowdedLabel,
   onSelect,
   onClose,
+  onFocusTab,
 }: {
   tab: {
     id: string;
@@ -520,17 +563,36 @@ function HeaderPill({
     packetStatus: string | null;
   };
   active: boolean;
+  /** This pill owns the tablist's single Tab stop (roving tabindex). */
+  tabStop: boolean;
   crowded: boolean;
   crowdedLabel: string | null;
   onSelect: (tabId: string) => void;
   onClose: (tabId: string) => void;
+  onFocusTab: (tabId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  // The close glyph is keyboard-reachable at all times (#2146): it stays in the
+  // accessibility tree with a stable label, and reveals itself on focus exactly
+  // as it does on hover so a keyboard user can see what they are about to hit.
+  const [closeFocused, setCloseFocused] = useState(false);
+  const closeRevealed = hovered || closeFocused;
   const display = crowded ? (crowdedLabel ?? significantWords(tab.label, 1)) : tab.label;
   return (
     <div
       data-no-drag
       data-o8-workspace-tab={tab.id}
+      role="tab"
+      aria-selected={active}
+      tabIndex={tabStop ? 0 : -1}
+      onFocus={() => onFocusTab(tab.id)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        // Only the pill itself activates — the close button owns its own keys.
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        onSelect(tab.id);
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onContextMenu={(event) => {
@@ -569,19 +631,26 @@ function HeaderPill({
       }}
       onClick={() => onSelect(tab.id)}
     >
-      {/* Leading slot morphs runtime-icon ↔ close-X on hover — fixed
-          14px so the pill width never shifts. Click while hovered
+      {/* Leading slot morphs runtime-icon ↔ close-X on hover or focus — fixed
+          14px so the pill width never shifts. Click/Enter while revealed
           (showing X) closes; the rest of the pill selects. */}
       <button
         type="button"
+        data-o8-workspace-tab-close={tab.id}
         onClick={(event) => {
-          if (!hovered) return; // only the X is the close target
+          if (!closeRevealed) return; // only the X is the close target
           event.stopPropagation();
           onClose(tab.id);
         }}
-        aria-label={hovered ? `Close ${tab.label || 'tab'}` : undefined}
-        title={hovered ? 'Close tab (⌘W)' : undefined}
-        tabIndex={hovered ? 0 : -1}
+        onKeyDown={(event) => {
+          // Stop Enter/Space bubbling to the pill, which would also select.
+          if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
+        }}
+        onFocus={() => setCloseFocused(true)}
+        onBlur={() => setCloseFocused(false)}
+        aria-label={`Close ${tab.label || 'tab'}`}
+        title={closeRevealed ? 'Close tab (⌘W)' : undefined}
+        tabIndex={tabStop ? 0 : -1}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -590,13 +659,13 @@ function HeaderPill({
           height: 14,
           borderWidth: 0,
           background: 'transparent',
-          color: hovered ? 'var(--t-text)' : 'inherit',
-          cursor: hovered ? 'pointer' : 'inherit',
+          color: closeRevealed ? 'var(--t-text)' : 'inherit',
+          cursor: closeRevealed ? 'pointer' : 'inherit',
           padding: 0,
           flexShrink: 0,
         }}
       >
-        {hovered ? (
+        {closeRevealed ? (
           <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>

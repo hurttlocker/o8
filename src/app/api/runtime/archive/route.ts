@@ -7,7 +7,8 @@ import { ownedGrokSessionState } from '@/lib/grok/owned';
 import { ownedOpencodeSessionState } from '@/lib/opencode/owned';
 import { ownedPiSessionState } from '@/lib/pi/owned';
 import { ownedPrimeAgentSessionState } from '@/lib/prime-agent/owned';
-import { archiveLane, getLane } from '@/lib/lane/registry';
+import { archiveLane, findLaneBySession, getLane } from '@/lib/lane/registry';
+import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -175,10 +176,19 @@ export async function POST(request: NextRequest) {
         if (!result.archived) {
           throw new RuntimeArchiveRejectedError(409, result.note);
         }
+        // #2154 — archiving the session dir alone left the LANE row at its
+        // terminal status, so the Agents rail re-rendered the row on the next
+        // poll and archiving never shrank the rail. Retire the lane too, but
+        // only once its lifecycle is over: a live lane keeps its row (#2144).
+        const lane = findLaneBySession(ownedSessionKey);
+        const laneRetired = lane && isLaneTerminal(lane.status) && lane.status !== 'archived'
+          ? Boolean(archiveLane(lane.id, 'user'))
+          : false;
         return {
           ok: true,
           archived: true,
           sessionKey: ownedSessionKey,
+          ...(laneRetired && lane ? { laneId: lane.id } : {}),
           clientMutationId,
           note: result.note,
         };

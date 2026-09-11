@@ -31,6 +31,7 @@ import { AGENT_STATUS_ACCENT } from '@/components/desktop/AgentStatusDot';
 import {
   ExtraAgentActionMenu,
   ExtraAgentRowView,
+  isClearableExtraAgent,
   type AgentOrigin,
   type ExtraAgentActionMenuState,
   type ExtraAgentRow,
@@ -74,6 +75,8 @@ export interface LaneSummary {
   lastEventAt: string | null;
   lastEventLabel: string | null;
   prNumber?: number | null;
+  /** #2154 — a human archived this lane (vs the headless loop's auto-archive). */
+  archivedByOperator?: boolean;
 }
 
 export interface AgentPanelExtraAgentsProps {
@@ -195,6 +198,29 @@ function buildRows(
   return rows;
 }
 
+/**
+ * Which lanes belong in the Agents section.
+ *
+ * Live lanes always. A terminal lane stays only while it still says something
+ * true about today: outcome-stamped completed/archived lanes keep their chip
+ * for 24h (Q ruling 2026-07-18 — terminal agents live in the CLEAN view, not
+ * behind a click), and legacy archives with no outcome stay hidden.
+ *
+ * #2154 — an archive the OPERATOR performed is a dismissal, not history. That
+ * row leaves the rail at once and the collapsed Archived section keeps it.
+ * Before this, archiving re-rendered the lane as a grey Discarded row forever,
+ * so the rail only ever grew and the sole way to empty it was a hard prune that
+ * deleted the records.
+ */
+export function isRailLane(lane: LaneSummary, now = Date.now()): boolean {
+  if (lane.archivedByOperator) return false;
+  const terminal = lane.status === 'archived' || lane.status === 'completed';
+  if (!terminal) return true;
+  if (!lane.outcome) return false;
+  const at = Date.parse(lane.lastEventAt ?? '');
+  return Number.isFinite(at) && now - at < RECENT_TERMINAL_WINDOW_MS;
+}
+
 function isTerminalRow(row: ExtraAgentRow): boolean {
   return Boolean(row.outcome)
     || row.laneStatus === 'archived'
@@ -234,6 +260,65 @@ export function deriveSpawnedAgentRows({
 
 const COLLAPSED_KEY = 'o8:agent-panel:spawned-agents-collapsed';
 
+/** Tell every lane consumer (this rail, the Archived section) to refetch. */
+function broadcastLaneLifecycle(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event('o8:lifecycle-reconcile'));
+}
+
+/**
+ * #2154 — the bulk clear, on the Agents header. Hover-revealed per the rail's
+ * progressive-disclosure rule (hurttlocker: row actions are never
+ * default-visible); focus reveals it too so it stays keyboard-reachable.
+ */
+function ClearFinishedAgentsButton({
+  count,
+  busy,
+  revealed,
+  onReveal,
+  onHide,
+  onClick,
+}: {
+  count: number;
+  busy: boolean;
+  revealed: boolean;
+  onReveal: () => void;
+  onHide: () => void;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onFocus={onReveal}
+      onBlur={onHide}
+      onClick={onClick}
+      title={`Archive ${count} finished agent${count === 1 ? '' : 's'} — the lane records are kept`}
+      style={{
+        paddingTop: 2,
+        paddingRight: 6,
+        paddingBottom: 2,
+        paddingLeft: 6,
+        borderWidth: 0,
+        borderRadius: 4,
+        background: 'transparent',
+        fontSize: 10,
+        lineHeight: '14px',
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        fontFamily: 'var(--font-sans-system)',
+        color: 'var(--t-text-faint)',
+        cursor: busy ? 'default' : 'pointer',
+        opacity: revealed ? 1 : 0,
+        transition: 'opacity 120ms ease',
+        outline: 'none',
+      }}
+    >
+      Clear
+    </button>
+  );
+}
+
 function AgentPanelExtraAgentsBase({
   activeSessionKey,
   onSelectSession,
@@ -246,6 +331,7 @@ function AgentPanelExtraAgentsBase({
   const [archivedRowKeys, setArchivedRowKeys] = useState<Set<string>>(() => new Set());
   const [hoverCard, setHoverCard] = useState<{ row: ExtraAgentRow; rect: DOMRect } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [headerHovered, setHeaderHovered] = useState(false);
   const [readStateVersion, setReadStateVersion] = useState(0);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -288,6 +374,7 @@ function AgentPanelExtraAgentsBase({
         row.sessionKey ? { sessionKey: row.sessionKey } : { laneId: row.laneId! },
         clientMutationId,
       );
+      broadcastLaneLifecycle();
     } catch {
       // Roll back the optimistic hide so operator can retry.
       setArchivedRowKeys((prev) => {
@@ -337,18 +424,7 @@ function AgentPanelExtraAgentsBase({
       let laneList: LaneSummary[] = [];
       if (lanesRes.status === 'fulfilled' && lanesRes.value.ok) {
         const json = await lanesRes.value.json() as { lanes?: LaneSummary[] };
-        laneList = (json.lanes ?? []).filter((lane) => {
-          const terminal = lane.status === 'archived' || lane.status === 'completed';
-          if (!terminal) return true;
-          // Recent group (Q ruling 2026-07-18: terminal agents live in the
-          // CLEAN view, not behind a click): outcome-stamped terminal lanes
-          // from the last 24h stay on the rail with their truthful chip.
-          // Legacy archives with no outcome (reset/rerun cleanup noise) stay
-          // hidden — resurrecting history isn't the point, the day's work is.
-          if (!lane.outcome) return false;
-          const at = Date.parse(lane.lastEventAt ?? '');
-          return Number.isFinite(at) && Date.now() - at < RECENT_TERMINAL_WINDOW_MS;
-        });
+        laneList = (json.lanes ?? []).filter((lane) => isRailLane(lane));
         setLanes(laneList);
       }
 
@@ -448,6 +524,34 @@ function AgentPanelExtraAgentsBase({
       };
     }).sort((a, b) => b.rank - a.rank || b.row.lastActivityAt - a.row.lastActivityAt);
   }, [readStateVersion, rows]);
+  // #2154 — the rows a bulk clear would retire. Lane-terminal only, so the
+  // affordance can never reach live work; the count drives the header reveal.
+  const clearableRowKeys = useMemo(
+    () => rankedRows.filter(({ row }) => isClearableExtraAgent(row)).map(({ row }) => row.key),
+    [rankedRows],
+  );
+
+  const handleClearFinished = useCallback(async () => {
+    if (clearableRowKeys.length === 0) return;
+    setArchivedRowKeys((prev) => new Set([...prev, ...clearableRowKeys]));
+    setBusy(true);
+    try {
+      const res = await fetch('/api/lanes/archive-terminal', { method: 'POST' });
+      if (!res.ok) throw new Error(`Clear failed with status ${res.status}`);
+      broadcastLaneLifecycle();
+    } catch (error) {
+      // Roll back the optimistic hide so the operator can retry.
+      setArchivedRowKeys((prev) => {
+        const next = new Set(prev);
+        for (const key of clearableRowKeys) next.delete(key);
+        return next;
+      });
+      console.warn('[spawned-agents] clear finished agents failed:', error);
+    } finally {
+      setBusy(false);
+    }
+  }, [clearableRowKeys]);
+
   const needsYouCount = rankedRows.filter((entry) => entry.rank > 0).length;
   const highestBand = rankedRows.find((entry) => entry.rank > 0)?.band ?? null;
   // Tone ladder mirrors attentionWashStyle — 'human' is warm like rejected,
@@ -504,20 +608,40 @@ function AgentPanelExtraAgentsBase({
         paddingBottom: 8,
       }}
     >
-      <SectionLabel
-        label="Agents"
-        compact
-        count={needsYouCount > 0 ? needsYouCount : undefined}
-        countTone={countTone}
-        collapsed={collapsed}
-        onToggle={toggleCollapsed}
-      />
+      <div
+        onMouseEnter={() => setHeaderHovered(true)}
+        onMouseLeave={() => setHeaderHovered(false)}
+      >
+        <SectionLabel
+          label="Agents"
+          compact
+          count={needsYouCount > 0 ? needsYouCount : undefined}
+          countTone={countTone}
+          collapsed={collapsed}
+          onToggle={toggleCollapsed}
+          action={clearableRowKeys.length > 0 ? (
+            <ClearFinishedAgentsButton
+              count={clearableRowKeys.length}
+              busy={busy}
+              revealed={headerHovered}
+              onReveal={() => setHeaderHovered(true)}
+              onHide={() => setHeaderHovered(false)}
+              onClick={() => { void handleClearFinished(); }}
+            />
+          ) : null}
+        />
+      </div>
       {/* layout="position" springs a row to its new slot when a band change
           re-sorts the list — without it, a working row that flips to needs-you
-          teleports (rig finding 2026-07-31). Position-only: rows never resize. */}
-      {!collapsed ? rankedRows.map(({ row, band }) => (
+          teleports (rig finding 2026-07-31). Position-only: rows never resize.
+          The role=list wrapper reproduces the section's own flex column so it
+          is layout-neutral while giving AT grouping + position (#2146). */}
+      {!collapsed ? (
+        <div role="list" aria-label="Agents" style={{ display: 'flex', flexDirection: 'column' }}>
+        {rankedRows.map(({ row, band }) => (
         <motion.div
           key={row.key}
+          role="listitem"
           layout="position"
           transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         >
@@ -540,7 +664,9 @@ function AgentPanelExtraAgentsBase({
           }}
         />
         </motion.div>
-      )) : null}
+        ))}
+        </div>
+      ) : null}
       {actionMenu ? (
         <ExtraAgentActionMenu
           state={actionMenu}
