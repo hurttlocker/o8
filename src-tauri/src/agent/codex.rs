@@ -7,13 +7,25 @@
 //! resident stream-json child since #1252; this closes the same gap on the
 //! Codex side, where every turn used to cold-spawn `codex exec`.)
 //!
-//! The child runs against a MANAGED `CODEX_HOME` under the agent data dir — a
-//! minimal `config.toml` plus the operator's copied auth files — because
-//! `app-server` has no `--ignore-user-config` flag and would otherwise inherit
-//! the operator's own model pins and MCP servers. Codex plugins installed
-//! globally still register their MCP servers; that exposure is unchanged from
-//! the `codex exec` path, and what keeps the seat safe is the same pair as
-//! before: the read-only sandbox and the JSON-only planner contract.
+//! The child runs against the operator's OWN `CODEX_HOME` — o8 never copies or
+//! relinks their Codex credentials, because a second copy of an OAuth token is
+//! a second thing to leak and token refreshes would land in the copy instead of
+//! the real file. `app-server` takes no `--ignore-user-config`, so inheritance
+//! is neutralized with `-c` overrides instead (verified against codex-cli
+//! 0.153.4 by reading the effective config back through `config/read`):
+//!
+//! * `model` / `model_reasoning_effort` / `approval_policy` / `sandbox_mode`
+//!   and `tools.image_generation` are fully overridden — an operator config
+//!   pinning a frontier model at `danger-full-access` reads back as this seat
+//!   at `read-only` with no network.
+//! * `--disable plugins --disable apps` keeps plugin-provided MCP servers out
+//!   of the seat.
+//! * `-c mcp_servers={}` does NOT clear the table — the CLI merges it rather
+//!   than replacing it, and there is no general disable — so an MCP server
+//!   declared in the operator's `config.toml` still starts. Per-key overrides
+//!   replace the entry wholesale and fail its transport validation, so they are
+//!   not a fix. What keeps the seat safe is the pair it always relied on: the
+//!   read-only sandbox and the JSON-only planner contract.
 //!
 //! `codex exec` stays as the fallback. `app-server` is flagged experimental, so
 //! if the handshake fails (an older CLI, a protocol change) the session
@@ -209,57 +221,6 @@ impl CodexSession {
     }
 }
 
-/// The operator's own Codex home — the source of the auth files copied into the
-/// managed planner home.
-fn user_codex_home() -> PathBuf {
-    if let Ok(home) = std::env::var("CODEX_HOME") {
-        if !home.trim().is_empty() {
-            return PathBuf::from(home);
-        }
-    }
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".codex")
-}
-
-/// Materialize the managed `CODEX_HOME` for the resident planner: a minimal
-/// `config.toml` pinning the seat plus the operator's auth files, re-synced on
-/// every boot so a refreshed token is picked up. `model` and `effort` come from
-/// `planner_route`'s allow-listed catalog constants, never from free text.
-fn ensure_planner_codex_home(model: &str, effort: &str) -> Result<PathBuf, String> {
-    let home = super::agent_data_dir().join("codex-planner-home");
-    std::fs::create_dir_all(&home)
-        .map_err(|error| format!("codex planner home create failed: {error}"))?;
-    std::fs::write(
-        home.join("config.toml"),
-        format!(
-            "model = \"{model}\"\n\
-             model_reasoning_effort = \"{effort}\"\n\
-             approval_policy = \"never\"\n\
-             sandbox_mode = \"read-only\"\n\
-             \n\
-             [tools]\n\
-             image_generation = false\n"
-        ),
-    )
-    .map_err(|error| format!("codex planner config write failed: {error}"))?;
-    let source_home = user_codex_home();
-    for name in ["auth.json", "installation_id", "version.json"] {
-        let source = source_home.join(name);
-        if !source.exists() {
-            continue;
-        }
-        let destination = home.join(name);
-        if std::fs::copy(&source, &destination).is_err() {
-            continue;
-        }
-        #[cfg(unix)]
-        if name == "auth.json" {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600));
-        }
-    }
-    Ok(home)
-}
-
 /// A LIVE `codex app-server` child held across a task's turns. NDJSON JSON-RPC
 /// over stdio: one `turn/start` request per planner turn, pumped until this
 /// thread's `turn/completed` notification arrives.
@@ -272,21 +233,37 @@ struct AppServerSession {
 }
 
 impl AppServerSession {
+    /// Config overrides that pin the seat over whatever the operator's own
+    /// `config.toml` says. `model` and `effort` are `planner_route`'s
+    /// allow-listed catalog constants, never free text.
+    fn override_args(model: &str, effort: &str) -> Vec<String> {
+        vec![
+            "app-server".to_string(),
+            "--stdio".to_string(),
+            "-c".to_string(),
+            format!("model=\"{model}\""),
+            "-c".to_string(),
+            format!("model_reasoning_effort=\"{effort}\""),
+            "-c".to_string(),
+            "approval_policy=\"never\"".to_string(),
+            "-c".to_string(),
+            "sandbox_mode=\"read-only\"".to_string(),
+            "-c".to_string(),
+            "tools.image_generation=false".to_string(),
+            "-c".to_string(),
+            "mcp_servers={}".to_string(),
+            // Plugin-provided MCP servers are not planner tools.
+            "--disable".to_string(),
+            "plugins".to_string(),
+            "--disable".to_string(),
+            "apps".to_string(),
+        ]
+    }
+
     fn start(binary: &str, model: &str, effort: &str) -> Result<Self, String> {
-        let home = ensure_planner_codex_home(model, effort)?;
         let mut child = Command::new(binary)
-            .args([
-                "app-server",
-                "--stdio",
-                "-c",
-                "sandbox_mode=read-only",
-                "-c",
-                "tools.image_generation=false",
-                "-c",
-                "mcp_servers={}",
-            ])
+            .args(Self::override_args(model, effort))
             .current_dir(std::env::temp_dir())
-            .env("CODEX_HOME", &home)
             .env("PATH", super::claude::path_with_node_runtime())
             .env("FORCE_COLOR", "0")
             .env("NO_COLOR", "1")

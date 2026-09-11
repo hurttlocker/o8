@@ -56,9 +56,6 @@ struct CodexFixture {
     dir: std::path::PathBuf,
     binary: std::path::PathBuf,
     capture: std::path::PathBuf,
-    previous_data_dir: Option<std::ffi::OsString>,
-    previous_cortex_dir: Option<std::ffi::OsString>,
-    previous_codex_home: Option<std::ffi::OsString>,
     previous_app_server: Option<std::ffi::OsString>,
     previous_capture: Option<std::ffi::OsString>,
     _guard: std::sync::MutexGuard<'static, ()>,
@@ -66,9 +63,9 @@ struct CodexFixture {
 
 #[cfg(unix)]
 impl CodexFixture {
-    /// Build the fixture binary and point the planner's data dir, Codex home
-    /// and capture file at throwaway paths — no real `~/.o8` or `~/.codex`
-    /// state is read or written by these tests.
+    /// Build the fixture binary and point the capture file at a throwaway path.
+    /// The planner writes nothing to disk, so no data dir or Codex home is
+    /// swapped here — the fixture binary never reads either.
     fn new(app_server: bool) -> Self {
         let guard = crate::DATA_DIR_ENV_TEST_LOCK
             .lock()
@@ -81,16 +78,13 @@ impl CodexFixture {
                 .unwrap()
                 .as_nanos()
         ));
-        std::fs::create_dir_all(dir.join("codex-home")).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         let binary = dir.join("codex-fixture");
         let capture = dir.join("capture.txt");
         std::fs::write(&binary, CODEX_FIXTURE).unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let fixture = Self {
-            previous_data_dir: std::env::var_os("O8_DATA_DIR"),
-            previous_cortex_dir: std::env::var_os("CORTEX_IDE_DATA_DIR"),
-            previous_codex_home: std::env::var_os("CODEX_HOME"),
             previous_app_server: std::env::var_os("FIXTURE_APP_SERVER"),
             previous_capture: std::env::var_os("FIXTURE_CAPTURE"),
             dir: dir.clone(),
@@ -98,9 +92,6 @@ impl CodexFixture {
             capture: capture.clone(),
             _guard: guard,
         };
-        std::env::set_var("O8_DATA_DIR", dir.join("data"));
-        std::env::remove_var("CORTEX_IDE_DATA_DIR");
-        std::env::set_var("CODEX_HOME", dir.join("codex-home"));
         std::env::set_var("FIXTURE_APP_SERVER", if app_server { "1" } else { "0" });
         std::env::set_var("FIXTURE_CAPTURE", &capture);
         fixture
@@ -140,9 +131,6 @@ impl CodexFixture {
 impl Drop for CodexFixture {
     fn drop(&mut self) {
         for (key, value) in [
-            ("O8_DATA_DIR", &self.previous_data_dir),
-            ("CORTEX_IDE_DATA_DIR", &self.previous_cortex_dir),
-            ("CODEX_HOME", &self.previous_codex_home),
             ("FIXTURE_APP_SERVER", &self.previous_app_server),
             ("FIXTURE_CAPTURE", &self.previous_capture),
         ] {
@@ -212,12 +200,30 @@ fn resident_app_server_serves_both_turns_from_one_process() {
         .count();
     assert_eq!(turns, 2, "both turns ride the one thread:\n{captured}");
 
-    // The managed home is what keeps the resident child off the operator's own
-    // Codex config.
-    let config =
-        std::fs::read_to_string(fixture.dir.join("data/codex-planner-home/config.toml")).unwrap();
-    assert!(config.contains("model = \"gpt-5.6-sol\""), "{config}");
-    assert!(config.contains("sandbox_mode = \"read-only\""), "{config}");
+    // `-c` overrides — not a copied Codex home — are what keep the resident
+    // child off the operator's own model pins and sandbox mode. The empty
+    // `mcp_servers` table and the plugin/apps disables ride the same list.
+    let argv = &invocations[0];
+    for expected in [
+        "model=\"gpt-5.6-sol\"",
+        "model_reasoning_effort=\"high\"",
+        "approval_policy=\"never\"",
+        "sandbox_mode=\"read-only\"",
+        "tools.image_generation=false",
+        "mcp_servers={}",
+    ] {
+        // Each override must ride its own `-c`, or the CLI never sees it.
+        assert!(
+            argv.windows(2).any(|pair| pair[0] == "-c" && pair[1] == expected),
+            "missing `-c {expected}`: {argv:?}"
+        );
+    }
+    assert!(argv.windows(2).any(|pair| pair == ["--disable", "plugins"]));
+    assert!(argv.windows(2).any(|pair| pair == ["--disable", "apps"]));
+    assert!(
+        !argv.iter().any(|arg| arg.contains("auth.json")),
+        "the planner must never touch Codex credentials: {argv:?}"
+    );
 }
 
 #[cfg(unix)]
