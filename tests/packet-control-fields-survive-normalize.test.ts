@@ -55,6 +55,7 @@ function fullPacketFixture() {
     stallRetries: 2,
     zeroDiffRuntimeRetries: 1,
     launchAttempts: 3,
+    preflightRefusals: 2,
     operatorStopped: true,
     spendCap: { carrier: 'openrouter', costUsd: 1, inputTokens: 500_000 },
     spendTelemetry: {

@@ -438,6 +438,54 @@ describe("OpenCode readiness preflight", () => {
     });
   });
 
+  it("re-probes a refused model at most once per refresh window (#2195)", async () => {
+    // Dispatch preflight asks the identical question on every scheduling pass.
+    // Before the cache, a packet the gate kept refusing spent a fresh pair of
+    // CLI subprocesses per retry for a condition that had not changed — the
+    // probe half of the refusal loop.
+    const probes: string[] = [];
+    setOpencodeCliProbeDependenciesForTests({
+      run: async (args: string[]) => {
+        probes.push(args[0] ?? "");
+        if (args[0] === "models") return "hosted/other\n";
+        if (args[0] === "auth") return "[]";
+        throw new Error(`unexpected opencode probe: ${args.join(" ")}`);
+      },
+    });
+    const configPath = path.join(
+      authFixture.home,
+      ".config",
+      "opencode",
+      "opencode.json",
+    );
+    mkdirSync(path.dirname(configPath), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        provider: {
+          hosted: {
+            npm: "@ai-sdk/openai-compatible",
+            options: { baseURL: "https://api.example.com/v1" },
+            models: { coder: {} },
+          },
+        },
+      }),
+    );
+    invalidateRuntimeAuthCache();
+
+    const attempts = 12;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      await expect(
+        assertRuntimeDispatchable("opencode", "hosted/coder"),
+      ).rejects.toMatchObject({ code: "dispatch_cli_auth_unavailable" });
+    }
+
+    // Every attempt still refuses — the cache must not turn a refusal into a
+    // pass — but the model listing is spawned once, not once per attempt.
+    expect(probes.filter((arg) => arg === "models")).toHaveLength(1);
+    expect(probes.length).toBeLessThan(attempts);
+  });
+
   it("finds credential evidence in a portable AppData location", async () => {
     vi.stubEnv("XDG_DATA_HOME", "");
     const localAppData = path.join(authFixture.home, "AppData", "Local");
