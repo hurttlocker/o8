@@ -26,6 +26,8 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   localProviderIds,
   opencodeAuthenticatedProviders,
+  opencodeCliModels,
+  opencodeCliResolvesModel,
   probeOpencodeServiceVersion,
   providerHasConfiguredCredential,
   providerIdForModel,
@@ -42,9 +44,6 @@ const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const UNKNOWN_CLAUDE_CACHE_TTL_MS = 5_000;
 const PROBE_TIMEOUT_MS = 1_500;
-const TRUSTED_KEYLESS_OPENCODE_MODELS = new Set([
-  'opencode/deepseek-v4-flash-free',
-]);
 
 export type RuntimeHouse = RuntimeAuthHouse;
 export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable' | 'incompatible_model';
@@ -181,19 +180,26 @@ async function opencodeModelStatus(
   const authenticated = credentialProviders.has(providerId)
     || providerHasConfiguredCredential(config, providerId);
   const local = localProviders.has(providerId);
-  const keyless = TRUSTED_KEYLESS_OPENCODE_MODELS.has(model.trim());
-  const ready = authenticated || local || keyless;
+  // Absent credential evidence is unknown, not "no": OpenCode 2 keeps credentials
+  // server-side, where neither the auth listing nor the credential file can see
+  // them. Ask the CLI what it resolves — a model it lists is a model it will
+  // dispatch, and an install with nothing connected lists nothing — but only once
+  // the cheaper local evidence has come up empty.
+  const cliResolves = !authenticated
+    && !local
+    && await opencodeCliResolvesModel(status.binaryPath, model);
+  const ready = authenticated || local || cliResolves;
   return {
     ...status,
     authenticated,
     ready,
     unavailableReason: ready ? null : 'needs_auth',
-    detail: keyless
-      ? `OpenCode 2 model "${model.trim()}" supports keyless dispatch.`
+    detail: authenticated
+      ? `OpenCode 2 provider "${providerId}" has credential evidence.`
       : local
-      ? `OpenCode 2 provider "${providerId}" is configured for local dispatch.`
-      : authenticated
-        ? `OpenCode 2 provider "${providerId}" has credential evidence.`
+        ? `OpenCode 2 provider "${providerId}" is configured for local dispatch.`
+      : cliResolves
+        ? `OpenCode 2 lists model "${model.trim()}" as one it can resolve.`
         : `OpenCode 2 provider "${providerId}" has no credential evidence and is not configured for local dispatch.`,
     fix: ready
       ? 'No action needed.'
@@ -356,10 +362,11 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
     });
   }
 
-  const [credentialProviders, config, serviceVersion] = await Promise.all([
+  const [credentialProviders, config, serviceVersion, cliModels] = await Promise.all([
     opencodeAuthenticatedProviders(os.homedir(), binaryPath),
     readOpencodeConfig(os.homedir()),
     probeOpencodeServiceVersion(binaryPath),
+    opencodeCliModels(binaryPath),
   ]);
   const authenticated = credentialProviders.size > 0;
   const localProviderConfigured = localProviderIds(config).size > 0;
@@ -385,26 +392,25 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
       binaryPath,
     });
   }
-  const defaultModel = getRuntimeCapability('opencode').defaultModel;
-  const defaultModelReady = Boolean(
-    defaultModel && TRUSTED_KEYLESS_OPENCODE_MODELS.has(defaultModel),
-  );
+  // A listing that names anything is dispatch evidence for the same reason the
+  // per-model gate trusts it, and it replaces a hardcoded keyless-model list that
+  // went stale the moment the free tier changed.
+  const cliDispatchable = Boolean(cliModels?.size);
+  const ready = authenticated || cliDispatchable || localProviderConfigured;
   return nowStatus('opencode', 'opencode', {
     installed: true,
     authenticated,
-    ready: authenticated || defaultModelReady,
+    ready,
     detail: authenticated
       ? 'OpenCode 2 CLI is installed and has provider credential evidence.'
-      : defaultModelReady
-        ? `OpenCode 2 CLI is installed and its default model "${defaultModel}" supports keyless dispatch.`
+      : cliDispatchable
+        ? 'OpenCode 2 CLI is installed and lists models it can resolve.'
       : localProviderConfigured
         ? 'OpenCode 2 CLI is installed and has a configured local provider; select one of that provider\'s models to dispatch.'
         : 'OpenCode 2 CLI is installed but has no credential evidence or configured local provider.',
-    fix: authenticated || defaultModelReady
+    fix: ready
       ? 'No action needed.'
-      : localProviderConfigured
-        ? 'Select a model from the configured local provider, or run `opencode2 auth login`.'
-        : 'Run `opencode2 auth login` or configure a provider with a local baseURL.',
+      : 'Run `opencode2 auth login` or configure a provider with a local baseURL.',
     binaryPath,
   });
 }
