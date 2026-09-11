@@ -322,12 +322,14 @@ async function readPageStats(page) {
   });
 }
 
-async function readPerformance(page, observationMs) {
-  return page.evaluate((elapsedMs) => {
+export async function readPerformance(page) {
+  return page.evaluate(() => {
     const perf = window.__o8TerminalPerf;
+    const elapsedMs = performance.now() - perf.startedAt;
     const longTaskMs = perf.longTasks.reduce((sum, task) => sum + task.duration, 0);
     return {
       longTaskSupported: perf.longTaskSupported,
+      observationMs: elapsedMs,
       longTaskCount: perf.longTasks.length,
       longTaskMs,
       longTaskMsPerMinute: elapsedMs > 0 ? longTaskMs * 60000 / elapsedMs : null,
@@ -335,7 +337,7 @@ async function readPerformance(page, observationMs) {
       framesPerSecond: elapsedMs > 0 ? perf.frames * 1000 / elapsedMs : null,
       longTasks: perf.longTasks,
     };
-  }, observationMs);
+  });
 }
 
 async function measureKeystrokeToPaint(page, deliveryClient, sessionName, marker) {
@@ -996,7 +998,6 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       seeded.tabs,
       (tab) => `O8_WORKLOAD_READY_${tab.sessionName}_${sampleSeed}`,
     ), 30000);
-    await resetPageMeasurement(page);
     const deliveryStarts = seeded.tabs.map((tab, index) => clients[index].terminalDelivery(tab.sessionName));
 
     if (runConfig.cpuProfile) {
@@ -1010,6 +1011,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     const memoryProbeStartedAt = globalThis.performance.now();
     const physicalBytesStart = measureProcessGroupMemory(inventoryBeforeProbe, groups);
     const memoryProbeMs = globalThis.performance.now() - memoryProbeStartedAt;
+    await resetPageMeasurement(page);
     // The CPU counters and denominator must cover the same interval. Memory
     // probes can take seconds and run before the workload is released.
     const beforeSnapshot = snapshotProcessCounters();
@@ -1101,10 +1103,13 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     const cpuObservationMs = afterSnapshot.sampledAtMs - beforeSnapshot.sampledAtMs;
     const groupsAfter = resolveProcessGroups(after, stack, browserPid);
     const processPidTreeEnd = describeProcessPidTree(after, groupsAfter);
+    // Freeze browser counters before post-workload memory probes. Otherwise
+    // their potentially long wall time is counted as workload rendering.
+    const rawBrowser = await readPageStats(page);
+    const performance = await readPerformance(page);
+    const rawServer = (await clients[0].request('terminal-bench-stats')).data.snapshot;
     const physicalBytesEnd = measureProcessGroupMemory(after, groupsAfter);
     const processes = measureProcessGroups(before, after, groups, cpuObservationMs, physicalBytesStart, physicalBytesEnd);
-    const rawBrowser = await readPageStats(page);
-    const rawServer = (await clients[0].request('terminal-bench-stats')).data.snapshot;
     const hiddenOverflowClass = mountedHidden
       ? classifyHiddenOverflow(rawBrowser.diagnostics, rawServer, mountedHidden.sessionName)
       : null;
@@ -1112,7 +1117,6 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       correctness.failures += 1;
       throw new Error(`hidden client buffer did not overflow for ${mountedHidden.sessionName}`);
     }
-    const performance = await readPerformance(page, observationMs);
     await stopCpuProfiles?.();
     const resyncUnsettledCount = rawBrowser.diagnostics.filter((diagnostic) => (
       diagnostic.code === 'terminal_resync_unsettled'
@@ -1139,6 +1143,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     browserSummary.xtermImportMs = xtermImportDuration(browserConsole);
     const serverSummary = deriveServer(rawServer, seeded.tabs, browserSummary.neverMountedSessionNames);
     serverSummary.benchStatsRequests = clients.reduce((total, client) => total + client.benchStatsRequests, 0);
+    serverSummary.outputTailRequests = clients.reduce((total, client) => total + client.outputTailRequests, 0);
     serverSummary.hiddenDeliveredBytesPerHiddenClient = hiddenDeliveredBytesPerHiddenClient;
     serverSummary.hiddenDeliveriesPerHiddenClient = hiddenDeliveriesPerHiddenClient;
     const replayRisk = {
@@ -1299,7 +1304,7 @@ async function main() {
     buildMode: buildModes.length === 1 ? buildModes[0] : 'mixed',
     devModeCpuWarning: samples.some((sample) => sample.devModeCpuWarning),
     diagnosticCpuProfile: runConfig.cpuProfile,
-    measurementContractVersion: 2,
+    measurementContractVersion: 4,
     ...machineClass(),
     fixture: {
       id: 'terminal-ansi-alt-screen-visibility-v2',

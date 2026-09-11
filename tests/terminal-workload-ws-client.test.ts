@@ -9,6 +9,7 @@ describe('terminal workload server marker polling', () => {
       .mockResolvedValueOnce({
         data: {
           snapshot: {
+            schema: 'o8/terminal-output-tails/v1',
             sessions: {
               alpha: { lastOutputTail: 'ALPHA_DONE' },
               beta: { lastOutputTail: 'still running' },
@@ -19,6 +20,7 @@ describe('terminal workload server marker polling', () => {
       .mockResolvedValueOnce({
         data: {
           snapshot: {
+            schema: 'o8/terminal-output-tails/v1',
             sessions: {
               alpha: { lastOutputTail: 'tail moved on' },
               beta: { lastOutputTail: 'BETA_DONE' },
@@ -34,7 +36,16 @@ describe('terminal workload server marker polling', () => {
     ], 1000, 0);
 
     expect(request).toHaveBeenCalledTimes(2);
-    expect(request).toHaveBeenNthCalledWith(1, 'terminal-bench-stats');
-    expect(request).toHaveBeenNthCalledWith(2, 'terminal-bench-stats');
+    expect(request).toHaveBeenNthCalledWith(1, 'terminal-bench-stats', { outputOnly: true });
+    expect(request).toHaveBeenNthCalledWith(2, 'terminal-bench-stats', { outputOnly: true });
+  });
+
+  it('refuses an older server that did not honor the output-only protocol', async () => {
+    const client = new TerminalWorkloadClient('ws://fixture.invalid');
+    client.request = vi.fn().mockResolvedValue({ data: { snapshot: {
+      schema: 'o8/terminal-server-stats/v1', sessions: { alpha: { lastOutputTail: 'DONE' } },
+    } } });
+    await expect(client.waitForServerText('alpha', 'DONE', 1000))
+      .rejects.toThrow('did not acknowledge output-only');
   });
 });

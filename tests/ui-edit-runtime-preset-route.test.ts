@@ -9,6 +9,17 @@ import type { LaneCommand, LaneCommandResult } from '@/lib/lane/types';
 
 const laneCommandMock = vi.hoisted(() => vi.fn());
 const runtimeDispatchableMock = vi.hoisted(() => vi.fn(async () => undefined));
+const terminalManifestSettlementMock = vi.hoisted(() => vi.fn());
+const terminalLaneCleanupMock = vi.hoisted(() => vi.fn());
+
+// This routing fixture creates no worker or workspace manifest. Real terminal
+// settlement has its own entry-point tests and must not outlive this fixture.
+vi.mock('@/lib/workspace/manifest/terminal-release', () => ({
+  settleWorkspaceManifestOnTerminal: terminalManifestSettlementMock,
+}));
+vi.mock('@/lib/lane/terminal-lane-cleanup', () => ({
+  scheduleTerminalLaneCleanup: terminalLaneCleanupMock,
+}));
 
 vi.mock('@/lib/panel/auth', () => ({
   requirePanelAuth: vi.fn(() => null),
@@ -449,6 +460,12 @@ describe('UI edit runtime preset dispatch routing', () => {
       .find((command) => command.verb === 'launch_session');
     expect(firstMixedCarrierLaunch?.model).toBe(MODEL_IDS.codexScoutDefault);
     setLaneStatus(firstMixedCarrierLaunch!.laneId, 'completed', 'system', 'test-completed');
+    expect(terminalManifestSettlementMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: firstMixedCarrierLaunch!.laneId,
+    }));
+    expect(terminalLaneCleanupMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: firstMixedCarrierLaunch!.laneId,
+    }));
     laneCommandMock.mockClear();
     const deferredCarrierDispatch = await dispatchMission({ missionId: mixedCarrier.missionId });
     expect(deferredCarrierDispatch.dispatched).toBe(1);

@@ -11,6 +11,7 @@ export class TerminalWorkloadClient {
     this.deliveryBySession = new Map();
     this.textArrivalWatches = new Map();
     this.benchStatsRequests = 0;
+    this.outputTailRequests = 0;
   }
 
   async connect() {
@@ -85,6 +86,7 @@ export class TerminalWorkloadClient {
     const requestId = `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const startIndex = this.frames.length;
     if (type === 'terminal-bench-stats') this.benchStatsRequests += 1;
+    if (type === 'terminal-bench-stats' && message.outputOnly === true) this.outputTailRequests += 1;
     this.send({ type, requestId, ...message });
     return this.waitForFrame(
       (frame) => frame.channel === 'terminal-bench' && frame.data?.requestId === requestId,
@@ -131,7 +133,10 @@ export class TerminalWorkloadClient {
     const pending = new Map(markers.map(({ sessionName, marker }) => [sessionName, marker]));
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const snapshot = (await this.request('terminal-bench-stats')).data?.snapshot;
+      const snapshot = (await this.request('terminal-bench-stats', { outputOnly: true })).data?.snapshot;
+      if (snapshot?.schema !== 'o8/terminal-output-tails/v1') {
+        throw new Error('server did not acknowledge output-only terminal marker polling');
+      }
       for (const [sessionName, marker] of pending) {
         if (snapshot?.sessions?.[sessionName]?.lastOutputTail?.includes(marker)) pending.delete(sessionName);
       }
