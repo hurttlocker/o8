@@ -2237,6 +2237,14 @@
       ]
     },
     {
+      "path": "tests/preflight-refusal-bound-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/preship-cleanup-residuals.test.ts",
       "reasons": [
         "child-process",
