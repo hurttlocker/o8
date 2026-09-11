@@ -9,7 +9,7 @@ import {
   createO8WebviewCompositeHandlers,
   O8_WEBVIEW_COMPOSITE_TOOLS,
 } from '@/lib/mcp/o8-webview-composites';
-import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { O8WebviewClient, type O8WindowOperation } from '@/lib/mcp/o8-webview-client';
 import { buildPrepareComposerTargetScript } from '@/lib/mcp/o8-webview-composer-target';
 import { O8_WEBVIEW_ASYNC_EVAL_GUARD } from '@/lib/mcp/o8-webview-async-eval-guard';
 
@@ -315,6 +315,15 @@ function imageResult(base64: string, mimeType: string, meta: Record<string, unkn
  *  the base64 (the canvas, whose orchestrator stream truncates tool output) can
  *  still SHOW it via /api/panel/serve-image. Returns the path, or null if the
  *  write fails — the base64 in the result is always the source of truth. */
+/**
+ * Window operations an agent may drive. The client supports more (`close`,
+ * `setPosition`, `setSize`); those stay out of the tool surface on purpose.
+ * Keep in sync with the `operation` enum on `o8_view_manage_window`.
+ */
+const AGENT_WINDOW_OPERATIONS: readonly O8WindowOperation[] = [
+  'show', 'hide', 'focus', 'center', 'minimize', 'maximize', 'unmaximize', 'toggleFullscreen',
+];
+
 const SCREENSHOT_DIR = '/tmp/o8-screenshots';
 function persistScreenshot(base64: string, mimeType: string): string | null {
   try {
@@ -540,6 +549,33 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
         },
       },
       required: ['selector'],
+    },
+  },
+  {
+    name: 'o8_view_windows',
+    description: 'USE THIS WHEN typing or clicking lands nowhere, or you need to know what is actually on screen. Lists every o8 window with visible / focused / position / size. o8 runs transparent click-through overlays (`dock`, `spatial-ink`, `agent-partials`) alongside `main`; when one of them holds focus, keystrokes vanish into it and nothing in the DOM explains why. Fix it with o8_view_manage_window {operation: "focus", windowLabel: "main"}.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'o8_view_manage_window',
+    description: 'Show / hide / focus / center / minimize an o8 window by label. Most common use: return focus to `main` after o8_view_windows shows an overlay holding it. Labels come from o8_view_windows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: {
+          type: 'string',
+          enum: ['show', 'hide', 'focus', 'center', 'minimize', 'maximize', 'unmaximize', 'toggleFullscreen'],
+          description: 'What to do to the window.',
+        },
+        windowLabel: {
+          type: 'string',
+          description: 'Window label from o8_view_windows (e.g. "main", "dock", "spatial-ink", "agent-partials"). Defaults to "main".',
+        },
+      },
+      required: ['operation'],
     },
   },
 ];
@@ -770,6 +806,29 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
       const timeoutMs = parseOptionalNumber(args.timeoutMs);
       const result = await getClient().waitFor({ selector, text, timeoutMs });
       return jsonResult(result);
+    }),
+
+    o8_view_windows: async () => withStructuredErrors(async () => {
+      const result = await getClient().listWindows();
+      return jsonResult(result);
+    }),
+
+    o8_view_manage_window: async (args) => withStructuredErrors(async () => {
+      const operation = requiredString(args, 'operation');
+      // `close`, `setPosition` and `setSize` are reachable on the client but
+      // deliberately not offered here: `close` on `main` quits the app, and
+      // geometry belongs to the user, not to an agent poking at focus.
+      if (!AGENT_WINDOW_OPERATIONS.includes(operation as O8WindowOperation)) {
+        throw new Error(`Unsupported window operation "${operation}". Use one of: ${AGENT_WINDOW_OPERATIONS.join(', ')}.`);
+      }
+      const windowLabel = typeof args.windowLabel === 'string' && args.windowLabel.trim()
+        ? args.windowLabel.trim()
+        : undefined;
+      const result = await getClient().manageWindow({
+        operation: operation as O8WindowOperation,
+        windowLabel,
+      });
+      return jsonResult({ ...result, operation, windowLabel: windowLabel ?? 'main' });
     }),
 
   };

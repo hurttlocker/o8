@@ -7,22 +7,13 @@ import {
   createCodedError, getErrorCode, isMutationAckTimeout, queueCommandWrite,
   type PendingRequest,
 } from '@/lib/mcp/o8-webview-command-transport';
+// Retry-safety is classified once, next to the command's documentation, in the
+// socket command catalog. See o8-webview-commands.ts for the full surface.
+import { RECONNECT_RETRY_SAFE_COMMANDS } from '@/lib/mcp/o8-webview-commands';
 
 const DEFAULT_WINDOW_LABEL = 'main';
 const REQUEST_TIMEOUT_MS = 30_000;
 
-/**
- * Commands safe to re-fire after a reconnect: pure reads with no side
- * effects. Mutating commands (type_into_focused, execute_js — which carries
- * clicks — scroll_page) must NOT auto-retry: when the socket drops after the
- * write, the action usually already fired on the Rust side, so re-running
- * types text twice or double-fires a click.
- */
-const RECONNECT_RETRY_SAFE_COMMANDS = new Set([
-  'get_page_map',
-  'get_element_position',
-  'take_screenshot',
-]);
 const UNAVAILABLE_MESSAGE = 'o8 webview tools unavailable — launch o8 with --features dev-mcp-plugin or use the signed build';
 const JPEG_MIME_TYPE = 'image/jpeg';
 
@@ -62,6 +53,56 @@ interface PageMapResult {
   elements?: PageMapElement[];
   content?: string;
 }
+
+export interface O8WindowInfo {
+  label: string;
+  title?: string;
+  url?: string;
+  visible?: boolean;
+  focused?: boolean;
+  maximized?: boolean;
+  fullscreen?: boolean;
+  scaleFactor?: number;
+  outerSize?: { width: number; height: number };
+  innerSize?: { width: number; height: number };
+  position?: { x: number; y: number };
+  monitor?: { name?: string | null } | null;
+}
+
+export interface O8MonitorInfo {
+  name?: string | null;
+  size?: { width: number; height: number };
+  position?: { x: number; y: number };
+  scaleFactor?: number;
+}
+
+export interface O8AppInfo {
+  app?: { name?: string; version?: string };
+  os?: { os?: string; arch?: string; family?: string };
+  windows?: O8WindowInfo[];
+  monitors?: O8MonitorInfo[];
+  primaryMonitor?: O8MonitorInfo | null;
+}
+
+/** Values accepted by `manage_window`'s `operation` field. */
+export type O8WindowOperation =
+  | 'show'
+  | 'hide'
+  | 'focus'
+  | 'center'
+  | 'minimize'
+  | 'maximize'
+  | 'unmaximize'
+  | 'close'
+  | 'setPosition'
+  | 'setSize'
+  | 'toggleFullscreen';
+
+/** Values accepted by `navigate_webview`'s `action` field. */
+export type O8NavigateWebviewAction = 'navigate' | 'reload' | 'back' | 'forward' | 'get_url';
+
+/** Values accepted by `manage_events`' `action` field. */
+export type O8EventsAction = 'emit' | 'emit_to' | 'listen' | 'sniff';
 
 function extractDataUrlPayload(value: unknown): { base64: string; mimeType: string } {
   const candidate = resolveImageDataCandidate(value);
@@ -193,6 +234,23 @@ function getJpegDimensions(bytes: Buffer): { width: number; height: number } {
   }
 
   throw new Error('Failed to parse screenshot dimensions from JPEG response');
+}
+
+/**
+ * The plugin sometimes wraps a command result in a second `data` envelope.
+ * Peel one level so callers see the handler's own JSON either way.
+ */
+function unwrapCommandData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.data && typeof record.data === 'object' && !Array.isArray(record.data)) {
+    return record.data as Record<string, unknown>;
+  }
+
+  return record;
 }
 
 function coercePageMap(value: unknown): PageMapResult {
@@ -632,6 +690,11 @@ export class O8WebviewClient {
     //
     // The pushState + popstate path is kept as a fallback for the few
     // moments before NavigationBridge mounts after a cold launch.
+    //
+    // `navigateWebview()` exposes the real `navigate_webview` command for the
+    // cases this cannot serve — hard reload, a URL outside the app's routes,
+    // an overlay window. Routing o8's own page-to-page moves through it is
+    // the regression this method exists to avoid.
     await this.evalJs(`(() => {
       const next = new URL(${JSON.stringify(path)}, window.location.origin);
       const route = \`\${next.pathname}\${next.search}\${next.hash}\`;
@@ -648,6 +711,106 @@ export class O8WebviewClient {
       return route;
     })()`);
     return { ok: true };
+  }
+
+  /**
+   * Every window the app owns, with `visible` / `focused` / position / size.
+   *
+   * This is the only way to see o8's overlay windows (`dock`, `spatial-ink`,
+   * `agent-partials`). They are separate always-on-top, transparent,
+   * click-through windows, so nothing in the main window's document reports
+   * whether they are on screen. It is also how you catch an overlay holding
+   * focus while `main` does not: keystrokes disappear into a click-through
+   * window and the DOM shows nothing that explains it. `manageWindow({
+   * operation: 'focus' })` is the fix once you can see it.
+   */
+  async listWindows(): Promise<{ windows: O8WindowInfo[] }> {
+    const data = unwrapCommandData(await this.sendCommand('list_windows', {}));
+    return { windows: Array.isArray(data.windows) ? data.windows as O8WindowInfo[] : [] };
+  }
+
+  /** Package name/version, OS, every window, and monitors with scale factors. */
+  async getAppInfo(): Promise<O8AppInfo> {
+    return unwrapCommandData(await this.sendCommand('get_app_info', {})) as O8AppInfo;
+  }
+
+  /**
+   * Show / hide / focus / center / minimize a window by label.
+   *
+   * The wire field is `operation`, not `action` — `navigate_webview` and the
+   * `manage_*` commands take `action`, this one does not. Encoded here so
+   * callers never have to discover it through `missing field 'operation'`.
+   */
+  async manageWindow(opts: {
+    operation: O8WindowOperation;
+    windowLabel?: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  }): Promise<{ ok: boolean }> {
+    await this.sendCommand('manage_window', {
+      window_label: opts.windowLabel ?? DEFAULT_WINDOW_LABEL,
+      operation: opts.operation,
+      ...(typeof opts.x === 'number' ? { x: opts.x } : {}),
+      ...(typeof opts.y === 'number' ? { y: opts.y } : {}),
+      ...(typeof opts.width === 'number' ? { width: opts.width } : {}),
+      ...(typeof opts.height === 'number' ? { height: opts.height } : {}),
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Real webview navigation through the Rust `navigate_webview` command.
+   *
+   * Deliberately separate from `navigate(path)`, which stays the in-app SPA
+   * route transition (see the comment there and issue #863). `navigate`
+   * here performs a genuine document load, so use it for a hard reload, a URL
+   * outside the app's own routes, or an overlay window — not for moving
+   * between o8's own pages, which this would freeze mid-route.
+   */
+  async navigateWebview(opts: {
+    action: O8NavigateWebviewAction;
+    url?: string;
+    windowLabel?: string;
+  }): Promise<{ action?: string; url?: string }> {
+    const data = unwrapCommandData(await this.sendCommand('navigate_webview', {
+      window_label: opts.windowLabel ?? DEFAULT_WINDOW_LABEL,
+      action: opts.action,
+      ...(typeof opts.url === 'string' ? { url: opts.url } : {}),
+    }));
+    return data as { action?: string; url?: string };
+  }
+
+  /** Emit, target, listen on or sniff the internal Tauri event bus. */
+  async manageEvents(opts: {
+    action: O8EventsAction;
+    event?: string;
+    target?: string;
+    payload?: unknown;
+    durationMs?: number;
+  }): Promise<Record<string, unknown>> {
+    return unwrapCommandData(await this.sendCommand('manage_events', {
+      action: opts.action,
+      ...(typeof opts.event === 'string' ? { event: opts.event } : {}),
+      ...(typeof opts.target === 'string' ? { target: opts.target } : {}),
+      ...(opts.payload !== undefined ? { payload: opts.payload } : {}),
+      ...(typeof opts.durationMs === 'number' ? { duration_ms: opts.durationMs } : {}),
+    }));
+  }
+
+  /**
+   * Restart the app. The Rust side clamps the delay to 100–5000ms.
+   *
+   * `restart_app` is the one command whose payload is camelCase (`delayMs`);
+   * every other command takes snake_case fields. Sending `delay_ms` here is
+   * silently ignored and you get the 500ms default.
+   */
+  async restartApp(opts: { delayMs?: number } = {}): Promise<{ ok: boolean; message?: string }> {
+    const data = unwrapCommandData(await this.sendCommand('restart_app', {
+      ...(typeof opts.delayMs === 'number' ? { delayMs: opts.delayMs } : {}),
+    }));
+    return { ok: true, message: typeof data.message === 'string' ? data.message : undefined };
   }
 
   dispose(): void {
