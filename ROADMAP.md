@@ -4,7 +4,7 @@ o8 is the governance layer for autonomous engineering teams: approvals, audit, o
 
 ## How to read this
 
-A checkbox is checked only when the child issue is closed and its fix is on `main` at or before tag `v0.1.749`, and a status percent is checked divided by total, rounded to the nearest 5. Each open arc has one tracking issue whose checklist is the real progress; the percent here only summarizes it. Frontier arcs carry a verdict and a date instead of a percent, because they are not committed work yet, and a Frontier arc graduates into a pillar when it ships its first child. Run `node scripts/roadmap-status.mjs` to recompute the numbers from the tracking issues; it prints a table and does not rewrite this file.
+A checkbox is checked only when the child issue is closed and its fix is on `main` at or before the latest release tag (`v0.1.749` when this page was written), and a status percent is checked divided by total, rounded to the nearest 5. Each open arc has one tracking issue whose checklist is the real progress; the percent here only summarizes it. Frontier arcs carry a verdict and a date instead of a percent, because they are not committed work yet, and a Frontier arc graduates into a pillar when it ships its first child. Run `node scripts/roadmap-status.mjs` to recompute the numbers from the tracking issues; it prints a table and does not rewrite this file.
 
 ## 1. Governance is the product
 
