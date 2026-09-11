@@ -23,7 +23,9 @@ export interface BudgetResult {
   reason: string | null;
   baselineValue: number | null;
   deltaValue: number | null;
-  deltaStatus: 'improved' | 'regressed' | 'unchanged' | 'missing' | 'no-baseline';
+  deltaStatus: 'improved' | 'regressed' | 'unchanged' | 'missing' | 'no-baseline' | 'incomparable';
+  deltaReason?: string;
+  measurementMethod?: string | null;
 }
 
 export interface BudgetEvaluation {
@@ -69,7 +71,7 @@ export function metricObservations(receipt: InteractionReceiptLike): Array<{
 }>;
 export function evaluateInteractionBudgets(
   receipt: InteractionReceiptLike,
-  baseline?: { metrics?: Record<string, { value?: number | null }>; source?: string } | null,
+  baseline?: { metrics?: Record<string, { value?: number | null; measurementMethod?: string | null }>; source?: string } | null,
   options?: { forceAbsolute?: boolean },
 ): BudgetEvaluation;
 export function checkReceiptValidity(receipt: InteractionReceiptLike): string[];

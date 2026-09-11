@@ -102,6 +102,21 @@ design-page digest), and the sample count behind every distribution.
 
 ## The measurement order is part of the contract
 
+Startup input uses `page-readiness-plus-trusted-input-paint-v1`: the page stamps
+when its active textarea is visible and editable after hydration, then verifies
+the first trusted keyboard input remains in that same textarea through paint.
+The metric adds readiness time and input-to-paint time. It excludes the test
+driver's idle/protocol wait between those phases, recording that excluded wait
+and the full hydration-to-paint wall time separately in `observation`. Disabled,
+replaced, untrusted or unpainted input cannot produce a pass. The observer stops
+after the first input or its deadline; it does not run during the idle soak.
+
+Older startup observations ended when the driver read the page. They included
+driver delay and are not comparable to this method. The raw receipts remain
+unchanged; baseline deltas report `incomparable` across a method change. New
+observations must be collected before accepting a replacement startup baseline.
+The 2,000 ms startup ceiling is unchanged.
+
 The scenarios run in a fixed order — cold boot, fleet reveal, active-context
 reveal with composer readiness observed concurrently, keystrokes, Design Mode,
 soak, warm relaunch, falsification, then inventory as the final measured step.

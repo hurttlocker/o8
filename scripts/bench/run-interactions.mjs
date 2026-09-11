@@ -23,6 +23,7 @@ import { measureDesignMode, measureWarmRelaunch } from './interactions/design-an
 import { closeMeasuredBrowser, launchMeasuredBrowser } from './interactions/browser-runtime.mjs';
 import { scenarioResult } from './interactions/statistics.mjs';
 import { runSoak } from './interactions/soak.mjs';
+import { installStartupReadinessProbe, readStartupReadinessSample, STARTUP_MEASUREMENT_METHOD } from './interactions/startup-readiness.mjs';
 import {
   INTERACTION_BUDGETS,
   checkReceiptValidity,
@@ -124,6 +125,7 @@ async function openInstrumentedPage(browser, baseUrl, { injectedDelayMs = 0, boo
     }
   });
   await page.addInitScript(instrumentationInitScript, { injectedDelayMs, selectedRepoId });
+  await page.addInitScript(installStartupReadinessProbe, { timeoutMs: bootTimeoutMs });
   let response;
   try {
     response = await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'domcontentloaded', timeout: bootTimeoutMs });
@@ -155,9 +157,6 @@ function unavailableObservation(label, error) {
     note: `${label} failed: ${error instanceof Error ? error.message : String(error)}`,
   };
 }
-
-// Time from the hydration boundary until a composer will accept input. This is
-// measured in page time, not wall-clock around a protocol round trip.
 
 // The fleet reveal: the operator clicks Projects and the generated repositories
 // paint in the left panel. This is the rendered entry point the scale fixtures
@@ -239,15 +238,9 @@ async function waitForComposer(page, timeoutMs) {
   try {
     await page.locator(COMPOSER_SELECTOR).first().waitFor({ state: 'visible', timeout: timeoutMs });
   } catch {
-    return { durationMs: null, note: `no ${COMPOSER_SELECTOR} became visible within ${timeoutMs}ms` };
+    return { ready: false, note: `no ${COMPOSER_SELECTOR} became visible within ${timeoutMs}ms` };
   }
-  const durationMs = await page.evaluate(() => {
-    const hydratedAtMs = globalThis.__o8Interactions?.hydratedAtMs;
-    return Number.isFinite(hydratedAtMs) ? Number((performance.now() - hydratedAtMs).toFixed(2)) : null;
-  }).catch(() => null);
-  return Number.isFinite(durationMs)
-    ? { durationMs, phases: {} }
-    : { durationMs: null, note: 'hydration boundary was never stamped, so first-interaction time has no origin' };
+  return { ready: true };
 }
 
 async function sampleKeystrokes(page, samples) {
@@ -412,8 +405,10 @@ async function measureScale({ browser, browserPid, scale, runConfig }) {
     const fleetReveal = blocked
       ? { durationMs: null, note: blocked }
       : await measureFleetReveal(page, scale, runConfig.revealTimeoutMs);
-    const composerReady = await composerPending;
+    await composerPending;
     const keystrokes = blocked ? [] : await sampleKeystrokes(page, runConfig.samples);
+    const startupInput = blocked ? { durationMs: null, note: blocked }
+      : await page.evaluate(readStartupReadinessSample);
     // Measure tab switching inside the active restored workspace before the
     // repo-row scenario opens a second repo-bound pane. Reading every pill in
     // the split header can otherwise target an inactive sibling workspace.
@@ -501,7 +496,11 @@ async function measureScale({ browser, browserPid, scale, runConfig }) {
     const scenarios = {
       dashboard_cold_ready_ms: scenarioResult({ samples: coldBoot, phaseNames: PHASE_NAMES, unavailableReason: blocked }),
       warm_relaunch_ready_ms: scenarioResult({ samples: [warmRelaunch], phaseNames: PHASE_NAMES, unavailableReason: blocked }),
-      first_interaction_accepted_ms: scenarioResult({ samples: [composerReady], phaseNames: PHASE_NAMES, unavailableReason: blocked }),
+      first_interaction_accepted_ms: {
+        ...scenarioResult({ samples: [startupInput], phaseNames: PHASE_NAMES, unavailableReason: blocked }),
+        measurementMethod: STARTUP_MEASUREMENT_METHOD,
+        observation: startupInput,
+      },
       fleet_reveal_ms: scenarioResult({ samples: [fleetReveal], phaseNames: PHASE_NAMES, unavailableReason: blocked }),
       active_context_reveal_ms: scenarioResult({ samples: [activeContext], phaseNames: PHASE_NAMES, unavailableReason: blocked }),
       composer_keystroke_to_paint_ms: scenarioResult({ samples: keystrokes, phaseNames: PHASE_NAMES, unavailableReason: blocked }),
