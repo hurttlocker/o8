@@ -6340,20 +6340,15 @@ function sendTerminalBench(
   client: ClientState,
   event: string,
   requestId: unknown,
+  outputOnly = false,
 ) {
   if (!terminalWorkloadStats) return;
-  for (const attachment of terminalAttachments.values()) {
-    terminalWorkloadStats.recordRetainedEscapeState(
-      attachment.sessionName,
-      attachment.scrollbackChunks.join(''),
-    );
-  }
   send(client, {
     channel: 'terminal-bench',
     event,
     data: {
       requestId: typeof requestId === 'string' ? requestId : null,
-      snapshot: terminalWorkloadStats.snapshot(),
+      snapshot: terminalWorkloadStats.capture(terminalAttachments.values(), outputOnly),
     },
   });
 }
@@ -6379,7 +6374,7 @@ function handleTerminalBenchVisibility(client: ClientState, msg: Record<string, 
 }
 
 function handleTerminalBenchStats(client: ClientState, msg: Record<string, unknown>) {
-  sendTerminalBench(client, 'stats', msg.requestId);
+  sendTerminalBench(client, 'stats', msg.requestId, msg.outputOnly === true);
 }
 
 const TERMINAL_HISTORY_TRUNCATED_MARKER = '\r\n[terminal history truncated during hidden replay]\r\n';

@@ -156,6 +156,22 @@ export class TerminalWorkloadStats {
     alternate.retainedExit = retained.includes('\x1b[?1049l') || retained.includes('O8_ALT_SCREEN_EXIT_');
   }
 
+  capture(attachments: Iterable<{ sessionName: string; scrollbackChunks: string[] }>, outputOnly = false) {
+    if (outputOnly) {
+      const sessions: Record<string, { lastOutputTail: string; lastOutputAt: number }> = {};
+      for (const [sessionName, session] of this.sessions) {
+        sessions[sessionName] = { lastOutputTail: session.lastOutputTail, lastOutputAt: session.lastOutputAt };
+      }
+      return { schema: 'o8/terminal-output-tails/v1' as const, sessions };
+    }
+    // Full correctness snapshots retain the original escape-state inspection.
+    // Marker polling needs only the bounded output tails, not every scrollback.
+    for (const attachment of attachments) {
+      this.recordRetainedEscapeState(attachment.sessionName, attachment.scrollbackChunks.join(''));
+    }
+    return this.snapshot();
+  }
+
   snapshot(): {
     schema: 'o8/terminal-server-stats/v1';
     lastOutputTailByteCap: number;
