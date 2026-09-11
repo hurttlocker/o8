@@ -50,7 +50,7 @@ Execution is separated from approval. Workers cannot merge their own packets, ev
 | Worker capability boundaries | A worker cannot read or reach anything its packet does not grant. | 75% | Native workers run under the operator's user account and can read the operator's environment. | [#2198](https://github.com/hurttlocker/o8/issues/2198) |
 | Broadcast: the audit trail as a live feed | The operator watches the audit trail instead of only querying it. | 100% | none | shipped in 0.1.717 |
 | Contributor-ready public repo | An outside pull request gets green checks and a human reply without maintainer plumbing. | 85% | This roadmap and the claiming protocol are new. No outside claim has gone through them yet. | [#2199](https://github.com/hurttlocker/o8/issues/2199) |
-| First-diff quality | A governed packet's first diff scores at least as well as the raw model coding alone on the same issue. | 0% | Two blind benchmarks, two months and two model generations apart, both lost three of three to the raw model, and both lost the same two ways: over-engineering and missed sub-requirements. Nobody owns this yet. | [#1684](https://github.com/hurttlocker/o8/issues/1684) |
+| First-diff quality | A governed packet's first diff scores at least as well as the raw model coding alone on the same issue. | 0% | Two blind benchmarks, two months and two model generations apart, both lost three of three to the raw model, and both lost the same two ways: over-engineering and missed sub-requirements. The maintainer owns this one directly. | [#1684](https://github.com/hurttlocker/o8/issues/1684) |
 
 ## 2. Organizational memory
 
@@ -71,7 +71,7 @@ Local worker adapters launch the coding-agent CLIs you already pay for and reuse
 | --- | --- | --- | --- | --- |
 | Execution carriers | A model wrapper is a carrier choice, not a new entry in the runtime registry. | 100% | none | shipped in 0.1.748 |
 | Declarative runtimes | A CLI-shaped runtime is a config row, not a six-file patch. | 100% | none | shipped in 0.1.725 |
-| Carrier coverage and auth probes | A new carrier lands as a registry entry plus a readiness and auth probe, with no fork in the dispatch path. | 65% | Readiness and auth checks are written per CLI. The one adapter waiting is blocked on an upstream build for Intel Macs. | [#2200](https://github.com/hurttlocker/o8/issues/2200) |
+| Carrier coverage and auth probes | A new carrier lands as a registry entry plus a readiness and auth probe, with no fork in the dispatch path. | 50% | Readiness and auth checks are written per CLI, and the operator cannot see what evidence o8 used to call a runtime connected. The one adapter waiting is blocked on an upstream build for Intel Macs. | [#2200](https://github.com/hurttlocker/o8/issues/2200) |
 | OpenCode 2 and ACP | A CLI that is not tied to a subscription works as a worker and as an orchestrator backend. | 80% | An authenticated install can be refused dispatch when the CLI reports an empty provider list. | [#2201](https://github.com/hurttlocker/o8/issues/2201) |
 | Local models first-class | Every surface names its local provider, and a test proves no egress for a full packet lifecycle. | parked | No surface-by-surface local path exists, and nothing proves that a packet leaves nothing behind on the network. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
 
