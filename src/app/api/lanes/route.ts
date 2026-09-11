@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { getLane, getLaneEvents, listLanes, listActiveLanes } from '@/lib/lane/registry';
-import { summarizeLaneArchive } from '@/lib/lane/archive-summary';
+import { summarizeLaneArchive, wasArchivedByOperator } from '@/lib/lane/archive-summary';
 import { collapseArchivedLanesByTask } from '@/lib/lanes/collapse-archived-by-task';
 import { codename } from '@/lib/agents/codename';
 import { dispatch } from '@/lib/lane/commands';
@@ -75,19 +75,25 @@ export async function GET(req: NextRequest) {
   const launchContexts = resolvePacketLaunchContexts(
     resolvedLanes.flatMap((lane) => lane.packetId ? [lane.packetId] : []),
   );
-  const lanes = await Promise.all(resolvedLanes.map(async (lane) => ({
-    ...lane,
-    ...await resolveLaneTranscriptHealth(lane),
-    launchContext: lane.packetId
-      ? launchContexts.get(lane.packetId)?.launchContext ?? null
-      : null,
-    codename: codename(lane.id),
-    mergeMode: mergePolicy.mode,
-    mergeModeNote: mergePolicy.note,
-    archiveSummary: lane.status === 'archived' || lane.status === 'completed'
-      ? summarizeLaneArchive(lane, getLaneEvents(lane.id, 80))
-      : null,
-  })));
+  const lanes = await Promise.all(resolvedLanes.map(async (lane) => {
+    const retired = lane.status === 'archived' || lane.status === 'completed';
+    const archiveEvents = retired ? getLaneEvents(lane.id, 80) : [];
+    return {
+      ...lane,
+      ...await resolveLaneTranscriptHealth(lane),
+      launchContext: lane.packetId
+        ? launchContexts.get(lane.packetId)?.launchContext ?? null
+        : null,
+      codename: codename(lane.id),
+      mergeMode: mergePolicy.mode,
+      mergeModeNote: mergePolicy.note,
+      archiveSummary: retired ? summarizeLaneArchive(lane, archiveEvents) : null,
+      // #2154 — the rail needs to tell an operator's dismissal apart from the
+      // headless loop's auto-archive: the first clears the row, the second
+      // keeps its 24h outcome chip.
+      archivedByOperator: lane.status === 'archived' && wasArchivedByOperator(archiveEvents),
+    };
+  }));
 
   return NextResponse.json({ lanes }, {
     headers: serverTimingHeaders(startedAt, { 'Cache-Control': 'no-store, max-age=0' }),

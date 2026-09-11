@@ -97,3 +97,24 @@ export function summarizeLaneArchive(
     message: 'Archived by the system without merging.',
   };
 }
+
+/**
+ * #2154 — did a HUMAN archive this lane, or did the system tidy it away?
+ *
+ * Both write the same `archived` status, but they mean different things to the
+ * Agents rail: an operator archive is a dismissal ("I'm done looking at this")
+ * and must shrink the rail, while the headless loop's auto-archive of completed
+ * lanes must NOT — those keep their truthful outcome chip for 24h (Q ruling
+ * 2026-07-18). The archiving `status_change` event carries the actor, so the
+ * distinction is already recorded; this reads it back.
+ *
+ * Events arrive oldest-first (see getLaneEvents), so the scan runs backwards and
+ * stops at the most recent archive transition.
+ */
+export function wasArchivedByOperator(events: LaneEvent[]): boolean {
+  const archiveEvent = latestEvent(
+    events,
+    (event) => event.verb === 'status_change' && event.payload.status === 'archived',
+  );
+  return archiveEvent?.actor === 'user';
+}
