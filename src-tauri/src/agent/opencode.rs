@@ -52,11 +52,28 @@ pub(crate) struct OpencodeSession {
 
 impl OpencodeSession {
     pub(crate) fn new(binary: &str, model: Option<&str>) -> Self {
+        Self::resuming(binary, model, None)
+    }
+
+    /// Same seat, continuing a thread this machine already opened. `resume` is
+    /// an opaque `sessionID` the bound text surface held for this conversation
+    /// (#2176) — the first turn of a new conversation passes `None`.
+    pub(crate) fn resuming(binary: &str, model: Option<&str>, resume: Option<&str>) -> Self {
         Self {
             binary: binary.to_string(),
             model: model.map(str::to_string),
-            session_id: None,
+            session_id: resume
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string),
         }
+    }
+
+    /// The thread this session is on, for a caller that has to carry it to the
+    /// next turn. This seat has no o8-side model id, so the handle IS its
+    /// identity across turns.
+    pub(crate) fn resume_handle(&self) -> Option<&str> {
+        self.session_id.as_deref()
     }
 
     /// A screenshot rides the turn as a file attachment, so it has to land on
@@ -203,22 +220,29 @@ pub async fn run_loop(
     .await
 }
 
+/// One bound (phone / managed-messages) turn on the open seat, continuing
+/// `resume` when the conversation already opened a thread. Hands the thread it
+/// ended on back to the caller so the next turn resumes the same one (#2176) —
+/// this seat carries no o8-side model id, so the handle is what binds it.
 pub async fn run_phone_text_loop(
     binary: &str,
     model: Option<&str>,
+    resume: Option<&str>,
     intent: &str,
     ctx: &TaskCtx,
     correlation: ConfirmCorrelation,
-) -> Result<LoopResult, String> {
-    super::claude::run_text_planner_loop_correlated(
-        OpencodeSession::new(binary, model),
+) -> Result<(LoopResult, Option<String>), String> {
+    let (result, session) = super::claude::run_text_planner_loop_correlated_resumable(
+        OpencodeSession::resuming(binary, model, resume),
         model.unwrap_or("opencode"),
         intent,
         ctx,
         "opencode",
         correlation,
     )
-    .await
+    .await?;
+    let handle = session.resume_handle().map(str::to_string);
+    Ok((result, handle))
 }
 
 #[cfg(test)]

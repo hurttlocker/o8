@@ -83,16 +83,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // The phone's model picker only lists the two proprietary CLIs. When it
+  // names none of them, ask the native registry for the seat the operator's
+  // Symon brain setting actually resolves — since #2176 the text surface binds
+  // by registry id, so an open runtime seats it the same way. The availability
+  // gate below reports the native side's own reason when there is no seat.
   const requestedPlanner = await resolveRequestedPlanner(context.model);
-  if (!requestedPlanner) {
-    return NextResponse.json(
-      { ok: false, error: 'no_cli', detail: 'No signed-in native Symon planner CLI is available.' },
-      { status: 501 },
-    );
-  }
   let info: SymonTextPlannerInfo;
   try {
-    info = await readSymonTextPlannerInfo(requestedPlanner);
+    info = await readSymonTextPlannerInfo(requestedPlanner ?? undefined);
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'Desktop bridge unavailable.' },

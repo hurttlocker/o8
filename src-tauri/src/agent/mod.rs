@@ -14,6 +14,7 @@
 //! the loop's `await` from a different thread.
 
 pub mod agent_turn;
+pub mod bound_seat;
 pub mod capabilities;
 pub mod calendar_attention;
 pub mod claude;
@@ -1564,6 +1565,10 @@ pub struct SymonTextPlannerInfo {
     engine: Option<&'static str>,
     model: Option<String>,
     effort: Option<&'static str>,
+    /// The seat named the way Settings → Voice names it — `label · model ·
+    /// effort`, collapsing to `label · runtime-configured` for a seat whose
+    /// model and reasoning both come from the operator's own runtime config.
+    seat: Option<String>,
     tools: Vec<Value>,
     detail: Option<&'static str>,
 }
@@ -1590,10 +1595,15 @@ fn text_task_id(session_id: &str, turn_id: &str) -> Result<String, String> {
     Ok(format!("symon-text:{session_id}:{turn_id}"))
 }
 
-/// Why a resolved seat can still be unusable on the bound text surface.
-pub(crate) const UNBINDABLE_TEXT_PLANNER_MESSAGE: &str =
-    "the selected Symon brain runs its runtime's own configured model, which the text surface cannot pin yet — choose a brain with a model id in Settings → Voice";
-
+/// What the bound text surface (phone Symon, managed messages) can run, and
+/// under what name. The seat's IDENTITY is `engine` — the registry entry id —
+/// and `(engine, model, effort)` is the projection of it that surface already
+/// speaks. A seat whose model comes from the operator's own runtime config has
+/// no o8-side id to project, so it fills the model slot with the registry's
+/// `runtime-configured` marker (#2176) instead of being reported unavailable;
+/// the marker round-trips back through `resolve_bound` and is translated away
+/// before any spawn. What actually resumes such a seat is the per-session
+/// handle in `bound_seat`, which never crosses this bridge.
 pub fn symon_text_planner_info(
     engine: Option<&str>,
     model: Option<&str>,
@@ -1609,28 +1619,12 @@ pub fn symon_text_planner_info(
         },
     };
     match routing {
-        // The text surface resumes a session from a BOUND (engine, model,
-        // effort) triple, so a seat that carries no o8-side model id — an
-        // adapter running whatever model the operator configured for it — is
-        // reported unavailable HERE with the real reason, rather than passed on
-        // as a half-filled triple that reads downstream as "nothing installed".
-        // The voice + escalation paths take that seat happily; only this bound
-        // surface needs the id.
-        planner_route::PlannerRouting::Selected(selection) if selection.model.is_none() => {
-            SymonTextPlannerInfo {
-                available: false,
-                engine: None,
-                model: None,
-                effort: None,
-                tools: Vec::new(),
-                detail: Some(UNBINDABLE_TEXT_PLANNER_MESSAGE),
-            }
-        }
         planner_route::PlannerRouting::Selected(selection) => SymonTextPlannerInfo {
             available: true,
             engine: Some(selection.provider.id),
-            model: selection.model.clone(),
+            model: Some(selection.bound_model().to_string()),
             effort: Some(selection.effort),
+            seat: Some(selection.seat_line()),
             tools: tools::enabled_tools(),
             detail: None,
         },
@@ -1639,6 +1633,7 @@ pub fn symon_text_planner_info(
             engine: None,
             model: None,
             effort: None,
+            seat: None,
             tools: Vec::new(),
             detail: Some(message),
         },
@@ -1647,6 +1642,21 @@ pub fn symon_text_planner_info(
 
 pub async fn run_symon_text_turn(
     app: tauri::AppHandle,
+    session_id: String,
+    turn_id: String,
+    prompt: String,
+    engine: String,
+    model: String,
+    effort: String,
+) -> Result<SymonTextTurnResult, String> {
+    run_symon_text_turn_with(Some(app), session_id, turn_id, prompt, engine, model, effort).await
+}
+
+/// The bound surface's run path. `app` is optional so the real entry can be
+/// driven headless — every app-dependent emit already fails closed on `None`,
+/// the same seam the planner seat tests use for the tool dispatch.
+pub(crate) async fn run_symon_text_turn_with(
+    app: Option<tauri::AppHandle>,
     session_id: String,
     turn_id: String,
     prompt: String,
@@ -1664,12 +1674,15 @@ pub async fn run_symon_text_turn(
         planner_route::PlannerRouting::Unavailable { message } => return Err(message.to_string()),
     };
     let cancel = register_cancel(&task_id);
+    // The conversation key the seat handle is filed under — `session_id` itself
+    // is moved into the confirm correlation below.
+    let bound_session_id = session_id.clone();
     let ctx = TaskCtx {
         task_id: task_id.clone(),
         utterance: prompt.clone(),
         ledger_session_id: Some(session_id.clone()),
         machine_session_id: session_id.clone(),
-        app: Some(app),
+        app,
         screen: None,
         spatial: false,
         crop_png_base64: None,
@@ -1704,14 +1717,26 @@ pub async fn run_symon_text_turn(
             .await
         }
         planner_route::PlannerTransport::OpencodeRun => {
+            // This seat carries no o8-side model id, so what identifies it
+            // across bound turns is the thread it opened (#2176): resume the
+            // one this conversation already holds, and file whatever the turn
+            // ends on for the next one.
+            let resume = bound_seat::handle_for(&bound_session_id, selection.provider.id);
             opencode::run_phone_text_loop(
                 &selection.binary,
                 selection.model.as_deref(),
+                resume.as_deref(),
                 &prompt,
                 &ctx,
                 correlation,
             )
             .await
+            .map(|(result, handle)| {
+                if let Some(handle) = handle {
+                    bound_seat::remember(&bound_session_id, selection.provider.id, handle);
+                }
+                result
+            })
         }
     };
     let interrupted = ctx.is_cancelled();
