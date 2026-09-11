@@ -94,6 +94,9 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   packet.zeroDiffRuntimeRetries = 0;
   advancePacketStorageAdmissionEpoch(packet);
   packet.launchAttempts = 0;
+  // #2195 — "Manual reset required" is only true if the reset actually refreshes
+  // the dispatch-preflight refusal budget.
+  packet.preflightRefusals = 0;
   packet.operatorStopped = false;
   packet.tierEscalated = undefined;
   // #2045 — reset CONSUMES a still-armed alignment (stamps `alignmentResolvedAt`)

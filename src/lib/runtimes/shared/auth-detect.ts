@@ -26,6 +26,7 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   localProviderIds,
   opencodeAuthenticatedProviders,
+  clearOpencodeCliProbeMemo,
   opencodeCliModels,
   opencodeCliResolvesModel,
   probeOpencodeServiceVersion,
@@ -615,6 +616,9 @@ export function invalidateRuntimeAuthCache(): void {
   cache = null;
   snapshotRefresh = null;
   opencodeRefresh = null;
+  // The CLI listings are memoized a level down (#2195); an operator login has to
+  // clear that with everything else, or the refusal it just fixed would persist.
+  clearOpencodeCliProbeMemo();
 }
 
 async function refreshNativeWorkerReadiness(snapshot: RuntimeAuthSnapshot): Promise<RuntimeAuthSnapshot> {

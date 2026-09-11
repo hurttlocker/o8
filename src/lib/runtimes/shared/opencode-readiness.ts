@@ -522,6 +522,8 @@ export function setOpencodeCliProbeDependenciesForTests(
   dependencies: OpencodeCliProbeDependencies | null,
 ): void {
   cliProbeDependenciesForTests = dependencies;
+  // Swapping the probe swaps the answers — never serve one stub's reply to the next.
+  clearOpencodeCliProbeMemo();
 }
 
 async function runOpencodeCliProbe(binaryPath: string, args: string[]): Promise<string> {
@@ -540,8 +542,42 @@ function cliProbeRunner(
   dependencies?: OpencodeCliProbeDependencies,
 ): ((args: string[]) => Promise<string>) | null {
   const injected = dependencies ?? cliProbeDependenciesForTests;
-  if (injected) return injected.run;
-  return binaryPath ? (args: string[]) => runOpencodeCliProbe(binaryPath, args) : null;
+  const run = injected
+    ? injected.run
+    : binaryPath ? (args: string[]) => runOpencodeCliProbe(binaryPath, args) : null;
+  if (!run) return null;
+  return (args: string[]) => memoizedCliProbe(binaryPath, args, run);
+}
+
+// Every probe here is a subprocess, and dispatch preflight asks the same
+// question on every scheduling pass — one packet the gate kept refusing spawned
+// a pair per retry for an install state that had not changed (#2195). Keyed by
+// binary + argv because that is precisely what a listing's answer depends on:
+// nothing read from a config or credential file is memoized, so a config edit or
+// a fresh login is still seen immediately.
+const CLI_PROBE_TTL_MS = 10_000;
+const cliProbeMemo = new Map<string, { promise: Promise<string>; startedAt: number }>();
+
+export function clearOpencodeCliProbeMemo(): void {
+  cliProbeMemo.clear();
+}
+
+function memoizedCliProbe(
+  binaryPath: string | null | undefined,
+  args: string[],
+  run: (args: string[]) => Promise<string>,
+): Promise<string> {
+  const key = `${binaryPath ?? ""} ${args.join(" ")}`;
+  const now = Date.now();
+  const cached = cliProbeMemo.get(key);
+  if (cached && now - cached.startedAt < CLI_PROBE_TTL_MS) return cached.promise;
+  const promise = run(args);
+  cliProbeMemo.set(key, { promise, startedAt: now });
+  // A failed probe is not an answer — never hold one for the window.
+  promise.catch(() => {
+    if (cliProbeMemo.get(key)?.promise === promise) cliProbeMemo.delete(key);
+  });
+  return promise;
 }
 
 /**

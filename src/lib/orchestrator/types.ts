@@ -341,6 +341,17 @@ export interface OrchestratorPacket {
    */
   zeroDiffRuntimeRetries?: number;
   /**
+   * Dispatch-preflight refusal budget spent (#2195). A refusal throws before any
+   * lane exists, so every lane-bound terminal branch in reconcile is unreachable
+   * and the fall-through re-derives the packet back to `queued` — the scheduler's
+   * `blocked` write was un-written on the next tick and the refusal repeated
+   * forever, spawning an auth probe each time. The count lives ON the packet for
+   * the same reason {@link launchAttempts} does: nothing else survives the tick.
+   * Cleared on a successful dispatch (the refusal was transient) and by operator
+   * reset_packet.
+   */
+  preflightRefusals?: number;
+  /**
    * Operator hit Stop — terminal "do not re-dispatch" marker. Checked first in
    * getDispatchBlocker so NO path (headless loop, stall escalation, ralph
    * requeue) can relaunch it. Cleared by reset_packet / explicit relaunch.

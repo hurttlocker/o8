@@ -73,6 +73,8 @@ function friendlyAwaitingInputReason(label: string | null | undefined): string |
 // Mirrors MAX_LAUNCH_ATTEMPTS in scheduling.ts (duplicated across files like the
 // recovery cap above) — the packet-scoped launch/attach retry ceiling.
 const MAX_LAUNCH_ATTEMPTS = 5;
+// Mirrors MAX_PREFLIGHT_REFUSALS in scheduling.ts — the dispatch-preflight ceiling.
+const MAX_PREFLIGHT_REFUSALS = 5;
 const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
 /**
@@ -362,6 +364,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     stallRetries: normalizeAttemptCount(packet.stallRetries),
     zeroDiffRuntimeRetries: normalizeAttemptCount(packet.zeroDiffRuntimeRetries),
     launchAttempts: normalizeAttemptCount(packet.launchAttempts),
+    preflightRefusals: normalizeAttemptCount(packet.preflightRefusals),
     operatorStopped: packet.operatorStopped === true ? true : undefined,
     spendCap: normalizePacketSpendCap(packet.spendCap), spendTelemetry: normalizePacketSpendTelemetry(packet.spendTelemetry),
     contextTelemetry: normalizePacketContextTelemetry(packet.contextTelemetry),
@@ -984,6 +987,20 @@ export function reconcileOrchestratorMissionState(
     if (packet.status === 'failed' && (!domainLane || domainLane.status === 'failed')) {
       next.status = 'failed';
       next.blockedReason = packet.blockedReason ?? null;
+      return next;
+    }
+
+    // #2195 — a spent preflight budget is terminal HERE, not only where the
+    // scheduler wrote it. A refusal throws before a lane exists, so the
+    // lane-bound launch-cap branch below never sees it and the fall-through
+    // re-derives `queued` with `blockedReason` nulled: the scheduler's write was
+    // un-written every headless tick and the refusal repeated forever, spawning
+    // an auth probe each time. Keeping the reason on the packet is what puts the
+    // refusal in front of the operator — PacketCard renders `blockedReason`.
+    if ((packet.preflightRefusals ?? 0) >= MAX_PREFLIGHT_REFUSALS) {
+      next.status = 'failed';
+      next.blockedReason = packet.blockedReason
+        ?? `Dispatch preflight refused ${packet.preflightRefusals} times. Manual reset required.`;
       return next;
     }
 
