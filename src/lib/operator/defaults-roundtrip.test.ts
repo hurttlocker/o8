@@ -47,6 +47,8 @@ const NON_DEFAULT_UPDATE = {
   broadcastVoiceCalendar: false,
   broadcastVoiceCalendarLeadMinutes: 20,
   broadcastVoiceTimeCheckins: false,
+  presentationQuietMode: true,
+  notificationsReviewReady: 'off',
   thinkingEffort: 'low',
   promptCachingEnabled: false,
   orchestratorModel: 'claude-opus-4-8',

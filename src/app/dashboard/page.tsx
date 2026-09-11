@@ -113,6 +113,12 @@ import {
   type GuidedDiscoveryAction,
 } from './ftux';
 import {
+  PARKED_LANES_HEARTBEAT_MS,
+  PARKED_LANES_RUN_ID,
+  type ParkedLanesStatusPayload,
+} from '@/lib/presentation/parked-lanes-snapshot';
+import { watchQuietMode } from '@/lib/presentation/quiet-mode-client';
+import {
   buildOrchestrationPacketBadge,
   buildOrchestrationPacketDraft,
   buildWorkspaceChatTargetOptions,
@@ -4112,6 +4118,15 @@ function DashboardInner() {
     setO8ActiveTab('inbox');
   }, [openRightPanelFromUser]);
 
+  // #2147 — keep this window in step with quiet mode, including a toggle made
+  // from another window or from the native shell.
+  useEffect(() => watchQuietMode(), []);
+
+  // #2147 — the overlay status pill lives in a DIFFERENT window that outlives
+  // this one, so a change-only push leaves it painting a count from a previous
+  // run after every reload. Re-stamp and re-emit on a heartbeat; the pill drops
+  // anything older than PARKED_LANES_STALE_AFTER_MS, so a dashboard that went
+  // away lets the count lapse instead of freezing it.
   useEffect(() => {
     if (!canUseTauriEvents()) return;
     const breakdown = parkedLanes.reduce<Record<string, number>>((acc, lane) => {
@@ -4129,17 +4144,24 @@ function DashboardInner() {
     const tooltip = parts.length > 0
       ? `${parts.join(' · ')}${repos.length > 0 ? ` · ${repos.slice(0, 3).join(', ')}` : ''}`
       : 'No lanes ready for review';
-    import('@tauri-apps/api/event')
-      .then(({ emit }) => {
-        void emit('o8:parked-lanes-status', {
-          count: parkedLanes.length,
-          waiting: parkedLanes.length,
-          repos,
-          breakdown,
-          tooltip,
-        });
-      })
-      .catch(() => {});
+    const publish = () => {
+      import('@tauri-apps/api/event')
+        .then(({ emit }) => {
+          void emit('o8:parked-lanes-status', {
+            count: parkedLanes.length,
+            waiting: parkedLanes.length,
+            repos,
+            breakdown,
+            tooltip,
+            emittedAt: Date.now(),
+            runId: PARKED_LANES_RUN_ID,
+          } satisfies ParkedLanesStatusPayload);
+        })
+        .catch(() => {});
+    };
+    publish();
+    const heartbeat = setInterval(publish, PARKED_LANES_HEARTBEAT_MS);
+    return () => clearInterval(heartbeat);
   }, [parkedLanes]);
 
   useEffect(() => {

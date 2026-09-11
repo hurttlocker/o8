@@ -265,6 +265,11 @@ mod imp {
     /// the mouse, order front nonactivating, and arm the 90s safety auto-disarm.
     pub fn arm(app: &tauri::AppHandle) {
         use tauri::Manager;
+        // #2147 — quiet mode owns overlay visibility for its duration. Arming
+        // would cover the presenter's whole monitor with a capture layer.
+        if crate::presentation::overlay_show_blocked() {
+            return;
+        }
         *lock_stash() = Stash::new();
         ARMED.store(true, Ordering::SeqCst);
         let generation = ARM_GEN.fetch_add(1, Ordering::SeqCst) + 1;

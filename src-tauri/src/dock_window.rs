@@ -165,6 +165,12 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
 #[cfg(target_os = "macos")]
 pub fn show(app: &tauri::AppHandle) {
     use tauri::Manager;
+    // #2147 — quiet mode owns overlay visibility for its duration. Without this
+    // the dock re-asserts itself on the next Fn press and lands back on screen
+    // mid-presentation.
+    if crate::presentation::overlay_show_blocked() {
+        return;
+    }
     let Some(window) = app.get_webview_window(DOCK_LABEL) else {
         return;
     };
