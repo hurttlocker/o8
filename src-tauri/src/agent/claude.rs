@@ -26,15 +26,18 @@
 //! ONE persistent `claude` session per task — not a fresh spawn per turn. The
 //! proc boots once (pre-warmed on the Option keydown via `claude_pool`, so even
 //! turn 1 skips the ~1-2s CLI bootstrap), and each turn sends a single user
-//! frame while the model keeps its context. Turn 1 carries the full system
-//! prompt + tool schema + screenshot; follow-ups carry only the tool result — no
-//! re-boot, no transcript re-prefill. Built-in tools are hard-locked off at
-//! spawn (`--tools ""`), not just discouraged by the planner contract, so a
-//! contract-ignoring turn still has nothing to execute.
+//! frame while the model keeps its context. Turn 1 carries the system prompt +
+//! tool catalog + screenshot (shape and cost: `planner_payload`); follow-ups
+//! carry only the tool result — no re-boot, no transcript re-prefill. What each
+//! first turn cost is logged as one `[symon-planner]` line. Built-in tools are
+//! hard-locked off at spawn (`--tools ""`), not just discouraged by the planner
+//! contract, so a contract-ignoring turn still has nothing to execute.
 
 use super::{ConfirmCorrelation, LoopResult, TaskCtx};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+pub(crate) mod planner_payload;
 
 const MAX_TURNS: usize = 10;
 /// Per-turn ceiling. A real model hang is rare; on timeout the turn errors and
@@ -115,51 +118,6 @@ pub(crate) fn ensure_empty_mcp_config() -> Result<String, String> {
             .map_err(|e| format!("failed to write empty mcp config: {e}"))?;
     }
     Ok(path.to_string_lossy().to_string())
-}
-
-/// Build the first planner prompt: persona + (conversation / edit / SCREEN)
-/// context + the tool schema + the JSON-action contract + the user's request.
-/// When a screenshot rides the turn it is sent as an image block (see
-/// `ClaudeSession::send_turn`) and this prompt teaches the screen + draw
-/// protocol — the selected Claude model sees it directly, with no Gemini middleman.
-pub(crate) fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
-    let mut s = super::system_prompt();
-    if let Some(convo) = super::conversation_context() {
-        s.push_str("\n\n");
-        s.push_str(&convo);
-    }
-    if let Some(edit) = &ctx.edit {
-        s.push_str("\n\n");
-        s.push_str(&super::edit_prompt_section(edit));
-    }
-    if let Some(screen) = &ctx.screen {
-        s.push_str("\n\n");
-        s.push_str(&super::screen_prompt_section(screen));
-        // Planner-path rule: the [POINT]/[DRAW] tags must ride INSIDE the `say`
-        // string of the final {"done": true, "say": "..."} action — never as
-        // loose text outside the JSON, or extract_action won't see them.
-        s.push_str(
-            "\n\n(You CAN see the attached screenshot. When you point or draw, put the \
-             [POINT]/[GUIDE]/[DRAW] tags INSIDE the \"say\" string of your final \
-             {\"done\": true, \"say\": \"...\"} action — never outside the JSON object.)",
-        );
-        // Additive teaching diagrams (#1251): if a drawing session is live, give
-        // the brain back the exact tags it just drew so it re-emits + extends
-        // them instead of starting a fresh figure.
-        if let Some(feedback) = super::last_drawing_feedback() {
-            s.push_str(&feedback);
-        }
-    }
-    // `escalate` is withheld unless this turn's front seat differs from the seat
-    // the handoff would land on (#2164). A background brain task never carries
-    // that flag, so it keeps the infinite-handoff guard it always had.
-    let tool_specs: Vec<Value> = super::front_brain::planner_tool_specs(ctx);
-    let tools_json =
-        serde_json::to_string_pretty(&tool_specs).unwrap_or_else(|_| "[]".to_string());
-    s.push_str(PLANNER_CONTRACT);
-    s.push_str(&format!("\n\nAVAILABLE TOOLS (JSON Schema):\n{tools_json}"));
-    s.push_str(&format!("\n\nUser request: {intent}"));
-    s
 }
 
 /// Pull the next-action JSON out of Claude's reply — tolerant of stray code
@@ -660,8 +618,16 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
     // Turn 1 carries the full planner prompt; the screenshot rides it once and
     // remains in session context. Each follow-up replaces `next_message`
     // with just the tool-result block built at the loop foot.
-    let mut next_message = build_first_prompt(intent, ctx);
+    let first_turn = planner_payload::build_first_prompt(intent, ctx);
+    let first_turn_bytes = first_turn.prompt.len();
+    let tool_defs = first_turn.tool_defs;
+    // What the first turn cost, measured from here — the session is already
+    // spawned (or pooled), so this is the model's own time to a usable action.
+    let first_turn_started = Instant::now();
+    let mut next_message = first_turn.prompt;
     let mut next_image: Option<String> = ctx.screen.as_ref().map(|s| s.png_base64.clone());
+    // Schema lookups spent on this task (`planner_payload::TOOL_LOOKUP`).
+    let mut lookups = 0usize;
 
     // Anti-fabrication guard state: does the request ask Symon to DO something
     // (an action, not a pure question)? If so and the loop ends `done` with ZERO
@@ -701,7 +667,17 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
             result => result?,
         };
 
-        let Some(action) = extract_action(&raw) else {
+        let parsed = extract_action(&raw);
+        if turn == 0 {
+            // One stable line per planner task — what the first turn carried and
+            // what it bought. Keep the field names: a dashboard may parse them.
+            log::info!(
+                "[symon-planner] seat={provider}/{model} first_turn_bytes={first_turn_bytes} \
+                 tool_defs={tool_defs} first_action_ms={}",
+                first_turn_started.elapsed().as_millis()
+            );
+        }
+        let Some(action) = parsed else {
             // Not parseable as an action — take the reply as the final answer
             // rather than looping blindly.
             result_text = raw.trim().to_string();
@@ -744,6 +720,27 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
             break;
         };
         let tool_args = action.get("args").cloned().unwrap_or(json!({}));
+
+        // A schema lookup, not an action: the first turn carries the tool
+        // catalog compact, so this is how the planner reaches the parameters of
+        // anything whose full schema did not ride along. Answered here, ahead of
+        // the execution seam — it never reaches the ledger or the confirm gate.
+        if tool_name == planner_payload::TOOL_LOOKUP {
+            lookups += 1;
+            let names = planner_payload::requested_lookup_names(&tool_args);
+            log::info!(
+                "[symon-planner] tool_lookup {}/{} {names:?}",
+                lookups,
+                planner_payload::MAX_TOOL_LOOKUPS
+            );
+            next_message = if lookups > planner_payload::MAX_TOOL_LOOKUPS {
+                planner_payload::lookup_budget_spent_message()
+            } else {
+                planner_payload::tool_lookup_message(&names)
+            };
+            next_image = None;
+            continue;
+        }
 
         if let Some(app) = ctx.app.as_ref() {
             super::emit_agent_event(

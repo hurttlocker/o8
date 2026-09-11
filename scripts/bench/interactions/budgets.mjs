@@ -1,12 +1,13 @@
 import { packagedTargetIdentityProblems } from './targets.mjs';
 
-// Absolute interaction budgets. These are PROVISIONAL: the issue requires a
-// baseline across two shipped release builds before the operator locks them.
+// Absolute interaction budgets locked after two shipped-build observations.
+// The operator acceptance and its explicit exceptions are documented alongside
+// the saved reference; neither raw failures nor numeric limits are rewritten.
 // Each entry records its interaction-tier or already-locked terminal basis.
-// They are acceptance hypotheses, not values tuned from this packet's runs.
+// Values are unchanged from the provisional manifest.
 export const INTERACTION_BUDGETS = Object.freeze({
-  status: 'provisional',
-  lockedBy: null,
+  status: 'locked-v1',
+  lockedBy: 'operator-acceptance-2026-09-11',
   // Each budget cites its basis. Direct-manipulation ceilings come from the
   // repo's own interaction spec (docs/design/STYLEGUIDE.md, "Feedback timing
   // tiers"): 0-100ms means the result IS the feedback, 100ms-1s needs a busy

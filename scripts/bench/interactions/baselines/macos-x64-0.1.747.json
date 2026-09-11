@@ -1,0 +1,331 @@
+{
+  "schema": "o8/interaction-baseline/v1",
+  "status": "accepted",
+  "source": "operator-acceptance-2026-09-11",
+  "observedAt": "2026-09-11T02:18:21.612Z",
+  "acceptance": {
+    "decision": "Accept the v1 reference with documented exceptions; do not relabel the raw run.",
+    "acceptedAt": "2026-09-11",
+    "originalRunStatus": "fail",
+    "numericLimitsChanged": false,
+    "comparisonException": {
+      "metric": "first_interaction_accepted_ms",
+      "scale": 1000,
+      "value": 1083,
+      "previousValue": 929.7,
+      "deltaMs": 153.3,
+      "noiseBandMs": 150,
+      "rawDeltaStatus": "regressed",
+      "scope": "This reference selection only; future comparisons keep the 150 ms band."
+    },
+    "unavailable": {
+      "metric": "design_screenshot_crop_ms",
+      "scales": [
+        50,
+        250,
+        1000
+      ],
+      "followUp": 2175,
+      "numericValue": null
+    },
+    "bounds": "Packaged services and a browser, not native launch timing. Seven input/tab samples and a 12-second quick soak per scale. One startup observation per scale, not a population percentile. Terminal composition is historical for this release.",
+    "rawReceiptSha256": "4a6cede2f4dbbe58f3671ed8aa451d3d6928c794d4d10a93d6fb16910510942d",
+    "comparisonReceiptSha256": "3ccebc007d698b2ad13df0032ab8c241203f9fd3e22776e967d3704c6b5e035d",
+    "comparisonRelease": {
+      "appVersion": "0.1.746",
+      "releaseGitSha": "112d754b924198ece10f8d60ef0107a0d08f6117",
+      "archiveSha256": "53fb5d590eec885e70614af0f22565be058ef979495fc642c3aabd695549b828"
+    }
+  },
+  "observedFrom": {
+    "benchmarkGitSha": "bcd617e3a947aa4be6618384426c5d0dc659bd58",
+    "measuredTarget": {
+      "appVersion": "0.1.747",
+      "buildGitSha": "8bde3690dbda87ab78ff5d37eed2fc2229339919",
+      "buildMode": "packaged",
+      "platform": "darwin",
+      "unavailableReason": null,
+      "serverReportedBuildGitSha": "8bde3690dbda87ab78ff5d37eed2fc2229339919",
+      "buildGitShaSource": "explicit-release-provenance",
+      "reportedBuildMode": "packaged",
+      "artifactTargetDigestSha256": "0916cb70445454bf4970f45fac57089f31d32cf8ff8e37c080dba027f6adf77e",
+      "runtimeIdentityNote": null
+    },
+    "packagedArtifact": {
+      "bundleVersion": "0.1.747",
+      "bundleBuildVersion": "0.1.747",
+      "bundleIdentifier": "ai.o8.desktop",
+      "executableName": "o8",
+      "executableSha256": "80762d03102ccefe0ef971d85ec190c21811f78324ba27436f5627f56697a1b4",
+      "serverEntrySha256": "2fbf7a6236c260fff3ed2b4660eae2f7dfc1f76a07cf0624e9395520b83ee859",
+      "buildId": "K6qVFJv2llhq1Yg11W64Z",
+      "archiveSha256": "d07ab5c48b01707f7b52017cba3040534448be4e030314ffcdfc94171e2e0ee4",
+      "releaseGitSha": "8bde3690dbda87ab78ff5d37eed2fc2229339919",
+      "targetDigestSha256": "0916cb70445454bf4970f45fac57089f31d32cf8ff8e37c080dba027f6adf77e",
+      "signing": {
+        "strictCodesign": true,
+        "gatekeeperAccepted": true,
+        "gatekeeperNotarized": true,
+        "gatekeeperSource": "Notarized Developer ID"
+      },
+      "complete": true,
+      "identityProblems": [],
+      "unavailableReason": null
+    },
+    "fixtureDigests": [
+      {
+        "scale": 50,
+        "digest": "ae2e27323fe3f8c6"
+      },
+      {
+        "scale": 250,
+        "digest": "00a546672d0a5e7d"
+      },
+      {
+        "scale": 1000,
+        "digest": "389e9d0867190618"
+      }
+    ],
+    "host": {
+      "platform": "darwin",
+      "arch": "x64",
+      "cpuCount": 16,
+      "cpuModel": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+      "totalMemoryBytes": 68719476736,
+      "nodeVersion": "v22.23.2",
+      "osRelease": "25.6.0"
+    },
+    "samples": 7,
+    "runStatus": "fail"
+  },
+  "metrics": {
+    "dashboard_cold_ready_ms@50": {
+      "value": 644.7,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "warm_relaunch_ready_ms@50": {
+      "value": 384.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "first_interaction_accepted_ms@50": {
+      "value": 1055.1,
+      "statistic": "p95",
+      "scale": 50,
+      "measurementMethod": "page-readiness-plus-trusted-input-paint-v1"
+    },
+    "fleet_reveal_ms@50": {
+      "value": 90.1,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "active_context_reveal_ms@50": {
+      "value": 97.8,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_ms@50": {
+      "value": 41.5,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_p95_ms@50": {
+      "value": 73.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_arm_ms@50": {
+      "value": 59.6,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_hover_ms@50": {
+      "value": 58.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_select_ms@50": {
+      "value": 44.7,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_prompt_ready_ms@50": {
+      "value": 80,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "tab_switch_ms@50": {
+      "value": 49,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "repo_inventory_ms@50": {
+      "value": 6.1,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "repo_inventory_p95_ms@50": {
+      "value": 10.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "soak_long_task_ms_per_minute@50": {
+      "value": 0,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "dashboard_cold_ready_ms@250": {
+      "value": 750.8,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "warm_relaunch_ready_ms@250": {
+      "value": 376.4,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "first_interaction_accepted_ms@250": {
+      "value": 997.5,
+      "statistic": "p95",
+      "scale": 250,
+      "measurementMethod": "page-readiness-plus-trusted-input-paint-v1"
+    },
+    "fleet_reveal_ms@250": {
+      "value": 95.2,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "active_context_reveal_ms@250": {
+      "value": 127.3,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "composer_keystroke_to_paint_ms@250": {
+      "value": 42.9,
+      "statistic": "p50",
+      "scale": 250
+    },
+    "composer_keystroke_to_paint_p95_ms@250": {
+      "value": 52.4,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "design_arm_ms@250": {
+      "value": 63.9,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "design_hover_ms@250": {
+      "value": 62.7,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "design_select_ms@250": {
+      "value": 47.7,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "design_prompt_ready_ms@250": {
+      "value": 80.9,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "tab_switch_ms@250": {
+      "value": 54,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "repo_inventory_ms@250": {
+      "value": 9.9,
+      "statistic": "p50",
+      "scale": 250
+    },
+    "repo_inventory_p95_ms@250": {
+      "value": 10.1,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "soak_long_task_ms_per_minute@250": {
+      "value": 0,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "dashboard_cold_ready_ms@1000": {
+      "value": 710.3,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "warm_relaunch_ready_ms@1000": {
+      "value": 458.5,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "first_interaction_accepted_ms@1000": {
+      "value": 1083,
+      "statistic": "p95",
+      "scale": 1000,
+      "measurementMethod": "page-readiness-plus-trusted-input-paint-v1"
+    },
+    "fleet_reveal_ms@1000": {
+      "value": 218,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "active_context_reveal_ms@1000": {
+      "value": 172.2,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "composer_keystroke_to_paint_ms@1000": {
+      "value": 43.5,
+      "statistic": "p50",
+      "scale": 1000
+    },
+    "composer_keystroke_to_paint_p95_ms@1000": {
+      "value": 48.8,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "design_arm_ms@1000": {
+      "value": 65.2,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "design_hover_ms@1000": {
+      "value": 58.6,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "design_select_ms@1000": {
+      "value": 46.8,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "design_prompt_ready_ms@1000": {
+      "value": 81,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "tab_switch_ms@1000": {
+      "value": 49.6,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "repo_inventory_ms@1000": {
+      "value": 23.4,
+      "statistic": "p50",
+      "scale": 1000
+    },
+    "repo_inventory_p95_ms@1000": {
+      "value": 28.5,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "soak_long_task_ms_per_minute@1000": {
+      "value": 0,
+      "statistic": "p95",
+      "scale": 1000
+    }
+  }
+}

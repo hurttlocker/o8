@@ -262,6 +262,36 @@ describe('interaction sample statistics', () => {
 });
 
 describe('interaction budgets', () => {
+  it('records the accepted reference without erasing its raw failure or weakening future gates', () => {
+    const accepted = JSON.parse(fs.readFileSync(path.resolve(
+      'scripts/bench/interactions/baselines/macos-x64-0.1.747.json',
+    ), 'utf8'));
+    expect(INTERACTION_BUDGETS.status).toBe('locked-v1');
+    expect(INTERACTION_BUDGETS.lockedBy).toBe('operator-acceptance-2026-09-11');
+    expect(accepted.status).toBe('accepted');
+    expect(accepted.observedFrom.runStatus).toBe('fail');
+    expect(Object.keys(accepted.metrics)).toHaveLength(45);
+    expect(accepted.acceptance.unavailable).toMatchObject({
+      metric: 'design_screenshot_crop_ms', numericValue: null, followUp: 2175,
+    });
+    expect(JSON.stringify(accepted)).not.toContain('/Users/');
+    const method = 'page-readiness-plus-trusted-input-paint-v1';
+    const startup = accepted.metrics['first_interaction_accepted_ms@1000'];
+    expect(startup).toMatchObject({ value: 1083, measurementMethod: method });
+    expect(INTERACTION_BUDGETS.metrics.first_interaction_accepted_ms.max).toBe(2000);
+    expect(INTERACTION_BUDGETS.noiseBandMs.first_interaction_accepted_ms).toBe(150);
+    const candidate = receipt({ fixture: { scale: 1000 }, scenarios: {
+      ...receipt().scenarios,
+      first_interaction_accepted_ms: { ...scenario([1236.3]), measurementMethod: method },
+    } });
+    const evaluation = evaluateInteractionBudgets(candidate, accepted);
+    expect(evaluation.results.find(row => row.metric === 'first_interaction_accepted_ms')).toMatchObject({
+      status: 'pass', baselineValue: 1083, deltaValue: 153.3, deltaStatus: 'regressed',
+    });
+    expect(evaluation.status).toBe('fail');
+    expect(evaluation.unavailable.map(row => row.metric)).toContain('design_screenshot_crop_ms');
+  });
+
   it('passes every measured budget on a healthy production run', () => {
     const evaluation = evaluateInteractionBudgets(receipt());
     expect(evaluation.failed).toEqual([]);

@@ -380,10 +380,10 @@ fn escalate_is_withheld_when_the_front_and_background_seats_coincide() {
             !routing.escalate_available,
             "auto seats the background brain itself — there is nothing to hand off to"
         );
-        let prompt =
-            claude::build_first_prompt("tidy my desktop", &front_ctx(routing.escalate_available));
+        let ctx = front_ctx(routing.escalate_available);
+        let prompt = claude::planner_payload::build_first_prompt("tidy my desktop", &ctx).prompt;
         assert!(
-            !prompt.contains("\"escalate\""),
+            !prompt.contains("\"name\":\"escalate\""),
             "the planner catalog must not offer a handoff to its own seat"
         );
     }
@@ -396,10 +396,10 @@ fn escalate_is_withheld_when_the_front_and_background_seats_coincide() {
             routing.escalate_available,
             "the background brain resolves to codex here, a different seat"
         );
-        let prompt =
-            claude::build_first_prompt("tidy my desktop", &front_ctx(routing.escalate_available));
+        let ctx = front_ctx(routing.escalate_available);
+        let prompt = claude::planner_payload::build_first_prompt("tidy my desktop", &ctx).prompt;
         assert!(
-            prompt.contains("\"escalate\""),
+            prompt.contains("\"name\":\"escalate\""),
             "the handoff is offered when it leads somewhere"
         );
     }
@@ -421,8 +421,9 @@ fn escalate_is_withheld_when_the_front_and_background_seats_coincide() {
 #[test]
 fn a_background_brain_task_never_offers_the_handoff() {
     let _fixture = FrontFixture::new(json!({ "symon_front_brain": "claude" }));
-    let prompt = claude::build_first_prompt("summarize the week", &front_ctx(false));
-    assert!(!prompt.contains("\"escalate\""));
+    let prompt =
+        claude::planner_payload::build_first_prompt("summarize the week", &front_ctx(false)).prompt;
+    assert!(!prompt.contains("\"name\":\"escalate\""));
 }
 
 /// The acceptance case: front brain pinned to a non-Gemini adapter, no Gemini

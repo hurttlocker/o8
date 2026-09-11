@@ -41,7 +41,6 @@
 //! the rule only opens the handoff back up when the two seats genuinely differ.
 
 use super::planner_route::{self, PlannerRouting, PlannerSelection, PlannerTransport};
-use super::TaskCtx;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -268,22 +267,6 @@ where
         fell_back_from,
         escalate_available,
     }
-}
-
-/// The tool catalog a text-planner first turn presents (#2164).
-///
-/// `escalate` is withheld unless this task's front seat differs from the seat
-/// the handoff would land on. Background brain tasks carry
-/// `escalate_available: false`, which is the infinite-handoff guard the planner
-/// prompt has always enforced by stripping the tool outright.
-pub(crate) fn planner_tool_specs(ctx: &TaskCtx) -> Vec<Value> {
-    super::tools::enabled_tools()
-        .into_iter()
-        .filter(|tool| {
-            ctx.escalate_available
-                || tool.get("name").and_then(|name| name.as_str()) != Some("escalate")
-        })
-        .collect()
 }
 
 // ── Ask mode ────────────────────────────────────────────────────────────────
