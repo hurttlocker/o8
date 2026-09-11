@@ -256,3 +256,25 @@ jobs:
       - run: mkdir -p out/frontend out/server
       - run: cargo check --locked
         working-directory: src-tauri
+
+  roadmap-check:
+    name: Roadmap Drift Check
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Fails when a tracking-issue checklist claims a child shipped that is
+      # still open, or when ROADMAP.md's Now section links a closed issue.
+      # Closed-but-unreleased children are listed as awaiting release, not
+      # failed. Read-only; touches no files.
+      - name: Check ROADMAP.md against the tracking issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/roadmap-status.mjs --check
