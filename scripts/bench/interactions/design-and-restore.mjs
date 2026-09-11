@@ -58,6 +58,8 @@ export async function measureDesignMode(page, fixtureUrl, targetBlockId, timeout
       selector: 'button[aria-pressed="true"][title*="Design Mode"]',
       timeoutMs,
       requireFocusInside: false,
+      triggerEvent: 'pointerdown',
+      triggerSelector: DESIGN_BUTTON_SELECTOR,
     }).catch((error) => unavailableSample('Design Mode arm observation', error));
     await page.evaluate(() => true);
     await designButton.click({ timeout: 5_000 });
@@ -118,11 +120,15 @@ export async function measureDesignMode(page, fixtureUrl, targetBlockId, timeout
       selector: DESIGN_COMPOSER_SELECTOR,
       timeoutMs,
       requireFocusInside: false,
+      triggerEvent: 'pointerup',
+      triggerSelector: DRAW_SURFACE_SELECTOR,
     }).catch((error) => unavailableSample('Design Mode selection observation', error));
     const promptPending = page.evaluate(observePaintedCondition, {
       selector: DESIGN_COMPOSER_SELECTOR,
       timeoutMs,
       requireFocusInside: true,
+      triggerEvent: 'pointerup',
+      triggerSelector: DRAW_SURFACE_SELECTOR,
     }).catch((error) => unavailableSample('Design Mode prompt observation', error));
     await page.evaluate(() => true);
     await page.mouse.down();

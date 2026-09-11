@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { startIsolatedStack } from '../terminal-workload/runtime.mjs';
+import { BENCH_TMUX_SERVER_NAME } from '../tmux-scope.mjs';
 
 export const DEFAULT_RELEASE_APP_PATH = '/Applications/o8.app';
 const releaseIdentityCache = new Map();
@@ -230,6 +231,7 @@ export async function startReleaseArtifactStack(root, fixture, appPath, {
     O8_DATA_DIR: fixture.dataDir,
     CORTEX_IDE_DATA_DIR: fixture.dataDir,
     WS_TOKEN: token,
+    O8_DASH_TMUX_SERVER_NAME: BENCH_TMUX_SERVER_NAME,
     O8_INTERACTION_RUN_TAG: runTag ?? '',
   };
   delete env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
