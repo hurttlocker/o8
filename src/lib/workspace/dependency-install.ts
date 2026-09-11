@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -31,6 +31,7 @@ import {
   resolveReceiptedPackageManagerExecution,
 } from './dependency-manager-executable';
 import { dependencyCacheRoot } from './dependency-cache-root';
+import { acquireDependencyCache, type DependencyCachePolicy, type DependencyCacheRetentionReceipt } from './dependency-cache-retention';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +68,7 @@ export interface DependencyInstallReceipt {
   packageManagerExecutable: string;
   privateViewVerified: boolean;
   completedAt: string;
+  cacheRetention?: DependencyCacheRetentionReceipt;
 }
 
 export { DependencyAuthenticationUnsupportedError } from './dependency-manager-config';
@@ -82,6 +84,7 @@ export interface DependencyInstallOptions {
   run?: (invocation: DependencyInstallInvocation) => Promise<void>;
   resolveVersion?: (manager: SupportedPackageManager) => Promise<string>;
   cacheRoot?: string;
+  cachePolicy?: DependencyCachePolicy;
   now?: () => Date;
   materializationIdentity?: WorktreeMaterializationIdentity;
   /** Recipe derived at the same pinned setup boundary, before execution. */
@@ -474,26 +477,6 @@ export async function deriveDependencyInstallRecipe(
   };
 }
 
-async function ensurePrivateDirectory(directoryPath: string, parentPath?: string): Promise<void> {
-  try {
-    await mkdir(directoryPath, { recursive: parentPath === undefined, mode: 0o700 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-  }
-  const [entry, canonical, canonicalRoot] = await Promise.all([
-    lstat(directoryPath),
-    realpath(directoryPath),
-    realpath(parentPath ?? directoryPath),
-  ]);
-  if (!entry.isDirectory()
-    || entry.isSymbolicLink()
-    || (process.platform !== 'win32' && (entry.mode & 0o077) !== 0)
-    || (parentPath !== undefined
-      && canonical !== path.join(canonicalRoot, path.basename(directoryPath)))) {
-    throw new Error('Package-manager recipe authority is not an exact private directory.');
-  }
-}
-
 interface RecipeCacheAuthority {
   root: string;
   cache: string;
@@ -510,27 +493,6 @@ interface InstallRuntimePaths {
   emptyGlobalConfig: string;
   device: number;
   inode: number;
-}
-
-async function ensureRecipeAuthority(
-  cacheRoot: string,
-  recipe: DependencyInstallRecipe,
-): Promise<RecipeCacheAuthority> {
-  if (!/^[0-9a-f]{64}$/.test(recipe.key)
-    || recipe.cacheAuthorityId !== `native-download-cache:${recipe.packageManager}:recipe:${recipe.key}`) {
-    throw new Error('Dependency recipe cache authority is invalid.');
-  }
-  await ensurePrivateDirectory(cacheRoot);
-  const managerRoot = path.join(cacheRoot, recipe.packageManager);
-  await ensurePrivateDirectory(managerRoot, cacheRoot);
-  const root = path.join(managerRoot, recipe.key);
-  await ensurePrivateDirectory(root, managerRoot);
-  const authority = {
-    root,
-    cache: path.join(root, 'cache'),
-  };
-  await ensurePrivateDirectory(authority.cache, root);
-  return authority;
 }
 
 async function createInstallRuntime(
@@ -741,7 +703,6 @@ export async function runDependencyInstall(
     throw new Error('Prepared dependency recipe does not match the saved install command.');
   }
   const cacheRoot = path.resolve(options.cacheRoot ?? dependencyCacheRoot());
-  const authority = await ensureRecipeAuthority(cacheRoot, recipe);
   const execution = await resolveReceiptedPackageManagerExecution(
     recipe.packageManager,
     recipe.packageManagerVersion,
@@ -749,23 +710,39 @@ export async function runDependencyInstall(
   );
   const materializationIdentity = options.materializationIdentity
     ?? await captureWorktreeMaterializationIdentity(workspacePath);
-  const runtime = await createInstallRuntime(workspacePath, materializationIdentity);
+  const authority = await acquireDependencyCache(cacheRoot, recipe, options.cachePolicy);
+  let runtime: InstallRuntimePaths | undefined;
+  let receipt: DependencyInstallReceipt | undefined;
+  let executionStarted = false;
+  let executionFinished = false;
   try {
+    runtime = await createInstallRuntime(workspacePath, materializationIdentity);
     const invocation = nativeInvocation(
       workspacePath, recipe, authority, runtime, execution.executable,
     );
+    executionStarted = true;
     if (options.run) await options.run(invocation);
     else await defaultRun(invocation, options.materializationIdentity);
+    executionFinished = true;
     await ensurePinnedWorkspaceDirectory(workspacePath, materializationIdentity, 'node_modules');
     await auditPrivateDependencyView(workspacePath);
-    return {
+    receipt = {
       recipe,
       packageManagerExecutable: execution.executable,
       privateViewVerified: true,
       completedAt: (options.now ?? (() => new Date()))().toISOString(),
     };
+    return receipt;
   } finally {
-    await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture);
+    try {
+      if (runtime) await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture);
+    } finally {
+      // A failed/aborted runner may leave installer children alive. Keep its cache reservation.
+      if (!executionStarted || executionFinished) {
+        const retention = await authority.release();
+        if (receipt) receipt.cacheRetention = retention;
+      }
+    }
   }
 }
 
