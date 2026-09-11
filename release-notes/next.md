@@ -1,0 +1,7 @@
+- Multitask and parallel orchestration now launch workers with the correct tool instructions and resolve single-repository project context during dispatch.
+- Dispatch failures stay visible, and workers that fail before making changes receive a bounded recovery attempt.
+- The composer shows tool activity and running workers separately, using the same worker state as the crew rows.
+- Archiving a terminal clears its agent row. Orphaned review entries can be discarded safely when their worktree is already gone.
+- Session tabs expose stable handles and accessible tab semantics for reliable navigation.
+- Desktop automation supports window and app commands through the webview client.
+- Runtime readiness recognizes connected providers reported by the installed CLI.
