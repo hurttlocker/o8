@@ -87,38 +87,34 @@ jobs:
               core.info('Fork pull request detected; wrote the report to the job summary.');
             } else {
               try {
-                await github.rest.issues.createComment({
+                // Update the bot's earlier comment in place so repeated pushes
+                // do not stack duplicate reports on the PR.
+                const marker = '## 🔍 PR Review Bot';
+                const existing = await github.paginate(github.rest.issues.listComments, {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body,
+                  per_page: 100,
                 });
+                const mine = existing.find((c) =>
+                  c.user && c.user.type === 'Bot' && typeof c.body === 'string' && c.body.startsWith(marker));
+                if (mine) {
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: mine.id,
+                    body,
+                  });
+                } else {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.issue.number,
+                    body,
+                  });
+                }
               } catch (error) {
                 if (error.status !== 403) throw error;
                 core.warning(`Could not post the PR review comment: ${error.message}`);
-              }
-            }
-
-            // Also post inline review comments on large files
-            const reviewComments = [];
-            for (const f of stats.largeFiles.slice(0, 3)) {
-              reviewComments.push({
-                path: f.filename,
-                position: 1,
-                body: `⚠️ This file has ${f.changes} lines changed (+${f.additions}/-${f.deletions}). Consider if this can be broken into smaller changes.`,
-              });
-            }
-
-            if (!isFork && reviewComments.length > 0) {
-              try {
-                await github.rest.pulls.createReview({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: context.issue.number,
-                  event: 'COMMENT',
-                  comments: reviewComments,
-                });
-              } catch (e) {
-                core.warning(`Could not post inline comments: ${e.message}`);
               }
             }
