@@ -32,7 +32,7 @@ function receipt() {
   };
   return {
     schema: 'o8/terminal-workload/v1',
-    summary: { 1: summary, 12: structuredClone(summary) },
+    summary: { 1: summary, 4: structuredClone(summary), 12: structuredClone(summary) },
     samples: Array.from({ length: 3 }, () => ({
       sessionCount: 12,
       orchestratorLaunches: 0,
@@ -48,11 +48,25 @@ describe('terminal workload locked budgets', () => {
     expect(checkTerminalWorkloadBudgets(receipt())).toEqual([]);
   });
 
+  it('rejects diagnostic CPU profiles even when measured values pass', () => {
+    expect(checkTerminalWorkloadBudgets({ ...receipt(), diagnosticCpuProfile: true })).toContain(
+      'CPU-profiled diagnostic runs cannot satisfy acceptance budgets',
+    );
+  });
+
   it('enforces the strict N=12 realtime improvement gate', () => {
     const candidate = receipt();
     candidate.summary[12].processCpuPercent.realtimeServer = distribution(25, 30);
     expect(checkTerminalWorkloadBudgets(candidate)).toContain(
       'realtime-server CPU p50 25 must be below 25',
+    );
+  });
+
+  it.each([1, 4, 12] as const)('rejects an input timeout at N=%s', (count) => {
+    const candidate = receipt();
+    candidate.summary[count].keystrokeToPaintTimeouts = 1;
+    expect(checkTerminalWorkloadBudgets(candidate)).toContain(
+      `N=${count} visible-input timeouts must be zero, received 1`,
     );
   });
 

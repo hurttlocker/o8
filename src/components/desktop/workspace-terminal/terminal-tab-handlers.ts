@@ -1,5 +1,6 @@
 import { stripPersistedTabs, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { decodeTerminalBase64 } from './terminal-base64';
 import { retainTranscriptEntries } from '@/lib/transcripts/store';
 import {
   adHocLaneTitle,
@@ -460,7 +461,7 @@ export function detectLocalhostPreviews(
 ): LocalhostPreview[] {
   const previews: LocalhostPreview[] = [];
   try {
-    const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+    const bytes = decodeTerminalBase64(data);
     const clean = new TextDecoder().decode(bytes).replace(ANSI_RE, '');
     LOCALHOST_RE.lastIndex = 0;
     const now = Date.now();

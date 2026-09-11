@@ -1,3 +1,5 @@
+import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+
 /**
  * Next.js 16 instrumentation hook — runs once when the server starts.
  *
@@ -20,6 +22,15 @@ export async function register(): Promise<void> {
   // coverage than hardening call sites one at a time. It only removes the
   // current directory from EXECUTABLE lookup; explicit paths still work.
   if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
+
+  // A packaged API sidecar can restart while its WebSocket sibling stays up.
+  // Resume its durable queues without requiring another sibling startup POST.
+  // Keep builds and standalone development on the existing explicit-start path.
+  if (process.env.O8_PACKAGED_APP === '1' && process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
+    void import('@/lib/lane/review-drain-bootstrap')
+      .then(({ ensureReviewQueueDrainStarted }) => ensureReviewQueueDrainStarted())
+      .catch((error) => console.warn('[auto-review] Queue startup failed', { error: String(error) }));
+  }
 
   // Crash telemetry (Rock 2): observe uncaught exceptions + unhandled
   // rejections in the Next server process and persist them to the local crash

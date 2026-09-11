@@ -107,11 +107,14 @@ function textWatchMethods(): Pick<
     },
     recordDeliveryText: (text) => {
       if (watches.size === 0) return;
-      deliveryTail = `${deliveryTail}${text}`.slice(-2048);
+      // Inspect the complete delivery before retaining only the cross-chunk tail.
+      // A coalesced write can contain the marker before its final 2048 bytes.
+      const delivered = `${deliveryTail}${text}`;
       const at = now();
       for (const [marker, watch] of watches) {
-        if (watch.deliveredAt === null && deliveryTail.includes(marker)) watch.deliveredAt = at;
+        if (watch.deliveredAt === null && delivered.includes(marker)) watch.deliveredAt = at;
       }
+      deliveryTail = delivered.slice(-2048);
     },
     recordPaintedText: (text) => {
       const at = now();

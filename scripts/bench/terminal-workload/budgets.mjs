@@ -31,6 +31,9 @@ function finite(value) {
 export function checkTerminalWorkloadBudgets(receipt) {
   const failures = [];
   const budget = LOCKED_TERMINAL_WORKLOAD_BUDGETS;
+  if (receipt?.diagnosticCpuProfile) {
+    failures.push('CPU-profiled diagnostic runs cannot satisfy acceptance budgets');
+  }
   if (receipt?.schema !== 'o8/terminal-workload/v1') {
     failures.push(`schema must be o8/terminal-workload/v1, received ${receipt?.schema ?? 'missing'}`);
     return failures;
@@ -81,8 +84,10 @@ export function checkTerminalWorkloadBudgets(receipt) {
   );
   assertMax('keystroke-to-paint p50', n12.keystrokeToPaintMs?.p50, budget.keystrokeToPaintMsP50Max);
   assertMax('keystroke-to-paint p95', n12.keystrokeToPaintMs?.p95, budget.keystrokeToPaintMsP95Max);
-  if ((n12.keystrokeToPaintTimeouts ?? 0) !== 0) {
-    failures.push(`visible-input timeouts must be zero, received ${n12.keystrokeToPaintTimeouts}`);
+  for (const [count, summary] of Object.entries(receipt.summary ?? {})) {
+    if ((summary.keystrokeToPaintTimeouts ?? 0) !== 0) {
+      failures.push(`N=${count} visible-input timeouts must be zero, received ${summary.keystrokeToPaintTimeouts}`);
+    }
   }
   const renderN1 = n1.attribution?.renderEvents?.p95;
   const renderN12 = n12.attribution?.renderEvents?.p95;

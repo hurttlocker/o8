@@ -81,7 +81,7 @@ export function triggerAutoReview(lane: Lane): void {
 }
 
 /**
- * Start the review queue drain loop. Call once on ws-server startup.
+ * Start the review queue drain loop. Call once per server process.
  */
 export function startReviewQueueDrain(): () => void {
   if (drainTimer) return () => { /* already running */ };

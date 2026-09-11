@@ -1074,6 +1074,12 @@
       ]
     },
     {
+      "path": "tests/bench-design-gesture-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bench-interactions.test.ts",
       "reasons": [
         "process-signal"
@@ -1089,6 +1095,14 @@
       "path": "tests/bench-score-governance.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "tests/bench-tmux-scope-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
