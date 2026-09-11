@@ -161,11 +161,23 @@ describe('workflow policy — every workflow is classified from the filesystem',
     ).toEqual([]);
   });
 
-  it('forbids push triggers, including tag pushes', () => {
-    const violations = workflowFiles
-      .filter((file) => triggerNames(file.workflow).has('push'))
-      .map((file) => file.name);
-    expect(violations, 'push-triggered Actions spend money rechecking direct pushes without review signal').toEqual([]);
+  it('allows push triggers only for pushes to main, never tags or other branches', () => {
+    // The repo is public, so runners are free; a push-to-main run keeps the
+    // default-branch status honest after every merge (ruling 2026-09-11,
+    // reversing the PR-only rule from the private-repo days). Tag pushes and
+    // unscoped pushes stay forbidden: tags would re-run CI on every release,
+    // and an unscoped push would run it on every branch push.
+    const violations: string[] = [];
+    for (const file of workflowFiles) {
+      if (!triggerNames(file.workflow).has('push')) continue;
+      const trigger = file.workflow.on;
+      const push = isRecord(trigger) ? trigger.push : undefined;
+      const branches = isRecord(push) && Array.isArray(push.branches) ? push.branches : null;
+      const tags = isRecord(push) ? push.tags : undefined;
+      const onlyMain = branches !== null && branches.length === 1 && branches[0] === 'main';
+      if (!onlyMain || tags !== undefined) violations.push(file.name);
+    }
+    expect(violations, 'push triggers are permitted only as push.branches: [main] with no tag filter').toEqual([]);
   });
 
   it('allows macOS runners only in workflow_dispatch-only workflows', () => {
