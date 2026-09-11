@@ -45,6 +45,10 @@ pub mod undo;
 pub mod web_localization;
 pub mod worker_pulse;
 
+#[cfg(test)]
+#[path = "planner_seat_tests.rs"]
+mod planner_seat_tests;
+
 pub(crate) use execution::{
     execute_cascaded_tool_call, execute_realtime_tool_call, execute_text_tool_call,
 };
@@ -57,12 +61,6 @@ use tauri::Emitter;
 use tokio::sync::oneshot;
 
 const CONFIRM_TIMEOUT_SECS: u64 = 120;
-
-/// The Claude brain model — front voice brain AND the async escalation target.
-/// Opus 4.8 (adaptive reasoning): strongest model, and it SEES the screenshot
-/// directly via the CLI's stream-json image block (#1252), sub-billed on the
-/// user's Claude subscription. Slower than Gemini — masked by spoken fillers.
-const CLAUDE_BRAIN_MODEL: &str = crate::models::CLAUDE_BRAIN_MODEL;
 
 /// Per-task context threaded into the loop + tool dispatch.
 #[derive(Clone)]
@@ -1771,7 +1769,21 @@ async fn run_agent_inner(
     // falling through to a provider-specific "spawn failed".
     let planner_selection = if model_override.is_none() {
         match planner_route::resolve() {
-            planner_route::PlannerRouting::Selected(selection) => Some(selection),
+            planner_route::PlannerRouting::Selected(selection) => {
+                // One line per task naming the seat — the operator's receipt
+                // that a background run is on the worker/builder tier and not
+                // the frontier orchestrator model (#2155).
+                log::info!(
+                    "[symon-agent] planner seat: {} {} (effort {})",
+                    match selection.provider {
+                        planner_route::PlannerProvider::Claude => "claude",
+                        planner_route::PlannerProvider::Codex => "codex",
+                    },
+                    selection.model,
+                    selection.effort
+                );
+                Some(selection)
+            }
             planner_route::PlannerRouting::Unavailable { message } => {
                 store::finish_task(&task_id, "failed", message, "", "[]");
                 emit_agent_event(
@@ -2116,11 +2128,16 @@ pub fn spawn_agent_with_spatial(
     });
 }
 
-/// Spawn a BACKGROUND task on the Claude brain — the async target of
-/// `escalate(target:"claude_brain")`. Sibling of `spawn_agent`, but forces the
-/// Claude text-planner brain and a `claude-task-` id prefix so the dock can
-/// treat it as a quiet background run distinct from the live voice capsule.
-/// Fire-and-forget: results reach the user via dock events + TTS.
+/// Spawn a BACKGROUND task on the text-planner brain — the async target of
+/// `escalate(target:"claude_brain")`. Sibling of `spawn_agent`, with a
+/// `claude-task-` id prefix so the dock can treat it as a quiet background run
+/// distinct from the live voice capsule. Fire-and-forget: results reach the
+/// user via dock events + TTS.
+///
+/// The seat is resolved through the SHARED planner route (#2155) — no model
+/// override — so this background handoff runs the worker/builder tier and
+/// honors the operator's provider choice instead of pinning the frontier
+/// orchestrator model the way it used to.
 pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
     let task = task.trim().to_string();
     if task.is_empty() {
@@ -2139,14 +2156,7 @@ pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
         };
         log::info!("[symon-agent] claude-task: {} chars", task.len());
         match rt.block_on(async {
-            run_agent_inner(
-                app,
-                task,
-                Some(CLAUDE_BRAIN_MODEL.to_string()),
-                Some("claude-task"),
-                None,
-            )
-            .await
+            run_agent_inner(app, task, None, Some("claude-task"), None).await
         }) {
             Ok(text) => log::info!("[symon-agent] claude-task done: {} chars", text.len()),
             Err(e) => log::warn!("[symon-agent] claude-task failed: {e}"),

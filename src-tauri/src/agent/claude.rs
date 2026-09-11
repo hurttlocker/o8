@@ -265,12 +265,12 @@ impl ClaudeSession {
             "--model",
             model,
         ];
-        // Symon's Fable and Opus brain lanes run at full reasoning power.
-        // Sonnet paths (Smart Compose) keep the CLI default for latency. Effort
-        // is a pure function of the model, so the model-keyed warm pool stays
-        // coherent.
-        if model.starts_with("claude-opus") || model == crate::models::CLAUDE_FABLE_5 {
-            args.extend_from_slice(&["--effort", "high"]);
+        // The BUILDER tier (Opus / Fable) runs at full reasoning power; the
+        // worker-tier planner default and Smart Compose keep the CLI default
+        // for latency (#2155). Effort is a pure function of the model, so the
+        // model-keyed warm pool stays coherent.
+        if let Some(effort) = super::planner_route::claude_effort_flag(model) {
+            args.extend_from_slice(&["--effort", effort]);
         }
         let mut child = Command::new(bin)
             .args(&args)
