@@ -19,6 +19,7 @@ import {
 import { listRepos } from './registry';
 import { removeRepoFromPool } from './remove';
 import { reconcileSqliteProjectRepos } from './project-membership';
+import { isVirtualRepoProjectId, virtualProjectRepoId, virtualRepoProjectId } from './virtual-project-id';
 
 const PROJECTS_DIR = getDataDir();
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
@@ -211,7 +212,7 @@ function writeSqliteProjectMeta(ledger: ProjectsLedger): void {
       'UPDATE projects SET color = ?, sort_order = ? WHERE slug = ?',
     );
     ledger.projects.forEach((project, index) => {
-      if (project.id.startsWith('repo:')) return;
+      if (isVirtualRepoProjectId(project.id)) return;
       const color = project.color ?? null;
       const sortOrder = index;
       const res = updateById.run(color, sortOrder, project.id);
@@ -268,7 +269,7 @@ async function writeLedger(ledger: ProjectsLedger) {
   // derived at read time from unassigned pool repos.
   const persistable: ProjectsLedger = {
     ...ledger,
-    projects: ledger.projects.filter((p) => !p.id.startsWith('repo:')),
+    projects: ledger.projects.filter((p) => !isVirtualRepoProjectId(p.id)),
   };
   await writeFile(PROJECTS_PATH, JSON.stringify(persistable, null, 2), 'utf8');
   // #1099 Phase 2 — mirror the migrated metadata into SQLite so the overlay
@@ -303,7 +304,7 @@ export async function getProjectsLedger(): Promise<ProjectsLedger> {
   // while a concrete project exists, prefer a concrete (non-virtual) project.
   const hasActive = enriched.projects.some((p) => p.id === enriched.activeProjectId);
   if (!hasActive || enriched.activeProjectId === DEFAULT_PROJECT_ID) {
-    const concrete = enriched.projects.find((p) => p.id !== DEFAULT_PROJECT_ID && !p.id.startsWith('repo:'))
+    const concrete = enriched.projects.find((p) => p.id !== DEFAULT_PROJECT_ID && !isVirtualRepoProjectId(p.id))
       ?? enriched.projects.find((p) => p.id !== DEFAULT_PROJECT_ID)
       ?? enriched.projects[0];
     if (concrete) return { ...enriched, activeProjectId: concrete.id };
@@ -392,7 +393,7 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
     const repoPath = normalizeRepoPath(repo.localPath);
     if (assignedPaths.has(repoPath)) continue;
     projects.push({
-      id: `repo:${repo.id}`,
+      id: virtualRepoProjectId(repo.id),
       name: repo.name,
       repoPaths: [repoPath],
       createdAt: repo.addedAt ?? nowIso(),
@@ -583,17 +584,17 @@ export async function deleteProject(projectId: string): Promise<ProjectsLedger> 
   // the pool re-projects as a virtual single-repo row with the same name, so
   // the delete visibly "doesn't work". Repos on disk are never touched, and a
   // repo that another project still uses survives.
-  if (projectId.startsWith('repo:')) {
+  const virtualRepoId = virtualProjectRepoId(projectId);
+  if (virtualRepoId) {
     // Virtual single-repo projection — nothing is persisted for it, so the ONLY
     // real delete is removing the repo from the pool (the old filter-and-write
     // was a silent no-op: writeLedger drops repo:* ids and the projection
     // re-derived the row on every read).
     if (target) {
-      const repoId = projectId.slice('repo:'.length);
       try {
-        await removeRepoFromPool(repoId);
+        await removeRepoFromPool(virtualRepoId);
       } catch (error) {
-        console.warn(`[projects] Failed to remove repo ${repoId} for virtual project delete:`, error);
+        console.warn(`[projects] Failed to remove repo ${virtualRepoId} for virtual project delete:`, error);
       }
     }
     const remaining = ledger.projects.filter((p) => p.id !== projectId);

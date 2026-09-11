@@ -1,10 +1,12 @@
 import { getProject } from '@/lib/projects/store';
+import { findRepoByIdSync } from '@/lib/repos/registry';
+import { virtualProjectRepoId } from '@/lib/repos/virtual-project-id';
 
 /**
  * The JSON-ledger's sentinel project id (`DEFAULT_PROJECT_ID` in
- * `@/lib/repos/projects`). Declared locally rather than imported so this
- * module does not pull the repo-pool graph; `orchestrator-thread-project.test.ts`
- * pins the two together so they cannot drift apart.
+ * `@/lib/repos/projects`). Declared locally rather than imported from the
+ * ledger module; `orchestrator-thread-project.test.ts` pins the two together
+ * so they cannot drift apart.
  */
 export const LEGACY_DEFAULT_PROJECT_ID = 'default';
 
@@ -22,6 +24,28 @@ export const LEGACY_DEFAULT_PROJECT_ID = 'default';
  */
 function isUnresolvedLegacyDefault(projectId: string): boolean {
   return projectId === LEGACY_DEFAULT_PROJECT_ID && !getProject(projectId);
+}
+
+/**
+ * A thread's project id is stamped from the projects ledger, and the ledger
+ * resolves ids out of TWO stores: SQLite holds the real projects, and the
+ * ledger projects a virtual `repo:<id>` row for every pool repo that belongs
+ * to no project. Only SQLite was consulted here, so a single-repo project —
+ * which is what every repo is until a second one joins it — was selectable
+ * and usable everywhere except an orchestrator turn, where it killed the turn
+ * with "Project repo:<id> does not exist" (#2140). Both families resolve on
+ * this one path so the single-repo and multi-repo cases cannot drift apart.
+ */
+function projectIdResolves(projectId: string): boolean {
+  const repoId = virtualProjectRepoId(projectId);
+  return repoId ? Boolean(findRepoByIdSync(repoId)) : Boolean(getProject(projectId));
+}
+
+function unresolvedProjectMessage(projectId: string): string {
+  // A virtual id names a pool repo, not a project — say so rather than
+  // surfacing the internal `repo:<uuid>` form the operator never typed.
+  const repoId = virtualProjectRepoId(projectId);
+  return repoId ? `Repo ${repoId} is not registered.` : `Project ${projectId} does not exist.`;
 }
 
 export type OrchestratorThreadProjectErrorCode =
@@ -68,10 +92,10 @@ function validateRequestedProjectId(value: unknown): string | null {
   }
   const projectId = value.trim();
   if (isUnresolvedLegacyDefault(projectId)) return null;
-  if (!getProject(projectId)) {
+  if (!projectIdResolves(projectId)) {
     throw new OrchestratorThreadProjectError({
       code: 'orchestrator_thread_project_not_found',
-      message: `Project ${projectId} does not exist.`,
+      message: unresolvedProjectMessage(projectId),
       projectId,
     });
   }
