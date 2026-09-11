@@ -52,6 +52,11 @@ mod windows_cli_path;
 // (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
 #[cfg(target_os = "macos")]
 mod entitlement;
+// #2158: scopes the Control-as-Fn dictation substitute to an attached
+// non-Apple external keyboard instead of leaving it a global toggle. macOS-only
+// like the rest of the voice stack (#1673).
+#[cfg(target_os = "macos")]
+mod external_keyboard;
 mod telemetry;
 #[cfg(target_os = "macos")]
 mod url_scheme_handler;
@@ -5624,9 +5629,21 @@ fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> 
     };
     crate::stt::keys::set_pref(&key, value)?;
     if let Some(enabled) = external_symon_left_control {
-        crate::fn_hotkey::set_external_left_control_fn(enabled);
+        // #2158: hand the pref to the device watcher, which re-evaluates at once
+        // and arms the tap only while a non-Apple external keyboard is attached.
+        crate::external_keyboard::set_pref_enabled(enabled);
     }
     Ok(())
+}
+
+/// Live state of the external-keyboard Fn substitute (#2158): the stored pref,
+/// whether the Control-as-Fn remap is actually armed right now, and the product
+/// name of the keyboard arming it. Settings → Voice renders this under the
+/// toggle so "on but waiting for a keyboard" is visible rather than silent.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn external_keyboard_fn_state() -> crate::external_keyboard::ExternalKeyboardFnState {
+    crate::external_keyboard::state()
 }
 
 /// Operator-facing personal memory controls. These commands use the same
@@ -7842,6 +7859,8 @@ pub fn run() {
             voice_prefs_get,
             #[cfg(target_os = "macos")]
             voice_prefs_set,
+            #[cfg(target_os = "macos")]
+            external_keyboard_fn_state,
             #[cfg(target_os = "macos")]
             symon_memory_get,
             #[cfg(target_os = "macos")]
