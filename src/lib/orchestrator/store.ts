@@ -73,8 +73,6 @@ function friendlyAwaitingInputReason(label: string | null | undefined): string |
 // Mirrors MAX_LAUNCH_ATTEMPTS in scheduling.ts (duplicated across files like the
 // recovery cap above) — the packet-scoped launch/attach retry ceiling.
 const MAX_LAUNCH_ATTEMPTS = 5;
-// Mirrors MAX_PREFLIGHT_REFUSALS in scheduling.ts — the dispatch-preflight ceiling.
-const MAX_PREFLIGHT_REFUSALS = 5;
 const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
 /**
@@ -984,23 +982,19 @@ export function reconcileOrchestratorMissionState(
     }
     clearUnprovenReleaseClaim(next);
 
-    if (packet.status === 'failed' && (!domainLane || domainLane.status === 'failed')) {
-      next.status = 'failed';
-      next.blockedReason = packet.blockedReason ?? null;
+    // A preflight refusal has no lane to carry awaiting_human. Hold the packet
+    // blocked while the durable supervisor incident carries the human question.
+    if ((packet.preflightRefusals ?? 0) >= Math.max(1, packet.maxAttempts ?? 3)) {
+      next.status = 'blocked';
+      next.queueState = packet.queueState;
+      next.blockedReason = packet.blockedReason
+        ?? `Dispatch preflight refused ${packet.preflightRefusals}/${packet.maxAttempts ?? 3} attempts. Manual reset required.`;
       return next;
     }
 
-    // #2195 — a spent preflight budget is terminal HERE, not only where the
-    // scheduler wrote it. A refusal throws before a lane exists, so the
-    // lane-bound launch-cap branch below never sees it and the fall-through
-    // re-derives `queued` with `blockedReason` nulled: the scheduler's write was
-    // un-written every headless tick and the refusal repeated forever, spawning
-    // an auth probe each time. Keeping the reason on the packet is what puts the
-    // refusal in front of the operator — PacketCard renders `blockedReason`.
-    if ((packet.preflightRefusals ?? 0) >= MAX_PREFLIGHT_REFUSALS) {
+    if (packet.status === 'failed' && (!domainLane || domainLane.status === 'failed')) {
       next.status = 'failed';
-      next.blockedReason = packet.blockedReason
-        ?? `Dispatch preflight refused ${packet.preflightRefusals} times. Manual reset required.`;
+      next.blockedReason = packet.blockedReason ?? null;
       return next;
     }
 
