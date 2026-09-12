@@ -89,7 +89,8 @@ must use a new run ID rather than replace them.
 Historical v2 collection receipts remain readable and are interpreted as full
 runs. Those receipts predate the new dependency and worker identity fields, so
 they cannot prove that their already-collected arms used owned clones or
-run-specific workers.
+run-specific workers. They also lack pinned runtime settings, so a new judge
+phase can inspect them but refuses to launch judges from them.
 
 These isolation and identity changes do not alter the intervention or scoring.
 The three historical tasks and bases, four arms per task, one 2,400-second turn,

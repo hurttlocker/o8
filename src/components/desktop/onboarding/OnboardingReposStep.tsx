@@ -20,9 +20,11 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { requestPrompt } from '@/components/shared/ConfirmToastHost';
+import { isTauri } from '@/lib/tauri/bridge';
 import type { OnboardingRequest } from './request';
 
 const FONT = 'var(--font-sans-system)';
+const SOURCE_WEB_FOLDER_ERROR = 'The native o8 shell is required to choose a folder. From this source checkout, run `npm run build:cli` then `node cli/dist/o8.mjs repo add /absolute/path`.';
 
 // ── GitHub device flow state (owned by the parent, passed down read-only) ──
 export interface DeviceFlowState {
@@ -192,6 +194,11 @@ export function OnboardingReposStep({
 
   const handleAddFolder = useCallback(async () => {
     if (addingFolder) return;
+    if (!pickFolder && !isTauri()) {
+      setErrorKind('action');
+      setReposError(SOURCE_WEB_FOLDER_ERROR);
+      return;
+    }
     setAddingFolder(true);
     try {
       const folderPath = await (pickFolder ? pickFolder() : pickFolderPath(request));

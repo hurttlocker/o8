@@ -68,11 +68,24 @@ import {
   type PairedMechanicalReceipt,
 } from './coding-paired-mechanical';
 import {
+  codingCollectionSeed,
+  createNotCollectedEndToEnd,
+  readCodingTasks,
+  seededCodingShuffle,
+  type CodingEndToEndNotCollectedReceipt,
+} from './coding-paired-plan';
+import {
   assertPairedDependencySource,
   pairedWorkerName,
   preparePairedDetachedWorktree,
   type PairedDependencyPreparationReceipt,
 } from './coding-paired-worktree';
+import {
+  assertMatchingCodingRuntimeConfig,
+  readCodingRuntimeConfig,
+  type CodingRequestedSettings,
+  type CodingRuntimeConfig,
+} from './coding-runtime-config';
 import { RAW_BRIEF } from './coding-prompts';
 import {
   abortedRunControl,
@@ -91,18 +104,17 @@ import {
   type EndToEndCollectionReceipt,
 } from './run-coding-end-to-end';
 const REPO_ROOT = process.cwd();
-const TASKS_FILE = path.join(REPO_ROOT, 'tests/bench/coding/tasks.json');
 const RUN_ID = (process.env.O8_BENCH_RUN_ID ?? 'contract-v1').trim();
 if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(RUN_ID)) {
   throw new Error('O8_BENCH_RUN_ID must contain only letters, numbers, dot, underscore, and hyphen');
 }
 const WORK_ROOT = path.join(os.tmpdir(), 'o8-bench-coding', RUN_ID);
-const LATEST_DIR = path.join(REPO_ROOT, 'tests/bench/latest');
+const LATEST_DIR = path.resolve(process.env.O8_BENCH_LATEST_DIR
+  ?? path.join(REPO_ROOT, 'tests/bench/latest'));
 const COLLECTION_FILE = path.join(WORK_ROOT, 'collection.json');
 const JUDGING_FILE = path.join(WORK_ROOT, 'judging.json');
 const ARM_TIMEOUT_SECONDS = 2_400;
 const JUDGE_TIMEOUT_SECONDS = 1_800;
-const DEFAULT_SEED = 20_260_802;
 const BENCHMARK_NOTES_PATH = packetImplementationNotesPath('benchmark-contract');
 
 const CONTRACT_INTERVENTION = [
@@ -116,6 +128,7 @@ interface ArmReceipt extends ArmClassification {
   task: number;
   condition: CodingCondition;
   runtime: CodingRuntime;
+  requestedSettings: CodingRequestedSettings;
   treatment: 'raw' | 'contract';
   base: string;
   worktree: string;
@@ -139,13 +152,6 @@ interface ArmReceipt extends ArmClassification {
   measurementNotes: string[];
 }
 
-interface EndToEndNotCollectedReceipt {
-  schema: 'o8/coding-end-to-end-not-collected/v1';
-  runId: string;
-  status: 'not-collected';
-  reason: 'paired-only phase selected';
-}
-
 type CodingCollectionPhase = 'paired-only' | 'full';
 
 interface CollectionReceipt {
@@ -156,9 +162,10 @@ interface CollectionReceipt {
   seed: number;
   armTimeoutSeconds: number;
   conditions: CodingCondition[];
+  requestedSettings?: CodingRuntimeConfig;
   arms: ArmReceipt[];
   outcomeTotals: ArmOutcomeTotals;
-  endToEnd: EndToEndCollectionReceipt | EndToEndNotCollectedReceipt;
+  endToEnd: EndToEndCollectionReceipt | CodingEndToEndNotCollectedReceipt;
   runControl: BenchmarkRunControlReceipt;
 }
 
@@ -167,37 +174,8 @@ function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function readTasks(): CodingTask[] {
-  const parsed = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8')) as { tasks?: CodingTask[] };
-  if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0) {
-    throw new Error('tests/bench/coding/tasks.json has no tasks');
-  }
-  for (const task of parsed.tasks) {
-    if (!Number.isInteger(task.issue) || task.issue <= 0 || !task.base?.trim() || !task.label?.trim()) {
-      throw new Error(`invalid coding task fixture: ${JSON.stringify(task)}`);
-    }
-  }
-  return parsed.tasks;
-}
-
 function issueText(issue: number): string {
   return benchmarkIssueText(REPO_ROOT, issue);
-}
-
-function seededShuffle(seed: number) {
-  let state = seed >>> 0;
-  const next = () => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 4_294_967_296;
-  };
-  return <T,>(items: T[]): T[] => {
-    const copy = [...items];
-    for (let index = copy.length - 1; index > 0; index -= 1) {
-      const swapIndex = Math.floor(next() * (index + 1));
-      [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-    }
-    return copy;
-  };
 }
 
 function armDir(issue: number, condition: CodingCondition): string {
@@ -249,7 +227,12 @@ function emptyCommand(command: string): CommandReceipt {
   };
 }
 
-function runArm(task: CodingTask, condition: CodingCondition, issue: string): ArmReceipt {
+function runArm(
+  task: CodingTask,
+  condition: CodingCondition,
+  issue: string,
+  requestedSettings: CodingRequestedSettings,
+): ArmReceipt {
   const runtime = runtimeForCondition(condition);
   const treatment = treatmentForCondition(condition);
   const prepared = prepareArmWorktree(task, condition);
@@ -263,7 +246,11 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
   fs.writeFileSync(promptPath, prompt);
 
   const worker = pairedWorkerName(RUN_ID, 'arm', task.issue, condition);
-  const spawn = runCommand('ginsu', ['spawn', worker, dir, '--engine', runtime], { cwd: REPO_ROOT });
+  const spawn = runCommand('ginsu', [
+    'spawn', worker, dir, '--engine', runtime,
+    '--model', requestedSettings.model,
+    '--effort', requestedSettings.effort,
+  ], { cwd: REPO_ROOT });
   let send = { receipt: emptyCommand('ginsu send'), stdout: '', stderr: '' };
   let stop = { receipt: emptyCommand('ginsu stop'), stdout: '', stderr: '' };
   if (spawn.receipt.status === 0) {
@@ -314,6 +301,7 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     task: task.issue,
     condition,
     runtime,
+    requestedSettings,
     treatment,
     base: task.base,
     worktree: dir,
@@ -337,35 +325,20 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
   };
 }
 
-function collectionSeed(): number {
-  const parsed = Number(process.env.O8_BENCH_SEED ?? DEFAULT_SEED);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffff_ffff) {
-    throw new Error('O8_BENCH_SEED must be an unsigned 32-bit integer');
-  }
-  return parsed;
-}
-
-function notCollectedEndToEnd(): EndToEndNotCollectedReceipt {
-  return {
-    schema: 'o8/coding-end-to-end-not-collected/v1',
-    runId: RUN_ID,
-    status: 'not-collected',
-    reason: 'paired-only phase selected',
-  };
-}
-
 function createCollection(
   phase: CodingCollectionPhase,
   endToEnd: CollectionReceipt['endToEnd'],
+  requestedSettings: CodingRuntimeConfig,
 ): CollectionReceipt {
   return {
     schema: 'o8/coding-collection/v3',
     runId: RUN_ID,
     phase,
     createdAt: new Date().toISOString(),
-    seed: collectionSeed(),
+    seed: codingCollectionSeed(),
     armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
     conditions: [...CODING_CONDITIONS],
+    requestedSettings,
     arms: [],
     outcomeTotals: countArmOutcomes([]),
     endToEnd,
@@ -373,7 +346,10 @@ function createCollection(
   };
 }
 
-function pairedArmCallbacks(collection: CollectionReceipt): {
+function pairedArmCallbacks(
+  collection: CollectionReceipt,
+  requestedSettings: CodingRuntimeConfig,
+): {
   runArm: (input: { task: CodingTask; condition: CodingCondition }) => ArmReceipt;
   commitArm: (receipt: ArmReceipt) => void;
 } {
@@ -388,7 +364,12 @@ function pairedArmCallbacks(collection: CollectionReceipt): {
         fs.writeFileSync(path.join(WORK_ROOT, 'artifacts', `issue-${task.issue}.md`), issue);
       }
       console.log(`[coding] collecting ${condition} on #${task.issue}`);
-      return runArm(task, condition, issue);
+      return runArm(
+        task,
+        condition,
+        issue,
+        requestedSettings.arms[runtimeForCondition(condition)],
+      );
     },
     commitArm: (receipt) => {
       collection.arms.push(receipt);
@@ -405,7 +386,7 @@ function pairedArmPlan(tasks: CodingTask[], seed: number): Array<{
   task: CodingTask;
   condition: CodingCondition;
 }> {
-  const shuffle = seededShuffle(seed);
+  const shuffle = seededCodingShuffle(seed);
   return tasks.flatMap((task) => (
     shuffle(CODING_CONDITIONS).map((condition) => ({ task, condition }))
   ));
@@ -414,13 +395,14 @@ function pairedArmPlan(tasks: CodingTask[], seed: number): Array<{
 async function collectWhileApprovalHeld(
   tasks: CodingTask[],
   endToEndTasks: EndToEndTask[],
+  requestedSettings: CodingRuntimeConfig,
 ): Promise<CollectionReceipt> {
   const endToEnd = createEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks);
   fs.mkdirSync(WORK_ROOT, { recursive: true });
-  const collection = createCollection('full', endToEnd);
+  const collection = createCollection('full', endToEnd, requestedSettings);
   writeJson(COLLECTION_FILE, collection);
 
-  const callbacks = pairedArmCallbacks(collection);
+  const callbacks = pairedArmCallbacks(collection, requestedSettings);
   await runBackendGuardedCollection({
     arms: pairedArmPlan(tasks, collection.seed),
     ...callbacks,
@@ -460,15 +442,18 @@ async function collectWhileApprovalHeld(
 
 async function collect(
   tasks: CodingTask[],
+  requestedSettings: CodingRuntimeConfig,
   endToEndTasks = readEndToEndTasks(REPO_ROOT),
 ): Promise<CollectionReceipt> {
   assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
   try {
-    return await withTemporaryRequireApproval(() => collectWhileApprovalHeld(tasks, endToEndTasks));
+    return await withTemporaryRequireApproval(() => (
+      collectWhileApprovalHeld(tasks, endToEndTasks, requestedSettings)
+    ));
   } catch (error) {
     if (error instanceof O8BackendAbortError && !fs.existsSync(COLLECTION_FILE)) {
       const endToEnd = createAbortedEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks, error);
-      const collection = createCollection('full', endToEnd);
+      const collection = createCollection('full', endToEnd, requestedSettings);
       collection.runControl = abortedRunControl(error);
       fs.mkdirSync(WORK_ROOT, { recursive: true });
       writeJson(COLLECTION_FILE, collection);
@@ -477,11 +462,18 @@ async function collect(
   }
 }
 
-function collectPairedOnly(tasks: CodingTask[]): CollectionReceipt {
+function collectPairedOnly(
+  tasks: CodingTask[],
+  requestedSettings: CodingRuntimeConfig,
+): CollectionReceipt {
   assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
   fs.mkdirSync(WORK_ROOT, { recursive: true });
-  const collection = createCollection('paired-only', notCollectedEndToEnd());
-  const callbacks = pairedArmCallbacks(collection);
+  const collection = createCollection(
+    'paired-only',
+    createNotCollectedEndToEnd(RUN_ID),
+    requestedSettings,
+  );
+  const callbacks = pairedArmCallbacks(collection, requestedSettings);
   writeJson(COLLECTION_FILE, collection);
   for (const arm of pairedArmPlan(tasks, collection.seed)) {
     callbacks.commitArm(callbacks.runArm(arm));
@@ -536,7 +528,9 @@ function judge(
   tasks: CodingTask[],
   collection: CollectionReceipt,
   requestedPhase: CodingCollectionPhase,
+  requestedSettings: CodingRuntimeConfig,
 ): void {
+  assertMatchingCodingRuntimeConfig(collection.requestedSettings, requestedSettings);
   const collectedPhase = collectionPhase(collection);
   if (collectedPhase !== requestedPhase) {
     throw new Error(
@@ -555,12 +549,13 @@ function judge(
   const verdicts: CodingVerdict[] = [];
   const judgeReceipts: CodingJudgeReceipt[] = [];
   const mappings: Record<number, Record<string, CodingCondition>> = {};
-  const shuffle = seededShuffle(collection.seed);
+  const shuffle = seededCodingShuffle(collection.seed);
   const judgingStartedAt = new Date().toISOString();
   writeJson(JUDGING_FILE, {
     schema: 'o8/coding-judging/v2',
     runId: RUN_ID,
     startedAt: judgingStartedAt,
+    requestedSettings: requestedSettings.judges,
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
   });
@@ -611,6 +606,7 @@ function judge(
         repoRoot: REPO_ROOT,
         workRoot: WORK_ROOT,
         timeoutSeconds: JUDGE_TIMEOUT_SECONDS,
+        requestedSettings: requestedSettings.judges[judgeRuntime],
         runCommand,
       });
       verdicts.push(...result.verdicts);
@@ -619,6 +615,7 @@ function judge(
         schema: 'o8/coding-judging/v2',
         runId: RUN_ID,
         startedAt: judgingStartedAt,
+        requestedSettings: requestedSettings.judges,
         receipts: judgeReceipts,
         blindVerdicts: verdicts,
       });
@@ -665,6 +662,7 @@ function judge(
     schema: 'o8/coding-judging/v2',
     runId: RUN_ID,
     startedAt: judgingStartedAt,
+    requestedSettings: requestedSettings.judges,
     completedAt: new Date().toISOString(),
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
@@ -708,7 +706,7 @@ function preflightPaired(tasks: CodingTask[]): void {
   }
   console.log(
     `[coding] preflight OK: ${tasks.length} fixed tasks, ${CODING_CONDITIONS.length} paired arms/task, ` +
-    `${CODING_JUDGES.length} judges, seed=${collectionSeed()}, run=${RUN_ID}`,
+    `${CODING_JUDGES.length} judges, seed=${codingCollectionSeed()}, run=${RUN_ID}`,
   );
 }
 
@@ -743,7 +741,7 @@ async function main(): Promise<void> {
     || (args.has('--e2e') && args.has('--judge') && args.size === 2)) {
     judgeStandaloneEndToEnd({
       ...standaloneInput,
-      seed: collectionSeed(),
+      seed: codingCollectionSeed(),
       latestDir: LATEST_DIR,
     });
     return;
@@ -754,7 +752,8 @@ async function main(): Promise<void> {
     if (args.size !== 2 || pairedPhases.length !== 1) {
       throw new Error('choose one paired-only phase: --paired --preflight|--collect|--judge|--all');
     }
-    const tasks = readTasks();
+    const requestedSettings = readCodingRuntimeConfig(REPO_ROOT);
+    const tasks = readCodingTasks(REPO_ROOT);
     if (args.has('--preflight')) {
       assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
       preflightPaired(tasks);
@@ -762,15 +761,15 @@ async function main(): Promise<void> {
       return;
     }
     if (args.has('--collect')) {
-      collectPairedOnly(tasks);
+      collectPairedOnly(tasks, requestedSettings);
       return;
     }
     if (args.has('--judge')) {
-      judge(tasks, readCollection(), 'paired-only');
+      judge(tasks, readCollection(), 'paired-only', requestedSettings);
       return;
     }
-    const collection = collectPairedOnly(tasks);
-    judge(tasks, collection, 'paired-only');
+    const collection = collectPairedOnly(tasks, requestedSettings);
+    judge(tasks, collection, 'paired-only', requestedSettings);
     return;
   }
   if (args.size !== 1) {
@@ -779,22 +778,23 @@ async function main(): Promise<void> {
       'use --preflight --e2e to check the standalone experiment without collecting',
     );
   }
-  const tasks = readTasks();
+  const requestedSettings = readCodingRuntimeConfig(REPO_ROOT);
+  const tasks = readCodingTasks(REPO_ROOT);
   const endToEndTasks = readEndToEndTasks(REPO_ROOT);
   if (args.has('--preflight')) {
     preflight(tasks, endToEndTasks);
     return;
   }
   if (args.has('--collect')) {
-    await collect(tasks, endToEndTasks);
+    await collect(tasks, requestedSettings, endToEndTasks);
     return;
   }
   if (args.has('--judge')) {
-    judge(tasks, readCollection(), 'full');
+    judge(tasks, readCollection(), 'full', requestedSettings);
     return;
   }
-  const collection = await collect(tasks, endToEndTasks);
-  judge(tasks, collection, 'full');
+  const collection = await collect(tasks, requestedSettings, endToEndTasks);
+  judge(tasks, collection, 'full', requestedSettings);
 }
 
 void main();

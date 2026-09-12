@@ -12,6 +12,7 @@ import {
 import { parsePacketRecoveryArgs } from '../cli/src/commands/packet/recover';
 import { parseMirrorArgs, runPacketMirrorProof } from '../cli/src/commands/packet/mirror-proof';
 import {
+  parsePacketArguments,
   resolvePacketTargetFromLanes,
   type PacketTargetLane,
 } from '../cli/src/commands/packet/target';
@@ -74,6 +75,21 @@ describe('packet CLI target parsing', () => {
       .toBe('-v flag is broken');
     expect(() => parsePacketRecoveryArgs('steer', ['--message', '--packet', 'pkt-target']))
       .toThrow('--message requires a value.');
+  });
+
+  it('preserves every repeatable value in command order', () => {
+    const parsed = parsePacketArguments([
+      'pkt-target',
+      '--coverage',
+      'R1=src/one.ts',
+      '--coverage=R2=src/two.ts',
+    ], {
+      command: 'review',
+      repeatableValueFlags: ['coverage'],
+    });
+
+    expect(parsed.target).toBe('pkt-target');
+    expect(parsed.multiValues.coverage).toEqual(['R1=src/one.ts', 'R2=src/two.ts']);
   });
 
   it('routes capture and mirror-proof positional targets through the shared parser', () => {

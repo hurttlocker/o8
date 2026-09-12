@@ -14,6 +14,7 @@ import {
   pairedWorkerName,
   type PairedDependencyPreparationReceipt,
 } from './coding-paired-worktree';
+import type { CodingRequestedSettings } from './coding-runtime-config';
 
 export interface CodingJudgeCommandReceipt {
   command: string;
@@ -28,11 +29,13 @@ export interface CodingJudgeCommandReceipt {
 export interface CodingJudgeReceipt {
   task: number;
   judge: CodingJudge;
+  requestedSettings: CodingRequestedSettings;
   promptPath: string;
   outputPath: string;
   replyPath: string;
   worker: string;
   dependencies: PairedDependencyPreparationReceipt;
+  spawn: CodingJudgeCommandReceipt;
   command: CodingJudgeCommandReceipt;
   valid: boolean;
   invalidReason: string | null;
@@ -111,6 +114,7 @@ export function runCodingJudge(input: {
   repoRoot: string;
   workRoot: string;
   timeoutSeconds: number;
+  requestedSettings: CodingRequestedSettings;
   runCommand: RunCommand;
 }): { verdicts: CodingVerdict[]; receipt: CodingJudgeReceipt } {
   const artifactDir = path.join(input.workRoot, 'artifacts');
@@ -127,7 +131,11 @@ export function runCodingJudge(input: {
   if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
   const worker = pairedWorkerName(input.runId, 'judge', input.task.issue, input.judge);
-  const spawn = input.runCommand('ginsu', ['spawn', worker, input.baseDir, '--engine', input.judge], {
+  const spawn = input.runCommand('ginsu', [
+    'spawn', worker, input.baseDir, '--engine', input.judge,
+    '--model', input.requestedSettings.model,
+    '--effort', input.requestedSettings.effort,
+  ], {
     cwd: input.repoRoot,
   });
   let send = { receipt: spawn.receipt, stdout: '', stderr: spawn.stderr };
@@ -170,11 +178,13 @@ export function runCodingJudge(input: {
     receipt: {
       task: input.task.issue,
       judge: input.judge,
+      requestedSettings: input.requestedSettings,
       promptPath,
       outputPath,
       replyPath,
       worker,
       dependencies: input.dependencyPreparation,
+      spawn: spawn.receipt,
       command: send.receipt,
       valid: invalidReason === null,
       invalidReason,

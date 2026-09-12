@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -20,6 +21,17 @@ const RUNNER = path.join(SOURCE_ROOT, 'scripts/bench/run-coding.ts');
 const TSX_LOADER = path.join(SOURCE_ROOT, 'node_modules/tsx/dist/loader.mjs');
 const SERVER_ONLY_STUB = path.join(SOURCE_ROOT, 'scripts/register-server-only-stub.mjs');
 const createdRoots: string[] = [];
+const runtimeConfig = {
+  schema: 'o8/coding-runtime-config/v1',
+  arms: {
+    codex: { model: 'test/codex-arm', effort: 'high' },
+    claude: { model: 'test/claude-arm', effort: 'max' },
+  },
+  judges: {
+    codex: { model: 'test/codex-judge', effort: 'medium' },
+    claude: { model: 'test/claude-judge', effort: 'high' },
+  },
+};
 
 function executable(filePath: string, source: string): void {
   writeFileSync(filePath, source);
@@ -133,6 +145,7 @@ function fixture(): {
   const binDir = path.join(root, 'bin');
   const dataDir = path.join(root, 'no-live-app');
   const tempDir = path.join(root, 'tmp');
+  const configPath = path.join(root, 'runtime-config.json');
   mkdirSync(path.join(root, 'tests/bench/coding'), { recursive: true });
   mkdirSync(path.join(root, 'node_modules/better-sqlite3'), { recursive: true });
   mkdirSync(binDir);
@@ -154,6 +167,7 @@ function fixture(): {
     path.join(root, 'node_modules/better-sqlite3/index.js'),
     'module.exports = () => ({ close() {} });\n',
   );
+  writeFileSync(configPath, `${JSON.stringify(runtimeConfig)}\n`);
   writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
       baseUrl: SOURCE_ROOT,
@@ -173,6 +187,7 @@ function fixture(): {
       CORTEX_IDE_DATA_DIR: dataDir,
       O8_BENCH_REPO: 'fixture/o8',
       O8_BENCH_RUN_ID: 'paired-only-2252',
+      O8_BENCH_RUNTIME_CONFIG: configPath,
       O8_BENCH_FAKE_COMMAND_LOG: logPath,
       O8_BENCH_FAKE_GINSU_STATE: path.join(root, 'ginsu-state.json'),
       O8_BENCH_FAKE_REPO: root,
@@ -221,11 +236,23 @@ describe('paired-only coding benchmark CLI', () => {
 
       expect(collection).toMatchObject({
         phase: 'paired-only',
+        requestedSettings: runtimeConfig,
         arms: { length: 12 },
         endToEnd: { status: 'not-collected' },
         runControl: { status: 'completed', completedArms: 12, backendProbe: null },
       });
       expect(judging.receipts).toHaveLength(6);
+      for (const arm of collection.arms) {
+        expect(arm.requestedSettings).toEqual(runtimeConfig.arms[arm.runtime as 'codex' | 'claude']);
+        expect(arm.spawn.command).toContain(`--model ${arm.requestedSettings.model}`);
+        expect(arm.spawn.command).toContain(`--effort ${arm.requestedSettings.effort}`);
+      }
+      for (const receipt of judging.receipts) {
+        expect(receipt.requestedSettings)
+          .toEqual(runtimeConfig.judges[receipt.judge as 'codex' | 'claude']);
+        expect(receipt.spawn.command).toContain(`--model ${receipt.requestedSettings.model}`);
+        expect(receipt.spawn.command).toContain(`--effort ${receipt.requestedSettings.effort}`);
+      }
       expect(collection.arms.every((arm: { worktree: string }) => (
         !lstatSync(path.join(arm.worktree, 'node_modules')).isSymbolicLink()
       ))).toBe(true);
@@ -246,6 +273,27 @@ describe('paired-only coding benchmark CLI', () => {
     expect(workersByRun.get('run.a')).not.toEqual(workersByRun.get('run_a'));
     expect(ginsuNames.every((name) => /^bc-run-a-[a-f0-9]{16}-(?:arm|judge)-/.test(name))).toBe(true);
   }, 180_000);
+
+  it('requires paired runtime configuration before any launcher or app action', () => {
+    const test = fixture();
+    const env = { ...test.env };
+    delete env.O8_BENCH_RUNTIME_CONFIG;
+    for (const [index, args] of [
+      ['--paired', '--preflight'],
+      ['--paired', '--collect'],
+      ['--paired', '--judge'],
+      ['--paired', '--all'],
+    ].entries()) {
+      const result = runCli(test.root, {
+        ...env,
+        O8_BENCH_RUN_ID: `missing-config-${index}`,
+      }, args);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('O8_BENCH_RUNTIME_CONFIG');
+    }
+    expect(existsSync(test.logPath)).toBe(false);
+    expect(readdirSync(test.dataDir)).toEqual([]);
+  });
 
   it('keeps the legacy full preflight connected to e2e control', () => {
     const test = fixture();

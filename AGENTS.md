@@ -151,7 +151,7 @@ o8 packet retry [--packet <id>] [--reason "..."]         # reset while keeping t
 o8 packet rerun --feedback "..." [--packet <id>]         # fresh worker, immediate relaunch
 o8 packet steer --message "..." [--packet <id>]          # nudge the warm session
 o8 packet merge-preview [--packet <id>]                  # read-only five-layer merge preview
-o8 packet review --approve [--packet <id>] [--expected-sha <sha>] [--commit-message "..."]   # records review, then uses the gated merge path
+o8 packet review --approve [--packet <id>] --expected-sha <full-sha> [--coverage <requirement-id>=<repo-relative-path> ...] [--contract-version <n>] [--commit-message "..."]   # records per-requirement coverage, shows the gate verdict, then merges
 o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # worker context raises an operator card; it does not self-merge
 
 # Task artifacts — hand the operator a sandboxed form; its exact payload returns to you with a receipt
