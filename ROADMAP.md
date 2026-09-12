@@ -16,7 +16,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 ## Now
 
-One arc first: **First ten minutes.** A new operator goes from download to a first merged packet, and the minutes and the stalls are measured. The first measurement exists: from source on a Mac, clone to merged packet took 6.8 minutes with nine stalls, one of them needing maintainer knowledge to pass. The eight product frictions behind those stalls are the arc's children, and the download path is still unmeasured. [#2211](https://github.com/hurttlocker/o8/issues/2211), [receipt](./docs/user/first-run-receipt-2026-09-12.md)
+One arc first: **First ten minutes.** A new operator goes from download to a first merged packet, and the minutes and the stalls are measured. The first measurement exists: from source on a Mac, clone to merged packet took 6.8 minutes with nine stalls, one of them needing maintainer knowledge to pass. The eight product frictions behind those stalls shipped in 0.1.750. The download path is still unmeasured, so the arc stays open until a stranger's run is timed. [#2211](https://github.com/hurttlocker/o8/issues/2211), [receipt](./docs/user/first-run-receipt-2026-09-12.md)
 
 Linux is the next platform milestone. Nine of ten children are shipped; the last is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. [#2060](https://github.com/hurttlocker/o8/issues/2060)
 
@@ -46,7 +46,7 @@ Execution is separated from approval. Workers cannot merge their own packets. Th
 | --- | --- | --- | --- | --- |
 | Lane lifecycle and recovery honesty | No lane stalls silently. Every terminal state is reachable from the UI and the CLI. | open | A preflight-refused packet retries forever without surfacing. A superseded mission leaves its packets live. | [#2197](https://github.com/hurttlocker/o8/issues/2197) |
 | Worker capability boundaries | A worker cannot read or reach anything its packet does not grant. | open | Native workers run under the operator's user account and can read the operator's environment. | [#2198](https://github.com/hurttlocker/o8/issues/2198) |
-| Contributor-ready public repo | An outside pull request gets green checks and a human reply without maintainer plumbing. | open | This roadmap and the claiming protocol are new. No outside claim has gone through them yet. | [#2199](https://github.com/hurttlocker/o8/issues/2199) |
+| Contributor-ready public repo | An outside pull request gets green checks and a human reply without maintainer plumbing. | open | Every child is shipped as of 0.1.750. No outside pull request has gone through the claiming protocol end to end, so the outcome is unproven. | [#2199](https://github.com/hurttlocker/o8/issues/2199) |
 | First-diff quality | A governed packet's first diff scores at least as well as the raw model coding alone on the same issue. | open | Earlier headline comparisons reported 0/3 governed wins, but those scores were later withdrawn because judge bias could not be ruled out. Over-engineering and missed requirements remain the target failure modes. The later [paired contract trial](./docs/user/honest-benchmark-2026-08.md#track-1--coding-does-a-pre-edit-contract-improve-first-diff-quality) was mixed. The [September 12 fixed trial](https://github.com/hurttlocker/o8/issues/1684#issuecomment-5645498074) scored two complete tasks, with zero decisive contract wins in either runtime; one task was excluded for an invalid contract. The decision rule remains unmet. | [#1684](https://github.com/hurttlocker/o8/issues/1684) |
 
 ## 2. Organizational memory
@@ -65,7 +65,6 @@ Local worker adapters launch the coding-agent CLIs you already pay for and reuse
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
 | Carrier coverage and auth probes | A new carrier lands as a registry entry plus a readiness and auth probe, with no fork in the dispatch path. | open | Readiness and auth checks are written per CLI, and the operator cannot see what evidence o8 used to call a runtime connected. The one adapter waiting is blocked on an upstream build for Intel Macs. | [#2200](https://github.com/hurttlocker/o8/issues/2200) |
-| OpenCode 2 and ACP | A CLI that is not tied to a subscription works as a worker and as an orchestrator backend. | open | The empty-provider-list refusal is fixed on main and waits for the next release; after that the arc is shipped. | [#2201](https://github.com/hurttlocker/o8/issues/2201) |
 | Local models first-class | Every surface names its local provider, and a test proves no egress for a full packet lifecycle. | parked | No surface-by-surface local path exists, and nothing proves that a packet leaves nothing behind on the network. The first narrow step is an egress baseline that names every contacted host and surface, even when it fails. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
 
 ## 4. One control plane, every surface
@@ -83,7 +82,7 @@ Two lanes, one pillar. The people lane covers the surfaces a person works in. Th
 
 | Arc | Lane | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- | --- |
-| First ten minutes | people | A stranger goes from download to a first merged packet, and the minutes and the stalls are measured. | open | Measured once, from source: 6.8 minutes and nine stalls. The web loop's folder picker hangs, browser state restores a repository the server never registered, and review approval hits an undocumented second gate. The download path is unmeasured. | [#2211](https://github.com/hurttlocker/o8/issues/2211) |
+| First ten minutes | people | A stranger goes from download to a first merged packet, and the minutes and the stalls are measured. | open | Measured once, from source: 6.8 minutes and nine stalls. The eight frictions from that run shipped in 0.1.750. The download path is unmeasured, and no second run confirms the fixes. | [#2211](https://github.com/hurttlocker/o8/issues/2211) |
 | Design Mode loop | people | "Change this button" is one bounded loop with a before-and-after proof card. | open | Screenshot crop timing is not measured through the supported capture path. | [#1695](https://github.com/hurttlocker/o8/issues/1695) |
 | Agent-facing API manifest | agents | One manifest lists every operator verb and its surfaces, and CI fails when a verb exists on one surface and not another. | open | No manifest exists; parity between the CLI, MCP, and the webview socket is checked by hand. | [#2212](https://github.com/hurttlocker/o8/issues/2212) |
 
@@ -120,7 +119,7 @@ Arcs whose every child is closed and released. They stay here so the pillars rea
 
 - **Governance:** merge-gate truth (0.1.738); dispatch honesty (0.1.749); signed receipts and truth queries (0.1.722); Broadcast, the audit trail as a live feed (0.1.717).
 - **Organizational memory:** Engineering Brain question and answer ([#915](https://github.com/hurttlocker/o8/issues/915)); workers write back to memory (0.1.716); spec review inversion, where the operator owns the rules and agents only annotate.
-- **Runs on your subscriptions:** execution carriers (0.1.748); declarative runtimes (0.1.725).
+- **Runs on your subscriptions:** OpenCode 2 and ACP, a non-subscription CLI as worker and orchestrator backend (0.1.750); execution carriers (0.1.748); declarative runtimes (0.1.725).
 - **One control plane, every surface:** headless o8 (0.1.727); mobile as an operator surface ([#1074](https://github.com/hurttlocker/o8/issues/1074)); voice as an operator surface, with the planning seat as a registry choice (0.1.748).
 - **Smooth for people and for agents:** canvas IDE parity, carved scope ([#1664](https://github.com/hurttlocker/o8/issues/1664), 0.1.722); rich Markdown editor (0.1.722); interaction budgets (0.1.748); control surfaces instead of scraping (0.1.749); CLI and MCP symmetry (0.1.738).
 - **Runs where you are:** Mac hardening, a populated daily profile through an unchanged native idle gate (0.1.748).
