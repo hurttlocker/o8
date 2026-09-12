@@ -59,3 +59,27 @@ AI-assisted pull requests are welcome. The person submitting the pull request is
 ## Review expectations
 
 Review may take time because o8 has a solo maintainer. Opening a pull request does not create a review deadline or guarantee acceptance. Focused fixes with a reproduction and complete verification will be reviewed before speculative or broad changes.
+
+## Repository layout
+
+- [`.agents/`](./.agents/) — repository-local agent skills.
+- [`.claude/`](./.claude/) — Claude runtime settings, agents, hooks, and workflows.
+- [`.codex/`](./.codex/) — Codex runtime settings and agent profiles.
+- [`.github/`](./.github/) — CI workflows and GitHub contribution templates.
+- [`assets/`](./assets/) — README and product media.
+- [`brand/`](./brand/) — logo and application icon sources.
+- [`cli/`](./cli/) — the `o8` command-line client.
+- [`config/`](./config/) — checked-in tool configuration and release examples.
+- [`dist/`](./dist/) — compiled hook scripts consumed by agent runtimes.
+- [`docs/`](./docs/) — user guides, design references, internals, and operations runbooks.
+- [`drizzle/`](./drizzle/) — database migration assets.
+- [`examples/`](./examples/) — example directives and configuration patterns.
+- [`licenses/`](./licenses/) — third-party license texts.
+- [`patches/`](./patches/) — package-manager patches applied during install.
+- [`protocol/`](./protocol/) — realtime protocol contracts and generated bindings.
+- [`public/`](./public/) — static assets served by Next.js.
+- [`scripts/`](./scripts/) — development, verification, build, and release tooling.
+- [`src/`](./src/) — the Next.js application and shared TypeScript domain logic.
+- [`src-tauri/`](./src-tauri/) — the Tauri shell and native Rust code.
+- [`tauri-plugin-mcp/`](./tauri-plugin-mcp/) — the bundled Tauri MCP plugin.
+- [`tests/`](./tests/) — cross-cutting Vitest suites, fixtures, and Playwright specs.

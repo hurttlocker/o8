@@ -40,3 +40,29 @@ The active orchestrator and the dispatched worker runtime are separate choices. 
 API access is default-deny, workers cannot silently bypass review, and merge authority depends on the caller’s principal. Persistent state lets o8 recover lanes and transcripts after process restarts, while explicit stop, retry, and rerun actions keep failures visible instead of guessing that work completed.
 
 For the day-to-day operating loop, continue with the [orchestration playbook](orchestration-playbook.md).
+
+## The loop in one picture
+
+A mission is a goal. Each packet is a scoped unit of work, and each lane is the worker session that carries a packet through execution and review.
+
+```
+   you (or your orchestrator)
+              │
+        create mission ──▶ packets dispatched to workers
+              │                 │  each in an isolated git worktree
+              │                 ▼
+              │            worker codes, reports, heartbeats
+              │                 │
+              ▼                 ▼
+        review the diff ◀── work lands for review
+              │
+     approve ─┴─ reject / steer / rerun
+              │
+            merge  ──▶  audit trail, session ledger, memory
+```
+
+![Four agents on the canvas: two finished and waiting for review, one still working, and a live browser card previewing the page they built](./assets/fleet.gif)
+
+*The canvas — a spatial view of the same fleet. Two agents done and waiting at the gate, one still working, and a browser card previewing the page they just built.*
+
+Merges that fail don't silently die — a five-layer escalation chain (auto-retry → orchestrator escalation → steer the warm session → fresh redispatch → human card) means a lane always has a defined next step. Approvals can route to your phone. The whole loop is drivable three ways: **the app**, **the `o8` CLI**, or **MCP tools** from any MCP client — same verbs, same gates.
