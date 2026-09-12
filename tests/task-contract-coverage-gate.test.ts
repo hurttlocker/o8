@@ -101,6 +101,49 @@ describe('task-contract coverage gate', () => {
       .toBe('cited-path-not-in-change');
   });
 
+  it.each([
+    ['ledger.ts', 'src/lib/ledger.ts'],
+    ['lib/ledger.ts', 'src/lib/ledger.ts'],
+    ['other/src/lib/ledger.ts', 'src/lib/ledger.ts'],
+    ['src/lib/ledger.ts', 'other/src/lib/ledger.ts'],
+    ['/src/lib/ledger.ts', 'src/lib/ledger.ts'],
+    ['../src/lib/ledger.ts', 'src/lib/ledger.ts'],
+  ])('rejects citation %s when the changed path is %s', (productionPath, changedPath) => {
+    const result = evaluateContractCoverage({
+      contract,
+      contractRequired: true,
+      evidence: evidence({
+        entries: [
+          { requirementId: 'R1', productionPath: 'src/lib/publish.ts' },
+          { requirementId: 'R2', productionPath },
+        ],
+      }),
+      reviewedHeadSha: HEAD,
+      changedPaths: ['src/lib/publish.ts', changedPath],
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.missingRequirementIds).toEqual(['R2']);
+    expect(result.checks[1]?.failureReason).toBe('cited-path-not-in-change');
+  });
+
+  it('accepts an exact repository path with a leading dot segment', () => {
+    const result = evaluateContractCoverage({
+      contract,
+      contractRequired: true,
+      evidence: evidence({
+        entries: [
+          { requirementId: 'R1', productionPath: './src/lib/publish.ts' },
+          { requirementId: 'R2', productionPath: 'src/lib/ledger.ts' },
+        ],
+      }),
+      reviewedHeadSha: HEAD,
+      changedPaths: CHANGED,
+    });
+
+    expect(result.status).toBe('passed');
+  });
+
   it('rejects evidence gathered at a different commit than the review authorizes', () => {
     const result = evaluateContractCoverage({
       contract,

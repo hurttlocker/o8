@@ -92,7 +92,7 @@ o8 is building toward an operating system for delegated work: models and agents 
 
 Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and the issues labeled [`claimable`](https://github.com/hurttlocker/o8/issues?q=is%3Aissue+is%3Aopen+label%3Aclaimable) or [`help wanted`](https://github.com/hurttlocker/o8/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). UI changes read [`docs/design`](./docs/design/DESIGN.md) first. The full documentation index is [`docs/README.md`](./docs/README.md); the `o8` CLI reference is [`AGENTS.md`](./AGENTS.md).
 
-Community: [Discord](https://o8.run/discord) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
+Community: [Discord](https://discord.gg/TFK2x9A5WS) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
 
 ## License
 
