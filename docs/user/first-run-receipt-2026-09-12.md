@@ -1,4 +1,4 @@
-# First-run receipt — 2026-09-12
+# First-run receipt, 2026-09-12
 
 This run measured the README's macOS **From source** path from clone start to the first local packet merge. It used a fresh clone, a fresh data directory, and a disposable local Git repository. The installed app was not started or controlled; reuse of browser-origin state became a recorded first-run friction.
 
@@ -25,9 +25,9 @@ The fresh-run mission recorded one attempt, no retry, a local merge at `00:15:52
 
 ## What a stranger would hit first
 
-1. **High — state boundary:** a normal browser profile can restore a repository that the fresh server never registered and attempt work before setup finishes ([#2236](https://github.com/hurttlocker/o8/issues/2236)).
-2. **High — no working repository picker:** the README's web loop presents a local-folder action that waits without opening a chooser or showing a fallback ([#2235](https://github.com/hurttlocker/o8/issues/2235)).
-3. **High — no source control command:** the documented source install starts the servers but does not install `o8` or tell the operator to build and invoke `cli/dist/o8.mjs`. This PR adds those commands.
-4. **Medium — approval has an undocumented second gate:** an approved review cannot supply the coverage evidence the merge gate requires ([#2238](https://github.com/hurttlocker/o8/issues/2238)).
-5. **Medium — local repository signals conflict:** registration reports blocked readiness, then the packet can run and merge, after which the receipt reports a remote push failure ([#2237](https://github.com/hurttlocker/o8/issues/2237), [#2239](https://github.com/hurttlocker/o8/issues/2239)).
-6. **Low — prerequisite wording:** the README assumes `nvm` exists. This PR states the prerequisite and the direct Node 22 alternative.
+1. **High, state boundary:** a normal browser profile can restore a repository that the fresh server never registered and attempt work before setup finishes ([#2236](https://github.com/hurttlocker/o8/issues/2236)).
+2. **High, no working repository picker:** the README's web loop presents a local-folder action that waits without opening a chooser or showing a fallback ([#2235](https://github.com/hurttlocker/o8/issues/2235)).
+3. **High, no source control command:** the documented source install starts the servers but does not install `o8` or tell the operator to build and invoke `cli/dist/o8.mjs`. This PR adds those commands.
+4. **Medium, approval has an undocumented second gate:** an approved review cannot supply the coverage evidence the merge gate requires ([#2238](https://github.com/hurttlocker/o8/issues/2238)).
+5. **Medium, local repository signals conflict:** registration reports blocked readiness, then the packet can run and merge, after which the receipt reports a remote push failure ([#2237](https://github.com/hurttlocker/o8/issues/2237), [#2239](https://github.com/hurttlocker/o8/issues/2239)).
+6. **Low, prerequisite wording:** the README assumes `nvm` exists. This PR states the prerequisite and the direct Node 22 alternative.
