@@ -47,6 +47,12 @@ interface PairedJudgingReceipt {
   };
 }
 
+interface LatestCodingReceipt {
+  judging: {
+    pairedAcceptance?: PairedJudgingReceipt['pairedAcceptance'];
+  };
+}
+
 let fixtureRoot = '';
 let fixtureRepo = '';
 
@@ -188,9 +194,17 @@ function writeCollection(
 function runPersistedJudge(
   label: string,
   mutate?: (arm: PersistedAcceptanceArm) => void,
-): { receipt: PairedJudgingReceipt; ginsuCalls: string[]; stdout: string } {
+): {
+  receipt: PairedJudgingReceipt;
+  latest: LatestCodingReceipt;
+  collectionUnchanged: boolean;
+  ginsuCalls: string[];
+  stdout: string;
+} {
   const runId = `paired-acceptance-${label}-${process.pid}`;
   const workRoot = writeCollection(runId, mutate);
+  const collectionPath = path.join(workRoot, 'collection.json');
+  const originalCollection = fs.readFileSync(collectionPath);
   const binDir = path.join(fixtureRoot, `bin-${label}`);
   const logPath = path.join(fixtureRoot, `ginsu-${label}.log`);
   installFakeGinsu(binDir, logPath);
@@ -217,8 +231,13 @@ function runPersistedJudge(
   const receipt = JSON.parse(
     fs.readFileSync(path.join(workRoot, 'judging.json'), 'utf8'),
   ) as PairedJudgingReceipt;
+  const latest = JSON.parse(
+    fs.readFileSync(path.join(fixtureRepo, 'tests/bench/latest/coding.json'), 'utf8'),
+  ) as LatestCodingReceipt;
   const response = {
     receipt,
+    latest,
+    collectionUnchanged: originalCollection.equals(fs.readFileSync(collectionPath)),
     ginsuCalls: fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean),
     stdout: result.stdout,
   };
@@ -269,6 +288,16 @@ describe('paired coding persisted acceptance boundary', () => {
       },
     },
     {
+      label: 'contract-condition-labelled-raw',
+      reason: 'condition/treatment mismatch',
+      mutate: (arm: PersistedAcceptanceArm) => {
+        if (arm.condition.endsWith('-contract')) {
+          arm.treatment = 'raw';
+          arm.contractObserved = false;
+        }
+      },
+    },
+    {
       label: 'typecheck-failed',
       reason: 'typecheck failed',
       mutate: (arm: PersistedAcceptanceArm) => {
@@ -291,6 +320,8 @@ describe('paired coding persisted acceptance boundary', () => {
     expect(result.receipt.pairedAcceptance.tasks.every((task) => (
       task.reasons.some((entry) => entry.includes(reason))
     ))).toBe(true);
+    expect(result.latest.judging.pairedAcceptance).toEqual(result.receipt.pairedAcceptance);
+    expect(result.collectionUnchanged).toBe(true);
     expect(result.ginsuCalls).toEqual([]);
   });
 
@@ -299,6 +330,8 @@ describe('paired coding persisted acceptance boundary', () => {
 
     expect(result.receipt.pairedAcceptance.tasks).toHaveLength(TASKS.length);
     expect(result.receipt.pairedAcceptance.tasks.every((task) => task.complete)).toBe(true);
+    expect(result.latest.judging.pairedAcceptance).toEqual(result.receipt.pairedAcceptance);
+    expect(result.collectionUnchanged).toBe(true);
     expect(result.receipt.receipts).toHaveLength(TASKS.length * 2);
     expect(result.ginsuCalls.filter((call) => call === 'send')).toHaveLength(TASKS.length * 2);
     expect(result.stdout).toContain('[coding] complete tasks scored: 3');

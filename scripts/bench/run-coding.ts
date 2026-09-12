@@ -684,7 +684,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     },
     collection,
     outcomeTotals: countArmOutcomes([...collection.arms, ...collection.endToEnd.arms]),
-    judging: { receipts: judgeReceipts, mappings },
+    judging: { receipts: judgeReceipts, mappings, pairedAcceptance },
     endToEnd,
     ...summary,
   });

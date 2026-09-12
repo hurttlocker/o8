@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-import type { CodingCondition } from './coding';
+import { treatmentForCondition, type CodingCondition } from './coding';
 import type { ArmClassification, ArmOutcome } from './coding-arm-outcome';
 
 interface CommandEvidence {
@@ -60,6 +60,7 @@ function diffFailure(diffPath: string): string | null {
 
 export function assessPairedArmAcceptance(input: PairedArmEvidence): PairedArmAcceptanceReceipt {
   const reasons: string[] = [];
+  const expectedTreatment = treatmentForCondition(input.condition);
   if (input.terminalStatus !== 'completed') {
     reasons.push(`worker terminal status ${input.terminalStatus ?? 'was not observed'}`);
   }
@@ -72,7 +73,10 @@ export function assessPairedArmAcceptance(input: PairedArmEvidence): PairedArmAc
   if (input.changedFiles.length === 0) reasons.push('no diff produced');
   const diffReason = diffFailure(input.diffPath);
   if (diffReason) reasons.push(diffReason);
-  if (input.treatment === 'contract' && input.contractObserved !== true) {
+  if (input.treatment !== expectedTreatment) {
+    reasons.push(`condition/treatment mismatch: ${input.condition} requires ${expectedTreatment}`);
+  }
+  if (expectedTreatment === 'contract' && input.contractObserved !== true) {
     reasons.push('treatment contract was not observed');
   }
   if (input.mechanical.typecheck.status !== 0) reasons.push('typecheck failed');
