@@ -2224,6 +2224,13 @@
       ]
     },
     {
+      "path": "tests/panel-repos-readiness-scope.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/patch-id-aggregate-carry.test.ts",
       "reasons": [
         "child-process",

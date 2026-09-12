@@ -15,6 +15,7 @@ import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import {
   closeTile,
+  collectLeafNodes,
   collectLeafContentKinds,
   countLeaves,
   createDefaultTileLayout,
@@ -45,6 +46,63 @@ import {
 
 export const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 const ACTIVE_TILE_STORAGE_KEY = 'o8:dashboard-active-tile:v1';
+
+function validatePersistedLayoutRepos(
+  layout: TileLayout,
+  validatedRestorePaths: Array<{ requestedPath: string; canonicalPath: string }>,
+): TileLayout {
+  const canonicalByRequestedPath = new Map(validatedRestorePaths.map((validation) => (
+    [validation.requestedPath, validation.canonicalPath]
+  )));
+  let root = layout.root;
+  for (const leaf of collectLeafNodes(layout.root)) {
+    if (leaf.content.kind !== 'terminal' && leaf.content.kind !== 'canvas') continue;
+    const repoPath = leaf.content.repoPath;
+    if (!repoPath) continue;
+    const canonicalPath = canonicalByRequestedPath.get(repoPath.trim()) ?? null;
+    if (canonicalPath === repoPath) continue;
+    root = replaceTileContent(root, leaf.id, { ...leaf.content, repoPath: canonicalPath });
+  }
+  return root === layout.root ? layout : { ...layout, root };
+}
+
+async function loadValidatedRestorePaths(layout: TileLayout): Promise<{
+  ok: boolean;
+  paths: Array<{ requestedPath: string; canonicalPath: string }>;
+}> {
+  try {
+    const searchParams = new URLSearchParams();
+    const requestedPaths = new Set<string>();
+    for (const leaf of collectLeafNodes(layout.root)) {
+      if (leaf.content.kind !== 'terminal' && leaf.content.kind !== 'canvas') continue;
+      const repoPath = leaf.content.repoPath?.trim();
+      if (repoPath) requestedPaths.add(repoPath);
+    }
+    for (const repoPath of requestedPaths) searchParams.append('restorePath', repoPath);
+    const result = await Promise.race([
+      fetch(`/api/panel/repos?${searchParams.toString()}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      }).then(async (response) => (response.ok ? response.json().catch(() => null) : null)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+    ]) as { repos?: unknown; validatedRestorePaths?: unknown } | null;
+    if (!Array.isArray(result?.repos) || !Array.isArray(result?.validatedRestorePaths)) {
+      return { ok: false, paths: [] };
+    }
+    const paths = result.validatedRestorePaths.filter((entry): entry is {
+      requestedPath: string;
+      canonicalPath: string;
+    } => (
+      typeof entry === 'object'
+      && entry !== null
+      && typeof (entry as { requestedPath?: unknown }).requestedPath === 'string'
+      && typeof (entry as { canonicalPath?: unknown }).canonicalPath === 'string'
+    ));
+    return { ok: true, paths };
+  } catch {
+    return { ok: false, paths: [] };
+  }
+}
 
 interface WorkspaceTerminalTarget {
   tileId: string;
@@ -95,6 +153,7 @@ export function useTileLayout({
 }: UseTileLayoutArgs) {
   const [workspacePreviews, setWorkspacePreviews] = useState<DetectedLocalhostPreview[]>([]);
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
+  const tileLayoutPersistenceAllowedRef = useRef(false);
   const canvasStateByTileIdRef = useRef<Record<string, CanvasTileState>>({});
   const [canvasStateByTileId, setCanvasStateByTileId] = useState<Record<string, CanvasTileState>>({});
 
@@ -264,23 +323,34 @@ export function useTileLayout({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let cancelled = false;
+    tileLayoutPersistenceAllowedRef.current = false;
     const restoreTimer = window.setTimeout(() => {
-      const restored = deserializeTileLayout(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY));
-      const nextLayout = restored ?? createDefaultTileLayout();
-      const storedActiveTileId = window.localStorage.getItem(ACTIVE_TILE_STORAGE_KEY);
-      const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
-        ? storedActiveTileId
-        : getFirstLeaf(nextLayout.root).id;
-      setTileLayout(nextLayout);
-      setActiveTileId(restoredActiveTileId);
-      setTileLayoutHydrated(true);
+      void (async () => {
+        const restored = deserializeTileLayout(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY));
+        const validation = restored ? await loadValidatedRestorePaths(restored) : { ok: true, paths: [] };
+        const nextLayout = restored ? validatePersistedLayoutRepos(restored, validation.paths) : createDefaultTileLayout();
+        if (cancelled) return;
+        tileLayoutPersistenceAllowedRef.current = validation.ok;
+        const storedActiveTileId = window.localStorage.getItem(ACTIVE_TILE_STORAGE_KEY);
+        const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
+          ? storedActiveTileId
+          : getFirstLeaf(nextLayout.root).id;
+        setTileLayout(nextLayout);
+        setActiveTileId(restoredActiveTileId);
+        setTileLayoutHydrated(true);
+      })();
     }, 0);
 
-    return () => window.clearTimeout(restoreTimer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(restoreTimer);
+    };
   }, [setActiveTileId, setTileLayout]);
 
   useEffect(() => {
     if (!tileLayoutHydrated || typeof window === 'undefined') return;
+    if (!tileLayoutPersistenceAllowedRef.current) return;
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(tileLayout));
   }, [tileLayout, tileLayoutHydrated]);
 
