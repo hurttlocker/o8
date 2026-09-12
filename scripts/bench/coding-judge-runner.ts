@@ -10,6 +10,10 @@ import {
   type CodingVerdict,
 } from './coding';
 import { JUDGE_PROMPT } from './coding-prompts';
+import {
+  pairedWorkerName,
+  type PairedDependencyPreparationReceipt,
+} from './coding-paired-worktree';
 
 export interface CodingJudgeCommandReceipt {
   command: string;
@@ -27,6 +31,8 @@ export interface CodingJudgeReceipt {
   promptPath: string;
   outputPath: string;
   replyPath: string;
+  worker: string;
+  dependencies: PairedDependencyPreparationReceipt;
   command: CodingJudgeCommandReceipt;
   valid: boolean;
   invalidReason: string | null;
@@ -96,10 +102,12 @@ function parseJudgeOutput(
 }
 
 export function runCodingJudge(input: {
+  runId: string;
   task: CodingTask;
   judge: CodingJudge;
   inputs: Array<{ blindLabel: string; diffPath: string }>;
   baseDir: string;
+  dependencyPreparation: PairedDependencyPreparationReceipt;
   repoRoot: string;
   workRoot: string;
   timeoutSeconds: number;
@@ -118,7 +126,7 @@ export function runCodingJudge(input: {
   fs.writeFileSync(promptPath, prompt);
   if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
-  const worker = `bjudge${input.task.issue}${input.judge}`;
+  const worker = pairedWorkerName(input.runId, 'judge', input.task.issue, input.judge);
   const spawn = input.runCommand('ginsu', ['spawn', worker, input.baseDir, '--engine', input.judge], {
     cwd: input.repoRoot,
   });
@@ -165,6 +173,8 @@ export function runCodingJudge(input: {
       promptPath,
       outputPath,
       replyPath,
+      worker,
+      dependencies: input.dependencyPreparation,
       command: send.receipt,
       valid: invalidReason === null,
       invalidReason,

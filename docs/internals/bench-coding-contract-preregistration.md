@@ -69,3 +69,22 @@ in the receipt.
 The twelve paired 2x2 arms from `final-v3` remain unchanged. Any repeat of only
 the shipped-output experiment uses the standalone end-to-end flags and a fresh
 immutable run ID, so the paired collection is neither recollected nor overwritten.
+
+### 2026-09-12: isolated paired-only execution
+
+The runner now has an explicit `--paired` modifier for preflight, collection,
+judging, and the combined phase. Paired-only execution does not read or change
+the live approval setting, probe the app, or launch end-to-end missions. Its
+receipt marks end-to-end data as `not-collected`; full and standalone end-to-end
+commands keep their prior behavior.
+
+Each paired arm and judge receives an owned APFS copy-on-write clone of the
+preflight-checked `node_modules` directory instead of a symlink. Worker identities
+also include the immutable run ID, so a new run cannot resume a stopped or archived
+session from an earlier run. Existing worktree paths are preserved and cause a
+refusal; the operator must use a new run ID rather than replace them.
+
+These isolation and identity changes do not alter the intervention or scoring.
+The three historical tasks and bases, four arms per task, one 2,400-second turn,
+two blinded judges, rubric, invalid-arm retention, and greater-than-one-point
+decision rule remain fixed. No new quality score was collected for this amendment.
