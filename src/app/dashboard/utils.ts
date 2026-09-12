@@ -409,7 +409,20 @@ export function worktreeStageTone(status?: WorktreeInfo['status'] | null): Comma
 
 export function normalizeScopePath(value?: string | null) {
   const trimmed = value?.trim();
-  return trimmed ? trimmed.replace(/\/+$/, '') : null;
+  if (!trimmed) return null;
+  const absolute = trimmed.startsWith('/');
+  const segments: string[] = [];
+  for (const segment of trimmed.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length > 0 && segments[segments.length - 1] !== '..') segments.pop();
+      else if (!absolute) segments.push(segment);
+      continue;
+    }
+    segments.push(segment);
+  }
+  if (segments.length === 0) return null;
+  return `${absolute ? '/' : ''}${segments.join('/')}`;
 }
 
 export function pathBelongsToRepoScope(candidatePath?: string | null, repoPath?: string | null) {

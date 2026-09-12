@@ -42,6 +42,11 @@ import {
   findUnscopedCanvasLeaf,
   repoSlugFromRemote,
 } from '../utils';
+import {
+  collectPersistedRepoTileIds,
+  loadValidatedRestorePaths,
+  validatePersistedLayoutRepos,
+} from './tileLayoutRestore';
 
 export const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 const ACTIVE_TILE_STORAGE_KEY = 'o8:dashboard-active-tile:v1';
@@ -95,6 +100,8 @@ export function useTileLayout({
 }: UseTileLayoutArgs) {
   const [workspacePreviews, setWorkspacePreviews] = useState<DetectedLocalhostPreview[]>([]);
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
+  const [unverifiedRestoredRepoTileIds, setUnverifiedRestoredRepoTileIds] = useState<ReadonlySet<string>>(() => new Set());
+  const skipNextTileLayoutPersistenceRef = useRef(false);
   const canvasStateByTileIdRef = useRef<Record<string, CanvasTileState>>({});
   const [canvasStateByTileId, setCanvasStateByTileId] = useState<Record<string, CanvasTileState>>({});
 
@@ -264,23 +271,42 @@ export function useTileLayout({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let cancelled = false;
+    skipNextTileLayoutPersistenceRef.current = false;
     const restoreTimer = window.setTimeout(() => {
-      const restored = deserializeTileLayout(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY));
-      const nextLayout = restored ?? createDefaultTileLayout();
-      const storedActiveTileId = window.localStorage.getItem(ACTIVE_TILE_STORAGE_KEY);
-      const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
-        ? storedActiveTileId
-        : getFirstLeaf(nextLayout.root).id;
-      setTileLayout(nextLayout);
-      setActiveTileId(restoredActiveTileId);
-      setTileLayoutHydrated(true);
+      void (async () => {
+        const restored = deserializeTileLayout(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY));
+        const validation = restored ? await loadValidatedRestorePaths(restored) : { ok: true, paths: [] };
+        const nextLayout = restored && validation.ok
+          ? validatePersistedLayoutRepos(restored, validation.paths)
+          : restored ?? createDefaultTileLayout();
+        if (cancelled) return;
+        setUnverifiedRestoredRepoTileIds(restored && !validation.ok
+          ? collectPersistedRepoTileIds(restored)
+          : new Set());
+        skipNextTileLayoutPersistenceRef.current = !validation.ok;
+        const storedActiveTileId = window.localStorage.getItem(ACTIVE_TILE_STORAGE_KEY);
+        const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
+          ? storedActiveTileId
+          : getFirstLeaf(nextLayout.root).id;
+        setTileLayout(nextLayout);
+        setActiveTileId(restoredActiveTileId);
+        setTileLayoutHydrated(true);
+      })();
     }, 0);
 
-    return () => window.clearTimeout(restoreTimer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(restoreTimer);
+    };
   }, [setActiveTileId, setTileLayout]);
 
   useEffect(() => {
     if (!tileLayoutHydrated || typeof window === 'undefined') return;
+    if (skipNextTileLayoutPersistenceRef.current) {
+      skipNextTileLayoutPersistenceRef.current = false;
+      return;
+    }
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(tileLayout));
   }, [tileLayout, tileLayoutHydrated]);
 
@@ -708,6 +734,7 @@ export function useTileLayout({
     setWorkspacePreviews,
     tileLayoutHydrated,
     toggleContextualPanelTile,
+    unverifiedRestoredRepoTileIds,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
     workspacePreviews,
