@@ -18,6 +18,7 @@ For operators who want to understand the product and run governed agent work wit
 | [Product brief](user/o8-product-brief.md) | What o8 is, who it serves, and the boundaries of the product. |
 | [How o8 works](user/how-o8-works.md) | How missions, packets, lanes, review, and memory fit together. |
 | [Voice](user/voice.md) | Symon, the voice layer: what it does, the macOS controls, first-time setup, and the free and paid tiers. |
+| [First-run receipt (2026-09-12)](user/first-run-receipt-2026-09-12.md) | Timed source setup through the first merged packet, including every stall and workaround. |
 | [Runtime dogfood receipt](user/runtime-dogfood-receipt-2026-08-10.md) | One bounded operational run of a non-frontier runtime, with cost and review outcome. |
 | [Canonical workflow](user/canonical-workflow.md) | The expected path from a task request through reviewed integration. |
 | [Self-tuning harness](user/self-tuning-harness.md) | How grounded features, execution contracts, lift measurements, skeptical review, CI, and portable bundles fit together. |
