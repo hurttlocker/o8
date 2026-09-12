@@ -8,7 +8,7 @@
 
 **Run a fleet of coding agents. Approve what ships.**
 
-o8 is an open-source control room for one person running several AI coding agents across their repositories. It brings the work, reviews, and decisions into one place so you can direct the agents without following every terminal.
+o8 is an open-source control room for one person running several AI coding agents across their repositories, the governance layer above them. Claude Code, Codex, Grok Build, DeepSeek Harness, OpenCode, Gemini, and twelve more do the work in isolated git worktrees; o8 brings the work, the reviews, and the decisions into one place so you can direct the agents without following every terminal.
 
 [**Download for macOS**](https://github.com/hurttlocker/o8/releases) · [Build from source](#get-it)
 
@@ -72,7 +72,7 @@ Symon is the voice layer. Ask "what needs me?" without turning around, approve t
 
 ## Where it is going
 
-o8 is building toward **an operating system for delegated work**: models and agents can change while your project's rules, decisions, and history stay with you. The goal is to let you delegate more work without supervising every step, while keeping authority over what happens and evidence of the result. Coding is where we're proving that approach first.
+o8 is building toward an operating system for delegated work: models and agents can change while your project's rules, decisions, and history stay with you. The goal is to let you delegate more work without supervising every step, while keeping authority over what happens and evidence of the result. Coding is where we're proving that approach first.
 
 [ROADMAP.md](./ROADMAP.md): seven pillars, what is open, what is missing on each, and what to claim.
 
