@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { RepoReadiness, RepoSetupConfig } from './types';
 import { checkRepoOriginConfigured, getRepoOriginConfiguredOverride } from './origin-readiness';
+import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
 
 interface RepoReadinessInput {
   localPath: string;
@@ -146,12 +147,17 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
   // fallbacks), so a deleted/moved checkout used to read as 'unknown' (or
   // even 'ready' via the saved contract) and the operator only learned the
   // truth from a failed spawn.
-  if (!(await pathExists(repo.localPath))) {
+  const dispatchAdmission = getRepoDispatchAdmission(repo.localPath);
+  if (!dispatchAdmission.ok) {
+    const state = dispatchAdmission.failedCheck === 'repository_folder_exists' ? 'missing' : 'blocked';
     const value: RepoReadiness = {
-      state: 'missing',
-      label: readinessLabel('missing'),
-      summary: `Repo folder not found at ${repo.localPath} — it may have been moved or deleted.`,
-      nextAction: 'Re-add the repo at its new location, or remove it from the registry.',
+      state,
+      label: readinessLabel(state),
+      summary: dispatchAdmission.message,
+      dispatchable: false,
+      nextAction: dispatchAdmission.correctiveAction,
+      failedCheck: dispatchAdmission.failedCheck,
+      correctiveAction: dispatchAdmission.correctiveAction,
       currentBranch: null,
       onDefaultBranch: null,
       originConfigured: false,
@@ -189,6 +195,8 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
   let state: RepoReadiness['state'] = 'unknown';
   let summary = 'No saved repo setup contract yet.';
   let nextAction: string | undefined;
+  let failedCheck: string | undefined;
+  let correctiveAction: string | undefined;
 
   const envFallbacks = new Map<string, string>();
   await Promise.all(
@@ -199,7 +207,8 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
   );
 
   if (missingEnvFiles.length > 0) {
-    state = 'blocked';
+    state = 'needs_setup';
+    failedCheck = 'environment_files';
     const missingWithFallback = missingEnvFiles.filter((file) => envFallbacks.has(file));
     if (missingWithFallback.length > 0) {
       const file = missingWithFallback[0];
@@ -210,6 +219,7 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
       summary = `Missing env files: ${missingEnvFiles.join(', ')}.`;
       nextAction = 'Restore the missing env files or change the repo env mode before trusting runtime validation.';
     }
+    correctiveAction = nextAction;
   } else if (installLooksNeeded) {
     state = 'needs_setup';
     summary = `Dependencies still need setup with ${repo.setup.installCommand}.`;
@@ -224,13 +234,19 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
     state = 'needs_setup';
     summary = 'Install metadata is saved, but no dev/build command is configured yet.';
     nextAction = 'Save a dev or build command so the IDE can verify this repo end to end.';
+  } else {
+    state = 'ready';
+    summary = `Repository is ready for mission work on ${currentBranch}.${dirty ? ' Working tree has local changes.' : ''}`;
   }
 
   const value: RepoReadiness = {
     state,
     label: readinessLabel(state),
     summary,
+    dispatchable: true,
     nextAction,
+    failedCheck,
+    correctiveAction,
     currentBranch,
     onDefaultBranch,
     originConfigured,

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -126,6 +127,7 @@ const dataDir = path.join(testRoot, 'data');
 const repoPath = path.join(testRoot, 'repo');
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(repoPath, { recursive: true });
+execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 delete process.env.CORTEX_IDE_DB_PATH;

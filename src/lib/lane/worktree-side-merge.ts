@@ -46,6 +46,7 @@ import {
   fetchWorkerHeadIntoMainRepo,
   git,
   gitErrorMessage,
+  hasPushRemote,
   isAncestor,
   mergeRefForLane,
   pushExactBase, pushWorkerBranchBestEffort,
@@ -65,6 +66,7 @@ import { settleReturnedMergeState } from '@/lib/lane/merge-state-settlement';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
 import { fastForwardBaseBranch } from '@/lib/lane/operator-checkout-merge';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
+import { captureWorkspaceMaterializationSnapshot } from '@/lib/workspace/workspace-materialization-retirement';
 
 const BASE_ADVANCED_RETRY_LIMIT = 3;
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
@@ -627,10 +629,15 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     let mergeCandidateSha = rebasedSha;
     let mergedEquivalentHeadSha = spokenEvidence.present ? reviewedSnapshotSha : rebasedSha;
     let expectedRemoteBaseSha: string | undefined;
+    const originPushAvailable = await hasPushRemote(lane.repoPath);
     try {
       await fetchWorkerHeadIntoMainRepo(lane.repoPath, mergeWorktreePath, rebasedSha, integrationRef);
-      await pushWorkerBranchBestEffort(worktreePath, actualBranch, rebasedSha);
-      const originBaseRef = await refreshOriginBaseBestEffort(lane.repoPath, lane.baseBranch);
+      if (originPushAvailable) {
+        await pushWorkerBranchBestEffort(worktreePath, actualBranch, rebasedSha);
+      }
+      const originBaseRef = originPushAvailable
+        ? await refreshOriginBaseBestEffort(lane.repoPath, lane.baseBranch)
+        : null;
       if (originBaseRef && !(await isAncestor(lane.repoPath, originBaseRef, integrationRef))) {
         const retryResult = await retryBaseAdvancedAfterRebase(input, {
           mgr,
@@ -646,7 +653,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       const integrationSha = (await git(lane.repoPath, ['rev-parse', integrationRef], { timeout: 5000 })).stdout.trim();
       mergeCandidateSha = integrationSha;
       if (!spokenEvidence.present) mergedEquivalentHeadSha = integrationSha;
-      if (integrationSha !== rebasedSha) {
+      if (originPushAvailable && integrationSha !== rebasedSha) {
         await pushWorkerBranchLeaseBestEffort(worktreePath, actualBranch, integrationSha, rebasedSha);
       }
       let pushLease = await exactPushLeaseForCandidate(lane.repoPath, originBaseRef, integrationRef);
@@ -670,7 +677,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         return { ok: false, laneId: command.laneId, note: governedCandidate.note };
       }
       mergeCandidateSha = governedCandidate.candidateSha;
-      if (governedCandidate.squashed) {
+      if (originPushAvailable && governedCandidate.squashed) {
         await pushWorkerBranchLeaseBestEffort(
           lane.repoPath,
           actualBranch,
@@ -691,6 +698,11 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         action: 'merging',
       });
       if (finalGovernanceDrift) return finalGovernanceDrift;
+
+      await captureWorkspaceMaterializationSnapshot(lane.repoPath, worktreePath, 'merge', {
+        mergeCandidateSha,
+        reviewedHeadSha: reviewedSnapshotSha,
+      });
 
       try {
         await fastForwardBaseBranch({
@@ -718,13 +730,15 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     const mergeSha = mergeCandidateSha;
     appendEvent(command.laneId, 'merge', actor, { laneHeadSha: mergeSha, baseBranch: lane.baseBranch });
     let pushedToOrigin = false, pushError: string | undefined;
-    try {
-      await pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha);
-      pushedToOrigin = true;
-      console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after fast-forwarding ${actualBranch}`);
-    } catch (error) {
-      pushError = gitErrorMessage(error);
-      console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
+    if (originPushAvailable) {
+      try {
+        await pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha);
+        pushedToOrigin = true;
+        console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after fast-forwarding ${actualBranch}`);
+      } catch (error) {
+        pushError = gitErrorMessage(error);
+        console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
+      }
     }
     const worktreeRemoved = await settleSuccessfulMergeWorktreeCleanup({
       manager: mgr,
@@ -743,7 +757,9 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     const cleanupNote = worktreeRemoved ? '' : ' Worktree cleanup is pending and remains addressable for retry.';
     const mergeNote = pushedToOrigin
       ? `Rebased ${lane.branch} onto ${lane.baseBranch}, fast-forwarded ${lane.baseBranch}, and pushed to origin.${cleanupNote}${decompositionNote}`
-      : `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} LOCALLY - push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${cleanupNote}${decompositionNote}`;
+      : originPushAvailable
+        ? `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} LOCALLY - push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${cleanupNote}${decompositionNote}`
+        : `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} locally. No push remote is configured; the local merge commit is ${mergeSha}.${cleanupNote}${decompositionNote}`;
     return {
       ok: true,
       laneId: command.laneId,

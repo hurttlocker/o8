@@ -13,6 +13,7 @@ import {
   type WorkspaceSnapshotRecord,
 } from '@/lib/worktree/snapshot-state';
 import type { WorkspaceSnapshotJson } from '@/lib/worktree/snapshot-state-types';
+import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import {
   materializationAwareExecFile,
   withWorktreeMaterializationExecution,
@@ -21,6 +22,11 @@ import { ensureWorkspaceRecoveryRef } from './hibernator';
 import { readManagedWorkspaceMaterialization } from './managed-materialization-identity';
 
 export type WorkspaceRetirementAction = 'pr' | 'merge' | 'discard' | 'cleanup';
+
+interface MergeWorkspaceSnapshotEvidence {
+  mergeCandidateSha: string;
+  reviewedHeadSha: string;
+}
 
 interface WorkspaceRetirementReceipt {
   [key: string]: WorkspaceSnapshotJson;
@@ -86,17 +92,36 @@ export async function prepareWorkspaceMaterializationRetirement(
   workspacePath: string,
   action: WorkspaceRetirementAction,
 ): Promise<WorkspaceSnapshotRecord | null> {
+  const snapshot = await captureWorkspaceMaterializationSnapshot(repoPath, workspacePath, action);
+  return snapshot ? beginWorkspaceMaterializationRetirement(workspacePath, action) : null;
+}
+
+/** Capture immutable evidence while the reviewed checkout still exists. */
+export async function captureWorkspaceMaterializationSnapshot(
+  repoPath: string,
+  workspacePath: string,
+  action: WorkspaceRetirementAction,
+  mergeEvidence?: MergeWorkspaceSnapshotEvidence,
+): Promise<WorkspaceSnapshotRecord | null> {
   const existing = exactSnapshot(workspacePath);
-  if (existing) return beginWorkspaceMaterializationRetirement(workspacePath, action);
+  if (existing) {
+    if (mergeEvidence && existing.headCommit !== mergeEvidence.reviewedHeadSha) {
+      throw new Error('Workspace snapshot no longer identifies the reviewed merge HEAD.');
+    }
+    return existing;
+  }
   const repo = await findRepoByLocalPath(repoPath);
   if (!repo) return null;
   const lanes = listLanes().filter((lane) => (
     lane.packetId?.trim()
     && lane.worktreePath
-    && path.resolve(lane.repoPath) === path.resolve(repo.localPath)
+    && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repo.localPath)
     && path.resolve(lane.worktreePath) === path.resolve(workspacePath)
   ));
-  if (lanes.length === 0) return null;
+  if (lanes.length === 0) {
+    if (mergeEvidence) throw new Error('Merge evidence capture found no durable packet lane.');
+    return null;
+  }
   if (lanes.length !== 1) throw new Error('Workspace retirement found ambiguous managed lane truth.');
   const lane = lanes[0]!;
   const packetId = lane.packetId!;
@@ -107,14 +132,30 @@ export async function prepareWorkspaceMaterializationRetirement(
   }
   const identity = managed.identity;
   await withWorktreeMaterializationExecution(workspacePath, identity, async () => {
-    const [branch, headCommit, treeSha, baseTip] = await Promise.all([
+    const reviewedRef = mergeEvidence?.reviewedHeadSha ?? 'HEAD';
+    const [branch, headCommit, treeSha, baseTip, mergeCandidate] = await Promise.all([
       gitValue(workspacePath, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
-      gitValue(workspacePath, ['rev-parse', '--verify', 'HEAD^{commit}']),
-      gitValue(workspacePath, ['rev-parse', '--verify', 'HEAD^{tree}']),
-      gitValue(workspacePath, ['rev-parse', '--verify', `${lane.baseBranch}^{commit}`]),
+      gitValue(workspacePath, ['rev-parse', '--verify', `${reviewedRef}^{commit}`]),
+      gitValue(workspacePath, ['rev-parse', '--verify', `${reviewedRef}^{tree}`]),
+      gitValue(repo.localPath, ['rev-parse', '--verify', `refs/heads/${lane.baseBranch}^{commit}`]),
+      mergeEvidence
+        ? gitValue(repo.localPath, ['rev-parse', '--verify', `${mergeEvidence.mergeCandidateSha}^{commit}`])
+        : Promise.resolve(null),
     ]);
     if (branch !== lane.branch) throw new Error('Workspace retirement branch no longer matches its lane.');
-    const baseCommit = await gitValue(workspacePath, ['merge-base', baseTip, headCommit]);
+    if (mergeEvidence && headCommit !== mergeEvidence.reviewedHeadSha) {
+      throw new Error('Workspace HEAD changed before merge evidence capture.');
+    }
+    if (mergeEvidence && mergeCandidate !== mergeEvidence.mergeCandidateSha) {
+      throw new Error('Workspace merge candidate changed before evidence capture.');
+    }
+    // A rebase can replace HEAD while the original review still identifies the
+    // evidence to retain. Bank that object before reading ancestry in the base
+    // repository; packet clones need not have a local base branch.
+    if (isolationKind === 'apfs-cow-clone') {
+      await gitValue(repo.localPath, ['fetch', '--no-tags', workspacePath, headCommit]);
+    }
+    const baseCommit = await gitValue(repo.localPath, ['merge-base', baseTip, headCommit]);
     const recoveryRef = `refs/o8/recovery/${repo.id}/${packetId}`;
     const diffFingerprint = spokenReviewSnapshotFingerprint(headCommit, baseCommit, treeSha);
     await ensureWorkspaceRecoveryRef(repo.localPath, workspacePath, {
@@ -141,10 +182,10 @@ export async function prepareWorkspaceMaterializationRetirement(
         ? [{ kind: 'owned-session', identity: lane.sessionKey }]
         : [],
       creationId: `retire:${action}:create`,
-      receipt: { terminalBootstrap: true, terminalAction: action },
+      receipt: { terminalBootstrap: true, terminalAction: action, ...mergeEvidence },
     });
   });
-  return beginWorkspaceMaterializationRetirement(workspacePath, action);
+  return exactSnapshot(workspacePath);
 }
 
 /** Persist terminal cleanup intent before any exact path removal begins. */

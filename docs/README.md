@@ -67,6 +67,7 @@ For maintainers who build, verify, release, recover, or harden o8.
 
 | Document | What you will learn |
 |---|---|
+| [GitHub operating standard](operations/github-operating-standard.md) | How issues, tracking checklists, pull requests, and merges run here, and what a contributor can expect from us. |
 | [Pre-ship gate](operations/PRE-SHIP-GATE-CHECKLIST.md) | The clean-profile checks required before a public build is considered releasable. |
 | [Desktop build and deployment](operations/deployment.md) | How the native shell, sidecars, packaging, signing, and runtime prerequisites fit together. |
 | [Smoke-test prompt](operations/smoke-test-prompt.md) | The repeatable end-to-end product checks for a candidate build. |

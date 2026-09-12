@@ -31,6 +31,11 @@ import {
 } from '@/lib/orchestrator/storage-admission';
 import { getStoragePressureAdmissionCoordinator } from '@/lib/orchestrator/storage-pressure-policy';
 import { isDispatchHalted } from './dispatch-halt';
+import {
+  dispatchPreflightRefusalBlocker,
+  recordDispatchPreflightRefusal,
+  surfaceDispatchPreflightRefusalIncident,
+} from './dispatch-preflight-refusal';
 import { forgetRecoverySkip, pruneRecoverySkipMemo, shouldLogRecoverySkip } from './recovery-skip-log';
 
 import { computePredictedFiles, filterOverlappingPackets } from './preservation-envelope';
@@ -44,26 +49,6 @@ export const MAX_RECOVERY_DISPATCHES = 2;
 // resets when a fresh lane is minted on redispatch, so it never accumulated — the
 // launching<->idle thrash. This counter lives on the packet so it survives.
 export const MAX_LAUNCH_ATTEMPTS = 5;
-// Both dispatch preflights — the runtime auth gate and the execution-carrier gate,
-// thrown from the same try in dispatch-packet-launch.ts — are the refusal class
-// #2195 bounds. Matched on the error's own name rather than `instanceof` so the
-// bound cannot be switched off by a module double or a second module instance.
-const DISPATCH_PREFLIGHT_ERROR_NAMES = new Set([
-  'DispatchPreflightError',
-  'ExecutionCarrierPreflightError',
-]);
-
-function isDispatchPreflightRefusal(error: unknown): boolean {
-  return error instanceof Error && DISPATCH_PREFLIGHT_ERROR_NAMES.has(error.name);
-}
-
-// Packet-scoped dispatch-preflight refusal cap (#2195). A refusal (missing CLI
-// auth, an incompatible model pin) throws before a lane exists, so neither the
-// per-lane cap nor MAX_LAUNCH_ATTEMPTS above — which only counts launches that
-// reached a lane — bounded it, and reconcile re-derived the refused packet back
-// to 'queued' every tick. Transient refusals (a runtime still starting) still
-// get their retries; this only stops the infinite ones.
-export const MAX_PREFLIGHT_REFUSALS = 5;
 export const RUNTIME_PARALLEL_CAP: Partial<Record<OrchestratorRuntime, number>> = {
   gemini: 3,
 };
@@ -368,12 +353,8 @@ export function getDispatchBlocker(
   if ((candidate.launchAttempts ?? 0) >= MAX_LAUNCH_ATTEMPTS) {
     return `Launch attempts exceeded (${candidate.launchAttempts}/${MAX_LAUNCH_ATTEMPTS})`;
   }
-  // #2195 — a refused preflight never reaches a lane, so the cap above can't see
-  // it. Without this line the scheduler re-admits the packet every tick and each
-  // admission spawns another auth probe.
-  if ((candidate.preflightRefusals ?? 0) >= MAX_PREFLIGHT_REFUSALS) {
-    return `Dispatch preflight refusals exceeded (${candidate.preflightRefusals}/${MAX_PREFLIGHT_REFUSALS})`;
-  }
+  const preflightBlocker = dispatchPreflightRefusalBlocker(candidate);
+  if (preflightBlocker) return preflightBlocker;
   const dependency = packetReleaseBlockedBy(candidate, allPackets);
   if (dependency) {
     return `Blocked by ${dependency.id}`;
@@ -442,6 +423,16 @@ export async function runDispatchTick(
 ): Promise<OrchestratorMissionState> {
   let nextState = releaseAbandonedMissionLifecycleHold(normalizeOrchestratorMissionState(state));
   if (nextState.lifecycleHold) return nextState;
+  nextState = {
+    ...nextState,
+    packets: nextState.packets.map((packet) => {
+      const blocker = dispatchPreflightRefusalBlocker(packet);
+      if (!blocker || packet.queueState !== 'queued') return packet;
+      return surfaceDispatchPreflightRefusalIncident(packet, packet.blockedReason ?? blocker)
+        ? { ...packet, status: 'blocked', queueState: 'held' }
+        : packet;
+    }),
+  };
   if (isDispatchHalted()) {
     return nextState;
   }
@@ -764,10 +755,8 @@ export async function runDispatchTick(
           // Under budget the packet still retries — a runtime that is merely
           // still starting deserves that — and the budget resets on the
           // dispatch that finally succeeds.
-          const preflightRefused = isDispatchPreflightRefusal(result.reason);
-          const preflightRefusals = (candidate.preflightRefusals ?? 0) + (preflightRefused ? 1 : 0);
-          const refusalBudgetSpent = preflightRefused && preflightRefusals >= MAX_PREFLIGHT_REFUSALS;
-          if (preflightRefused) {
+          const preflightRefusal = recordDispatchPreflightRefusal(candidate, result.reason);
+          if (preflightRefusal) {
             // Log-only was the whole visibility defect: the app looked idle
             // while it spun. Mirrors the dispatch mutation published above so
             // the refusal — and its reason — reaches the operator live.
@@ -785,9 +774,9 @@ export async function runDispatchTick(
                 repoPath: candidate.workspaceTargetPath ?? undefined,
                 branch: candidate.branchTarget,
                 launchContext: packetLaunchContext(candidate),
-                note: refusalBudgetSpent
-                  ? `${candidate.referenceLabel} failed dispatch preflight ${preflightRefusals}× — no further retries. ${reason}`
-                  : `${candidate.referenceLabel} refused by dispatch preflight (${preflightRefusals}/${MAX_PREFLIGHT_REFUSALS}). ${reason}`,
+                note: preflightRefusal.exhausted
+                  ? `${candidate.referenceLabel} failed dispatch preflight ${preflightRefusal.count}× — no further retries. ${reason}`
+                  : `${candidate.referenceLabel} refused by dispatch preflight (${preflightRefusal.count}/${preflightRefusal.maxAttempts}). ${reason}`,
                 reason,
                 createdAt: new Date().toISOString(),
                 settledAt: new Date().toISOString(),
@@ -799,18 +788,15 @@ export async function runDispatchTick(
           return {
             ...candidate,
             ...recoveryFields,
-            preflightRefusals,
-            status: retryableStorageHold
-              ? 'queued'
-              : refusalBudgetSpent ? 'failed' : 'blocked',
-            blockedReason: refusalBudgetSpent
-              ? `Dispatch preflight refused ${preflightRefusals} times. ${reason} Manual reset required.`
-              : reason,
+            preflightRefusals: preflightRefusal?.count ?? candidate.preflightRefusals ?? 0,
+            status: retryableStorageHold ? 'queued' : 'blocked',
+            queueState: preflightRefusal?.incidentPersisted ? 'held' : candidate.queueState,
+            blockedReason: preflightRefusal?.blockedReason ?? reason,
             storageAdmission: storageReceipt,
-            lastEventAt: retryableStorageHold || preflightRefused ? new Date().toISOString() : candidate.lastEventAt,
+            lastEventAt: retryableStorageHold || preflightRefusal ? new Date().toISOString() : candidate.lastEventAt,
             lastEventLabel: retryableStorageHold
               ? 'storage_admission_held'
-              : preflightRefused ? 'dispatch_preflight_refused' : candidate.lastEventLabel,
+              : preflightRefusal ? 'dispatch_preflight_refused' : candidate.lastEventLabel,
           };
         } catch (foldErr) {
           const msg = foldErr instanceof Error ? foldErr.message : 'Dispatch post-processing failed.';

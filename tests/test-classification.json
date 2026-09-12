@@ -1140,6 +1140,26 @@
       ]
     },
     {
+      "path": "tests/bench/coding-paired-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/bench/coding-runtime-config-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bench/coding.test.ts",
       "reasons": [
         "worktree-api"
@@ -2030,6 +2050,14 @@
       ]
     },
     {
+      "path": "tests/mission-supersession-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-activity-route.test.ts",
       "reasons": [
         "child-process",
@@ -2829,6 +2857,13 @@
     },
     {
       "path": "tests/typecheck-tsconfig-clean.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/ui-edit-runtime-preset-route.test.ts",
       "reasons": [
         "child-process",
         "git-cli"

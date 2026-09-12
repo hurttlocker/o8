@@ -5,6 +5,7 @@ import { detectWorktree, type WorktreeMatch } from './worktree-resolve.js';
 export interface PacketArgumentSpec {
   command: string;
   valueFlags?: readonly string[];
+  repeatableValueFlags?: readonly string[];
   booleanFlags?: readonly string[];
   aliases?: Readonly<Record<string, string>>;
   allowTarget?: boolean;
@@ -19,6 +20,7 @@ export interface ParsedPacketArguments {
   target: string | null;
   targetWasExplicit: boolean;
   values: Record<string, string>;
+  multiValues: Record<string, string[]>;
   booleans: Set<string>;
 }
 
@@ -79,6 +81,7 @@ export function parsePacketArguments(
   spec: PacketArgumentSpec,
 ): ParsedPacketArguments {
   const valueFlags = new Set(spec.valueFlags ?? []);
+  const repeatableValueFlags = new Set(spec.repeatableValueFlags ?? []);
   const booleanFlags = new Set(spec.booleanFlags ?? []);
   const aliases = spec.aliases ?? {};
   const allowTarget = spec.allowTarget !== false;
@@ -86,6 +89,7 @@ export function parsePacketArguments(
   const positionalValues = spec.positionalValues ?? [];
   const knownFlags = new Set([
     ...valueFlags,
+    ...repeatableValueFlags,
     ...booleanFlags,
     ...targetFlags,
   ]);
@@ -97,6 +101,7 @@ export function parsePacketArguments(
     return knownFlags.has(name);
   };
   const values: Record<string, string> = {};
+  const multiValues: Record<string, string[]> = {};
   const booleans = new Set<string>();
   let flagTarget: string | null = null;
   let positionalTarget: string | null = null;
@@ -134,6 +139,18 @@ export function parsePacketArguments(
         : requireFlagValue(rest, index, `--${flagName}`, isKnownFlag);
       if (!canonicalToken.includes('=')) index += 1;
       values[flagName] = value;
+      continue;
+    }
+
+    if (flagName && repeatableValueFlags.has(flagName)) {
+      const value = canonicalToken.includes('=')
+        ? canonicalToken.slice(canonicalToken.indexOf('=') + 1)
+        : requireFlagValue(rest, index, `--${flagName}`, isKnownFlag);
+      if (!canonicalToken.includes('=')) index += 1;
+      if (!value.trim()) {
+        throw new CliError('invalid_args', `--${flagName} requires a value.`, EXIT.INVALID_ARGS);
+      }
+      multiValues[flagName] = [...(multiValues[flagName] ?? []), value];
       continue;
     }
 
@@ -185,6 +202,7 @@ export function parsePacketArguments(
     target: target || null,
     targetWasExplicit: Boolean(target),
     values,
+    multiValues,
     booleans,
   };
 }

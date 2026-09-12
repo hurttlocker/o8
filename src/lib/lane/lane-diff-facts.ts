@@ -318,7 +318,17 @@ export function getLaneDiffFacts(
     throw new Error('Lane has no repository path for diff facts.');
   }
 
-  const baseRange = `${comparisonRef || lane.baseBranch}...HEAD`;
+  let baseRef = comparisonRef || lane.baseBranch;
+  if (!comparisonRef && !baseRef.startsWith('refs/')) {
+    const localRef = `refs/heads/${baseRef}`;
+    try {
+      readGitOutput(cwd, ['show-ref', '--verify', '--quiet', localRef]);
+      baseRef = localRef;
+    } catch {
+      baseRef = `refs/remotes/origin/${baseRef}`;
+    }
+  }
+  const baseRange = `${baseRef}...HEAD`;
   const stat = readGitOutputWithFallback(
     cwd,
     ['diff', '--stat', baseRange],

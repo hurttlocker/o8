@@ -5,6 +5,7 @@ import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestra
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { applyPacketScopePolicy, buildRemainingLaunchBudget, computePredictedFiles, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { getOperatorDefaultsSync, resolveBranchPrefixSync } from '@/lib/operator/defaults';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
@@ -25,6 +26,10 @@ import { assertExecutionCarrierCompatible, isExecutionCarrierId } from '@/lib/ru
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
+import {
+  cancelSupersededMissionPackets,
+  cancelSupersededRegistryMissions,
+} from './mission-supersession';
 import {
   activityLabel,
   latestIsoTimestamp,
@@ -302,10 +307,28 @@ export async function createMission(input: CreateMissionInput) {
     branchPreparation: branchPreparation.filter((decision) => decision.action !== 'none'),
   };
   const mission = normalizeOrchestratorMissionState({ ...missionBase, creationReceipt });
+  const supersedingThreadId = input.orchestratorThreadId?.trim() ?? '';
+  const supersededAt = new Date().toISOString();
 
   const persisted = await withMissionHandoffBarrier(async () => {
     const { state, result: outgoing } = await withLockedState(
-      (current) => {
+      async (current) => {
+        if (supersedingThreadId) {
+          cancelSupersededMissionPackets(current, {
+            threadId: supersedingThreadId,
+            successorMissionId: missionId,
+            cancelledAt: supersededAt,
+          });
+          // Keep the current control-plane lock while older registry rows are
+          // cancelled. A current or non-current dispatch must finish first and
+          // count as in-flight, or observe the durable cancellation before it
+          // can create a lane. This closes the switch-then-cancel launch gap.
+          await cancelSupersededRegistryMissions({
+            threadId: supersedingThreadId,
+            successorMissionId: missionId,
+            cancelledAt: supersededAt,
+          });
+        }
         // Replace the mission under the control-plane lock so a concurrent
         // headless tick cannot restore a stale mission after createMission returns.
         if (current.missionId && current.missionId !== missionId) {
@@ -406,6 +429,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
 
   if (requestedMissionId && requestedMissionId !== currentMissionId) {
     const { result, state: finalState } = await withMissionRegistryState(requestedMissionId, async (stored) => {
+      assertOrchestratorRepoPath(stored.repoPath);
       const registryBefore = releaseAbandonedMissionLifecycleHold(
         reconcileOrchestratorControlPlaneState(stored),
         { allowOwnerTakeover: true },
@@ -428,6 +452,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
 
   // Use locked state to prevent race with headless loop tick
   const { result, state: finalState } = await withLockedState(async (current) => {
+    assertOrchestratorRepoPath(current.repoPath);
     // #23 — an EXPLICIT dispatch re-arms any packet a prior reset_packet left in
     // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
     // (so reset doesn't boomerang); an explicit dispatch_mission is the operator
