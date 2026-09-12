@@ -83,6 +83,8 @@ beforeAll(() => {
   git(['config', 'user.email', 'review@example.invalid'], reviewRepo);
   git(['config', 'user.name', 'review'], reviewRepo);
   fs.writeFileSync(path.join(reviewRepo, 'file.txt'), 'base\n');
+  fs.mkdirSync(path.join(reviewRepo, 'other'));
+  fs.writeFileSync(path.join(reviewRepo, 'other/file.txt'), 'unchanged\n');
   git(['add', '-A'], reviewRepo);
   git(['commit', '-q', '-m', 'base'], reviewRepo);
   git(['checkout', '-q', '-b', 'inline/contract-review'], reviewRepo);
@@ -118,6 +120,7 @@ const capturedContract: PacketTaskContract = {
 async function assessPersistedContractPacket(input: {
   source: PacketTaskContractSource;
   taskContract?: PacketTaskContract;
+  coveragePath?: string;
 }) {
   const packetId = `pkt-contract-review-${input.source}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const lane = createLane({
@@ -171,6 +174,13 @@ async function assessPersistedContractPacket(input: {
     reviewer: 'codex',
     reviewedHeadSha: reviewHeadSha,
     requiresSecondPass: false,
+    ...(input.coveragePath ? {
+      contractCoverageEvidence: {
+        contractVersion: 1,
+        headSha: reviewHeadSha,
+        entries: [{ requirementId: 'R1', productionPath: input.coveragePath }],
+      },
+    } : {}),
   });
 
   return {
@@ -180,6 +190,42 @@ async function assessPersistedContractPacket(input: {
 }
 
 describe('durable approval enforces contract coverage on the real path', () => {
+  it.each(['other/file.txt', '/file.txt', path.join(reviewRepo, 'file.txt')])(
+    'rejects a persisted review citing %s instead of the changed repository path',
+    async (coveragePath) => {
+      expect(git(['diff', '--name-only', 'main..HEAD'], reviewRepo)).toBe('file.txt');
+      expect(git(['show', 'HEAD:other/file.txt'], reviewRepo)).toBe('unchanged');
+
+      const { assessment } = await assessPersistedContractPacket({
+        source: 'explicit',
+        taskContract: capturedContract,
+        coveragePath,
+      });
+
+      expect(assessment).toMatchObject({
+        approved: false,
+        contractCoverage: {
+          status: 'failed',
+          missingRequirementIds: ['R1'],
+          checks: [{ requirementId: 'R1', failureReason: 'cited-path-not-in-change' }],
+        },
+      });
+    },
+  );
+
+  it.each(['file.txt', './file.txt'])('accepts a persisted review citing %s', async (coveragePath) => {
+    const { assessment } = await assessPersistedContractPacket({
+      source: 'explicit',
+      taskContract: capturedContract,
+      coveragePath,
+    });
+
+    expect(assessment).toMatchObject({
+      approved: true,
+      contractCoverage: { status: 'passed', missingRequirementIds: [] },
+    });
+  });
+
   it('rejects an approved review that carries no coverage evidence', async () => {
     const { evaluateContractCoverage, readCoverageEvidence } =
       await import('@/lib/orchestrator/task-contract-coverage');

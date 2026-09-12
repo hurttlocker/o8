@@ -74,19 +74,14 @@ export interface ContractCoverageInput {
 }
 
 function normalizePath(value: string): string {
-  return value.trim().replace(/^\.\//, '').replace(/^\/+/, '');
+  return value.trim().replace(/^\.\//, '');
 }
 
 /** A cited path counts only if the change actually touched that file. */
 function pathWasChanged(citedPath: string, changedPaths: readonly string[]): boolean {
   const cited = normalizePath(citedPath);
   if (cited.length === 0) return false;
-  return changedPaths.some((changed) => {
-    const normalized = normalizePath(changed);
-    return normalized === cited
-      || normalized.endsWith(`/${cited}`)
-      || cited.endsWith(`/${normalized}`);
-  });
+  return changedPaths.some((changed) => normalizePath(changed) === cited);
 }
 
 function failAll(
