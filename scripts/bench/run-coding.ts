@@ -25,7 +25,6 @@ import {
   CODING_JUDGES,
   CODING_RUNTIMES,
   type CodingCondition,
-  type CodingRuntime,
   type CodingTask,
   type CodingVerdict,
   blindCodingDiffs,
@@ -39,10 +38,7 @@ import {
   classifyArmStatus,
   countArmOutcomes,
   ginsuTurnStatus,
-  isScorableArmOutcome,
-  type ArmClassification,
   type ArmErrorReceipt,
-  type ArmOutcomeTotals,
 } from './coding-arm-outcome';
 import {
   CODING_TASK_CONTRACT_FILE,
@@ -65,15 +61,23 @@ import { runCodingJudge, type CodingJudgeReceipt } from './coding-judge-runner';
 import {
   pairedStagedDiffFacts,
   runPairedMechanicalChecks,
-  type PairedMechanicalReceipt,
 } from './coding-paired-mechanical';
 import {
   codingCollectionSeed,
   createNotCollectedEndToEnd,
   readCodingTasks,
   seededCodingShuffle,
-  type CodingEndToEndNotCollectedReceipt,
 } from './coding-paired-plan';
+import {
+  enforceCollectedPairedAcceptance,
+  selectCompletePairedTask,
+  type PairedTaskAcceptanceReceipt,
+} from './coding-paired-acceptance';
+import {
+  type CodingCollectionPhase,
+  type CodingCollectionReceipt as CollectionReceipt,
+  type CodingPairedArmReceipt as ArmReceipt,
+} from './coding-paired-receipts';
 import {
   assertPairedDependencySource,
   pairedWorkerName,
@@ -93,7 +97,6 @@ import {
   runBackendGuardedCollection,
   runningRunControl,
   withTemporaryRequireApproval,
-  type BenchmarkRunControlReceipt,
 } from './coding-run-control';
 import { judgeEndToEnd } from './judge-coding-end-to-end';
 import {
@@ -123,51 +126,6 @@ const CONTRACT_INTERVENTION = [
   `6. In addition to the assistant-message block, write the same contract JSON object, without tags or a Markdown fence, to ${CODING_TASK_CONTRACT_FILE} in the worktree root before any implementation edit. This artifact is mandatory and must remain unchanged after it is written.`,
   buildDeviationsClause('benchmark-contract'),
 ].join('\n');
-
-interface ArmReceipt extends ArmClassification {
-  task: number;
-  condition: CodingCondition;
-  runtime: CodingRuntime;
-  requestedSettings: CodingRequestedSettings;
-  treatment: 'raw' | 'contract';
-  base: string;
-  worktree: string;
-  promptPath: string;
-  replyPath: string;
-  diffPath: string;
-  worker: string;
-  dependencies: PairedDependencyPreparationReceipt;
-  turns: 1;
-  repairTurns: 0;
-  operatorInterventions: 0;
-  timeoutSeconds: number;
-  spawn: CommandReceipt;
-  send: CommandReceipt;
-  stop: CommandReceipt;
-  contractObserved: boolean | null;
-  changedFiles: string[];
-  additions: number;
-  deletions: number;
-  mechanical: PairedMechanicalReceipt;
-  measurementNotes: string[];
-}
-
-type CodingCollectionPhase = 'paired-only' | 'full';
-
-interface CollectionReceipt {
-  schema: 'o8/coding-collection/v2' | 'o8/coding-collection/v3';
-  runId: string;
-  phase?: CodingCollectionPhase;
-  createdAt: string;
-  seed: number;
-  armTimeoutSeconds: number;
-  conditions: CodingCondition[];
-  requestedSettings?: CodingRuntimeConfig;
-  arms: ArmReceipt[];
-  outcomeTotals: ArmOutcomeTotals;
-  endToEnd: EndToEndCollectionReceipt | CodingEndToEndNotCollectedReceipt;
-  runControl: BenchmarkRunControlReceipt;
-}
 
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -296,6 +254,16 @@ function runArm(
     source: 'stream',
     errors,
   });
+  const acceptedClassification = enforceCollectedPairedAcceptance(classification, {
+    condition,
+    treatment,
+    diffPath,
+    changedFiles: diffFacts.changedFiles,
+    contractObserved,
+    send: send.receipt,
+    mechanical,
+    measurementNotes,
+  });
 
   return {
     task: task.issue,
@@ -320,7 +288,7 @@ function runArm(
     contractObserved,
     ...diffFacts,
     mechanical,
-    ...classification,
+    ...acceptedClassification,
     measurementNotes,
   };
 }
@@ -549,6 +517,15 @@ function judge(
   const verdicts: CodingVerdict[] = [];
   const judgeReceipts: CodingJudgeReceipt[] = [];
   const mappings: Record<number, Record<string, CodingCondition>> = {};
+  const pairedSelections = tasks.map((task) => selectCompletePairedTask({
+    task: task.issue,
+    conditions: CODING_CONDITIONS,
+    arms: collection.arms.filter((arm) => arm.task === task.issue),
+  }));
+  const pairedAcceptance = {
+    requiredConditions: [...CODING_CONDITIONS],
+    tasks: pairedSelections.map((selection) => selection.receipt),
+  } satisfies { requiredConditions: CodingCondition[]; tasks: PairedTaskAcceptanceReceipt[] };
   const shuffle = seededCodingShuffle(collection.seed);
   const judgingStartedAt = new Date().toISOString();
   writeJson(JUDGING_FILE, {
@@ -558,20 +535,21 @@ function judge(
     requestedSettings: requestedSettings.judges,
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
+    pairedAcceptance,
   });
 
-  for (const task of tasks) {
-    const available: Partial<Record<CodingCondition, string>> = {};
-    for (const condition of CODING_CONDITIONS) {
-      const receipt = collection.arms.find((arm) => (
-        arm.task === task.issue && arm.condition === condition && isScorableArmOutcome(arm.outcome)
-      ));
-      if (receipt && fs.existsSync(receipt.diffPath)) available[condition] = receipt.diffPath;
-    }
-    if (Object.keys(available).length !== CODING_CONDITIONS.length) {
-      console.warn(`[coding] #${task.issue}: incomplete scorable arm set; task excluded from scoring`);
+  for (const [taskIndex, task] of tasks.entries()) {
+    const selection = pairedSelections[taskIndex];
+    if (!selection.receipt.complete) {
+      console.warn(
+        `[coding] #${task.issue}: paired acceptance failed; task excluded from scoring: ` +
+        selection.receipt.reasons.join('; '),
+      );
       continue;
     }
+    const available = Object.fromEntries(CODING_CONDITIONS.map((condition) => (
+      [condition, selection.accepted[condition]!.diffPath]
+    ))) as Record<CodingCondition, string>;
 
     const blinded = blindCodingDiffs(task.issue, available, shuffle);
     mappings[task.issue] = blinded.mapping;
@@ -618,6 +596,7 @@ function judge(
         requestedSettings: requestedSettings.judges,
         receipts: judgeReceipts,
         blindVerdicts: verdicts,
+        pairedAcceptance,
       });
     }
   }
@@ -654,7 +633,7 @@ function judge(
     },
     collection,
     outcomeTotals: countArmOutcomes([...collection.arms, ...collectedEndToEndArms]),
-    judging: { receipts: judgeReceipts, mappings },
+    judging: { receipts: judgeReceipts, mappings, pairedAcceptance },
     endToEnd,
     ...summary,
   });
@@ -666,6 +645,7 @@ function judge(
     completedAt: new Date().toISOString(),
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
+    pairedAcceptance,
   });
 
   console.log(`[coding] complete tasks scored: ${summary.tasksScored}`);

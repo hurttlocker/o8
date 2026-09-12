@@ -70,6 +70,26 @@ The twelve paired 2x2 arms from `final-v3` remain unchanged. Any repeat of only
 the shipped-output experiment uses the standalone end-to-end flags and a fresh
 immutable run ID, so the paired collection is neither recollected nor overwritten.
 
+### 2026-09-12: paired acceptance enforcement
+
+The paired collector now records terminal classification separately from protocol
+acceptance. A completed process is accepted only when it produced a nonempty diff,
+the contract-first arm wrote an observable treatment contract, and independent
+TypeScript and touched-file ESLint checks passed. Any failed worker turn is invalid
+under this paired protocol. The receipt keeps the terminal status, mechanical
+evidence, acceptance decision, and every rejection reason.
+
+Paired judging rechecks the persisted mechanical evidence and the diff bytes for
+exactly one receipt in each of the four conditions. It does not trust a stored
+`outcome: valid` value by itself, and it excludes the whole task when any arm is
+missing, duplicated, or rejected. The rejected receipts remain in the collection,
+and the judging receipt records each exclusion. No arm is replaced and the original
+task denominator remains visible.
+
+This clarification applies to new collections and new judging receipts. Published
+receipts are not rewritten. The separate governed shipped-output experiment keeps
+its declared rule that a terminal product failure is measurable and scorable.
+
 ### 2026-09-12: fixed participant count before recollection
 
 Every paired arm uses one worker context, and each independent judge uses one
