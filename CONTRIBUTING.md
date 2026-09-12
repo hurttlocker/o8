@@ -18,6 +18,8 @@ o8 is maintained by one person, and review capacity is limited. Small, focused c
 
 Open an issue before starting any non-trivial change. An issue is not a promise that a pull request will be accepted, but it can prevent both sides from spending time on work that does not fit the project.
 
+The way we run issues, pull requests, and merges is written down in [docs/operations/github-operating-standard.md](./docs/operations/github-operating-standard.md).
+
 ## Claiming work
 
 Find work through [`ROADMAP.md`](./ROADMAP.md). Each open arc there links to one tracking issue, and that issue's checklist lists its children. Pick an unchecked child labeled `claimable`: those have a brief that is complete enough to start from.
