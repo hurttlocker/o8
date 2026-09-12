@@ -63,6 +63,7 @@ describe('roadmap status', () => {
           '- [x] tracking note without a child issue',
           '## Notes',
           'The checklist ends above.',
+          '- [x] #104 checkbox outside the checklist',
         ].join('\n'),
         comments: 1,
       }],
@@ -72,6 +73,7 @@ describe('roadmap status', () => {
       'repos/example/roadmap/issues/101': { state: 'closed' },
       'repos/example/roadmap/issues/102': { state: 'closed' },
       'repos/example/roadmap/issues/103': { state: 'open' },
+      'repos/example/roadmap/issues/104': { state: 'open' },
     };
     Object.assign(fixture, openNowLinkFixtures());
 
@@ -109,5 +111,24 @@ describe('roadmap status', () => {
     const check = runRoadmapStatus(fixture, true);
     expect(check.status).toBe(0);
     expect(check.stdout).toContain('roadmap check: no drift.');
+  });
+
+  it('still rejects a checked body child whose issue is open', () => {
+    const fixture: GhFixture = {
+      ...openNowLinkFixtures(),
+      'repos/example/roadmap/issues?state=open&labels=tracking&per_page=100': [{
+        number: 902,
+        title: 'invalid tracking issue',
+        body: '## Checklist\n- [x] #301 incorrectly marked shipped',
+        comments: 0,
+      }],
+      'repos/example/roadmap/issues/301': { state: 'open' },
+    };
+
+    const check = runRoadmapStatus(fixture, true);
+    expect(check.status).toBe(1);
+    expect(check.stdout).toContain('1 tracking issues, 1 of 1 children shipped.');
+    expect(check.stderr).toContain('#902: checked #301 is open');
+    expect(check.stdout).not.toContain('roadmap check: no drift.');
   });
 });
