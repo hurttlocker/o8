@@ -1,6 +1,6 @@
 # Governed task evaluation
 
-Status: preparation for [#2289](https://github.com/hurttlocker/o8/issues/2289). Collection is proposed in [#2288](https://github.com/hurttlocker/o8/issues/2288). This protocol does not authorize a run, release, restart, model trial, policy change, or product change.
+Status: protocol [#2290](https://github.com/hurttlocker/o8/pull/2290) is merged under [#2289](https://github.com/hurttlocker/o8/issues/2289). Collection in [#2288](https://github.com/hurttlocker/o8/issues/2288) is deliberately deferred for capacity. Resumption requires operator confirmation of timing and a frozen total usage ceiling that preserves capacity for ongoing development; a fresh usage week alone is not authorization. This protocol does not authorize a run, release, restart, model trial, policy change, or product change.
 
 ## Purpose and boundary
 
@@ -60,7 +60,7 @@ The first four categories are mutually exclusive and counted once as total activ
 
 Reuse an existing receipt only when it matches the runtime, signed identity, and reviewed revision. If no matching receipt exists, mark recovery evidence missing. Before collection, the manifest may declare at most one bounded interruption case per runtime in disposable test state. Count those cases separately from the twelve normal attempts.
 
-Do not restart the daily app or touch held lanes, remote machines, virtual-machine work, or voice work. Collection waits until the active release has settled, isolated resources are ready, this protocol has been reviewed, and the frozen manifest and human participant are available. Until these prerequisites exist, collection is **blocked**, not a completed incomplete pilot.
+Do not restart the daily app or touch held lanes, remote machines, virtual-machine work, or voice work. Collection remains deliberately deferred until the operator confirms timing and a frozen total usage ceiling that preserves development capacity. Release completion, isolated resources, a frozen manifest, and an available human participant remain prerequisites. A fresh usage week alone does not authorize collection. Deferring collection is not an incomplete experimental result.
 
 ## Decision rule
 
