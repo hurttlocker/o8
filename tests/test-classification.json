@@ -2838,6 +2838,7 @@
       "path": "tests/test-gate-runner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "process-signal",
         "real-path"
       ]
