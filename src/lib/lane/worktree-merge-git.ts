@@ -363,6 +363,18 @@ export async function pushExactBase(
   ], { timeout: 60_000 });
 }
 
+export async function hasPushRemote(repoPath: string, remote = 'origin'): Promise<boolean> {
+  const { stdout: remotesOutput } = await git(repoPath, ['remote'], { timeout: 5000 });
+  const remotes = remotesOutput.split('\n').map((value) => value.trim()).filter(Boolean);
+  if (!remotes.includes(remote)) return false;
+  const { stdout } = await git(
+    repoPath,
+    ['remote', 'get-url', '--push', remote],
+    { timeout: 5000 },
+  );
+  return stdout.trim().length > 0;
+}
+
 export async function exactPushLeaseForCandidate(
   repoPath: string,
   originBaseRef: string | null,

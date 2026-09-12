@@ -26,6 +26,10 @@ import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
 import {
+  cancelSupersededMissionPackets,
+  cancelSupersededRegistryMissions,
+} from './mission-supersession';
+import {
   activityLabel,
   latestIsoTimestamp,
   readTranscriptActivityBySession,
@@ -302,10 +306,28 @@ export async function createMission(input: CreateMissionInput) {
     branchPreparation: branchPreparation.filter((decision) => decision.action !== 'none'),
   };
   const mission = normalizeOrchestratorMissionState({ ...missionBase, creationReceipt });
+  const supersedingThreadId = input.orchestratorThreadId?.trim() ?? '';
+  const supersededAt = new Date().toISOString();
 
   const persisted = await withMissionHandoffBarrier(async () => {
     const { state, result: outgoing } = await withLockedState(
-      (current) => {
+      async (current) => {
+        if (supersedingThreadId) {
+          cancelSupersededMissionPackets(current, {
+            threadId: supersedingThreadId,
+            successorMissionId: missionId,
+            cancelledAt: supersededAt,
+          });
+          // Keep the current control-plane lock while older registry rows are
+          // cancelled. A current or non-current dispatch must finish first and
+          // count as in-flight, or observe the durable cancellation before it
+          // can create a lane. This closes the switch-then-cancel launch gap.
+          await cancelSupersededRegistryMissions({
+            threadId: supersedingThreadId,
+            successorMissionId: missionId,
+            cancelledAt: supersededAt,
+          });
+        }
         // Replace the mission under the control-plane lock so a concurrent
         // headless tick cannot restore a stale mission after createMission returns.
         if (current.missionId && current.missionId !== missionId) {
