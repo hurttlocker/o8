@@ -56,4 +56,22 @@ describe('#1565 — missing repo folder is a first-class readiness state', () =>
 
     expect(readiness.state).not.toBe('missing');
   });
+
+  it('treats missing configured env as setup work without blocking dispatch', async () => {
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-readiness-env-'));
+    execFileSync('git', ['init', '-q', repoPath]);
+
+    const readiness = await getRepoReadiness({
+      localPath: repoPath,
+      defaultBranch: 'main',
+      setup: { ...setup, envMode: 'copy', envFiles: ['.env'] },
+    });
+
+    expect(readiness).toMatchObject({
+      state: 'needs_setup',
+      dispatchable: true,
+      failedCheck: 'environment_files',
+      correctiveAction: expect.any(String),
+    });
+  });
 });

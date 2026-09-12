@@ -2836,6 +2836,13 @@
       ]
     },
     {
+      "path": "tests/ui-edit-runtime-preset-route.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/ui-loop-budgets-real-path.test.ts",
       "reasons": [
         "child-process",

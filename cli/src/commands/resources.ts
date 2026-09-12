@@ -18,7 +18,14 @@ interface RepoEntry {
   remoteUrl?: string | null;
   defaultBranch?: string;
   exists?: boolean;
-  readiness?: { state?: string; label?: string };
+  readiness?: {
+    state?: string;
+    label?: string;
+    dispatchable?: boolean;
+    nextAction?: string;
+    failedCheck?: string;
+    correctiveAction?: string;
+  };
 }
 
 interface RepoListResponse {
@@ -239,6 +246,10 @@ function repoPayload(repo: RepoEntry) {
     defaultBranch: repo.defaultBranch ?? null,
     exists: repo.exists ?? null,
     readiness: repo.readiness?.state ?? null,
+    dispatchable: repo.readiness?.dispatchable ?? null,
+    failedCheck: repo.readiness?.failedCheck ?? null,
+    correctiveAction: repo.readiness?.correctiveAction ?? repo.readiness?.nextAction ?? null,
+    nextAction: repo.readiness?.nextAction ?? repo.readiness?.correctiveAction ?? null,
   };
 }
 

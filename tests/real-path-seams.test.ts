@@ -33,7 +33,7 @@
  *      operator-defaults resolution, not resolveBrainEnabledWith in isolation.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { basename, join } from 'node:path';
 import { createElement } from 'react';
@@ -142,6 +142,8 @@ const { addSessionRule } = await import('@/lib/db/session-rules-store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
+const dispatchRoute = await import('@/app/api/orchestrator/dispatch/route');
+const reposRoute = await import('@/app/api/panel/repos/route');
 const operatorStatusRoute = await import('@/app/api/operator/status/route');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const chatHistoryRoute = await import('@/app/api/v2/chat-history/route');
@@ -343,6 +345,72 @@ describe('seam C — typecheckAutoRetries survives the orchestrator-state persis
     // type-broken packet loops full workers forever — this asserts it persists.
     expect(packet).toBeTruthy();
     expect(packet.typecheckAutoRetries).toBe(2);
+  });
+});
+
+describe('repository dispatch admission stays consistent across registration and launch', () => {
+  it('returns the same structured Git failure before an async mission can launch', async () => {
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-non-git-dispatch-seam-'));
+    tempDirs.push(repoPath);
+    let addedRepoId: string | null = null;
+    try {
+      const addResponse = await reposRoute.POST(new Request('http://localhost/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', localPath: repoPath }),
+      }));
+      expect(addResponse.status).toBe(201);
+      const added = await addResponse.json();
+      addedRepoId = added.repo.id;
+      const canonicalRepoPath = realpathSync(repoPath);
+      expect(added.repo).toMatchObject({
+        localPath: canonicalRepoPath,
+        exists: true,
+        isGitRepo: false,
+        readiness: {
+          state: 'blocked',
+          dispatchable: false,
+          failedCheck: 'git_work_tree',
+          correctiveAction: expect.any(String),
+        },
+      });
+
+      const missionId = `mission-non-git-${Date.now()}`;
+      writeOrchestratorControlPlaneState({
+        ...createEmptyOrchestratorMissionState(),
+        missionId,
+        prompt: 'non-Git admission seam',
+        summary: 'non-Git admission seam',
+        repoPath: canonicalRepoPath,
+        runtime: 'codex',
+        packets: [packetFixture({ id: `pkt-non-git-${Date.now()}`, queueState: 'held' })],
+      });
+
+      const dispatchResponse = await dispatchRoute.POST(operatorReq(
+        'http://localhost/api/orchestrator/dispatch',
+        { missionId, wait: false },
+      ));
+      expect(dispatchResponse.status).toBe(400);
+      const dispatched = await dispatchResponse.json();
+      expect(dispatched).toMatchObject({
+        ok: false,
+        error: {
+          code: 'repo_dispatch_blocked',
+          failedCheck: added.repo.readiness.failedCheck,
+          correctiveAction: added.repo.readiness.correctiveAction,
+          nextAction: added.repo.readiness.correctiveAction,
+        },
+      });
+    } finally {
+      writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+      if (addedRepoId) {
+        await reposRoute.DELETE(new Request('http://localhost/api/panel/repos', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: addedRepoId }),
+        }));
+      }
+    }
   });
 });
 
