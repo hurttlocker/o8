@@ -47,6 +47,7 @@ const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const { recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { AGENT_COMMIT_TRAILER } = await import('@/lib/lane/commit-attribution');
 const { createLane } = await import('@/lib/lane/registry');
+const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const {
@@ -234,6 +235,24 @@ afterAll(() => {
 });
 
 describe('approve_and_merge governed squash through the route handler', () => {
+  it('reports a successful local merge when the canonical repository has no push remote', async () => {
+    const fixture = await createFixture('local-only');
+    git(fixture.repo, ['remote', 'remove', 'origin']);
+    expect(git(fixture.repo, ['remote'])).toBe('');
+
+    const response = await mergeRoute.POST(mergeRequest(fixture.packetId));
+    const payload = await response.json();
+    const status = await getMissionStatus({ includeCost: false });
+    const packet = status.packets.find((candidate) => candidate.id === fixture.packetId);
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(payload.result.note).toContain('No push remote is configured');
+    expect(payload.result.note).not.toMatch(/push(?: to origin)? failed|fatal:/i);
+    expect(git(fixture.repo, ['rev-parse', 'refs/heads/main'])).toBe(payload.result.mergeSha);
+    expect(packet).toMatchObject({ status: 'released', releaseState: 'released' });
+  }, 60_000);
+
   it('does not attach a landed merge to a successor attempt that arrived before release persistence', async () => {
     const fixture = await createFixture('successor-attempt');
     lifecycle.afterMerge = () => {
