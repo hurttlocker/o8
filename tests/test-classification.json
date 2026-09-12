@@ -2520,6 +2520,16 @@
       ]
     },
     {
+      "path": "tests/resident-service-close-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/resource-lease-cli-real-path.test.ts",
       "reasons": [
         "child-process",

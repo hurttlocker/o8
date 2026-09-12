@@ -138,7 +138,7 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
 
   async function listSessions(): Promise<OwnedAcpSessionRecord[]> {
     const sessions = (await Promise.all((await listDirs()).map(loadSession)))
-      .filter((session): session is OwnedAcpSessionRecord => Boolean(session));
+      .filter((session): session is OwnedAcpSessionRecord => Boolean(session && !session.detachedAt));
     await Promise.all(sessions.map(refreshSession));
     return sessions;
   }
@@ -331,6 +331,9 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
     return withSession(surfaceId, async () => {
       const session = await findSession(surfaceId, false);
       if (!session) throw new Error(`${adapter.humanLabel} session was not found.`);
+      if (session.detachedAt) {
+        throw new Error(`${adapter.humanLabel} session was detached from its closed packet and cannot be resumed.`);
+      }
       if (session.activeRun?.outcome === 'running') {
         throw new Error(`${adapter.humanLabel} session still has an active turn.`);
       }
@@ -515,6 +518,35 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
     return archived;
   }
 
+  function setDetachedSession(surfaceId: string, reason: string | null) {
+    return withSession(surfaceId, async () => {
+      const session = await findSession(surfaceId, false);
+      if (!session) {
+        return {
+          updated: false,
+          previouslyDetached: false,
+          note: `${adapter.humanLabel} session was not found.`,
+        };
+      }
+      const previouslyDetached = Boolean(session.detachedAt);
+      if (reason === null) {
+        delete session.detachedAt;
+        delete session.detachedReason;
+      } else {
+        session.detachedAt = session.detachedAt ?? nowIso();
+        session.detachedReason = reason;
+      }
+      await saveSession(session);
+      return {
+        updated: true,
+        previouslyDetached,
+        note: reason === null
+          ? `${adapter.humanLabel} session was restored to active discovery.`
+          : `${adapter.humanLabel} recovery metadata was preserved outside active fleet discovery.`,
+      };
+    });
+  }
+
   const presentation = createOwnedAcpPresentation({
     adapter,
     findSession,
@@ -532,6 +564,7 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
     ...presentation,
     sessionState: (surfaceId) => readOwnedSessionState(root(), surfaceId, adapter.surfaceIdPrefix),
     archiveSession,
+    setDetachedSession,
     sweepOrphanedSessions,
     getSessionIdentityId: async () => null,
     invalidateFleetCache: () => {},
@@ -544,6 +577,7 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
     resolveRoot: root,
     sessionState: store.sessionState,
     archiveSession: store.archiveSession,
+    setDetachedSession: store.setDetachedSession,
   });
 
   return store;

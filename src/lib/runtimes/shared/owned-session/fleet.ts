@@ -81,10 +81,12 @@ export function createFleetComputer({
           const filePath = metadataPath(sessionDir);
           if (!(await pathExists(filePath))) return null;
           const session = await io.loadSession(sessionDir);
+          if (session.detachedAt) return null;
           return withSurfaceLock(session.surfaceId, async () => {
             // Stop, resume or exit recording may have changed the run while
             // this inventory read waited. Never write that stale snapshot back.
             const current = await io.loadSession(sessionDir);
+            if (current.detachedAt) return null;
             await runController.refreshSession(current);
             return current;
           });
@@ -311,11 +313,13 @@ export function createFleetComputer({
       try {
         if (!(await pathExists(metadataPath(sessionDir)))) continue;
         const session = await io.loadSession(sessionDir);
+        if (session.detachedAt) continue;
         if (activeSurfaceIds.has(session.surfaceId)) continue;
         if (Date.now() - sessionLastActivityMs(session) < maxAgeMs) continue;
         const didArchive = await withSurfaceLock(session.surfaceId, async () => {
           if (!(await pathExists(metadataPath(sessionDir)))) return false;
           const current = await io.loadSession(sessionDir);
+          if (current.detachedAt) return false;
           if (activeSurfaceIds.has(current.surfaceId)) return false;
           if (Date.now() - sessionLastActivityMs(current) < maxAgeMs) return false;
           if (current.activeRun) {
