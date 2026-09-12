@@ -16,7 +16,9 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 ## Now
 
-One arc for September 2026: **Linux.** Nine of ten children are shipped. The last one is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. Until that proof exists, o8 runs on one platform. [#2060](https://github.com/hurttlocker/o8/issues/2060)
+One arc first: **First ten minutes.** A new operator goes from download to a first merged packet, and the minutes and the stalls are measured. Nobody has measured it yet, and until someone has, the rest of this page is the maintainers' view of the product. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+
+Linux is the next platform milestone. Nine of ten children are shipped; the last is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. [#2060](https://github.com/hurttlocker/o8/issues/2060)
 
 ## What we need to prove
 
