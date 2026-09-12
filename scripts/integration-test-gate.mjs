@@ -43,20 +43,48 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ps includes process environments and can exceed spawnSync's 1 MiB default.
+// Bound the snapshot at 64 MiB; timeouts, larger output, and failed scans must
+// still leave process-tree settlement unconfirmed.
+const MARKER_SCAN_MAX_BUFFER = 64 * 1024 * 1024;
+
+let lastMarkerProbeDiagnostic = null;
+
 function markerPids(marker) {
   if (!marker || process.platform === 'win32') return null;
   const receipt = spawnSync('ps', ['eww', '-axo', 'pid=,command='], {
     encoding: 'utf8',
     timeout: 3_000,
+    maxBuffer: MARKER_SCAN_MAX_BUFFER,
     windowsHide: true,
   });
-  if (receipt.status !== 0) return null;
+  if (receipt.error || receipt.status !== 0) {
+    lastMarkerProbeDiagnostic = {
+      errorCode: receipt.error?.code ?? null,
+      exitStatus: receipt.status ?? null,
+      signal: receipt.signal ?? null,
+      stdoutBytes: typeof receipt.stdout === 'string' ? Buffer.byteLength(receipt.stdout) : 0,
+    };
+    return null;
+  }
+  lastMarkerProbeDiagnostic = null;
   const needle = `O8_TEST_FILE_MARKER=${marker}`;
   return (receipt.stdout ?? '').split('\n').flatMap((line) => {
     if (!line.includes(needle)) return [];
     const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0] ?? '', 10);
     return Number.isSafeInteger(pid) && pid > 0 ? [pid] : [];
   });
+}
+
+function describeProbeDiagnostic(diagnostic) {
+  if (!diagnostic) return 'process scan unavailable';
+  const parts = [
+    diagnostic.errorCode ? `errorCode=${diagnostic.errorCode}` : null,
+    diagnostic.exitStatus !== null && diagnostic.exitStatus !== undefined ? `exitStatus=${diagnostic.exitStatus}` : null,
+    diagnostic.signal ? `signal=${diagnostic.signal}` : null,
+    `stdoutBytes=${diagnostic.stdoutBytes}`,
+  ].filter(Boolean);
+  return `process scan unavailable (${parts.join(', ')})`;
 }
 
 function groupAlive(child) {
@@ -82,12 +110,11 @@ function childAlive(child) {
 function remainingTreePids(child, marker, markerState = markerPids(marker)) {
   const pids = new Set(markerState ?? []);
   if (groupAlive(child) && child?.pid) pids.add(child.pid);
-  if (markerState === null && child?.pid) pids.add(child.pid);
   return [...pids].sort((a, b) => a - b);
 }
 
 async function settle(child, marker, firstSignal = 'SIGTERM') {
-  if (!child?.pid) return { confirmed: false, remainingPids: [] };
+  if (!child?.pid) return { confirmed: false, remainingPids: [], probeUnavailable: false, diagnostic: null };
   for (const [signal, waitMs] of [
     [firstSignal, 500],
     ['SIGTERM', 750],
@@ -112,11 +139,11 @@ async function settle(child, marker, firstSignal = 'SIGTERM') {
     }
     await sleep(waitMs);
     if (process.platform === 'win32' && !childAlive(child)) {
-      return { confirmed: true, remainingPids: [] };
+      return { confirmed: true, remainingPids: [], probeUnavailable: false, diagnostic: null };
     }
     const remaining = markerPids(marker);
     if (!groupAlive(child) && remaining !== null && remaining.length === 0) {
-      return { confirmed: true, remainingPids: [] };
+      return { confirmed: true, remainingPids: [], probeUnavailable: false, diagnostic: null };
     }
   }
   if (process.platform === 'win32') {
@@ -124,13 +151,19 @@ async function settle(child, marker, firstSignal = 'SIGTERM') {
     return {
       confirmed: !alive,
       remainingPids: alive ? [child.pid] : [],
+      probeUnavailable: false,
+      diagnostic: null,
     };
   }
   const remaining = markerPids(marker);
-  const confirmed = !groupAlive(child) && remaining !== null && remaining.length === 0;
+  const alive = groupAlive(child);
+  const confirmed = !alive && remaining !== null && remaining.length === 0;
+  const probeUnavailable = !confirmed && !alive && remaining === null;
   return {
     confirmed,
     remainingPids: confirmed ? [] : remainingTreePids(child, marker, remaining),
+    probeUnavailable,
+    diagnostic: probeUnavailable ? lastMarkerProbeDiagnostic : null,
   };
 }
 
@@ -307,7 +340,9 @@ async function runFile(file, index) {
         : { confirmed: true, remainingPids: [] }));
   if (!treeSettlement.confirmed) {
     outcome.code = 1;
-    const treeError = `integration fixture process tree could not be confirmed stopped; pids: ${treeSettlement.remainingPids.join(', ') || child.pid || 'unknown'}`;
+    const treeError = treeSettlement.probeUnavailable
+      ? `integration fixture process tree could not be confirmed stopped; ${describeProbeDiagnostic(treeSettlement.diagnostic)}; process group exited`
+      : `integration fixture process tree could not be confirmed stopped; pids: ${treeSettlement.remainingPids.join(', ') || child.pid || 'unknown'}`;
     outcome.error = new Error(outcome.timedOut && outcome.error
       ? `${outcome.error.message}; ${treeError}`
       : treeError);
