@@ -2,8 +2,8 @@
  * Auto-review trigger for the orchestrator loop.
  *
  * When a lane transitions to 'reviewing' (agent finished), this module
- * enqueues a durable review job in SQLite. A drain loop processes the
- * queue sequentially, sending review prompts to the orchestrator session.
+ * enqueues a durable review job in SQLite. A bounded drain pool processes the
+ * queue, sending review prompts through dedicated reviewer sessions.
  *
  * This is the connecting tissue between agent completion and human approval.
  * (#456) — Persistent queue survives process restarts. No more lost reviews.
@@ -20,6 +20,17 @@ import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './
 import { extractAddedLines, getLaneDiffFacts, parseDiffStat, type AddedDiffLine } from './lane-diff-facts';
 import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
+import {
+  REVIEW_CONCURRENCY_LIMIT,
+  activateReviewSlot,
+  activeLaneReviewExists,
+  activeReviewClaimCount,
+  isLaneAutoReviewActive,
+  nextAvailableReviewSlot,
+  releaseReviewSlot,
+  releaseStaleLaneReviewClaims,
+  reviewerSessionThreadId,
+} from './review-concurrency';
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
@@ -58,17 +69,10 @@ const REVIEW_DIFF_LINES = {
   'deep-dive': 320,
 } as const;
 
-/** Lane -> exact claim generation currently allowed to write review results. */
-const reviewingLanes = new Map<string, string>();
-
 let drainTimer: ReturnType<typeof setInterval> | null = null;
 let stopExplainerDrain: (() => void) | null = null;
 
-export function isLaneAutoReviewActive(laneId: string): boolean {
-  return reviewingLanes.has(laneId);
-}
-
-export { cancelAutoReviewForLane };
+export { isLaneAutoReviewActive, cancelAutoReviewForLane };
 
 // ── Public API ──
 
@@ -117,26 +121,6 @@ export function startReviewQueueDrain(): () => void {
 }
 
 // ── Drain Logic ──
-
-/** Exact claim occupying the serialized slot; stale claims do not pin it. */
-let activeReviewClaim: QueuedReview | null = null;
-
-function claimGeneration(review: Pick<QueuedReview, 'id' | 'claim_owner'>): string {
-  return `${review.id}\u0000${review.claim_owner}`;
-}
-
-function releaseActiveReviewSlot(review: QueuedReview): void {
-  if (reviewingLanes.get(review.lane_id) === claimGeneration(review)) {
-    reviewingLanes.delete(review.lane_id);
-  }
-  if (
-    activeReviewClaim?.id === review.id
-    && activeReviewClaim.claim_owner === review.claim_owner
-  ) {
-    activeReviewClaim = null;
-  }
-}
-
 type ReviewDepth = keyof typeof REVIEW_DIFF_LINES;
 
 /** Structured settlement prevents an early return from looking completed. */
@@ -163,35 +147,9 @@ function requeueIfReviewHeadMoved(review: QueuedReview, lane: Lane): boolean {
  * Run one drain tick. Exported so real-path tests can drive the production
  * queue path deterministically instead of waiting on the interval.
  */
-export async function drainReviewQueue(): Promise<void> {
-  // Recovery must run before the slot check so a hung turn cannot disable the
-  // path that reclaims it and starts its replacement.
-  await runReviewRecoveryPass();
-
-  if (activeReviewClaim) {
-    if (isReviewClaimCurrent(activeReviewClaim)) return;
-    releaseActiveReviewSlot(activeReviewClaim);
-  }
-
-  const review = claimNextReview();
-  if (!review) return;
-
-  // Don't review concurrently for the same lane. This is a defensive guard;
-  // activeReviewClaim normally owns the only serialized reviewer slot.
-  if (reviewingLanes.has(review.lane_id)) {
-    markReviewDeferred({
-      reviewId: review.id,
-      claimOwner: review.claim_owner,
-      laneId: review.lane_id,
-      reason: 'Lane already being reviewed',
-    });
-    return;
-  }
-
-  activeReviewClaim = review;
-  reviewingLanes.set(review.lane_id, claimGeneration(review));
+async function processClaimedReview(slot: number, review: QueuedReview): Promise<'continue' | 'pause'> {
   try {
-    const outcome = await performAutoReview(review);
+    const outcome = await performAutoReview(review, slot);
     if (outcome.kind === 'deferred') {
       markReviewDeferred({
         reviewId: review.id,
@@ -199,6 +157,7 @@ export async function drainReviewQueue(): Promise<void> {
         laneId: review.lane_id,
         reason: outcome.reason,
       });
+      return 'pause';
     } else if (outcome.kind === 'skipped') {
       markReviewSkipped({
         reviewId: review.id,
@@ -206,8 +165,10 @@ export async function drainReviewQueue(): Promise<void> {
         laneId: review.lane_id,
         reason: outcome.reason,
       });
+      return 'continue';
     } else {
       markReviewCompleted({ reviewId: review.id, claimOwner: review.claim_owner });
+      return 'continue';
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -218,7 +179,7 @@ export async function drainReviewQueue(): Promise<void> {
         laneId: review.lane_id,
         reason: `Review attempt cancelled mid-flight: ${errorMsg}`,
       });
-      return;
+      return 'continue';
     }
     markReviewFailed({
       reviewId: review.id,
@@ -228,11 +189,51 @@ export async function drainReviewQueue(): Promise<void> {
       attempts: review.attempts + 1,
     });
     console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
+    return 'pause';
   } finally {
-    releaseActiveReviewSlot(review);
+    releaseReviewSlot(slot, review);
     clearReviewAttemptCancellation(review.id, review.claim_owner);
     void drainPacketExplainerQueue().catch(() => {});
   }
+}
+
+async function drainAvailableReviewSlot(): Promise<void> {
+  while (true) {
+    const slot = nextAvailableReviewSlot();
+    if (slot === null) return;
+
+    const review = claimNextReview();
+    if (!review) return;
+
+    // A successor waits behind the lane's current claim. Reclaimed generations
+    // are cancelled and owner-scoped, so their stale continuations cannot write.
+    if (activeLaneReviewExists(review.lane_id)) {
+      markReviewDeferred({
+        reviewId: review.id,
+        claimOwner: review.claim_owner,
+        laneId: review.lane_id,
+        reason: 'Lane already being reviewed',
+      });
+      return;
+    }
+
+    activateReviewSlot(slot, review);
+    const disposition = await processClaimedReview(slot, review);
+    if (disposition === 'pause') return;
+  }
+}
+
+export async function drainReviewQueue(): Promise<void> {
+  // Recovery stays ahead of capacity checks so an abandoned turn cannot pin a
+  // slot or disable the path that reclaims and replaces it.
+  await runReviewRecoveryPass();
+
+  // A reclaimed lane can advance while its aborted session keeps its slot.
+  releaseStaleLaneReviewClaims(isReviewClaimCurrent);
+
+  const available = REVIEW_CONCURRENCY_LIMIT - activeReviewClaimCount();
+  if (available <= 0) return;
+  await Promise.all(Array.from({ length: available }, () => drainAvailableReviewSlot()));
 }
 
 // ── Review Execution ──
@@ -495,7 +496,7 @@ function buildReviewPrompt(
   });
 }
 
-async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcome> {
+async function performAutoReview(review: QueuedReview, reviewerSlot: number): Promise<AutoReviewOutcome> {
   const { getLane, getLatestLaneReviewScreenshot } = await import('@/lib/lane/registry');
   const lane = getLane(review.lane_id);
   if (!lane) {
@@ -608,6 +609,7 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     laneId: lane.id,
     repoPath: lane.repoPath,
     threadId: `auto-review-${lane.id}-${review.id}`,
+    sessionThreadId: reviewerSessionThreadId(reviewerSlot, 'primary'),
     surface: 'auto-review',
     expectedHeadSha: review.head_sha,
     prompt: (backendId) => backendId === 'codex'
@@ -649,6 +651,7 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
       retry: {
         reviewPrompt,
         threadId: `auto-review-${lane.id}-${review.id}-verdict-retry`,
+        sessionThreadId: reviewerSessionThreadId(reviewerSlot, 'verdict-retry'),
       },
     });
     if (recorded?.reviewUnavailable) {
@@ -705,6 +708,7 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     laneId: lane.id,
     repoPath: lane.repoPath,
     threadId: secondPassThreadId,
+    sessionThreadId: reviewerSessionThreadId(reviewerSlot, 'blind'),
     surface: 'merge-gate-review',
     expectedHeadSha: pendingSecondPass.reviewedHeadSha,
     prompt: blindPrompt,
