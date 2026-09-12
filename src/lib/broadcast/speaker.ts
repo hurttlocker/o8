@@ -3,8 +3,8 @@ import 'server-only';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
-import { apiFetch } from '@/lib/mcp/operator-handlers/shared';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { fetchNextJson } from '@/lib/ws-server/next-fetch';
 import {
   attentionEventIsCurrent,
   attentionSubscriptionEnabled,
@@ -100,8 +100,9 @@ function voiceSettings(): BroadcastVoiceSettings {
 }
 
 async function loadCommentary(cursor: string | null): Promise<CommentaryPage> {
-  const suffix = cursor ? `?since=${encodeURIComponent(cursor)}&limit=${COMMENTARY_PAGE_LIMIT}` : `?limit=${COMMENTARY_PAGE_LIMIT}`;
-  const response = await apiFetch(`/api/broadcast/commentary${suffix}`) as Partial<CommentaryPage>;
+  const searchParams = new URLSearchParams({ limit: String(COMMENTARY_PAGE_LIMIT) });
+  if (cursor) searchParams.set('since', cursor);
+  const response = await fetchNextJson<Partial<CommentaryPage>>('/api/broadcast/commentary', { searchParams });
   if (!Array.isArray(response.commentary) || typeof response.hasMore !== 'boolean') {
     throw new Error('Broadcast commentary endpoint returned an invalid page.');
   }
@@ -691,14 +692,22 @@ export class BroadcastSpeaker {
 
 let speakerTimer: NodeJS.Timeout | null = null;
 let loopSpeaker: BroadcastSpeaker | null = null;
+let speakerUnavailableWarningActive = false;
 
 export function startBroadcastSpeakerLoop(): () => void {
   if (speakerTimer) return () => undefined;
   loopSpeaker = new BroadcastSpeaker();
   const tick = () => {
-    void loopSpeaker?.tick().catch((error) => {
-      console.warn(`[broadcast-speaker] ${error instanceof Error ? error.message : String(error)}`);
-    });
+    void loopSpeaker?.tick()
+      .then((result) => {
+        if (result?.status === 'processed') speakerUnavailableWarningActive = false;
+      })
+      .catch((error) => {
+        if (!speakerUnavailableWarningActive) {
+          console.warn(`[broadcast-speaker] ${error instanceof Error ? error.message : String(error)}`);
+        }
+        speakerUnavailableWarningActive = true;
+      });
   };
   tick();
   speakerTimer = setInterval(tick, SPEAKER_TICK_MS);
@@ -707,5 +716,6 @@ export function startBroadcastSpeakerLoop(): () => void {
     if (speakerTimer) clearInterval(speakerTimer);
     speakerTimer = null;
     loopSpeaker = null;
+    speakerUnavailableWarningActive = false;
   };
 }
