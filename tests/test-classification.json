@@ -2593,6 +2593,14 @@
       ]
     },
     {
+      "path": "tests/reviewer-concurrency-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/runtime-action-idempotency-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -2907,6 +2915,15 @@
     {
       "path": "tests/ui-loop-warm-lane-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-check-state-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },

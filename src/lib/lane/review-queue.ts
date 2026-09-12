@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
+import { recordLaneEvent } from '@/lib/lane/events';
 import type { Lane } from '@/lib/lane/types';
 import {
   laneReviewHeadSha,
   normalizeAttemptHeadSha,
   settleSupersededReviewAttempts,
 } from './review-attempt-head';
+import { REVIEW_CONCURRENCY_LIMIT } from './review-concurrency';
 import { notifyCorrectnessReviewQueued } from './packet-explainer-queue';
 
 export { surfaceReviewQueueBlocker } from './review-queue-blocker';
@@ -84,6 +86,18 @@ export function enqueueLaneReview(
     `INSERT INTO review_queue (id, lane_id, repo_path, status, attempts, head_sha, created_at, updated_at)
      VALUES (?, ?, ?, 'pending', 0, ?, datetime('now'), datetime('now'))`,
   ).run(reviewId, lane.id, lane.repoPath, currentHeadSha ?? null);
+
+  const queued = db.prepare(
+    `SELECT COUNT(*) AS count FROM review_queue
+     WHERE status IN ('pending', 'in_progress')`,
+  ).get() as { count: number };
+  recordLaneEvent(lane.id, 'review_queued', 'system', {
+    packetId: lane.packetId ?? null,
+    reviewId,
+    state: 'queued',
+    queueDepth: queued.count,
+    concurrencyLimit: REVIEW_CONCURRENCY_LIMIT,
+  });
 
   console.log(`[auto-review] Enqueued review ${reviewId} for lane ${lane.id} (${lane.label})`);
   return { reviewId, queued: true, status: 'pending', supersededAttempts };
