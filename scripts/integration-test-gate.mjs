@@ -6,11 +6,12 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 const root = process.cwd();
 const vitest = join(root, 'node_modules', 'vitest', 'vitest.mjs');
@@ -41,6 +42,17 @@ if (files.length === 0) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Vitest compares filters with canonical discovered paths. Resolve aliases
+// first, and report unavailable selections before starting a child.
+function resolveFilterPath(file) {
+  const absolute = isAbsolute(file) ? file : join(root, file);
+  try {
+    return { path: realpathSync(absolute), errorCode: null };
+  } catch (error) {
+    return { path: absolute, errorCode: error?.code ?? 'UNKNOWN' };
+  }
 }
 
 // ps includes process environments and can exceed spawnSync's 1 MiB default.
@@ -240,6 +252,26 @@ function appendBounded(current, chunk, limit = 2 * 1024 * 1024) {
 const FIXTURE_BASE = process.platform === 'win32' ? tmpdir() : '/tmp';
 
 async function runFile(file, index) {
+  const startedAt = Date.now();
+  const resolved = resolveFilterPath(file);
+  if (resolved.errorCode) {
+    const durationMs = Date.now() - startedAt;
+    const error = `selected file cannot be resolved (${resolved.errorCode}): ${resolved.path}`;
+    console.log(`[integration-gate] ${index + 1}/${files.length} FAIL ${file} · 0/0 passed · ${(durationMs / 1000).toFixed(1)}s · ${error}`);
+    return {
+      file,
+      code: 1,
+      signal: null,
+      error,
+      durationMs,
+      retained: [],
+      total: 0,
+      passed: 0,
+      failed: 0,
+      pending: 0,
+      firstFailure: file,
+    };
+  }
   const fixtureRoot = mkdtempSync(join(FIXTURE_BASE, 'o8g-'));
   const reportPath = join(fixtureRoot, 'vitest-report.json');
   const marker = randomUUID().replace(/-/g, '');
@@ -251,7 +283,6 @@ async function runFile(file, index) {
     O8_TEST_GATE_REPORT_PATH: reportPath,
   };
   delete env.O8_DATA_DIR;
-  const startedAt = Date.now();
   let stdout = '';
   let stderr = '';
   const child = spawn(process.execPath, [
@@ -259,7 +290,7 @@ async function runFile(file, index) {
     'run',
     '--config',
     integrationConfig,
-    file,
+    resolved.path,
   ], {
     cwd: root,
     detached: process.platform !== 'win32',
