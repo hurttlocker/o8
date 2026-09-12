@@ -437,6 +437,12 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     secondPassSchedulingWarning = rearmed.reason;
   }
 
+  let contractCoverage = null;
+  if (input.approved && verdictLane) {
+    const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+    contractCoverage = (await assessDurableApprovedReview(verdictLane)).contractCoverage ?? null;
+  }
+
   log(`Recorded review for packet ${packet.id}${orphanLane ? ` (orphan via lane ${orphanLane.id})` : ''}.`, {
     approved: input.approved,
     findings: input.findings.length,
@@ -458,5 +464,6 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     }),
     auditEventType: 'orchestrator_review',
     auditApprovalId: resolvedAuditApprovalId,
+    contractCoverage,
   };
 }

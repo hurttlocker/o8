@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { runPacketReview } from '../cli/src/commands/packet/review';
 
 const { publishRealtimeMutation } = vi.hoisted(() => ({
   publishRealtimeMutation: vi.fn(async () => {}),
@@ -322,6 +323,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   rmSync(defaultsPath, { force: true });
   rmSync(settingsTomlPath, { force: true });
   for (const dir of tempDirs.splice(0)) {
@@ -429,6 +432,9 @@ describe('requireApproval merge governance through the real command path', () =>
     ));
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      result: { contractCoverage: { status: 'passed', missingRequirementIds: [] } },
+    });
     const approval = listApprovalsForContext({ laneId: fixture.lane.id })
       .find((candidate) => candidate.toolName === 'orchestrator_review');
     expect(approval?.args?.contractCoverageEvidence).toMatchObject({
@@ -441,6 +447,76 @@ describe('requireApproval merge governance through the real command path', () =>
       contractCoverage: { status: 'passed', missingRequirementIds: [] },
     });
   }, 30_000);
+
+  it('records one-requirement coverage and merges through the documented CLI review flow', async () => {
+    const fixture = await createStandardLane('cli-contract-review', false);
+    const taskContract = {
+      version: 1 as const,
+      requirements: [{
+        id: 'R1',
+        source: 'Complete one governed operator review.',
+        expectedBehavior: 'The CLI review records coverage before entering the merge gate.',
+        productionPath: 'file.txt',
+        verification: 'Inspect the committed file.',
+      }],
+      smallestRoute: [{
+        path: 'file.txt',
+        requirements: ['R1'],
+        reason: 'The packet changes one file.',
+      }],
+      exclusions: [],
+    };
+    persistDispatcherMission(
+      fixture.lane.packetId!,
+      fixture.repo,
+      `thoughts-cli-contract-${Date.now()}`,
+      { taskContract, taskContractRequired: true },
+    );
+
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/lanes') {
+        return new Response(JSON.stringify({ lanes: [fixture.lane] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      const request = new NextRequest(url, {
+        method: init?.method,
+        headers: init?.headers,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      if (url.pathname === '/api/orchestrator/review') return reviewRoute.POST(request);
+      if (url.pathname === '/api/orchestrator/merge') return mergeRoute.POST(request);
+      throw new Error(`Unexpected CLI request: ${url.pathname}`);
+    }));
+
+    await expect(runPacketReview(
+      { human: false, verbose: false },
+      [
+        fixture.lane.packetId!,
+        '--approve',
+        '--expected-sha',
+        fixture.reviewedHeadSha,
+        '--coverage',
+        'R1=file.txt',
+      ],
+    )).resolves.toBe(0);
+
+    const output = JSON.parse(stdout.mock.calls.map(([chunk]) => String(chunk)).join(''));
+    expect(output).toMatchObject({
+      packet: {
+        id: fixture.lane.packetId,
+        contractCoverage: {
+          status: 'passed',
+          checks: [{ requirementId: 'R1', covered: true, citedPath: 'file.txt' }],
+          missingRequirementIds: [],
+        },
+        merge: { merged: true },
+      },
+    });
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+  }, 60_000);
 
   it('does not let a pending review waive spoken merge-gate blockers', async () => {
     const fixture = await createBudgetBlockedLane('pending-spoken-review');
