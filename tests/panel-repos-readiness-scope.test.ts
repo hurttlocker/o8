@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -12,11 +13,32 @@ const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-repo-list-scope
 const dataDir = path.join(home, '.o8-data');
 const existingPath = path.join(home, 'existing-repo');
 const missingPath = path.join(home, 'missing-repo');
+const neverExistingPath = path.join(home, 'never-existing-repo');
+const outsidePath = path.join(home, 'outside-repo');
+const escapedSymlinkPath = path.join(existingPath, 'escaped-repo');
+const externalWorktreePath = path.join(home, 'external-worktree');
 process.env.HOME = home;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(existingPath, { recursive: true });
+writeFileSync(path.join(existingPath, 'README.md'), 'registered repository\n');
+execFileSync('git', ['init', '-q', '-b', 'main', existingPath]);
+execFileSync('git', ['-C', existingPath, 'add', 'README.md']);
+execFileSync('git', [
+  '-C',
+  existingPath,
+  '-c',
+  'user.name=o8 test',
+  '-c',
+  'user.email=test@o8.local',
+  'commit',
+  '-qm',
+  'test: seed repository',
+]);
+execFileSync('git', ['-C', existingPath, 'worktree', 'add', '-q', '-b', 'restore-fixture', externalWorktreePath]);
+mkdirSync(outsidePath, { recursive: true });
+symlinkSync(outsidePath, escapedSymlinkPath, 'dir');
 
 function repo(id: string, localPath: string): RepoRegistryEntry {
   return {
@@ -64,7 +86,11 @@ afterAll(() => {
 
 async function getRepos(query = '') {
   const response = await reposRoute.GET(new Request(`http://127.0.0.1/api/panel/repos${query}`));
-  const data = await response.json() as { repos?: RepoRegistryEntry[]; error?: string };
+  const data = await response.json() as {
+    repos?: RepoRegistryEntry[];
+    validatedRestorePaths?: Array<{ requestedPath: string; canonicalPath: string }>;
+    error?: string;
+  };
   return { response, data };
 }
 
@@ -105,5 +131,33 @@ describe('GET /api/panel/repos readiness scope', () => {
 
     expect(response.status).toBe(404);
     expect(data.error).toBe('Registered repository not found.');
+  });
+
+  it('validates restore paths without returning the fleet readiness payload', async () => {
+    const query = new URLSearchParams();
+    query.set('restoreValidationOnly', '1');
+    query.append('restorePath', existingPath);
+    query.append('restorePath', externalWorktreePath);
+    query.append('restorePath', escapedSymlinkPath);
+    query.append('restorePath', outsidePath);
+    query.append('restorePath', neverExistingPath);
+
+    const { response, data } = await getRepos(`?${query.toString()}`);
+
+    expect(response.status).toBe(200);
+    expect(data.repos).toBeUndefined();
+    expect(response.headers.get('Server-Timing')).toContain('validation;dur=');
+    expect(response.headers.get('Server-Timing')).not.toContain('readiness;dur=');
+    expect(response.headers.get('Server-Timing')).not.toContain('existence;dur=');
+    expect(data.validatedRestorePaths).toEqual([
+      {
+        requestedPath: existingPath,
+        canonicalPath: realpathSync(existingPath),
+      },
+      {
+        requestedPath: externalWorktreePath,
+        canonicalPath: realpathSync(externalWorktreePath),
+      },
+    ]);
   });
 });
