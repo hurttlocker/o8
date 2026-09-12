@@ -1,3 +1,7 @@
+const PARTICIPANT_LIMIT = `Work alone for this benchmark. Do not launch helper agents, delegate work, or make
+additional model calls. Use ordinary local inspection and verification tools directly.
+This participant limit takes precedence over general delegation guidance.`;
+
 export const RAW_BRIEF = `You are implementing a real issue in this repository from a clean checkout
 at the commit where the issue was still open.
 
@@ -6,12 +10,16 @@ Repository instructions at the root are binding. Implement every requirement wit
 expanding the requested scope. You have one turn and the fixed time budget enforced by
 the runner. You may inspect, implement, test, and repair within that turn.
 
+${PARTICIPANT_LIMIT}
+
 Leave the work uncommitted. Do not commit, push, create branches, or alter benchmark
 artifacts. Do not weaken or rewrite tests to make the implementation pass.`;
 
 export const JUDGE_PROMPT = `You are an impartial senior code reviewer scoring candidate diffs for the
 same issue. You do not know which runtime or treatment produced them. Judge only the
 code and base repository; do not speculate about authorship.
+
+${PARTICIPANT_LIMIT}
 
 Mechanical checks are reported separately and do not affect the score. Find what a
 compiler cannot establish: unreachable behavior, omitted requirements, excess public
