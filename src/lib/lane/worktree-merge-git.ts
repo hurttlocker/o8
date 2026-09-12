@@ -231,6 +231,12 @@ export async function createDetachedIntegrationWorktree(input: {
       input.repoPath,
       integrationPath,
     ], { timeout: 30_000 });
+    await git(integrationPath, [
+      'fetch',
+      '--no-tags',
+      input.sourceWorktreePath,
+      input.sourceSha,
+    ], { timeout: 30_000 });
     await copyTransportConfig(input.sourceWorktreePath, integrationPath);
     for (const key of ['user.name', 'user.email']) {
       try {

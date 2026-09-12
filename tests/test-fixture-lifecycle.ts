@@ -151,9 +151,15 @@ async function realTemporaryRoots(): Promise<string[]> {
   return [...new Set(roots.filter((candidate): candidate is string => candidate !== null))];
 }
 
-async function assertTemporarySweepParent(canonicalParent: string): Promise<void> {
+export async function pathIsWithinRealTemporaryRoot(target: string): Promise<boolean> {
+  const canonical = await realpath(target).catch(() => null);
+  if (canonical === null) return false;
   const temporaryRoots = await realTemporaryRoots();
-  if (!temporaryRoots.some((root) => pathIsInsideRoot(canonicalParent, root))) {
+  return temporaryRoots.some((root) => pathIsInsideRoot(canonical, root));
+}
+
+async function assertTemporarySweepParent(canonicalParent: string): Promise<void> {
+  if (!await pathIsWithinRealTemporaryRoot(canonicalParent)) {
     throw new Error(`Fixture sweep parent is outside a real temporary root: ${canonicalParent}`);
   }
 }

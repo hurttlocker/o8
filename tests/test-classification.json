@@ -1472,6 +1472,13 @@
       ]
     },
     {
+      "path": "tests/data-handoff-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/declarative-dispatch-worktree-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1984,6 +1991,7 @@
     {
       "path": "tests/merge-checkout-coupling-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "git-cli",
         "real-path",
@@ -2592,6 +2600,14 @@
       ]
     },
     {
+      "path": "tests/reviewer-concurrency-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/roadmap-status.test.ts",
       "reasons": [
         "child-process",
@@ -2836,6 +2852,7 @@
       "path": "tests/test-gate-runner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "process-signal",
         "real-path"
       ]
@@ -2913,6 +2930,15 @@
     {
       "path": "tests/ui-loop-warm-lane-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-check-state-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },

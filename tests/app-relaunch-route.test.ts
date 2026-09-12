@@ -27,7 +27,11 @@ async function postRelaunch(body: unknown) {
 describe('POST /api/panel/app/relaunch', () => {
   beforeEach(async () => {
     publishRealtimeMutation.mockClear();
-    await postUpdateState({ updatePending: false });
+    await postUpdateState({
+      updatePending: false,
+      checkOutcome: 'current',
+      checkedAt: '2026-09-12T16:00:00.000Z',
+    });
   });
 
   it('no-ops clearly when --if-update-pending is requested with no pending update', async () => {
@@ -42,7 +46,12 @@ describe('POST /api/panel/app/relaunch', () => {
   });
 
   it('publishes the realtime mutation when an update is pending', async () => {
-    await postUpdateState({ updatePending: true, version: '0.1.999' });
+    await postUpdateState({
+      updatePending: true,
+      version: '0.1.999',
+      checkOutcome: 'available',
+      checkedAt: '2026-09-12T16:00:00.000Z',
+    });
     const res = await postRelaunch({ ifUpdatePending: true });
     const data = await res.json() as { relaunched?: boolean; state?: { version?: string | null } };
 

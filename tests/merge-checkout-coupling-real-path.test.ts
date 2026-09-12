@@ -54,12 +54,23 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   })),
 }));
 
+vi.mock('@/lib/worktree/apfs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/apfs')>(),
+  getApfsCowCapability: vi.fn(async () => ({
+    macos: true,
+    apfs: true,
+    sameVolume: true,
+    canCowClone: true,
+  })),
+}));
+
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const laneEventsRoute = await import('@/app/api/lanes/[id]/events/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
-const { recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
@@ -89,7 +100,12 @@ function commitAll(cwd: string, message: string): void {
 
 type LintFixtureMode = 'error' | 'clean' | 'no-config';
 
-async function createFixture(label: string, approved: boolean, lintMode?: LintFixtureMode) {
+async function createFixture(
+  label: string,
+  approved: boolean,
+  lintMode?: LintFixtureMode,
+  isolationPreference: 'git-worktree' | 'apfs-cow-clone' = 'git-worktree',
+) {
   const root = mkdtempSync(join(os.tmpdir(), `o8-merge-checkout-${label}-`));
   const origin = join(root, 'origin.git');
   const repo = join(root, 'operator');
@@ -130,7 +146,7 @@ async function createFixture(label: string, approved: boolean, lintMode?: LintFi
     baseBranch: 'main',
     packetId,
     skipSetup: true,
-    isolationPreference: 'git-worktree',
+    isolationPreference,
   });
   git(worktree.path, ['config', 'user.name', 'o8-test']);
   git(worktree.path, ['config', 'user.email', 'o8@example.test']);
@@ -286,6 +302,55 @@ afterAll(() => {
 });
 
 describe('merge checkout coupling through real handlers', () => {
+  it.each(['git-worktree', 'apfs-cow-clone'] as const)(
+    'keeps an approved %s packet mergeable after a dirty checkout blocks the late fast-forward',
+    async (isolationPreference) => {
+      const fixture = await createFixture(
+        `approval-survives-failure-${isolationPreference}`,
+        true,
+        undefined,
+        isolationPreference,
+      );
+      if (isolationPreference === 'apfs-cow-clone') {
+        expect(() => git(fixture.repo, [
+          'cat-file', '-e', `${fixture.reviewedHeadSha}^{commit}`,
+        ])).toThrow();
+      }
+      writeFileSync(join(fixture.repo, 'base-advance.txt'), 'new base work\n');
+      commitAll(fixture.repo, 'advance base after review');
+      git(fixture.repo, ['remote', 'remove', 'origin']);
+      writeFileSync(join(fixture.repo, 'file.txt'), 'base\noperator work\n');
+      setLaneStatus(fixture.lane.id, 'reviewing', 'system', 'review_ready');
+
+      const blockedResponse = await mergeRoute.POST(mergeRequest(fixture.packetId));
+      const blockedPayload = await blockedResponse.json();
+      const reviewApproval = listApprovalsForContext({
+        packetId: fixture.packetId,
+        laneId: fixture.lane.id,
+        sessionKey: fixture.lane.sessionKey ?? undefined,
+      }).find((approval) => approval.toolName === 'orchestrator_review');
+
+      expect(blockedResponse.status).toBe(200);
+      expect(blockedPayload).toMatchObject({ ok: true, result: { merged: false } });
+      expect(reviewApproval).toMatchObject({
+        status: 'approved',
+        args: { approved: true, reviewedHeadSha: fixture.reviewedHeadSha },
+      });
+      expect(await assessDurableApprovedReview(fixture.lane)).toMatchObject({ approved: true });
+      expect(git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+
+      writeFileSync(join(fixture.repo, 'file.txt'), 'base\n');
+      expect(git(fixture.repo, ['status', '--porcelain'])).toBe('');
+
+      const retryResponse = await mergeRoute.POST(mergeRequest(fixture.packetId));
+      const retryPayload = await retryResponse.json();
+
+      expect(retryResponse.status).toBe(200);
+      expect(retryPayload).toMatchObject({ ok: true, result: { merged: true } });
+      expect(git(fixture.repo, ['show', 'refs/heads/main:file.txt'])).toBe('base\nworker');
+    }, 60_000,
+  );
+
   it('persists an unexpected merge failure reason and correlated server log', async () => {
     const fixture = await createFixture('merge-error-reason', true);
     const failureReason = 'synthetic late merge failure';
