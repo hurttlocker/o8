@@ -18,7 +18,16 @@ interface UpdateApplyResponse {
     };
     unavailable?: string[];
   };
-  state?: { version?: string | null };
+  result?: { code?: string };
+  state?: {
+    version?: string | null;
+    check?: {
+      outcome?: string;
+      checkedAt?: string | null;
+      errorCode?: string | null;
+      error?: string | null;
+    };
+  };
 }
 
 export async function runUpdate(
@@ -57,6 +66,8 @@ export async function runUpdate(
     requested: data.requested === true,
     forced: data.forced === true,
     version: data.state?.version ?? null,
+    result: data.result?.code ?? null,
+    check: data.state?.check ?? null,
     message: data.message ?? data.error?.message ?? null,
     error: data.error ?? null,
     idle: data.idle ?? null,
