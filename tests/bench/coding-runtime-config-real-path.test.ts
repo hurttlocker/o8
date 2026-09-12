@@ -200,6 +200,15 @@ describe('coding benchmark runtime configuration through the process entry point
         expect(args.slice(args.indexOf('--effort'), args.indexOf('--effort') + 2))
           .toEqual(['--effort', runtimeConfig.arms[runtime].effort]);
       }
+      const armPrompts = fs.readFileSync(launcherLog, 'utf8').trim().split('\n')
+        .map((line) => JSON.parse(line) as string[])
+        .filter((args) => args[0] === 'send' && args[1]?.startsWith('bc'));
+      expect(armPrompts).toHaveLength(12);
+      for (const args of armPrompts) {
+        expect(args[2]).toContain('Work alone for this benchmark.');
+        expect(args[2]).toContain('Do not launch helper agents, delegate work, or make');
+        expect(args[2]).toContain('additional model calls.');
+      }
 
       const judgeResult = runBenchmark(['--judge'], {
         ...process.env,
@@ -216,6 +225,7 @@ describe('coding benchmark runtime configuration through the process entry point
         requestedSettings?: typeof runtimeConfig.judges;
         receipts: Array<{
           judge: 'codex' | 'claude';
+          promptPath: string;
           worker: string;
           requestedSettings?: { model: string; effort: string };
           dependencies: { destination: string; owned: boolean; symbolicLink: boolean };
@@ -226,6 +236,10 @@ describe('coding benchmark runtime configuration through the process entry point
       expect(judging.receipts).toHaveLength(6);
       for (const receipt of judging.receipts) {
         expect(receipt.requestedSettings).toEqual(runtimeConfig.judges[receipt.judge]);
+        const prompt = fs.readFileSync(receipt.promptPath, 'utf8');
+        expect(prompt).toContain('Work alone for this benchmark.');
+        expect(prompt).toContain('Do not launch helper agents, delegate work, or make');
+        expect(prompt).toContain('additional model calls.');
         const spawnArgv = receipt.spawn.command.split(' ');
         expect(spawnArgv.slice(spawnArgv.indexOf('--model'), spawnArgv.indexOf('--model') + 2))
           .toEqual(['--model', receipt.requestedSettings?.model]);
