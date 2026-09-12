@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -94,7 +95,8 @@ export function pairedWorkerName(
   task: number,
   condition: string,
 ): string {
-  const safeRunId = runId.replace(/[._]/g, '-');
+  const readableRunId = runId.replace(/[^a-z0-9-]/gi, '-').slice(0, 24);
+  const runIdHash = createHash('sha256').update(runId).digest('hex').slice(0, 16);
   const safeCondition = condition.replace(/[^a-z0-9_-]/gi, '-');
-  return `bc-${safeRunId}-${role}-${task}-${safeCondition}`;
+  return `bc-${readableRunId}-${runIdHash}-${role}-${task}-${safeCondition}`;
 }
