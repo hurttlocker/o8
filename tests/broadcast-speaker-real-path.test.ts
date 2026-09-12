@@ -19,7 +19,7 @@ const { getSqlite } = await import('@/lib/db');
 const { appendBroadcastEvent } = await import('@/lib/broadcast/post');
 const { recordCalendarAttention } = await import('@/lib/broadcast/calendar-attention');
 const { recordAutomationAttention } = await import('@/lib/broadcast/automation-attention');
-const { BroadcastSpeaker } = await import('@/lib/broadcast/speaker');
+const { BroadcastSpeaker, startBroadcastSpeakerLoop } = await import('@/lib/broadcast/speaker');
 const { appendEvent, createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { createApproval, recordOrchestratorReview } = await import('@/lib/approvals/store');
 const commentaryRoute = await import('@/app/api/broadcast/commentary/route');
@@ -69,6 +69,31 @@ async function emptyCommentary() {
 }
 
 describe('Broadcast speaker real path', () => {
+  it('logs one warning for a continuous commentary outage', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: { message: 'Commentary unavailable.' },
+    }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const stop = startBroadcastSpeakerLoop();
+    try {
+      await vi.advanceTimersByTimeAsync(3_500);
+      const speakerWarnings = warning.mock.calls.filter(([message]) => (
+        String(message).startsWith('[broadcast-speaker]')
+      ));
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+      expect(speakerWarnings).toHaveLength(1);
+    } finally {
+      stop();
+      warning.mockRestore();
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('advances the route cursor, prevents overlap, summarizes overflow, and lets say preempt pending lines', async () => {
     const base = Date.now();
     for (let index = 1; index <= 5; index += 1) {

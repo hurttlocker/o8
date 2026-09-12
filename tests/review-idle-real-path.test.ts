@@ -15,11 +15,15 @@ const token = `review-idle-${process.pid}`;
 const requests: { path: string; fresh: boolean }[] = [];
 const frames: Frame[] = [];
 let apiServer: Server;
+let decoyServer: Server;
 let wsProcess: ChildProcess | null = null;
 let socket: WebSocket | null = null;
 let apiPort = 0;
+let decoyPort = 0;
 let wsPort = 0;
 let output = '';
+const decoyRequests: string[] = [];
+const commentaryAuthorizations: string[] = [];
 let holdSnapshot = false;
 let releaseSnapshot: (() => void) | null = null;
 
@@ -71,9 +75,19 @@ beforeAll(async () => {
   mkdirSync(reviewRoot);
   writeFileSync(join(dataDir, 'ws-token'), token, { mode: 0o600 });
   apiPort = await freePort();
+  decoyPort = await freePort();
   wsPort = await freePort();
-  writeFileSync(join(dataDir, 'api-port'), String(apiPort));
+  // A stale disk port must never override the source stack's explicit
+  // O8_API_PORT. The decoy catches regressions without touching another app.
+  writeFileSync(join(dataDir, 'api-port'), String(decoyPort));
   writeFileSync(join(dataDir, 'ws-port'), String(wsPort));
+  decoyServer = createServer((request, response) => {
+    decoyRequests.push(request.url ?? '');
+    response.writeHead(401, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ error: 'wrong source API port' }));
+  });
+  decoyServer.listen(decoyPort, '127.0.0.1');
+  await once(decoyServer, 'listening');
   apiServer = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${apiPort}`);
     requests.push({ path: url.pathname, fresh: url.searchParams.get('fresh') === '1' });
@@ -102,7 +116,13 @@ beforeAll(async () => {
     } else if (url.pathname === '/api/setup/identity') {
       response.end(JSON.stringify({ configured: false }));
     } else if (url.pathname === '/api/broadcast/commentary') {
-      response.end(JSON.stringify({ commentary: [], cursor: null, hasMore: false }));
+      commentaryAuthorizations.push(request.headers.authorization ?? '');
+      if (request.headers.authorization !== `Bearer ${token}`) {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: 'missing operator bearer' }));
+      } else {
+        response.end(JSON.stringify({ commentary: [], cursor: null, hasMore: false }));
+      }
     } else if (url.pathname === '/api/orchestrator/headless-tick') {
       response.end(JSON.stringify({ ok: true }));
     } else {
@@ -112,16 +132,18 @@ beforeAll(async () => {
   });
   apiServer.listen(apiPort, '127.0.0.1');
   await once(apiServer, 'listening');
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env, O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir,
+    O8_REVIEW_TEST_DIR: root, CORTEX_IDE_REVIEW_REPO_ROOT: reviewRoot,
+    O8_API_PORT: String(apiPort), O8_WS_PORT: String(wsPort),
+  };
+  delete childEnv.NEXT_ORIGIN;
   wsProcess = execFile(process.execPath, [
     '--require=./tests/helpers/review-idle-preload.cjs',
     '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'src/ws-server.ts',
   ], {
     cwd: process.cwd(),
-    env: {
-      ...process.env, O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir,
-      O8_REVIEW_TEST_DIR: root, CORTEX_IDE_REVIEW_REPO_ROOT: reviewRoot,
-      O8_API_PORT: String(apiPort), O8_WS_PORT: String(wsPort), NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
-    },
+    env: childEnv,
   });
   wsProcess.stdout?.on('data', (chunk) => { output = `${output}${chunk}`.slice(-16_000); });
   wsProcess.stderr?.on('data', (chunk) => { output = `${output}${chunk}`.slice(-16_000); });
@@ -150,10 +172,21 @@ afterAll(async () => {
     apiServer.closeAllConnections();
     await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   }
+  if (decoyServer?.listening) {
+    decoyServer.closeAllConnections();
+    await new Promise<void>((resolve) => decoyServer.close(() => resolve()));
+  }
   rmSync(root, { recursive: true, force: true });
 });
 
 describe('review refresh through the real WebSocket server', () => {
+  it('authenticates speaker polling against the explicit source API port', async () => {
+    await waitFor(() => commentaryAuthorizations.length > 0, 'authenticated commentary poll');
+    expect(commentaryAuthorizations.every((authorization) => authorization === `Bearer ${token}`)).toBe(true);
+    expect(decoyRequests.some((path) => path.startsWith('/api/broadcast/commentary'))).toBe(false);
+    expect(output).not.toContain('[broadcast-speaker]');
+  });
+
   it('keeps ordinary-folder timer scans free of diff shells and runtime rediscovery', async () => {
     // The review root has no Git watcher. Its periodic safety scan still runs.
     const before = freshReads();
