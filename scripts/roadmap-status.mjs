@@ -17,27 +17,22 @@ function gh(path) {
   return JSON.parse(`[${out.trim().replace(/^\[/, '').replace(/\]$/, '').replace(/\]\s*\[/g, ',')}]`);
 }
 
-// The last `## Checklist` section wins, so a converted epic's comment beats its body.
-function countChecklist(texts) {
-  let checked = 0;
-  let total = 0;
-  for (const text of texts) {
-    if (!text || !/^##\s+Checklist\s*$/m.test(text)) continue;
-    const section = text.split(/^##\s+Checklist\s*$/m).pop().split(/^##\s+/m)[0];
-    let c = 0;
-    let t = 0;
-    for (const line of section.split('\n')) {
-      const m = /^\s*-\s*\[([ xX])\]/.exec(line);
-      if (!m) continue;
-      t += 1;
-      if (m[1] !== ' ') c += 1;
-    }
-    if (t > 0) {
-      checked = c;
-      total = t;
-    }
+// The tracking issue body is the checklist authority. Non-child checkboxes are
+// intentionally excluded: this command reports children shipped and can only
+// check the state of entries that link to a child issue.
+function parseChecklist(body) {
+  const sections = body.split(/^##\s+Checklist\s*$/m);
+  const section = sections.length > 1 ? sections[1].split(/^##\s+/m)[0] : '';
+  const items = [];
+  for (const line of section.split('\n')) {
+    const m = /^\s*-\s*\[([ xX])\]\s*#(\d+)\b/.exec(line);
+    if (m) items.push({ checked: m[1] !== ' ', num: Number(m[2]) });
   }
-  return { checked, total };
+  return {
+    items,
+    checked: items.filter((item) => item.checked).length,
+    total: items.length,
+  };
 }
 
 // --check: a checked child must be closed, and every issue linked from the Now
@@ -47,18 +42,6 @@ function countChecklist(texts) {
 function issueState(num) {
   const out = execFileSync('gh', ['api', `repos/${REPO}/issues/${num}`], { encoding: 'utf8' });
   return JSON.parse(out).state;
-}
-function checklistItems(texts) {
-  const items = [];
-  for (const text of texts) {
-    if (!text || !/^##\s+Checklist\s*$/m.test(text)) continue;
-    const section = text.split(/^##\s+Checklist\s*$/m).pop().split(/^##\s+/m)[0];
-    for (const line of section.split('\n')) {
-      const m = /^\s*-\s*\[([ xX])\]\s*#(\d+)/.exec(line);
-      if (m) items.push({ checked: m[1] !== ' ', num: Number(m[2]) });
-    }
-  }
-  return items;
 }
 function nowLinks() {
   let md = '';
@@ -82,13 +65,10 @@ const rows = [];
 const problems = [];
 const awaiting = [];
 for (const issue of issues) {
-  const texts = [issue.body || ''];
-  if (issue.comments > 0) {
-    for (const c of gh(`repos/${REPO}/issues/${issue.number}/comments?per_page=100`)) texts.push(c.body || '');
-  }
-  const { checked, total } = countChecklist(texts);
+  const checklist = parseChecklist(issue.body || '');
+  const { checked, total } = checklist;
   if (CHECK) {
-    for (const item of checklistItems(texts)) {
+    for (const item of checklist.items) {
       const state = issueState(item.num);
       if (item.checked && state !== 'closed') problems.push(`#${issue.number}: checked #${item.num} is ${state}`);
       if (!item.checked && state !== 'open') awaiting.push(`#${issue.number}: #${item.num} is closed, box stays open until it ships`);
