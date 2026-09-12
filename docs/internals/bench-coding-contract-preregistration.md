@@ -89,3 +89,30 @@ task denominator remains visible.
 This clarification applies to new collections and new judging receipts. Published
 receipts are not rewritten. The separate governed shipped-output experiment keeps
 its declared rule that a terminal product failure is measurable and scorable.
+
+### 2026-09-12: isolated paired-only execution
+
+The runner now has an explicit `--paired` modifier for preflight, collection,
+judging, and the combined phase. Paired-only execution does not read or change
+the live approval setting, probe the app, or launch end-to-end missions. Its
+receipt marks end-to-end data as `not-collected`. Full and standalone end-to-end
+commands retain their existing phase selection and control-plane behavior.
+
+Each paired arm and judge receives an owned APFS copy-on-write clone of the
+preflight-checked `node_modules` directory instead of a symlink. Worker identities
+also include the immutable run ID, so a new run cannot resume a stopped or archived
+session from an earlier run. This dependency and identity hardening applies to
+paired arms and judges whether the runner invokes them from a paired-only or full
+phase. Existing worktree paths are preserved and cause a refusal; the operator
+must use a new run ID rather than replace them.
+
+Historical v2 collection receipts remain readable and are interpreted as full
+runs. Those receipts predate the new dependency and worker identity fields, so
+they cannot prove that their already-collected arms used owned clones or
+run-specific workers. They also lack pinned runtime settings, so a new judge
+phase can inspect them but refuses to launch judges from them.
+
+These isolation and identity changes do not alter the intervention or scoring.
+The three historical tasks and bases, four arms per task, one 2,400-second turn,
+two blinded judges, rubric, invalid-arm retention, and greater-than-one-point
+decision rule remain fixed. No new quality score was collected for this amendment.

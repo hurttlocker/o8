@@ -8,8 +8,7 @@
  *   --judge      blind complete task sets and score them with two judges
  *   --all        collect, then judge
  */
-
-import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +25,6 @@ import {
   CODING_JUDGES,
   CODING_RUNTIMES,
   type CodingCondition,
-  type CodingRuntime,
   type CodingTask,
   type CodingVerdict,
   blindCodingDiffs,
@@ -40,21 +38,17 @@ import {
   classifyArmStatus,
   countArmOutcomes,
   ginsuTurnStatus,
-  type ArmClassification,
   type ArmErrorReceipt,
-  type ArmOutcomeTotals,
 } from './coding-arm-outcome';
-import {
-  enforceCollectedPairedAcceptance,
-  selectCompletePairedTask,
-  type PairedArmAcceptanceReceipt,
-  type PairedTaskAcceptanceReceipt,
-} from './coding-paired-acceptance';
 import {
   CODING_TASK_CONTRACT_FILE,
   readCodingTaskContract,
 } from './coding-task-contract';
 import { benchmarkIssueText } from './coding-github-issue';
+import {
+  runCodingCommand as runCommand,
+  type CodingCommandReceipt as CommandReceipt,
+} from './coding-command';
 import {
   assertUnusedCodingRunId,
   collectStandaloneEndToEnd,
@@ -64,6 +58,38 @@ import {
 import { createAbortedEndToEndCollection } from './coding-end-to-end-receipt';
 import { o8CliPreflightSummary } from './coding-o8-cli';
 import { runCodingJudge, type CodingJudgeReceipt } from './coding-judge-runner';
+import {
+  pairedStagedDiffFacts,
+  runPairedMechanicalChecks,
+} from './coding-paired-mechanical';
+import {
+  codingCollectionSeed,
+  createNotCollectedEndToEnd,
+  readCodingTasks,
+  seededCodingShuffle,
+} from './coding-paired-plan';
+import {
+  enforceCollectedPairedAcceptance,
+  selectCompletePairedTask,
+  type PairedTaskAcceptanceReceipt,
+} from './coding-paired-acceptance';
+import {
+  type CodingCollectionPhase,
+  type CodingCollectionReceipt as CollectionReceipt,
+  type CodingPairedArmReceipt as ArmReceipt,
+} from './coding-paired-receipts';
+import {
+  assertPairedDependencySource,
+  pairedWorkerName,
+  preparePairedDetachedWorktree,
+  type PairedDependencyPreparationReceipt,
+} from './coding-paired-worktree';
+import {
+  assertMatchingCodingRuntimeConfig,
+  readCodingRuntimeConfig,
+  type CodingRequestedSettings,
+  type CodingRuntimeConfig,
+} from './coding-runtime-config';
 import { RAW_BRIEF } from './coding-prompts';
 import {
   abortedRunControl,
@@ -71,7 +97,6 @@ import {
   runBackendGuardedCollection,
   runningRunControl,
   withTemporaryRequireApproval,
-  type BenchmarkRunControlReceipt,
 } from './coding-run-control';
 import { judgeEndToEnd } from './judge-coding-end-to-end';
 import {
@@ -81,20 +106,18 @@ import {
   readEndToEndTasks,
   type EndToEndCollectionReceipt,
 } from './run-coding-end-to-end';
-
 const REPO_ROOT = process.cwd();
-const TASKS_FILE = path.join(REPO_ROOT, 'tests/bench/coding/tasks.json');
 const RUN_ID = (process.env.O8_BENCH_RUN_ID ?? 'contract-v1').trim();
 if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(RUN_ID)) {
   throw new Error('O8_BENCH_RUN_ID must contain only letters, numbers, dot, underscore, and hyphen');
 }
 const WORK_ROOT = path.join(os.tmpdir(), 'o8-bench-coding', RUN_ID);
-const LATEST_DIR = path.join(REPO_ROOT, 'tests/bench/latest');
+const LATEST_DIR = path.resolve(process.env.O8_BENCH_LATEST_DIR
+  ?? path.join(REPO_ROOT, 'tests/bench/latest'));
 const COLLECTION_FILE = path.join(WORK_ROOT, 'collection.json');
 const JUDGING_FILE = path.join(WORK_ROOT, 'judging.json');
 const ARM_TIMEOUT_SECONDS = 2_400;
 const JUDGE_TIMEOUT_SECONDS = 1_800;
-const DEFAULT_SEED = 20_260_802;
 const BENCHMARK_NOTES_PATH = packetImplementationNotesPath('benchmark-contract');
 
 const CONTRACT_INTERVENTION = [
@@ -104,146 +127,17 @@ const CONTRACT_INTERVENTION = [
   buildDeviationsClause('benchmark-contract'),
 ].join('\n');
 
-interface CommandReceipt {
-  command: string;
-  status: number | null;
-  signal: string | null;
-  durationMs: number;
-  timedOut: boolean;
-  stderrBytes: number;
-  spawnErrorCode: string | null;
-}
-
-interface MechanicalReceipt {
-  typecheck: CommandReceipt;
-  eslint: CommandReceipt | null;
-  lintedFiles: string[];
-}
-
-interface ArmReceipt extends ArmClassification {
-  task: number;
-  condition: CodingCondition;
-  runtime: CodingRuntime;
-  treatment: 'raw' | 'contract';
-  base: string;
-  worktree: string;
-  promptPath: string;
-  replyPath: string;
-  diffPath: string;
-  turns: 1;
-  repairTurns: 0;
-  operatorInterventions: 0;
-  timeoutSeconds: number;
-  spawn: CommandReceipt;
-  send: CommandReceipt;
-  stop: CommandReceipt;
-  contractObserved: boolean | null;
-  changedFiles: string[];
-  additions: number;
-  deletions: number;
-  mechanical: MechanicalReceipt;
-  terminalOutcome: ArmClassification['outcome'];
-  terminalClassificationReason: string;
-  pairedAcceptance: PairedArmAcceptanceReceipt;
-  measurementNotes: string[];
-}
-
-interface CollectionReceipt {
-  schema: 'o8/coding-collection/v2';
-  runId: string;
-  createdAt: string;
-  seed: number;
-  armTimeoutSeconds: number;
-  conditions: CodingCondition[];
-  arms: ArmReceipt[];
-  outcomeTotals: ArmOutcomeTotals;
-  endToEnd: EndToEndCollectionReceipt;
-  runControl: BenchmarkRunControlReceipt;
-}
-
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function readTasks(): CodingTask[] {
-  const parsed = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8')) as { tasks?: CodingTask[] };
-  if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0) {
-    throw new Error('tests/bench/coding/tasks.json has no tasks');
-  }
-  for (const task of parsed.tasks) {
-    if (!Number.isInteger(task.issue) || task.issue <= 0 || !task.base?.trim() || !task.label?.trim()) {
-      throw new Error(`invalid coding task fixture: ${JSON.stringify(task)}`);
-    }
-  }
-  return parsed.tasks;
 }
 
 function issueText(issue: number): string {
   return benchmarkIssueText(REPO_ROOT, issue);
 }
 
-function runCommand(
-  command: string,
-  args: string[],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
-): { receipt: CommandReceipt; stdout: string; stderr: string } {
-  const startedAt = Date.now();
-  const result: SpawnSyncReturns<string> = spawnSync(command, args, {
-    cwd: options.cwd,
-    env: options.env,
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 * 1024,
-    timeout: options.timeoutMs,
-  });
-  const errorCode = result.error && 'code' in result.error ? String(result.error.code) : '';
-  return {
-    receipt: {
-      command: command === 'ginsu' && args[0] === 'send'
-        ? `ginsu send ${args[1] ?? '(unknown)'} <PROMPT>`
-        : [command, ...args].join(' '),
-      status: result.status,
-      signal: result.signal,
-      durationMs: Date.now() - startedAt,
-      timedOut: errorCode === 'ETIMEDOUT',
-      stderrBytes: Buffer.byteLength(result.stderr || '', 'utf8'),
-      spawnErrorCode: errorCode || null,
-    },
-    stdout: result.stdout || '',
-    stderr: result.stderr || result.error?.message || '',
-  };
-}
-
-function seededShuffle(seed: number) {
-  let state = seed >>> 0;
-  const next = () => {
-    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
-    return state / 4_294_967_296;
-  };
-  return <T,>(items: T[]): T[] => {
-    const copy = [...items];
-    for (let index = copy.length - 1; index > 0; index -= 1) {
-      const swapIndex = Math.floor(next() * (index + 1));
-      [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-    }
-    return copy;
-  };
-}
-
 function armDir(issue: number, condition: CodingCondition): string {
   return path.join(WORK_ROOT, `t${issue}-${condition}`);
-}
-
-function assertManagedWorktreePath(managedRoot: string, dir: string, expectedName: string): void {
-  const resolvedRoot = path.resolve(managedRoot);
-  const resolved = path.resolve(dir);
-  const expected = path.join(resolvedRoot, expectedName);
-  if (resolved !== expected || path.dirname(resolved) !== resolvedRoot || resolved === resolvedRoot) {
-    throw new Error(`refusing unmanaged benchmark worktree path: ${dir}`);
-  }
-  if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) {
-    throw new Error(`refusing benchmark worktree symlink: ${resolved}`);
-  }
 }
 
 function prepareDetachedWorktree(
@@ -251,23 +145,20 @@ function prepareDetachedWorktree(
   dir: string,
   expectedName: string,
   base: string,
-): string {
-  assertManagedWorktreePath(managedRoot, dir, expectedName);
-  if (fs.existsSync(dir)) {
-    const removal = runCommand('git', ['worktree', 'remove', '--force', dir], { cwd: REPO_ROOT });
-    if (removal.receipt.status !== 0 || fs.existsSync(dir)) {
-      throw new Error(`could not safely replace benchmark worktree ${dir}: ${removal.stderr.trim().slice(0, 500)}`);
-    }
-  }
-  execFileSync('git', ['worktree', 'add', '-q', '--detach', dir, base], { cwd: REPO_ROOT });
-  const modules = path.join(dir, 'node_modules');
-  if (!fs.existsSync(modules)) {
-    fs.symlinkSync(path.join(REPO_ROOT, 'node_modules'), modules, 'dir');
-  }
-  return dir;
+): { path: string; dependencies: PairedDependencyPreparationReceipt } {
+  return preparePairedDetachedWorktree({
+    repoRoot: REPO_ROOT,
+    managedRoot,
+    dir,
+    expectedName,
+    base,
+  });
 }
 
-function prepareArmWorktree(task: CodingTask, condition: CodingCondition): string {
+function prepareArmWorktree(
+  task: CodingTask,
+  condition: CodingCondition,
+): { path: string; dependencies: PairedDependencyPreparationReceipt } {
   const name = `t${task.issue}-${condition}`;
   return prepareDetachedWorktree(WORK_ROOT, armDir(task.issue, condition), name, task.base);
 }
@@ -282,61 +173,6 @@ function promptFor(condition: CodingCondition, issue: string): string {
   ].filter((section): section is string => section !== null).join('\n\n');
 }
 
-function stagedDiffFacts(dir: string, diffPath: string): {
-  changedFiles: string[];
-  additions: number;
-  deletions: number;
-} {
-  // Bare `git add -A` — passing any pathspec puts git in explicit mode, where a
-  // gitignored match (the node_modules symlink each arm needs) warns and exits
-  // non-zero, aborting the whole collection. Without a pathspec git silently
-  // skips ignored paths, so benchmark-only artifacts are unstaged explicitly instead.
-  execFileSync('git', ['add', '-A'], { cwd: dir });
-  execFileSync(
-    'git',
-    ['reset', '-q', '--', 'implementation-notes.md', CODING_TASK_CONTRACT_FILE],
-    { cwd: dir },
-  );
-  try {
-    const diff = execFileSync('git', ['diff', '--cached', '--binary'], {
-      cwd: dir,
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    fs.writeFileSync(diffPath, diff);
-    const changedFiles = execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: dir, encoding: 'utf8' })
-      .split('\n').map((entry) => entry.trim()).filter(Boolean);
-    const numstat = execFileSync('git', ['diff', '--cached', '--numstat'], { cwd: dir, encoding: 'utf8' });
-    let additions = 0;
-    let deletions = 0;
-    for (const line of numstat.split('\n')) {
-      const [added, deleted] = line.split('\t');
-      if (/^\d+$/.test(added ?? '')) additions += Number(added);
-      if (/^\d+$/.test(deleted ?? '')) deletions += Number(deleted);
-    }
-    return { changedFiles, additions, deletions };
-  } finally {
-    execFileSync('git', ['reset', '-q'], { cwd: dir });
-  }
-}
-
-function runMechanicalChecks(dir: string, changedFiles: string[]): MechanicalReceipt {
-  const typecheck = runCommand('npx', ['tsc', '--noEmit'], {
-    cwd: dir,
-    timeoutMs: 10 * 60 * 1_000,
-  }).receipt;
-  const lintedFiles = changedFiles.filter((file) => (
-    /\.(?:[cm]?[jt]sx?)$/.test(file) && fs.existsSync(path.join(dir, file))
-  ));
-  const eslint = lintedFiles.length > 0
-    ? runCommand('npx', ['eslint', ...lintedFiles], {
-        cwd: dir,
-        timeoutMs: 10 * 60 * 1_000,
-      }).receipt
-    : null;
-  return { typecheck, eslint, lintedFiles };
-}
-
 function emptyCommand(command: string): CommandReceipt {
   return {
     command,
@@ -349,10 +185,16 @@ function emptyCommand(command: string): CommandReceipt {
   };
 }
 
-function runArm(task: CodingTask, condition: CodingCondition, issue: string): ArmReceipt {
+function runArm(
+  task: CodingTask,
+  condition: CodingCondition,
+  issue: string,
+  requestedSettings: CodingRequestedSettings,
+): ArmReceipt {
   const runtime = runtimeForCondition(condition);
   const treatment = treatmentForCondition(condition);
-  const dir = prepareArmWorktree(task, condition);
+  const prepared = prepareArmWorktree(task, condition);
+  const dir = prepared.path;
   const artifactDir = path.join(WORK_ROOT, 'artifacts');
   fs.mkdirSync(artifactDir, { recursive: true });
   const promptPath = path.join(artifactDir, `prompt-${task.issue}-${condition}.md`);
@@ -361,8 +203,12 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
   const prompt = promptFor(condition, issue);
   fs.writeFileSync(promptPath, prompt);
 
-  const worker = `bc${task.issue}${condition.replace(/[^a-z]/g, '')}`;
-  const spawn = runCommand('ginsu', ['spawn', worker, dir, '--engine', runtime], { cwd: REPO_ROOT });
+  const worker = pairedWorkerName(RUN_ID, 'arm', task.issue, condition);
+  const spawn = runCommand('ginsu', [
+    'spawn', worker, dir, '--engine', runtime,
+    '--model', requestedSettings.model,
+    '--effort', requestedSettings.effort,
+  ], { cwd: REPO_ROOT });
   let send = { receipt: emptyCommand('ginsu send'), stdout: '', stderr: '' };
   let stop = { receipt: emptyCommand('ginsu stop'), stdout: '', stderr: '' };
   if (spawn.receipt.status === 0) {
@@ -381,8 +227,12 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
   const contractObserved = treatment === 'contract'
     ? readCodingTaskContract(dir) !== null
     : null;
-  const diffFacts = stagedDiffFacts(dir, diffPath);
-  const mechanical = runMechanicalChecks(dir, diffFacts.changedFiles);
+  const diffFacts = pairedStagedDiffFacts(
+    dir,
+    diffPath,
+    ['implementation-notes.md', CODING_TASK_CONTRACT_FILE],
+  );
+  const mechanical = runPairedMechanicalChecks(dir, diffFacts.changedFiles, runCommand);
   const measurementNotes = [
     spawn.receipt.status !== 0 ? 'worker spawn failed' : null,
     send.receipt.status !== 0 ? 'worker turn failed' : null,
@@ -419,12 +269,15 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     task: task.issue,
     condition,
     runtime,
+    requestedSettings,
     treatment,
     base: task.base,
     worktree: dir,
     promptPath,
     replyPath,
     diffPath,
+    worker,
+    dependencies: prepared.dependencies,
     turns: 1,
     repairTurns: 0,
     operatorInterventions: 0,
@@ -440,42 +293,36 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
   };
 }
 
-function collectionSeed(): number {
-  const parsed = Number(process.env.O8_BENCH_SEED ?? DEFAULT_SEED);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffff_ffff) {
-    throw new Error('O8_BENCH_SEED must be an unsigned 32-bit integer');
-  }
-  return parsed;
-}
-
-async function collectWhileApprovalHeld(
-  tasks: CodingTask[],
-  endToEndTasks: EndToEndTask[],
-): Promise<CollectionReceipt> {
-  const endToEnd = createEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks);
-  fs.mkdirSync(WORK_ROOT, { recursive: true });
-  const seed = collectionSeed();
-  const shuffle = seededShuffle(seed);
-  const collection: CollectionReceipt = {
-    schema: 'o8/coding-collection/v2',
+function createCollection(
+  phase: CodingCollectionPhase,
+  endToEnd: CollectionReceipt['endToEnd'],
+  requestedSettings: CodingRuntimeConfig,
+): CollectionReceipt {
+  return {
+    schema: 'o8/coding-collection/v3',
     runId: RUN_ID,
+    phase,
     createdAt: new Date().toISOString(),
-    seed,
+    seed: codingCollectionSeed(),
     armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
     conditions: [...CODING_CONDITIONS],
+    requestedSettings,
     arms: [],
     outcomeTotals: countArmOutcomes([]),
     endToEnd,
     runControl: runningRunControl(),
   };
-  writeJson(COLLECTION_FILE, collection);
+}
 
+function pairedArmCallbacks(
+  collection: CollectionReceipt,
+  requestedSettings: CodingRuntimeConfig,
+): {
+  runArm: (input: { task: CodingTask; condition: CodingCondition }) => ArmReceipt;
+  commitArm: (receipt: ArmReceipt) => void;
+} {
   const issues = new Map<number, string>();
-  const pendingArms = tasks.flatMap((task) => (
-    shuffle(CODING_CONDITIONS).map((condition) => ({ task, condition }))
-  ));
-  await runBackendGuardedCollection({
-    arms: pendingArms,
+  return {
     runArm: ({ task, condition }) => {
       let issue = issues.get(task.issue);
       if (!issue) {
@@ -485,7 +332,12 @@ async function collectWhileApprovalHeld(
         fs.writeFileSync(path.join(WORK_ROOT, 'artifacts', `issue-${task.issue}.md`), issue);
       }
       console.log(`[coding] collecting ${condition} on #${task.issue}`);
-      return runArm(task, condition, issue);
+      return runArm(
+        task,
+        condition,
+        issue,
+        requestedSettings.arms[runtimeForCondition(condition)],
+      );
     },
     commitArm: (receipt) => {
       collection.arms.push(receipt);
@@ -495,6 +347,33 @@ async function collectWhileApprovalHeld(
         `+${receipt.additions}/-${receipt.deletions} notes=${receipt.measurementNotes.join('; ') || 'none'}`,
       );
     },
+  };
+}
+
+function pairedArmPlan(tasks: CodingTask[], seed: number): Array<{
+  task: CodingTask;
+  condition: CodingCondition;
+}> {
+  const shuffle = seededCodingShuffle(seed);
+  return tasks.flatMap((task) => (
+    shuffle(CODING_CONDITIONS).map((condition) => ({ task, condition }))
+  ));
+}
+
+async function collectWhileApprovalHeld(
+  tasks: CodingTask[],
+  endToEndTasks: EndToEndTask[],
+  requestedSettings: CodingRuntimeConfig,
+): Promise<CollectionReceipt> {
+  const endToEnd = createEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks);
+  fs.mkdirSync(WORK_ROOT, { recursive: true });
+  const collection = createCollection('full', endToEnd, requestedSettings);
+  writeJson(COLLECTION_FILE, collection);
+
+  const callbacks = pairedArmCallbacks(collection, requestedSettings);
+  await runBackendGuardedCollection({
+    arms: pairedArmPlan(tasks, collection.seed),
+    ...callbacks,
     onRunControl: (receipt) => {
       collection.runControl = {
         ...receipt,
@@ -517,12 +396,13 @@ async function collectWhileApprovalHeld(
       writeJson(COLLECTION_FILE, collection);
     },
   });
+  const completedEndToEnd = collection.endToEnd as EndToEndCollectionReceipt;
   collection.runControl = {
     status: 'completed',
-    completedArms: collection.arms.length + collection.endToEnd.arms.length,
+    completedArms: collection.arms.length + completedEndToEnd.arms.length,
     abortReason: null,
     backendDetail: null,
-    backendProbe: collection.endToEnd.runControl.backendProbe,
+    backendProbe: completedEndToEnd.runControl.backendProbe,
   };
   writeJson(COLLECTION_FILE, collection);
   return collection;
@@ -530,26 +410,19 @@ async function collectWhileApprovalHeld(
 
 async function collect(
   tasks: CodingTask[],
+  requestedSettings: CodingRuntimeConfig,
   endToEndTasks = readEndToEndTasks(REPO_ROOT),
 ): Promise<CollectionReceipt> {
   assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
   try {
-    return await withTemporaryRequireApproval(() => collectWhileApprovalHeld(tasks, endToEndTasks));
+    return await withTemporaryRequireApproval(() => (
+      collectWhileApprovalHeld(tasks, endToEndTasks, requestedSettings)
+    ));
   } catch (error) {
     if (error instanceof O8BackendAbortError && !fs.existsSync(COLLECTION_FILE)) {
       const endToEnd = createAbortedEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks, error);
-      const collection: CollectionReceipt = {
-        schema: 'o8/coding-collection/v2',
-        runId: RUN_ID,
-        createdAt: new Date().toISOString(),
-        seed: collectionSeed(),
-        armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
-        conditions: [...CODING_CONDITIONS],
-        arms: [],
-        outcomeTotals: countArmOutcomes([]),
-        endToEnd,
-        runControl: abortedRunControl(error),
-      };
+      const collection = createCollection('full', endToEnd, requestedSettings);
+      collection.runControl = abortedRunControl(error);
       fs.mkdirSync(WORK_ROOT, { recursive: true });
       writeJson(COLLECTION_FILE, collection);
     }
@@ -557,12 +430,52 @@ async function collect(
   }
 }
 
+function collectPairedOnly(
+  tasks: CodingTask[],
+  requestedSettings: CodingRuntimeConfig,
+): CollectionReceipt {
+  assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
+  fs.mkdirSync(WORK_ROOT, { recursive: true });
+  const collection = createCollection(
+    'paired-only',
+    createNotCollectedEndToEnd(RUN_ID),
+    requestedSettings,
+  );
+  const callbacks = pairedArmCallbacks(collection, requestedSettings);
+  writeJson(COLLECTION_FILE, collection);
+  for (const arm of pairedArmPlan(tasks, collection.seed)) {
+    callbacks.commitArm(callbacks.runArm(arm));
+    collection.runControl = {
+      status: 'running',
+      completedArms: collection.arms.length,
+      abortReason: null,
+      backendDetail: null,
+      backendProbe: null,
+    };
+    writeJson(COLLECTION_FILE, collection);
+  }
+  collection.runControl = {
+    ...collection.runControl,
+    status: 'completed',
+  };
+  writeJson(COLLECTION_FILE, collection);
+  return collection;
+}
+
+function collectionPhase(collection: CollectionReceipt): CodingCollectionPhase {
+  return collection.schema === 'o8/coding-collection/v2' ? 'full' : collection.phase ?? 'full';
+}
+
 function readCollection(): CollectionReceipt {
   const parsed = JSON.parse(fs.readFileSync(COLLECTION_FILE, 'utf8')) as CollectionReceipt;
-  if (parsed.schema !== 'o8/coding-collection/v2'
+  const supportedSchema = parsed.schema === 'o8/coding-collection/v2'
+    || parsed.schema === 'o8/coding-collection/v3';
+  const endToEndSchema = parsed.endToEnd?.schema;
+  if (!supportedSchema
     || parsed.runId !== RUN_ID
     || !Array.isArray(parsed.arms)
-    || parsed.endToEnd?.schema !== 'o8/coding-end-to-end-collection/v1'
+    || (endToEndSchema !== 'o8/coding-end-to-end-collection/v1'
+      && endToEndSchema !== 'o8/coding-end-to-end-not-collected/v1')
     || parsed.endToEnd.runId !== RUN_ID) {
     throw new Error('collection.json is missing or uses an unsupported schema');
   }
@@ -572,10 +485,30 @@ function readCollection(): CollectionReceipt {
       `arms completed before abort=${parsed.runControl.completedArms}`,
     );
   }
+  if (collectionPhase(parsed) === 'paired-only'
+    && parsed.endToEnd.schema !== 'o8/coding-end-to-end-not-collected/v1') {
+    throw new Error('paired-only collection must mark end-to-end data as not collected');
+  }
   return parsed;
 }
 
-function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
+function judge(
+  tasks: CodingTask[],
+  collection: CollectionReceipt,
+  requestedPhase: CodingCollectionPhase,
+  requestedSettings: CodingRuntimeConfig,
+): void {
+  assertMatchingCodingRuntimeConfig(collection.requestedSettings, requestedSettings);
+  const collectedPhase = collectionPhase(collection);
+  if (collectedPhase !== requestedPhase) {
+    throw new Error(
+      `benchmark run ${RUN_ID} collected phase=${collectedPhase}; judge it with the matching phase flag`,
+    );
+  }
+  if (requestedPhase === 'full'
+    && collection.endToEnd.schema !== 'o8/coding-end-to-end-collection/v1') {
+    throw new Error(`benchmark run ${RUN_ID} has no collected end-to-end data`);
+  }
   if (fs.existsSync(JUDGING_FILE)) {
     throw new Error(
       `benchmark run ${RUN_ID} already has judging receipts; use a new run ID rather than replacing verdicts`,
@@ -593,12 +526,13 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     requiredConditions: [...CODING_CONDITIONS],
     tasks: pairedSelections.map((selection) => selection.receipt),
   } satisfies { requiredConditions: CodingCondition[]; tasks: PairedTaskAcceptanceReceipt[] };
-  const shuffle = seededShuffle(collection.seed);
+  const shuffle = seededCodingShuffle(collection.seed);
   const judgingStartedAt = new Date().toISOString();
   writeJson(JUDGING_FILE, {
     schema: 'o8/coding-judging/v2',
     runId: RUN_ID,
     startedAt: judgingStartedAt,
+    requestedSettings: requestedSettings.judges,
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
     pairedAcceptance,
@@ -633,16 +567,24 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
         fs.writeFileSync(dest, scrubAuthorship(fs.readFileSync(input.diffPath, 'utf8')));
         return { blindLabel: input.blindLabel, diffPath: dest };
       });
-      const baseDir = prepareDetachedWorktree(judgeScope, path.join(judgeScope, 'base'), 'base', task.base);
+      const preparedBase = prepareDetachedWorktree(
+        judgeScope,
+        path.join(judgeScope, 'base'),
+        'base',
+        task.base,
+      );
       console.log(`[coding] judging #${task.issue} with judge ${judgeRuntime}`);
       const result = runCodingJudge({
+        runId: RUN_ID,
         task,
         judge: judgeRuntime,
         inputs: relabelled,
-        baseDir,
+        baseDir: preparedBase.path,
+        dependencyPreparation: preparedBase.dependencies,
         repoRoot: REPO_ROOT,
         workRoot: WORK_ROOT,
         timeoutSeconds: JUDGE_TIMEOUT_SECONDS,
+        requestedSettings: requestedSettings.judges[judgeRuntime],
         runCommand,
       });
       verdicts.push(...result.verdicts);
@@ -651,6 +593,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
         schema: 'o8/coding-judging/v2',
         runId: RUN_ID,
         startedAt: judgingStartedAt,
+        requestedSettings: requestedSettings.judges,
         receipts: judgeReceipts,
         blindVerdicts: verdicts,
         pairedAcceptance,
@@ -659,16 +602,22 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
   }
 
   const summary = scoreCodingResults(tasks, verdicts, mappings);
-  const endToEnd = judgeEndToEnd({
-    repoRoot: REPO_ROOT,
-    workRoot: WORK_ROOT,
-    seed: collection.seed,
-    collection: collection.endToEnd,
-  });
+  const endToEnd = requestedPhase === 'full'
+    ? judgeEndToEnd({
+        repoRoot: REPO_ROOT,
+        workRoot: WORK_ROOT,
+        seed: collection.seed,
+        collection: collection.endToEnd as EndToEndCollectionReceipt,
+      })
+    : collection.endToEnd;
+  const collectedEndToEndArms = collection.endToEnd.schema === 'o8/coding-end-to-end-collection/v1'
+    ? collection.endToEnd.arms
+    : [];
   fs.mkdirSync(LATEST_DIR, { recursive: true });
   writeJson(path.join(LATEST_DIR, 'coding.json'), {
-    schema: 'o8/coding-benchmark/v2',
+    schema: 'o8/coding-benchmark/v3',
     runId: RUN_ID,
+    phase: requestedPhase,
     generatedAt: new Date().toISOString(),
     protocol: {
       seed: collection.seed,
@@ -683,7 +632,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
       rawAndTreatmentShareTaskBaseRulesAndBudget: true,
     },
     collection,
-    outcomeTotals: countArmOutcomes([...collection.arms, ...collection.endToEnd.arms]),
+    outcomeTotals: countArmOutcomes([...collection.arms, ...collectedEndToEndArms]),
     judging: { receipts: judgeReceipts, mappings, pairedAcceptance },
     endToEnd,
     ...summary,
@@ -692,6 +641,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     schema: 'o8/coding-judging/v2',
     runId: RUN_ID,
     startedAt: judgingStartedAt,
+    requestedSettings: requestedSettings.judges,
     completedAt: new Date().toISOString(),
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
@@ -720,14 +670,12 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
   console.log(`[coding] ${summary.note}`);
 }
 
-function preflight(tasks: CodingTask[], endToEndTasks: EndToEndTask[]): void {
+function preflightPaired(tasks: CodingTask[]): void {
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
   if (path.resolve(root) !== path.resolve(REPO_ROOT)) {
     throw new Error(`run the coding benchmark from the repository root: ${root}`);
   }
-  if (!fs.existsSync(path.join(REPO_ROOT, 'node_modules'))) {
-    throw new Error('node_modules is missing; run npm install before the benchmark');
-  }
+  assertPairedDependencySource(REPO_ROOT);
   for (const command of ['ginsu', 'gh']) {
     const check = runCommand(command, ['--help'], { cwd: REPO_ROOT, timeoutMs: 30_000 });
     if (check.receipt.status !== 0) throw new Error(`${command} is unavailable`);
@@ -736,11 +684,15 @@ function preflight(tasks: CodingTask[], endToEndTasks: EndToEndTask[]): void {
     execFileSync('git', ['cat-file', '-e', `${task.base}^{commit}`], { cwd: REPO_ROOT });
     issueText(task.issue);
   }
-  const endToEnd = preflightEndToEnd(REPO_ROOT, endToEndTasks);
   console.log(
     `[coding] preflight OK: ${tasks.length} fixed tasks, ${CODING_CONDITIONS.length} paired arms/task, ` +
-    `${CODING_JUDGES.length} judges, seed=${collectionSeed()}, run=${RUN_ID}`,
+    `${CODING_JUDGES.length} judges, seed=${codingCollectionSeed()}, run=${RUN_ID}`,
   );
+}
+
+function preflight(tasks: CodingTask[], endToEndTasks: EndToEndTask[]): void {
+  preflightPaired(tasks);
+  const endToEnd = preflightEndToEnd(REPO_ROOT, endToEndTasks);
   console.log(
     `[coding:e2e] preflight OK: issues=${endToEndTasks.map((task) => task.issue).join(',')}, ` +
     `arms=3/task, base=${endToEnd.baseCommit}, ` +
@@ -751,7 +703,9 @@ function preflight(tasks: CodingTask[], endToEndTasks: EndToEndTask[]): void {
 
 async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
-  const allowed = new Set(['--preflight', '--collect', '--judge', '--all', '--e2e', '--e2e-judge']);
+  const allowed = new Set([
+    '--preflight', '--collect', '--judge', '--all', '--paired', '--e2e', '--e2e-judge',
+  ]);
   const unknown = [...args].filter((arg) => !allowed.has(arg));
   if (unknown.length > 0) throw new Error(`unknown coding benchmark flag: ${unknown.join(', ')}`);
   const standaloneInput = { repoRoot: REPO_ROOT, workRoot: WORK_ROOT, runId: RUN_ID };
@@ -767,9 +721,35 @@ async function main(): Promise<void> {
     || (args.has('--e2e') && args.has('--judge') && args.size === 2)) {
     judgeStandaloneEndToEnd({
       ...standaloneInput,
-      seed: collectionSeed(),
+      seed: codingCollectionSeed(),
       latestDir: LATEST_DIR,
     });
+    return;
+  }
+  if (args.has('--paired')) {
+    const pairedPhases = ['--preflight', '--collect', '--judge', '--all']
+      .filter((flag) => args.has(flag));
+    if (args.size !== 2 || pairedPhases.length !== 1) {
+      throw new Error('choose one paired-only phase: --paired --preflight|--collect|--judge|--all');
+    }
+    const requestedSettings = readCodingRuntimeConfig(REPO_ROOT);
+    const tasks = readCodingTasks(REPO_ROOT);
+    if (args.has('--preflight')) {
+      assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
+      preflightPaired(tasks);
+      console.log('[coding] paired-only phase selected; end-to-end data=not collected');
+      return;
+    }
+    if (args.has('--collect')) {
+      collectPairedOnly(tasks, requestedSettings);
+      return;
+    }
+    if (args.has('--judge')) {
+      judge(tasks, readCollection(), 'paired-only', requestedSettings);
+      return;
+    }
+    const collection = collectPairedOnly(tasks, requestedSettings);
+    judge(tasks, collection, 'paired-only', requestedSettings);
     return;
   }
   if (args.size !== 1) {
@@ -778,22 +758,23 @@ async function main(): Promise<void> {
       'use --preflight --e2e to check the standalone experiment without collecting',
     );
   }
-  const tasks = readTasks();
+  const requestedSettings = readCodingRuntimeConfig(REPO_ROOT);
+  const tasks = readCodingTasks(REPO_ROOT);
   const endToEndTasks = readEndToEndTasks(REPO_ROOT);
   if (args.has('--preflight')) {
     preflight(tasks, endToEndTasks);
     return;
   }
   if (args.has('--collect')) {
-    await collect(tasks, endToEndTasks);
+    await collect(tasks, requestedSettings, endToEndTasks);
     return;
   }
   if (args.has('--judge')) {
-    judge(tasks, readCollection());
+    judge(tasks, readCollection(), 'full', requestedSettings);
     return;
   }
-  const collection = await collect(tasks, endToEndTasks);
-  judge(tasks, collection);
+  const collection = await collect(tasks, requestedSettings, endToEndTasks);
+  judge(tasks, collection, 'full', requestedSettings);
 }
 
 void main();
