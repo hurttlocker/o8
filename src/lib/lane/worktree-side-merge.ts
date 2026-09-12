@@ -774,8 +774,10 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       blockers: [],
     };
   } catch (error) {
-    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
-    return { ok: false, laneId: command.laneId, note: gitErrorMessage(error) };
+    const reason = gitErrorMessage(error);
+    console.error(`[lane-merge] Merge failed for lane ${lane.id} (packet ${lane.packetId ?? 'unbound'}): ${reason}`);
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error', { reason });
+    return { ok: false, laneId: command.laneId, note: reason };
   } finally {
     await cleanupIntegrationWorktree?.();
   }
