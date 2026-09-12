@@ -14,6 +14,11 @@ export interface OwnedSessionLifecycleRegistration {
   resolveRoot(): string;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
+    updated: boolean;
+    previouslyDetached: boolean;
+    note: string;
+  }>;
   getWorkspaceBinding?(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null>;
   rebindWorkspace?(surfaceId: string, input: RebindOwnedWorkspaceInput): Promise<RebindOwnedWorkspaceResult>;
 }
@@ -42,6 +47,11 @@ export function registerOwnedSessionLifecycle(options: {
     resolveRoot: () => process.env[options.rootEnvVar] || options.rootDefault,
     sessionState: (surfaceId) => options.store.sessionState(surfaceId),
     archiveSession: (surfaceId) => options.store.archiveSession(surfaceId),
+    ...(options.store.setDetachedSession ? {
+      setDetachedSession: (surfaceId: string, reason: string | null) => (
+        options.store.setDetachedSession!(surfaceId, reason)
+      ),
+    } : {}),
     ...(options.store.getWorkspaceBinding && options.store.rebindWorkspace ? {
       getWorkspaceBinding: (surfaceId: string) => options.store.getWorkspaceBinding!(surfaceId),
       rebindWorkspace: (surfaceId: string, input: RebindOwnedWorkspaceInput) => (
