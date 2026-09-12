@@ -1472,6 +1472,13 @@
       ]
     },
     {
+      "path": "tests/data-handoff-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/declarative-dispatch-worktree-real-path.test.ts",
       "reasons": [
         "child-process",
