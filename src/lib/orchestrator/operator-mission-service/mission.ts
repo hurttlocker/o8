@@ -5,6 +5,7 @@ import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestra
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { applyPacketScopePolicy, buildRemainingLaunchBudget, computePredictedFiles, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { getOperatorDefaultsSync, resolveBranchPrefixSync } from '@/lib/operator/defaults';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
@@ -428,6 +429,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
 
   if (requestedMissionId && requestedMissionId !== currentMissionId) {
     const { result, state: finalState } = await withMissionRegistryState(requestedMissionId, async (stored) => {
+      assertOrchestratorRepoPath(stored.repoPath);
       const registryBefore = releaseAbandonedMissionLifecycleHold(
         reconcileOrchestratorControlPlaneState(stored),
         { allowOwnerTakeover: true },
@@ -450,6 +452,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
 
   // Use locked state to prevent race with headless loop tick
   const { result, state: finalState } = await withLockedState(async (current) => {
+    assertOrchestratorRepoPath(current.repoPath);
     // #23 — an EXPLICIT dispatch re-arms any packet a prior reset_packet left in
     // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
     // (so reset doesn't boomerang); an explicit dispatch_mission is the operator

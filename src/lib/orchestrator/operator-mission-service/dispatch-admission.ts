@@ -1,4 +1,5 @@
 import { reconcileOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
+import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
@@ -18,6 +19,7 @@ export async function prepareMissionDispatch(input: DispatchMissionInput) {
     const current = currentMissionState();
     if (requestedMissionId !== current.missionId?.trim()) {
       const { state } = await withMissionRegistryState(requestedMissionId, async (stored) => {
+        assertOrchestratorRepoPath(stored.repoPath);
         const prepared = releaseAbandonedMissionLifecycleHold(
           reconcileOrchestratorControlPlaneState(stored),
           { allowOwnerTakeover: true },
@@ -29,6 +31,7 @@ export async function prepareMissionDispatch(input: DispatchMissionInput) {
     }
 
     const { state } = await withLockedState(async (stored) => {
+      assertOrchestratorRepoPath(stored.repoPath);
       const prepared = releaseAbandonedMissionLifecycleHold(stored, { allowOwnerTakeover: true });
       if (!prepared.lifecycleHold) preparePacketsForExplicitDispatch(prepared, input.runtime);
       Object.assign(stored, prepared);

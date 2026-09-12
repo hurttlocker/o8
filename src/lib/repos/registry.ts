@@ -20,6 +20,7 @@ import type {
 import { isRepoWorkspaceIsolationPreference } from './types';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
+import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
 import { dependencyInstallCommandForManager } from '@/lib/workspace/dependency-manager-contract';
 import { loadWorkspaceManifest, workspaceManifestPath } from '@/lib/workspace/manifest';
 
@@ -279,9 +280,13 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
     devCommand = 'go run .';
   }
 
+  const envFiles = (await Promise.all(['.env', '.env.local'].map(async (file) => (
+    await pathExists(path.join(repoRoot, file)) ? file : null
+  )))).filter((file): file is string => Boolean(file));
+
   return {
-    envMode: 'copy',
-    envFiles: ['.env', '.env.local'],
+    envMode: envFiles.length > 0 ? 'copy' : 'skip',
+    envFiles,
     installCommand,
     installOnCreateWorkspace: Boolean(installCommand),
     buildCommand,
@@ -331,7 +336,8 @@ async function inspectLocalRepo(localPath: string): Promise<ValidatedRepoCandida
   if (isOrchestratorHomePath(localPath)) {
     throw new Error('Home mode is not a registered repository.');
   }
-  const { localPath: repoRoot, isGitRepo } = await resolveRepoRoot(localPath);
+  const { localPath: repoRoot } = await resolveRepoRoot(localPath);
+  const isGitRepo = getRepoDispatchAdmission(repoRoot).ok;
   const [remoteUrl, defaultBranch, setup] = await Promise.all([
     isGitRepo ? gitValue(repoRoot, ['remote', 'get-url', 'origin']) : null,
     resolveDefaultBranch(repoRoot, isGitRepo),
