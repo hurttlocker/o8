@@ -16,7 +16,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 ## Now
 
-One arc first: **First ten minutes.** A new operator goes from download to a first merged packet, and the minutes and the stalls are measured. Nobody has measured it yet, and until someone has, the rest of this page is the maintainers' view of the product. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+One arc first: **First ten minutes.** A new operator goes from download to a first merged packet, and the minutes and the stalls are measured. The first measurement exists: from source on a Mac, clone to merged packet took 6.8 minutes with nine stalls, one of them needing maintainer knowledge to pass. The eight product frictions behind those stalls are the arc's children, and the download path is still unmeasured. [#2211](https://github.com/hurttlocker/o8/issues/2211), [receipt](./docs/user/first-run-receipt-2026-09-12.md)
 
 Linux is the next platform milestone. Nine of ten children are shipped; the last is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. [#2060](https://github.com/hurttlocker/o8/issues/2060)
 
@@ -24,7 +24,7 @@ Linux is the next platform milestone. Nine of ten children are shipped; the last
 
 Three outcomes decide whether the pillars add up. The first-diff comparisons below provide evidence on code quality; operator effort and the full loop's value still need measurement. A green checklist is progress on a row, not proof of the outcome.
 
-- **A new operator finishes the loop.** Download to first merged packet, with the minutes and the stalls measured. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+- **A new operator finishes the loop.** Download to first merged packet, with the minutes and the stalls measured. Baseline from source: 6.8 minutes, nine stalls. The download path has no baseline. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 - **Interrupted work stays visible and recoverable.** A refusal surfaces, retries are bounded, and a replaced mission leaves no live packets behind. [#2197](https://github.com/hurttlocker/o8/issues/2197)
 - **The governed loop earns its cost.** A first diff at least as good as the raw model on the same task remains the goal. Also compare final accepted quality. Measure the operator's time spent supervising, reviewing, and repairing the result, alongside runtime costs for attempts, reviews, and rework. An accurate ledger supports that comparison; it does not establish that delegation saves time or money. [#1684](https://github.com/hurttlocker/o8/issues/1684), [#1791](https://github.com/hurttlocker/o8/issues/1791)
 
@@ -81,7 +81,7 @@ Two lanes, one pillar. The people lane covers the surfaces a person works in. Th
 
 | Arc | Lane | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- | --- |
-| First ten minutes | people | A stranger goes from download to a first merged packet, and the minutes and the stalls are measured. | open | Nobody has measured it. | [#2211](https://github.com/hurttlocker/o8/issues/2211) |
+| First ten minutes | people | A stranger goes from download to a first merged packet, and the minutes and the stalls are measured. | open | Measured once, from source: 6.8 minutes and nine stalls. The web loop's folder picker hangs, browser state restores a repository the server never registered, and review approval hits an undocumented second gate. The download path is unmeasured. | [#2211](https://github.com/hurttlocker/o8/issues/2211) |
 | Design Mode loop | people | "Change this button" is one bounded loop with a before-and-after proof card. | open | Screenshot crop timing is not measured through the supported capture path. | [#1695](https://github.com/hurttlocker/o8/issues/1695) |
 | Agent-facing API manifest | agents | One manifest lists every operator verb and its surfaces, and CI fails when a verb exists on one surface and not another. | open | No manifest exists; parity between the CLI, MCP, and the webview socket is checked by hand. | [#2212](https://github.com/hurttlocker/o8/issues/2212) |
 
