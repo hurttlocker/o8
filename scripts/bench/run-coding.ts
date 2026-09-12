@@ -40,11 +40,16 @@ import {
   classifyArmStatus,
   countArmOutcomes,
   ginsuTurnStatus,
-  isScorableArmOutcome,
   type ArmClassification,
   type ArmErrorReceipt,
   type ArmOutcomeTotals,
 } from './coding-arm-outcome';
+import {
+  enforceCollectedPairedAcceptance,
+  selectCompletePairedTask,
+  type PairedArmAcceptanceReceipt,
+  type PairedTaskAcceptanceReceipt,
+} from './coding-paired-acceptance';
 import {
   CODING_TASK_CONTRACT_FILE,
   readCodingTaskContract,
@@ -137,6 +142,9 @@ interface ArmReceipt extends ArmClassification {
   additions: number;
   deletions: number;
   mechanical: MechanicalReceipt;
+  terminalOutcome: ArmClassification['outcome'];
+  terminalClassificationReason: string;
+  pairedAcceptance: PairedArmAcceptanceReceipt;
   measurementNotes: string[];
 }
 
@@ -396,6 +404,16 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     source: 'stream',
     errors,
   });
+  const acceptedClassification = enforceCollectedPairedAcceptance(classification, {
+    condition,
+    treatment,
+    diffPath,
+    changedFiles: diffFacts.changedFiles,
+    contractObserved,
+    send: send.receipt,
+    mechanical,
+    measurementNotes,
+  });
 
   return {
     task: task.issue,
@@ -417,7 +435,7 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     contractObserved,
     ...diffFacts,
     mechanical,
-    ...classification,
+    ...acceptedClassification,
     measurementNotes,
   };
 }
@@ -566,6 +584,15 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
   const verdicts: CodingVerdict[] = [];
   const judgeReceipts: CodingJudgeReceipt[] = [];
   const mappings: Record<number, Record<string, CodingCondition>> = {};
+  const pairedSelections = tasks.map((task) => selectCompletePairedTask({
+    task: task.issue,
+    conditions: CODING_CONDITIONS,
+    arms: collection.arms.filter((arm) => arm.task === task.issue),
+  }));
+  const pairedAcceptance = {
+    requiredConditions: [...CODING_CONDITIONS],
+    tasks: pairedSelections.map((selection) => selection.receipt),
+  } satisfies { requiredConditions: CodingCondition[]; tasks: PairedTaskAcceptanceReceipt[] };
   const shuffle = seededShuffle(collection.seed);
   const judgingStartedAt = new Date().toISOString();
   writeJson(JUDGING_FILE, {
@@ -574,20 +601,21 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     startedAt: judgingStartedAt,
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
+    pairedAcceptance,
   });
 
-  for (const task of tasks) {
-    const available: Partial<Record<CodingCondition, string>> = {};
-    for (const condition of CODING_CONDITIONS) {
-      const receipt = collection.arms.find((arm) => (
-        arm.task === task.issue && arm.condition === condition && isScorableArmOutcome(arm.outcome)
-      ));
-      if (receipt && fs.existsSync(receipt.diffPath)) available[condition] = receipt.diffPath;
-    }
-    if (Object.keys(available).length !== CODING_CONDITIONS.length) {
-      console.warn(`[coding] #${task.issue}: incomplete scorable arm set; task excluded from scoring`);
+  for (const [taskIndex, task] of tasks.entries()) {
+    const selection = pairedSelections[taskIndex];
+    if (!selection.receipt.complete) {
+      console.warn(
+        `[coding] #${task.issue}: paired acceptance failed; task excluded from scoring: ` +
+        selection.receipt.reasons.join('; '),
+      );
       continue;
     }
+    const available = Object.fromEntries(CODING_CONDITIONS.map((condition) => (
+      [condition, selection.accepted[condition]!.diffPath]
+    ))) as Record<CodingCondition, string>;
 
     const blinded = blindCodingDiffs(task.issue, available, shuffle);
     mappings[task.issue] = blinded.mapping;
@@ -625,6 +653,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
         startedAt: judgingStartedAt,
         receipts: judgeReceipts,
         blindVerdicts: verdicts,
+        pairedAcceptance,
       });
     }
   }
@@ -666,6 +695,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     completedAt: new Date().toISOString(),
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
+    pairedAcceptance,
   });
 
   console.log(`[coding] complete tasks scored: ${summary.tasksScored}`);
