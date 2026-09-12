@@ -107,6 +107,7 @@ export interface TileRegistryDeps {
   thoughtsDraftInjection: { id: string; text: string } | null;
   thoughtsMissionState: OrchestratorMissionState;
   tileLayout: TileLayout;
+  unverifiedRestoredRepoTileIds: ReadonlySet<string>;
   workspacePreviews: DetectedLocalhostPreview[];
   workspaceScopeEntries: WorkspaceScopeEntry[];
   workspaceTerminalPreferredRepo: WorkspaceScopeEntry | null;
@@ -160,6 +161,7 @@ export function createTileRegistry({
   thoughtsDraftInjection,
   thoughtsMissionState,
   tileLayout,
+  unverifiedRestoredRepoTileIds,
   workspacePreviews,
   workspaceScopeEntries,
   workspaceTerminalPreferredRepo,
@@ -247,6 +249,13 @@ export function createTileRegistry({
       hideHeader: true,
       // closable determined dynamically in TileContainer (last terminal is protected)
       render: ({ tileId, content }) => {
+        if (unverifiedRestoredRepoTileIds.has(tileId)) {
+          return (
+            <div role="status" style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
+              Couldn’t verify this saved repository scope. Reload to try again.
+            </div>
+          );
+        }
         const firstTerminalLeafId = (() => {
           const firstLeaf = getFirstLeaf(tileLayout.root);
           return firstLeaf.content.kind === 'terminal' ? firstLeaf.id : null;
@@ -445,6 +454,13 @@ export function createTileRegistry({
       label: 'Inspector',
       description: 'Legacy canvas surface for diffs, issues, PRs, and session replay.',
       render: ({ tileId, content }) => {
+        if (unverifiedRestoredRepoTileIds.has(tileId)) {
+          return (
+            <div role="status" style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
+              Couldn’t verify this saved repository scope. Reload to try again.
+            </div>
+          );
+        }
         const tileState = canvasStateByTileId[tileId] ?? { tabs: [], activeTabId: null, revealKey: 0 };
         const tileRepoEntry = content.kind === 'canvas' && content.repoPath
           ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null

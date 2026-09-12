@@ -136,6 +136,7 @@ function LayoutRestoreHarness({
     })),
     workspaceTerminalPreferredRepo: null,
     workspaceTerminalResetNonceByTileId: {},
+    unverifiedRestoredRepoTileIds: restored.unverifiedRestoredRepoTileIds,
   } as unknown as Parameters<typeof createTileRegistry>[0]);
   return registry.terminal.render({ active: true, content: leaf.content, tileId: leaf.id });
 }
@@ -224,14 +225,52 @@ describe('useTileLayout browser-origin restore', () => {
       hydrated = nextHydrated;
     };
 
-    await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos: [] })));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
     await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
 
     expect(hydrated).toBe(true);
-    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: null });
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
     const stored = JSON.parse(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY) ?? 'null') as TileLayout | null;
     expect(stored && getFirstLeaf(stored.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+    expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
+    expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
     expect(runtimeLaunches).toEqual([]);
+  });
+
+  it('preserves a persisted repo scope but blocks launch when validation times out', async () => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+      const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+      const runtimeLaunches: string[] = [];
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.startsWith('/api/panel/repos')) return new Promise<Response>(() => undefined);
+        if (url.startsWith('/api/runtime/launch')) runtimeLaunches.push(url);
+        return Promise.resolve(Response.json({}));
+      }));
+
+      let latestLayout = createDefaultTileLayout();
+      let hydrated = false;
+      const onLayout = (layout: TileLayout, nextHydrated: boolean) => {
+        latestLayout = layout;
+        hydrated = nextHydrated;
+      };
+
+      await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
+      await act(async () => vi.advanceTimersByTimeAsync(2100));
+
+      expect(hydrated).toBe(true);
+      expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+      const stored = JSON.parse(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY) ?? 'null') as TileLayout | null;
+      expect(stored && getFirstLeaf(stored.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+      expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
+      expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
+      expect(runtimeLaunches).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects a persisted traversal that lexically escapes a registered repo', async () => {

@@ -271,6 +271,24 @@ export async function GET(request: Request) {
     const registryStartedAt = performance.now();
     const registeredRepos = await listRepos();
     const registryDurationMs = performance.now() - registryStartedAt;
+    const requestedRestorePaths = params.getAll('restorePath');
+    if (params.get('restoreValidationOnly') === '1') {
+      const validationStartedAt = performance.now();
+      const validatedRestorePaths = await validateRestorePaths(requestedRestorePaths, registeredRepos);
+      const validationDurationMs = performance.now() - validationStartedAt;
+      return NextResponse.json(
+        { validatedRestorePaths },
+        {
+          headers: {
+            'Server-Timing': [
+              `registry;dur=${registryDurationMs.toFixed(1)}`,
+              `validation;dur=${validationDurationMs.toFixed(1)}`,
+              `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`,
+            ].join(', '),
+          },
+        },
+      );
+    }
     const readinessStartedAt = performance.now();
     const readinessSelector = params.get('readiness');
     let repos;
@@ -295,7 +313,6 @@ export async function GET(request: Request) {
     }
     const readinessDurationMs = performance.now() - readinessStartedAt;
     const existenceStartedAt = performance.now();
-    const requestedRestorePaths = params.getAll('restorePath');
     const [responseRepos, validatedRestorePaths] = await Promise.all([
       Promise.all(repos.map(appendExistence)),
       requestedRestorePaths.length > 0

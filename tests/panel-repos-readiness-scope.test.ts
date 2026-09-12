@@ -133,8 +133,9 @@ describe('GET /api/panel/repos readiness scope', () => {
     expect(data.error).toBe('Registered repository not found.');
   });
 
-  it('canonicalizes restored paths and rejects symlink escapes and missing paths', async () => {
+  it('validates restore paths without returning the fleet readiness payload', async () => {
     const query = new URLSearchParams();
+    query.set('restoreValidationOnly', '1');
     query.append('restorePath', existingPath);
     query.append('restorePath', externalWorktreePath);
     query.append('restorePath', escapedSymlinkPath);
@@ -144,6 +145,10 @@ describe('GET /api/panel/repos readiness scope', () => {
     const { response, data } = await getRepos(`?${query.toString()}`);
 
     expect(response.status).toBe(200);
+    expect(data.repos).toBeUndefined();
+    expect(response.headers.get('Server-Timing')).toContain('validation;dur=');
+    expect(response.headers.get('Server-Timing')).not.toContain('readiness;dur=');
+    expect(response.headers.get('Server-Timing')).not.toContain('existence;dur=');
     expect(data.validatedRestorePaths).toEqual([
       {
         requestedPath: existingPath,
