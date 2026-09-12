@@ -2910,6 +2910,15 @@
       ]
     },
     {
+      "path": "tests/update-check-state-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/validate-qa-cases.test.ts",
       "reasons": [
         "child-process",
