@@ -65,6 +65,7 @@ import { settleReturnedMergeState } from '@/lib/lane/merge-state-settlement';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
 import { fastForwardBaseBranch } from '@/lib/lane/operator-checkout-merge';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
+import { captureWorkspaceMaterializationSnapshot } from '@/lib/workspace/workspace-materialization-retirement';
 
 const BASE_ADVANCED_RETRY_LIMIT = 3;
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
@@ -691,6 +692,10 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         action: 'merging',
       });
       if (finalGovernanceDrift) return finalGovernanceDrift;
+
+      await captureWorkspaceMaterializationSnapshot(lane.repoPath, worktreePath, 'merge', {
+        reviewedHeadSha: reviewedSnapshotSha,
+      });
 
       try {
         await fastForwardBaseBranch({
