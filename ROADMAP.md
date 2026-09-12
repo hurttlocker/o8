@@ -8,7 +8,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 1. **Governance is the product.** Workers cannot merge their own work. The goal is to record every decision and make every failure visible and actionable.
 2. **Organizational memory.** Rules and past outcomes stay with the project, not with one model vendor.
-3. **Runs on your subscriptions.** The coding-agent CLIs you already pay for, behind one runtime contract.
+3. **Choose your agent systems.** Keep the workflow while choosing the systems that direct, build, review, or supply memory.
 4. **One control plane, every surface.** Desktop, phone, CLI, MCP, headless, voice. Same verbs, different authority.
 5. **Smooth for people and for agents.** Fast and legible for a person; drivable through a real interface for a program.
 6. **Runs where you are.** Light on the machine, on the machine you have. Mac today, Linux compiles but is unproven end to end, Windows help wanted.
@@ -20,13 +20,32 @@ One arc first: **First ten minutes.** A new operator goes from download to a fir
 
 Linux is the next platform milestone. Nine of ten children are shipped; the last is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. [#2060](https://github.com/hurttlocker/o8/issues/2060)
 
+Lane lifecycle and shared settings are reliability gates for that path and for the next milestone. A refusal or replacement must settle truthfully, and a changed choice must reach every surface on its next action. They support first ten minutes; they do not replace it. [#2197](https://github.com/hurttlocker/o8/issues/2197), [#2217](https://github.com/hurttlocker/o8/issues/2217)
+
+## Next: agent systems cooperate
+
+The first bounded milestone within collaboration profiles is one real governed task with distinct supported systems for implementation and review. This proof uses supported systems before the additional carriers listed first in the epic's delivery order. Those carriers remain part of the full epic. [#1792](https://github.com/hurttlocker/o8/issues/1792)
+
+- The operator sees each role's effective runtime, provider, model, connection evidence, and billing mode. Real-binary conformance and connection evidence are inputs to this proof. [#2227](https://github.com/hurttlocker/o8/issues/2227), [#2214](https://github.com/hurttlocker/o8/issues/2214)
+- Project rules, evidence, and approvals stay with the task.
+- An interruption recovers without duplicate work. Full cancellation and recovery lifecycle acceptance remains a goal. [#2197](https://github.com/hurttlocker/o8/issues/2197)
+- One role can be replaced for the following task without rebuilding the workflow. Role policy and truthful handoffs are foundations, not new work claimed here. [#1172](https://github.com/hurttlocker/o8/issues/1172), [#1730](https://github.com/hurttlocker/o8/issues/1730)
+
+Its evidence includes accepted result quality, total attempts, reviews and rework, elapsed time, operator interventions and time, and attributable API cost or subscription capacity. Subscription capacity is recorded as capacity, never converted to an invented per-token dollar saving. The full recommendations and routing ambitions in the collaboration epic follow this proof. [#1791](https://github.com/hurttlocker/o8/issues/1791)
+
+The next bounded environment slice proves the same governed task specification in isolated runs locally and in one remote environment, with declared capabilities, limits, cleanup, and receipts. Prove setup, preview, and cleanup through the planned workspace manifest. Live migration, snapshots, warm caches, and broad remote continuity stay Ahead. [#1690](https://github.com/hurttlocker/o8/issues/1690), [#1725](https://github.com/hurttlocker/o8/issues/1725)
+
+Alongside that work, establish a first local-egress report that names every contacted host and surface, even if it fails, before claiming local-only execution. [#2228](https://github.com/hurttlocker/o8/issues/2228)
+
+Multiplayer, broad GUI work, and larger surface expansion stay later bets; this milestone does not cancel or change their issue status. [#1875](https://github.com/hurttlocker/o8/issues/1875)
+
 ## What we need to prove
 
 Three outcomes decide whether the pillars add up. The first-diff comparisons below provide evidence on code quality; operator effort and the full loop's value still need measurement. A green checklist is progress on a row, not proof of the outcome.
 
 - **A new operator finishes the loop.** Download to first merged packet, with the minutes and the stalls measured. Baseline from source: 6.8 minutes, nine stalls. The download path has no baseline. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 - **Interrupted work stays visible and recoverable.** A refusal surfaces, retries are bounded, and a replaced mission leaves no live packets behind. [#2197](https://github.com/hurttlocker/o8/issues/2197)
-- **The governed loop earns its cost.** A first diff at least as good as the raw model on the same task remains the goal. Also compare final accepted quality. Measure the operator's time spent supervising, reviewing, and repairing the result, alongside runtime costs for attempts, reviews, and rework. An accurate ledger supports that comparison; it does not establish that delegation saves time or money. [#1684](https://github.com/hurttlocker/o8/issues/1684), [#1791](https://github.com/hurttlocker/o8/issues/1791)
+- **The governed loop earns its cost.** A first diff at least as good as the raw model on the same task remains the goal. Also compare final accepted quality, total attempts, reviews and rework, elapsed time, operator interventions and time, and attributable API cost or subscription capacity. An accurate ledger supports that comparison; it does not establish that delegation saves time or money, and subscription capacity is not a fictional per-token dollar rate. [#1684](https://github.com/hurttlocker/o8/issues/1684), [#1791](https://github.com/hurttlocker/o8/issues/1791)
 
 ## How to read this
 
@@ -56,15 +75,16 @@ Project rules and prior outcomes stay attached to the project, not to one model 
 | Cost and capacity ledger | The ledger's number and the provider's invoice agree. | open | Nothing measures what role routing and context controls save. | [#1791](https://github.com/hurttlocker/o8/issues/1791) |
 | Memory the operator shapes | What the operator rejects, steers, or edits becomes memory the Brain and the next worker retrieve, and any single retained item can be withdrawn from future retrieval without erasing the record that it was once applied. | open | Rejection and steer reasons are stored for audit and read by no retriever; the schema's rework flag is never written; the only way to forget one rule is to reset the whole database. | [#2221](https://github.com/hurttlocker/o8/issues/2221) |
 
-## 3. Runs on your subscriptions
+## 3. Choose your agent systems
 
-Local worker adapters launch the coding-agent CLIs you already pay for and reuse the authentication those tools already hold. The runtime contract keeps callers independent of any one provider's protocol.
+o8 governs workflow independently of the systems an operator chooses, retaining each system's native strengths. Each role must preserve the agent runtime, model provider, exact model, and billing mode as separate facts. Billing modes distinguish metered API usage, subscription capacity, local inference, and unknown costs. The goal covers subscription CLIs, API-backed systems, and local systems, with supported roles established by capability evidence.
 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
+| Collaboration profiles: first operator proof | One real task uses distinct supported implementation and review systems, preserves rules and approvals, recovers without duplicate work, and permits a role replacement on the following task. | open | One combined operator proof is still required. The broader recommendation and routing ambitions remain follow-on. | [#1792](https://github.com/hurttlocker/o8/issues/1792) |
 | Carrier coverage and auth probes | A new carrier lands as a registry entry plus a readiness and auth probe, with no fork in the dispatch path. | open | Readiness and auth checks are written per CLI, and the operator cannot see what evidence o8 used to call a runtime connected. The one adapter waiting is blocked on an upstream build for Intel Macs. | [#2200](https://github.com/hurttlocker/o8/issues/2200) |
 | OpenCode 2 and ACP | A CLI that is not tied to a subscription works as a worker and as an orchestrator backend. | open | The empty-provider-list refusal is fixed on main and waits for the next release; after that the arc is shipped. | [#2201](https://github.com/hurttlocker/o8/issues/2201) |
-| Local models first-class | Every surface names its local provider, and a test proves no egress for a full packet lifecycle. | parked | No surface-by-surface local path exists, and nothing proves that a packet leaves nothing behind on the network. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
+| Local models first-class | Every surface names its local provider, and a test proves no egress for a full packet lifecycle. | parked | No surface-by-surface local path exists, and nothing proves that a packet leaves nothing behind on the network. The first narrow step is an egress baseline that names hosts and surfaces, even when it fails. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
 
 ## 4. One control plane, every surface
 
@@ -105,10 +125,10 @@ The bets for 2027 and 2028. Each row is an outcome we think operators will need,
 
 | Bet | What already exists | Next child | Where |
 | --- | --- | --- | --- |
-| Agents that work while you are away, wherever they run. Hosted, remote, or local workers, days-long missions, the same packet and merge gate. | Headless o8, the mobile relay, crash survival, the durable execution spine. | A portable worker environment profile so a packet can be placed on a remote worker without changing its runtime contract. | [#1690](https://github.com/hurttlocker/o8/issues/1690), [#1727](https://github.com/hurttlocker/o8/issues/1727) |
+| Agents that work while you are away, wherever they run. Hosted, remote, or local workers, days-long missions, the same packet and merge gate. | Headless o8, the mobile relay, crash survival, the durable execution spine. | Broad remote continuity after the bounded local-and-one-remote proof in Next. | [#1727](https://github.com/hurttlocker/o8/issues/1727) |
 | The right model for each packet, chosen and escalated by o8. A failed packet retries on a stronger tier without the operator choosing. | The carrier registry, per-packet model pins, the merge-failure escalation chain. | A worker escalation ladder that retries a failed packet on the next tier, with bounded attempts, the effective model visible, and a refusal instead of a silent fallback when the requested tier is unavailable. | [#2209](https://github.com/hurttlocker/o8/issues/2209) |
-| Proof that travels. Receipts and control that systems outside o8 can verify and plug into, so o8 is the human gate inside other people's agent graphs. | Signed packet receipts and truth queries, the ACP orchestrator backend, MCP on both sides. | A receipt format another organization can verify without an o8 install, and a mission exported as an observed agent graph that an outside validator accepts. | [#1997](https://github.com/hurttlocker/o8/issues/1997), [#1998](https://github.com/hurttlocker/o8/issues/1998), [#2230](https://github.com/hurttlocker/o8/issues/2230) |
-| Nothing leaves the machine unless you say so. Local and on-device models as a real mode with a test that proves it. | Local endpoint probes, the local chat tier for the Brain, an audit of surfaces without a local path. | An egress assertion test across a full packet lifecycle. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
+| Proof that travels. Receipts and control that systems outside o8 can verify and plug into, so o8 is the human gate inside other people's agent graphs. | Signed packet receipts and truth queries, the ACP orchestrator backend, MCP on both sides. | A receipt format another organization can verify without an o8 install. Observed-graph export remains a bounded contributor opportunity until an external consumer needs it. | [#1997](https://github.com/hurttlocker/o8/issues/1997), [#1998](https://github.com/hurttlocker/o8/issues/1998), [#2230](https://github.com/hurttlocker/o8/issues/2230) |
+| Nothing leaves the machine unless you say so. Local and on-device models as a real mode with a test that proves it. | Local endpoint probes, the local chat tier for the Brain, an audit of surfaces without a local path. | A named egress baseline is the first narrow proof; remediation remains part of the parked all-surfaces epic. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
 | Two operators, one approval path. Teams share a workspace without weakening who can approve what. | Principal-based authorization for operator, worker, and remote callers. | A workspace identity and role model. | [#1875](https://github.com/hurttlocker/o8/issues/1875) |
 | Agents that use the screen, not only the repo. A packet can drive a browser or a GUI with the same isolation, review, and receipt. | The embedded browser agent and its governed verbs. | Computer-use as a worker capability behind the packet contract. | not yet filed |
 
@@ -118,7 +138,7 @@ Arcs whose every child is closed and released. They stay here so the pillars rea
 
 - **Governance:** merge-gate truth (0.1.738); dispatch honesty (0.1.749); signed receipts and truth queries (0.1.722); Broadcast, the audit trail as a live feed (0.1.717).
 - **Organizational memory:** Engineering Brain question and answer ([#915](https://github.com/hurttlocker/o8/issues/915)); workers write back to memory (0.1.716); spec review inversion, where the operator owns the rules and agents only annotate.
-- **Runs on your subscriptions:** execution carriers (0.1.748); declarative runtimes (0.1.725).
+- **Choose your agent systems:** execution carriers (0.1.748); declarative runtimes (0.1.725).
 - **One control plane, every surface:** headless o8 (0.1.727); mobile as an operator surface ([#1074](https://github.com/hurttlocker/o8/issues/1074)); voice as an operator surface, with the planning seat as a registry choice (0.1.748).
 - **Smooth for people and for agents:** canvas IDE parity, carved scope ([#1664](https://github.com/hurttlocker/o8/issues/1664), 0.1.722); rich Markdown editor (0.1.722); interaction budgets (0.1.748); control surfaces instead of scraping (0.1.749); CLI and MCP symmetry (0.1.738).
 - **Runs where you are:** Mac hardening, a populated daily profile through an unchanged native idle gate (0.1.748).
