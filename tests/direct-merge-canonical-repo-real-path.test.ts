@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,7 @@ const { addRepo } = await import('@/lib/repos/registry');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { worktreeRepoKey } = await import('@/lib/worktree/root-layout');
+const { listWorkspaceSnapshotsByOriginalPath } = await import('@/lib/worktree/snapshot-state');
 
 const roots: string[] = [];
 
@@ -127,7 +128,7 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
     chmodSync(tscPath, 0o755);
   }
 
-  await addRepo(canonicalRepo);
+  await addRepo(realpathSync.native(canonicalRepo));
   const worktreeId = `packet-${packetId}`;
   const materializationIdentity = await captureWorktreeMaterializationIdentity(packetClone);
   const materializationParentIdentity = await captureWorktreeMaterializationIdentity(relocatedBase);
@@ -206,14 +207,36 @@ afterEach(() => {
 describe('direct merge publishes through the canonical mission repository', () => {
   it('lands a relocated full-clone packet commit on canonical main', async () => {
     const fixture = await createRelocatedCloneMission('success');
+    const warnings: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    });
     expect(git(fixture.packetClone, ['remote', 'get-url', 'origin'])).not.toBe(fixture.canonicalRepo);
 
-    const result = await reviewAndMerge(fixture);
+    try {
+      const result = await reviewAndMerge(fixture);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const snapshots = listWorkspaceSnapshotsByOriginalPath(fixture.packetClone);
 
-    expect(result.merged).toBe(true);
-    expect(git(fixture.canonicalRepo, ['merge-base', '--is-ancestor', fixture.packetSha, 'main'])).toBe('');
-    expect(git(fixture.canonicalRepo, ['rev-parse', 'main'])).toBe(fixture.packetSha);
-  }, 30_000);
+      expect(result.merged).toBe(true);
+      expect(git(fixture.canonicalRepo, ['merge-base', '--is-ancestor', fixture.packetSha, 'main'])).toBe('');
+      expect(git(fixture.canonicalRepo, ['rev-parse', 'main'])).toBe(fixture.packetSha);
+      expect(existsSync(fixture.packetClone)).toBe(false);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]).toMatchObject({
+        state: 'retired',
+        headCommit: fixture.packetSha,
+      });
+      expect(snapshots[0]!.diffFingerprint).toBeTruthy();
+      expect(git(fixture.canonicalRepo, ['rev-parse', snapshots[0]!.recoveryRef])).toBe(fixture.packetSha);
+      expect(warnings.filter((warning) => (
+        warning.includes('[worktree-capture]')
+        || warning.includes('Failed to preserve head')
+      ))).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  }, 60_000);
 
   it('blocks and escalates when canonical main loses the candidate after git merge succeeds', async () => {
     const fixture = await createRelocatedCloneMission('postcondition');
