@@ -1,42 +1,32 @@
 /**
- * #2195 — a packet refused by dispatch preflight must stop retrying, and must
- * say why.
- *
- * The loop is a two-module handshake, which is why either half alone stays
- * green while the bug runs. `scheduling.ts` writes `status: 'blocked'` on a
- * refusal; `reconcileOrchestratorMissionState` re-derives packet status FROM
- * THE LANE, and a packet refused at preflight never got one — so the
- * no-lane fall-through wrote `queued` back and nulled `blockedReason` on the
- * very next headless tick. Measured live: ~15 refusals a minute, 1,186 log
- * lines, an auth probe spawned per pass, and no operator-visible handle on the
- * packet at all.
- *
- * So the assertions below drive the REAL pair in the REAL order the headless
- * loop runs them — runDispatchTick -> reconcile -> repeat — and require the
- * terminal state to SURVIVE the reconcile. Asserting only that the scheduler
- * wrote something would pass against the original bug.
+ * #2195 — drive the persisted headless scheduler, not the refusal guard alone.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const preflight = vi.hoisted(() => ({
-  calls: 0,
   detail: 'The selected runtime has no credential evidence.',
+  probeLogPath: '',
 }));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/runtimes/shared/auth-detect')>();
+  const { execFileSync: spawnProbe } = await import('node:child_process');
   return {
     ...actual,
-    // Stands in for a preflight that refuses every time for an unchanged
-    // reason. The call counter is the probe proxy: each real invocation is what
-    // spawned the auth-probe subprocess on the demo machine.
     assertRuntimeDispatchable: vi.fn(async (runtime: string) => {
-      preflight.calls += 1;
+      // Each call launches a real child process, standing in for the auth CLI
+      // probe that the production preflight spawned on every scheduler pass.
+      spawnProbe(process.execPath, [
+        '-e',
+        'require("node:fs").appendFileSync(process.env.O8_PROBE_LOG, "probe\\n")',
+      ], {
+        env: { ...process.env, O8_PROBE_LOG: preflight.probeLogPath },
+      });
       throw new actual.DispatchPreflightError({
         house: 'opencode',
         runtime: runtime as never,
@@ -52,20 +42,34 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/runtime/actions', () => ({
-  launchRuntimeSurface: vi.fn(async () => {
-    throw new Error('preflight must refuse before any launch is attempted');
-  }),
+const runtimeLaunch = vi.hoisted(() => vi.fn(async () => {
+  throw new Error('preflight must refuse before any launch is attempted');
 }));
 
-const { createEmptyOrchestratorMissionState, reconcileOrchestratorMissionState } =
-  await import('@/lib/orchestrator/store');
-const { runDispatchTick, getDispatchBlocker, MAX_PREFLIGHT_REFUSALS } =
-  await import('@/lib/orchestrator/scheduling');
-import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+vi.mock('@/lib/runtime/actions', () => ({
+  launchRuntimeSurface: runtimeLaunch,
+}));
+
+vi.mock('@/lib/realtime/publisher', () => ({
+  publishRealtimeMutation: vi.fn(async () => {}),
+}));
+
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const {
+  readOrchestratorControlPlaneState,
+  writeOrchestratorControlPlaneState,
+} = await import('@/lib/orchestrator/control-plane');
+const { runHeadlessSprintTick } = await import('@/lib/orchestrator/headless-loop');
+const { getDispatchBlocker } = await import('@/lib/orchestrator/scheduling');
+const { setDispatchPreflightIncidentWriterForTests } =
+  await import('@/lib/orchestrator/dispatch-preflight-refusal');
+const { findLaneByPacket } = await import('@/lib/lane/registry');
+const { enqueueInboxItem, listInboxItems } = await import('@/lib/supervisor/inbox');
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const testRoot = mkdtempSync(join(tmpdir(), 'o8-preflight-refusal-bound-'));
 const repoPath = join(testRoot, 'repo');
+const probeLogPath = join(testRoot, 'auth-probes.log');
 
 beforeAll(() => {
   mkdirSync(repoPath, { recursive: true });
@@ -80,10 +84,19 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  preflight.calls = 0;
+  preflight.probeLogPath = probeLogPath;
+  rmSync(probeLogPath, { force: true });
+  runtimeLaunch.mockClear();
+  let writes = 0;
+  setDispatchPreflightIncidentWriterForTests((input) => {
+    writes += 1;
+    if (writes === 1) throw new Error('injected first incident write failure');
+    return enqueueInboxItem(input);
+  });
 });
 
 afterAll(() => {
+  setDispatchPreflightIncidentWriterForTests(null);
   rmSync(testRoot, { recursive: true, force: true });
 });
 
@@ -96,99 +109,73 @@ function refusedPacket(): OrchestratorPacket {
     workspaceTargetPath: repoPath,
     branchTarget: 'issue/2195-preflight-refusal',
     runtime: 'opencode',
+    dispatchRuntimePin: 'opencode',
     dependencyLabels: [],
     dependencyPacketIds: [],
     queueState: 'queued',
     releaseState: 'pending',
     status: 'queued',
+    attemptCount: 0,
+    maxAttempts: 2,
     blockedReason: null,
     lane: null,
   };
 }
 
-function stateWith(packet: OrchestratorPacket): OrchestratorMissionState {
-  return { ...createEmptyOrchestratorMissionState(), packets: [packet] };
-}
-
-/** One turn of the headless loop: dispatch, then re-derive from lane truth. */
-async function headlessTick(state: OrchestratorMissionState): Promise<OrchestratorMissionState> {
-  const dispatched = await runDispatchTick(state);
-  return reconcileOrchestratorMissionState(dispatched, {
-    laneSnapshots: [],
-    runtimeTruth: [],
-  });
-}
-
-function only(state: OrchestratorMissionState): OrchestratorPacket {
-  const packet = state.packets.find((candidate) => candidate.id === 'pkt-preflight-refused-2195');
-  if (!packet) throw new Error('packet vanished from mission state');
+function onlyPersisted(): OrchestratorPacket {
+  const packet = readOrchestratorControlPlaneState().packets
+    .find((candidate) => candidate.id === 'pkt-preflight-refused-2195');
+  if (!packet) throw new Error('persisted packet vanished');
   return packet;
 }
 
 describe('#2195 dispatch preflight refusals are bounded and visible', () => {
-  it('reaches a terminal state that survives reconcile, and stops probing', async () => {
-    let state = stateWith(refusedPacket());
+  it('persists a blocked packet and human-required incident after bounded probes', async () => {
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-preflight-refused-2195',
+      repoPath,
+      packets: [refusedPacket()],
+    });
 
-    // Comfortably more turns than the budget: the pre-fix loop ran until it was
-    // stopped by hand, so the bound has to hold against a scheduler that keeps
-    // being asked.
-    const turns = MAX_PREFLIGHT_REFUSALS * 4;
-    const statusPerTurn: string[] = [];
+    const turns = 12;
     for (let turn = 0; turn < turns; turn += 1) {
-      state = await headlessTick(state);
-      statusPerTurn.push(only(state).status);
+      await runHeadlessSprintTick();
     }
 
-    const packet = only(state);
-
-    // 1. Terminal, and terminal AFTER reconcile re-derived it — the exact step
-    //    that used to un-write 'blocked' back to 'queued'.
-    expect(packet.status).toBe('failed');
-    expect(packet.preflightRefusals).toBe(MAX_PREFLIGHT_REFUSALS);
-
-    // 2. Visible, with the reason. This is what PacketCard renders; before the
-    //    fix reconcile nulled it on every pass and the only evidence was a log.
+    const packet = onlyPersisted();
+    expect(packet).toMatchObject({
+      status: 'blocked',
+      queueState: 'held',
+      attemptCount: 0,
+      maxAttempts: 2,
+      preflightRefusals: 2,
+      lastEventLabel: 'dispatch_preflight_refused',
+    });
     expect(packet.blockedReason).toContain(preflight.detail);
-    expect(packet.blockedReason).toMatch(/preflight refused/i);
+    expect(packet.blockedReason).toMatch(/preflight refused 2\/2 attempts/i);
+    expect(findLaneByPacket(packet.id)).toBeNull();
+    expect(runtimeLaunch).not.toHaveBeenCalled();
 
-    // 3. Bounded probes. One per refusal, and not one per turn.
-    expect(preflight.calls).toBe(MAX_PREFLIGHT_REFUSALS);
-    expect(preflight.calls).toBeLessThan(turns);
-
-    // 4. And no dispatch path will re-admit it. Checked a second time against a
-    //    packet forced back to 'queued', because that is exactly the shape the
-    //    bug produced: the count has to block on its own, without relying on a
-    //    status that something else re-derived.
-    expect(getDispatchBlocker(packet, state.packets)).not.toBeNull();
+    const probes = readFileSync(probeLogPath, 'utf8').trim().split('\n');
+    expect(probes).toHaveLength(2);
+    expect(probes.length).toBeLessThan(turns);
     expect(getDispatchBlocker(
-      { ...packet, status: 'queued', blockedReason: null },
-      state.packets,
-    )).toMatch(/preflight refusals exceeded/i);
+      { ...packet, status: 'queued', queueState: 'queued', blockedReason: null },
+      [packet],
+    )).toMatch(/preflight refusals exceeded \(2\/2\)/i);
 
-    // 5. Retries were real up to the budget — a runtime that is merely still
-    //    starting must still get its attempts, so the fix must not be "refuse
-    //    once, give up".
-    expect(statusPerTurn.slice(0, MAX_PREFLIGHT_REFUSALS - 1)).toEqual(
-      Array(MAX_PREFLIGHT_REFUSALS - 1).fill('queued'),
-    );
-  });
-
-  it('keeps the terminal state and reason across further reconcile passes', async () => {
-    let state = stateWith(refusedPacket());
-    for (let turn = 0; turn < MAX_PREFLIGHT_REFUSALS; turn += 1) {
-      state = await headlessTick(state);
-    }
-    expect(only(state).status).toBe('failed');
-    const reason = only(state).blockedReason;
-
-    // Reconcile alone, with no dispatch in between — the headless loop also
-    // re-derives state on ticks that dispatch nothing.
-    for (let pass = 0; pass < 5; pass += 1) {
-      state = reconcileOrchestratorMissionState(state, { laneSnapshots: [], runtimeTruth: [] });
-    }
-
-    expect(only(state).status).toBe('failed');
-    expect(only(state).blockedReason).toBe(reason);
-    expect(preflight.calls).toBe(MAX_PREFLIGHT_REFUSALS);
+    const incidents = listInboxItems({ includeAllProjects: true })
+      .filter((item) => item.packetId === packet.id && item.kind === 'bounded_retry_exhausted');
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      status: 'human_required',
+      payload: {
+        stage: 'dispatch_preflight',
+        attempts: '2/2',
+        errorMessage: expect.stringContaining(preflight.detail),
+        question: expect.stringContaining(preflight.detail),
+      },
+    });
   });
 });
