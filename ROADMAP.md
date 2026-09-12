@@ -12,7 +12,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 4. **One control plane, every surface.** Desktop, phone, CLI, MCP, headless, voice. Same verbs, different authority.
 5. **Smooth for people and for agents.** Fast and legible for a person; drivable through a real interface for a program.
 6. **Runs where you are.** Light on the machine, on the machine you have. Mac today, Linux compiles but is unproven end to end, Windows help wanted.
-7. **Ahead.** The bets for 2027 and 2028, with what we are already doing on each.
+7. **Ahead.** Longer-term bets, advanced when their next proof warrants it.
 
 ## Now
 
@@ -21,6 +21,8 @@ One arc first: **First ten minutes.** A new operator goes from download to a fir
 Linux is the next platform milestone. Nine of ten children are shipped; the last is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. [#2060](https://github.com/hurttlocker/o8/issues/2060)
 
 Lane lifecycle and shared settings are gates on that path, not arcs that replace it. A refusal or a replaced mission must settle truthfully, and a changed setting must reach every surface on its next action. [#2197](https://github.com/hurttlocker/o8/issues/2197), [#2217](https://github.com/hurttlocker/o8/issues/2217)
+
+**Remote project operation is the next product milestone.** Its worker integration can proceed alongside the first-use and Linux proofs: run a project task on an external worker, close the laptop, and return to the same task, preview, diff, evidence, and approval path. A second supported agent system must then complete a later packet without rebuilding the project workflow. [#2282](https://github.com/hurttlocker/o8/issues/2282), [build order and proof](./docs/operations/remote-project-milestone.md)
 
 ## What we need to prove
 
@@ -75,6 +77,7 @@ Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control p
 | --- | --- | --- | --- | --- |
 | Terminals as a workspace surface | A tmux or vim session survives an update and a pane switch byte for byte, and agent terminal actions go through a governed adapter. | open | Agent terminal actions are raw writes, and agent status inside a terminal is not inspectable. | [#1723](https://github.com/hurttlocker/o8/issues/1723) |
 | Settings take effect everywhere | An operator changes a setting once and every surface uses the new value on its next action, with no reload and no second place to set it. | open | Operator defaults are snapshotted at page load and cached per terminal server; the same bug has recurred under four names. | [#2217](https://github.com/hurttlocker/o8/issues/2217) |
+| Remote project operation | An operator reconnects to the same remote task, preview, diff, evidence, and approval path; a later packet can use another supported agent system with the same project rules. | open | The standalone worker uses the legacy protocol. Durable worker integration, remote workspace identity, and an operator-visible recovery and continuation proof remain open. | [#2282](https://github.com/hurttlocker/o8/issues/2282) |
 
 ## 5. Smooth for people and for agents
 
@@ -102,11 +105,11 @@ Windows is help wanted. No maintainer has a Windows machine to verify on, so thi
 
 ## 7. Ahead
 
-The bets for 2027 and 2028. Each row is an outcome we think operators will need, what already exists in o8 toward it, and the next child that would move it. A shipped child moves only the part it proves; a bet moves into a pillar when an operator can use the promised outcome. Rows are reviewed at the start of each month; a bet nobody has touched in a quarter gets cut, not carried.
+Longer-term bets, ordered by evidence and dependencies rather than a calendar year. Each row is an outcome we think operators will need, what already exists in o8 toward it, and the next child that would move it. A shipped child moves only the part it proves; a bounded outcome can move into an active pillar with an owner and an explicit proof. Basic remote project operation now has that scope in pillar 4. Rows are reviewed at the start of each month; a bet nobody has touched in a quarter gets cut, not carried.
 
 | Bet | What already exists | Next child | Where |
 | --- | --- | --- | --- |
-| Agents that work while you are away, wherever they run. Hosted, remote, or local workers, days-long missions, the same packet and merge gate. | Headless o8, the mobile relay, crash survival, the durable execution spine. | A portable worker environment profile so a packet can be placed on a remote worker without changing its runtime contract. | [#1690](https://github.com/hurttlocker/o8/issues/1690), [#1727](https://github.com/hurttlocker/o8/issues/1727) |
+| Portable execution across worker fleets. Placement policy, warm environments, suspension, and migration preserve the packet and merge gate. | Headless o8, the mobile relay, crash survival, the durable execution spine; a bounded remote-project milestone is active in pillar 4. | A portable worker environment profile, composed with cross-device continuity, extends the first remote proof to more environments. | [#1690](https://github.com/hurttlocker/o8/issues/1690), [#1727](https://github.com/hurttlocker/o8/issues/1727) |
 | The right model for each packet, chosen and escalated by o8. A failed packet retries on a stronger tier without the operator choosing. | The carrier registry, per-packet model pins, the merge-failure escalation chain. | A worker escalation ladder that retries a failed packet on the next tier, with bounded attempts, the effective model visible, and a refusal instead of a silent fallback when the requested tier is unavailable. | [#2209](https://github.com/hurttlocker/o8/issues/2209) |
 | Proof that travels. Receipts and control that systems outside o8 can verify and plug into, so o8 is the human gate inside other people's agent graphs. | Signed packet receipts and truth queries, the ACP orchestrator backend, MCP on both sides. | A receipt format another organization can verify without an o8 install, and a mission exported as an observed agent graph that an outside validator accepts. | [#1997](https://github.com/hurttlocker/o8/issues/1997), [#1998](https://github.com/hurttlocker/o8/issues/1998), [#2230](https://github.com/hurttlocker/o8/issues/2230) |
 | Nothing leaves the machine unless you say so. Local and on-device models as a real mode with a test that proves it. | Local endpoint probes, the local chat tier for the Brain, an audit of surfaces without a local path. | A named egress baseline across a full packet lifecycle, listing every contacted host and surface, as the first narrow proof; remediation stays with the parked all-surfaces epic. | [#2228](https://github.com/hurttlocker/o8/issues/2228), [#1451](https://github.com/hurttlocker/o8/issues/1451) |
