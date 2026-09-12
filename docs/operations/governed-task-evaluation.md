@@ -1,16 +1,35 @@
 # Governed task evaluation
 
-Status: preparation for [#2289](https://github.com/hurttlocker/o8/issues/2289). Collection is proposed in [#2288](https://github.com/hurttlocker/o8/issues/2288). This protocol does not authorize a run, release, restart, model trial, policy change, or product change.
+Status: protocol [#2290](https://github.com/hurttlocker/o8/pull/2290) is merged under [#2289](https://github.com/hurttlocker/o8/issues/2289). The formal paired pilot in [#2288](https://github.com/hurttlocker/o8/issues/2288) remains deliberately deferred for capacity. [#2296](https://github.com/hurttlocker/o8/issues/2296) is a separate incremental real-work dogfood round; no sample has started. This protocol does not authorize a run, release, restart, model trial, policy change, or product change.
 
 ## Purpose and boundary
 
-This pilot asks whether the existing o8 workflow helps an operator finish correct, acceptable work with less active operator effort. It compares final task completion and operator effort. Initial-patch quality is a diagnostic, not the product claim.
+The formal paired pilot asks whether the existing o8 workflow helps an operator finish correct, acceptable work with less active operator effort. It compares final task completion and operator effort. Initial-patch quality is a diagnostic, not the product claim.
 
 [#1684](https://github.com/hurttlocker/o8/issues/1684) remains open and parked. Its first-diff research, original rule, and recorded results stay intact. The fresh tasks in this pilot are not its historical recurrence set. A future intervention study must declare its own question and protocol.
 
-The pilot is a bounded decision aid, not a test of statistical significance or a population claim. It covers one governed task loop across the two tested runtime families. It does not establish multi-mission or fleet throughput, remote-operation benefit, or a general effect across tasks, operators, or runtimes.
+The formal paired pilot is a bounded decision aid, not a test of statistical significance or a population claim. It covers one governed task loop across the two tested runtime families. It does not establish multi-mission or fleet throughput, remote-operation benefit, or a general effect across tasks, operators, or runtimes.
+
+## Incremental real-work dogfood
+
+This observation round is separate from the formal paired pilot. Observe the next three suitable, already-authorized small engineering packets, one at a time as real work arrives. Record each selected task and packet before work begins. Do not manufacture tasks, use setup or protocol-writing as a sample, or select a task in advance solely to fill the round. A failure, hold, cancellation, or bypass remains an attempt.
+
+Use each task's normal scope, worker, review, and delivery checks, and reuse their existing receipts. Normal repairs and necessary rechecks still belong to the real task. Do not add duplicate raw-agent baselines, extra model judges, broad tests, or telemetry solely for this round. Human minutes are recorded only when observed or supplied by the operator; unavailable measures stay unavailable. Account-wide quota changes are not packet-specific usage.
+
+### Per-packet receipt
+
+- Task and packet links, expected outcome, scope and stop limits, source and build identity, and effective runtime evidence when available.
+- Original state, final terminal outcome, resulting revision, review and check evidence, and any lost or preserved work.
+- Interventions by actor, their reason and result, plus observed friction or useful workflow behavior.
+- Elapsed and waiting time, attributable usage when available, and human minutes only when observed or supplied.
+
+Review the first three attempts together, or stop earlier for a material failure or capacity limit. A partial round preserves its receipts but does not prove a controlled effect. Fix findings through the normal issue and pull-request process between packets, record the change, and do not rewrite earlier outcomes or pool changed versions into a causal claim.
+
+This round records reliability and friction on the observed tasks and guides fixes. It does not establish savings against another workflow or improve [#1684](https://github.com/hurttlocker/o8/issues/1684)'s first-patch result.
 
 ## Comparison design
+
+This and the remaining sections define only the formal [#2288](https://github.com/hurttlocker/o8/issues/2288) pilot. Its sealed manifest, fixed workflow, and decision rubric do not restrict normal fixes between #2296 packets.
 
 Use three fresh tasks and two established runtime families. Each task and runtime combination is one pair, for six pairs and twelve initial workflow runs.
 
@@ -60,7 +79,7 @@ The first four categories are mutually exclusive and counted once as total activ
 
 Reuse an existing receipt only when it matches the runtime, signed identity, and reviewed revision. If no matching receipt exists, mark recovery evidence missing. Before collection, the manifest may declare at most one bounded interruption case per runtime in disposable test state. Count those cases separately from the twelve normal attempts.
 
-Do not restart the daily app or touch held lanes, remote machines, virtual-machine work, or voice work. Collection waits until the active release has settled, isolated resources are ready, this protocol has been reviewed, and the frozen manifest and human participant are available. Until these prerequisites exist, collection is **blocked**, not a completed incomplete pilot.
+Do not restart the daily app or touch held lanes, remote machines, virtual-machine work, or voice work. Formal collection remains deliberately deferred until the operator confirms timing and a frozen total usage ceiling that preserves development capacity. Release completion, isolated resources, a frozen manifest, and an available human participant remain prerequisites. A fresh usage week alone does not authorize formal collection. Deferring collection is not an incomplete experimental result.
 
 ## Decision rule
 

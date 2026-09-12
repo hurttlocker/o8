@@ -1,0 +1,211 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { build } from 'esbuild';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import * as updateApplyRoute from '@/app/api/panel/update/apply/route';
+import * as updateStateRoute from '@/app/api/panel/app/update-state/route';
+
+const dataDir = mkdtempSync(join(tmpdir(), 'o8-update-check-state-'));
+const cliEntry = join(dataDir, 'o8.mjs');
+const children = new Set<ChildProcess>();
+let server: Server | null = null;
+let apiPort = 0;
+
+function stateRequest(body: unknown) {
+  return new Request('http://127.0.0.1/api/panel/app/update-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function forwardUpdateApply(request: import('node:http').IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  const body = Buffer.concat(chunks).toString('utf8');
+  return updateApplyRoute.POST(new Request('http://127.0.0.1/api/panel/update/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }));
+}
+
+async function runCli(args: string[]) {
+  const env = { ...process.env };
+  delete env.O8_WORKER_TOKEN;
+  delete env.O8_WORKER_PACKET_ID;
+  const child = spawn(process.execPath, [cliEntry, ...args], {
+    cwd: process.cwd(),
+    env: {
+      ...env,
+      CORTEX_IDE_DATA_DIR: dataDir,
+      O8_DATA_DIR: dataDir,
+      O8_API_PORT: String(apiPort),
+      O8_API_TOKEN: 'synthetic-update-check-token',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  children.add(child);
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
+  child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  children.delete(child);
+  return {
+    exitCode,
+    stdout: Buffer.concat(stdout).toString('utf8'),
+    stderr: Buffer.concat(stderr).toString('utf8'),
+  };
+}
+
+beforeAll(async () => {
+  await build({
+    entryPoints: [join(process.cwd(), 'cli/src/index.ts')],
+    outfile: cliEntry,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
+    banner: {
+      js: `import { createRequire as __o8_createRequire } from 'node:module';
+import { fileURLToPath as __o8_fileURLToPath } from 'node:url';
+import { dirname as __o8_dirname } from 'node:path';
+const require = __o8_createRequire(import.meta.url); globalThis.require = require;
+const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_dirname(__filename);`,
+    },
+  });
+  server = createServer(async (request, response) => {
+    if (request.url !== '/api/panel/update/apply' || request.method !== 'POST') {
+      response.writeHead(404, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ error: 'missing fixture route' }));
+      return;
+    }
+    const routeResponse = await forwardUpdateApply(request);
+    response.writeHead(routeResponse.status, Object.fromEntries(routeResponse.headers));
+    response.end(Buffer.from(await routeResponse.arrayBuffer()));
+  });
+  await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('update CLI fixture did not bind');
+  apiPort = address.port;
+});
+
+afterAll(async () => {
+  for (const child of children) child.kill('SIGKILL');
+  server?.closeAllConnections();
+  await new Promise<void>((resolve, reject) => {
+    if (!server) return resolve();
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+describe('update check state through the real route and CLI parser', () => {
+  it('reports an absent check instead of claiming no update is available', async () => {
+    await updateStateRoute.POST(stateRequest({
+      updatePending: false,
+      checkOutcome: 'never',
+      checkedAt: null,
+      checkError: null,
+    }));
+
+    const result = await runCli(['update', 'apply']);
+    expect(result.exitCode, result.stderr).toBe(5);
+    const payload = JSON.parse(result.stdout) as {
+      message?: string;
+      error?: { code?: string };
+    };
+    expect(payload.error?.code).toBe('update_check_not_run');
+    expect(payload.message).not.toMatch(/no .*available update|no update available/i);
+
+    const forcedResult = await runCli(['update', 'apply', '--force']);
+    expect(forcedResult.exitCode, forcedResult.stderr).toBe(5);
+    const forcedPayload = JSON.parse(forcedResult.stdout) as {
+      message?: string;
+      error?: { code?: string };
+    };
+    expect(forcedPayload.error?.code).toBe('update_check_not_run');
+    expect(forcedPayload.message).toMatch(/force cannot apply.*no updater check/i);
+    expect(forcedPayload.message).not.toMatch(/no .*available update|no update available/i);
+  });
+
+  it('returns failed and current check outcomes as distinct route states', async () => {
+    const checkedAt = '2026-09-12T16:00:00.000Z';
+    await updateStateRoute.POST(stateRequest({
+      updatePending: false,
+      checkOutcome: 'failed',
+      checkedAt,
+      checkError: 'synthetic feed timeout',
+    }));
+
+    const failedStateResponse = await updateStateRoute.GET();
+    await expect(failedStateResponse.json()).resolves.toMatchObject({
+      ok: true,
+      state: {
+        check: {
+          outcome: 'failed',
+          checkedAt,
+          errorCode: 'update_check_failed',
+          error: 'synthetic feed timeout',
+        },
+      },
+    });
+
+    const failedResult = await runCli(['update', 'apply']);
+    expect(failedResult.exitCode, failedResult.stderr).toBe(5);
+    expect(JSON.parse(failedResult.stdout)).toMatchObject({
+      ok: false,
+      requested: false,
+      error: { code: 'update_check_failed' },
+      check: { outcome: 'failed', errorCode: 'update_check_failed' },
+    });
+
+    await updateStateRoute.POST(stateRequest({
+      updatePending: false,
+      checkOutcome: 'current',
+      checkedAt,
+      checkError: null,
+    }));
+    const currentResult = await runCli(['update', 'apply']);
+    expect(currentResult.exitCode, currentResult.stderr).toBe(0);
+    expect(JSON.parse(currentResult.stdout)).toMatchObject({
+      ok: true,
+      requested: false,
+      result: 'already_current',
+      error: null,
+      check: { outcome: 'current', errorCode: null },
+    });
+
+    await updateStateRoute.POST(stateRequest({
+      updatePending: false,
+      checkOutcome: 'never',
+      checkedAt: null,
+      checkError: null,
+    }));
+    const staleStateResponse = await updateStateRoute.GET();
+    await expect(staleStateResponse.json()).resolves.toMatchObject({
+      state: { check: { outcome: 'current', checkedAt } },
+    });
+
+    await updateStateRoute.POST(stateRequest({
+      updatePending: false,
+      checkOutcome: 'failed',
+      checkedAt: '2026-09-12T15:59:59.000Z',
+      checkError: 'stale synthetic failure',
+    }));
+    const olderStateResponse = await updateStateRoute.GET();
+    await expect(olderStateResponse.json()).resolves.toMatchObject({
+      state: { check: { outcome: 'current', checkedAt, error: null } },
+    });
+  });
+});

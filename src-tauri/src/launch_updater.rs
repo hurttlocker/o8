@@ -25,6 +25,15 @@ struct LaunchUpdatePayload {
     notes: Option<String>,
     date: Option<String>,
     release_url: Option<String>,
+    checked_at: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LaunchUpdateCheckPayload {
+    outcome: &'static str,
+    checked_at: String,
+    error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -199,7 +208,7 @@ pub fn start_launch_update_check<R: Runtime>(app: AppHandle<R>) {
             Ok(updater) => updater,
             Err(err) => {
                 log::warn!("[launch-updater] updater unavailable: {}", err);
-                emit_clear(&app);
+                emit_clear(&app, "failed", Some(bounded_check_error(err)));
                 return;
             }
         };
@@ -212,24 +221,38 @@ pub fn start_launch_update_check<R: Runtime>(app: AppHandle<R>) {
                     notes: update.body.clone(),
                     date: update.date.map(|date| date.to_string()),
                     release_url: release_url_from_raw_json(&update.raw_json),
+                    checked_at: checked_at(),
                 };
                 if let Err(err) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
                     log::warn!("[launch-updater] emit update-available failed: {}", err);
                 }
             }
-            Ok(None) => emit_clear(&app),
+            Ok(None) => emit_clear(&app, "current", None),
             Err(err) => {
                 log::warn!("[launch-updater] check failed: {}", err);
-                emit_clear(&app);
+                emit_clear(&app, "failed", Some(bounded_check_error(err)));
             }
         }
     });
 }
 
-fn emit_clear<R: Runtime>(app: &AppHandle<R>) {
-    if let Err(err) = app.emit(UPDATE_CLEAR_EVENT, ()) {
+fn emit_clear<R: Runtime>(app: &AppHandle<R>, outcome: &'static str, error: Option<String>) {
+    let payload = LaunchUpdateCheckPayload {
+        outcome,
+        checked_at: checked_at(),
+        error,
+    };
+    if let Err(err) = app.emit(UPDATE_CLEAR_EVENT, payload) {
         log::warn!("[launch-updater] emit update-clear failed: {}", err);
     }
+}
+
+fn checked_at() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+fn bounded_check_error(error: impl std::fmt::Display) -> String {
+    error.to_string().chars().take(1_000).collect()
 }
 
 fn release_url_from_raw_json(raw_json: &serde_json::Value) -> Option<String> {
