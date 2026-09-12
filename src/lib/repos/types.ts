@@ -22,7 +22,10 @@ export interface RepoReadiness {
   state: RepoReadinessState;
   label: string;
   summary: string;
+  dispatchable?: boolean;
   nextAction?: string;
+  failedCheck?: string;
+  correctiveAction?: string;
   currentBranch: string | null;
   onDefaultBranch: boolean | null;
   originConfigured: boolean;

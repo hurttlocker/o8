@@ -1,5 +1,6 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { RepoDispatchAdmissionError } from '@/lib/lane/repo-preflight';
 import {
   dispatchMission,
   MissionNotFoundError,
@@ -18,6 +19,23 @@ import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape, u
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+function repoAdmissionErrorResponse(error: RepoDispatchAdmissionError) {
+  const { admission } = error;
+  return NextResponse.json({
+    ok: false,
+    error: {
+      code: 'repo_dispatch_blocked',
+      message: admission.message,
+      failedCheck: admission.failedCheck,
+      correctiveAction: admission.correctiveAction,
+      nextAction: admission.correctiveAction,
+    },
+  }, {
+    status: 400,
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
+}
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -92,35 +110,41 @@ export async function POST(request: NextRequest) {
     // Runtime launch remains asynchronous, but an API-process exit can no
     // longer lose the explicit held -> queued transition; the headless loop
     // resumes it from durable mission state after restart.
-    if (idemKey) {
-      const outcome = await withIdempotency(
-        { key: idemKey, verb: 'dispatch_mission', scopeId: targetMissionId },
-        async () => {
-          const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime });
-          if (admitted.blocked) {
-            return { initiated: false, async: true, missionId: targetMissionId, blocked: true };
-          }
-          void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
-            console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
-          });
-          return { initiated: true, async: true, missionId: targetMissionId };
-        },
-      );
-      if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission dispatch') ?? operatorSuccess(replayShape(outcome), 202);
-      return operatorSuccess(replayShape(outcome));
+    try {
+      if (idemKey) {
+        const outcome = await withIdempotency(
+          { key: idemKey, verb: 'dispatch_mission', scopeId: targetMissionId },
+          async () => {
+            const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime });
+            if (admitted.blocked) {
+              return { initiated: false, async: true, missionId: targetMissionId, blocked: true };
+            }
+            void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
+              console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
+            });
+            return { initiated: true, async: true, missionId: targetMissionId };
+          },
+        );
+        if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission dispatch') ?? operatorSuccess(replayShape(outcome), 202);
+        return operatorSuccess(replayShape(outcome));
+      }
+      const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime });
+      if (admitted.blocked) {
+        return operatorError(
+          'dispatch_blocked',
+          'The mission has an active lifecycle hold and was not dispatched.',
+          409,
+        );
+      }
+      void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
+        console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
+      });
+      return operatorSuccess({ initiated: true, async: true, missionId: targetMissionId });
+    } catch (error) {
+      if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
+      const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';
+      return operatorError('dispatch_failed', message, 500, error);
     }
-    const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime });
-    if (admitted.blocked) {
-      return operatorError(
-        'dispatch_blocked',
-        'The mission has an active lifecycle hold and was not dispatched.',
-        409,
-      );
-    }
-    void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
-      console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
-    });
-    return operatorSuccess({ initiated: true, async: true, missionId: targetMissionId });
   }
 
   try {
@@ -140,6 +164,7 @@ export async function POST(request: NextRequest) {
     const result = await dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime });
     return operatorSuccess(result);
   } catch (error) {
+    if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
     if (error instanceof DispatchPreflightError) {
       return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
         runtime: error.status.runtime,

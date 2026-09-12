@@ -20,6 +20,29 @@ function couldContainGitWorkTree(repoPath: string): boolean {
   }
 }
 
+export type RepoDispatchFailedCheck = 'repository_folder_exists' | 'git_work_tree';
+
+export type RepoDispatchAdmission = {
+  ok: true;
+  repoPath: string;
+} | {
+  ok: false;
+  repoPath: string;
+  failedCheck: RepoDispatchFailedCheck;
+  correctiveAction: string;
+  message: string;
+};
+
+export class RepoDispatchAdmissionError extends Error {
+  readonly admission: Extract<RepoDispatchAdmission, { ok: false }>;
+
+  constructor(admission: Extract<RepoDispatchAdmission, { ok: false }>) {
+    super(admission.message);
+    this.name = 'RepoDispatchAdmissionError';
+    this.admission = admission;
+  }
+}
+
 /**
  * #1551 — repo-path preflight shared by BOTH orchestrator spawn paths.
  *
@@ -55,20 +78,43 @@ export function isGitWorkTreeSync(repoPath: string): boolean {
   }
 }
 
+export function getRepoDispatchAdmission(repoPath: string): RepoDispatchAdmission {
+  const normalized = repoPath.trim();
+  if (!normalized || !existsSync(normalized)) {
+    const correctiveAction = 'Re-add the repo at its current location, or remove the stale registry entry.';
+    return {
+      ok: false,
+      repoPath: normalized,
+      failedCheck: 'repository_folder_exists',
+      correctiveAction,
+      message: normalized
+        ? `Repository folder not found at ${normalized}. ${correctiveAction}`
+        : `Repository path is missing. ${correctiveAction}`,
+    };
+  }
+  if (isOrchestratorHomePath(normalized)) return { ok: true, repoPath: normalized };
+  if (!isGitWorkTreeSync(normalized)) {
+    const correctiveAction = `Run "git init" in ${normalized}, create an initial commit, or select an existing Git repository.`;
+    return {
+      ok: false,
+      repoPath: normalized,
+      failedCheck: 'git_work_tree',
+      correctiveAction,
+      message: `${normalized} isn't a Git repository. ${correctiveAction}`,
+    };
+  }
+  return { ok: true, repoPath: normalized };
+}
+
+export function assertRepoDispatchAdmission(repoPath: string): void {
+  const admission = getRepoDispatchAdmission(repoPath);
+  if (!admission.ok) throw new RepoDispatchAdmissionError(admission);
+}
+
 /** Throws a human-actionable error when `repoPath` is missing or not a Git
  *  work tree. A null/empty repoPath passes — some sessions run unbound. */
 export function assertOrchestratorRepoPath(repoPath: string | null | undefined): void {
   if (!repoPath) return;
-  if (!existsSync(repoPath)) {
-    throw new Error(
-      `This chat's repo folder no longer exists at ${repoPath} — it may have been moved or deleted. `
-      + 'Re-add the repo (or point its project at the new location in Settings → Projects), then start a new session.',
-    );
-  }
   if (isOrchestratorHomePath(repoPath)) return;
-  if (!isGitWorkTreeSync(repoPath)) {
-    throw new Error(
-      `${repoPath} isn't a Git repository — run "git init" there (or point this chat at a Git repo), then try again.`,
-    );
-  }
+  assertRepoDispatchAdmission(repoPath);
 }
