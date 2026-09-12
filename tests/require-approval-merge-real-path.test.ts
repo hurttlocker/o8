@@ -49,8 +49,9 @@ const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token')
 const { recordMission } = await import('@/lib/db/missions-store');
 const { dispatch } = await import('@/lib/lane/commands');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+const { spokenReviewSnapshotFingerprint } = await import('@/lib/lane/lane-diff-facts');
 const { decideSurfaceMerge } = await import('@/lib/lane/surface-merge-decision');
-const { archiveLane, createLane, getLane } = await import('@/lib/lane/registry');
+const { archiveLane, createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { withRepoActionLock } = await import('@/lib/lane/repo-action-lock');
 const { handleWaitForMissionReady } = await import('@/lib/mcp/operator-handlers/mission');
 const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -676,6 +677,60 @@ describe('requireApproval merge governance through the real command path', () =>
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({ ok: true, result: { merged: true } });
     expect(packet).toMatchObject({ releaseState: 'released', recovery: null });
+  }, 60_000);
+
+  it('records merge completion before durable workspace retirement archives the lane', async () => {
+    const fixture = await createStandardLane('terminal-retirement-order');
+    const repo = await addRepo(fixture.repo);
+    const treeSha = git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD^{tree}']);
+    createWorkspaceSnapshot({
+      repositoryUuid: repo.id,
+      packetId: fixture.lane.packetId!,
+      laneId: fixture.lane.id,
+      originalPath: fixture.lane.worktreePath!,
+      branch: fixture.lane.branch,
+      baseCommit: fixture.baseHeadSha,
+      headCommit: fixture.reviewedHeadSha,
+      treeSha,
+      recoveryRef: `refs/o8/recovery/${fixture.lane.packetId}`,
+      diffFingerprint: spokenReviewSnapshotFingerprint(
+        fixture.reviewedHeadSha,
+        fixture.baseHeadSha,
+        treeSha,
+      ),
+      sessionIdentities: [{ kind: 'owned-session', identity: fixture.lane.sessionKey! }],
+      creationId: `terminal-retirement-${fixture.lane.packetId}-created`,
+    });
+    persistDispatcherMission(
+      fixture.lane.packetId!,
+      fixture.repo,
+      `thoughts-terminal-retirement-${Date.now()}`,
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const response = await mergeRoute.POST(mergeRequest(
+        getOrCreateWsToken(),
+        fixture.lane.packetId!,
+      ));
+      const payload = await response.json();
+      const status = await getMissionStatus({ includeCost: false });
+      const packet = status.packets.find((candidate) => candidate.id === fixture.lane.packetId);
+      const terminalStatuses = getLaneEvents(fixture.lane.id)
+        .filter((event) => event.verb === 'status_change')
+        .map((event) => event.payload.status);
+
+      expect(response.status).toBe(200);
+      expect(payload).toMatchObject({ ok: true, result: { merged: true } });
+      expect(terminalStatuses.slice(-3)).toEqual(['merging', 'completed', 'archived']);
+      expect(getLane(fixture.lane.id)).toMatchObject({ status: 'archived', outcome: 'merged' });
+      expect(packet).toMatchObject({ status: 'released', releaseState: 'released' });
+      expect(warn.mock.calls.some((args) => (
+        args.some((arg) => String(arg).includes('Refusing to transition lane'))
+      ))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   }, 60_000);
 
   it('routes a review-worthy surface approval to the recorded dispatcher and wakes the mission-ready rail', async () => {
