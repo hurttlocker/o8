@@ -56,6 +56,11 @@ fs.appendFileSync(process.env.FAKE_LAUNCHER_LOG, JSON.stringify(args) + '\\n');
 if (args[0] === 'send') process.stdout.write('fixture worker reply\\n');
 `);
   writeExecutable(path.join(binDir, 'npx'), '#!/bin/sh\nexit 0\n');
+  writeExecutable(path.join(binDir, 'cp'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const destination = process.argv.at(-1);
+fs.mkdirSync(destination, { recursive: true });
+`);
   const o8Cli = path.join(binDir, 'o8-fixture');
   writeExecutable(o8Cli, `#!/usr/bin/env node
 const args = process.argv.slice(2);
@@ -168,7 +173,9 @@ describe('coding benchmark runtime configuration through the process entry point
         requestedSettings?: typeof runtimeConfig;
         arms: Array<{
           runtime: 'codex' | 'claude';
+          worker: string;
           requestedSettings?: { model: string; effort: string };
+          dependencies: { destination: string; owned: boolean; symbolicLink: boolean };
           spawn: { command: string };
         }>;
       };
@@ -178,10 +185,13 @@ describe('coding benchmark runtime configuration through the process entry point
         expect(arm.requestedSettings).toEqual(runtimeConfig.arms[arm.runtime]);
         expect(arm.spawn.command).toContain(`--model ${runtimeConfig.arms[arm.runtime].model}`);
         expect(arm.spawn.command).toContain(`--effort ${runtimeConfig.arms[arm.runtime].effort}`);
+        expect(arm.dependencies).toMatchObject({ owned: true, symbolicLink: false });
+        expect(fs.lstatSync(arm.dependencies.destination).isSymbolicLink()).toBe(false);
       }
+      const armWorkers = new Set(collection.arms.map((arm) => arm.worker));
       const launches = fs.readFileSync(launcherLog, 'utf8').trim().split('\n')
         .map((line) => JSON.parse(line) as string[])
-        .filter((args) => args[0] === 'spawn' && args[1]?.startsWith('bc'));
+        .filter((args) => args[0] === 'spawn' && armWorkers.has(args[1]));
       expect(launches).toHaveLength(12);
       for (const args of launches) {
         const runtime = args[args.indexOf('--engine') + 1] as 'codex' | 'claude';
@@ -216,7 +226,9 @@ describe('coding benchmark runtime configuration through the process entry point
         receipts: Array<{
           judge: 'codex' | 'claude';
           promptPath: string;
+          worker: string;
           requestedSettings?: { model: string; effort: string };
+          dependencies: { destination: string; owned: boolean; symbolicLink: boolean };
           spawn: { command: string };
         }>;
       };
@@ -233,10 +245,13 @@ describe('coding benchmark runtime configuration through the process entry point
           .toEqual(['--model', receipt.requestedSettings?.model]);
         expect(spawnArgv.slice(spawnArgv.indexOf('--effort'), spawnArgv.indexOf('--effort') + 2))
           .toEqual(['--effort', receipt.requestedSettings?.effort]);
+        expect(receipt.dependencies).toMatchObject({ owned: true, symbolicLink: false });
+        expect(fs.lstatSync(receipt.dependencies.destination).isSymbolicLink()).toBe(false);
       }
+      const judgeWorkers = new Set(judging.receipts.map((receipt) => receipt.worker));
       const judgeLaunches = fs.readFileSync(launcherLog, 'utf8').trim().split('\n')
         .map((line) => JSON.parse(line) as string[])
-        .filter((args) => args[0] === 'spawn' && args[1]?.startsWith('bjudge'));
+        .filter((args) => args[0] === 'spawn' && judgeWorkers.has(args[1]));
       expect(judgeLaunches).toHaveLength(6);
       for (const args of judgeLaunches) {
         const judge = args[args.indexOf('--engine') + 1] as 'codex' | 'claude';

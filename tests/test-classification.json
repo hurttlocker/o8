@@ -1140,6 +1140,15 @@
       ]
     },
     {
+      "path": "tests/bench/coding-paired-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bench/coding-runtime-config-real-path.test.ts",
       "reasons": [
         "child-process",
