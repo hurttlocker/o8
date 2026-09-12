@@ -10,6 +10,7 @@ import {
   type CodingVerdict,
 } from './coding';
 import { JUDGE_PROMPT } from './coding-prompts';
+import type { CodingRequestedSettings } from './coding-runtime-config';
 
 export interface CodingJudgeCommandReceipt {
   command: string;
@@ -24,6 +25,7 @@ export interface CodingJudgeCommandReceipt {
 export interface CodingJudgeReceipt {
   task: number;
   judge: CodingJudge;
+  requestedSettings: CodingRequestedSettings;
   promptPath: string;
   outputPath: string;
   replyPath: string;
@@ -103,6 +105,7 @@ export function runCodingJudge(input: {
   repoRoot: string;
   workRoot: string;
   timeoutSeconds: number;
+  requestedSettings: CodingRequestedSettings;
   runCommand: RunCommand;
 }): { verdicts: CodingVerdict[]; receipt: CodingJudgeReceipt } {
   const artifactDir = path.join(input.workRoot, 'artifacts');
@@ -119,7 +122,11 @@ export function runCodingJudge(input: {
   if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
   const worker = `bjudge${input.task.issue}${input.judge}`;
-  const spawn = input.runCommand('ginsu', ['spawn', worker, input.baseDir, '--engine', input.judge], {
+  const spawn = input.runCommand('ginsu', [
+    'spawn', worker, input.baseDir, '--engine', input.judge,
+    '--model', input.requestedSettings.model,
+    '--effort', input.requestedSettings.effort,
+  ], {
     cwd: input.repoRoot,
   });
   let send = { receipt: spawn.receipt, stdout: '', stderr: spawn.stderr };
@@ -162,6 +169,7 @@ export function runCodingJudge(input: {
     receipt: {
       task: input.task.issue,
       judge: input.judge,
+      requestedSettings: input.requestedSettings,
       promptPath,
       outputPath,
       replyPath,

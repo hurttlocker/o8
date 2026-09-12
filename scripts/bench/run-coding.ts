@@ -59,6 +59,12 @@ import {
 import { createAbortedEndToEndCollection } from './coding-end-to-end-receipt';
 import { o8CliPreflightSummary } from './coding-o8-cli';
 import { runCodingJudge, type CodingJudgeReceipt } from './coding-judge-runner';
+import {
+  assertMatchingCodingRuntimeConfig,
+  readCodingRuntimeConfig,
+  type CodingRequestedSettings,
+  type CodingRuntimeConfig,
+} from './coding-runtime-config';
 import { RAW_BRIEF } from './coding-prompts';
 import {
   abortedRunControl,
@@ -84,7 +90,7 @@ if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(RUN_ID)) {
   throw new Error('O8_BENCH_RUN_ID must contain only letters, numbers, dot, underscore, and hyphen');
 }
 const WORK_ROOT = path.join(os.tmpdir(), 'o8-bench-coding', RUN_ID);
-const LATEST_DIR = path.join(REPO_ROOT, 'tests/bench/latest');
+const LATEST_DIR = path.resolve(process.env.O8_BENCH_LATEST_DIR ?? path.join(REPO_ROOT, 'tests/bench/latest'));
 const COLLECTION_FILE = path.join(WORK_ROOT, 'collection.json');
 const JUDGING_FILE = path.join(WORK_ROOT, 'judging.json');
 const ARM_TIMEOUT_SECONDS = 2_400;
@@ -119,6 +125,7 @@ interface ArmReceipt extends ArmClassification {
   task: number;
   condition: CodingCondition;
   runtime: CodingRuntime;
+  requestedSettings: CodingRequestedSettings;
   treatment: 'raw' | 'contract';
   base: string;
   worktree: string;
@@ -147,6 +154,7 @@ interface CollectionReceipt {
   seed: number;
   armTimeoutSeconds: number;
   conditions: CodingCondition[];
+  requestedSettings?: CodingRuntimeConfig;
   arms: ArmReceipt[];
   outcomeTotals: ArmOutcomeTotals;
   endToEnd: EndToEndCollectionReceipt;
@@ -341,7 +349,8 @@ function emptyCommand(command: string): CommandReceipt {
   };
 }
 
-function runArm(task: CodingTask, condition: CodingCondition, issue: string): ArmReceipt {
+function runArm(task: CodingTask, condition: CodingCondition, issue: string,
+  requestedSettings: CodingRequestedSettings): ArmReceipt {
   const runtime = runtimeForCondition(condition);
   const treatment = treatmentForCondition(condition);
   const dir = prepareArmWorktree(task, condition);
@@ -354,7 +363,10 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
   fs.writeFileSync(promptPath, prompt);
 
   const worker = `bc${task.issue}${condition.replace(/[^a-z]/g, '')}`;
-  const spawn = runCommand('ginsu', ['spawn', worker, dir, '--engine', runtime], { cwd: REPO_ROOT });
+  const spawn = runCommand('ginsu', [
+    'spawn', worker, dir, '--engine', runtime,
+    '--model', requestedSettings.model, '--effort', requestedSettings.effort,
+  ], { cwd: REPO_ROOT });
   let send = { receipt: emptyCommand('ginsu send'), stdout: '', stderr: '' };
   let stop = { receipt: emptyCommand('ginsu stop'), stdout: '', stderr: '' };
   if (spawn.receipt.status === 0) {
@@ -401,6 +413,7 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     task: task.issue,
     condition,
     runtime,
+    requestedSettings,
     treatment,
     base: task.base,
     worktree: dir,
@@ -433,6 +446,7 @@ function collectionSeed(): number {
 async function collectWhileApprovalHeld(
   tasks: CodingTask[],
   endToEndTasks: EndToEndTask[],
+  requestedSettings: CodingRuntimeConfig,
 ): Promise<CollectionReceipt> {
   const endToEnd = createEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks);
   fs.mkdirSync(WORK_ROOT, { recursive: true });
@@ -445,6 +459,7 @@ async function collectWhileApprovalHeld(
     seed,
     armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
     conditions: [...CODING_CONDITIONS],
+    requestedSettings,
     arms: [],
     outcomeTotals: countArmOutcomes([]),
     endToEnd,
@@ -467,7 +482,7 @@ async function collectWhileApprovalHeld(
         fs.writeFileSync(path.join(WORK_ROOT, 'artifacts', `issue-${task.issue}.md`), issue);
       }
       console.log(`[coding] collecting ${condition} on #${task.issue}`);
-      return runArm(task, condition, issue);
+      return runArm(task, condition, issue, requestedSettings.arms[runtimeForCondition(condition)]);
     },
     commitArm: (receipt) => {
       collection.arms.push(receipt);
@@ -512,11 +527,14 @@ async function collectWhileApprovalHeld(
 
 async function collect(
   tasks: CodingTask[],
+  requestedSettings: CodingRuntimeConfig,
   endToEndTasks = readEndToEndTasks(REPO_ROOT),
 ): Promise<CollectionReceipt> {
   assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
   try {
-    return await withTemporaryRequireApproval(() => collectWhileApprovalHeld(tasks, endToEndTasks));
+    return await withTemporaryRequireApproval(() => (
+      collectWhileApprovalHeld(tasks, endToEndTasks, requestedSettings)
+    ));
   } catch (error) {
     if (error instanceof O8BackendAbortError && !fs.existsSync(COLLECTION_FILE)) {
       const endToEnd = createAbortedEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks, error);
@@ -527,6 +545,7 @@ async function collect(
         seed: collectionSeed(),
         armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
         conditions: [...CODING_CONDITIONS],
+        requestedSettings,
         arms: [],
         outcomeTotals: countArmOutcomes([]),
         endToEnd,
@@ -557,7 +576,9 @@ function readCollection(): CollectionReceipt {
   return parsed;
 }
 
-function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
+function judge(tasks: CodingTask[], collection: CollectionReceipt,
+  requestedSettings: CodingRuntimeConfig): void {
+  assertMatchingCodingRuntimeConfig(collection.requestedSettings, requestedSettings);
   if (fs.existsSync(JUDGING_FILE)) {
     throw new Error(
       `benchmark run ${RUN_ID} already has judging receipts; use a new run ID rather than replacing verdicts`,
@@ -572,6 +593,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     schema: 'o8/coding-judging/v2',
     runId: RUN_ID,
     startedAt: judgingStartedAt,
+    requestedSettings: requestedSettings.judges,
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
   });
@@ -615,6 +637,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
         repoRoot: REPO_ROOT,
         workRoot: WORK_ROOT,
         timeoutSeconds: JUDGE_TIMEOUT_SECONDS,
+        requestedSettings: requestedSettings.judges[judgeRuntime],
         runCommand,
       });
       verdicts.push(...result.verdicts);
@@ -623,6 +646,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
         schema: 'o8/coding-judging/v2',
         runId: RUN_ID,
         startedAt: judgingStartedAt,
+        requestedSettings: requestedSettings.judges,
         receipts: judgeReceipts,
         blindVerdicts: verdicts,
       });
@@ -663,6 +687,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     schema: 'o8/coding-judging/v2',
     runId: RUN_ID,
     startedAt: judgingStartedAt,
+    requestedSettings: requestedSettings.judges,
     completedAt: new Date().toISOString(),
     receipts: judgeReceipts,
     blindVerdicts: verdicts,
@@ -748,6 +773,7 @@ async function main(): Promise<void> {
       'use --preflight --e2e to check the standalone experiment without collecting',
     );
   }
+  const requestedSettings = readCodingRuntimeConfig(REPO_ROOT);
   const tasks = readTasks();
   const endToEndTasks = readEndToEndTasks(REPO_ROOT);
   if (args.has('--preflight')) {
@@ -755,15 +781,15 @@ async function main(): Promise<void> {
     return;
   }
   if (args.has('--collect')) {
-    await collect(tasks, endToEndTasks);
+    await collect(tasks, requestedSettings, endToEndTasks);
     return;
   }
   if (args.has('--judge')) {
-    judge(tasks, readCollection());
+    judge(tasks, readCollection(), requestedSettings);
     return;
   }
-  const collection = await collect(tasks, endToEndTasks);
-  judge(tasks, collection);
+  const collection = await collect(tasks, requestedSettings, endToEndTasks);
+  judge(tasks, collection, requestedSettings);
 }
 
 void main();

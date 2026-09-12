@@ -160,17 +160,42 @@ approves a card or invokes merge preview.
 Preflight without launching workers:
 
 ```sh
-npm run bench:coding
+O8_BENCH_RUNTIME_CONFIG=/path/to/runtime-config.json npm run bench:coding
 ```
 
 Collection and judging are separate so the paid phase is explicit and its raw
 artifacts remain inspectable between phases:
 
 ```sh
-npm run bench:coding:collect
-npm run bench:coding:judge
+O8_BENCH_RUNTIME_CONFIG=/path/to/runtime-config.json npm run bench:coding:collect
+O8_BENCH_RUNTIME_CONFIG=/path/to/runtime-config.json npm run bench:coding:judge
 npm run bench:score
 ```
+
+The operator-supplied JSON file is required for paired preflight, collection,
+judging, and `bench:coding:all`. It declares requested launcher settings without
+embedding model names in the repository:
+
+```json
+{
+  "schema": "o8/coding-runtime-config/v1",
+  "arms": {
+    "codex": { "model": "operator-selected-codex-arm", "effort": "high" },
+    "claude": { "model": "operator-selected-claude-arm", "effort": "high" }
+  },
+  "judges": {
+    "codex": { "model": "operator-selected-codex-judge", "effort": "high" },
+    "claude": { "model": "operator-selected-claude-judge", "effort": "high" }
+  }
+}
+```
+
+Each runtime can use a different model or effort, but its raw and contract arms
+always receive the same declared pair. The collection receipt snapshots all
+requested settings before an arm starts. The judging receipt snapshots judge
+settings before a judge starts and rejects a config that differs from the
+collection snapshot. These are requested-setting receipts, not proof of the
+effective backend model or usage.
 
 The default run ID is `contract-v1`. Set `O8_BENCH_RUN_ID` before both commands
 for later repetitions. Collection refuses to overwrite an existing run ID, so a
@@ -193,6 +218,7 @@ O8_BENCH_RUN_ID=<fresh-id> npm run bench:coding:e2e:judge
 Standalone judging writes `tests/bench/latest/coding-end-to-end.json`, including
 cost receipts, every invalid arm and its reasons, the three-attempt review bound,
 and all recorded review findings. Collection and judging receipts under the run
-directory remain immutable.
+directory remain immutable. The standalone shipped-output experiment retains its
+versioned v1 launcher behavior and does not read the paired runtime config.
 
 If governance is absent for a release, the scorecard records it as `automated — not run this release`. If coding is absent, the scorecard records it as `operator-triggered — not run this release`.
