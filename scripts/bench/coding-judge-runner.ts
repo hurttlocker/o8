@@ -29,6 +29,7 @@ export interface CodingJudgeReceipt {
   promptPath: string;
   outputPath: string;
   replyPath: string;
+  spawn: CodingJudgeCommandReceipt;
   command: CodingJudgeCommandReceipt;
   valid: boolean;
   invalidReason: string | null;
@@ -173,6 +174,7 @@ export function runCodingJudge(input: {
       promptPath,
       outputPath,
       replyPath,
+      spawn: spawn.receipt,
       command: send.receipt,
       valid: invalidReason === null,
       invalidReason,

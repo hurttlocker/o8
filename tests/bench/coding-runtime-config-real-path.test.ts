@@ -207,12 +207,18 @@ describe('coding benchmark runtime configuration through the process entry point
         receipts: Array<{
           judge: 'codex' | 'claude';
           requestedSettings?: { model: string; effort: string };
+          spawn: { command: string };
         }>;
       };
       expect(judging.requestedSettings).toEqual(runtimeConfig.judges);
       expect(judging.receipts).toHaveLength(6);
       for (const receipt of judging.receipts) {
         expect(receipt.requestedSettings).toEqual(runtimeConfig.judges[receipt.judge]);
+        const spawnArgv = receipt.spawn.command.split(' ');
+        expect(spawnArgv.slice(spawnArgv.indexOf('--model'), spawnArgv.indexOf('--model') + 2))
+          .toEqual(['--model', receipt.requestedSettings?.model]);
+        expect(spawnArgv.slice(spawnArgv.indexOf('--effort'), spawnArgv.indexOf('--effort') + 2))
+          .toEqual(['--effort', receipt.requestedSettings?.effort]);
       }
       const judgeLaunches = fs.readFileSync(launcherLog, 'utf8').trim().split('\n')
         .map((line) => JSON.parse(line) as string[])
