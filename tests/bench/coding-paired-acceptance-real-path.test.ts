@@ -3,7 +3,6 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { type CodingCondition } from '../../scripts/bench/coding';
 import {
   codingPairedCommands,
   codingPairedRuntimeConfig,
@@ -17,7 +16,7 @@ const createdRoots: string[] = [];
 
 interface PersistedAcceptanceArm {
   task: number;
-  condition: CodingCondition;
+  condition: string;
   runtime: 'codex' | 'claude';
   outcome: 'valid' | 'failed' | 'invalid';
   requestedSettings: { model: string; effort: string };
@@ -36,6 +35,11 @@ interface PairedJudgingReceipt {
       task: number;
       complete: boolean;
       reasons: string[];
+      arms: Array<{
+        condition: string;
+        accepted: boolean;
+        reasons: string[];
+      }>;
     }>;
   };
 }
@@ -50,6 +54,7 @@ function runPairedAcceptance(input: {
   label: string;
   mode?: CodingPairedFixtureMode;
   mutatePersisted?: (arm: PersistedAcceptanceArm) => void;
+  mutateCollection?: (collection: { arms: PersistedAcceptanceArm[] }) => void;
 }): {
   collection: { arms: PersistedAcceptanceArm[] };
   receipt: PairedJudgingReceipt;
@@ -76,6 +81,9 @@ function runPairedAcceptance(input: {
   ) as { arms: PersistedAcceptanceArm[] };
   if (input.mutatePersisted) {
     for (const arm of collection.arms) input.mutatePersisted(arm);
+  }
+  input.mutateCollection?.(collection);
+  if (input.mutatePersisted || input.mutateCollection) {
     fs.writeFileSync(collectionPath, JSON.stringify(collection, null, 2) + '\n');
   }
   const originalCollection = fs.readFileSync(collectionPath);
@@ -175,6 +183,69 @@ describe('paired coding acceptance through collect and persisted judge processes
       task.reasons.some((entry) => entry.includes('condition/treatment mismatch'))
     ))).toBe(true);
     expect(result.latest.judging.pairedAcceptance).toEqual(result.receipt.pairedAcceptance);
+    expect(result.collectionUnchanged).toBe(true);
+    expect(result.judgeLaunches).toBe(0);
+  }, 180_000);
+
+  it('rejects and diagnoses a persisted fifth arm with an unknown condition', () => {
+    const unexpectedCondition = 'codex-unknown';
+    const result = runPairedAcceptance({
+      label: 'unexpected-condition',
+      mutateCollection: (collection) => {
+        for (const task of TASKS) {
+          const knownArm = collection.arms.find((arm) => arm.task === task)!;
+          collection.arms.push({
+            ...knownArm,
+            condition: unexpectedCondition,
+          });
+        }
+      },
+    });
+
+    expect(result.collection.arms).toHaveLength(TASKS.length * 5);
+    expect(result.receipt.receipts).toHaveLength(0);
+    expect(result.receipt.pairedAcceptance.tasks.every((task) => !task.complete)).toBe(true);
+    expect(result.receipt.pairedAcceptance.tasks.every((task) => (
+      task.reasons.some((reason) => reason.includes(`unexpected condition: ${unexpectedCondition}`))
+        && task.arms.some((arm) => (
+          arm.condition === unexpectedCondition
+            && !arm.accepted
+            && arm.reasons.includes(`unexpected condition: ${unexpectedCondition}`)
+        ))
+    ))).toBe(true);
+    expect(result.latest.judging.pairedAcceptance).toEqual(result.receipt.pairedAcceptance);
+    expect(result.collectionUnchanged).toBe(true);
+    expect(result.judgeLaunches).toBe(0);
+  }, 180_000);
+
+  it.each([
+    {
+      label: 'missing-condition',
+      reason: 'arm receipt is missing',
+      mutateCollection: (collection: { arms: PersistedAcceptanceArm[] }) => {
+        collection.arms = collection.arms.filter((arm) => arm.condition !== 'codex-raw');
+      },
+    },
+    {
+      label: 'duplicate-condition',
+      reason: 'duplicate arm receipts: 2',
+      mutateCollection: (collection: { arms: PersistedAcceptanceArm[] }) => {
+        for (const task of TASKS) {
+          const knownArm = collection.arms.find((arm) => (
+            arm.task === task && arm.condition === 'codex-raw'
+          ))!;
+          collection.arms.push({ ...knownArm });
+        }
+      },
+    },
+  ])('keeps $label task cardinality rejection', ({ label, reason, mutateCollection }) => {
+    const result = runPairedAcceptance({ label, mutateCollection });
+
+    expect(result.receipt.receipts).toHaveLength(0);
+    expect(result.receipt.pairedAcceptance.tasks.every((task) => !task.complete)).toBe(true);
+    expect(result.receipt.pairedAcceptance.tasks.every((task) => (
+      task.reasons.some((entry) => entry.includes(reason))
+    ))).toBe(true);
     expect(result.collectionUnchanged).toBe(true);
     expect(result.judgeLaunches).toBe(0);
   }, 180_000);

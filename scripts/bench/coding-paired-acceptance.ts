@@ -32,7 +32,7 @@ export interface CollectedPairedArmClassification extends ArmClassification {
 }
 
 export interface PairedArmAcceptanceReceipt {
-  condition: CodingCondition;
+  condition: string;
   accepted: boolean;
   recordedOutcome: ArmOutcome;
   terminalStatus: PairedArmEvidence['terminalStatus'];
@@ -132,10 +132,22 @@ export function enforceCollectedPairedAcceptance(
 export function selectCompletePairedTask<T extends PairedArmEvidence>(input: {
   task: number;
   conditions: readonly CodingCondition[];
-  arms: T[];
+  arms: Array<Omit<T, 'condition'> & { condition: string }>;
 }): { receipt: PairedTaskAcceptanceReceipt; accepted: Partial<Record<CodingCondition, T>> } {
   const accepted: Partial<Record<CodingCondition, T>> = {};
   const armReceipts: PairedArmAcceptanceReceipt[] = [];
+  const expectedConditions = new Set<string>(input.conditions);
+  for (const arm of input.arms) {
+    if (expectedConditions.has(arm.condition)) continue;
+    armReceipts.push({
+      condition: arm.condition,
+      accepted: false,
+      recordedOutcome: arm.outcome,
+      terminalStatus: arm.terminalStatus,
+      diffPath: arm.diffPath,
+      reasons: [`unexpected condition: ${arm.condition}`],
+    });
+  }
   for (const condition of input.conditions) {
     const matches = input.arms.filter((arm) => arm.condition === condition);
     if (matches.length !== 1) {
@@ -149,9 +161,10 @@ export function selectCompletePairedTask<T extends PairedArmEvidence>(input: {
       });
       continue;
     }
-    const receipt = assessPairedArmAcceptance(matches[0]);
+    const arm = { ...matches[0], condition } as T;
+    const receipt = assessPairedArmAcceptance(arm);
     armReceipts.push(receipt);
-    if (receipt.accepted) accepted[condition] = matches[0];
+    if (receipt.accepted) accepted[condition] = arm;
   }
   const reasons = armReceipts.flatMap((arm) => arm.reasons.map((reason) => `${arm.condition}: ${reason}`));
   return {
