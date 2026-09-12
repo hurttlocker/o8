@@ -8,7 +8,7 @@
 
 **Run a fleet of coding agents. Approve what ships.**
 
-o8 is an open-source control room for one person running several AI coding agents across their repositories, the governance layer above them. Claude Code, Codex, Grok Build, DeepSeek Harness, OpenCode, Gemini, and twelve more do the work in isolated git worktrees. Workers never merge their own work. A merge is approved by you, or by an orchestrator review you chose to delegate, and one setting makes every merge wait for you.
+o8 is an open-source control room for one person running several AI coding agents across their repositories. It brings the work, reviews, and decisions into one place so you can direct the agents without following every terminal.
 
 [**Download for macOS**](https://github.com/hurttlocker/o8/releases) · [Build from source](#get-it)
 
@@ -21,7 +21,7 @@ The aim is that you can hand out several pieces of work, look away, and come bac
 ## What happens when you dispatch
 
 1. You, or the orchestrator model you chose, create a mission. It becomes packets.
-2. Each packet runs on the runtime you picked, in its own git worktree, and reports as it goes.
+2. Each packet runs on the runtime you picked, in its own git worktree, and reports as it goes. Workers never merge their own work.
 3. The work lands for review: the diff, the receipts, and the cost when the runtime reports it.
 4. You approve, reject, steer, or rerun. You can delegate the review to an orchestrator. By default its approved merges go through, and the approval setting can make every merge wait for you.
 5. The merge writes the audit trail and records the outcome. Project rules and recorded outcomes are what the Brain and the next packet retrieve. Learning from your rejections and steers is still an open arc.
@@ -71,6 +71,8 @@ Everything that runs on your machine is free and open source: the app, all eight
 Symon is the voice layer. Ask "what needs me?" without turning around, approve the one thing that is blocking, and dictate anywhere on the Mac. Anything with a side effect goes through a spoken confirm card, so voice never becomes a way around governance. Controls, setup, and tiers: [Voice](./docs/user/voice.md).
 
 ## Where it is going
+
+o8 is building toward **an operating system for delegated work**: models and agents can change while your project's rules, decisions, and history stay with you. The goal is to let you delegate more work without supervising every step, while keeping authority over what happens and evidence of the result. Coding is where we're proving that approach first.
 
 [ROADMAP.md](./ROADMAP.md): seven pillars, what is open, what is missing on each, and what to claim.
 
