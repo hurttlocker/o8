@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,7 @@ const { recordMission } = await import('@/lib/db/missions-store');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const {
   approveAndMergePacket,
+  getMissionStatus,
   submitPacketReview,
 } = await import('@/lib/orchestrator/operator-mission-service');
 const {
@@ -28,6 +29,10 @@ const { addRepo } = await import('@/lib/repos/registry');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { worktreeRepoKey } = await import('@/lib/worktree/root-layout');
+const {
+  listWorkspaceSnapshotTransitions,
+  listWorkspaceSnapshotsByOriginalPath,
+} = await import('@/lib/worktree/snapshot-state');
 
 const roots: string[] = [];
 
@@ -68,7 +73,7 @@ function packetFixture(packetId: string, canonicalRepo: string, branch: string):
 }
 
 async function createRelocatedCloneMission(label: string, incompleteDependencies = false) {
-  const root = mkdtempSync(join(os.tmpdir(), `o8-direct-merge-${label}-`));
+  const root = realpathSync(mkdtempSync(join(os.tmpdir(), `o8-direct-merge-${label}-`)));
   const origin = join(root, 'github-like.git');
   const canonicalRepo = join(root, 'canonical');
   const packetId = `pkt-canonical-${label}-${Date.now()}`;
@@ -127,7 +132,7 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
     chmodSync(tscPath, 0o755);
   }
 
-  await addRepo(canonicalRepo);
+  await addRepo(realpathSync.native(canonicalRepo));
   const worktreeId = `packet-${packetId}`;
   const materializationIdentity = await captureWorktreeMaterializationIdentity(packetClone);
   const materializationParentIdentity = await captureWorktreeMaterializationIdentity(relocatedBase);
@@ -181,7 +186,7 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
   });
   writeOrchestratorControlPlaneState(mission);
 
-  return { baseSha, branch, canonicalRepo, lane, packetClone, packetId, packetSha, typecheckMarker };
+  return { baseSha, branch, canonicalRepo, lane, missionId, packetClone, packetId, packetSha, typecheckMarker };
 }
 
 async function reviewAndMerge(fixture: Awaited<ReturnType<typeof createRelocatedCloneMission>>) {
@@ -199,6 +204,7 @@ async function reviewAndMerge(fixture: Awaited<ReturnType<typeof createRelocated
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -206,14 +212,62 @@ afterEach(() => {
 describe('direct merge publishes through the canonical mission repository', () => {
   it('lands a relocated full-clone packet commit on canonical main', async () => {
     const fixture = await createRelocatedCloneMission('success');
+    const diagnostics: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      diagnostics.push(args.map(String).join(' '));
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      diagnostics.push(args.map(String).join(' '));
+    });
     expect(git(fixture.packetClone, ['remote', 'get-url', 'origin'])).not.toBe(fixture.canonicalRepo);
 
-    const result = await reviewAndMerge(fixture);
+    try {
+      const result = await reviewAndMerge(fixture);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const lane = getLane(fixture.lane.id);
+      const terminalEvents = getLaneEvents(fixture.lane.id)
+        .filter((event) => event.verb === 'status_change')
+        .map((event) => event.payload.status)
+        .filter((status) => status === 'completed' || status === 'archived');
+      const mission = await getMissionStatus({ missionId: fixture.missionId, includeCost: false });
+      const snapshots = listWorkspaceSnapshotsByOriginalPath(fixture.packetClone);
+      const creation = snapshots[0]
+        ? listWorkspaceSnapshotTransitions(snapshots[0].repositoryUuid, snapshots[0].packetId)[0]
+        : undefined;
 
-    expect(result.merged).toBe(true);
-    expect(git(fixture.canonicalRepo, ['merge-base', '--is-ancestor', fixture.packetSha, 'main'])).toBe('');
-    expect(git(fixture.canonicalRepo, ['rev-parse', 'main'])).toBe(fixture.packetSha);
-  }, 30_000);
+      expect(result.merged).toBe(true);
+      expect(git(fixture.canonicalRepo, ['merge-base', '--is-ancestor', fixture.packetSha, 'main'])).toBe('');
+      expect(git(fixture.canonicalRepo, ['rev-parse', 'main'])).toBe(fixture.packetSha);
+      expect(existsSync(fixture.packetClone)).toBe(false);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]).toMatchObject({
+        state: 'retired',
+        headCommit: fixture.packetSha,
+      });
+      expect(snapshots[0]!.diffFingerprint).toBeTruthy();
+      expect(git(fixture.canonicalRepo, ['rev-parse', snapshots[0]!.recoveryRef])).toBe(fixture.packetSha);
+      expect(creation?.receipt).toMatchObject({
+        mergeCandidateSha: fixture.packetSha,
+        reviewedHeadSha: fixture.packetSha,
+      });
+      expect(lane).toMatchObject({ status: 'archived', outcome: 'merged' });
+      expect(terminalEvents).toEqual(['archived']);
+      expect(mission.packets.find((packet) => packet.id === fixture.packetId)).toMatchObject({
+        status: 'released',
+        releaseState: 'released',
+      });
+      expect(diagnostics.filter((diagnostic) => (
+        diagnostic.includes('[worktree-capture]')
+        || diagnostic.includes('Failed to preserve head')
+        || diagnostic.includes('REFUSED preservation boundary')
+        || diagnostic.includes('REFUSED durable retirement begin')
+        || diagnostic.includes('Refusing to transition lane')
+      ))).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  }, 60_000);
 
   it('blocks and escalates when canonical main loses the candidate after git merge succeeds', async () => {
     const fixture = await createRelocatedCloneMission('postcondition');

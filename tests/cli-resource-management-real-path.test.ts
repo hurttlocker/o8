@@ -73,9 +73,26 @@ function runCli(args: string[]): Promise<CliResult> {
   });
 }
 
+function initializeRepo(repoPath: string): void {
+  execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
+  writeFileSync(path.join(repoPath, 'README.md'), 'local-only repository\n', 'utf8');
+  execFileSync('git', ['-C', repoPath, 'add', 'README.md']);
+  execFileSync('git', [
+    '-C',
+    repoPath,
+    '-c',
+    'user.name=o8 test',
+    '-c',
+    'user.email=test@o8.local',
+    'commit',
+    '-qm',
+    'test: seed local repository',
+  ]);
+}
+
 beforeAll(async () => {
-  execFileSync('git', ['init', '-q', repoA]);
-  execFileSync('git', ['init', '-q', repoB]);
+  initializeRepo(repoA);
+  initializeRepo(repoB);
   execFileSync(process.execPath, [path.join(process.cwd(), 'cli/esbuild.config.mjs')], {
     cwd: process.cwd(),
     stdio: 'ignore',
@@ -182,7 +199,15 @@ describe('o8 repo and project CLI real path', () => {
     expect(repoAResult).toMatchObject({
       schema: 'o8/cli/repo.add/v1',
       registered: true,
-      repo: { path: realpathSync.native(repoA) },
+      repo: {
+        path: realpathSync.native(repoA),
+        remoteUrl: null,
+        exists: true,
+        readiness: 'ready',
+        dispatchable: true,
+        failedCheck: null,
+        correctiveAction: null,
+      },
     });
 
     const addB = await runCli(['repo', 'add', repoB]);

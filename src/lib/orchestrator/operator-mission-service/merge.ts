@@ -428,17 +428,30 @@ async function dispatchPacketMerge(
     }
   }
 
-  // Sync first so reconciliation runs, then apply the release on top.
-  // This prevents reconciliation from resetting the packet status after we set it.
-  // Pass undefined so sync re-reads inside the mutex — otherwise we race the
-  // /api/orchestrator/state GET poll and other concurrent writers.
+  // Persist canonical release evidence before lane reconciliation projects the
+  // retired workspace as archived. Evidence-backed release then survives sync.
   const [
-    { syncOrchestratorControlPlaneState },
+    { readOrchestratorControlPlaneState, syncOrchestratorControlPlaneState, withLockedState },
     { runDispatchTick },
   ] = await Promise.all([
     loadControlPlane(),
     loadDispatch(),
   ]);
+  if (result.ok) {
+    await withLockedState((fresh) => {
+      const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
+      if (!packetState || !packetReleaseIdentityIsCurrent(packetState, lane.id, releaseGeneration)) return;
+      markPacketReleased(packetState, {
+        source: 'approve_and_merge',
+        mergeCommit: result.mergeSha ?? null,
+        headSha: result.reviewedHeadSha ?? result.mergeSha ?? null,
+        evidenceKind: 'merge_command',
+      });
+      if (packetState.lane) {
+        packetState.lane.lastEventLabel = 'merged';
+      }
+    });
+  }
   const synced = await syncOrchestratorControlPlaneState();
 
   const releasedAfterDispatch = await alreadyReleasedResultForPacketId(input.packetId, synced.packets);
@@ -452,27 +465,6 @@ async function dispatchPacketMerge(
   if (!result.ok && (failedLane?.status === 'reviewing' || failedLane?.status === 'awaiting_orchestrator')) {
     log(`Merge command held for packet ${packet.id}.`, { note: result.note, actor });
     return withGateVerdict(packet.id, mergePacketResultFromLaneCommand(result), packet.review?.approved === true);
-  }
-
-  // Adversarial F3 — the release mutation lands under the lock against a
-  // FRESH read; the old code mutated the pre-release snapshot and whole-state
-  // wrote it after the (async) dispatch tick, clobbering every concurrent
-  // locked write on the highest-traffic path in the app.
-  const { withLockedState, readOrchestratorControlPlaneState } = await loadControlPlane();
-  if (result.ok) {
-    await withLockedState((fresh) => {
-      const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
-      if (!packetState || !packetReleaseIdentityIsCurrent(packetState, lane.id, releaseGeneration)) return;
-      markPacketReleased(packetState, {
-        source: 'approve_and_merge',
-        mergeCommit: result.mergeSha ?? null,
-        headSha: result.reviewedHeadSha ?? null,
-        evidenceKind: 'merge_command',
-      });
-      if (packetState.lane) {
-        packetState.lane.lastEventLabel = 'merged';
-      }
-    });
   }
 
   // The receipt signer re-reads the persisted release payload. Launch it only

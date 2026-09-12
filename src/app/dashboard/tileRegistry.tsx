@@ -35,6 +35,7 @@ import type {
 } from './types';
 import {
   collectOpenTerminalRepoPaths,
+  pathBelongsToRepoScope,
   repoSlugFromRemote,
   sameWorkspaceLaneState,
 } from './utils';
@@ -106,6 +107,7 @@ export interface TileRegistryDeps {
   thoughtsDraftInjection: { id: string; text: string } | null;
   thoughtsMissionState: OrchestratorMissionState;
   tileLayout: TileLayout;
+  unverifiedRestoredRepoTileIds: ReadonlySet<string>;
   workspacePreviews: DetectedLocalhostPreview[];
   workspaceScopeEntries: WorkspaceScopeEntry[];
   workspaceTerminalPreferredRepo: WorkspaceScopeEntry | null;
@@ -159,6 +161,7 @@ export function createTileRegistry({
   thoughtsDraftInjection,
   thoughtsMissionState,
   tileLayout,
+  unverifiedRestoredRepoTileIds,
   workspacePreviews,
   workspaceScopeEntries,
   workspaceTerminalPreferredRepo,
@@ -246,23 +249,39 @@ export function createTileRegistry({
       hideHeader: true,
       // closable determined dynamically in TileContainer (last terminal is protected)
       render: ({ tileId, content }) => {
+        if (unverifiedRestoredRepoTileIds.has(tileId)) {
+          return (
+            <div role="status" style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
+              Couldn’t verify this saved repository scope. Reload to try again.
+            </div>
+          );
+        }
         const firstTerminalLeafId = (() => {
           const firstLeaf = getFirstLeaf(tileLayout.root);
           return firstLeaf.content.kind === 'terminal' ? firstLeaf.id : null;
         })();
         const hasScopedTerminalLeaf = collectOpenTerminalRepoPaths(tileLayout.root).length > 0;
+        const persistedRepoOwner = content.kind === 'terminal' && content.repoPath
+          ? workspaceScopeEntries.find((repo) => pathBelongsToRepoScope(content.repoPath, repo.localPath)) ?? null
+          : null;
         const tileRepoEntry = content.kind === 'terminal' && content.repoPath
           // When the tile is scoped to a repo that ISN'T in the current scope
           // set (e.g. an o8-site/worker repo a dispatched session lives in),
-          // synthesize an entry from the path instead of letting it fall through
-          // to workspaceTerminalPreferredRepo below. The fall-through made
+          // synthesize an entry from the path only when a current registered
+          // root owns it. The fall-through made
           // tilePreferredRepo.localPath !== content.repoPath, which fed an
           // onRepoScopeChange → restoreKey flip-flop that cleared the tab array
           // every render — the "blink to the Start-a-new-session picker" + the
           // worker transcript vanishing (2026-06-22). A synthesized entry makes
           // content.repoPath a stable fixed point and stops the oscillation.
+          // Requiring persistedRepoOwner prevents a browser layout left by a
+          // different local server from becoming a session/runtime launch scope.
           ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath)
-              ?? { name: content.repoPath.split('/').pop() || content.repoPath, localPath: content.repoPath }
+              ?? (persistedRepoOwner ? {
+                name: content.repoPath.split('/').pop() || content.repoPath,
+                localPath: content.repoPath,
+                registryRepoId: persistedRepoOwner.registryRepoId,
+              } : null)
           : null;
         const isFreshSplitTile = content.kind === 'terminal'
           && tileId !== 'tile-root'
@@ -435,6 +454,13 @@ export function createTileRegistry({
       label: 'Inspector',
       description: 'Legacy canvas surface for diffs, issues, PRs, and session replay.',
       render: ({ tileId, content }) => {
+        if (unverifiedRestoredRepoTileIds.has(tileId)) {
+          return (
+            <div role="status" style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
+              Couldn’t verify this saved repository scope. Reload to try again.
+            </div>
+          );
+        }
         const tileState = canvasStateByTileId[tileId] ?? { tabs: [], activeTabId: null, revealKey: 0 };
         const tileRepoEntry = content.kind === 'canvas' && content.repoPath
           ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null

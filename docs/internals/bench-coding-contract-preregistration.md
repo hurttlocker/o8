@@ -90,6 +90,19 @@ This clarification applies to new collections and new judging receipts. Publishe
 receipts are not rewritten. The separate governed shipped-output experiment keeps
 its declared rule that a terminal product failure is measurable and scorable.
 
+### 2026-09-12: fixed participant count before recollection
+
+Every paired arm uses one worker context, and each independent judge uses one
+reviewer context. The common briefs explicitly prohibit helper agents, delegation,
+and additional model calls. This limit overrides general delegation guidance in
+the working environment and applies equally to raw and contract-first arms.
+Ordinary local inspection and verification tools remain available.
+
+This clarification was recorded before collecting a new measurement. It does not
+change the treatment, task inputs, time bounds, rubric, or historical receipts.
+Prompt delivery is checked through the collection and judging entry points;
+that check proves the instructions were supplied, not that a model obeyed them.
+
 ### 2026-09-12: isolated paired-only execution
 
 The runner now has an explicit `--paired` modifier for preflight, collection,

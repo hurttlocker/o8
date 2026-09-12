@@ -86,6 +86,22 @@ describe('coding benchmark runtime configuration through the process entry point
       call.command === 'ginsu' && call.args[0] === 'spawn' && armWorkers.has(call.args[1])
     ));
     expect(armLaunches).toHaveLength(12);
+    for (const { args } of armLaunches) {
+      const runtime = args[args.indexOf('--engine') + 1] as 'codex' | 'claude';
+      expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2))
+        .toEqual(['--model', codingPairedRuntimeConfig.arms[runtime].model]);
+      expect(args.slice(args.indexOf('--effort'), args.indexOf('--effort') + 2))
+        .toEqual(['--effort', codingPairedRuntimeConfig.arms[runtime].effort]);
+    }
+    const armPrompts = codingPairedCommands(test.logPath).filter((call) => (
+      call.command === 'ginsu' && call.args[0] === 'send' && armWorkers.has(call.args[1])
+    ));
+    expect(armPrompts).toHaveLength(12);
+    for (const { args } of armPrompts) {
+      expect(args[2]).toContain('Work alone for this benchmark.');
+      expect(args[2]).toContain('Do not launch helper agents, delegate work, or make');
+      expect(args[2]).toContain('additional model calls.');
+    }
 
     const judge = runCodingPairedCli(test.root, env, ['--paired', '--judge']);
     expect(judge.status, judge.stdout + '\n' + judge.stderr).toBe(0);
@@ -94,6 +110,7 @@ describe('coding benchmark runtime configuration through the process entry point
       receipts: Array<{
         judge: 'codex' | 'claude';
         worker: string;
+        promptPath: string;
         requestedSettings?: { model: string; effort: string };
         dependencies: { destination: string; owned: boolean; symbolicLink: boolean };
         spawn: { command: string };
@@ -103,10 +120,26 @@ describe('coding benchmark runtime configuration through the process entry point
     expect(judging.receipts).toHaveLength(6);
     for (const receipt of judging.receipts) {
       expect(receipt.requestedSettings).toEqual(codingPairedRuntimeConfig.judges[receipt.judge]);
+      const prompt = fs.readFileSync(receipt.promptPath, 'utf8');
+      expect(prompt).toContain('Work alone for this benchmark.');
+      expect(prompt).toContain('Do not launch helper agents, delegate work, or make');
+      expect(prompt).toContain('additional model calls.');
       expect(receipt.spawn.command).toContain('--model ' + receipt.requestedSettings?.model);
       expect(receipt.spawn.command).toContain('--effort ' + receipt.requestedSettings?.effort);
       expect(receipt.dependencies).toMatchObject({ owned: true, symbolicLink: false });
       expect(fs.lstatSync(receipt.dependencies.destination).isSymbolicLink()).toBe(false);
+    }
+    const judgeWorkers = new Set(judging.receipts.map((receipt) => receipt.worker));
+    const judgeLaunches = codingPairedCommands(test.logPath).filter((call) => (
+      call.command === 'ginsu' && call.args[0] === 'spawn' && judgeWorkers.has(call.args[1])
+    ));
+    expect(judgeLaunches).toHaveLength(6);
+    for (const { args } of judgeLaunches) {
+      const runtime = args[args.indexOf('--engine') + 1] as 'codex' | 'claude';
+      expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2))
+        .toEqual(['--model', codingPairedRuntimeConfig.judges[runtime].model]);
+      expect(args.slice(args.indexOf('--effort'), args.indexOf('--effort') + 2))
+        .toEqual(['--effort', codingPairedRuntimeConfig.judges[runtime].effort]);
     }
   }, 180_000);
 });

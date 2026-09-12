@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertOrchestratorRepoPath } from './repo-preflight';
+import { assertOrchestratorRepoPath, getRepoDispatchAdmission } from './repo-preflight';
 
 const tempDirs: string[] = [];
 
@@ -13,8 +13,14 @@ afterEach(() => {
 });
 
 describe('assertOrchestratorRepoPath', () => {
+  it('allows an unbound mission without a repository path', () => {
+    expect(() => assertOrchestratorRepoPath(null)).not.toThrow();
+    expect(() => assertOrchestratorRepoPath('')).not.toThrow();
+  });
+
   it('allows the resolved home anchor without requiring a Git work tree', () => {
     expect(() => assertOrchestratorRepoPath(homedir())).not.toThrow();
+    expect(getRepoDispatchAdmission(homedir())).toEqual({ ok: true, repoPath: homedir() });
   });
 
   it('still rejects an arbitrary existing non-Git directory', () => {

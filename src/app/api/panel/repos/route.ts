@@ -1,8 +1,9 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { access } from 'node:fs/promises';
+import { access, realpath } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
+import { isAbsolute, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import {
@@ -40,6 +41,7 @@ import type {
 } from '@/lib/repos/types';
 
 const RUNTIME_CLEANUP_TIMEOUT_MS = 3_500;
+const execFileAsync = promisify(execFile);
 
 async function pathExists(localPath: string) {
   try {
@@ -52,6 +54,73 @@ async function pathExists(localPath: string) {
 
 async function appendExistence<T extends { localPath: string }>(repo: T): Promise<T & { exists: boolean }> {
   return { ...repo, exists: await pathExists(repo.localPath) };
+}
+
+function isWithinRealRoot(root: string, candidate: string) {
+  const relativePath = relative(root, candidate);
+  return relativePath === '' || (
+    relativePath !== '..'
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolute(relativePath)
+  );
+}
+
+async function validateRestorePaths(
+  requestedPaths: string[],
+  registeredRepos: Array<{ localPath: string }>,
+) {
+  const registeredPaths = Array.from(new Set(registeredRepos
+    .map((repo) => repo.localPath.trim())
+    .filter((localPath) => isAbsolute(localPath))));
+  const registeredRealPaths = (await Promise.all(registeredPaths.map(async (localPath) => {
+    try {
+      return await realpath(localPath);
+    } catch {
+      return null;
+    }
+  }))).filter((localPath): localPath is string => Boolean(localPath));
+  const listedWorktreePaths = (await Promise.all(registeredRealPaths.map(async (registeredRoot) => {
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['-C', registeredRoot, 'worktree', 'list', '--porcelain', '-z'],
+        { windowsHide: true, timeout: 5_000, maxBuffer: 4 * 1024 * 1024 },
+      );
+      return stdout
+        .split('\0')
+        .filter((field) => field.startsWith('worktree '))
+        .map((field) => field.slice('worktree '.length))
+        .filter((localPath) => isAbsolute(localPath));
+    } catch {
+      return [];
+    }
+  }))).flat();
+  const worktreeRealPaths = (await Promise.all(listedWorktreePaths.map(async (localPath) => {
+    try {
+      return await realpath(localPath);
+    } catch {
+      return null;
+    }
+  }))).filter((localPath): localPath is string => Boolean(localPath));
+  const allowedRealRoots = Array.from(new Set([
+    ...registeredRealPaths,
+    ...worktreeRealPaths,
+  ]));
+
+  const uniqueRequestedPaths = Array.from(new Set(requestedPaths
+    .map((requestedPath) => requestedPath.trim())
+    .filter((requestedPath) => isAbsolute(requestedPath))));
+  const validations = await Promise.all(uniqueRequestedPaths.map(async (requestedPath) => {
+    try {
+      const canonicalPath = await realpath(requestedPath);
+      return allowedRealRoots.some((root) => isWithinRealRoot(root, canonicalPath))
+        ? { requestedPath, canonicalPath }
+        : null;
+    } catch {
+      return null;
+    }
+  }));
+  return validations.filter((validation): validation is NonNullable<typeof validation> => Boolean(validation));
 }
 
 function normalizeScopePath(filePath?: string | null) {
@@ -161,8 +230,6 @@ async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl
   };
 }
 
-const execFileAsync = promisify(execFile);
-
 /** List the authenticated user's GitHub repositories via the `gh` CLI — the
  *  app's GitHub auth source (see /api/panel/github-status, which reads
  *  `gh auth status`). Returns the raw GitHub API shape (full_name, clone_url,
@@ -204,6 +271,24 @@ export async function GET(request: Request) {
     const registryStartedAt = performance.now();
     const registeredRepos = await listRepos();
     const registryDurationMs = performance.now() - registryStartedAt;
+    const requestedRestorePaths = params.getAll('restorePath');
+    if (params.get('restoreValidationOnly') === '1') {
+      const validationStartedAt = performance.now();
+      const validatedRestorePaths = await validateRestorePaths(requestedRestorePaths, registeredRepos);
+      const validationDurationMs = performance.now() - validationStartedAt;
+      return NextResponse.json(
+        { validatedRestorePaths },
+        {
+          headers: {
+            'Server-Timing': [
+              `registry;dur=${registryDurationMs.toFixed(1)}`,
+              `validation;dur=${validationDurationMs.toFixed(1)}`,
+              `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`,
+            ].join(', '),
+          },
+        },
+      );
+    }
     const readinessStartedAt = performance.now();
     const readinessSelector = params.get('readiness');
     let repos;
@@ -228,10 +313,15 @@ export async function GET(request: Request) {
     }
     const readinessDurationMs = performance.now() - readinessStartedAt;
     const existenceStartedAt = performance.now();
-    const responseRepos = await Promise.all(repos.map(appendExistence));
+    const [responseRepos, validatedRestorePaths] = await Promise.all([
+      Promise.all(repos.map(appendExistence)),
+      requestedRestorePaths.length > 0
+        ? validateRestorePaths(requestedRestorePaths, registeredRepos)
+        : Promise.resolve([]),
+    ]);
     const existenceDurationMs = performance.now() - existenceStartedAt;
     return NextResponse.json(
-      { repos: responseRepos },
+      { repos: responseRepos, validatedRestorePaths },
       {
         headers: {
           'Server-Timing': [
@@ -277,7 +367,7 @@ export async function POST(request: Request) {
         if (isOrchestratorHomePath(body.localPath)) {
           return NextResponse.json({ error: 'Home mode is not a registered repository.' }, { status: 400 });
         }
-        const repo = await enrichRepoReadiness(await addRepo(body.localPath));
+        const repo = await appendExistence(await enrichRepoReadiness(await addRepo(body.localPath)));
         // Auto-scan skeleton for newly added repo + start change polling
         triggerScan(repo.localPath);
         startChangePolling(repo.localPath);
