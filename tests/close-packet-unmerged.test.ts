@@ -309,7 +309,7 @@ describe('close_packet_unmerged real path (#1570)', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe('different-current-close-mission');
   });
 
-  it('keeps the lane and packet live when process death cannot be confirmed', async () => {
+  it('closes with a durable warning when process death cannot be confirmed', async () => {
     const packetId = 'pkt-close-unmerged-live-worker';
     const repoPath = join(dataDir, 'repo-live-worker');
     const lane = createLane({
@@ -325,8 +325,8 @@ describe('close_packet_unmerged real path (#1570)', () => {
     const packet = {
       id: packetId,
       referenceLabel: '#live-worker',
-      title: 'Keep unconfirmed worker visible',
-      summary: 'Close must fail closed.',
+      title: 'Record unconfirmed worker closure',
+      summary: 'Close must preserve the uncertainty.',
       workspaceTargetPath: repoPath,
       branchTarget: lane.branch,
       runtime: 'codex',
@@ -360,26 +360,36 @@ describe('close_packet_unmerged real path (#1570)', () => {
       disposition: 'wontfix',
     }));
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      ok: false,
-      error: {
-        code: 'kill_unconfirmed',
-        message: expect.stringContaining('worker session class'),
+      ok: true,
+      result: {
+        closed: true,
+        worktreeRemoved: false,
+        worktreeCleanup: 'preserved',
+        note: expect.stringContaining('Kill unconfirmed'),
       },
     });
     expect(getLane(lane.id)).toMatchObject({
-      status: 'paused',
+      status: 'archived',
       sessionKey: 'codex:unverified-live-worker',
+      outcomeNote: expect.stringContaining('Kill unconfirmed'),
     });
     expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
       id: packetId,
-      status: 'blocked',
-      archivedAt: null,
+      status: 'archived',
+      archivedAt: expect.any(String),
+    });
+    expect(getLaneEvents(lane.id).find((event) => (
+      event.verb === 'update' && event.payload.code === 'kill_unconfirmed'
+    ))).toMatchObject({
+      payload: {
+        resolution: 'closed_unmerged_worker_ownership_preserved',
+      },
     });
   });
 
-  it('refuses to hide a second packet lane whose worker remains live', async () => {
+  it('records every unconfirmed worker when duplicate packet lanes close', async () => {
     const packetId = 'pkt-close-unmerged-duplicate-live-worker';
     const repoPath = join(dataDir, 'repo-duplicate-live-worker');
     const first = createLane({
@@ -427,10 +437,17 @@ describe('close_packet_unmerged real path (#1570)', () => {
 
     const response = await closeRoute.POST(operatorRequest({ packetId, disposition: 'wontfix' }));
 
-    expect(response.status).toBe(409);
-    expect(getLane(first.id)?.status).toBe('paused');
-    expect(getLane(second.id)?.status).toBe('paused');
-    expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt).toBeNull();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: { note: expect.stringContaining('Kill unconfirmed for 2 worker session class processes') },
+    });
+    expect(getLane(first.id)).toMatchObject({
+      status: 'archived',
+      outcomeNote: expect.stringContaining('Kill unconfirmed for 2 worker session class processes'),
+    });
+    expect(getLane(second.id)?.status).toBe('archived');
+    expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt).toEqual(expect.any(String));
   });
 
   it('never reports a preserved branch when the production ref postcondition fails (#1631)', async () => {

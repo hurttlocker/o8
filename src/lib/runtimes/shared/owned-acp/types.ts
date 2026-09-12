@@ -50,6 +50,9 @@ export interface OwnedAcpSessionRecord {
   commandIdentity?: string;
   serverVersion?: string;
   supportsResume?: boolean;
+  /** Packet ownership ended without process-exit proof; keep recovery data but hide active discovery. */
+  detachedAt?: string;
+  detachedReason?: string;
 }
 
 export interface OwnedAcpLaunchResolution {
