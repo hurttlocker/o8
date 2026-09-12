@@ -42,8 +42,10 @@ import {
   generateSuggestions,
   isRenderableThoughtEntry,
   isRunnableCliSession,
+  isRuntimeSessionKey,
   mergeSameThreadHistoryLoad,
   mergeTranscriptEntries,
+  repoPathLabel,
   resolveThreadLoadPlan,
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
@@ -116,26 +118,13 @@ import {
 } from './history-transcript';
 import {
   composerBackendTurnOverride,
+  resolveFreshComposerTurnOptions,
   formatComposerBackendLabel,
   resolveActiveComposerBackend,
   useBackendSwitchChoice,
 } from './useBackendSwitchChoice';
 
 export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsChatPermissionMode };
-function isRuntimeSessionKey(sessionKey: string): boolean {
-  return sessionKey.startsWith('claude-code:')
-    || sessionKey.startsWith('codex:')
-    || sessionKey.startsWith('codex-owned:')
-    || sessionKey.startsWith('codex-discovered:')
-    || sessionKey.startsWith('codex-live:')
-    || sessionKey.startsWith('gemini-owned:')
-    || sessionKey.startsWith('opencode-owned:');
-}
-
-function repoPathLabel(path: string | null | undefined): string | null {
-  if (!path?.trim()) return null;
-  return path.split('/').filter(Boolean).pop() ?? path;
-}
 
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
@@ -1591,8 +1580,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const sendOrchestrator = useCallback((message: string, options: OrchestratorSendOptions) => {
     const handoffMode = backendSwitch.currentHandoffMode();
-    return orchStream.send(message, handoffMode ? { ...options, handoffMode } : options);
-  }, [backendSwitch, orchStream]);
+    return orchStream.send(message, {
+      ...options,
+      ...(handoffMode ? { handoffMode } : {}),
+      resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
+        repoPath: resolvedRepoPath,
+        backend: orchestratorBackend,
+        backendSourceRef, setBackend: setOrchestratorBackend,
+        setModel: setOrchestratorModel, setOperatorDefaults,
+      }, signal),
+    });
+  }, [backendSwitch, orchStream, orchestratorBackend, resolvedRepoPath]);
 
   const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
     const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];

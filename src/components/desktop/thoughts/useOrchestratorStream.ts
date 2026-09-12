@@ -16,7 +16,6 @@ import {
   subscribeOrchestratorMissionCompleted,
   type OrchestratorMissionCompletedDetail,
 } from '@/lib/orchestrator/store';
-import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import {
   buildOrchestratorSendPayload,
   createOrchestratorClientMessageId,
@@ -35,7 +34,6 @@ import {
   useNoSnapshotBusyFallback,
 } from './use-orchestrator-stream/snapshot-reconcile';
 import {
-  DEFAULT_ORCHESTRATOR_MODEL,
   ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR,
   ORCHESTRATOR_AUTO_COMPACT_THRESHOLD,
   ORCHESTRATOR_COMPACTION_STATUS_MIN_MS,
@@ -52,7 +50,6 @@ import {
   openOrchestratorWebSocket,
   refreshWsCredentials,
   sortTranscriptEntries,
-  type OrchestratorPermissionMode,
   type OrchestratorStreamStatus,
 } from './use-orchestrator-stream/shared';
 import {
@@ -60,15 +57,14 @@ import {
   type CurrentAssistantStreamState,
   type OrchestratorSnapshotTurn,
 } from './use-orchestrator-stream/socket';
+import { prepareOrchestratorTurn, useTurnOptionResolution } from './use-orchestrator-stream/turn-option-resolution';
 import type {
   OrchestratorSendHandle,
   OrchestratorSendOptions,
   OrchestratorStreamOptions,
   OrchestratorStreamResult,
 } from './use-orchestrator-stream/types';
-
 export type { OrchestratorSendHandle } from './use-orchestrator-stream/types';
-
 export {
   DEFAULT_ORCHESTRATOR_MODEL,
   ORCHESTRATOR_TOKEN_EVENT,
@@ -161,6 +157,7 @@ export function useOrchestratorStream(
   // It must be set before the send ACK because the operator can press Stop
   // while the selected backend is still resolving its CLI (#1557).
   const activeTurnBackendRef = useRef<OrchestratorBackendId | null>(null);
+  const turnOptionResolution = useTurnOptionResolution(repoPath);
   const missionRotationInFlightRef = useRef(false);
   const pendingMissionCompletionRef = useRef<OrchestratorMissionCompletedDetail | null>(null);
   const transitionStripTimerRef = useRef<number | null>(null);
@@ -311,6 +308,7 @@ export function useOrchestratorStream(
   }, []);
 
   const reset = useCallback(() => {
+    turnOptionResolution.abort();
     const nextStatus = connected ? 'ready' : 'connecting';
     resetEpochRef.current += 1;
     lastSeqRef.current = 0;
@@ -343,7 +341,7 @@ export function useOrchestratorStream(
     }
     clearQueuedOrchestratorSessionPrelude(repoPathRef.current, threadIdRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
-  }, [connected, resetFirstTurnPlanCapture, syncMessages, updateRunningTotal]);
+  }, [connected, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution, updateRunningTotal]);
 
   const archiveMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
     const activeRepoPath = repoPathRef.current;
@@ -843,6 +841,7 @@ export function useOrchestratorStream(
   // 'done' event within 1-2s which reinforces the idle state. Partial events
   // already accumulated in the transcript stay intact.
   const interrupt = useCallback(() => {
+    turnOptionResolution.abort();
     const activeRepoPath = repoPathRef.current;
     if (!activeRepoPath) return;
     const ws = wsRef.current;
@@ -862,31 +861,13 @@ export function useOrchestratorStream(
       activeTurnRef.current = null;
       currentAssistantRef.current = null;
     }
-  }, [connected]);
-
+  }, [connected, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
-    const permissionMode: OrchestratorPermissionMode = options?.permissionMode ?? 'full';
-    const thinkingEffort = options?.thinkingEffort;
-    const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
-    const displayMessage = options?.displayMessage?.trim() || message;
-    const wireMessage = options?.wireMessage?.trim() || message;
-    const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
-    const requestedOrchestrationMode = options?.orchestrationMode ?? 'fleet';
-    // Single is the hard boundary: even a stale UI state that still has MoA
-    // armed must not route into Collide's proposer fan-out.
-    const collide = options?.collide === true && requestedOrchestrationMode !== 'single';
-    const collideBaseBackend = collide ? options?.backend : undefined;
-    const backend = collide ? 'collide' : options?.backend;
-    activeTurnBackendRef.current = backend ?? null;
-    // Collide owns its proposal/aggregation pass; the separate Fusion directive
-    // would nest a second fan-out inside it.
-    const orchestrationMode: OrchestratorExecutionMode = collide
-      ? 'fleet'
-      : requestedOrchestrationMode;
     suppressTurnEventsRef.current = false;
     const clientMessageId = createOrchestratorClientMessageId();
     const sentAtMs = Date.now();
     const transcriptBeforeSend = messagesRef.current;
+    const repoPathAtSend = repoPathRef.current;
 
     // Mint before returning the handle so undo always targets the exact durable
     // thread even when this is the first message on a fresh tab.
@@ -899,7 +880,7 @@ export function useOrchestratorStream(
       clientMessageId,
       userMessageId: `orch-user-${clientMessageId}`,
       threadId: threadIdRef.current,
-      backend: backend ?? null,
+      backend: options?.backend ?? null,
       transcriptBeforeSend,
     };
     lastSendAtRef.current = sentAtMs;
@@ -907,6 +888,23 @@ export function useOrchestratorStream(
     setPendingStatusBusy();
 
     void (async () => {
+      const turnOptions = await turnOptionResolution.resolve(clientMessageId, options);
+      if (turnOptions === null || repoPathRef.current !== repoPathAtSend || threadIdRef.current !== sendHandle.threadId) {
+        activeTurnBackendRef.current = null;
+        if (statusRef.current === 'busy') {
+          const nextStatus = connected ? 'ready' : 'connecting';
+          statusRef.current = nextStatus;
+          setStatus(nextStatus);
+          setBusyState(createIdleBusyState());
+        }
+        return;
+      }
+      const {
+        permissionMode, thinkingEffort, model, displayMessage, wireMessage,
+        localEntriesAfterUser, collideBaseBackend, backend, orchestrationMode,
+      } = prepareOrchestratorTurn(message, turnOptions);
+      activeTurnBackendRef.current = backend ?? null;
+      sendHandle.backend = backend ?? null;
       const activeRepoPath = repoPathRef.current;
       if (!activeRepoPath) {
         activeTurnBackendRef.current = null;
@@ -1004,9 +1002,9 @@ export function useOrchestratorStream(
         // Per-turn override stays truthful while the global default write settles.
         backend,
         collideBaseBackend,
-        handoffMode: options?.handoffMode,
-        attachments: options?.attachments,
-        taskArtifactAction: options?.taskArtifactAction,
+        handoffMode: turnOptions?.handoffMode,
+        attachments: turnOptions?.attachments,
+        taskArtifactAction: turnOptions?.taskArtifactAction,
       });
       const pendingRecord = {
         text: outboundMessage,
@@ -1036,9 +1034,10 @@ export function useOrchestratorStream(
       setPendingStatusBusy();
     })();
     return sendHandle;
-  }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy]);
+  }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution]);
 
   const undoSend = useCallback((handle: OrchestratorSendHandle) => {
+    turnOptionResolution.abort(handle.clientMessageId);
     const activeRepoPath = repoPathRef.current;
     durablePendingSend.cancelPending(handle.clientMessageId);
     syncMessages(handle.transcriptBeforeSend);
@@ -1067,7 +1066,7 @@ export function useOrchestratorStream(
       getWebSocket: () => wsRef.current,
       connect: () => { console.warn('[orchestrator-stream] WS not open, reconnecting to undo send...'); connect(); },
     });
-  }, [connect, connected, durablePendingSend, resetFirstTurnPlanCapture, syncMessages]);
+  }, [connect, connected, durablePendingSend, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution]);
 
   return {
     messages,

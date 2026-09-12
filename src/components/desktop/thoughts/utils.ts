@@ -135,6 +135,21 @@ export function isRunnableCliSession(agent: FleetAgent) {
   return true;
 }
 
+export function isRuntimeSessionKey(sessionKey: string): boolean {
+  return sessionKey.startsWith('claude-code:')
+    || sessionKey.startsWith('codex:')
+    || sessionKey.startsWith('codex-owned:')
+    || sessionKey.startsWith('codex-discovered:')
+    || sessionKey.startsWith('codex-live:')
+    || sessionKey.startsWith('gemini-owned:')
+    || sessionKey.startsWith('opencode-owned:');
+}
+
+export function repoPathLabel(path: string | null | undefined): string | null {
+  if (!path?.trim()) return null;
+  return path.split('/').filter(Boolean).pop() ?? path;
+}
+
 export function buildAgentTargets(
   agents: FleetAgent[],
   preferredRuntime: OrchestratorRuntime,
