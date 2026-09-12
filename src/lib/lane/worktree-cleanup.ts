@@ -4,6 +4,7 @@ import { removeCortexWorktreePath } from './worktree-clone-removal';
 import { checkPruneGate } from './prune-gate';
 import type { Lane } from './types';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
+import { worktreeIsConfirmedAbsent } from './lane-storage-release';
 
 type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>
   & Partial<Pick<Lane, 'baseBranch' | 'packetId'>>
@@ -63,6 +64,12 @@ export async function cleanupLaneWorktree(
   if (normalizedWorktree === repoPath) {
     console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: worktree path equals repo path (no isolation).`);
     return false;
+  }
+
+  // Exact merge retirement may have removed this path before its terminal
+  // callback runs. Absence is settled cleanup, not another capture attempt.
+  if (worktreeIsConfirmedAbsent(worktreePath)) {
+    return settleRemovedWorktreeReservation(lane, true);
   }
 
   const terminal = opts.terminal === true;
