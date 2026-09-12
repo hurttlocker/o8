@@ -533,7 +533,7 @@ export function setLaneStatus(
   laneId: string,
   status: LaneStatus,
   actor: LaneEventActor = 'system',
-  eventLabel?: string,
+  eventLabel?: string, eventPayload: { reason?: string } = {},
 ): Lane | null {
   const existing = getLane(laneId);
   if (existing && isRefusedTerminalTransition(existing.status, status)) {
@@ -547,7 +547,7 @@ export function setLaneStatus(
   const lane = updateLane(
     laneId,
     { status, lastEventAt: now, lastEventLabel: eventLabel ?? status },
-    actor, { eventLabel: eventLabel ?? status },
+    actor, { ...eventPayload, eventLabel: eventLabel ?? status },
   );
 
   if (

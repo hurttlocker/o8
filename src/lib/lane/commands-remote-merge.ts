@@ -34,8 +34,8 @@ export async function performRemoteCustomerMerge(
 
   const fetched = await fetchWorkerBranch(lane.repoPath, workerRun.remoteBranch, workerRun.id);
   if (!fetched.ok) {
-    console.warn(`[remote-merge] ${fetched.note}`);
-    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
+    console.error(`[remote-merge] Merge failed for lane ${lane.id} (packet ${lane.packetId ?? 'unbound'}): ${fetched.note}`);
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error', { reason: fetched.note });
     return { ok: false, laneId: command.laneId, note: fetched.note };
   }
 
@@ -258,8 +258,8 @@ export async function performRemoteCustomerMerge(
     };
   } catch (error) {
     const message = formatLaneCommandError(error);
-    console.error(`[remote-merge] Merge failed for lane ${lane.id}: ${message}`);
-    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
+    console.error(`[remote-merge] Merge failed for lane ${lane.id} (packet ${lane.packetId ?? 'unbound'}): ${message}`);
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error', { reason: message });
     return { ok: false, laneId: command.laneId, note: message };
   } finally {
     if (savedBranch) {
