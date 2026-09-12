@@ -44,6 +44,8 @@ Eighteen runtimes, one adapter contract, and a test that keeps this table equal 
 
 **From source** needs Node 22.x (native modules are built against the Node 22 ABI), Rust stable, and Xcode Command Line Tools.
 
+Install `nvm` before using the commands below. If Node 22.x is already installed another way, verify it with `node --version` and skip the two `nvm` commands.
+
 ```bash
 git clone https://github.com/hurttlocker/o8.git
 cd o8
@@ -51,6 +53,16 @@ nvm install && nvm use   # .nvmrc pins Node 22
 npm install
 npm run dev              # web loop: Next.js :47120 + WS :47125
 ```
+
+The source web loop does not install the global `o8` command. Build the source CLI once, then use `node cli/dist/o8.mjs` wherever [`AGENTS.md`](./AGENTS.md) shows `o8`:
+
+```bash
+npm run build:cli
+node cli/dist/o8.mjs repo add /absolute/path/to/repo
+node cli/dist/o8.mjs mission create --title "First packet" --body "Add one README line" --repo /absolute/path/to/repo --runtime codex
+```
+
+Use the returned mission and packet IDs with `mission dispatch`, `mission wait`, `packet diff`, and `packet review --approve --packet <id>`. If review creates an operator card, finish it with `inbox list` and `inbox approve <id>`. The native app installs the global `o8` command after it runs once.
 
 `npm run tauri:dev` builds the native shell (a much longer first build). After a hard kill, `node scripts/dev.mjs cleanup` recovers the ports. Bring at least one agent CLI you already use (`claude`, `codex`, `grok`, `opencode`, `gemini`); no API keys are needed to start, and [`.env.example`](./.env.example) documents every optional one.
 

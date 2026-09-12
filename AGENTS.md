@@ -58,6 +58,7 @@ Use Node 22 (`package.json` pins `>=22 <23`) and `npm install` to sync dependenc
 - `npm run dev:ws`: starts only the WebSocket server.
 - `npm run desktop:dev`: alias for the coordinated `npm run dev` stack.
 - `npm run desktop:dev:side`: side-by-side dev stack on `3010`/`3011` for installed-app bridge work.
+- `npm run build:cli`: builds the source CLI at `cli/dist/o8.mjs`. A source-only web loop does not install the global `o8` symlink, so use `node cli/dist/o8.mjs <command>` until the native app has run once.
 - `npm run build`: production Next.js build using webpack.
 - `npm run start`: serves a production Next build, honoring `PORT`.
 - `npm run tauri:dev` / `npm run tauri:build`: run or package the native shell.
@@ -150,7 +151,7 @@ o8 packet retry [--packet <id>] [--reason "..."]         # reset while keeping t
 o8 packet rerun --feedback "..." [--packet <id>]         # fresh worker, immediate relaunch
 o8 packet steer --message "..." [--packet <id>]          # nudge the warm session
 o8 packet merge-preview [--packet <id>]                  # read-only five-layer merge preview
-o8 packet review --approve [--expected-sha <sha>] [--commit-message "..."]   # records review, then uses the gated merge path
+o8 packet review --approve [--packet <id>] [--expected-sha <sha>] [--commit-message "..."]   # records review, then uses the gated merge path
 o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # worker context raises an operator card; it does not self-merge
 
 # Task artifacts — hand the operator a sandboxed form; its exact payload returns to you with a receipt
