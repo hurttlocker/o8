@@ -1,6 +1,6 @@
 # o8 roadmap
 
-o8 is for one operator running several coding agents at once. It turns work into missions and packets, runs each packet in its own worktree, keeps the operator in the approval path, and records enough evidence to explain later what happened. This page says where that is going and what is open to work on.
+o8 is for one operator running several coding agents at once. It turns work into missions and packets, runs each packet in its own worktree, keeps the operator in the approval path, and records enough evidence to explain later what happened. All seven pillars serve one outcome: an operator delegates useful work, understands its state while away, steps in when needed, and approves the result without replaying the whole session. This page says where that is going and what is open to work on.
 
 Taste is a gate on every row here, not a pillar of its own. A change that reads badly, responds slowly, or behaves unpredictably is not finished, whichever pillar it belongs to.
 
@@ -11,12 +11,22 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 3. **Runs on your subscriptions.** The coding-agent CLIs you already pay for, behind one runtime contract.
 4. **One control plane, every surface.** Desktop, phone, CLI, MCP, headless, voice. Same verbs, different authority.
 5. **Smooth for people and for agents.** Fast and legible for a person; drivable through a real interface for a program.
-6. **Runs where you are.** Light on the machine, on the machine you have. Mac today, Linux one proof away, Windows help wanted.
+6. **Runs where you are.** Light on the machine, on the machine you have. Mac today, Linux compiles but is unproven end to end, Windows help wanted.
 7. **Ahead.** The bets for 2027 and 2028, with what we are already doing on each.
 
 ## Now
 
-One arc for September 2026: **Linux.** Nine of ten children are shipped. The last one is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. Until that proof exists, o8 runs on one platform. [#2060](https://github.com/hurttlocker/o8/issues/2060)
+One arc first: **First ten minutes.** A new operator goes from download to a first merged packet, and the minutes and the stalls are measured. Nobody has measured it yet, and until someone has, the rest of this page is the maintainers' view of the product. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+
+Linux is the next platform milestone. Nine of ten children are shipped; the last is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. [#2060](https://github.com/hurttlocker/o8/issues/2060)
+
+## What we need to prove
+
+Three outcomes decide whether the pillars add up. None has a baseline yet, and a green checklist is progress on a row, not proof of the outcome.
+
+- **A new operator finishes the loop.** Download to first merged packet, with the minutes and the stalls measured. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+- **Interrupted work stays visible and recoverable.** A refusal surfaces, retries are bounded, and a replaced mission leaves no live packets behind. [#2197](https://github.com/hurttlocker/o8/issues/2197)
+- **The governed loop earns its cost.** A first diff at least as good as the raw model on the same issue, and a ledger that agrees with the invoice. [#1684](https://github.com/hurttlocker/o8/issues/1684), [#1791](https://github.com/hurttlocker/o8/issues/1791)
 
 ## How to read this
 
@@ -24,7 +34,7 @@ Only open arcs appear in the pillar tables. Shipped arcs are listed once at the 
 
 State words mean: **open** has children in flight; **parked** means we know what it would take and are not doing it now; **not usable** means the platform does not run o8 today, whatever the checklist says. Read the Gap column first. It says what is missing in words.
 
-`node scripts/roadmap-status.mjs` prints the checklist counts. `node scripts/roadmap-status.mjs --check` fails when a checklist disagrees with GitHub (a checked child that is open, an unchecked child that is closed) or when a Now link points at a closed issue. CI runs the check on every push to main and weekly, so this page cannot drift silently.
+`node scripts/roadmap-status.mjs` prints the checklist counts. `node scripts/roadmap-status.mjs --check` fails when a checked child is still open or when a Now link points at a closed issue. A closed child whose box is unchecked is reported as awaiting release, not as drift. CI runs the check on every push to main and weekly. The check reads issue state only: it does not read release tags and it cannot judge a Gap sentence, so the words on this page are the maintainers' to keep true.
 
 ## 1. Governance is the product
 
@@ -44,7 +54,7 @@ Project rules and prior outcomes stay attached to the project, not to one model 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
 | Cost and capacity ledger | The ledger's number and the provider's invoice agree. | open | Nothing measures what role routing and context controls save. | [#1791](https://github.com/hurttlocker/o8/issues/1791) |
-| Memory the operator shapes | What the operator rejects, steers, or edits becomes memory the Brain and the next worker retrieve, and any single retained item can be deleted. | open | Rejection and steer reasons are stored for audit and read by no retriever; the schema's rework flag is never written; the only way to forget one rule is to reset the whole database. | [#2221](https://github.com/hurttlocker/o8/issues/2221) |
+| Memory the operator shapes | What the operator rejects, steers, or edits becomes memory the Brain and the next worker retrieve, and any single retained item can be withdrawn from future retrieval without erasing the record that it was once applied. | open | Rejection and steer reasons are stored for audit and read by no retriever; the schema's rework flag is never written; the only way to forget one rule is to reset the whole database. | [#2221](https://github.com/hurttlocker/o8/issues/2221) |
 
 ## 3. Runs on your subscriptions
 
@@ -91,12 +101,12 @@ Windows is help wanted. No maintainer has a Windows machine to verify on, so thi
 
 ## 7. Ahead
 
-The bets for 2027 and 2028. Each row is an outcome we think operators will need, what already exists in o8 toward it, and the next child that would move it. A bet moves into a pillar when that child ships. Rows are reviewed at the start of each month; a bet nobody has touched in a quarter gets cut, not carried.
+The bets for 2027 and 2028. Each row is an outcome we think operators will need, what already exists in o8 toward it, and the next child that would move it. A shipped child moves only the part it proves; a bet moves into a pillar when an operator can use the promised outcome. Rows are reviewed at the start of each month; a bet nobody has touched in a quarter gets cut, not carried.
 
 | Bet | What already exists | Next child | Where |
 | --- | --- | --- | --- |
 | Agents that work while you are away, wherever they run. Hosted, remote, or local workers, days-long missions, the same packet and merge gate. | Headless o8, the mobile relay, crash survival, the durable execution spine. | A portable worker environment profile so a packet can be placed on a remote worker without changing its runtime contract. | [#1690](https://github.com/hurttlocker/o8/issues/1690), [#1727](https://github.com/hurttlocker/o8/issues/1727) |
-| The right model for each packet, chosen and escalated by o8. A failed packet retries on a stronger tier without the operator choosing. | The carrier registry, per-packet model pins, the merge-failure escalation chain. | A worker escalation ladder that retries a failed packet on the next tier. | [#2209](https://github.com/hurttlocker/o8/issues/2209) |
+| The right model for each packet, chosen and escalated by o8. A failed packet retries on a stronger tier without the operator choosing. | The carrier registry, per-packet model pins, the merge-failure escalation chain. | A worker escalation ladder that retries a failed packet on the next tier, with bounded attempts, the effective model visible, and a refusal instead of a silent fallback when the requested tier is unavailable. | [#2209](https://github.com/hurttlocker/o8/issues/2209) |
 | Proof that travels. Receipts and control that systems outside o8 can verify and plug into, so o8 is the human gate inside other people's agent graphs. | Signed packet receipts and truth queries, the ACP orchestrator backend, MCP on both sides. | A receipt format another organization can verify without an o8 install, and a mission exported as an observed agent graph that an outside validator accepts. | [#1997](https://github.com/hurttlocker/o8/issues/1997), [#1998](https://github.com/hurttlocker/o8/issues/1998), [#2230](https://github.com/hurttlocker/o8/issues/2230) |
 | Nothing leaves the machine unless you say so. Local and on-device models as a real mode with a test that proves it. | Local endpoint probes, the local chat tier for the Brain, an audit of surfaces without a local path. | An egress assertion test across a full packet lifecycle. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
 | Two operators, one approval path. Teams share a workspace without weakening who can approve what. | Principal-based authorization for operator, worker, and remote callers. | A workspace identity and role model. | [#1875](https://github.com/hurttlocker/o8/issues/1875) |
