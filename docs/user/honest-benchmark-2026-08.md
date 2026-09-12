@@ -2,6 +2,8 @@
 
 *First run 2026-06-01/02. Re-run and substantially rebuilt 2026-08-02/03 against v0.1.652.*
 
+**September 12, 2026 coding update:** A [new fixed paired trial](https://github.com/hurttlocker/o8/issues/1684#issuecomment-5645498074) scored two complete tasks, with zero decisive contract wins in either runtime. The third task was excluded for an invalid contract. The quality decision rule remains unmet. The report below preserves the August results; its coding conclusions describe that earlier sample.
+
 Hypothesis and scoring rules were committed before measurement — see [the pre-registration](../internals/bench-2026-08-preregistration.md). Amendments 1–3 predate the data they govern; Amendment 4 discloses the first completed run, Amendments 5–9 record each failure and repair before its post-fix continuation, and Amendment 10 records the completed continuation without changing its rules. Read *What changed since June* before quoting any figure.
 
 This document reports what we can defend. Where a track lost, it says so. Where a result was withdrawn, it says why. Two of our own prior figures are retired below, and the shipped-output experiment keeps its original empty governed artifact alongside a separately labelled post-fix continuation.
