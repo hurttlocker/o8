@@ -747,7 +747,9 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       pushedToOrigin,
       mergedEquivalentHeadSha,
     });
-    setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
+    if (getLane(command.laneId)?.status !== 'archived') {
+      setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
+    }
 
     // Coarse product signal: the governance loop closed. Fire-and-forget.
     void emitProductEvent('merge.approved', { runtime: lane.runtime, pushed: pushedToOrigin });

@@ -17,6 +17,7 @@ const { recordMission } = await import('@/lib/db/missions-store');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const {
   approveAndMergePacket,
+  getMissionStatus,
   submitPacketReview,
 } = await import('@/lib/orchestrator/operator-mission-service');
 const {
@@ -72,7 +73,7 @@ function packetFixture(packetId: string, canonicalRepo: string, branch: string):
 }
 
 async function createRelocatedCloneMission(label: string, incompleteDependencies = false) {
-  const root = mkdtempSync(join(os.tmpdir(), `o8-direct-merge-${label}-`));
+  const root = realpathSync(mkdtempSync(join(os.tmpdir(), `o8-direct-merge-${label}-`)));
   const origin = join(root, 'github-like.git');
   const canonicalRepo = join(root, 'canonical');
   const packetId = `pkt-canonical-${label}-${Date.now()}`;
@@ -185,7 +186,7 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
   });
   writeOrchestratorControlPlaneState(mission);
 
-  return { baseSha, branch, canonicalRepo, lane, packetClone, packetId, packetSha, typecheckMarker };
+  return { baseSha, branch, canonicalRepo, lane, missionId, packetClone, packetId, packetSha, typecheckMarker };
 }
 
 async function reviewAndMerge(fixture: Awaited<ReturnType<typeof createRelocatedCloneMission>>) {
@@ -203,6 +204,7 @@ async function reviewAndMerge(fixture: Awaited<ReturnType<typeof createRelocated
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -222,6 +224,12 @@ describe('direct merge publishes through the canonical mission repository', () =
     try {
       const result = await reviewAndMerge(fixture);
       await new Promise((resolve) => setTimeout(resolve, 50));
+      const lane = getLane(fixture.lane.id);
+      const terminalEvents = getLaneEvents(fixture.lane.id)
+        .filter((event) => event.verb === 'status_change')
+        .map((event) => event.payload.status)
+        .filter((status) => status === 'completed' || status === 'archived');
+      const mission = await getMissionStatus({ missionId: fixture.missionId, includeCost: false });
       const snapshots = listWorkspaceSnapshotsByOriginalPath(fixture.packetClone);
       const creation = snapshots[0]
         ? listWorkspaceSnapshotTransitions(snapshots[0].repositoryUuid, snapshots[0].packetId)[0]
@@ -242,11 +250,18 @@ describe('direct merge publishes through the canonical mission repository', () =
         mergeCandidateSha: fixture.packetSha,
         reviewedHeadSha: fixture.packetSha,
       });
+      expect(lane).toMatchObject({ status: 'archived', outcome: 'merged' });
+      expect(terminalEvents).toEqual(['archived']);
+      expect(mission.packets.find((packet) => packet.id === fixture.packetId)).toMatchObject({
+        status: 'released',
+        releaseState: 'released',
+      });
       expect(diagnostics.filter((diagnostic) => (
         diagnostic.includes('[worktree-capture]')
         || diagnostic.includes('Failed to preserve head')
         || diagnostic.includes('REFUSED preservation boundary')
         || diagnostic.includes('REFUSED durable retirement begin')
+        || diagnostic.includes('Refusing to transition lane')
       ))).toEqual([]);
     } finally {
       warnSpy.mockRestore();
