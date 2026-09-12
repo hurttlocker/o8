@@ -6,7 +6,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 ## At a glance
 
-1. **Governance is the product.** Workers cannot merge their own work; every decision and failure is recorded and visible.
+1. **Governance is the product.** Workers cannot merge their own work. The goal is to record every decision and make every failure visible and actionable.
 2. **Organizational memory.** Rules and past outcomes stay with the project, not with one model vendor.
 3. **Runs on your subscriptions.** The coding-agent CLIs you already pay for, behind one runtime contract.
 4. **One control plane, every surface.** Desktop, phone, CLI, MCP, headless, voice. Same verbs, different authority.
@@ -22,11 +22,11 @@ Linux is the next platform milestone. Nine of ten children are shipped; the last
 
 ## What we need to prove
 
-Three outcomes decide whether the pillars add up. None has a baseline yet, and a green checklist is progress on a row, not proof of the outcome.
+Three outcomes decide whether the pillars add up. The first-diff comparisons below provide evidence on code quality; operator effort and the full loop's value still need measurement. A green checklist is progress on a row, not proof of the outcome.
 
 - **A new operator finishes the loop.** Download to first merged packet, with the minutes and the stalls measured. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 - **Interrupted work stays visible and recoverable.** A refusal surfaces, retries are bounded, and a replaced mission leaves no live packets behind. [#2197](https://github.com/hurttlocker/o8/issues/2197)
-- **The governed loop earns its cost.** A first diff at least as good as the raw model on the same issue, and a ledger that agrees with the invoice. [#1684](https://github.com/hurttlocker/o8/issues/1684), [#1791](https://github.com/hurttlocker/o8/issues/1791)
+- **The governed loop earns its cost.** A first diff at least as good as the raw model on the same task remains the goal. Also compare final accepted quality. Measure the operator's time spent supervising, reviewing, and repairing the result, alongside runtime costs for attempts, reviews, and rework. An accurate ledger supports that comparison; it does not establish that delegation saves time or money. [#1684](https://github.com/hurttlocker/o8/issues/1684), [#1791](https://github.com/hurttlocker/o8/issues/1791)
 
 ## How to read this
 
@@ -38,7 +38,7 @@ State words mean: **open** has children in flight; **parked** means we know what
 
 ## 1. Governance is the product
 
-Execution is separated from approval. Workers cannot merge their own packets, every decision is recorded, and every failure moves through a visible state.
+Execution is separated from approval. Workers cannot merge their own packets. This pillar requires decisions and failures to be recorded and visible, with a supported path to resolve them; the lifecycle row below tracks the remaining gaps.
 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
