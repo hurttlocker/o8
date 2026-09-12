@@ -30,6 +30,12 @@ export interface OrchestratorSendOptions {
   /** Explicit consent to seed a cold cross-backend continuation. */
   handoffMode?: 'handoff';
   attachments?: Array<{ dataUri: string; name?: string }>;
+  /**
+   * Resolves settings which must be current when this turn is constructed.
+   * The composer uses this for persisted operator defaults, which can change
+   * while a tab remains mounted.
+   */
+  resolveTurnOptions?: (signal: AbortSignal) => Promise<Pick<OrchestratorSendOptions, 'backend' | 'model'>>;
 }
 
 export interface OrchestratorStreamOptions {

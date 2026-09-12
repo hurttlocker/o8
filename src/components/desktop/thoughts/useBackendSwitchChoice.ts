@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { formatModelLabel } from '@/lib/format';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import { writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import type { PendingBackendSwitch } from './chat-panel/BackendSwitchChoice';
-import type { OrchestratorBackendSetting, ThoughtsOperatorDefaults } from './operator-defaults';
+import { fetchFreshThoughtsOperatorDefaults, type OrchestratorBackendSetting, type ThoughtsOperatorDefaults } from './operator-defaults';
 
 export function resolveActiveComposerBackend(defaults: Pick<ThoughtsOperatorDefaults, 'orchestratorBackend' | 'inAppOrchestratorEnabled'>): OrchestratorBackendSetting {
   if (defaults.orchestratorBackend !== 'auto') return defaults.orchestratorBackend;
@@ -20,6 +20,26 @@ export function formatComposerBackendLabel(backend: OrchestratorBackendSetting, 
 
 export function composerBackendTurnOverride(backend: OrchestratorBackendSetting): OrchestratorBackendId | undefined {
   return backend === 'auto' ? undefined : backend;
+}
+
+export async function resolveFreshComposerTurnOptions(input: {
+  repoPath: string | null;
+  backend: OrchestratorBackendSetting;
+  backendSourceRef: MutableRefObject<'default' | 'thread' | 'user'>;
+  setBackend: Dispatch<SetStateAction<OrchestratorBackendSetting>>;
+  setModel: Dispatch<SetStateAction<string>>;
+  setOperatorDefaults: Dispatch<SetStateAction<ThoughtsOperatorDefaults>>;
+}, signal?: AbortSignal) {
+  const defaults = await fetchFreshThoughtsOperatorDefaults(signal);
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const model = readStoredOrchestratorModel(input.repoPath) ?? defaults.orchestratorModel;
+  const backend = input.backendSourceRef.current === 'default'
+    ? resolveActiveComposerBackend(defaults)
+    : input.backend;
+  input.setOperatorDefaults(defaults);
+  input.setModel(model);
+  if (input.backendSourceRef.current === 'default') input.setBackend(backend);
+  return { model, backend: composerBackendTurnOverride(backend) };
 }
 
 export function useBackendSwitchChoice(input: {

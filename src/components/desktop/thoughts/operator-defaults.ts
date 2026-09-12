@@ -55,16 +55,31 @@ export const THOUGHTS_OPERATOR_DEFAULTS_FALLBACK: ThoughtsOperatorDefaults = {
 
 export async function fetchThoughtsOperatorDefaults(signal?: AbortSignal): Promise<ThoughtsOperatorDefaults> {
   try {
-    const response = await fetchOperatorDefaultsValues();
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    const payload = await response.json().catch(() => null) as OperatorDefaultsPayload | null;
-    if (!response.ok) {
-      throw new Error('Failed to load operator defaults.');
-    }
-    return normalizeThoughtsOperatorDefaults(payload);
+    return await parseThoughtsOperatorDefaults(fetchOperatorDefaultsValues(), signal);
   } catch {
     return THOUGHTS_OPERATOR_DEFAULTS_FALLBACK;
   }
+}
+
+/** Bypass the short UI snapshot when a turn needs persisted truth at send time. */
+export async function fetchFreshThoughtsOperatorDefaults(signal?: AbortSignal): Promise<ThoughtsOperatorDefaults> {
+  return await parseThoughtsOperatorDefaults(
+    fetch('/api/panel/operator-defaults?include=values', { cache: 'no-store', signal }),
+    signal,
+  );
+}
+
+async function parseThoughtsOperatorDefaults(
+  responsePromise: Promise<Response>,
+  signal?: AbortSignal,
+): Promise<ThoughtsOperatorDefaults> {
+  const response = await responsePromise;
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const payload = await response.json().catch(() => null) as OperatorDefaultsPayload | null;
+  if (!response.ok || !payload || typeof payload !== 'object' || !payload.values || typeof payload.values !== 'object') {
+    throw new Error('Failed to load operator defaults.');
+  }
+  return normalizeThoughtsOperatorDefaults(payload);
 }
 
 export async function fetchThoughtsRuntimeReadiness(): Promise<number | null> {
