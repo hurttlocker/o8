@@ -87,6 +87,10 @@
     "bench:coding:collect": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --collect",
     "bench:coding:judge": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --judge",
     "bench:coding:all": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --all",
+    "bench:coding:paired:preflight": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --paired --preflight",
+    "bench:coding:paired:collect": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --paired --collect",
+    "bench:coding:paired:judge": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --paired --judge",
+    "bench:coding:paired:all": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --paired --all",
     "bench:coding:e2e:preflight": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --preflight --e2e",
     "bench:coding:e2e": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --e2e",
     "bench:coding:e2e:judge": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --e2e-judge"
