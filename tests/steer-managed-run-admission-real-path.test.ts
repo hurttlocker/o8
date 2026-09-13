@@ -204,4 +204,23 @@ describe('steered-turn managed-run admission through production routes', () => {
     expect((await steer(packet.id)).status).toBe(200);
     expect((await register(packet)).status).toBe(409);
   });
+
+  it('keeps an admitted turn authorized after a concurrent steer is refused as still-busy', async () => {
+    // #2342 — a second steer that the runtime refuses as busy still appends
+    // its own steered_packet + steer_failed lane events. Those must not read
+    // as newer lifecycle evidence that closes the FIRST turn's live grant.
+    const { packet, lane, sessionKey } = fixture();
+    expect((await steer(packet.id)).status).toBe(200);
+    expect((await register(packet, 'first')).status).toBe(200);
+
+    perform.mockResolvedValueOnce({ ok: false, status: 'unavailable', note: 'still busy' });
+    const busyResponse = await steerRoute.POST(request('/api/orchestrator/steer-packet', {
+      packetId: packet.id, message: 'A second nudge while busy',
+      idempotencyKey: `steer-busy-${packet.id}`,
+    }));
+    expect(busyResponse.status, await busyResponse.clone().text()).toBe(409);
+
+    expect(getLane(lane.id)).toMatchObject({ status: 'running', sessionKey });
+    expect((await register(packet, 'afterBusyRefusal')).status).toBe(200);
+  });
 });
