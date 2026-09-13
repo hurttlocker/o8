@@ -101,7 +101,7 @@ export function isTopComposerEffort(
   effort: ThinkingEffort,
   options: readonly ThinkingEffort[],
 ): boolean {
-  return options.length > 2 && options.indexOf(effort) >= options.length - 2;
+  return options.length > 2 && (effort === 'xhigh' || effort === 'max' || effort === 'ultra');
 }
 
 export interface ComposerSelectorModeSpec {

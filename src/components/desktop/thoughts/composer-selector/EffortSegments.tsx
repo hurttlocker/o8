@@ -80,10 +80,13 @@ export function EffortSegments({
           marginTop: 4,
           color: isTopComposerEffort(state.effort, state.effortOptions)
             ? 'var(--t-brand-orange)'
-            : 'var(--t-text-faint)',
+            : 'var(--t-text-muted)',
           fontSize: 9.5,
           fontWeight: 300,
+          lineHeight: '13px',
+          minHeight: 13,
           textAlign: 'center',
+          whiteSpace: 'nowrap',
         }}
       >
         {composerEffortConsequence(state.leadBackend, state.effort)}

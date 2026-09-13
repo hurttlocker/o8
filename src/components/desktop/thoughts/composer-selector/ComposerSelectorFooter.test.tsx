@@ -208,8 +208,13 @@ describe('ComposerSelectorFooter', () => {
     act(() => lead.click());
     const segments = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')];
     expect(segments).toHaveLength(expectedEfforts.length);
-    act(() => segments.at(-1)!.click());
+    act(() => segments.find((segment) => segment.textContent === 'Extra')!.click());
     expect(lead.getAttribute('data-accent')).toBe('swarm');
+    const extraBar = lead.querySelectorAll<HTMLElement>('[data-testid="composer-selector-meter-bar"]')
+      [expectedEfforts.indexOf('xhigh')];
+    const effortWord = lead.querySelector<HTMLElement>('[data-testid="composer-selector-effort-word"]')!;
+    expect(extraBar.getAttribute('data-accent')).toBe('swarm');
+    expect(effortWord.style.color).toBe(extraBar.style.background);
 
     act(() => lead.click());
     const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
@@ -231,6 +236,33 @@ describe('ComposerSelectorFooter', () => {
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('Solo'))!.click());
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
+  });
+
+  it('uses the full runtime label in the bounded workers chip', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => new Response(JSON.stringify(
+      String(input).includes('include=values') ? {
+        values: {
+          defaultDispatchRuntime: 'opencode',
+          defaultDispatchModel: '',
+          opencodeWorkerModel: null,
+          workerStartMode: 'autonomous',
+        },
+        sources: {},
+      } : {},
+    ), { status: 200 }));
+    await act(async () => { root.render(createElement(Harness)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    act(() => mode.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Multitask'))!.click());
+
+    const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(workers.textContent).toContain('OpenCode 2');
+    expect(workers.textContent).not.toContain('OC2');
+    expect(workers.style.maxWidth).not.toBe('');
+    expect(workers.querySelector<HTMLElement>('[data-testid="composer-selector-workers-label"]')?.style.textOverflow)
+      .toBe('ellipsis');
   });
 
   it('marks every picker row and shows model-specific effort consequences', async () => {

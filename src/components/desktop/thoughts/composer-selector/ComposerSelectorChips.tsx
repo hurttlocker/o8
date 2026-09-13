@@ -92,7 +92,10 @@ export function LeadChip({
           );
         })}
       </span>
-      <span style={{ flexShrink: 0, color: accent, fontWeight: 450 }}>
+      <span
+        data-testid="composer-selector-effort-word"
+        style={{ flexShrink: 0, color: accent, fontWeight: 450 }}
+      >
         {MODEL_EFFORT_LABELS[state.effort]}
       </span>
     </button>
@@ -130,8 +133,8 @@ export function WorkersChip({
   const label = mode === 'fusion'
     ? `${runtimes.length} runtimes`
     : mode === 'moa'
-      ? `2 ${getRuntimeCapability(runtime).shortLabel}`
-      : getRuntimeCapability(runtime).shortLabel;
+      ? `2 ${getRuntimeCapability(runtime).label}`
+      : getRuntimeCapability(runtime).label;
   return (
     <button
       ref={buttonRef}
@@ -152,6 +155,8 @@ export function WorkersChip({
         fontSize: 11,
         fontWeight: 450,
         flexShrink: 0,
+        maxWidth: 180,
+        overflow: 'hidden',
         opacity: saving ? 0.6 : 1,
       }}
     >
@@ -178,7 +183,12 @@ export function WorkersChip({
           </span>
         ))}
       </span>
-      <span>{label}</span>
+      <span
+        data-testid="composer-selector-workers-label"
+        style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+      >
+        {label}
+      </span>
     </button>
   );
 }
