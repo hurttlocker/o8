@@ -7,7 +7,6 @@ import {
   type ComposerModelOption,
 } from '../ModelThinkingChip';
 import {
-  WORKER_START_OPTIONS,
   shortWorkerModelLabel,
   workerModelForDisplay,
   type DispatchDefaults,
@@ -25,7 +24,7 @@ import { LeadChip, WorkersChip } from './ComposerSelectorChips';
 import { EffortSlider } from './EffortSlider';
 import { ProviderMarkGlyph } from './provider-marks';
 import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { WORKER_START_OPTIONS, type WorkerStartMode } from '@/lib/operator/worker-start-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 
 type VisiblePick =
@@ -353,7 +352,7 @@ export function ComposerPicker({
                   const selected = option.value === defaults.workerStartMode;
                   return (
                     <button key={option.value} type="button" aria-pressed={selected} disabled={saving} onClick={() => onWorkerStartModeChange(option.value)} style={{ flex: 1, height: 22, borderRadius: 6, borderWidth: 1, borderStyle: 'solid', borderColor: selected ? 'transparent' : 'var(--t-border)', background: selected ? 'var(--t-accent-soft)' : 'transparent', color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1 }}>
-                      {option.value === 'huddle' ? 'Plan first' : option.label}
+                      {option.label}
                     </button>
                   );
                 })}
