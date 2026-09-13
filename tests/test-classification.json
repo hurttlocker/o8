@@ -2553,6 +2553,22 @@
       ]
     },
     {
+      "path": "tests/reset-partial-bind-recovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/reset-receipt-reconciliation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/reset-stop-registry-truth.test.ts",
       "reasons": [
         "child-process",

@@ -167,6 +167,17 @@ export interface ResetPacketInput {
     skipHoldIfStateMoved?: boolean;
     expectedReleaseSource?: string;
   };
+  /**
+   * Correlation for the accepted request that owns this reset (#2313). When
+   * present, the reset journals its intended generation, the salvage guard it
+   * stamps, and its terminal receipt against `requestKey`, so an owner that
+   * exits before the idempotency receipt is persisted still leaves the request
+   * a supported path to a final result. Callers without an idempotency
+   * identity (stop-packet cleanup, agent-control) omit it and journal nothing.
+   */
+  recovery?: {
+    requestKey: string;
+  };
 }
 
 export interface MergePacketResult {

@@ -3,45 +3,25 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resetPacket } from '@/lib/orchestrator/operator-mission-service';
 import {
-  ResetCleanupFailedError,
-  ResetKillUnconfirmedError,
-  ResetSessionArchiveUnconfirmedError,
-} from '@/lib/orchestrator/operator-mission-service/reset';
+  resetFailureReceipt,
+  resetSuccessReceipt,
+  type ResetFailureReceipt,
+  type ResetReceipt,
+} from '@/lib/orchestrator/operator-mission-service/reset-receipt';
+import {
+  parseResetRecoveryEvidence,
+  reconcileUnresolvedResetRequest,
+} from '@/lib/orchestrator/operator-mission-service/reset-recovery';
+import { readResetRequestHold } from '@/lib/orchestrator/operator-mission-service/reset-recovery-journal';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
   withIdempotency,
 } from '@/lib/orchestrator/idempotency-store';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape, unresolvedIdempotencyResponse } from '../_utils';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-type ResetResult = Awaited<ReturnType<typeof resetPacket>>;
-
-interface ResetFailureReceipt {
-  ok: false;
-  code: string;
-  message: string;
-  status: number;
-  result?: ResetCleanupFailedError['result'];
-}
-
-type ResetReceipt =
-  | { ok: true; result: ResetResult }
-  | ResetFailureReceipt;
-
-function resetFailureReceipt(error: unknown): ResetFailureReceipt {
-  const message = error instanceof Error ? error.message : 'Unable to reset packet.';
-  if (error instanceof ResetKillUnconfirmedError) return { ok: false, code: 'kill_unconfirmed', message, status: 409 };
-  if (error instanceof ResetSessionArchiveUnconfirmedError) {
-    return { ok: false, code: 'session_archive_unconfirmed', message, status: 409 };
-  }
-  if (error instanceof ResetCleanupFailedError) {
-    return { ok: false, code: 'worktree_cleanup_failed', message, status: 409, result: error.result };
-  }
-  return { ok: false, code: 'reset_failed', message, status: 500 };
-}
 
 function resetFailureResponse(receipt: ResetFailureReceipt, replayed: boolean) {
   const response = receipt.result
@@ -94,6 +74,27 @@ export async function POST(request: NextRequest) {
       400,
     );
   }
+  // #2313 — operator attestation for a reservation that predates the reset
+  // correlation journal. It identifies WHICH interrupted request this is, so it
+  // is deliberately excluded from the canonical body and the derived key: the
+  // operator resubmits the ORIGINAL request, plus evidence, and reconciles the
+  // original reservation instead of minting a second one. Partial or malformed
+  // attestation is rejected rather than silently ignored.
+  const parsedEvidence = parseResetRecoveryEvidence(record.recovery);
+  if (!parsedEvidence.ok) {
+    return operatorError('invalid_recovery_evidence', parsedEvidence.message, 400);
+  }
+  const evidence = parsedEvidence.evidence;
+  if (evidence && clearWorktree) {
+    // Recovery only ever continues committed-work salvage. A worktree-clearing
+    // reset takes no salvage hold and its cleanup is destructive, so there is
+    // nothing an attestation could safely resume.
+    return operatorError(
+      'invalid_recovery_evidence',
+      'Recovery attestation applies only to committed-work retry; a worktree-clearing reset cannot be resumed.',
+      400,
+    );
+  }
   const canonicalBody = JSON.stringify({ packetId, clearWorktree, reason });
   const key = deriveIdempotencyKey({
     verb: 'reset_packet',
@@ -123,14 +124,42 @@ export async function POST(request: NextRequest) {
       );
     }
     const outcome = await withIdempotency<ResetReceipt>(
-      { key, verb: 'reset_packet', scopeId: packetId },
+      {
+        key,
+        verb: 'reset_packet',
+        scopeId: packetId,
+        // #2313 — an owner that exited before its receipt was persisted left the
+        // request quarantined forever. Reconciliation replays the journaled
+        // receipt, or resumes only the remainder of that exact request under its
+        // own generation. It runs for confirmed-dead owners only.
+        reconcileUnresolved: () => reconcileUnresolvedResetRequest({
+          packetId,
+          requestKey: key,
+          clearWorktree,
+          reason,
+          evidence,
+        }),
+      },
       async () => {
+        // Recovery evidence is an attestation for an already-reserved request.
+        // If this callback won a new reservation, the supplied key did not
+        // identify an interrupted request, so finalise a refusal before any
+        // reset side effect can run.
+        if (evidence) {
+          return {
+            ok: false,
+            code: 'recovery_request_not_found',
+            message: 'Recovery evidence requires the original interrupted request idempotencyKey; no matching request was found.',
+            status: 409,
+          } satisfies ResetReceipt;
+        }
         try {
-          const result = await resetPacket({ packetId, reason, clearWorktree });
-          if ('reset' in result && result.reset === false && !('salvaged' in result && result.salvaged === true)) {
-            return { ok: false, code: 'reset_state_changed', message: result.note, status: 409 };
-          }
-          return { ok: true, result };
+          return resetSuccessReceipt(await resetPacket({
+            packetId,
+            reason,
+            clearWorktree,
+            recovery: { requestKey: key },
+          }));
         } catch (error) {
           // Reset failures can follow confirmed process, session, lane, or
           // worktree retirement. Finalize that failure before responding so
@@ -140,7 +169,17 @@ export async function POST(request: NextRequest) {
       },
     );
     if (outcome.inProgress) {
-      return unresolvedIdempotencyResponse(outcome, 'packet reset') ?? operatorSuccess(replayShape(outcome), 202);
+      if (!outcome.unresolved) return operatorSuccess(replayShape(outcome), 202);
+      // Held, never success. Surface the precise durable reason the
+      // reconciliation refused so the operator knows what is missing.
+      const heldReason = readResetRequestHold(key);
+      return operatorError(
+        'outcome_unknown',
+        heldReason
+          ? `The prior packet reset process ended before its receipt was persisted, and it could not be reconciled: ${heldReason}. The exact mutation remains quarantined and was not repeated.`
+          : 'The prior packet reset process ended before its receipt was persisted. Its outcome is unknown, so the exact mutation remains quarantined and was not repeated. Inspect current state before taking another action.',
+        409,
+      );
     }
     if (!outcome.result.ok) return resetFailureResponse(outcome.result, outcome.replayed);
     return operatorSuccess(replayShape({ ...outcome, result: outcome.result.result }));
