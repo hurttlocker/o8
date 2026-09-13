@@ -36,6 +36,16 @@ type RetrySalvageLocation = (
 );
 export type RetrySalvageGuard = RetrySalvageGuardFields & RetrySalvageLocation;
 
+/**
+ * What a request had durably decided immediately before the bind's first
+ * irreversible change (#2313). A surviving checkpoint identifies a partial
+ * bind that must remain held until an exact completed receipt exists.
+ */
+export interface RetrySalvageBindCheckpoint {
+  candidateLaneId: string;
+  worktreePath: string;
+}
+
 export class RetrySalvageStateChangedError extends Error {}
 export class RetrySalvageKillUnconfirmedError extends Error {}
 
@@ -48,8 +58,12 @@ function buildRetrySalvageGuard(
   location: RetrySalvageLocation,
   candidateLane: Lane | null,
   laneIds: string[],
+  // #2313 — the caller may mint the generation first and journal it BEFORE the
+  // hold is stamped, so a crash during the hold still names the generation the
+  // request intended to own.
+  requestedGeneration?: string,
 ): RetrySalvageGuard {
-  const generation = randomUUID();
+  const generation = requestedGeneration?.trim() || randomUUID();
   return {
     ...location,
     candidateLane,
@@ -98,7 +112,10 @@ function packetMatchesRetrySalvageGuard(packet: OrchestratorPacket, guard: Retry
     && (packet.lane?.worktreePath ?? null) === guard.worktreePath;
 }
 
-async function holdPacketForRetrySalvageUnlocked(input: ResetPacketInput): Promise<RetrySalvageGuard | null> {
+async function holdPacketForRetrySalvageUnlocked(
+  input: ResetPacketInput,
+  requestedGeneration?: string,
+): Promise<RetrySalvageGuard | null> {
   if (input.clearWorktree || input.scope) return null;
 
   const { listLanes } = await import('@/lib/lane/registry');
@@ -111,7 +128,7 @@ async function holdPacketForRetrySalvageUnlocked(input: ResetPacketInput): Promi
     const packetLanes = listLanes().filter((lane) => lane.packetId === target.id);
     const guardedLane = retrySalvageCandidateForPacket(target, packetLanes);
     const laneIds = packetLanes.map((lane) => lane.id);
-    const guard = buildRetrySalvageGuard(target, { store: 'current', missionId }, guardedLane, laneIds);
+    const guard = buildRetrySalvageGuard(target, { store: 'current', missionId }, guardedLane, laneIds, requestedGeneration);
     markPacketRetrySalvageHeld(target, guard);
     return guard;
   });
@@ -129,15 +146,18 @@ async function holdPacketForRetrySalvageUnlocked(input: ResetPacketInput): Promi
     const packetLanes = listLanes().filter((lane) => lane.packetId === target.id);
     const guardedLane = retrySalvageCandidateForPacket(target, packetLanes);
     const laneIds = packetLanes.map((lane) => lane.id);
-    const guard = buildRetrySalvageGuard(target, { store: 'registry', missionId: registryEntry.id }, guardedLane, laneIds);
+    const guard = buildRetrySalvageGuard(target, { store: 'registry', missionId: registryEntry.id }, guardedLane, laneIds, requestedGeneration);
     markPacketRetrySalvageHeld(target, guard);
     return { state: fresh, result: guard };
   });
   return result;
 }
 
-export function holdPacketForRetrySalvage(input: ResetPacketInput): Promise<RetrySalvageGuard | null> {
-  return withMissionHandoffBarrier(() => holdPacketForRetrySalvageUnlocked(input));
+export function holdPacketForRetrySalvage(
+  input: ResetPacketInput,
+  requestedGeneration?: string,
+): Promise<RetrySalvageGuard | null> {
+  return withMissionHandoffBarrier(() => holdPacketForRetrySalvageUnlocked(input, requestedGeneration));
 }
 
 async function retrySalvageGuardIsCurrentUnlocked(
@@ -165,6 +185,62 @@ export function retrySalvageGuardIsCurrent(
   guard: RetrySalvageGuard,
 ): Promise<boolean> {
   return withMissionHandoffBarrier(() => retrySalvageGuardIsCurrentUnlocked(packetId, guard));
+}
+
+/**
+ * Rebuild the guard for a hold that is STILL stamped on the packet (#2313).
+ *
+ * Used for a journaled generation without a saved guard, or explicit evidence
+ * for a legacy reservation. The packet can confirm that generation's hold,
+ * but generation alone does not prove a bind never started. Recovery checks
+ * the journal's bind checkpoint separately and holds any partial operation.
+ * Returns null unless the reconstructed guard matches the live packet.
+ */
+async function rehydrateRetrySalvageGuardUnlocked(
+  packetId: string,
+  generation: string,
+): Promise<RetrySalvageGuard | null> {
+  const { listLanes } = await import('@/lib/lane/registry');
+  const source = retrySalvageGenerationSource(generation);
+  const build = (packet: OrchestratorPacket, location: RetrySalvageLocation): RetrySalvageGuard | null => {
+    if (packet.releaseStatePayload?.source !== source) return null;
+    const packetLanes = listLanes().filter((lane) => lane.packetId === packet.id);
+    const guard = buildRetrySalvageGuard(
+      packet,
+      location,
+      retrySalvageCandidateForPacket(packet, packetLanes),
+      packetLanes.map((lane) => lane.id),
+      generation,
+    );
+    return packetMatchesRetrySalvageGuard(packet, guard) ? guard : null;
+  };
+
+  const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+  const { result: current } = await withLockedState((fresh) => {
+    const missionId = fresh.missionId?.trim();
+    if (!missionId) return null;
+    const packet = fresh.packets.find((candidate) => candidate.id === packetId);
+    return packet ? build(packet, { store: 'current', missionId }) : null;
+  });
+  if (current) return current;
+
+  const registryEntry = findMissionRegistryEntryByPacketId(packetId, { includeArchived: true });
+  if (!registryEntry) return null;
+  const { result } = await withMissionRegistryState(registryEntry.id, (fresh) => {
+    const packet = fresh.packets.find((candidate) => candidate.id === packetId);
+    return {
+      state: fresh,
+      result: packet ? build(packet, { store: 'registry', missionId: registryEntry.id }) : null,
+    };
+  });
+  return result;
+}
+
+export function rehydrateRetrySalvageGuard(
+  packetId: string,
+  generation: string,
+): Promise<RetrySalvageGuard | null> {
+  return withMissionHandoffBarrier(() => rehydrateRetrySalvageGuardUnlocked(packetId, generation));
 }
 
 export async function markRetrySalvageKillUnconfirmed(
@@ -284,6 +360,7 @@ async function bindCommittedRetryWorkUnlocked(
   input: ResetPacketInput,
   guard: RetrySalvageGuard,
   candidate: Lane,
+  beforeBind?: (checkpoint: RetrySalvageBindCheckpoint) => void,
 ): Promise<RetrySalvage> {
   if (!await retrySalvageGuardIsCurrentUnlocked(input.packetId, guard)) {
     throw new RetrySalvageStateChangedError(`Packet ${input.packetId} changed while retry salvage was probing; committed work was left untouched.`);
@@ -293,6 +370,15 @@ async function bindCommittedRetryWorkUnlocked(
   if (!candidateLane?.worktreePath || !laneMatchesRetrySalvageCandidate(candidateLane, candidate, input.packetId)) {
     throw new RetrySalvageStateChangedError(`Packet ${input.packetId} lane changed while retry salvage was probing; committed work was left untouched.`);
   }
+
+  // #2313 — record the non-repeatable checkpoint BEFORE the first irreversible
+  // change. A crash after this point is held rather than inferred from later
+  // lane state. This must not be best effort: if it cannot be recorded,
+  // nothing is touched.
+  beforeBind?.({
+    candidateLaneId: candidateLane.id,
+    worktreePath: candidateLane.worktreePath,
+  });
 
   // Archival persists telemetry through patchMissionPacket, which takes the
   // packet-state lock itself. Await it before that lock, then revalidate both
@@ -378,8 +464,9 @@ export function bindCommittedRetryWork(
   input: ResetPacketInput,
   guard: RetrySalvageGuard,
   candidate: Lane,
+  beforeBind?: (checkpoint: RetrySalvageBindCheckpoint) => void,
 ): Promise<RetrySalvage> {
-  return withMissionHandoffBarrier(() => bindCommittedRetryWorkUnlocked(input, guard, candidate));
+  return withMissionHandoffBarrier(() => bindCommittedRetryWorkUnlocked(input, guard, candidate, beforeBind));
 }
 
 function markPacketRetrySalvaged(packet: OrchestratorPacket, salvage: RetrySalvage): void {
