@@ -123,4 +123,115 @@ describe('global repository worktree discovery', () => {
     expect(mocks.ipcFetch).toHaveBeenCalledTimes(2);
     expect(mocks.ipcFetch).toHaveBeenLastCalledWith('/api/worktrees?repo=%2Ftmp%2Frepo-0250');
   });
+
+  it('rebuilds an exact saved worktree scope from the authoritative repo producer', async () => {
+    const registered = repo(1);
+    const externalOwner = repo(2);
+    const worktreePath = '/tmp/o8-external-worktrees/saved-chat';
+    mocks.fetchSWRJson.mockRejectedValue(new Error('cold-start repository list failed'));
+    mocks.ipcFetch.mockImplementation(async (input: string) => {
+      if (input === '/api/panel/repos') return Response.json({ repos: [registered, externalOwner] });
+      if (input === `/api/worktrees?repo=${encodeURIComponent(registered.localPath)}`) {
+        return Response.json({ worktrees: [], conflicts: { safe: true, count: 0 }, totalDiskUsage: 0 });
+      }
+      if (input === `/api/worktrees?repo=${encodeURIComponent(externalOwner.localPath)}`) {
+        return Response.json({
+          worktrees: [{ path: worktreePath, branch: 'saved-chat', status: 'active' }],
+          conflicts: { safe: true, count: 0 },
+          totalDiskUsage: 0,
+        });
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(current.globalRepoEntries).toEqual([]);
+
+    let refreshed = false;
+    await act(async () => {
+      refreshed = await current.refreshRestoredRepoState([worktreePath]);
+    });
+
+    expect(refreshed).toBe(true);
+    expect(current.globalRepoEntries).toEqual([registered, externalOwner]);
+    expect(current.workspaceScopeEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ localPath: registered.localPath }),
+      expect.objectContaining({ localPath: externalOwner.localPath }),
+      expect.objectContaining({ localPath: worktreePath, isWorktree: true }),
+    ]));
+  });
+
+  it('does not authorize a validated worktree when its producer cannot return that scope', async () => {
+    const registered = repo(1);
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [] });
+    mocks.ipcFetch.mockImplementation(async (input: string) => {
+      if (input === '/api/panel/repos') return Response.json({ repos: [registered] });
+      if (input.startsWith('/api/worktrees?repo=')) {
+        return Response.json({ worktrees: [], conflicts: { safe: true, count: 0 }, totalDiskUsage: 0 });
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await expect(current.refreshRestoredRepoState(['/tmp/o8-external-worktrees/missing'])).resolves.toBe(false);
+    expect(current.globalRepoEntries).toEqual([]);
+  });
+
+  it('bounds and abandons a hung authoritative restore refresh', async () => {
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [] });
+    mocks.ipcFetch.mockImplementation(() => new Promise<Response>(() => undefined));
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    let refreshed = true;
+    await act(async () => {
+      const pending = current.refreshRestoredRepoState(['/tmp/o8-external-worktrees/saved-chat']);
+      await vi.advanceTimersByTimeAsync(2_000);
+      refreshed = await pending;
+    });
+
+    expect(refreshed).toBe(false);
+    expect(current.globalRepoEntries).toEqual([]);
+  });
+
+  it('ignores a stale repository inventory after its recovery signal is cancelled', async () => {
+    const registered = repo(1);
+    let resolveRepos: ((response: Response) => void) | null = null;
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [] });
+    mocks.ipcFetch.mockImplementation((input: string) => {
+      if (input === '/api/panel/repos') return new Promise<Response>((resolve) => { resolveRepos = resolve; });
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const controller = new AbortController();
+    const pending = current.refreshRestoredRepoState([registered.localPath], controller.signal);
+    controller.abort();
+    await act(async () => {
+      resolveRepos?.(Response.json({ repos: [registered] }));
+      await expect(pending).resolves.toBe(false);
+    });
+
+    expect(current.globalRepoEntries).toEqual([]);
+  });
 });

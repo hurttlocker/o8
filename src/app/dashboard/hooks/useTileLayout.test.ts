@@ -4,7 +4,7 @@ import { act, createElement, StrictMode, useEffect, useRef, useState } from 'rea
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
-import { createDefaultTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
+import { collectLeafNodes, createDefaultTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
 import { createTileRegistry } from '../tileRegistry';
 import { TILE_LAYOUT_STORAGE_KEY, useTileLayout } from './useTileLayout';
@@ -41,6 +41,22 @@ function persistedLayout(repoPath: string): TileLayout {
       type: 'leaf',
       id: 'tile-root',
       content: { kind: 'terminal', repoPath },
+    },
+  };
+}
+
+function persistedTerminalCanvasLayout(repoPath: string): TileLayout {
+  return {
+    ...createDefaultTileLayout(),
+    root: {
+      type: 'split',
+      id: 'saved-split',
+      direction: 'horizontal',
+      ratio: 0.5,
+      children: [
+        { type: 'leaf', id: 'saved-terminal', content: { kind: 'terminal', repoPath } },
+        { type: 'leaf', id: 'saved-canvas', content: { kind: 'canvas', repoPath } },
+      ],
     },
   };
 }
@@ -82,11 +98,15 @@ function repoValidationResponse(url: string, registeredRepos: RepoRegistryEntry[
 function LayoutRestoreHarness({
   onLayout,
   onReplaceLayout,
+  onSplitTile,
   registeredRepos,
+  refreshRestoredRepoState = async () => true,
 }: {
   onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
   onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
+  onSplitTile?: (split: (tileId: string) => void) => void;
   registeredRepos: RepoRegistryEntry[];
+  refreshRestoredRepoState?: (validatedPaths: readonly string[]) => Promise<boolean>;
 }) {
   const [layout, setLayout] = useState(createDefaultTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>('tile-root');
@@ -100,6 +120,7 @@ function LayoutRestoreHarness({
     findWorkspaceTarget: () => null,
     globalRepoEntries: registeredRepos,
     globalRepoEntry: null,
+    refreshRestoredRepoState,
     setActiveTileId,
     setTileLayout: setLayout,
     tileLayout: layout,
@@ -120,6 +141,10 @@ function LayoutRestoreHarness({
   useEffect(() => {
     onReplaceLayout?.(setLayout);
   }, [onReplaceLayout]);
+
+  useEffect(() => {
+    onSplitTile?.((tileId) => restored.handleSplitTile(tileId, 'horizontal'));
+  }, [onSplitTile, restored.handleSplitTile]);
 
   if (!restored.tileLayoutHydrated) return createElement('div');
   const leaf = getFirstLeaf(layout.root);
@@ -332,6 +357,106 @@ describe('useTileLayout browser-origin restore', () => {
     });
 
     expect(validationCalls).toBe(2);
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+  });
+
+  it('keeps saved terminal and canvas scopes when the operator splits during initial validation', async () => {
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedTerminalCanvasLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    let completeInitialValidation: ((response: Response) => void) | null = null;
+    let validationCalls = 0;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (!url.startsWith('/api/panel/repos')) return Promise.resolve(Response.json({}));
+      validationCalls += 1;
+      if (validationCalls === 1) return new Promise<Response>((resolve) => { completeInitialValidation = resolve; });
+      return Promise.resolve(repoValidationResponse(url, registeredRepos));
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let hydrated = false;
+    let splitTile: ((tileId: string) => void) | null = null;
+    const onLayout = (layout: TileLayout, nextHydrated: boolean) => {
+      latestLayout = layout;
+      hydrated = nextHydrated;
+    };
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onSplitTile: (split) => { splitTile = split; },
+      registeredRepos,
+    })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    await act(async () => splitTile?.('tile-root'));
+    await act(async () => {
+      completeInitialValidation?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
+      await Promise.resolve();
+    });
+
+    expect(hydrated).toBe(true);
+    expect(collectLeafNodes(latestLayout.root).map((leaf) => leaf.content)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'terminal', repoPath: STALE_REPO_PATH }),
+      expect.objectContaining({ kind: 'canvas', repoPath: STALE_REPO_PATH }),
+    ]));
+    expect(collectLeafNodes(latestLayout.root)).toHaveLength(3);
+    expect(container.querySelector('button[aria-label="Retry saved repository scope"]')).not.toBeNull();
+    expect(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY)).toContain(STALE_REPO_PATH);
+
+    await act(async () => splitTile?.('saved-terminal'));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)));
+    const storedAfterSecondSplit = window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY);
+    expect(storedAfterSecondSplit).toContain(STALE_REPO_PATH);
+    expect(validationCalls).toBe(1);
+
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]')?.click());
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+    expect(validationCalls).toBe(2);
+    expect(collectLeafNodes(latestLayout.root).map((leaf) => leaf.content)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'terminal', repoPath: STALE_REPO_PATH }),
+      expect.objectContaining({ kind: 'canvas', repoPath: STALE_REPO_PATH }),
+    ]));
+  });
+
+  it('ignores a completed repository refresh after the operator changes the restored repo scope', async () => {
+    const newerRepoPath = '/tmp/newer-o8-instance/repo';
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    let validationCalls = 0;
+    let completeRefresh: ((available: boolean) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (!url.startsWith('/api/panel/repos')) return Response.json({});
+      validationCalls += 1;
+      return validationCalls === 1
+        ? Response.json({}, { status: 503 })
+        : repoValidationResponse(url, registeredRepos);
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let validationState = 'idle';
+    let replaceLayout: ((layout: TileLayout) => void) | null = null;
+    const onLayout = (layout: TileLayout, _hydrated: boolean, nextValidationState: string) => {
+      latestLayout = layout;
+      validationState = nextValidationState;
+    };
+    const refreshRestoredRepoState = () => new Promise<boolean>((resolve) => { completeRefresh = resolve; });
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onReplaceLayout: (replace) => { replaceLayout = replace; },
+      refreshRestoredRepoState,
+      registeredRepos,
+    })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]')?.click());
+    await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
+    await act(async () => {
+      completeRefresh?.(true);
+      await Promise.resolve();
+    });
+
+    expect(validationCalls).toBe(2);
+    expect(validationState).toBe('idle');
     expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
   });
 

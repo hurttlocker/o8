@@ -482,7 +482,9 @@ export function createTileRegistry({
         }
         const tileState = canvasStateByTileId[tileId] ?? { tabs: [], activeTabId: null, revealKey: 0 };
         const tileRepoEntry = content.kind === 'canvas' && content.repoPath
-          ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null
+          ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath)
+            ?? globalRepoEntries.find((repo) => repo.localPath === content.repoPath)
+            ?? null
           : null;
 
         return (
