@@ -10,7 +10,11 @@ import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-mo
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
 import { formatModelLabel } from '@/lib/format';
 import { composerModeSpec, type ComposerMode } from './composer-mode';
-import { isHotComposerEffort, supportedEffortsForLead } from './composer-selector/state';
+import {
+  isHotComposerEffort,
+  resolveEffectiveComposerLeadModelId,
+  supportedEffortsForLead,
+} from './composer-selector/state';
 import { useUltraEffortPreference } from './composer-selector/UltraEffortPreference';
 
 export const MODEL_EFFORT_LABELS: Record<ThinkingEffort, string> = {
@@ -380,7 +384,9 @@ export function ModelThinkingChip({
   const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
   const effectiveModelId = activeBackend === 'claude' && harnessCarrier?.source !== 'native'
     ? harnessCarrier?.model ?? normalizedModelId
-    : normalizedModelId;
+    : activeBackend === 'codex'
+      ? resolveEffectiveComposerLeadModelId(activeBackend, normalizedModelId)
+      : normalizedModelId;
   // The composer trigger should name the actual MODEL, not the provider
   // (Q ruling 2026-07-11 — "you might need to know what model you're on").
   // Resolve it from the picked (backend, modelId); fall back to the provider

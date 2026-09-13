@@ -53,6 +53,7 @@ export function useBackendSwitchChoice(input: {
   setBackend: Dispatch<SetStateAction<OrchestratorBackendSetting>>;
   setModel: Dispatch<SetStateAction<string>>;
   setOperatorDefaults: Dispatch<SetStateAction<ThoughtsOperatorDefaults>>;
+  onBeforeApply?: () => void;
 }) {
   const {
     backendSourceRef,
@@ -65,11 +66,13 @@ export function useBackendSwitchChoice(input: {
     setBackend,
     setModel,
     setOperatorDefaults,
+    onBeforeApply,
   } = input;
   const [pending, setPending] = useState<PendingBackendSwitch | null>(null);
   const handoffModeRef = useRef<'handoff' | null>(null);
   const handoffTargetRef = useRef<OrchestratorBackendId | null>(null);
   const apply = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
+    onBeforeApply?.();
     backendSourceRef.current = 'user';
     setBackend(backend);
     if (model) {
@@ -95,12 +98,18 @@ export function useBackendSwitchChoice(input: {
       console.log('[thoughts] failed to persist orchestrator backend', error);
       setBackend(resolveActiveComposerBackend(operatorDefaults));
     });
-  }, [backendSourceRef, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
+  }, [backendSourceRef, onBeforeApply, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
   const reset = useCallback(() => {
     setPending(null);
     handoffModeRef.current = null;
     handoffTargetRef.current = null;
   }, []);
+  const selectModel = useCallback((model: string) => {
+    onBeforeApply?.();
+    reset();
+    setModel(model);
+    writeStoredOrchestratorModel(repoPath, model);
+  }, [onBeforeApply, repoPath, reset, setModel]);
   const request = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
     reset();
     const destination = composerBackendTurnOverride(backend) ?? backend;
@@ -132,5 +141,6 @@ export function useBackendSwitchChoice(input: {
     pending,
     request,
     reset,
-  }), [acceptHandoff, apply, clearPending, observeLatestBackend, pending, request, reset]);
+    selectModel,
+  }), [acceptHandoff, apply, clearPending, observeLatestBackend, pending, request, reset, selectModel]);
 }

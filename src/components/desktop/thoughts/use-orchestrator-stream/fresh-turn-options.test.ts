@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, createRef, useEffect, useRef, useState } from 'react';
+import { act, createElement, createRef, useEffect, useRef, useState, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from '@/app/api/panel/operator-defaults/route';
@@ -29,6 +29,7 @@ let host: HTMLDivElement;
 let freshFetchFails = false;
 let freshFetchGate: Promise<void> | null = null;
 let releaseFreshFetch: (() => void) | null = null;
+let historyResponse: Record<string, unknown> | null = null;
 
 interface ComposerTestWindow extends Window {
   interruptComposerTurn?: () => void;
@@ -94,6 +95,40 @@ function ComposerSubmissionHarness() {
   return createElement('output', { 'data-testid': 'displayed-model' }, displayedModel);
 }
 
+function RoutingThoughtsHarness({ panelRef }: { panelRef: RefObject<ThoughtsChatPanelHandle | null> }) {
+  const [collideEnabled, setCollideEnabled] = useState(false);
+  const missionState: OrchestratorMissionState = {
+    version: 2,
+    prompt: '',
+    summary: '',
+    packets: [],
+    updatedAt: new Date(0).toISOString(),
+  };
+  return createElement(ThoughtsChatPanel, {
+    ref: panelRef,
+    open: false,
+    agents: [],
+    missionState,
+    preferredRuntime: 'codex',
+    sessionTargets: [],
+    workspaceTargets: [],
+    repoPath,
+    initialMode: 'fleet',
+    onModePersist: () => {},
+    collideEnabled,
+    onSetCollide: setCollideEnabled,
+    suppressAutoRestore: true,
+    suppressRuntimePrewarm: true,
+    thoughtsBodyBackground: 'var(--t-bg)',
+    thoughtsElevatedSurface: 'var(--t-panel)',
+    thoughtsElevatedBorder: 'var(--t-border)',
+    thoughtsElevatedShadow: 'var(--t-panel-shadow)',
+    thoughtsMutedGlass: 'var(--t-muted)',
+    onMissionStateChange: () => {},
+    onChromeChange: () => {},
+  });
+}
+
 async function waitForPayload(count: number) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const payloads = sentTurnPayloads();
@@ -112,13 +147,23 @@ function sentTurnPayloads() {
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    disconnect() {}
+  });
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith('/api/panel/operator-defaults')) {
       if (freshFetchFails) return new Response('unavailable', { status: 503 });
       if (freshFetchGate) await freshFetchGate;
+      if (init?.method === 'POST') {
+        return POST(new Request(`http://127.0.0.1${url}`, init));
+      }
       return GET(new Request(`http://127.0.0.1${url}`));
+    }
+    if (url.startsWith('/api/v2/chat-history?tabId=') && historyResponse) {
+      return new Response(JSON.stringify(historyResponse), { headers: { 'Content-Type': 'application/json' } });
     }
     return new Response('{}', { headers: { 'Content-Type': 'application/json' } });
   }));
@@ -126,6 +171,7 @@ beforeEach(async () => {
   freshFetchFails = false;
   freshFetchGate = null;
   releaseFreshFetch = null;
+  historyResponse = null;
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -202,6 +248,130 @@ describe('composer fresh operator defaults at the send seam', () => {
     expect(payload.message).toContain('[Mode: Fusion]');
     expect(localStorage.getItem(composerModeStorageKey(composerModeStorageId))).toBe('fusion');
     expect(localStorage.getItem(legacySwarmStorageKey(composerModeStorageId))).toBe('0');
+  });
+
+  for (const selectorEnabled of [true, false]) {
+    it(`resets comparison mode before a ${selectorEnabled ? 'selector' : 'classic'} lead pick reaches routing`, async () => {
+      localStorage.setItem('o8:composer-selector-v1', selectorEnabled ? '1' : '0');
+      await act(async () => root.unmount());
+      root = createRoot(host);
+      invalidateOperatorDefaultsValuesSnapshot();
+      await persistDefaults('gpt-5.6-sol', 'codex');
+      const panelRef = createRef<ThoughtsChatPanelHandle>();
+      await act(async () => {
+        root.render(createElement(RoutingThoughtsHarness, { panelRef }));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const modeTrigger = selectorEnabled
+        ? host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')
+        : host.querySelector<HTMLButtonElement>('button[aria-label^="Mode:"]');
+      await act(async () => {
+        modeTrigger!.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      const compareMode = [...document.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('Compare plans'))!;
+      await act(async () => {
+        compareMode.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      const modelTrigger = selectorEnabled
+        ? host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')
+        : [...host.querySelectorAll<HTMLButtonElement>('button')]
+          .find((button) => button.title.endsWith(' · Compare plans'));
+      await act(async () => {
+        modelTrigger!.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      if (!selectorEnabled) {
+        const codexHouse = [...document.querySelectorAll<HTMLButtonElement>('button')]
+          .find((button) => button.textContent?.trim() === 'Codex')!;
+        await act(async () => {
+          codexHouse.click();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+      }
+      const pickedModel = selectorEnabled
+        ? document.querySelector<HTMLButtonElement>('[data-testid="lead-row-gpt-5.6-terra"]')
+        : [...document.querySelectorAll<HTMLButtonElement>('button')]
+          .find((button) => button.textContent?.includes('GPT-5.6 Terra'));
+      act(() => pickedModel!.click());
+
+      const resetModeTrigger = selectorEnabled
+        ? host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')
+        : host.querySelector<HTMLButtonElement>('button[aria-label^="Mode:"]');
+      expect(resetModeTrigger?.textContent ?? resetModeTrigger?.getAttribute('aria-label')).toContain('Solo');
+
+      let payload: Record<string, unknown> = {};
+      await act(async () => {
+        expect(panelRef.current?.sendNow('route this lead')).toBe(true);
+        payload = await waitForPayload(1);
+      });
+      expect(payload).toMatchObject({
+        backend: 'codex',
+        model: 'gpt-5.6-terra',
+        orchestrationMode: 'single',
+      });
+      expect(payload.backend).not.toBe('collide');
+      expect(payload.message).toContain('[Mode: Solo]');
+    });
+  }
+
+  it('resets Fusion when a deferred backend handoff applies through the real panel', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '1');
+    historyResponse = {
+      backend: 'codex',
+      messages: [
+        { id: 'history-user', role: 'user', content: 'previous turn', timestamp: 1 },
+        { id: 'history-assistant', role: 'assistant', content: 'previous reply', timestamp: 2, backend: 'codex', model: 'gpt-5.6-sol' },
+      ],
+    };
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    await act(async () => {
+      root.render(createElement(RoutingThoughtsHarness, { panelRef }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(panelRef.current).not.toBeNull();
+    await act(async () => {
+      panelRef.current!.loadThread('backend-handoff-thread');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    const modeTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    act(() => modeTrigger.click());
+    act(() => [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Fusion'))!.click());
+    const leadTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
+    act(() => leadTrigger.click());
+    act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-row-claude-sonnet-5"]')!.click());
+
+    expect(modeTrigger.textContent).toContain('Fusion');
+    const handoff = [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Hand off')!;
+    await act(async () => {
+      handoff.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(modeTrigger.textContent).toContain('Solo');
+
+    let payload: Record<string, unknown> = {};
+    await act(async () => {
+      expect(panelRef.current?.sendNow('continue on picked backend')).toBe(true);
+      payload = await waitForPayload(1);
+    });
+    expect(payload).toMatchObject({
+      backend: 'claude',
+      model: 'claude-sonnet-5',
+      orchestrationMode: 'single',
+    });
+    expect(payload.backend).not.toBe('collide');
+    expect(payload.message).toContain('[Mode: Solo]');
   });
 
   it('carries and displays each persisted default without remounting, while retaining a repo model pin', async () => {

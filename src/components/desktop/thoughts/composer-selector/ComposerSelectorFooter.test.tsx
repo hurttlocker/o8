@@ -8,6 +8,7 @@ import { ComposerSelectorFooter } from './ComposerSelectorFooter';
 import {
   COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY,
   cycleComposerSelectorMode,
+  resolveEffectiveComposerLeadModelId,
   supportedEffortsForLead,
   type ComposerSelectorMode,
 } from './state';
@@ -582,6 +583,21 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe(topEffort);
     expect(modelTrigger.title).toContain('Fusion');
     expect(modeTrigger.getAttribute('aria-label')).toBe('Mode: Fusion');
+  });
+
+  it('uses the effective default lead for classic Codex Ultra capability', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '0');
+    localStorage.setItem('o8:orchestrator:ultra-effort', '1');
+    act(() => { root.render(createElement(NoPinCodexHarness, {})); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const effortTrigger = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.title.startsWith('Reasoning:'))!;
+    act(() => effortTrigger.click());
+
+    const effectiveModel = resolveEffectiveComposerLeadModelId('codex', undefined)!;
+    const expectedStops = supportedEffortsForLead('codex', effectiveModel, true, false, true);
+    expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuemax'))
+      .toBe(String(expectedStops.length - 1));
   });
 
   it('moves the focused slider with arrows and digit keys', async () => {

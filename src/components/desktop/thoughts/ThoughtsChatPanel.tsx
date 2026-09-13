@@ -436,6 +436,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const loadGenerationRef = useRef(0);
   const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
+  const resetComposerModeForLeadChange = useCallback(() => {
+    if (composerModeRef.current === 'moa' || composerModeRef.current === 'fusion') {
+      handleComposerModeChange('solo');
+    }
+  }, [handleComposerModeChange]);
   const backendSwitch = useBackendSwitchChoice({
     backendSourceRef,
     currentModel: orchestratorModel,
@@ -447,6 +452,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setBackend: setOrchestratorBackend,
     setModel: setOrchestratorModel,
     setOperatorDefaults,
+    onBeforeApply: resetComposerModeForLeadChange,
   });
   const [threadProjectId, setThreadProjectId] = useState<string | null>(projectIdProp ?? null);
   useEffect(() => {
@@ -2352,11 +2358,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}
-        onModelChange={isOrchestratorMode ? (model) => {
-          backendSwitch.clearPending();
-          setOrchestratorModel(model);
-          writeStoredOrchestratorModel(resolvedRepoPath, model);
-        } : undefined}
+        onModelChange={isOrchestratorMode ? backendSwitch.selectModel : undefined}
         activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}
         onBackendChange={isOrchestratorMode ? backendSwitch.request : undefined}
         effort={thinkingEffort}
