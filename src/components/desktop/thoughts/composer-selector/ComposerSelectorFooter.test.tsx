@@ -5,10 +5,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ComposerSelectorFooter } from './ComposerSelectorFooter';
 import {
   COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY,
-  cycleComposerSelectorMode,
+  COMPOSER_SELECTOR_MODES,
   resolveEffectiveComposerLeadModelId,
   supportedEffortsForLead,
   type ComposerSelectorMode,
@@ -19,8 +18,16 @@ import { COMPOSER_MODEL_GROUPS } from '../ModelThinkingChip';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
+import { WORKER_START_OPTIONS } from '@/lib/operator/worker-start-mode';
 import { MODEL_IDS } from '@/lib/models';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
+
+const entitlementState = vi.hoisted(() => ({ plan: 'free' as 'free' | 'founder' }));
+
+vi.mock('@/lib/entitlement/context', () => ({
+  useEntitlement: () => ({ plan: entitlementState.plan }),
+}));
 
 vi.mock('../chat-panel/ComposerPopover', async () => {
   const React = await import('react');
@@ -34,67 +41,65 @@ vi.mock('../chat-panel/ComposerPopover', async () => {
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
 
-function Harness() {
+function Harness({
+  initialModel = 'gpt-5.6-sol',
+  initialBackend = 'codex',
+  initialEffort = 'high',
+  effortTestId,
+}: {
+  initialModel?: string;
+  initialBackend?: OrchestratorBackendSetting;
+  initialEffort?: ThinkingEffort;
+  effortTestId?: string;
+} = {}) {
+  const [input, setInput] = useState('Build it');
   const [mode, setMode] = useState<ComposerSelectorMode>('solo');
-  const [effort, setEffort] = useState<ThinkingEffort>('high');
-  const [model, setModel] = useState('gpt-5.6-sol');
-  const [backend, setBackend] = useState<OrchestratorBackendSetting>('codex');
+  const [effort, setEffort] = useState<ThinkingEffort>(initialEffort);
+  const [model, setModel] = useState(initialModel);
+  const [backend, setBackend] = useState<OrchestratorBackendSetting>(initialBackend);
   return (
-    <div>
-      <textarea
-        data-testid="composer-textarea"
-        onKeyDown={(event) => {
-          if (event.key === 'Tab' && event.shiftKey) {
-            event.preventDefault();
-            setMode((current) => cycleComposerSelectorMode(current));
-          }
-        }}
-      />
-      <ComposerSelectorFooter
-        input="Build it"
-        mode={mode}
-        onModeChange={setMode}
+    <>
+      {effortTestId ? <span data-testid={effortTestId}>{effort}</span> : null}
+      <ComposerArea
+        activeComposer
+        input={input}
+        onInputChange={setInput}
+        isOrchestratorMode
+        displayWaiting={false}
+        chatMessages={[]}
+        activeTargetLabel="Orchestrator"
+        targetAgentExists
+        thoughtsBodyBackground="var(--t-chat-surface-bg)"
+        enhancing={false}
+        preEnhanceInput={null}
+        onEnhance={() => {}}
+        onUndoEnhance={() => {}}
+        onSubmit={() => {}}
+        onSlashCommand={() => {}}
         modelId={model}
         modelLabel={model === 'gpt-5.6-sol' ? 'Sol' : model}
-        activeBackend={backend}
         onModelChange={setModel}
+        activeBackend={backend}
         onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
         effort={effort}
+        operatorDefaultEffort={initialEffort}
         onEffortChange={setEffort}
         adaptiveEnabled
-        attachControl={<button type="button">Attach</button>}
-        micControl={<button type="button">Mic</button>}
-        sendControl={<button type="button">Send</button>}
+        displayMessagesCount={0}
+        hasAssistantActivity={false}
+        composerMode={mode}
+        onComposerModeChange={setMode}
+        sessionRulesThreadId="harness-thread"
       />
-    </div>
+    </>
   );
 }
 
-function O8PlanHarness({ isFreePlan }: { isFreePlan: boolean }) {
-  const [effort, setEffort] = useState<ThinkingEffort>('low');
-  return (
-    <div>
-      <span data-testid="o8-plan-effort">{effort}</span>
-      <ComposerSelectorFooter
-        input="Build it"
-        mode="solo"
-        onModeChange={() => {}}
-        modelId="o8-free"
-        modelLabel="o8"
-        activeBackend="o8"
-        effort={effort}
-        onEffortChange={setEffort}
-        adaptiveEnabled
-        isFreePlan={isFreePlan}
-        attachControl={<button type="button">Attach</button>}
-        micControl={<button type="button">Mic</button>}
-        sendControl={<button type="button">Send</button>}
-      />
-    </div>
-  );
+function O8PlanHarness() {
+  return <Harness initialModel="o8-free" initialBackend="o8" initialEffort="low" effortTestId="o8-plan-effort" />;
 }
 
-function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: ThinkingEffort }) {
+function RealComposerHarness({ initialEffort = 'high', threadId = 'thread-test', operatorDefaultEffort = 'high' }: { initialEffort?: ThinkingEffort; threadId?: string; operatorDefaultEffort?: ThinkingEffort }) {
   const [input, setInput] = useState('Build it');
   const [mode, setMode] = useState<ComposerSelectorMode>('solo');
   const [effort, setEffort] = useState<ThinkingEffort>(initialEffort);
@@ -126,7 +131,7 @@ function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: Think
         activeBackend={backend}
         onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
         effort={effort}
-        operatorDefaultEffort="high"
+        operatorDefaultEffort={operatorDefaultEffort}
         onEffortChange={setEffort}
         adaptiveEnabled
         displayMessagesCount={0}
@@ -138,7 +143,7 @@ function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: Think
         onVoiceModeChange={() => {}}
         composerMode={mode}
         onComposerModeChange={setMode}
-        sessionRulesThreadId="thread-test"
+        sessionRulesThreadId={threadId}
       />
     </>
   );
@@ -187,6 +192,7 @@ describe('ComposerSelectorFooter', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    entitlementState.plan = 'free';
     invalidateOperatorDefaultsValuesSnapshot();
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {};
@@ -222,6 +228,7 @@ describe('ComposerSelectorFooter', () => {
     expect([...footer!.children].map((node) => node.getAttribute('data-testid'))).toEqual([
       'composer-selector-mode',
       'composer-selector-attach',
+      'composer-selector-leading-controls',
       'composer-selector-spacer',
       'composer-selector-lead',
       'composer-selector-mic',
@@ -276,6 +283,30 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
   });
 
+  it('renders composer setting text from the shared label tables', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
+    act(() => lead.click());
+    const pickerText = container.textContent ?? '';
+    for (const effort of supportedEffortsForLead('codex', 'gpt-5.6-sol', true)) {
+      expect(pickerText).toContain(THINKING_EFFORT_LABELS[effort].long);
+    }
+    for (const option of WORKER_START_OPTIONS) expect(pickerText).toContain(option.long);
+
+    act(() => lead.click());
+    const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    act(() => mode.click());
+    const modeText = container.textContent ?? '';
+    for (const option of COMPOSER_SELECTOR_MODES) expect(modeText).toContain(option.long);
+    const comparePlans = COMPOSER_SELECTOR_MODES.find((option) => option.id === 'moa')!;
+    expect(modeText).toContain(comparePlans.long);
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes(comparePlans.long))!.click());
+    expect(mode.textContent).toContain(comparePlans.short);
+    expect(mode.getAttribute('aria-label')).toBe(`Mode: ${comparePlans.long}`);
+    expect(mode.title).toContain(comparePlans.long);
+  });
+
   it('persists Extra through the real flag-on composer path', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
@@ -292,6 +323,30 @@ describe('ComposerSelectorFooter', () => {
     expect(lead.getAttribute('data-accent')).toBe('swarm');
     expect(lead.querySelector<HTMLElement>('[data-testid="composer-selector-effort-word"]')?.style.color)
       .toBe('var(--t-brand-orange)');
+  });
+
+  it('resolves thread storage through the real ComposerArea path before the operator default', async () => {
+    localStorage.setItem(`${COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY}:thread:thread-real`, JSON.stringify({ 'gpt-5.6-sol': 'high' }));
+    await act(async () => { root.render(createElement(RealComposerHarness, { threadId: 'thread-real', operatorDefaultEffort: 'low' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('high');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
+      .find((stop) => stop.textContent === 'Extra')!.click());
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('xhigh');
+    localStorage.removeItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => { root.render(createElement(RealComposerHarness, { threadId: 'thread-fresh', operatorDefaultEffort: 'medium' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('medium');
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => { root.render(createElement(RealComposerHarness, { threadId: 'thread-real', operatorDefaultEffort: 'low' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('xhigh');
   });
 
   it('uses the full runtime label in the bounded workers chip', async () => {
@@ -322,6 +377,7 @@ describe('ComposerSelectorFooter', () => {
   });
 
   it('marks every picker row and shows model-specific effort consequences', async () => {
+    entitlementState.plan = 'founder';
     await act(async () => { root.render(createElement(Harness)); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -348,7 +404,7 @@ describe('ComposerSelectorFooter', () => {
   });
 
   it('shows but refuses the locked founders effort on the free o8 plan', async () => {
-    await act(async () => { root.render(createElement(O8PlanHarness, { isFreePlan: true })); });
+    await act(async () => { root.render(createElement(O8PlanHarness)); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
       .find((stop) => stop.textContent === 'High')!;
@@ -381,7 +437,9 @@ describe('ComposerSelectorFooter', () => {
   });
 
   it('selects and persists the founders effort on the paid o8 plan', async () => {
-    await act(async () => { root.render(createElement(O8PlanHarness, { isFreePlan: false })); });
+    entitlementState.plan = 'founder';
+    localStorage.setItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY, JSON.stringify({ 'o8-free': 'low' }));
+    await act(async () => { root.render(createElement(O8PlanHarness)); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
       .find((stop) => stop.textContent === 'High')!;
@@ -400,7 +458,7 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const textarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
     textarea.focus();
-    for (const label of ['Multitask', 'Compare plans', 'Fusion', 'Solo']) {
+    for (const label of ['Multitask', 'MoA', 'Fusion', 'Solo']) {
       await act(async () => {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, shiftKey: true, bubbles: true, cancelable: true }));
       });

@@ -6,7 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { MODEL_EFFORT_LABELS } from '../ModelThinkingChip';
+import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
 import {
   composerEffortConsequence,
   isHotComposerEffort,
@@ -23,8 +23,7 @@ const SPRING_EASE = 'cubic-bezier(.34,1.56,.64,1)';
 const HOT_ACCENT = 'var(--t-brand-orange)';
 
 function effortLabel(effort: ResolvedComposerSelectorState['effort']): string {
-  const label = MODEL_EFFORT_LABELS[effort];
-  return `${label[0].toUpperCase()}${label.slice(1)}`;
+  return THINKING_EFFORT_LABELS[effort].long;
 }
 
 function useReducedMotion(): boolean {

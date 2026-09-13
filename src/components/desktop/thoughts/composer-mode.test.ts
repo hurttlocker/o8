@@ -53,7 +53,7 @@ describe('resolveComposerExecutionMode', () => {
     for (const mode of COMPOSER_MODES) {
       const resolved = composerModeSpec(mode.id);
       const turn = composeComposerTurnMessage('Build it', mode.id, false);
-      expect(resolved.label).toBe(mode.label);
+      expect(resolved.long).toBe(mode.long);
       expect(turn.wireMessage).toContain(resolved.directive);
     }
   });

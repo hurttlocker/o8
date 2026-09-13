@@ -10,19 +10,10 @@ import { SessionRulesChip } from './SessionRulesChip';
 import { ModelThinkingChip } from './ModelThinkingChip';
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
-import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { ComposerSelectorFooter } from './composer-selector/ComposerSelectorFooter';
-import type { ComposerEffortClampNotice } from './composer-selector/state';
+import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { ComposerSelectorFooterView } from './composer-selector/ComposerSelectorFooter';
+import type { ComposerSelectorController } from './composer-selector/useComposerSelectorState';
 
-const EFFORT_LABELS: Record<ThinkingEffort, string> = {
-  adaptive: 'adaptive',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  max: 'max',
-  xhigh: 'xhigh',
-  ultra: 'ultra',
-};
 // xhigh stays in the menu but reads as a sibling option to max, NOT as
 // "even better than max". max gets the brand orange to anchor it as the
 // climax tier; xhigh gets a muted dot so it doesn't outshine max.
@@ -51,7 +42,7 @@ export function ThinkingChip({
   onChange?: (next: ThinkingEffort) => void;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const label = EFFORT_LABELS[effort];
+  const label = THINKING_EFFORT_LABELS[effort].short;
   const dotColor = EFFORT_DOT[effort];
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
 
@@ -76,7 +67,7 @@ export function ThinkingChip({
             aria-hidden="true"
             style={{ width: 6, height: 6, borderRadius: 999, background: EFFORT_DOT[option] }}
           />
-          <span>{EFFORT_LABELS[option]}</span>
+          <span>{THINKING_EFFORT_LABELS[option].long}</span>
         </span>
         {active ? <span style={{ fontSize: 11, color: 'var(--t-accent)' }}>•</span> : null}
       </button>
@@ -427,6 +418,7 @@ export function InputButtons({
   onFileReferenceSelect,
   composerMode,
   onComposerModeChange,
+  composerSelectorController,
   repoPath,
   workspaceTargets,
   selectedRepoPath,
@@ -439,9 +431,6 @@ export function InputButtons({
   onSavePrompt,
   onRequestTextareaFocus,
   composerSelectorV1Enabled = false,
-  operatorDefaultEffort = effort,
-  composerEffortClampNotice = null,
-  composerSelectorIsFreePlan = false,
 }: {
   input: string;
   enhancing: boolean;
@@ -480,6 +469,7 @@ export function InputButtons({
   onFileReferenceSelect?: (path: string) => void;
   composerMode?: ComposerMode;
   onComposerModeChange?: (mode: ComposerMode) => void;
+  composerSelectorController?: ComposerSelectorController;
   repoPath?: string | null;
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
@@ -492,12 +482,13 @@ export function InputButtons({
   onSavePrompt?: (body: string) => void;
   onRequestTextareaFocus?: () => void;
   composerSelectorV1Enabled?: boolean;
-  operatorDefaultEffort?: ThinkingEffort;
-  composerEffortClampNotice?: ComposerEffortClampNotice | null;
-  composerSelectorIsFreePlan?: boolean;
 }) {
   const canSubmit = Boolean(input.trim());
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
+  const selectorReady = Boolean(
+    composerSelectorController && composerMode && modelLabel && modelId && activeBackend && onEffortChange,
+  );
+  const selectorControls = composerSelectorController;
 
   // Adaptive composer row: measure available width and, below the threshold,
   // collapse the in-input pickers (model + agent) to icon-only — matching the
@@ -518,31 +509,24 @@ export function InputButtons({
 
   if (
     composerSelectorV1Enabled
-    && composerMode
-    && onComposerModeChange
-    && modelLabel
-    && modelId
-    && activeBackend
-    && onEffortChange
+    && selectorControls
+    && selectorReady
   ) {
     return (
       <ComposerChipCompactContext.Provider value={compact}>
-        <ComposerSelectorFooter
+        <ComposerSelectorFooterView
           input={input}
-          mode={composerMode}
-          onModeChange={onComposerModeChange}
-          modelId={modelId}
-          modelLabel={modelLabel}
-          activeBackend={activeBackend}
-          onModelChange={onModelChange}
-          onBackendChange={onBackendChange}
-          effort={effort}
-          onEffortChange={onEffortChange}
-          adaptiveEnabled={adaptiveEnabled}
-          operatorDefaultEffort={operatorDefaultEffort}
-          clampNotice={composerEffortClampNotice}
-          isFreePlan={composerSelectorIsFreePlan}
-          threadId={sessionRulesThreadId ?? null}
+          state={selectorControls.state}
+          defaults={selectorControls.defaults}
+          composerModelGroups={selectorControls.composerModelGroups}
+          onModeChange={selectorControls.onModeChange}
+          onModelChange={selectorControls.onModelChange}
+          onBackendChange={selectorControls.onBackendChange}
+          onEffortChange={selectorControls.onEffortChange}
+          onRuntimeChange={selectorControls.onRuntimeChange}
+          onWorkerModelChange={selectorControls.onWorkerModelChange}
+          onWorkerStartModeChange={selectorControls.onWorkerStartModeChange}
+          saving={selectorControls.savingWorkerDefaults}
           leadingControls={(
             <>
               {inlineLeadingExtras ? (
@@ -681,7 +665,10 @@ export function InputButtons({
           Pinned, never shrinks or clips. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
       {composerMode && onComposerModeChange ? (
-        <ComposerModeChip mode={composerMode} onModeChange={onComposerModeChange} />
+        <ComposerModeChip
+          mode={selectorControls?.state.mode ?? composerMode}
+          onModeChange={selectorControls?.onModeChange ?? onComposerModeChange}
+        />
       ) : null}
       {inlineMeterSlot ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -692,19 +679,27 @@ export function InputButtons({
         <ModelThinkingChip
           split
           compact={compact}
-          modelLabel={modelLabel}
-          modelId={modelId}
-          onModelChange={onModelChange}
-          activeBackend={activeBackend}
-          onBackendChange={onBackendChange}
-          effort={effort}
+          modelLabel={selectorControls?.state.leadModelLabel ?? modelLabel}
+          modelId={selectorControls?.state.leadModelId ?? modelId}
+          onModelChange={selectorControls?.onModelChange ?? onModelChange}
+          activeBackend={selectorControls?.state.leadBackend ?? activeBackend}
+          onBackendChange={selectorControls?.onBackendChange ?? onBackendChange}
+          effort={selectorControls?.state.effort ?? effort}
           adaptiveEnabled={adaptiveEnabled}
-          onEffortChange={onEffortChange}
-          composerMode={composerMode}
+          onEffortChange={selectorControls?.onEffortChange ?? onEffortChange}
+          composerMode={selectorControls?.state.mode ?? composerMode}
         />
       ) : null}
-      {composerMode && composerMode !== 'solo' ? (
-        <FleetWorkerChip compact={compact} />
+      {composerMode && (selectorControls?.state.mode ?? composerMode) !== 'solo' ? (
+        <FleetWorkerChip
+          compact={compact}
+          defaults={selectorControls?.defaults}
+          workerModelLocked={selectorControls?.workerModelLocked}
+          saving={selectorControls?.savingWorkerDefaults}
+          onRuntimeChange={selectorControls?.onRuntimeChange}
+          onWorkerModelChange={selectorControls?.onWorkerModelChange}
+          onWorkerStartModeChange={selectorControls?.onWorkerStartModeChange}
+        />
       ) : null}
 
       {/* Send — ↵ enter key when idle, square stop while working

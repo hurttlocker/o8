@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
-import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { isCodexUltraCapableModel } from '@/lib/codex/reasoning-effort';
@@ -16,18 +16,6 @@ import {
   supportedEffortsForLead,
 } from './composer-selector/state';
 import { useUltraEffortPreference } from './composer-selector/UltraEffortPreference';
-
-export const MODEL_EFFORT_LABELS: Record<ThinkingEffort, string> = {
-  adaptive: 'adaptive',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  max: 'max',
-  // "Extra" reads cleaner than "Xhigh" on the slider (Q ruling 2026-07-11,
-  // matching the Claude Code reference).
-  xhigh: 'extra',
-  ultra: 'ultra',
-};
 
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
@@ -371,7 +359,7 @@ export function ModelThinkingChip({
   const ultraEnabled = useUltraEffortPreference();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const splitRef = useRef<HTMLSpanElement>(null);
-  const selectedLabel = MODEL_EFFORT_LABELS[effort];
+  const selectedLabel = THINKING_EFFORT_LABELS[effort].short;
   const effortHot = isHotComposerEffort(effort);
   const mode = composerModeSpec(composerMode);
   const deepModeActive = composerMode === 'fusion' || composerMode === 'moa';
@@ -440,7 +428,7 @@ export function ModelThinkingChip({
 
   const effortStops: EffortStop[] = options.map((option) => ({
     effort: option,
-    label: MODEL_EFFORT_LABELS[option].charAt(0).toUpperCase() + MODEL_EFFORT_LABELS[option].slice(1),
+    label: THINKING_EFFORT_LABELS[option].long,
     sub: isO8Backend
       ? option === 'high' ? 'founders' : 'free'
       : option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
@@ -486,7 +474,7 @@ export function ModelThinkingChip({
             type="button"
             onClick={() => { if (canOpen) setOpen((current) => !current); }}
             disabled={!canOpen}
-            title={`${triggerModelLabel} · ${mode.label}`}
+            title={`${triggerModelLabel} · ${mode.long}`}
             aria-haspopup="menu"
             aria-expanded={open}
             style={quietTriggerStyle(open)}
@@ -523,7 +511,7 @@ export function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={`${triggerModelLabel} · ${mode.label} · ${effortTitle} ${selectedLabel}`}
+        title={`${triggerModelLabel} · ${mode.long} · ${effortTitle} ${selectedLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{

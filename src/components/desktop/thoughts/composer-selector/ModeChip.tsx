@@ -51,7 +51,7 @@ export function ModeChip({
         ref={triggerRef}
         data-testid="composer-selector-mode"
         type="button"
-        title={`${state.modeSublabel}. Shift+Tab cycles.`}
+        title={`${state.modeLabel}. ${state.modeSublabel}. Shift+Tab cycles.`}
         aria-label={`Mode: ${state.modeLabel}`}
         aria-expanded={open}
         onClick={() => setPopoverOpen(!open)}
@@ -80,7 +80,7 @@ export function ModeChip({
         }}
       >
         {fusion ? <FusionGlyph /> : null}
-        {state.modeLabel}
+        {state.modeShortLabel}
         <span style={{ fontSize: 9, color: 'var(--t-text-faint)', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-border)', borderRadius: 4, paddingLeft: 3, paddingRight: 3, lineHeight: '13px' }}>
           ⇧⇥
         </span>
@@ -148,7 +148,7 @@ function ModeSelectorModeMenu({
           >
             <span style={{ width: 13, flexShrink: 0, color: spec.id === 'fusion' ? FUSION_ACCENT : 'var(--t-accent)', visibility: selected ? 'visible' : 'hidden' }}><CheckGlyph /></span>
             <span style={{ display: 'flex', flexDirection: 'column', gap: 1, lineHeight: 1.2 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{spec.label}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{spec.long}</span>
               <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)' }}>{spec.sublabel}</span>
             </span>
           </button>

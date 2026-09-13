@@ -23,27 +23,27 @@ describe('worker start mode', () => {
     expect(WORKER_START_OPTIONS).toEqual([
       {
         value: 'autonomous',
-        label: 'Run now',
-        shortLabel: 'Run',
+        long: 'Run now',
+        short: 'Run',
         detail: 'The worker implements immediately inside its worktree.',
       },
       {
         value: 'huddle',
-        label: 'Plan first',
-        shortLabel: 'Plan',
+        long: 'Plan first',
+        short: 'Plan',
         detail: 'The worker reads the task, shares a plan with the lead, and waits before editing.',
       },
       {
         value: 'adaptive',
-        label: 'Adaptive',
-        shortLabel: 'Adaptive',
+        long: 'Adaptive',
+        short: 'Adaptive',
         detail: 'Lower-cost subscription workers plan first; other workers run immediately.',
       },
     ]);
 
     const huddle = WORKER_START_OPTIONS.find((option) => option.value === 'huddle');
     expect(huddle).toBeDefined();
-    expect(`${huddle?.label} ${huddle?.detail}`).not.toMatch(/\b(?:ask|approve|approval|confirm)\b/i);
+    expect(`${huddle?.long} ${huddle?.detail}`).not.toMatch(/\b(?:ask|approve|approval|confirm)\b/i);
   });
 
   it('lets a per-mission choice override the saved policy', () => {

@@ -3,7 +3,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
-import { readStoredComposerMode, writeStoredComposerMode } from './composer-mode-storage';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
 import { fetchRuntimeLaunchReceipt, fetchRuntimeSteerReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
@@ -18,7 +17,6 @@ import {
 } from '@/lib/orchestrator/thinking-preferences';
 import {
   queueOrchestratorSessionPrelude,
-  readStoredOrchestratorModel,
   searchOrchestratorArchive,
   writeStoredOrchestratorModel,
 } from '@/lib/orchestrator/store';
@@ -62,6 +60,7 @@ import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
+import { useOrchestratorModelState } from './composer-selector/useOrchestratorModelState';
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
@@ -255,28 +254,23 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // Composer mode (Cursor-parity, Q 2026-07-17) — persists across sends until
   // switched, Cursor behavior. Ref mirrors state so handleTaskSend reads the
   // live value without growing its dependency list.
-  const [composerMode, setComposerMode] = useState<ComposerMode>(
-    () => composerModeStorageId ? readStoredComposerMode(composerModeStorageId) : 'solo',
-  );
+  const [composerMode, setComposerMode] = useState<ComposerMode>('solo');
   const composerModeRef = useRef<ComposerMode>(composerMode);
   composerModeRef.current = composerMode;
   // MoA IS the Collide backend — keep the chip and the model-picker's Mode
   // section telling the same truth in both directions.
   const handleComposerModeChange = useCallback((next: ComposerMode) => {
     setComposerMode(next);
-    if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, next);
     if (next === 'moa') onSetCollide?.(true);
     else if (collideEnabled) onSetCollide?.(false);
-  }, [collideEnabled, composerModeStorageId, onSetCollide]);
+  }, [collideEnabled, onSetCollide]);
   useEffect(() => {
     if (collideEnabled && composerMode !== 'moa') {
       setComposerMode('moa');
-      if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, 'moa');
     } else if (!collideEnabled && composerMode === 'moa') {
       setComposerMode('solo');
-      if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, 'solo');
     }
-  }, [collideEnabled, composerMode, composerModeStorageId]);
+  }, [collideEnabled, composerMode]);
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
   // Orchestration mode + runtime + chat-model selection. Per-tab when
@@ -386,7 +380,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [thinkingOverride, setThinkingOverride] = useState<ManualThinkingEffort | null>(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).thinkingOverride,
   );
-  const [orchestratorModel, setOrchestratorModel] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorModel);
   const [chatMessages, setChatMessages] = useReducer(retainedTranscriptReducer, []);
   const {
     entries: threadHistoryEntries,
@@ -436,6 +429,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const loadGenerationRef = useRef(0);
   const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
+  const {
+    acceptModel: acceptOrchestratorModel,
+    model: orchestratorModel,
+    restoreModel: restoreOrchestratorModel,
+    setModel: setOrchestratorModel,
+  } = useOrchestratorModelState({ operatorDefaultModel: operatorDefaults.orchestratorModel, repoPath: resolvedRepoPath });
   const resetComposerModeForLeadChange = useCallback(() => {
     if (composerModeRef.current === 'moa' || composerModeRef.current === 'fusion') {
       handleComposerModeChange('solo');
@@ -450,7 +449,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setActiveThreadAgent,
     setActiveThreadBackend,
     setBackend: setOrchestratorBackend,
-    setModel: setOrchestratorModel,
+    setModel: acceptOrchestratorModel,
     setOperatorDefaults,
     onBeforeApply: resetComposerModeForLeadChange,
   });
@@ -544,14 +543,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     return () => { controller.abort(); cancelRuntimeReadiness(); };
   }, []);
-
-  useEffect(() => {
-    if (!resolvedRepoPath) {
-      setOrchestratorModel(operatorDefaults.orchestratorModel);
-      return;
-    }
-    setOrchestratorModel(readStoredOrchestratorModel(resolvedRepoPath) ?? operatorDefaults.orchestratorModel);
-  }, [operatorDefaults.orchestratorModel, resolvedRepoPath]);
 
   useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
     setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
@@ -1597,7 +1588,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setModel: setOrchestratorModel, setOperatorDefaults,
       }, signal),
     });
-  }, [backendSwitch, orchStream, orchestratorBackend, resolvedRepoPath]);
+  }, [backendSwitch, orchStream, orchestratorBackend, resolvedRepoPath, setOrchestratorModel]);
 
   const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
     const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
@@ -1626,8 +1617,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       runningTotal: orchStream.runningTotal,
       currentModel: orchestratorModel,
       setCurrentModel: (model) => {
-        setOrchestratorModel(model);
         writeStoredOrchestratorModel(resolvedRepoPath, model);
+        acceptOrchestratorModel(model);
       },
       replaceTranscript: orchStream.replaceTranscript,
       compactNow: orchStream.compactNow,
@@ -1677,6 +1668,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     isOrchestratorMode,
     missionState,
     orchStream,
+    acceptOrchestratorModel,
     orchestratorModel,
     resetRemoteSession,
     resolvedRepoPath,
@@ -2358,6 +2350,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}
+        onModelRestore={isOrchestratorMode ? restoreOrchestratorModel : undefined}
         onModelChange={isOrchestratorMode ? backendSwitch.selectModel : undefined}
         activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}
         onBackendChange={isOrchestratorMode ? backendSwitch.request : undefined}
@@ -2384,6 +2377,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onUploadDiskFiles={processAttachmentFiles}
         composerMode={isOrchestratorMode && !isChatMode ? composerMode : undefined}
         onComposerModeChange={isOrchestratorMode && !isChatMode ? handleComposerModeChange : undefined}
+        composerModeStorageId={composerModeStorageId}
         repoPath={resolvedRepoPath}
         workspaceTargets={workspaceTargets}
         selectedRepoPath={resolvedRepoPath}

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { formatModelLabel } from '@/lib/format';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { updateOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import type { PendingBackendSwitch } from './chat-panel/BackendSwitchChoice';
 import { fetchFreshThoughtsOperatorDefaults, type OrchestratorBackendSetting, type ThoughtsOperatorDefaults } from './operator-defaults';
@@ -51,7 +52,7 @@ export function useBackendSwitchChoice(input: {
   setActiveThreadAgent: Dispatch<SetStateAction<string | null>>;
   setActiveThreadBackend: Dispatch<SetStateAction<OrchestratorBackendId | null>>;
   setBackend: Dispatch<SetStateAction<OrchestratorBackendSetting>>;
-  setModel: Dispatch<SetStateAction<string>>;
+  setModel: (model: string) => void;
   setOperatorDefaults: Dispatch<SetStateAction<ThoughtsOperatorDefaults>>;
   onBeforeApply?: () => void;
 }) {
@@ -69,46 +70,51 @@ export function useBackendSwitchChoice(input: {
     onBeforeApply,
   } = input;
   const [pending, setPending] = useState<PendingBackendSwitch | null>(null);
+  const applyGenerationRef = useRef(0);
   const handoffModeRef = useRef<'handoff' | null>(null);
   const handoffTargetRef = useRef<OrchestratorBackendId | null>(null);
   const apply = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
+    const applyGeneration = ++applyGenerationRef.current;
     onBeforeApply?.();
     backendSourceRef.current = 'user';
     setBackend(backend);
     if (model) {
-      setModel(model);
       writeStoredOrchestratorModel(repoPath, model);
+      setModel(model);
     }
     setActiveThreadBackend(composerBackendTurnOverride(backend) ?? null);
     setActiveThreadAgent(null);
-    void fetch('/api/panel/operator-defaults', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orchestratorBackend: backend }),
-    }).then(async (response) => {
+    void updateOperatorDefaultsValues({ orchestratorBackend: backend }).then(async (response) => {
       const payload = await response.json().catch(() => null) as { values?: Partial<ThoughtsOperatorDefaults>; error?: string } | null;
       if (!response.ok) throw new Error(payload?.error || 'Failed to persist orchestrator backend.');
       return payload;
     }).then((payload) => {
+      if (applyGeneration !== applyGenerationRef.current) return;
       if (!payload?.values) return;
       const defaults = { ...operatorDefaults, ...payload.values };
       setOperatorDefaults(defaults);
       setBackend(resolveActiveComposerBackend(defaults));
     }).catch((error) => {
+      if (applyGeneration !== applyGenerationRef.current) return;
       console.log('[thoughts] failed to persist orchestrator backend', error);
+      if (model) {
+        writeStoredOrchestratorModel(repoPath, currentModel);
+        setModel(currentModel);
+      }
       setBackend(resolveActiveComposerBackend(operatorDefaults));
     });
-  }, [backendSourceRef, onBeforeApply, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
+  }, [backendSourceRef, currentModel, onBeforeApply, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
   const reset = useCallback(() => {
     setPending(null);
     handoffModeRef.current = null;
     handoffTargetRef.current = null;
   }, []);
   const selectModel = useCallback((model: string) => {
+    applyGenerationRef.current += 1;
     onBeforeApply?.();
     reset();
-    setModel(model);
     writeStoredOrchestratorModel(repoPath, model);
+    setModel(model);
   }, [onBeforeApply, repoPath, reset, setModel]);
   const request = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
     reset();

@@ -17,7 +17,7 @@ import {
   type OrchestratorRuntime,
   type RuntimeAuthHouse,
 } from '@/lib/orchestrator/runtime-capabilities';
-import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { AgentRoleRoute } from '@/lib/operator/role-routing';
 import type { RoleRoutingReceipt } from '@/lib/operator/role-routing-ledger';
 import {
@@ -187,29 +187,30 @@ export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; l
   { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-6 Astra orchestrates, Terra works, escalates to Sol when needed.' },
 ];
 
-export const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
-  { value: 'adaptive', label: 'Adaptive', detail: 'Let the model choose.' },
-  { value: 'low', label: 'Low', detail: 'Quick answers.' },
-  { value: 'medium', label: 'Medium', detail: 'Balanced cost and quality.' },
-  { value: 'high', label: 'High', detail: 'Deeper reasoning, more tokens.' },
-  { value: 'max', label: 'Max', detail: 'Highest effort allowed.' },
-  { value: 'xhigh', label: 'Extended', detail: 'Extended thinking budget.' },
+const SETTINGS_THINKING_EFFORTS: readonly ThinkingEffort[] = [
+  'adaptive', 'low', 'medium', 'high', 'max', 'xhigh',
 ];
+
+export const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = SETTINGS_THINKING_EFFORTS.map((value) => ({
+  value,
+  label: THINKING_EFFORT_LABELS[value].long,
+  detail: THINKING_EFFORT_LABELS[value].detail,
+}));
 
 export const CODEX_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
   { value: 'adaptive', label: 'Runtime default', detail: 'Leave Codex at its default.' },
-  { value: 'low', label: 'Low', detail: 'Quick worker turns.' },
-  { value: 'medium', label: 'Medium', detail: 'Balanced cost and quality.' },
-  { value: 'high', label: 'High', detail: 'Deeper worker reasoning.' },
-  { value: 'xhigh', label: 'Extended', detail: 'Codex top effort.' },
+  { value: 'low', label: THINKING_EFFORT_LABELS.low.long, detail: 'Quick worker turns.' },
+  { value: 'medium', label: THINKING_EFFORT_LABELS.medium.long, detail: 'Balanced cost and quality.' },
+  { value: 'high', label: THINKING_EFFORT_LABELS.high.long, detail: 'Deeper worker reasoning.' },
+  { value: 'xhigh', label: THINKING_EFFORT_LABELS.xhigh.long, detail: 'Codex top effort.' },
 ];
 
 export const CLAUDE_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
   { value: 'adaptive', label: 'Runtime default', detail: 'Leave Claude Code at its default.' },
-  { value: 'low', label: 'Low', detail: 'Quick worker turns.' },
-  { value: 'medium', label: 'Medium', detail: 'Balanced cost and quality.' },
-  { value: 'high', label: 'High', detail: 'Deeper worker reasoning.' },
-  { value: 'max', label: 'Max', detail: 'Claude Code top effort.' },
+  { value: 'low', label: THINKING_EFFORT_LABELS.low.long, detail: 'Quick worker turns.' },
+  { value: 'medium', label: THINKING_EFFORT_LABELS.medium.long, detail: 'Balanced cost and quality.' },
+  { value: 'high', label: THINKING_EFFORT_LABELS.high.long, detail: 'Deeper worker reasoning.' },
+  { value: 'max', label: THINKING_EFFORT_LABELS.max.long, detail: 'Claude Code top effort.' },
 ];
 
 export const BRAIN_CODEX_MODEL_OPTIONS: Array<{ value: string; label: string; detail: string }> = [

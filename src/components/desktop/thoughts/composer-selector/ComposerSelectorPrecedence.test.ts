@@ -1,0 +1,151 @@
+// @vitest-environment jsdom
+
+import { act, createElement, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { ComposerArea } from '../chat-panel/ComposerArea';
+import { writeStoredComposerMode } from '../composer-mode-storage';
+import type { ComposerSelectorMode } from './state';
+import type { ComposerWorkerDefaults } from './worker-settings';
+
+const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
+
+function RealComposerHarness({ tabId, threadId }: { tabId: string; threadId: string }) {
+  const [input, setInput] = useState('Build it');
+  const [mode, setMode] = useState<ComposerSelectorMode>('solo');
+  const [effort, setEffort] = useState<ThinkingEffort>('high');
+  const [model, setModel] = useState('gpt-5.6-sol');
+  return createElement(ComposerArea, {
+    activeComposer: true,
+    input,
+    onInputChange: setInput,
+    isOrchestratorMode: true,
+    displayWaiting: false,
+    chatMessages: [],
+    activeTargetLabel: 'Orchestrator',
+    targetAgentExists: true,
+    thoughtsBodyBackground: 'var(--t-chat-surface-bg)',
+    enhancing: false,
+    preEnhanceInput: null,
+    onEnhance: () => {},
+    onUndoEnhance: () => {},
+    onSubmit: () => {},
+    onSlashCommand: () => {},
+    modelLabel: 'Sol',
+    modelId: model,
+    onModelRestore: setModel,
+    onModelChange: setModel,
+    activeBackend: 'codex',
+    effort,
+    operatorDefaultEffort: 'high',
+    onEffortChange: setEffort,
+    adaptiveEnabled: true,
+    displayMessagesCount: 0,
+    hasAssistantActivity: false,
+    composerMode: mode,
+    onComposerModeChange: setMode,
+    composerModeStorageId: tabId,
+    sessionRulesThreadId: threadId,
+    repoPath: '/repo/selector-precedence',
+  });
+}
+
+describe('composer selector real-path precedence', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let operatorValues: ComposerWorkerDefaults;
+  let postBodies: Array<Record<string, unknown>>;
+
+  beforeEach(() => {
+    localStorage.clear();
+    operatorValues = {
+      defaultDispatchRuntime: 'gemini',
+      defaultDispatchModel: '',
+      opencodeWorkerModel: null,
+      workerStartMode: 'huddle',
+    };
+    postBodies = [];
+    invalidateOperatorDefaultsValuesSnapshot();
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = typeof init.body === 'string'
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : {};
+        postBodies.push(body);
+        operatorValues = { ...operatorValues, ...body } as ComposerWorkerDefaults;
+      }
+      return new Response(JSON.stringify({ values: operatorValues, sources: {} }), { status: 200 });
+    }));
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    invalidateOperatorDefaultsValuesSnapshot();
+    vi.unstubAllGlobals();
+  });
+
+  it('resolves tab mode and operator worker defaults across in-session and fresh tabs', async () => {
+    writeStoredComposerMode('tab-a', 'moa');
+
+    await act(async () => {
+      root.render(createElement(RealComposerHarness, { key: 'tab-a', tabId: 'tab-a', threadId: 'thread-a' }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    let modeChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    let workersChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(modeChip.textContent).toContain('MoA');
+    expect(modeChip.getAttribute('aria-label')).toBe('Mode: Compare plans');
+    expect(workersChip.textContent).toContain('2 Gemini');
+
+    await act(async () => {
+      workersChip.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.querySelector('[data-testid="worker-row-gemini"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect([...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Plan first')?.getAttribute('aria-pressed')).toBe('true');
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-testid="worker-row-codex"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(postBodies).toContainEqual({ defaultDispatchRuntime: 'codex' });
+    workersChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(workersChip.textContent).toContain('2 Codex');
+
+    await act(async () => {
+      root.render(createElement(RealComposerHarness, { key: 'tab-b', tabId: 'tab-b', threadId: 'thread-b' }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    modeChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    expect(modeChip.textContent).toContain('Solo');
+    expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.querySelector('[data-testid="worker-row-codex"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect([...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Plan first')?.getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => {
+      root.render(createElement(RealComposerHarness, { key: 'tab-a-remount', tabId: 'tab-a', threadId: 'thread-a' }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    modeChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    workersChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(modeChip.getAttribute('aria-label')).toBe('Mode: Compare plans');
+    expect(workersChip.textContent).toContain('2 Codex');
+  });
+});
