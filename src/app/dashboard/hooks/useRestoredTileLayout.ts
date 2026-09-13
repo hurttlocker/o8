@@ -31,6 +31,7 @@ interface UseRestoredTileLayoutArgs {
   skipNextTileLayoutPersistenceRef: MutableRefObject<boolean>;
   storageKey: string;
   tileLayout: TileLayout;
+  refreshRestoredRepoState: (validatedPaths: readonly string[]) => Promise<boolean>;
 }
 
 function persistedRepoScopes(layout: TileLayout): Map<string, string> {
@@ -50,6 +51,7 @@ export function useRestoredTileLayout({
   skipNextTileLayoutPersistenceRef,
   storageKey,
   tileLayout,
+  refreshRestoredRepoState,
 }: UseRestoredTileLayoutArgs) {
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
   const [blockedRepoScopes, setBlockedRepoScopes] = useState<Map<string, string>>(() => new Map());
@@ -58,6 +60,7 @@ export function useRestoredTileLayout({
   const layoutRevisionRef = useRef(0);
   const mountedRef = useRef(true);
   const validationControllerRef = useRef<AbortController | null>(null);
+  const retryInFlightRef = useRef(false);
 
   useEffect(() => {
     if (layoutRef.current === tileLayout) return;
@@ -127,28 +130,46 @@ export function useRestoredTileLayout({
   }, [activeTileStorageKey, setActiveTileId, setTileLayout, skipNextTileLayoutPersistenceRef, storageKey, validateLayout]);
 
   const retryRestoredRepoValidation = useCallback(() => {
-    if (validationControllerRef.current || restoredRepoValidationState === 'pending') return;
+    if (validationControllerRef.current || retryInFlightRef.current || restoredRepoValidationState === 'pending') return;
     const layoutAtStart = layoutRef.current;
+    retryInFlightRef.current = true;
     setRestoredRepoValidationState('pending');
     void (async () => {
-      const validation = await validateLayout(layoutAtStart);
-      if (!validation) {
-        if (mountedRef.current) setRestoredRepoValidationState('idle');
-        return;
+      try {
+        const validation = await validateLayout(layoutAtStart);
+        if (!validation || !mountedRef.current || layoutRef.current !== layoutAtStart) {
+          if (mountedRef.current) setRestoredRepoValidationState('idle');
+          return;
+        }
+        if (!validation.ok) {
+          setRestoredRepoValidationState('failed');
+          return;
+        }
+        const refreshed = await refreshRestoredRepoState(validation.paths.map((path) => path.canonicalPath));
+        if (!mountedRef.current || layoutRef.current !== layoutAtStart) {
+          if (mountedRef.current) setRestoredRepoValidationState('idle');
+          return;
+        }
+        if (!refreshed) {
+          setRestoredRepoValidationState('failed');
+          return;
+        }
+        setTileLayout((current) => (
+          current === layoutAtStart
+            ? validatePersistedLayoutRepos(current, validation.paths)
+            : current
+        ));
+        setBlockedRepoScopes(new Map());
+        setRestoredRepoValidationState('verified');
+      } catch {
+        if (mountedRef.current && layoutRef.current === layoutAtStart) {
+          setRestoredRepoValidationState('failed');
+        }
+      } finally {
+        retryInFlightRef.current = false;
       }
-      if (!validation.ok) {
-        setRestoredRepoValidationState('failed');
-        return;
-      }
-      setTileLayout((current) => (
-        current === layoutAtStart
-          ? validatePersistedLayoutRepos(current, validation.paths)
-          : current
-      ));
-      setBlockedRepoScopes(new Map());
-      setRestoredRepoValidationState('verified');
     })();
-  }, [restoredRepoValidationState, setTileLayout, validateLayout]);
+  }, [refreshRestoredRepoState, restoredRepoValidationState, setTileLayout, validateLayout]);
 
   const unverifiedRestoredRepoTileIds = useMemo(() => {
     const currentScopes = persistedRepoScopes(tileLayout);

@@ -154,6 +154,42 @@ export function useGlobalRepoState({
     return repos;
   }, []);
 
+  // A saved workspace may finish its path validation after the initial repo
+  // inventory request failed. Re-read the authoritative inventory and only
+  // report recovery when every validated scope is present in that inventory
+  // (or its authoritative worktree list). This is deliberately an explicit
+  // retry path, not a second registry or a polling loop.
+  const refreshRestoredRepoState = useCallback(async (validatedPaths: readonly string[]) => {
+    const response = await ipcFetch('/api/panel/repos', {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    });
+    const data = await response.json().catch(() => null) as { repos?: unknown } | null;
+    if (!response.ok || !Array.isArray(data?.repos)) return false;
+    const repos = data.repos as RepoRegistryEntry[];
+    const relevantRepos = repos.filter((repo) => validatedPaths.some((path) => (
+      path === repo.localPath || path.startsWith(`${repo.localPath}/`)
+    )));
+    const summaries = await Promise.all(relevantRepos.map(async (repo) => [
+      repo.localPath,
+      await loadRepoWorktrees(repo.localPath),
+    ] as const));
+    const availablePaths = new Set(repos.map((repo) => repo.localPath));
+    for (const [, summary] of summaries) {
+      for (const worktree of summary.worktrees) availablePaths.add(worktree.path);
+    }
+    if (!validatedPaths.every((path) => availablePaths.has(path))) return false;
+
+    setGlobalRepoEntries(repos);
+    setAllRepoWorktrees((current) => {
+      const next = Object.fromEntries(Object.entries(current)
+        .filter(([repoPath]) => repos.some((repo) => repo.localPath === repoPath)));
+      for (const [repoPath, summary] of summaries) next[repoPath] = summary.worktrees;
+      return next;
+    });
+    return true;
+  }, [loadRepoWorktrees]);
+
   // Fetch registered repos on mount — prefer saved repo, otherwise restore the first registered repo
   useEffect(() => {
     loadRegisteredRepos()
@@ -435,6 +471,7 @@ export function useGlobalRepoState({
     handleSelectRegisteredRepo,
     loadRegisteredRepos,
     loadRepoWorktrees,
+    refreshRestoredRepoState,
     openRepoWorkspaceModal,
     orchestratorWorkspaceTargets,
     focusRepoSetup,

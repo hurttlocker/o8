@@ -83,10 +83,12 @@ function LayoutRestoreHarness({
   onLayout,
   onReplaceLayout,
   registeredRepos,
+  refreshRestoredRepoState = async () => true,
 }: {
   onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
   onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
   registeredRepos: RepoRegistryEntry[];
+  refreshRestoredRepoState?: (validatedPaths: readonly string[]) => Promise<boolean>;
 }) {
   const [layout, setLayout] = useState(createDefaultTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>('tile-root');
@@ -100,6 +102,7 @@ function LayoutRestoreHarness({
     findWorkspaceTarget: () => null,
     globalRepoEntries: registeredRepos,
     globalRepoEntry: null,
+    refreshRestoredRepoState,
     setActiveTileId,
     setTileLayout: setLayout,
     tileLayout: layout,
@@ -332,6 +335,49 @@ describe('useTileLayout browser-origin restore', () => {
     });
 
     expect(validationCalls).toBe(2);
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+  });
+
+  it('ignores a completed repository refresh after the operator changes the restored repo scope', async () => {
+    const newerRepoPath = '/tmp/newer-o8-instance/repo';
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    let validationCalls = 0;
+    let completeRefresh: ((available: boolean) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (!url.startsWith('/api/panel/repos')) return Response.json({});
+      validationCalls += 1;
+      return validationCalls === 1
+        ? Response.json({}, { status: 503 })
+        : repoValidationResponse(url, registeredRepos);
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let validationState = 'idle';
+    let replaceLayout: ((layout: TileLayout) => void) | null = null;
+    const onLayout = (layout: TileLayout, _hydrated: boolean, nextValidationState: string) => {
+      latestLayout = layout;
+      validationState = nextValidationState;
+    };
+    const refreshRestoredRepoState = () => new Promise<boolean>((resolve) => { completeRefresh = resolve; });
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onReplaceLayout: (replace) => { replaceLayout = replace; },
+      refreshRestoredRepoState,
+      registeredRepos,
+    })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]')?.click());
+    await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
+    await act(async () => {
+      completeRefresh?.(true);
+      await Promise.resolve();
+    });
+
+    expect(validationCalls).toBe(2);
+    expect(validationState).toBe('idle');
     expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
   });
 

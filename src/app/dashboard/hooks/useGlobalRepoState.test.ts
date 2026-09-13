@@ -123,4 +123,63 @@ describe('global repository worktree discovery', () => {
     expect(mocks.ipcFetch).toHaveBeenCalledTimes(2);
     expect(mocks.ipcFetch).toHaveBeenLastCalledWith('/api/worktrees?repo=%2Ftmp%2Frepo-0250');
   });
+
+  it('rebuilds an exact saved worktree scope from the authoritative repo producer', async () => {
+    const registered = repo(1);
+    const worktreePath = `${registered.localPath}/.worktrees/saved-chat`;
+    mocks.fetchSWRJson.mockRejectedValue(new Error('cold-start repository list failed'));
+    mocks.ipcFetch.mockImplementation(async (input: string) => {
+      if (input === '/api/panel/repos') return Response.json({ repos: [registered] });
+      if (input === `/api/worktrees?repo=${encodeURIComponent(registered.localPath)}`) {
+        return Response.json({
+          worktrees: [{ path: worktreePath, branch: 'saved-chat', status: 'active' }],
+          conflicts: { safe: true, count: 0 },
+          totalDiskUsage: 0,
+        });
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(current.globalRepoEntries).toEqual([]);
+
+    let refreshed = false;
+    await act(async () => {
+      refreshed = await current.refreshRestoredRepoState([worktreePath]);
+    });
+
+    expect(refreshed).toBe(true);
+    expect(current.globalRepoEntries).toEqual([registered]);
+    expect(current.workspaceScopeEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ localPath: registered.localPath }),
+      expect.objectContaining({ localPath: worktreePath, isWorktree: true }),
+    ]));
+  });
+
+  it('does not authorize a validated worktree when its producer cannot return that scope', async () => {
+    const registered = repo(1);
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [] });
+    mocks.ipcFetch.mockImplementation(async (input: string) => {
+      if (input === '/api/panel/repos') return Response.json({ repos: [registered] });
+      if (input.startsWith('/api/worktrees?repo=')) {
+        return Response.json({ worktrees: [], conflicts: { safe: true, count: 0 }, totalDiskUsage: 0 });
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await expect(current.refreshRestoredRepoState([`${registered.localPath}/.worktrees/missing`])).resolves.toBe(false);
+    expect(current.globalRepoEntries).toEqual([]);
+  });
 });
