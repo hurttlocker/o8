@@ -92,10 +92,10 @@ function O8PlanHarness({ isFreePlan }: { isFreePlan: boolean }) {
   );
 }
 
-function RealComposerHarness() {
+function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: ThinkingEffort }) {
   const [input, setInput] = useState('Build it');
   const [mode, setMode] = useState<ComposerSelectorMode>('solo');
-  const [effort, setEffort] = useState<ThinkingEffort>('high');
+  const [effort, setEffort] = useState<ThinkingEffort>(initialEffort);
   const [model, setModel] = useState('gpt-5.6-sol');
   const [backend, setBackend] = useState<OrchestratorBackendSetting>('codex');
   return (
@@ -231,9 +231,11 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
 
     act(() => lead.click());
-    const segments = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')];
-    expect(segments).toHaveLength(expectedEfforts.length);
-    act(() => segments.find((segment) => segment.textContent === 'Extra')!.click());
+    const slider = container.querySelector<HTMLElement>('[role="slider"]')!;
+    expect(slider).not.toBeNull();
+    const stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
+    expect(stops).toHaveLength(expectedEfforts.length);
+    act(() => stops.find((stop) => stop.textContent === 'Extra')!.click());
     expect(lead.getAttribute('data-accent')).toBe('swarm');
     const extraBar = lead.querySelectorAll<HTMLElement>('[data-testid="composer-selector-meter-bar"]')
       [expectedEfforts.indexOf('xhigh')];
@@ -261,6 +263,24 @@ describe('ComposerSelectorFooter', () => {
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('Solo'))!.click());
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
+  });
+
+  it('persists Extra through the real flag-on composer path', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '1');
+    act(() => { root.render(createElement(RealComposerHarness)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
+    act(() => lead.click());
+    const extra = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
+      .find((stop) => stop.textContent === 'Extra')!;
+    act(() => extra.click());
+
+    expect(JSON.parse(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY) ?? '{}'))
+      .toEqual({ 'gpt-5.6-sol': 'xhigh' });
+    expect(lead.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('extra');
+    expect(lead.getAttribute('data-accent')).toBe('swarm');
+    expect(lead.querySelector<HTMLElement>('[data-testid="composer-selector-effort-word"]')?.style.color)
+      .toBe('var(--t-brand-orange)');
   });
 
   it('uses the full runtime label in the bounded workers chip', async () => {
@@ -305,13 +325,13 @@ describe('ComposerSelectorFooter', () => {
 
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-o8-free"]')!.click());
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
-    const o8Segments = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')];
-    expect(o8Segments).toHaveLength(2);
-    expect(o8Segments[0]?.textContent).toBe('Low');
-    act(() => o8Segments[0]!.click());
+    const o8Stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
+    expect(o8Stops).toHaveLength(2);
+    expect(o8Stops[0]?.textContent).toBe('Low');
+    act(() => o8Stops[0]!.click());
     expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
       .toContain('Low · free');
-    act(() => o8Segments[1]!.click());
+    act(() => o8Stops[1]!.click());
     expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
       .toContain('High · founders');
   });
@@ -319,8 +339,8 @@ describe('ComposerSelectorFooter', () => {
   it('shows but refuses the locked founders effort on the free o8 plan', async () => {
     await act(async () => { root.render(createElement(O8PlanHarness, { isFreePlan: true })); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
-    const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')]
-      .find((segment) => segment.textContent === 'High')!;
+    const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
+      .find((stop) => stop.textContent === 'High')!;
 
     expect(high).not.toBeUndefined();
     expect(high.getAttribute('aria-disabled')).toBe('true');
@@ -329,14 +349,14 @@ describe('ComposerSelectorFooter', () => {
     expect(high.style.background).toBe('transparent');
     act(() => high.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
     expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toBe('High · founders');
+      .toContain('High · founders');
     expect(high.style.background).toBe('transparent');
     act(() => high.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
     expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toBe('Low · free');
+      .toContain('Low · free');
     act(() => high.focus());
     expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toBe('High · founders');
+      .toContain('High · founders');
     act(() => high.click());
     act(() => high.dispatchEvent(new KeyboardEvent('keydown', {
       key: '†',
@@ -352,8 +372,8 @@ describe('ComposerSelectorFooter', () => {
   it('selects and persists the founders effort on the paid o8 plan', async () => {
     await act(async () => { root.render(createElement(O8PlanHarness, { isFreePlan: false })); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
-    const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')]
-      .find((segment) => segment.textContent === 'High')!;
+    const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
+      .find((stop) => stop.textContent === 'High')!;
 
     expect(high.getAttribute('aria-disabled')).toBeNull();
     act(() => high.click());
@@ -500,6 +520,54 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(container.querySelector('[data-testid="composer-selector-footer"]')).not.toBeNull();
     expect(container.querySelector('button[aria-label="Fleet worker: Codex. Starts: Run now"]')).toBeNull();
+  });
+
+  it('moves the focused slider with arrows and digit keys', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    const slider = container.querySelector<HTMLElement>('[role="slider"]')!;
+    act(() => slider.focus());
+    await act(async () => {
+      slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('extra');
+    await act(async () => {
+      slider.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('low');
+  });
+
+  it('drops the Ultra stop when the thinking preference event disables it', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '1');
+    localStorage.setItem('o8:orchestrator:ultra-effort', '1');
+    act(() => { root.render(createElement(RealComposerHarness)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    expect(container.querySelectorAll('[data-testid="composer-selector-effort-stop"]')).toHaveLength(7);
+
+    localStorage.setItem('o8:orchestrator:ultra-effort', '0');
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('cortex:orchestrator-thinking-preferences'));
+    });
+    expect(container.querySelectorAll('[data-testid="composer-selector-effort-stop"]')).toHaveLength(6);
+  });
+
+  it('clamps and persists Ultra to Max when the preference turns off', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '1');
+    localStorage.setItem('o8:orchestrator:ultra-effort', '1');
+    localStorage.setItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY, JSON.stringify({ 'gpt-5.6-sol': 'ultra' }));
+    act(() => { root.render(createElement(RealComposerHarness, { initialEffort: 'ultra' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('ultra');
+
+    localStorage.setItem('o8:orchestrator:ultra-effort', '0');
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('cortex:orchestrator-thinking-preferences'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('max');
+    expect(JSON.parse(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY) ?? '{}'))
+      .toEqual({ 'gpt-5.6-sol': 'max' });
   });
 
   it('resolves a no-pin Codex lead to the effective catalogue default', async () => {

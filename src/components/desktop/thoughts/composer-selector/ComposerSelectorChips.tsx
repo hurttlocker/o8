@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { MODEL_EFFORT_LABELS } from '../ModelThinkingChip';
 import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { ProviderMarkGlyph } from './provider-marks';
 import {
-  isTopComposerEffort,
+  isHotComposerEffort,
   providerMarkForLead,
   providerMarkForRuntime,
   type ComposerSelectorMode,
@@ -42,8 +42,29 @@ export function LeadChip({
   onClick: () => void;
 }) {
   const selectedIndex = Math.max(0, state.effortOptions.indexOf(state.effort));
-  const topActive = isTopComposerEffort(state.effort, state.effortOptions);
+  const topActive = isHotComposerEffort(state.effort);
   const accent = topActive ? 'var(--t-brand-orange)' : 'var(--t-accent)';
+  const meterRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const previousIndexRef = useRef<number | null>(null);
+  useEffect(() => {
+    const previousIndex = previousIndexRef.current;
+    previousIndexRef.current = selectedIndex;
+    if (
+      previousIndex === null
+      || selectedIndex <= previousIndex
+      || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ) return;
+    for (let index = previousIndex + 1; index <= selectedIndex; index += 1) {
+      meterRefs.current[index]?.animate?.(
+        [
+          { transform: 'scaleY(1)' },
+          { transform: 'scaleY(1.35)', offset: 0.5 },
+          { transform: 'scaleY(1)' },
+        ],
+        { duration: 240, delay: (index - previousIndex - 1) * 30, easing: 'cubic-bezier(.34,1.56,.64,1)' },
+      );
+    }
+  }, [selectedIndex]);
   return (
     <button
       ref={buttonRef}
@@ -74,19 +95,20 @@ export function LeadChip({
       <span aria-hidden style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 2, height: 9 }}>
         {state.effortOptions.map((effort, index) => {
           const lit = index <= selectedIndex;
-          const top = isTopComposerEffort(effort, state.effortOptions);
           return (
             <span
               key={effort}
+              ref={(node) => { meterRefs.current[index] = node; }}
               data-testid="composer-selector-meter-bar"
               data-lit={lit ? 'true' : 'false'}
-              data-accent={top ? 'swarm' : 'lead'}
+              data-accent={topActive ? 'swarm' : 'lead'}
               style={{
                 width: 2,
                 height: 4 + index,
                 borderRadius: 2,
-                background: top ? 'var(--t-brand-orange)' : lit ? 'var(--t-accent)' : 'var(--t-border)',
-                opacity: lit ? 1 : top ? 0.32 : 0.65,
+                background: lit ? accent : 'var(--t-border)',
+                opacity: lit ? 1 : topActive ? 0.32 : 0.65,
+                transformOrigin: 'bottom',
               }}
             />
           );

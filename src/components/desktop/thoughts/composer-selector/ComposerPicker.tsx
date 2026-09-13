@@ -22,7 +22,7 @@ import {
   type ResolvedComposerSelectorState,
 } from './state';
 import { LeadChip, WorkersChip } from './ComposerSelectorChips';
-import { EffortSegments } from './EffortSegments';
+import { EffortSlider } from './EffortSlider';
 import { ProviderMarkGlyph } from './provider-marks';
 import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
@@ -122,7 +122,8 @@ export function ComposerPicker({
       window.setTimeout(() => {
         if (target === 'lead') {
           searchRef.current?.focus();
-          selectedLeadRef.current?.scrollIntoView?.({ block: 'nearest' });
+          (selectedLeadRef.current?.parentElement ?? selectedLeadRef.current)
+            ?.scrollIntoView?.({ block: 'nearest' });
         } else {
           workerSectionRef.current?.scrollIntoView?.({ block: 'nearest' });
           selectedWorkerRef.current?.scrollIntoView?.({ block: 'nearest' });
@@ -291,7 +292,7 @@ export function ComposerPicker({
                       {selected && !normalizedQuery && (
                         state.effortOptions.length > 0 || state.lockedEffortOptions.length > 0
                       ) ? (
-                        <EffortSegments state={state} onPick={onEffortChange} disabled={saving} />
+                        <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
                       ) : null}
                     </div>
                   );
@@ -318,7 +319,7 @@ export function ComposerPicker({
                       {selected && !normalizedQuery && (
                         state.effortOptions.length > 0 || state.lockedEffortOptions.length > 0
                       ) ? (
-                        <EffortSegments state={state} onPick={onEffortChange} disabled={saving} />
+                        <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
                       ) : null}
                     </div>
                   );
