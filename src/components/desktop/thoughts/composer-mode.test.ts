@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { COMPOSER_MODE_DIRECTIVES } from '@/lib/orchestrator/composer-wire';
-import { composeComposerModeMessage, resolveComposerExecutionMode } from './composer-mode';
+import {
+  COMPOSER_MODES,
+  composeComposerModeMessage,
+  composeComposerTurnMessage,
+  composerModeSpec,
+  resolveComposerExecutionMode,
+} from './composer-mode';
 
 describe('composeComposerModeMessage', () => {
   it('keeps the Solo directive on the wire while preserving operator text for display', () => {
@@ -31,14 +37,24 @@ describe('composeComposerModeMessage', () => {
 });
 
 describe('resolveComposerExecutionMode', () => {
-  it('maps the default composer onto the shared backend literals', () => {
-    expect(resolveComposerExecutionMode('solo', false, false)).toBe('single');
-    expect(resolveComposerExecutionMode('multitask', false, false)).toBe('fleet');
-    expect(resolveComposerExecutionMode('solo', true, false)).toBe('fusion');
-    expect(resolveComposerExecutionMode('fusion', false, false)).toBe('fusion');
+  it('maps all four composer modes onto the shared backend literals', () => {
+    expect(resolveComposerExecutionMode('solo', false)).toBe('single');
+    expect(resolveComposerExecutionMode('multitask', false)).toBe('fleet');
+    expect(resolveComposerExecutionMode('moa', false)).toBe('fleet');
+    expect(resolveComposerExecutionMode('fusion', false)).toBe('fusion');
   });
 
-  it('keeps the automatic single-runtime policy ahead of Fusion', () => {
-    expect(resolveComposerExecutionMode('multitask', true, true)).toBe('single');
+  it('keeps the automatic single-runtime policy ahead of the selected mode', () => {
+    expect(resolveComposerExecutionMode('fusion', true)).toBe('single');
+  });
+
+  it('uses one resolver for every rendered label and wire directive', () => {
+    expect(COMPOSER_MODES.map((mode) => mode.id)).toEqual(['solo', 'multitask', 'moa', 'fusion']);
+    for (const mode of COMPOSER_MODES) {
+      const resolved = composerModeSpec(mode.id);
+      const turn = composeComposerTurnMessage('Build it', mode.id, false);
+      expect(resolved.label).toBe(mode.label);
+      expect(turn.wireMessage).toContain(resolved.directive);
+    }
   });
 });
