@@ -27,6 +27,15 @@ export interface WorkspaceLifecycleLease {
   packetId: string;
   reservationId: string;
   contended: boolean;
+  /** This acquisition had to reclaim a confirmed-dead owner's abandoned lease. */
+  reclaimedDeadOwner: boolean;
+  /**
+   * Contention came from an owner this process could not prove dead — a real
+   * competing intent, not an abandoned lease. Reclaiming after a crash sets
+   * `contended` too, so callers that fail closed on contention must read this
+   * instead or they refuse the first legitimate recovery after an owner exits.
+   */
+  contendedByLiveOwner: boolean;
 }
 
 export class WorkspaceLifecycleLeaseUnavailableError extends Error {
@@ -131,11 +140,18 @@ export async function acquireWorkspaceLifecycleLease(
   const reservationId = randomUUID();
   const deadline = Date.now() + WAIT_BUDGET_MS;
   let contended = false;
+  let reclaimedDeadOwner = false;
+  let contendedByLiveOwner = false;
   for (;;) {
     const claim = claimLease(packetId, reservationId, identity);
-    if (claim.acquired) return { packetId, reservationId, contended };
+    if (claim.acquired) {
+      return { packetId, reservationId, contended, reclaimedDeadOwner, contendedByLiveOwner };
+    }
     contended = true;
     if (!claim.owner) {
+      // The row vanished between the insert and the read: somebody else owned
+      // and released it. That is a competing intent, not an abandoned lease.
+      contendedByLiveOwner = true;
       if (Date.now() >= deadline) break;
       await waitBriefly();
       continue;
@@ -146,8 +162,10 @@ export async function acquireWorkspaceLifecycleLease(
       || (ownerProbe.state === 'live'
         && !sameMetadataLockProcessIdentity(ownerProbe.identity, ownerIdentity))) {
       reclaimLease(claim.owner);
+      reclaimedDeadOwner = true;
       continue;
     }
+    contendedByLiveOwner = true;
     if (Date.now() >= deadline) break;
     await waitBriefly();
   }

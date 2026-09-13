@@ -360,15 +360,24 @@ async function executeWithIdempotency<T>(
     if (unresolved && existing.reservation_id && params.reconcileUnresolved) {
       try {
         const reconciled = await params.reconcileUnresolved();
-        if (reconciled !== null && finalizeUnresolved(
-          key,
-          existing.reservation_id,
-          existing.pid,
-          existing.owner_identity_json,
-          JSON.stringify(reconciled),
-          expiresAt,
-        )) {
-          return { replayed: true, inProgress: false, result: reconciled };
+        if (reconciled !== null) {
+          if (finalizeUnresolved(
+            key,
+            existing.reservation_id,
+            existing.pid,
+            existing.owner_identity_json,
+            JSON.stringify(reconciled),
+            expiresAt,
+          )) {
+            return { replayed: true, inProgress: false, result: reconciled };
+          }
+          // A concurrent duplicate reconciled the same reservation first. The
+          // row is keyed by this request, so its receipt is this request's
+          // answer — replay it instead of reporting an unknown outcome.
+          const settled = selectFresh(key, Date.now());
+          if (settled?.result_json != null) {
+            return { replayed: true, inProgress: false, result: JSON.parse(settled.result_json) as T };
+          }
         }
       } catch (error) {
         console.warn('[idempotency] unresolved receipt reconciliation failed:', error instanceof Error ? error.message : error);

@@ -9,6 +9,17 @@
  *
  *   o8 packet reset   [--packet <id>] [--reason "…"]   # wipe worktree, then `o8 mission dispatch`
  *   o8 packet retry   [--packet <id>] [--reason "…"]   # KEEP worktree; committed work returns to review
+ *
+ * Recovery of an interrupted `retry` (#2313): resubmit the ORIGINAL request
+ * unchanged — same --idempotency-key and --reason — and attest which interrupted
+ * request it is with BOTH
+ *   --expected-generation <retry-salvage generation>
+ *   --expected-candidate-lane <lane id>
+ * The attestation is not part of the request body the key is bound to, so the
+ * original reservation is reconciled instead of a second one being minted.
+ * Recovery continues committed-work salvage ONLY: it never resumes the
+ * generation-scoped reset, and `o8 packet reset` (which clears the worktree)
+ * cannot be recovered this way.
  *   o8 packet rerun   --feedback "…" [--packet <id>] [--idempotency-key <id>]
  *   o8 packet merge-preview [--packet <id>]            # dry-run the 5-layer merge gate
  */
@@ -65,7 +76,10 @@ type RecoveryVerb = 'reset' | 'retry' | 'rerun' | 'steer' | 'approve-merge' | 'm
 
 export function parsePacketRecoveryArgs(verb: RecoveryVerb, rest: string[]): ParsedPacketArguments {
   if (verb === 'reset' || verb === 'retry') {
-    return parsePacketArguments(rest, { command: verb, valueFlags: ['reason', 'idempotency-key'] });
+    return parsePacketArguments(rest, {
+      command: verb,
+      valueFlags: ['reason', 'idempotency-key', 'expected-generation', 'expected-candidate-lane'],
+    });
   }
   if (verb === 'rerun') {
     return parsePacketArguments(rest, { command: verb, valueFlags: ['feedback', 'idempotency-key'] });
@@ -96,11 +110,40 @@ async function doReset(mode: OutputMode, rest: string[], clearWorktree: boolean,
   const args = parsePacketRecoveryArgs(verb, rest);
   const packetId = requirePacketId(await resolvePacketTarget(args.target), verb);
   const cfg = resolveConfig();
+  // Recovery attestation for an interrupted request. Both halves are required:
+  // the generation says WHICH request, the candidate lane says which committed
+  // work it was preserving. Neither alone is accepted by the route.
+  const hasRecoveryEvidence = Object.hasOwn(args.values, 'expected-generation')
+    || Object.hasOwn(args.values, 'expected-candidate-lane');
+  const expectedGeneration = args.values['expected-generation']?.trim() || '';
+  const expectedCandidateLaneId = args.values['expected-candidate-lane']?.trim() || '';
+  if (hasRecoveryEvidence && clearWorktree) {
+    throw new CliError(
+      'invalid_recovery_evidence',
+      'Recovery attestation applies only to `o8 packet retry`; a worktree-clearing reset cannot be resumed.',
+      EXIT.INVALID_ARGS,
+    );
+  }
+  if (hasRecoveryEvidence && (!expectedGeneration || !expectedCandidateLaneId)) {
+    throw new CliError(
+      'invalid_recovery_evidence',
+      'Recovering an interrupted request needs both --expected-generation and --expected-candidate-lane.',
+      EXIT.INVALID_ARGS,
+    );
+  }
+  if (hasRecoveryEvidence && !args.values['idempotency-key']?.trim()) {
+    throw new CliError(
+      'invalid_recovery_evidence',
+      'Recovering an interrupted request needs its original --idempotency-key; recovery evidence cannot be applied to a new key.',
+      EXIT.INVALID_ARGS,
+    );
+  }
   const body = {
     packetId,
     clearWorktree,
     reason: args.values.reason?.trim() || undefined,
     idempotencyKey: args.values['idempotency-key']?.trim() || randomUUID(),
+    ...(hasRecoveryEvidence ? { recovery: { expectedGeneration, expectedCandidateLaneId } } : {}),
   };
   const res = await fetchCorrelatedPacketMutation<OperatorResponse<PacketResetResult>>(
     cfg,
