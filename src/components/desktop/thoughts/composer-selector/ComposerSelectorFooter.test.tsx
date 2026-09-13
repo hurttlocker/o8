@@ -2,6 +2,7 @@
 
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ComposerSelectorFooter } from './ComposerSelectorFooter';
@@ -527,6 +528,8 @@ describe('ComposerSelectorFooter', () => {
   });
 
   it('defaults to the selector footer and keeps the classic footer behind opt-out', async () => {
+    expect(renderToStaticMarkup(createElement(RealComposerHarness)))
+      .toContain('data-testid="composer-selector-footer"');
     act(() => { root.render(createElement(RealComposerHarness, { key: 'default' })); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(container.querySelector('[data-testid="composer-selector-footer"]')).not.toBeNull();

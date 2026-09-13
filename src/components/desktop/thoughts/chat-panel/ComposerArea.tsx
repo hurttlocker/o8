@@ -147,7 +147,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
-  const [composerSelectorV1Enabled, setComposerSelectorV1Enabled] = useState(false);
+  const [composerSelectorV1Enabled, setComposerSelectorV1Enabled] = useState(true);
   useEffect(() => {
     setComposerSelectorV1Enabled(readComposerSelectorV1Flag());
   }, []);
