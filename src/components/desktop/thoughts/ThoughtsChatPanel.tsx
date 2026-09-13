@@ -2349,7 +2349,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         ) : null}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
-        modelId={isOrchestratorMode ? orchestratorModel : undefined} onModelRestore={isOrchestratorMode ? restoreOrchestratorModel : undefined}
+        modelId={isOrchestratorMode ? orchestratorModel : undefined}
+        onModelRestore={isOrchestratorMode ? restoreOrchestratorModel : undefined}
         onModelChange={isOrchestratorMode ? backendSwitch.selectModel : undefined}
         activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}
         onBackendChange={isOrchestratorMode ? backendSwitch.request : undefined}
