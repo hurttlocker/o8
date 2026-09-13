@@ -195,6 +195,35 @@ describe('global repository worktree discovery', () => {
     expect(current.globalRepoEntries).toEqual([]);
   });
 
+  it('keeps recovered inventory when the older mount request rejects later', async () => {
+    const registered = repo(1);
+    let rejectMount: (error: Error) => void = () => { throw new Error('Mount request not started'); };
+    mocks.fetchSWRJson.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectMount = reject;
+    }));
+    mocks.ipcFetch.mockImplementation(async (input: string) => {
+      if (input === '/api/panel/repos') return Response.json({ repos: [registered] });
+      return Response.json({ worktrees: [], conflicts: { safe: true, count: 0 }, totalDiskUsage: 0 });
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+
+    await act(async () => {
+      expect(await current.refreshRestoredRepoState([registered.localPath])).toBe(true);
+    });
+    expect(current.globalRepoEntries).toEqual([registered]);
+
+    await act(async () => {
+      rejectMount(new Error('Old startup request failed'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(current.globalRepoEntries).toEqual([registered]);
+    expect(current.workspaceScopeEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ localPath: registered.localPath }),
+    ]));
+  });
+
   it('bounds and abandons a hung authoritative restore refresh', async () => {
     mocks.fetchSWRJson.mockResolvedValue({ repos: [] });
     mocks.ipcFetch.mockImplementation(() => new Promise<Response>(() => undefined));

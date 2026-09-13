@@ -307,7 +307,8 @@ export function useGlobalRepoState({
         }
       })
       .catch(() => {
-        setGlobalRepoEntries([]);
+        // A failed startup request does not invalidate a newer successful
+        // recovery or the last known inventory.
       });
   }, [loadRegisteredRepos]);
 
