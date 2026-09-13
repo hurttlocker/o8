@@ -1,7 +1,7 @@
 /**
  * Composer modes (Cursor-parity mission, Q 2026-07-17, v2 ruling) — the "+"
  * switcher carries the agent's operating mode so the model picker stays purely
- * about models. Three modes, Q's exact semantics:
+ * about models. The classic footer keeps three modes, with Q's exact semantics:
  *
  * - Solo — the orchestrator does NOT dispatch anything: it works directly in
  *   this session with its own tools.
@@ -10,6 +10,8 @@
  * - Mixture of Agents — it multitasks, but PLANS with both frontier models
  *   first (Collide backend: Claude + Codex propose, one synthesizer decides).
  *   The panel flips collide state alongside the directive.
+ * The flagged selector adds Fusion through the shared resolver while this
+ * classic list stays unchanged.
  *
  * The active mode shows as a chip beside the "+" trigger and persists across
  * sends until switched.
@@ -21,6 +23,10 @@ import {
   composeComposerWireMessage,
   type ComposerWireMode,
 } from '@/lib/orchestrator/composer-wire';
+import {
+  composerSelectorModeSpec,
+  resolveComposerSelectorExecutionMode,
+} from './composer-selector/state';
 
 export type ComposerMode = ComposerWireMode;
 
@@ -63,7 +69,7 @@ export const COMPOSER_MODES: readonly ComposerModeSpec[] = [
 ];
 
 export function composerModeSpec(mode: ComposerMode): ComposerModeSpec {
-  return COMPOSER_MODES.find((m) => m.id === mode) ?? COMPOSER_MODES[0];
+  return COMPOSER_MODES.find((m) => m.id === mode) ?? composerSelectorModeSpec(mode);
 }
 
 export function resolveComposerExecutionMode(
@@ -73,7 +79,7 @@ export function resolveComposerExecutionMode(
 ): OrchestratorExecutionMode {
   if (forceSingle) return 'single';
   if (fusionEnabled) return 'fusion';
-  return mode === 'solo' ? 'single' : 'fleet';
+  return resolveComposerSelectorExecutionMode(mode);
 }
 
 /**

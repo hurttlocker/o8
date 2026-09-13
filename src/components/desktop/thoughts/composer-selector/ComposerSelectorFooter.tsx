@@ -1,0 +1,165 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ComposerPicker } from './ComposerPicker';
+import { ModeChip } from './ModeChip';
+import {
+  readComposerEffortMaps,
+  resolveComposerSelectorState,
+  writeComposerModelEffort,
+  type ComposerEffortClampNotice,
+  type ComposerSelectorMode,
+} from './state';
+import {
+  FALLBACK_DISPATCH_DEFAULTS,
+  shortWorkerModelLabel,
+  workerModelForDisplay,
+  type DispatchDefaults,
+} from '../ComposerFleetChips';
+import type { OrchestratorBackendSetting } from '../operator-defaults';
+import { fetchOperatorDefaultsValues, invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
+import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
+
+export function ComposerSelectorFooter({
+  mode,
+  onModeChange,
+  modelId,
+  modelLabel,
+  activeBackend,
+  onModelChange,
+  onBackendChange,
+  effort,
+  onEffortChange,
+  adaptiveEnabled,
+  operatorDefaultEffort = effort,
+  clampNotice = null,
+  isFreePlan = false,
+  threadId = null,
+  attachControl,
+  micControl,
+  sendControl,
+  onRequestTextareaFocus,
+}: {
+  input: string;
+  mode: ComposerSelectorMode;
+  onModeChange: (mode: ComposerSelectorMode) => void;
+  modelId: string;
+  modelLabel: string;
+  activeBackend: OrchestratorBackendSetting;
+  onModelChange?: (model: string) => void;
+  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
+  effort: ThinkingEffort;
+  onEffortChange: (effort: ThinkingEffort) => void;
+  adaptiveEnabled: boolean;
+  operatorDefaultEffort?: ThinkingEffort;
+  clampNotice?: ComposerEffortClampNotice | null;
+  isFreePlan?: boolean;
+  threadId?: string | null;
+  attachControl?: ReactNode;
+  micControl?: ReactNode;
+  sendControl?: ReactNode;
+  onRequestTextareaFocus?: () => void;
+}) {
+  const [defaults, setDefaults] = useState<DispatchDefaults>(FALLBACK_DISPATCH_DEFAULTS);
+  const [threadEfforts, setThreadEfforts] = useState(() => readComposerEffortMaps(threadId, modelId).thread);
+  const [saving, setSaving] = useState(false);
+
+  const refetchDefaults = useCallback(async () => {
+    try {
+      const response = await fetchOperatorDefaultsValues();
+      if (!response.ok) return;
+      const payload = await response.json() as { values?: Partial<DispatchDefaults> };
+      const values = payload.values ?? {};
+      setDefaults({
+        defaultDispatchRuntime: (values.defaultDispatchRuntime as OrchestratorRuntime) || 'codex',
+        defaultDispatchModel: typeof values.defaultDispatchModel === 'string' ? values.defaultDispatchModel : '',
+        opencodeWorkerModel: typeof values.opencodeWorkerModel === 'string' && values.opencodeWorkerModel ? values.opencodeWorkerModel : null,
+        workerStartMode: values.workerStartMode === 'huddle' || values.workerStartMode === 'adaptive' ? values.workerStartMode : 'autonomous',
+      });
+    } catch {
+      // Keep the last confirmed operator defaults.
+    }
+  }, []);
+
+  useEffect(() => { void refetchDefaults(); }, [refetchDefaults]);
+  useEffect(() => {
+    setThreadEfforts(readComposerEffortMaps(threadId, modelId).thread);
+  }, [modelId, threadId]);
+
+  const runtimeLabel = getRuntimeCapability(defaults.defaultDispatchRuntime).label;
+  const workerModel = workerModelForDisplay(defaults.defaultDispatchRuntime, defaults);
+  const resolved = useMemo(() => resolveComposerSelectorState({
+    mode,
+    leadModelId: modelId,
+    leadModelLabel: modelLabel,
+    leadBackend: activeBackend,
+    inSessionEffortByModel: { [modelId]: effort },
+    threadEffortByModel: threadEfforts,
+    operatorDefaultEffort,
+    adaptiveEnabled,
+    isFreePlan,
+    workerRuntimeLabel: runtimeLabel,
+    workerModelLabel: workerModel ? shortWorkerModelLabel(workerModel) : null,
+    clampNotice,
+  }), [activeBackend, adaptiveEnabled, clampNotice, effort, isFreePlan, mode, modelId, modelLabel, operatorDefaultEffort, runtimeLabel, threadEfforts, workerModel]);
+
+  const setEffort = (next: ThinkingEffort) => {
+    writeComposerModelEffort(modelId, next, threadId);
+    setThreadEfforts((current) => ({ ...current, [modelId]: next }));
+    onEffortChange(next);
+  };
+
+  const persistDefaults = useCallback(async (patch: Partial<DispatchDefaults>) => {
+    setDefaults((current) => ({ ...current, ...patch }));
+    setSaving(true);
+    try {
+      await fetch('/api/panel/operator-defaults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      invalidateOperatorDefaultsValuesSnapshot();
+    } catch {
+      // The confirmed read below restores server truth after a failed write.
+    } finally {
+      await refetchDefaults();
+      setSaving(false);
+    }
+  }, [refetchDefaults]);
+
+  return (
+    <div
+      data-testid="composer-selector-footer"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: 36,
+        paddingTop: 4,
+        paddingRight: 8,
+        paddingBottom: 8,
+        paddingLeft: 8,
+      }}
+    >
+      <ModeChip state={resolved} onModeChange={onModeChange} />
+      <span data-testid="composer-selector-attach" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{attachControl}</span>
+      <span data-testid="composer-selector-spacer" style={{ flex: 1, minWidth: 0 }} />
+      <ComposerPicker
+        state={resolved}
+        defaults={defaults}
+        onModelChange={onModelChange}
+        onBackendChange={onBackendChange}
+        onEffortChange={setEffort}
+        onRuntimeChange={(defaultDispatchRuntime) => { void persistDefaults({ defaultDispatchRuntime }); }}
+        onWorkerModelChange={(opencodeWorkerModel) => { void persistDefaults({ opencodeWorkerModel }); }}
+        onWorkerStartModeChange={(workerStartMode: WorkerStartMode) => { void persistDefaults({ workerStartMode }); }}
+        onRequestTextareaFocus={onRequestTextareaFocus}
+        saving={saving}
+      />
+      <span data-testid="composer-selector-mic" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{micControl}</span>
+      <span data-testid="composer-selector-send" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{sendControl}</span>
+    </div>
+  );
+}

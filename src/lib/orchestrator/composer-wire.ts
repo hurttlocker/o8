@@ -1,4 +1,4 @@
-export type ComposerWireMode = 'solo' | 'multitask' | 'moa';
+export type ComposerWireMode = 'solo' | 'multitask' | 'moa' | 'fusion';
 
 /**
  * Dispatch is an MCP tool on the `cortex` server, and every orchestrator backend
@@ -17,6 +17,7 @@ export const COMPOSER_MODE_DIRECTIVES: Readonly<Record<ComposerWireMode, string>
   solo: '[Mode: Solo] Work directly in this session yourself — do NOT dispatch worker agents or create missions. Edit, run, and verify with your own tools.',
   multitask: `[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. ${DISPATCH_IMPERATIVE}`,
   moa: `[Mode: Mixture of Agents] After the proposal round, decompose the work into parallel worker packets and dispatch them into isolated worktrees. ${DISPATCH_IMPERATIVE}`,
+  fusion: `[Mode: Fusion] Run a deep parallel pass with native sub-agents and workers across every available runtime. ${DISPATCH_IMPERATIVE}`,
 };
 
 /**

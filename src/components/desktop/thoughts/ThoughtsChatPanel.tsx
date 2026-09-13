@@ -2362,7 +2362,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onBackendChange={isOrchestratorMode ? backendSwitch.request : undefined}
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
-        adaptiveEnabled={adaptiveThinkingEnabled}
+        adaptiveEnabled={adaptiveThinkingEnabled} operatorDefaultEffort={operatorDefaults.thinkingEffort}
         swarmEnabled={swarmEnabled}
         onSetSwarm={onSetSwarm}
         collideEnabled={collideEnabled}
