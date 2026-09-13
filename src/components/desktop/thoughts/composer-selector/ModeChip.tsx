@@ -51,7 +51,7 @@ export function ModeChip({
         ref={triggerRef}
         data-testid="composer-selector-mode"
         type="button"
-        title={`${state.modeSublabel}. Shift+Tab cycles.`}
+        title={`${state.modeLabel}. ${state.modeSublabel}. Shift+Tab cycles.`}
         aria-label={`Mode: ${state.modeLabel}`}
         aria-expanded={open}
         onClick={() => setPopoverOpen(!open)}

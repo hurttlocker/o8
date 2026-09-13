@@ -59,8 +59,8 @@ export function useComposerSelectorState(input: {
   threadId: string | null;
   repoPath?: string | null;
   isFreePlan?: boolean;
-  initialEffortIsSessionOverride?: boolean;
   onModeChange?: (mode: ComposerSelectorMode) => void;
+  onModelRestore?: (model: string) => void;
   onModelChange?: (model: string) => void;
   onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   onEffortChange: (effort: ThinkingEffort) => void;
@@ -78,8 +78,8 @@ export function useComposerSelectorState(input: {
     threadId,
     repoPath,
     isFreePlan: freePlanOverride,
-    initialEffortIsSessionOverride = false,
     onModeChange: changeMode,
+    onModelRestore: restoreModel,
     onModelChange: changeModel,
     onBackendChange: changeBackend,
     onEffortChange: changeEffort,
@@ -184,8 +184,8 @@ export function useComposerSelectorState(input: {
   useEffect(() => {
     if (!enabled || !repoPath) return;
     const storedModel = readStoredOrchestratorModel(repoPath);
-    if (storedModel && storedModel !== modelId) changeModel?.(storedModel);
-  }, [changeModel, enabled, modelId, repoPath]);
+    if (storedModel && storedModel !== modelId) restoreModel?.(storedModel);
+  }, [enabled, modelId, repoPath, restoreModel]);
 
   const storedEffortKey = `${threadId ?? ''}:${modelId ?? ''}`;
   useEffect(() => {
@@ -199,17 +199,6 @@ export function useComposerSelectorState(input: {
     ? storedEffortSnapshot.efforts
     : EMPTY_COMPOSER_EFFORTS;
   const effortKey = sessionEffortKey(threadId);
-  if (
-    initialEffortIsSessionOverride
-    && modelId
-    && inSessionEffortsRef.current[effortKey]?.[modelId] === undefined
-  ) {
-    inSessionEffortsRef.current[effortKey] = setModelEffort(
-      inSessionEffortsRef.current[effortKey] ?? {},
-      modelId,
-      effort,
-    );
-  }
   const currentSessionEfforts = inSessionEffortsRef.current[effortKey] ?? EMPTY_COMPOSER_EFFORTS;
   const resolvedModelLabel = backend && modelId
     ? resolveComposerLeadCatalogueLabel(

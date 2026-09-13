@@ -8,11 +8,7 @@ import type { ComposerModelGroup } from '../ModelThinkingChip';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { ComposerPicker } from './ComposerPicker';
 import { ModeChip } from './ModeChip';
-import type {
-  ComposerSelectorMode,
-  ResolvedComposerSelectorState,
-} from './state';
-import { useComposerSelectorState } from './useComposerSelectorState';
+import type { ResolvedComposerSelectorState } from './state';
 import type { ComposerWorkerDefaults } from './worker-settings';
 
 export function ComposerSelectorFooterView({
@@ -102,79 +98,5 @@ export function ComposerSelectorFooterView({
       {voiceControl ? <span data-testid="composer-selector-voice" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{voiceControl}</span> : null}
       <span data-testid="composer-selector-send" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{sendControl}</span>
     </div>
-  );
-}
-
-export function ComposerSelectorFooter({
-  mode,
-  onModeChange,
-  modelId,
-  modelLabel,
-  activeBackend,
-  onModelChange,
-  onBackendChange,
-  effort,
-  onEffortChange,
-  adaptiveEnabled,
-  operatorDefaultEffort = effort,
-  isFreePlan = false,
-  threadId = null,
-  ...viewProps
-}: {
-  input: string;
-  mode: ComposerSelectorMode;
-  onModeChange: (mode: ComposerSelectorMode) => void;
-  modelId: string;
-  modelLabel: string;
-  activeBackend: OrchestratorBackendSetting;
-  onModelChange?: (model: string) => void;
-  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
-  effort: ThinkingEffort;
-  onEffortChange: (effort: ThinkingEffort) => void;
-  adaptiveEnabled: boolean;
-  operatorDefaultEffort?: ThinkingEffort;
-  isFreePlan?: boolean;
-  threadId?: string | null;
-  leadingControls?: ReactNode;
-  attachControl?: ReactNode;
-  meterControl?: ReactNode;
-  micControl?: ReactNode;
-  voiceControl?: ReactNode;
-  sendControl?: ReactNode;
-  containerRef?: Ref<HTMLDivElement>;
-  onRequestTextareaFocus?: () => void;
-}) {
-  const controller = useComposerSelectorState({
-    enabled: true,
-    mode,
-    modelId,
-    modelLabel,
-    backend: activeBackend,
-    effort,
-    operatorDefaultEffort,
-    adaptiveEnabled,
-    threadId,
-    isFreePlan,
-    initialEffortIsSessionOverride: true,
-    onModeChange,
-    onModelChange,
-    onBackendChange,
-    onEffortChange,
-  });
-  return (
-    <ComposerSelectorFooterView
-      {...viewProps}
-      state={controller.state}
-      defaults={controller.defaults}
-      composerModelGroups={controller.composerModelGroups}
-      onModeChange={controller.onModeChange}
-      onModelChange={controller.onModelChange}
-      onBackendChange={controller.onBackendChange}
-      onEffortChange={controller.onEffortChange}
-      onRuntimeChange={controller.onRuntimeChange}
-      onWorkerModelChange={controller.onWorkerModelChange}
-      onWorkerStartModeChange={controller.onWorkerStartModeChange}
-      saving={controller.savingWorkerDefaults}
-    />
   );
 }

@@ -49,6 +49,8 @@ interface ComposerAreaProps {
   modelLabel: string;
   /** Raw orchestrator model id — only meaningful in orchestrator mode. */
   modelId?: string;
+  /** Restore persisted model state without applying user-pick side effects. */
+  onModelRestore?: (model: string) => void;
   /** Orchestrator-mode model switching from the composer chip. */
   onModelChange?: (model: string) => void;
   activeBackend?: OrchestratorBackendSetting;
@@ -110,6 +112,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSlashCommand,
   modelLabel,
   modelId,
+  onModelRestore,
   onModelChange,
   activeBackend,
   onBackendChange,
@@ -166,6 +169,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     threadId: sessionRulesThreadId ?? null,
     repoPath,
     onModeChange: onComposerModeChange,
+    onModelRestore,
     onModelChange,
     onBackendChange,
     onEffortChange,
