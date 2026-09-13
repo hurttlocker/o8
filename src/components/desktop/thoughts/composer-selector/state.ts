@@ -6,6 +6,7 @@ import {
 } from '@/lib/orchestrator/thinking-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { MODEL_IDS } from '@/lib/models';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 
 export const COMPOSER_SELECTOR_V1_STORAGE_KEY = 'o8:composer-selector-v1';
@@ -15,6 +16,93 @@ export const LEGACY_COMPOSER_EFFORT_STORAGE_KEY = 'o8:orchestrator:thinking-effo
 
 export type ComposerSelectorMode = 'solo' | 'multitask' | 'moa' | 'fusion';
 export type ComposerEffortMap = Partial<Record<string, ThinkingEffort>>;
+export type ComposerProviderMark = 'anthropic' | 'openai' | 'gemini' | 'x' | 'deepseek' | 'copilot' | 'ollama' | 'o8' | 'terminal';
+
+export const COMPOSER_PROVIDER_MARK_TABLE = {
+  leadModelFamilies: [
+    { pattern: /^ollama:/i, mark: 'ollama' },
+    { pattern: /deepseek/i, mark: 'deepseek' },
+    { pattern: /(?:^|\/)gemini|google\//i, mark: 'gemini' },
+    { pattern: /(?:^|\/)grok|x-ai\//i, mark: 'x' },
+    { pattern: /(?:^|\/)claude|anthropic\//i, mark: 'anthropic' },
+    { pattern: /(?:^|\/)gpt-|openai\//i, mark: 'openai' },
+  ],
+  leadBackends: {
+    auto: 'terminal',
+    codex: 'openai',
+    claude: 'anthropic',
+    openclaw: 'terminal',
+    hermes: 'terminal',
+    collide: 'terminal',
+    fable: 'anthropic',
+    o8: 'o8',
+    opencode: 'terminal',
+  },
+  workerRuntimes: {
+    codex: 'openai',
+    'claude-code': 'anthropic',
+    gemini: 'gemini',
+    antigravity: 'gemini',
+    magnitude: 'terminal',
+    opencode: 'terminal',
+    'copilot-cli': 'copilot',
+    crush: 'terminal',
+    openhands: 'terminal',
+    goose: 'terminal',
+    qwen: 'terminal',
+    qoder: 'terminal',
+    kimi: 'terminal',
+    aider: 'terminal',
+    '3code': 'terminal',
+    pi: 'terminal',
+    cursor: 'terminal',
+    grok: 'x',
+    'prime-agent': 'terminal',
+    'deepseek-harness': 'deepseek',
+  },
+} as const satisfies {
+  leadModelFamilies: readonly { pattern: RegExp; mark: ComposerProviderMark }[];
+  leadBackends: Record<OrchestratorBackendSetting, ComposerProviderMark>;
+  workerRuntimes: Record<OrchestratorRuntime, ComposerProviderMark>;
+};
+
+export const COMPOSER_EFFORT_CONSEQUENCES: Record<ThinkingEffort, string> = {
+  low: 'Low · fast, cheapest',
+  medium: 'Medium · balanced',
+  adaptive: 'Adaptive · the model picks',
+  high: 'High · default for real work',
+  xhigh: 'Extra · longer turns',
+  max: 'Max · usage limits apply',
+  ultra: 'Ultra · longest turns, usage limits apply',
+};
+
+export function providerMarkForLead(
+  backend: OrchestratorBackendSetting,
+  modelId: string,
+): ComposerProviderMark {
+  return COMPOSER_PROVIDER_MARK_TABLE.leadModelFamilies
+    .find(({ pattern }) => pattern.test(modelId))?.mark
+    ?? COMPOSER_PROVIDER_MARK_TABLE.leadBackends[backend];
+}
+
+export function providerMarkForRuntime(runtime: OrchestratorRuntime): ComposerProviderMark {
+  return COMPOSER_PROVIDER_MARK_TABLE.workerRuntimes[runtime];
+}
+
+export function composerEffortConsequence(
+  backend: OrchestratorBackendSetting,
+  effort: ThinkingEffort,
+): string {
+  if (backend === 'o8') return effort === 'high' ? 'High · founders' : 'Low · free';
+  return COMPOSER_EFFORT_CONSEQUENCES[effort];
+}
+
+export function isTopComposerEffort(
+  effort: ThinkingEffort,
+  options: readonly ThinkingEffort[],
+): boolean {
+  return options.length > 2 && options.indexOf(effort) >= options.length - 2;
+}
 
 export interface ComposerSelectorModeSpec {
   id: ComposerSelectorMode;
@@ -171,9 +259,9 @@ export function supportedEffortsForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
   adaptiveEnabled: boolean,
-  isFreePlan = false,
+  _isFreePlan = false,
 ): readonly ThinkingEffort[] {
-  if (backend === 'o8') return isFreePlan ? [] : ['low', 'high'];
+  if (backend === 'o8') return ['low', 'high'];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
   const ultraCapable = backend === 'codex' && isCodexUltraCapableModel(modelId);

@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { composeComposerTurnMessage } from '../composer-mode';
 import {
+  composerEffortConsequence,
+  providerMarkForLead,
+  providerMarkForRuntime,
   resolveEffectiveComposerLeadModelId,
   resolveComposerSelectorState,
   readComposerEffortMaps,
@@ -91,7 +94,7 @@ describe('composer selector state', () => {
     expect(resolved.chipTitle).toContain('ultra is unsupported for Terra; clamped to xhigh');
   });
 
-  it('keeps the free backend on its real low tier while hiding effort controls', () => {
+  it('keeps the free backend on its real low tier while exposing both o8 tiers', () => {
     const resolved = resolveComposerSelectorState({
       mode: 'solo',
       leadModelId: 'o8-free',
@@ -106,7 +109,17 @@ describe('composer selector state', () => {
     });
 
     expect(resolved.effort).toBe('low');
-    expect(resolved.effortOptions).toEqual([]);
+    expect(resolved.effortOptions).toEqual(['low', 'high']);
+    expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
+    expect(composerEffortConsequence('o8', 'high')).toBe('High · founders');
+  });
+
+  it('maps lead families and worker runtimes to provider marks', () => {
+    expect(providerMarkForLead('codex', 'gpt-6-astra')).toBe('openai');
+    expect(providerMarkForLead('codex', 'ollama:qwen:32b')).toBe('ollama');
+    expect(providerMarkForLead('opencode', 'google/gemini-3-pro')).toBe('gemini');
+    expect(providerMarkForRuntime('claude-code')).toBe('anthropic');
+    expect(providerMarkForRuntime('deepseek-harness')).toBe('deepseek');
   });
 
   it('resolves in-session over thread over operator default', () => {

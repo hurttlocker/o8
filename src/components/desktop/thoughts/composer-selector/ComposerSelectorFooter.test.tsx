@@ -5,7 +5,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ComposerSelectorFooter } from './ComposerSelectorFooter';
-import { cycleComposerSelectorMode, type ComposerSelectorMode } from './state';
+import {
+  cycleComposerSelectorMode,
+  supportedEffortsForLead,
+  type ComposerSelectorMode,
+} from './state';
 import { InputButtons } from '../InputButtons';
 import { ComposerArea } from '../chat-panel/ComposerArea';
 import { COMPOSER_MODEL_GROUPS } from '../ModelThinkingChip';
@@ -31,6 +35,7 @@ function Harness() {
   const [mode, setMode] = useState<ComposerSelectorMode>('solo');
   const [effort, setEffort] = useState<ThinkingEffort>('high');
   const [model, setModel] = useState('gpt-5.6-sol');
+  const [backend, setBackend] = useState<OrchestratorBackendSetting>('codex');
   return (
     <div>
       <textarea
@@ -47,9 +52,10 @@ function Harness() {
         mode={mode}
         onModeChange={setMode}
         modelId={model}
-        modelLabel={model === 'gpt-5.6-sol' ? 'Sol' : 'Terra'}
-        activeBackend="codex"
+        modelLabel={model === 'gpt-5.6-sol' ? 'Sol' : model}
+        activeBackend={backend}
         onModelChange={setModel}
+        onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
         effort={effort}
         onEffortChange={setEffort}
         adaptiveEnabled
@@ -174,19 +180,83 @@ describe('ComposerSelectorFooter', () => {
     vi.unstubAllGlobals();
   });
 
-  it('orders mode, attach, picker, mic, and send with mic immediately before send', async () => {
+  it('orders mode, attach, lead, mic, and send with mic immediately before send', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     const footer = container.querySelector('[data-testid="composer-selector-footer"]');
     expect([...footer!.children].map((node) => node.getAttribute('data-testid'))).toEqual([
       'composer-selector-mode',
       'composer-selector-attach',
       'composer-selector-spacer',
-      'composer-selector-picker',
+      'composer-selector-lead',
       'composer-selector-mic',
       'composer-selector-send',
     ]);
     expect(footer?.querySelector('[data-testid="composer-selector-send"]')?.previousElementSibling)
       .toBe(footer?.querySelector('[data-testid="composer-selector-mic"]'));
+  });
+
+  it('renders the Marks lead meter and only mounts workers outside Solo', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    const expectedEfforts = supportedEffortsForLead('codex', 'gpt-5.6-sol', true);
+    const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
+    expect(lead.querySelectorAll('[data-provider-mark]')).toHaveLength(1);
+    expect(lead.querySelectorAll('[data-testid="composer-selector-meter-bar"]')).toHaveLength(expectedEfforts.length);
+    expect(lead.querySelectorAll('[data-testid="composer-selector-meter-bar"][data-lit="true"]')).toHaveLength(expectedEfforts.indexOf('high') + 1);
+    expect(lead.textContent).toContain('high');
+    expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
+
+    act(() => lead.click());
+    const segments = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')];
+    expect(segments).toHaveLength(expectedEfforts.length);
+    act(() => segments.at(-1)!.click());
+    expect(lead.getAttribute('data-accent')).toBe('swarm');
+
+    act(() => lead.click());
+    const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    act(() => mode.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Multitask'))!.click());
+    const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(workers.querySelectorAll('[data-provider-mark]')).toHaveLength(1);
+    expect(workers.textContent).toContain('Codex');
+
+    act(() => mode.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Fusion'))!.click());
+    const fusionWorkers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(fusionWorkers.querySelectorAll('[data-provider-mark]')).toHaveLength(3);
+    expect(fusionWorkers.textContent).toContain(`${listDispatchableRuntimes().length} runtimes`);
+
+    act(() => mode.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Solo'))!.click());
+    expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
+  });
+
+  it('marks every picker row and shows model-specific effort consequences', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="composer-selector-search"]'));
+
+    const leadRows = [...container.querySelectorAll<HTMLElement>('[data-testid^="lead-row-"]')];
+    const workerRows = [...container.querySelectorAll<HTMLElement>('[data-testid^="worker-row-"]')];
+    expect(leadRows.every((row) => row.querySelector('[data-provider-mark]'))).toBe(true);
+    expect(workerRows.every((row) => row.querySelector('[data-provider-mark]'))).toBe(true);
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
+      .toContain('High · default for real work');
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-o8-free"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    const o8Segments = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')];
+    expect(o8Segments).toHaveLength(2);
+    expect(o8Segments[0]?.textContent).toBe('Low');
+    act(() => o8Segments[0]!.click());
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
+      .toContain('Low · free');
+    act(() => o8Segments[1]!.click());
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
+      .toContain('High · founders');
   });
 
   it('cycles all four modes with Shift+Tab and keeps textarea focus', async () => {
@@ -213,16 +283,16 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: '†', code: 'KeyT', altKey: true, bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('xhigh');
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('extra');
 
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     search.focus();
     expect(document.activeElement).toBe(search);
     await act(async () => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'T', code: 'KeyT', altKey: true, shiftKey: true, bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('xhigh');
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('extra');
     await act(async () => {
       search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
@@ -230,7 +300,7 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'T', code: 'KeyT', altKey: true, shiftKey: true, bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('high');
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('high');
   });
 
   it('selecting Fusion leaves effort unchanged', async () => {
@@ -240,21 +310,21 @@ describe('ComposerSelectorFooter', () => {
     const fusion = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('Fusion'))!;
     act(() => fusion.click());
-    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('high');
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('high');
   });
 
   it('updates the at-rest string after picking a model', async () => {
     await act(async () => { root.render(createElement(Harness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const terra = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('GPT-5.6 Terra'))!;
     act(() => terra.click());
-    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('Terra');
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('Terra');
   });
 
   it('search narrows both lead and worker rows', async () => {
     await act(async () => { root.render(createElement(Harness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -271,7 +341,7 @@ describe('ComposerSelectorFooter', () => {
   it('includes live searchable lead houses from the shared model catalogue', async () => {
     const searchable = COMPOSER_MODEL_GROUPS.find((group) => group.searchable)!;
     await act(async () => { root.render(createElement(Harness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     expect(container.querySelector(`[data-testid="lead-row-${searchable.key}"]`)).not.toBeNull();
 
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
@@ -286,7 +356,7 @@ describe('ComposerSelectorFooter', () => {
   it('uses arrow navigation and Enter across the lead and worker sections', async () => {
     const lastRuntime = listDispatchableRuntimes().at(-1)!;
     await act(async () => { root.render(createElement(Harness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); });
     await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
@@ -335,8 +405,9 @@ describe('ComposerSelectorFooter', () => {
     const catalogueDefault = COMPOSER_MODEL_GROUPS
       .flatMap((group) => group.options)
       .find((option) => option.backend === 'codex' && option.model === MODEL_IDS.codexDefault)!;
-    const picker = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!;
-    expect(picker.textContent).toContain(`${catalogueDefault.label}· xhigh`);
+    const picker = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
+    expect(picker.textContent).toContain(catalogueDefault.label);
+    expect(picker.textContent).toContain('extra');
 
     act(() => picker.click());
     const selectedLeadRows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-row-"][aria-pressed="true"]')];
@@ -362,7 +433,11 @@ describe('ComposerSelectorFooter', () => {
     ), { status: 200 }));
     await act(async () => { root.render(createElement(Harness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
+    const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    act(() => mode.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Multitask'))!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 
     const popover = container.querySelector<HTMLElement>('[data-testid="composer-selector-popover"]')!;
@@ -383,7 +458,7 @@ describe('ComposerSelectorFooter', () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(NoPinCodexHarness, { codexDefaultDispatchModel: 'ollama:local-code:32b' })); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-    const picker = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!;
+    const picker = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
     expect(picker.textContent).toContain('local-code:32b');
     act(() => picker.click());
     const selectedLeadRows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-row-"][aria-pressed="true"]')];
