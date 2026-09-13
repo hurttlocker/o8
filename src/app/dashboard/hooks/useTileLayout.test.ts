@@ -138,6 +138,8 @@ function LayoutRestoreHarness({
     },
   });
 
+  const { handleSplitTile, handleResizeSplit } = restored;
+
   useEffect(() => {
     onLayout(layout, restored.tileLayoutHydrated, restored.restoredRepoValidationState);
   }, [layout, onLayout, restored.restoredRepoValidationState, restored.tileLayoutHydrated]);
@@ -147,16 +149,16 @@ function LayoutRestoreHarness({
   }, [onReplaceLayout]);
 
   useEffect(() => {
-    onSplitTile?.((tileId) => restored.handleSplitTile(tileId, 'horizontal'));
-  }, [onSplitTile, restored.handleSplitTile]);
+    onSplitTile?.((tileId) => handleSplitTile(tileId, 'horizontal'));
+  }, [onSplitTile, handleSplitTile]);
 
   useEffect(() => {
     onUnverifiedIds?.(restored.unverifiedRestoredRepoTileIds);
   }, [onUnverifiedIds, restored.unverifiedRestoredRepoTileIds]);
 
   useEffect(() => {
-    onResizeSplit?.((splitId, ratio) => restored.handleResizeSplit(splitId, ratio));
-  }, [onResizeSplit, restored.handleResizeSplit]);
+    onResizeSplit?.((splitId, ratio) => handleResizeSplit(splitId, ratio));
+  }, [onResizeSplit, handleResizeSplit]);
 
   if (!restored.tileLayoutHydrated) return createElement('div');
   const leaf = getFirstLeaf(layout.root);
