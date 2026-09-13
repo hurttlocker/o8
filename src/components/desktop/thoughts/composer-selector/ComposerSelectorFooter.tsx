@@ -26,6 +26,7 @@ import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { useComposerModelCatalogue } from '../ModelThinkingChip';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { formatModelLabel } from '@/lib/format';
+import { useUltraEffortPreference } from './UltraEffortPreference';
 
 export function ComposerSelectorFooter({
   mode,
@@ -70,6 +71,7 @@ export function ComposerSelectorFooter({
   const [defaults, setDefaults] = useState<DispatchDefaults>(FALLBACK_DISPATCH_DEFAULTS);
   const [threadEfforts, setThreadEfforts] = useState(() => readComposerEffortMaps(threadId, modelId).thread);
   const [saving, setSaving] = useState(false);
+  const ultraEnabled = useUltraEffortPreference();
   const { groups: baseComposerModelGroups } = useComposerModelCatalogue();
   const localLead = useMemo(() => activeBackend === 'codex' ? parseLocalModel(modelId) : null, [activeBackend, modelId]);
   const composerModelGroups = useMemo(() => {
@@ -121,11 +123,12 @@ export function ComposerSelectorFooter({
     threadEffortByModel: threadEfforts,
     operatorDefaultEffort,
     adaptiveEnabled,
+    ultraEnabled,
     isFreePlan,
     workerRuntimeLabel: runtimeLabel,
     workerModelLabel: workerModel ? shortWorkerModelLabel(workerModel) : null,
     clampNotice,
-  }), [activeBackend, adaptiveEnabled, clampNotice, effort, isFreePlan, mode, modelId, operatorDefaultEffort, resolvedModelLabel, runtimeLabel, threadEfforts, workerModel]);
+  }), [activeBackend, adaptiveEnabled, clampNotice, effort, isFreePlan, mode, modelId, operatorDefaultEffort, resolvedModelLabel, runtimeLabel, threadEfforts, ultraEnabled, workerModel]);
 
   const setEffort = (next: ThinkingEffort) => {
     const change = resolveSupportedEffortChange(next, resolved.effort, resolved.effortOptions);

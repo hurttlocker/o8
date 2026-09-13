@@ -6,6 +6,7 @@ import { composeComposerTurnMessage } from '../composer-mode';
 import {
   clampEffortToLead,
   composerEffortConsequence,
+  isHotComposerEffort,
   providerMarkForLead,
   providerMarkForRuntime,
   resolveEffectiveComposerLeadModelId,
@@ -38,6 +39,7 @@ describe('composer selector state', () => {
           threadEffortByModel: {},
           operatorDefaultEffort: 'medium',
           adaptiveEnabled: true,
+          ultraEnabled: true,
           workerRuntimeLabel: 'Codex',
           workerModelLabel: 'Sol',
         });
@@ -96,6 +98,20 @@ describe('composer selector state', () => {
     expect(resolved.effortOptions).not.toContain('max');
     expect(resolved.effortOptions).not.toContain('ultra');
     expect(resolved.chipTitle).toContain('ultra is unsupported for Terra; clamped to xhigh');
+  });
+
+  it('hides Ultra until enabled and clamps a stored Ultra effort to Max', () => {
+    const hidden = supportedEffortsForLead('codex', 'gpt-6-astra', true, false, false);
+    const shown = supportedEffortsForLead('codex', 'gpt-6-astra', true, false, true);
+
+    expect(hidden).not.toContain('ultra');
+    expect(shown).toContain('ultra');
+    expect(clampEffortToLead('ultra', hidden)).toEqual({ effort: 'max', clampedFrom: 'ultra' });
+  });
+
+  it('treats Extra, Max, and Ultra as the hot effort band', () => {
+    expect(['xhigh', 'max', 'ultra'].every((effort) => isHotComposerEffort(effort as ThinkingEffort))).toBe(true);
+    expect(['low', 'medium', 'adaptive', 'high'].some((effort) => isHotComposerEffort(effort as ThinkingEffort))).toBe(false);
   });
 
   it('keeps the free backend on its real low tier while exposing both o8 tiers', () => {

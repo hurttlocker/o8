@@ -15,6 +15,7 @@ import {
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { useUltraEffortPreference } from './UltraEffortPreference';
 
 export function useComposerSelectorState(input: {
   enabled: boolean;
@@ -48,6 +49,7 @@ export function useComposerSelectorState(input: {
   const lastResolvedModelRef = useRef<string | null>(null);
   const [clampNotice, setClampNotice] = useState<ComposerEffortClampNotice | null>(null);
   const { plan } = useEntitlement();
+  const ultraEnabled = useUltraEffortPreference();
 
   const resolveModelEffort = useCallback((nextModelId: string, nextBackend: OrchestratorBackendSetting) => {
     const persisted = readComposerEffortMaps(threadId, nextModelId);
@@ -60,14 +62,15 @@ export function useComposerSelectorState(input: {
       threadEffortByModel: { ...persisted.global, ...persisted.thread },
       operatorDefaultEffort,
       adaptiveEnabled,
+      ultraEnabled,
       isFreePlan: plan === 'free',
       workerRuntimeLabel: '',
     });
-  }, [adaptiveEnabled, mode, modelLabel, operatorDefaultEffort, plan, threadId]);
+  }, [adaptiveEnabled, mode, modelLabel, operatorDefaultEffort, plan, threadId, ultraEnabled]);
 
   useEffect(() => {
     if (!enabled || !modelId || !backend) return;
-    const resolutionKey = `${threadId ?? ''}:${backend}:${modelId}`;
+    const resolutionKey = `${threadId ?? ''}:${backend}:${modelId}:${adaptiveEnabled}:${ultraEnabled}:${plan}`;
     if (lastResolvedModelRef.current === resolutionKey) return;
     lastResolvedModelRef.current = resolutionKey;
     const resolved = resolveModelEffort(modelId, backend);
@@ -84,18 +87,21 @@ export function useComposerSelectorState(input: {
     return () => { cancelled = true; };
   }, [
     backend,
+    adaptiveEnabled,
     changeEffort,
     effort,
     enabled,
     modelId,
+    plan,
     resolveModelEffort,
     threadId,
+    ultraEnabled,
   ]);
 
   const onEffortChange = useCallback((nextEffort: ThinkingEffort) => {
     setClampNotice(null);
     const supported = backend
-      ? supportedEffortsForLead(backend, modelId ?? '', adaptiveEnabled, plan === 'free')
+      ? supportedEffortsForLead(backend, modelId ?? '', adaptiveEnabled, plan === 'free', ultraEnabled)
       : [nextEffort];
     const change = resolveSupportedEffortChange(nextEffort, effort, supported);
     if (!change.accepted) {
@@ -107,7 +113,7 @@ export function useComposerSelectorState(input: {
     inSessionEffortsRef.current = setModelEffort(inSessionEffortsRef.current, modelId, change.effort);
     writeComposerModelEffort(modelId, change.effort, threadId);
     changeEffort(change.effort);
-  }, [adaptiveEnabled, backend, changeEffort, effort, modelId, plan, threadId]);
+  }, [adaptiveEnabled, backend, changeEffort, effort, modelId, plan, threadId, ultraEnabled]);
 
   const onModelChange = useCallback((model: string) => {
     if (modelId) {

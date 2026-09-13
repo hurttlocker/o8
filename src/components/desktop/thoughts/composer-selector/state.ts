@@ -73,7 +73,7 @@ export const COMPOSER_EFFORT_CONSEQUENCES: Record<ThinkingEffort, string> = {
   high: 'High · default for real work',
   xhigh: 'Extra · longer turns',
   max: 'Max · usage limits apply',
-  ultra: 'Ultra · longest turns, usage limits apply',
+  ultra: 'Ultra · may fan out to sub-agents outside o8. Longest turns, usage limits apply',
 };
 
 export function providerMarkForLead(
@@ -97,11 +97,8 @@ export function composerEffortConsequence(
   return COMPOSER_EFFORT_CONSEQUENCES[effort];
 }
 
-export function isTopComposerEffort(
-  effort: ThinkingEffort,
-  options: readonly ThinkingEffort[],
-): boolean {
-  return options.length > 2 && (effort === 'xhigh' || effort === 'max' || effort === 'ultra');
+export function isHotComposerEffort(effort: ThinkingEffort): boolean {
+  return effort === 'xhigh' || effort === 'max' || effort === 'ultra';
 }
 
 export interface ComposerSelectorModeSpec {
@@ -168,6 +165,7 @@ export interface ResolveComposerSelectorInput {
   threadEffortByModel: ComposerEffortMap;
   operatorDefaultEffort: ThinkingEffort;
   adaptiveEnabled: boolean;
+  ultraEnabled?: boolean;
   isFreePlan?: boolean;
   workerRuntimeLabel: string;
   workerModelLabel?: string | null;
@@ -261,12 +259,16 @@ export function supportedEffortsForLead(
   modelId: string,
   adaptiveEnabled: boolean,
   isFreePlan = false,
+  ultraEnabled = false,
 ): readonly ThinkingEffort[] {
   if (backend === 'o8') return isFreePlan ? ['low'] : ['low', 'high'];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
   const ultraCapable = backend === 'codex' && isCodexUltraCapableModel(modelId);
-  if (backend === 'codex') return ultraCapable ? [...base, 'ultra'] : base.filter((effort) => effort !== 'max');
+  if (backend === 'codex') {
+    if (!ultraCapable) return base.filter((effort) => effort !== 'max');
+    return ultraEnabled ? [...base, 'ultra'] : base;
+  }
   return base;
 }
 
@@ -312,6 +314,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     input.leadModelId,
     input.adaptiveEnabled,
     input.isFreePlan,
+    input.ultraEnabled,
   );
   const lockedEffortOptions: readonly ThinkingEffort[] = input.leadBackend === 'o8' && input.isFreePlan
     ? ['high']
