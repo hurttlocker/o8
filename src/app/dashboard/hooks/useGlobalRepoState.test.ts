@@ -9,6 +9,7 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 const mocks = vi.hoisted(() => ({
   fetchSWRJson: vi.fn(),
   ipcFetch: vi.fn(),
+  requestConfirm: vi.fn(async () => true),
 }));
 
 vi.mock('@/lib/panel/fetch-cache', () => ({
@@ -18,6 +19,12 @@ vi.mock('@/lib/panel/fetch-cache', () => ({
 
 vi.mock('@/lib/tauri/ipc-fetch', () => ({
   ipcFetch: mocks.ipcFetch,
+}));
+
+vi.mock('@/components/shared/ConfirmToastHost', () => ({
+  requestConfirm: mocks.requestConfirm,
+  requestPrompt: vi.fn(async () => null),
+  toast: vi.fn(),
 }));
 
 import { useGlobalRepoState } from './useGlobalRepoState';
@@ -320,5 +327,126 @@ describe('global repository worktree discovery', () => {
     expect(current.workspaceScopeEntries).toEqual(expect.arrayContaining([
       expect.objectContaining({ localPath: worktreePath, isWorktree: true }),
     ]));
+  });
+
+  it('keeps a repo absent after a confirmed Remove even when a stale recovery refresh resolves later', async () => {
+    const removedRepo = repo(1);
+    const otherRepo = repo(2);
+    const worktreePath = '/tmp/o8-external-worktrees/saved-chat';
+    let resolveRemovedRepoWorktrees: ((response: Response) => void) | null = null;
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [removedRepo, otherRepo] });
+    mocks.ipcFetch.mockImplementation((input: string) => {
+      if (input === '/api/panel/repos') return Promise.resolve(Response.json({ repos: [removedRepo, otherRepo] }));
+      if (input === `/api/worktrees?repo=${encodeURIComponent(removedRepo.localPath)}`) {
+        return new Promise<Response>((resolve) => { resolveRemovedRepoWorktrees = resolve; });
+      }
+      if (input === `/api/worktrees?repo=${encodeURIComponent(otherRepo.localPath)}`) {
+        return Promise.resolve(Response.json({ worktrees: [], conflicts: { safe: true, count: 0 }, totalDiskUsage: 0 }));
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/panel/branches?')) return Response.json({ branches: [{ current: true, name: 'main' }] });
+      if (url === '/api/panel/repos' && init?.method === 'DELETE') return Response.json({ ok: true });
+      throw new Error(`Unexpected fetch: ${url} ${init?.method ?? 'GET'}`);
+    }));
+
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(current.globalRepoEntries).toEqual([removedRepo, otherRepo]);
+
+    // Recovery starts fanning out worktree lookups for both repos —
+    // removedRepo's is still pending.
+    const recoveryPending = current.refreshRestoredRepoState([worktreePath]);
+    await act(async () => { await Promise.resolve(); });
+
+    // The operator confirms Remove on removedRepo through the REAL
+    // exported handler (real confirm + real DELETE) WHILE that recovery is
+    // still waiting on removedRepo's own worktree lookup.
+    await act(async () => { await current.handleRemoveRegisteredRepo(removedRepo.id); });
+    expect(mocks.requestConfirm).toHaveBeenCalled();
+    expect(current.globalRepoEntries).toEqual([otherRepo]);
+
+    // The stale recovery's (now-irrelevant) worktree lookup finally
+    // resolves and would, on the pre-fix code, resurrect removedRepo.
+    let refreshed = true;
+    await act(async () => {
+      resolveRemovedRepoWorktrees?.(Response.json({
+        worktrees: [{ path: worktreePath, branch: 'saved-chat', status: 'active' }],
+        conflicts: { safe: true, count: 0 },
+        totalDiskUsage: 0,
+      }));
+      refreshed = await recoveryPending;
+    });
+
+    expect(refreshed).toBe(false);
+    expect(current.globalRepoEntries).toEqual([otherRepo]);
+  });
+
+  it('preserves a newer confirmed touch after a stale recovery refresh resolves later', async () => {
+    const touchedRepo = repo(1);
+    const otherRepo = repo(2);
+    const worktreePath = '/tmp/o8-external-worktrees/saved-chat';
+    const touchedRepoAfterTouch: RepoRegistryEntry = { ...touchedRepo, lastOpenedAt: '2026-09-14T00:00:00.000Z' };
+    let resolveOtherWorktrees: ((response: Response) => void) | null = null;
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [touchedRepo, otherRepo] });
+    mocks.ipcFetch.mockImplementation((input: string) => {
+      if (input === '/api/panel/repos') return Promise.resolve(Response.json({ repos: [touchedRepo, otherRepo] }));
+      if (input === `/api/worktrees?repo=${encodeURIComponent(touchedRepo.localPath)}`) {
+        return Promise.resolve(Response.json({
+          worktrees: [{ path: worktreePath, branch: 'saved-chat', status: 'active' }],
+          conflicts: { safe: true, count: 0 },
+          totalDiskUsage: 0,
+        }));
+      }
+      if (input === `/api/worktrees?repo=${encodeURIComponent(otherRepo.localPath)}`) {
+        return new Promise<Response>((resolve) => { resolveOtherWorktrees = resolve; });
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/panel/branches?')) return Response.json({ branches: [{ current: true, name: 'main' }] });
+      if (url === '/api/panel/repos' && init?.method === 'POST') return Response.json({ repo: touchedRepoAfterTouch });
+      throw new Error(`Unexpected fetch: ${url} ${init?.method ?? 'GET'}`);
+    }));
+
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Recovery starts fanning out; otherRepo's worktree lookup stays
+    // pending so the whole refresh is still in flight for the next step.
+    const recoveryPending = current.refreshRestoredRepoState([worktreePath]);
+    await act(async () => { await Promise.resolve(); });
+
+    // The operator selects touchedRepo through the REAL exported handler
+    // (fires the real 'touch' POST) WHILE that recovery is still in flight.
+    await act(async () => {
+      await current.handleSelectRegisteredRepo(touchedRepo.id);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(current.globalRepoEntries.find((entry) => entry.id === touchedRepo.id)).toEqual(touchedRepoAfterTouch);
+
+    // The stale recovery's worktree lookup finally resolves and would, on
+    // the pre-fix code, overwrite the touched record with its pre-touch
+    // snapshot.
+    let refreshed = true;
+    await act(async () => {
+      resolveOtherWorktrees?.(Response.json({ worktrees: [], conflicts: { safe: true, count: 0 }, totalDiskUsage: 0 }));
+      refreshed = await recoveryPending;
+    });
+
+    expect(refreshed).toBe(false);
+    expect(current.globalRepoEntries.find((entry) => entry.id === touchedRepo.id)).toEqual(touchedRepoAfterTouch);
   });
 });

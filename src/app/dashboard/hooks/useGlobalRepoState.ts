@@ -116,6 +116,15 @@ export function useGlobalRepoState({
   // worktree lookups must never be clobbered by that older, slower refresh
   // finishing later.
   const repoInventoryGenerationRef = useRef(0);
+  // A confirmed mutation (a completed remove/touch response, or any other
+  // caller-side authoritative rewrite of the repo list — see
+  // page.tsx's handleRepoRemoved) is newer truth than anything currently in
+  // flight. Bump the epoch so a loadRegisteredRepos/refreshRestoredRepoState
+  // call that started BEFORE this mutation can never overwrite it with
+  // pre-mutation data once that older, slower call finally resolves.
+  const bumpRepoInventoryGeneration = useCallback(() => {
+    repoInventoryGenerationRef.current += 1;
+  }, []);
 
   const loadRepoWorktrees = useCallback(async (
     repoPath: string,
@@ -341,6 +350,7 @@ export function useGlobalRepoState({
       .then(async (response) => {
         const data = await response.json() as { repo?: RepoRegistryEntry };
         if (data.repo) {
+          bumpRepoInventoryGeneration();
           setGlobalRepoEntries((current) => {
             const next = current.map((repo) => (repo.id === data.repo?.id ? data.repo : repo));
             return next;
@@ -348,7 +358,7 @@ export function useGlobalRepoState({
         }
       })
       .catch(() => null);
-  }, [globalRepoEntries]);
+  }, [bumpRepoInventoryGeneration, globalRepoEntries]);
 
   const handleRemoveRegisteredRepo = useCallback(async (repoId: string) => {
     const target = globalRepoEntries.find((repo) => repo.id === repoId);
@@ -372,6 +382,7 @@ export function useGlobalRepoState({
       throw new Error(data.error ?? 'Unable to remove repository.');
     }
 
+    bumpRepoInventoryGeneration();
     setGlobalRepoEntries((current) => current.filter((repo) => repo.id !== repoId));
     if (globalRepoId === repoId) {
       setGlobalRepoId(null);
@@ -380,7 +391,7 @@ export function useGlobalRepoState({
         sessionStorage.removeItem('cortex-global-repo-id');
       }
     }
-  }, [globalRepoEntries, globalRepoId]);
+  }, [bumpRepoInventoryGeneration, globalRepoEntries, globalRepoId]);
 
   // Fetch branch when selected repo changes
   useEffect(() => {
@@ -549,6 +560,7 @@ export function useGlobalRepoState({
 
   return {
     allRepoWorktrees,
+    bumpRepoInventoryGeneration,
     globalRepo,
     globalRepoBranch,
     globalRepoEntries,
