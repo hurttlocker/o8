@@ -6,6 +6,7 @@ import {
 
 export const ORCHESTRATOR_THINKING_OVERRIDE_STORAGE_KEY = 'o8:orchestrator:thinking-effort';
 export const ORCHESTRATOR_ADAPTIVE_THINKING_STORAGE_KEY = 'o8:orchestrator:adaptive-thinking';
+export const ORCHESTRATOR_ULTRA_EFFORT_STORAGE_KEY = 'o8:orchestrator:ultra-effort';
 export const ORCHESTRATOR_THINKING_PREFERENCES_EVENT = 'cortex:orchestrator-thinking-preferences';
 
 export function readStoredOrchestratorThinkingOverride(): ManualThinkingEffort | null {
@@ -51,6 +52,25 @@ export function writeAdaptiveThinkingEnabled(enabled: boolean) {
   dispatchThinkingPreferenceChange();
 }
 
+export function readUltraEffortEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(ORCHESTRATOR_ULTRA_EFFORT_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeUltraEffortEnabled(enabled: boolean) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(ORCHESTRATOR_ULTRA_EFFORT_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // ignore storage failures
+  }
+  dispatchThinkingPreferenceChange();
+}
+
 export function hasStoredOrchestratorThinkingPreference(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -86,6 +106,7 @@ export function subscribeOrchestratorThinkingPreferences(listener: () => void) {
     if (
       event.key === ORCHESTRATOR_THINKING_OVERRIDE_STORAGE_KEY
       || event.key === ORCHESTRATOR_ADAPTIVE_THINKING_STORAGE_KEY
+      || event.key === ORCHESTRATOR_ULTRA_EFFORT_STORAGE_KEY
     ) {
       listener();
     }

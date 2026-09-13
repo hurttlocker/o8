@@ -16,7 +16,9 @@ import { useEntitlement } from '@/lib/entitlement/context';
 import { ValuePill } from './grouped';
 import {
   readAdaptiveThinkingEnabled,
+  readUltraEffortEnabled,
   writeAdaptiveThinkingEnabled,
+  writeUltraEffortEnabled,
 } from '@/lib/orchestrator/thinking-preferences';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { LocalModelsSection } from './LocalModelsSection';
@@ -162,6 +164,7 @@ export function DispatchFoundersSection({
   // Client-side pref (localStorage via thinking-preferences.ts) — moved here
   // from the env-gated API Keys tab where it was unreachable (#1450 IA pass).
   const [adaptiveThinking, setAdaptiveThinking] = useState(() => readAdaptiveThinkingEnabled());
+  const [ultraEffort, setUltraEffort] = useState(() => readUltraEffortEnabled());
   // Managed-plan status mirrors inference-route.ts rule #1: an eligible plan
   // token routes Brain calls through the managed proxy first.
   const { plan } = useEntitlement();
@@ -255,6 +258,14 @@ export function DispatchFoundersSection({
             subtitle="New turns default to adaptive and can stream summarized reasoning"
             checked={adaptiveThinking}
             onToggle={(next) => { setAdaptiveThinking(next); writeAdaptiveThinkingEnabled(next); }}
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="Show Ultra effort"
+            subtitle="Ultra may fan out to sub-agents that run outside o8. Longest turns, usage limits apply."
+            checked={ultraEffort}
+            onToggle={(next) => { setUltraEffort(next); writeUltraEffortEnabled(next); }}
             divider
           />
           <SettingsRow
