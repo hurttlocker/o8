@@ -17,9 +17,7 @@ import {
   closeTile,
   collectLeafContentKinds,
   countLeaves,
-  createDefaultTileLayout,
   createTileContent,
-  deserializeTileLayout,
   findLeafByContentKind,
   findSiblingLeaf,
   findTile,
@@ -42,11 +40,7 @@ import {
   findUnscopedCanvasLeaf,
   repoSlugFromRemote,
 } from '../utils';
-import {
-  collectPersistedRepoTileIds,
-  loadValidatedRestorePaths,
-  validatePersistedLayoutRepos,
-} from './tileLayoutRestore';
+import { useRestoredTileLayout } from './useRestoredTileLayout';
 
 export const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 const ACTIVE_TILE_STORAGE_KEY = 'o8:dashboard-active-tile:v1';
@@ -99,11 +93,23 @@ export function useTileLayout({
   waitForWorkspaceTerminalTarget,
 }: UseTileLayoutArgs) {
   const [workspacePreviews, setWorkspacePreviews] = useState<DetectedLocalhostPreview[]>([]);
-  const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
-  const [unverifiedRestoredRepoTileIds, setUnverifiedRestoredRepoTileIds] = useState<ReadonlySet<string>>(() => new Set());
   const skipNextTileLayoutPersistenceRef = useRef(false);
   const canvasStateByTileIdRef = useRef<Record<string, CanvasTileState>>({});
   const [canvasStateByTileId, setCanvasStateByTileId] = useState<Record<string, CanvasTileState>>({});
+  const {
+    retryRestoredRepoValidation,
+    restoredRepoValidationState,
+    setTileLayoutHydrated,
+    tileLayoutHydrated,
+    unverifiedRestoredRepoTileIds,
+  } = useRestoredTileLayout({
+    activeTileStorageKey: ACTIVE_TILE_STORAGE_KEY,
+    setActiveTileId,
+    setTileLayout,
+    skipNextTileLayoutPersistenceRef,
+    storageKey: TILE_LAYOUT_STORAGE_KEY,
+    tileLayout,
+  });
 
   const registerContextualPanelHandle = useCallback((tileId: string, handle: ContextualPanelHandle | null) => {
     if (handle) {
@@ -268,38 +274,6 @@ export function useTileLayout({
     setActiveTileId(result.newTileId);
     return result.newTileId;
   }, [findInsertionTarget, findPreferredCanvasTileId, findWorkspaceTarget, setActiveTileId, setCanvasTileRepoScope, setTileLayout, tileLayout.root]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    let cancelled = false;
-    skipNextTileLayoutPersistenceRef.current = false;
-    const restoreTimer = window.setTimeout(() => {
-      void (async () => {
-        const restored = deserializeTileLayout(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY));
-        const validation = restored ? await loadValidatedRestorePaths(restored) : { ok: true, paths: [] };
-        const nextLayout = restored && validation.ok
-          ? validatePersistedLayoutRepos(restored, validation.paths)
-          : restored ?? createDefaultTileLayout();
-        if (cancelled) return;
-        setUnverifiedRestoredRepoTileIds(restored && !validation.ok
-          ? collectPersistedRepoTileIds(restored)
-          : new Set());
-        skipNextTileLayoutPersistenceRef.current = !validation.ok;
-        const storedActiveTileId = window.localStorage.getItem(ACTIVE_TILE_STORAGE_KEY);
-        const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
-          ? storedActiveTileId
-          : getFirstLeaf(nextLayout.root).id;
-        setTileLayout(nextLayout);
-        setActiveTileId(restoredActiveTileId);
-        setTileLayoutHydrated(true);
-      })();
-    }, 0);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(restoreTimer);
-    };
-  }, [setActiveTileId, setTileLayout]);
 
   useEffect(() => {
     if (!tileLayoutHydrated || typeof window === 'undefined') return;
@@ -728,6 +702,8 @@ export function useTileLayout({
     handleSplitTile,
     openCanvasTab,
     registerContextualPanelHandle,
+    restoredRepoValidationState,
+    retryRestoredRepoValidation,
     selectCanvasTab,
     setCanvasStateByTileId,
     setTileLayoutHydrated,

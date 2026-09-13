@@ -81,9 +81,11 @@ function repoValidationResponse(url: string, registeredRepos: RepoRegistryEntry[
 
 function LayoutRestoreHarness({
   onLayout,
+  onReplaceLayout,
   registeredRepos,
 }: {
-  onLayout: (layout: TileLayout, hydrated: boolean) => void;
+  onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
+  onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
   registeredRepos: RepoRegistryEntry[];
 }) {
   const [layout, setLayout] = useState(createDefaultTileLayout);
@@ -112,8 +114,12 @@ function LayoutRestoreHarness({
   });
 
   useEffect(() => {
-    onLayout(layout, restored.tileLayoutHydrated);
-  }, [layout, onLayout, restored.tileLayoutHydrated]);
+    onLayout(layout, restored.tileLayoutHydrated, restored.restoredRepoValidationState);
+  }, [layout, onLayout, restored.restoredRepoValidationState, restored.tileLayoutHydrated]);
+
+  useEffect(() => {
+    onReplaceLayout?.(setLayout);
+  }, [onReplaceLayout]);
 
   if (!restored.tileLayoutHydrated) return createElement('div');
   const leaf = getFirstLeaf(layout.root);
@@ -128,6 +134,8 @@ function LayoutRestoreHarness({
     termWsConnected: false,
     thoughtsMissionState: { packets: [] },
     tileLayout: layout,
+    restoredRepoValidationState: restored.restoredRepoValidationState,
+    retryRestoredRepoValidation: restored.retryRestoredRepoValidation,
     workspacePreviews: [],
     workspaceScopeEntries: registeredRepos.map((repo) => ({
       registryRepoId: repo.id,
@@ -236,6 +244,95 @@ describe('useTileLayout browser-origin restore', () => {
     expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
     expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
     expect(runtimeLaunches).toEqual([]);
+  });
+
+  it('retries a failed saved scope from the rendered tile without remounting', async () => {
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    const runtimeLaunches: string[] = [];
+    let validationCalls = 0;
+    let completeRetry: ((response: Response) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/panel/repos')) {
+        validationCalls += 1;
+        if (validationCalls === 1) return Promise.resolve(Response.json({}, { status: 503 }));
+        return new Promise<Response>((resolve) => { completeRetry = resolve; });
+      }
+      if (url.startsWith('/api/runtime/launch')) runtimeLaunches.push(url);
+      return Promise.resolve(Response.json({}));
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let hydrated = false;
+    let validationState = 'idle';
+    const onLayout = (layout: TileLayout, nextHydrated: boolean, nextValidationState: string) => {
+      latestLayout = layout;
+      hydrated = nextHydrated;
+      validationState = nextValidationState;
+    };
+
+    await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    expect(hydrated).toBe(true);
+    expect(validationState).toBe('failed');
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+    expect(runtimeLaunches).toEqual([]);
+    const retryButton = container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]');
+    expect(retryButton).not.toBeNull();
+
+    await act(async () => retryButton?.click());
+    expect(validationState).toBe('pending');
+    expect(retryButton?.disabled).toBe(true);
+    expect(runtimeLaunches).toEqual([]);
+
+    await act(async () => {
+      completeRetry?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
+      await Promise.resolve();
+    });
+
+    expect(validationCalls).toBe(2);
+    expect(validationState).toBe('verified');
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+    expect(workspaceBoundary.preferredRepoPaths).toEqual([STALE_REPO_PATH]);
+    expect(runtimeLaunches).toContain('/api/runtime/launch');
+  });
+
+  it('ignores a retry response after the operator changes the restored repo scope', async () => {
+    const newerRepoPath = '/tmp/newer-o8-instance/repo';
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    let validationCalls = 0;
+    let completeRetry: ((response: Response) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (!url.startsWith('/api/panel/repos')) return Promise.resolve(Response.json({}));
+      validationCalls += 1;
+      if (validationCalls === 1) return Promise.resolve(Response.json({}, { status: 503 }));
+      return new Promise<Response>((resolve) => { completeRetry = resolve; });
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let replaceLayout: ((layout: TileLayout) => void) | null = null;
+    const onLayout = (layout: TileLayout) => { latestLayout = layout; };
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onReplaceLayout: (replace) => { replaceLayout = replace; },
+      registeredRepos,
+    })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    const retryButton = container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]');
+    await act(async () => retryButton?.click());
+    await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
+    await act(async () => {
+      completeRetry?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
+      await Promise.resolve();
+    });
+
+    expect(validationCalls).toBe(2);
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
   });
 
   it('preserves a persisted repo scope but blocks launch when validation times out', async () => {

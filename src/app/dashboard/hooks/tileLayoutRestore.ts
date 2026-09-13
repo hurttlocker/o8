@@ -34,10 +34,13 @@ export function collectPersistedRepoTileIds(layout: TileLayout): ReadonlySet<str
     .map((leaf) => leaf.id));
 }
 
-export async function loadValidatedRestorePaths(layout: TileLayout): Promise<RestorePathValidation> {
+export async function loadValidatedRestorePaths(layout: TileLayout, signal?: AbortSignal): Promise<RestorePathValidation> {
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const abortValidation = () => controller.abort();
   try {
+    if (signal?.aborted) return { ok: false, paths: [] };
+    signal?.addEventListener('abort', abortValidation, { once: true });
     const searchParams = new URLSearchParams({ restoreValidationOnly: '1' });
     const requestedPaths = new Set<string>();
     for (const leaf of collectLeafNodes(layout.root)) {
@@ -75,5 +78,6 @@ export async function loadValidatedRestorePaths(layout: TileLayout): Promise<Res
     return { ok: false, paths: [] };
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', abortValidation);
   }
 }
