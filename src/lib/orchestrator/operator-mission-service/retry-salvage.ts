@@ -285,19 +285,32 @@ async function bindCommittedRetryWorkUnlocked(
   guard: RetrySalvageGuard,
   candidate: Lane,
 ): Promise<RetrySalvage> {
-  const bind = async (packet: OrchestratorPacket): Promise<RetrySalvage> => {
+  if (!await retrySalvageGuardIsCurrentUnlocked(input.packetId, guard)) {
+    throw new RetrySalvageStateChangedError(`Packet ${input.packetId} changed while retry salvage was probing; committed work was left untouched.`);
+  }
+  const { archiveLane, createLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+  const candidateLane = getLane(candidate.id);
+  if (!candidateLane?.worktreePath || !laneMatchesRetrySalvageCandidate(candidateLane, candidate, input.packetId)) {
+    throw new RetrySalvageStateChangedError(`Packet ${input.packetId} lane changed while retry salvage was probing; committed work was left untouched.`);
+  }
+
+  // Archival persists telemetry through patchMissionPacket, which takes the
+  // packet-state lock itself. Await it before that lock, then revalidate both
+  // identities inside the final mutation. The mission handoff barrier and
+  // packet lifecycle lease still cover the entire operation.
+  assertLaneSessionsArchived(await archiveLaneSessions([candidateLane]));
+
+  const bind = (packet: OrchestratorPacket): RetrySalvage => {
     if (!packetMatchesRetrySalvageGuard(packet, guard)) {
       throw new RetrySalvageStateChangedError(`Packet ${input.packetId} changed while retry salvage was probing; committed work was left untouched.`);
     }
 
-    const { archiveLane, createLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
     const lane = getLane(candidate.id);
     if (!lane || !lane.worktreePath || !laneMatchesRetrySalvageCandidate(lane, candidate, input.packetId)) {
       throw new RetrySalvageStateChangedError(`Packet ${input.packetId} lane changed while retry salvage was probing; committed work was left untouched.`);
     }
     const worktreePath = lane.worktreePath;
 
-    assertLaneSessionsArchived(await archiveLaneSessions([lane]));
     if (lane.sessionKey?.trim()) unregisterWatchedAgent(lane.sessionKey.trim());
 
     const reviewLane = createLane({
@@ -340,7 +353,7 @@ async function bindCommittedRetryWorkUnlocked(
 
   if (guard.store === 'current') {
     const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-    const { result } = await withLockedState(async (fresh) => {
+    const { result } = await withLockedState((fresh) => {
       if (fresh.missionId !== guard.missionId) return null;
       const target = fresh.packets.find((packet) => packet.id === input.packetId);
       if (!target) {
@@ -351,12 +364,12 @@ async function bindCommittedRetryWorkUnlocked(
     if (result) return result;
   }
 
-  const { result } = await withMissionRegistryState(guard.missionId, async (fresh) => {
+  const { result } = await withMissionRegistryState(guard.missionId, (fresh) => {
     const target = fresh.packets.find((packet) => packet.id === input.packetId);
     if (!target) {
       throw new RetrySalvageStateChangedError(`Packet ${input.packetId} changed while retry salvage was probing; committed work was left untouched.`);
     }
-    return { state: fresh, result: await bind(target) };
+    return { state: fresh, result: bind(target) };
   });
   return result;
 }
