@@ -52,7 +52,12 @@ export function useRestoredTileLayout({
   refreshRestoredRepoState,
 }: UseRestoredTileLayoutArgs) {
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
-  const [blockedRepoScopes, setBlockedRepoScopes] = useState<Map<string, string>>(() => new Map());
+  // Keyed by repoPath VALUE, not tile id — blocking is a property of the
+  // repo path, not of whichever leaf first referenced it. A leaf created
+  // later (a split, or any code path that assigns an existing repoPath to a
+  // different/new leaf id) that carries a still-unverified path is blocked
+  // automatically; a leaf carrying a different, never-blocked path never is.
+  const [blockedRepoPaths, setBlockedRepoPaths] = useState<Set<string>>(() => new Set());
   const [restoredRepoValidationState, setRestoredRepoValidationState] = useState<RestoredRepoValidationState>('idle');
   const layoutRef = useRef(tileLayout);
   const layoutRevisionRef = useRef(0);
@@ -122,10 +127,12 @@ export function useRestoredTileLayout({
     setTileLayoutHydrated(true);
     setRestoredRepoValidationState('pending');
     // Never expose a restored scope to a real terminal/canvas before it is
-    // confirmed — mark every persisted scope as pending up front so the
-    // tile shows "Verifying…" instead of launching against an unverified
-    // repo path while the network round trip is still in flight.
-    setBlockedRepoScopes(persistedRepoScopes(restored));
+    // confirmed — mark every persisted path as pending up front so the tile
+    // shows "Verifying…" instead of launching against an unverified repo
+    // path while the network round trip is still in flight. This covers
+    // every leaf carrying that path from the very first hydrated render,
+    // including one created later by a split (see blockedRepoPaths above).
+    setBlockedRepoPaths(new Set(persistedRepoScopes(restored).values()));
 
     void (async () => {
       const validation = await validateLayout(restored);
@@ -133,18 +140,18 @@ export function useRestoredTileLayout({
       if (!validation || !validation.ok) {
         // Either superseded mid-flight by another layout change, or the
         // round trip genuinely failed. Re-assert blocking for exactly the
-        // scopes THIS attempt was requested for — never a broader "whatever
+        // paths THIS attempt was requested for — never a broader "whatever
         // is on screen now" snapshot, so a newer, unrelated scope the
         // operator already switched to is never retroactively blocked.
         // unverifiedRestoredRepoTileIds below further intersects this with
         // the CURRENT layout, so a tile the operator already rescoped away
         // from the failed path drops out on its own.
-        setBlockedRepoScopes(persistedRepoScopes(restored));
+        setBlockedRepoPaths(new Set(persistedRepoScopes(restored).values()));
         setRestoredRepoValidationState('failed');
         return;
       }
       setTileLayout((current) => validatePersistedLayoutRepos(current, validation));
-      setBlockedRepoScopes(new Map());
+      setBlockedRepoPaths(new Set());
       setRestoredRepoValidationState('verified');
     })();
 
@@ -197,7 +204,7 @@ export function useRestoredTileLayout({
             ? validatePersistedLayoutRepos(current, validation)
             : current
         ));
-        setBlockedRepoScopes(new Map());
+        setBlockedRepoPaths(new Set());
         setRestoredRepoValidationState('verified');
       } catch {
         if (mountedRef.current && layoutRef.current === layoutAtStart) {
@@ -211,10 +218,10 @@ export function useRestoredTileLayout({
 
   const unverifiedRestoredRepoTileIds = useMemo(() => {
     const currentScopes = persistedRepoScopes(tileLayout);
-    return new Set(Array.from(blockedRepoScopes.entries())
-      .filter(([tileId, repoPath]) => currentScopes.get(tileId) === repoPath)
+    return new Set(Array.from(currentScopes.entries())
+      .filter(([, repoPath]) => blockedRepoPaths.has(repoPath))
       .map(([tileId]) => tileId));
-  }, [blockedRepoScopes, tileLayout]);
+  }, [blockedRepoPaths, tileLayout]);
 
   return {
     retryRestoredRepoValidation,

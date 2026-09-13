@@ -100,6 +100,7 @@ function LayoutRestoreHarness({
   onReplaceLayout,
   onSplitTile,
   onResizeSplit,
+  onUnverifiedIds,
   registeredRepos,
   refreshRestoredRepoState = async () => true,
 }: {
@@ -107,6 +108,7 @@ function LayoutRestoreHarness({
   onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
   onSplitTile?: (split: (tileId: string) => void) => void;
   onResizeSplit?: (resize: (splitId: string, ratio: number) => void) => void;
+  onUnverifiedIds?: (ids: ReadonlySet<string>) => void;
   registeredRepos: RepoRegistryEntry[];
   refreshRestoredRepoState?: (validatedPaths: readonly string[]) => Promise<boolean>;
 }) {
@@ -147,6 +149,10 @@ function LayoutRestoreHarness({
   useEffect(() => {
     onSplitTile?.((tileId) => restored.handleSplitTile(tileId, 'horizontal'));
   }, [onSplitTile, restored.handleSplitTile]);
+
+  useEffect(() => {
+    onUnverifiedIds?.(restored.unverifiedRestoredRepoTileIds);
+  }, [onUnverifiedIds, restored.unverifiedRestoredRepoTileIds]);
 
   useEffect(() => {
     onResizeSplit?.((splitId, ratio) => restored.handleResizeSplit(splitId, ratio));
@@ -197,6 +203,120 @@ describe('useTileLayout browser-origin restore', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('keeps the real registry consumer blocked from the first hydrated render through an unresolved split', async () => {
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    const runtimeLaunches: string[] = [];
+    let completeInitialValidation: ((response: Response) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/panel/repos')) {
+        return new Promise<Response>((resolve) => { completeInitialValidation = resolve; });
+      }
+      if (url.startsWith('/api/runtime/launch')) runtimeLaunches.push(url);
+      return Promise.resolve(Response.json({}));
+    }));
+
+    let hydrated = false;
+    let splitTile: ((tileId: string) => void) | null = null;
+    const onLayout = (_layout: TileLayout, nextHydrated: boolean) => { hydrated = nextHydrated; };
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onSplitTile: (split) => { splitTile = split; },
+      registeredRepos,
+    })));
+    // Flush only the synchronous seed effect — the validation network call
+    // is deliberately left unresolved.
+    await act(async () => { await Promise.resolve(); });
+
+    expect(hydrated).toBe(true);
+    // The REAL registry consumer, on its very first hydrated render — well
+    // before validation resolves either way — must already show the
+    // blocked/pending status, never the live WorkspaceTerminal (which would
+    // otherwise launch against an unverified repo path).
+    expect(container.textContent).toContain('Verifying saved repository scope');
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]')?.disabled).toBe(true);
+    expect(runtimeLaunches).toEqual([]);
+    expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
+
+    // An actual split of the still-unverified leaf while validation remains
+    // unresolved: the original leaf (still first in the tree) must stay
+    // blocked in the real render, and the still-pending path must not leak
+    // through the real terminal via either leaf.
+    await act(async () => splitTile?.('tile-root'));
+    expect(container.textContent).toContain('Verifying saved repository scope');
+    expect(runtimeLaunches).toEqual([]);
+    expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
+
+    await act(async () => {
+      completeInitialValidation?.(Response.json({}, { status: 503 }));
+      await Promise.resolve();
+    });
+  });
+
+  it('blocks a brand-new tile id that later carries the same still-unverified repo path', async () => {
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/panel/repos')) return Response.json({}, { status: 503 });
+      return Response.json({});
+    }));
+
+    let replaceLayout: ((layout: TileLayout) => void) | null = null;
+    let unverifiedIds = new Set<string>();
+    const onLayout = () => undefined;
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onReplaceLayout: (replace) => { replaceLayout = replace; },
+      onUnverifiedIds: (ids) => { unverifiedIds = new Set(ids); },
+      registeredRepos,
+    })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    // The ORIGINAL restored leaf ('tile-root') has failed validation.
+    expect(unverifiedIds.has('tile-root')).toBe(true);
+
+    // A brand-new tile id — never part of the original restored snapshot —
+    // gets assigned the exact same still-unverified path (e.g. a canvas
+    // scope reassignment, or any future split/copy path). Blocking is a
+    // property of the PATH, so this new id must be blocked too, and a
+    // sibling leaf pointed at a genuinely different, never-blocked path
+    // must not be.
+    await act(async () => replaceLayout?.({
+      ...createDefaultTileLayout(),
+      root: {
+        type: 'split',
+        id: 'new-split',
+        direction: 'horizontal',
+        ratio: 0.5,
+        children: [
+          { type: 'leaf', id: 'tile-root', content: { kind: 'terminal', repoPath: STALE_REPO_PATH } },
+          { type: 'leaf', id: 'brand-new-leaf', content: { kind: 'terminal', repoPath: STALE_REPO_PATH } },
+        ],
+      },
+    }));
+
+    expect(unverifiedIds.has('tile-root')).toBe(true);
+    expect(unverifiedIds.has('brand-new-leaf')).toBe(true);
+
+    await act(async () => replaceLayout?.({
+      ...createDefaultTileLayout(),
+      root: {
+        type: 'split',
+        id: 'new-split',
+        direction: 'horizontal',
+        ratio: 0.5,
+        children: [
+          { type: 'leaf', id: 'tile-root', content: { kind: 'terminal', repoPath: STALE_REPO_PATH } },
+          { type: 'leaf', id: 'unrelated-leaf', content: { kind: 'terminal', repoPath: '/tmp/never-blocked/repo' } },
+        ],
+      },
+    }));
+
+    expect(unverifiedIds.has('unrelated-leaf')).toBe(false);
   });
 
   it('drops a repo scope from another local server before the workspace can restore it', async () => {
