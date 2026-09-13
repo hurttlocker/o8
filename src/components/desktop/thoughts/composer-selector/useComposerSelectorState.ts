@@ -86,6 +86,8 @@ export function useComposerSelectorState(input: {
   } = input;
   const inSessionEffortsRef = useRef<Record<string, ComposerEffortMap>>({});
   const lastResolvedModelRef = useRef<string | null>(null);
+  const modelIdRef = useRef(modelId);
+  const restoreModelRef = useRef(restoreModel);
   const [clampNotice, setClampNotice] = useState<ComposerEffortClampNotice | null>(null);
   const [storedEffortSnapshot, setStoredEffortSnapshot] = useState<{
     key: string;
@@ -182,10 +184,18 @@ export function useComposerSelectorState(input: {
   }, [mode, modeStorageId]);
 
   useEffect(() => {
+    modelIdRef.current = modelId;
+  }, [modelId]);
+
+  useEffect(() => {
+    restoreModelRef.current = restoreModel;
+  }, [restoreModel]);
+
+  useEffect(() => {
     if (!enabled || !repoPath) return;
     const storedModel = readStoredOrchestratorModel(repoPath);
-    if (storedModel && storedModel !== modelId) restoreModel?.(storedModel);
-  }, [enabled, modelId, repoPath, restoreModel]);
+    if (storedModel && storedModel !== modelIdRef.current) restoreModelRef.current?.(storedModel);
+  }, [enabled, repoPath, threadId]);
 
   const storedEffortKey = `${threadId ?? ''}:${modelId ?? ''}`;
   useEffect(() => {
@@ -348,9 +358,8 @@ export function useComposerSelectorState(input: {
       );
       writeComposerModelEffort(modelId, effort, threadId);
     }
-    if (nextModel) writeStoredOrchestratorModel(repoPath, nextModel);
     changeBackend?.(nextBackend, nextModel);
-  }, [changeBackend, effort, modelId, repoPath, threadId]);
+  }, [changeBackend, effort, modelId, threadId]);
 
   const persistWorkerDefaults = useCallback(async (patch: WorkerDefaultsPatch) => {
     setWorkerOverrides((current) => ({ ...current, ...patch }));

@@ -1,10 +1,21 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
 const thoughtsRoot = fileURLToPath(new URL('../', import.meta.url));
+const directPersistencePattern = /\blocalStorage\.(?:getItem|setItem|removeItem)\s*\(|window\.localStorage\b|fetch\(\s*['"]\/api\/panel\/operator-defaults/;
+
+const directPersistenceSeams: Record<string, string> = {
+  'AcpModelPicker.tsx': 'Owns the recent-model list for each searchable backend picker.',
+  'ThoughtsChatPanel.tsx': 'Owns the one-shot suppression flag for automatic thread restoration.',
+  'chat-panel/TaskArtifactCard.tsx': 'Owns unsent task-artifact drafts keyed by artifact id.',
+  'chat-panel/useAgentVoiceMode.ts': 'Owns the per-agent voice-mode preference.',
+  'composer-mode-storage.ts': 'Owns tab-scoped composer mode persistence and legacy migration.',
+  'composer-selector/state.ts': 'Owns selector feature flags plus global and per-thread effort maps.',
+  'mission-panel/PacketCard.tsx': 'Owns the selected detail tab for each packet card.',
+  'use-orchestrator-stream/pending-send-store.ts': 'Owns durable pending-send records through an injectable storage seam.',
+};
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -16,28 +27,23 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe('composer selector storage ownership', () => {
-  it('keeps direct localStorage access inside state.ts', () => {
-    const files = ['ComposerSelectorFooter.tsx', 'useComposerSelectorState.ts', 'ComposerPicker.tsx'];
-    for (const file of files) {
-      const source = readFileSync(`${here}/${file}`, 'utf8');
-      expect(source, file).not.toMatch(/localStorage\.(getItem|setItem|removeItem|clear)\s*\(/);
-    }
-    const state = readFileSync(`${here}/state.ts`, 'utf8');
-    expect(state).toMatch(/localStorage\.getItem/);
-    expect(state).toMatch(/localStorage\.setItem/);
-  });
-
-  it('keeps selector persistence and operator-default requests behind the shared seams', () => {
-    const forbiddenStorage = /localStorage\.(?:getItem|setItem)\(\s*['"]o8:orchestrator:(?:model-|thinking-preference|swarm-|orchestration-mode)/;
+  it('keeps direct browser persistence inside explicitly documented seam modules', () => {
+    const violations: string[] = [];
     for (const file of sourceFiles(thoughtsRoot)) {
+      const relativePath = relative(thoughtsRoot, file);
       const source = readFileSync(file, 'utf8');
-      expect(source, file).not.toMatch(forbiddenStorage);
-      expect(source, file).not.toContain('/api/panel/operator-defaults');
+      if (directPersistencePattern.test(source) && !directPersistenceSeams[relativePath]) {
+        violations.push(relativePath);
+      }
     }
-    const hook = readFileSync(`${here}/useComposerSelectorState.ts`, 'utf8');
-    expect(hook).toContain('readStoredOrchestratorModel');
-    expect(hook).toContain('writeComposerModelEffort');
-    expect(hook).toContain('fetchOperatorDefaultsValues');
-    expect(hook).toContain('updateOperatorDefaultsValues');
+    expect(violations).toEqual([]);
+
+    for (const [relativePath, reason] of Object.entries(directPersistenceSeams)) {
+      expect(reason.length, `${relativePath} needs an ownership reason`).toBeGreaterThan(0);
+      expect(
+        readFileSync(join(thoughtsRoot, relativePath), 'utf8'),
+        `${relativePath} no longer owns direct persistence and should leave the allowlist`,
+      ).toMatch(directPersistencePattern);
+    }
   });
 });

@@ -60,6 +60,7 @@ import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
+import { useOrchestratorModelState } from './composer-selector/useOrchestratorModelState';
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
@@ -379,7 +380,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [thinkingOverride, setThinkingOverride] = useState<ManualThinkingEffort | null>(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).thinkingOverride,
   );
-  const [orchestratorModel, setOrchestratorModel] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorModel);
   const [chatMessages, setChatMessages] = useReducer(retainedTranscriptReducer, []);
   const {
     entries: threadHistoryEntries,
@@ -429,6 +429,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const loadGenerationRef = useRef(0);
   const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
+  const {
+    acceptModel: acceptOrchestratorModel,
+    model: orchestratorModel,
+    restoreModel: restoreOrchestratorModel,
+    setModel: setOrchestratorModel,
+  } = useOrchestratorModelState({ operatorDefaultModel: operatorDefaults.orchestratorModel, repoPath: resolvedRepoPath });
   const resetComposerModeForLeadChange = useCallback(() => {
     if (composerModeRef.current === 'moa' || composerModeRef.current === 'fusion') {
       handleComposerModeChange('solo');
@@ -443,7 +449,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setActiveThreadAgent,
     setActiveThreadBackend,
     setBackend: setOrchestratorBackend,
-    setModel: setOrchestratorModel,
+    setModel: acceptOrchestratorModel,
     setOperatorDefaults,
     onBeforeApply: resetComposerModeForLeadChange,
   });
@@ -537,14 +543,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     return () => { controller.abort(); cancelRuntimeReadiness(); };
   }, []);
-
-  useEffect(() => {
-    if (!resolvedRepoPath) {
-      setOrchestratorModel(operatorDefaults.orchestratorModel);
-      return;
-    }
-    setOrchestratorModel(operatorDefaults.orchestratorModel);
-  }, [operatorDefaults.orchestratorModel, resolvedRepoPath]);
 
   useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
     setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
@@ -1590,7 +1588,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setModel: setOrchestratorModel, setOperatorDefaults,
       }, signal),
     });
-  }, [backendSwitch, orchStream, orchestratorBackend, resolvedRepoPath]);
+  }, [backendSwitch, orchStream, orchestratorBackend, resolvedRepoPath, setOrchestratorModel]);
 
   const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
     const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
@@ -1619,8 +1617,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       runningTotal: orchStream.runningTotal,
       currentModel: orchestratorModel,
       setCurrentModel: (model) => {
-        setOrchestratorModel(model);
         writeStoredOrchestratorModel(resolvedRepoPath, model);
+        acceptOrchestratorModel(model);
       },
       replaceTranscript: orchStream.replaceTranscript,
       compactNow: orchStream.compactNow,
@@ -1670,6 +1668,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     isOrchestratorMode,
     missionState,
     orchStream,
+    acceptOrchestratorModel,
     orchestratorModel,
     resetRemoteSession,
     resolvedRepoPath,
@@ -2350,7 +2349,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         ) : null}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
-        modelId={isOrchestratorMode ? orchestratorModel : undefined} onModelRestore={isOrchestratorMode ? setOrchestratorModel : undefined}
+        modelId={isOrchestratorMode ? orchestratorModel : undefined} onModelRestore={isOrchestratorMode ? restoreOrchestratorModel : undefined}
         onModelChange={isOrchestratorMode ? backendSwitch.selectModel : undefined}
         activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}
         onBackendChange={isOrchestratorMode ? backendSwitch.request : undefined}

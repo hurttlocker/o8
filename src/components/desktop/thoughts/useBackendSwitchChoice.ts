@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefO
 import { formatModelLabel } from '@/lib/format';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { updateOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
-import { readStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import type { PendingBackendSwitch } from './chat-panel/BackendSwitchChoice';
 import { fetchFreshThoughtsOperatorDefaults, type OrchestratorBackendSetting, type ThoughtsOperatorDefaults } from './operator-defaults';
 
@@ -52,7 +52,7 @@ export function useBackendSwitchChoice(input: {
   setActiveThreadAgent: Dispatch<SetStateAction<string | null>>;
   setActiveThreadBackend: Dispatch<SetStateAction<OrchestratorBackendId | null>>;
   setBackend: Dispatch<SetStateAction<OrchestratorBackendSetting>>;
-  setModel: Dispatch<SetStateAction<string>>;
+  setModel: (model: string) => void;
   setOperatorDefaults: Dispatch<SetStateAction<ThoughtsOperatorDefaults>>;
   onBeforeApply?: () => void;
 }) {
@@ -61,6 +61,7 @@ export function useBackendSwitchChoice(input: {
     currentModel,
     latestAssistantBackendRef,
     operatorDefaults,
+    repoPath,
     setActiveThreadAgent,
     setActiveThreadBackend,
     setBackend,
@@ -69,13 +70,16 @@ export function useBackendSwitchChoice(input: {
     onBeforeApply,
   } = input;
   const [pending, setPending] = useState<PendingBackendSwitch | null>(null);
+  const applyGenerationRef = useRef(0);
   const handoffModeRef = useRef<'handoff' | null>(null);
   const handoffTargetRef = useRef<OrchestratorBackendId | null>(null);
   const apply = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
+    const applyGeneration = ++applyGenerationRef.current;
     onBeforeApply?.();
     backendSourceRef.current = 'user';
     setBackend(backend);
     if (model) {
+      writeStoredOrchestratorModel(repoPath, model);
       setModel(model);
     }
     setActiveThreadBackend(composerBackendTurnOverride(backend) ?? null);
@@ -85,25 +89,33 @@ export function useBackendSwitchChoice(input: {
       if (!response.ok) throw new Error(payload?.error || 'Failed to persist orchestrator backend.');
       return payload;
     }).then((payload) => {
+      if (applyGeneration !== applyGenerationRef.current) return;
       if (!payload?.values) return;
       const defaults = { ...operatorDefaults, ...payload.values };
       setOperatorDefaults(defaults);
       setBackend(resolveActiveComposerBackend(defaults));
     }).catch((error) => {
+      if (applyGeneration !== applyGenerationRef.current) return;
       console.log('[thoughts] failed to persist orchestrator backend', error);
+      if (model) {
+        writeStoredOrchestratorModel(repoPath, currentModel);
+        setModel(currentModel);
+      }
       setBackend(resolveActiveComposerBackend(operatorDefaults));
     });
-  }, [backendSourceRef, onBeforeApply, operatorDefaults, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
+  }, [backendSourceRef, currentModel, onBeforeApply, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
   const reset = useCallback(() => {
     setPending(null);
     handoffModeRef.current = null;
     handoffTargetRef.current = null;
   }, []);
   const selectModel = useCallback((model: string) => {
+    applyGenerationRef.current += 1;
     onBeforeApply?.();
     reset();
+    writeStoredOrchestratorModel(repoPath, model);
     setModel(model);
-  }, [onBeforeApply, reset, setModel]);
+  }, [onBeforeApply, repoPath, reset, setModel]);
   const request = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
     reset();
     const destination = composerBackendTurnOverride(backend) ?? backend;

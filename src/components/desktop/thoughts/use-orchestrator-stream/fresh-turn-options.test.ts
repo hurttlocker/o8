@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from '@/app/api/panel/operator-defaults/route';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
-import { writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import { ThoughtsChatPanel, type ThoughtsChatPanelHandle } from '../ThoughtsChatPanel';
 import { composerModeStorageKey, legacySwarmStorageKey } from '../composer-mode-storage';
 import { THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, type OrchestratorBackendSetting } from '../operator-defaults';
@@ -298,6 +298,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         : [...document.querySelectorAll<HTMLButtonElement>('button')]
           .find((button) => button.textContent?.includes('GPT-5.6 Terra'));
       act(() => pickedModel!.click());
+      expect(readStoredOrchestratorModel(repoPath)).toBe('gpt-5.6-terra');
 
       const resetModeTrigger = selectorEnabled
         ? host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')
@@ -321,6 +322,7 @@ describe('composer fresh operator defaults at the send seam', () => {
 
   it('resets Fusion when a deferred backend handoff applies through the real panel', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
+    writeStoredOrchestratorModel(repoPath, 'gpt-5.6-sol');
     historyResponse = {
       backend: 'codex',
       messages: [
@@ -359,6 +361,7 @@ describe('composer fresh operator defaults at the send seam', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(modeTrigger.textContent).toContain('Solo');
+    expect(readStoredOrchestratorModel(repoPath)).toBe('claude-sonnet-5');
 
     let payload: Record<string, unknown> = {};
     await act(async () => {
