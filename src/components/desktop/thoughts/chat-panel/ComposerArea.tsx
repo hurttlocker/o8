@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
@@ -59,12 +59,6 @@ interface ComposerAreaProps {
   codexDefaultDispatchModel?: string;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;
-  /** UltraCode / swarm tier — surfaced in the thinking dropdown. */
-  swarmEnabled?: boolean;
-  onSetSwarm?: (enabled: boolean) => void;
-  /** Collide / MoA tier — icon chip sibling to the permission toggle. */
-  collideEnabled?: boolean;
-  onSetCollide?: (enabled: boolean) => void;
   /** Clarify-first (#1489) — per-send interview-before-dispatch toggle. */
   /** Session rules (#1329) — forwarded to InputButtons; undefined hides the chip. */
   sessionRulesThreadId?: string | null;
@@ -124,10 +118,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   codexDefaultDispatchModel,
   onEffortChange,
   adaptiveEnabled,
-  swarmEnabled,
-  onSetSwarm,
-  collideEnabled,
-  onSetCollide,
   sessionRulesThreadId,
   repoLabel,
   displayMessagesCount,
@@ -176,15 +166,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     onBackendChange,
     onEffortChange,
   });
-  useEffect(() => {
-    if (composerSelectorV1Enabled && swarmEnabled && composerMode && composerMode !== 'fusion') {
-      onComposerModeChange?.('fusion');
-    }
-  }, [composerMode, composerSelectorV1Enabled, onComposerModeChange, swarmEnabled]);
-  const handleSelectorModeChange = useCallback((next: ComposerMode) => {
-    if (next !== 'fusion' && swarmEnabled) onSetSwarm?.(false);
-    onComposerModeChange?.(next);
-  }, [onComposerModeChange, onSetSwarm, swarmEnabled]);
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -615,7 +596,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 && document.activeElement === event.currentTarget
               ) {
                 event.preventDefault();
-                handleSelectorModeChange(cycleComposerSelectorMode(composerMode));
+                onComposerModeChange(cycleComposerSelectorMode(composerMode));
                 return;
               }
               if (
@@ -750,10 +731,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             effort={effort}
             onEffortChange={composerSelectorV1Enabled ? selectorControls.onEffortChange : onEffortChange}
             adaptiveEnabled={adaptiveEnabled}
-            swarmEnabled={isOrchestratorMode ? swarmEnabled : false}
-            onSetSwarm={isOrchestratorMode ? onSetSwarm : undefined}
-            collideEnabled={isOrchestratorMode ? collideEnabled : false}
-            onSetCollide={isOrchestratorMode ? onSetCollide : undefined}
             sessionRulesThreadId={sessionRulesThreadId}
             repoLabel={showReasoningControls ? repoLabel : null}
             displayMessagesCount={displayMessagesCount}
@@ -761,7 +738,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onStop={isOrchestratorMode ? onStop : undefined}
             onUploadDiskFiles={onUploadDiskFiles}
             composerMode={composerMode}
-            onComposerModeChange={composerSelectorV1Enabled ? handleSelectorModeChange : onComposerModeChange}
+            onComposerModeChange={onComposerModeChange}
             onFileReferenceSelect={handleFileReferenceSelect}
             repoPath={repoPath}
             workspaceTargets={workspaceTargets}

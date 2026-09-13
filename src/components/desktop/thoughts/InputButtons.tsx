@@ -418,10 +418,6 @@ export function InputButtons({
   effort = 'adaptive',
   onEffortChange,
   adaptiveEnabled = true,
-  swarmEnabled = false,
-  onSetSwarm,
-  collideEnabled = false,
-  onSetCollide,
   sessionRulesThreadId,
   repoLabel,
   displayMessagesCount = 0,
@@ -465,12 +461,6 @@ export function InputButtons({
   effort?: ThinkingEffort;
   onEffortChange?: (effort: ThinkingEffort) => void;
   adaptiveEnabled?: boolean;
-  /** UltraCode / swarm tier — Claude fans work out to native sub-agents + Codex. */
-  swarmEnabled?: boolean;
-  onSetSwarm?: (enabled: boolean) => void;
-  /** Collide / MoA tier — Claude + Codex propose independently, Claude synthesizes. */
-  collideEnabled?: boolean;
-  onSetCollide?: (enabled: boolean) => void;
   /**
    * Session rules (#1329). `undefined` = surface doesn't carry session rules
    * (CLI lanes) → chip hidden. `null` = orchestrator surface, thread not yet
@@ -680,10 +670,7 @@ export function InputButtons({
           effort={effort}
           adaptiveEnabled={adaptiveEnabled}
           onEffortChange={onEffortChange}
-          swarmEnabled={swarmEnabled}
-          onSetSwarm={onSetSwarm}
-          collideEnabled={collideEnabled}
-          onSetCollide={onSetCollide}
+          composerMode={composerMode}
         />
       ) : null}
       {composerMode && composerMode !== 'solo' ? (

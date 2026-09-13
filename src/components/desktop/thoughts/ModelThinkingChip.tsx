@@ -9,6 +9,9 @@ import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
 import { formatModelLabel } from '@/lib/format';
+import { composerModeSpec, type ComposerMode } from './composer-mode';
+import { isHotComposerEffort, supportedEffortsForLead } from './composer-selector/state';
+import { useUltraEffortPreference } from './composer-selector/UltraEffortPreference';
 
 export const MODEL_EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
@@ -22,11 +25,6 @@ export const MODEL_EFFORT_LABELS: Record<ThinkingEffort, string> = {
   ultra: 'ultra',
 };
 
-// Adaptive sits BETWEEN medium and high — that's the band it auto-picks in,
-// and its half-lit fourth bar reads the same way (operator, 2026-07-06).
-// 'ultra' is Codex-flagship-only (appended dynamically below) — not in the
-// base list, so it never shows for Claude/Fable turns.
-export const MODEL_EFFORT_OPTIONS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
   // bars fill 3 solid + a half-lit fourth — reading as "between medium and high".
@@ -213,19 +211,9 @@ function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; acti
   );
 }
 
-export type EffortStop =
-  | { kind: 'effort'; effort: ThinkingEffort; label: string; sub: string }
-  | { kind: 'ultracode'; label: string; sub: string };
+export type EffortStop = { effort: ThinkingEffort; label: string; sub: string };
 
-/**
- * Effort slider (Claude Code reference, Q ruling 2026-07-11). A horizontal
- * track of discrete stops — one per selectable effort — with a final purple
- * "Fusion" notch that arms the deep multi-agent pass. The live title above updates as the
- * handle moves; click a stop or drag the handle to pick.
- *
- * (The animated glitch-fill inside the track that the reference shows at the
- * Fusion tier is a deliberate follow-up pass — slider first.)
- */
+/** Horizontal track with one discrete stop per supported reasoning effort. */
 export function EffortSlider({
   stops,
   index,
@@ -240,8 +228,8 @@ export function EffortSlider({
   const last = stops.length - 1;
   const clamped = Math.max(0, Math.min(last, index));
   const active = stops[clamped];
-  const atUltracode = active?.kind === 'ultracode';
-  const accent = atUltracode ? SWARM_ACCENT : 'var(--t-accent)';
+  const hot = Boolean(active && isHotComposerEffort(active.effort));
+  const accent = hot ? SWARM_ACCENT : 'var(--t-accent)';
 
   const pickFromClientX = (clientX: number) => {
     const el = trackRef.current;
@@ -256,7 +244,7 @@ export function EffortSlider({
   return (
     <div style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 2, paddingBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 9 }}>
-        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: atUltracode ? SWARM_ACCENT : 'var(--t-text)' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: hot ? SWARM_ACCENT : 'var(--t-text)' }}>
           {active?.label}
         </span>
         <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.2 }}>
@@ -293,7 +281,6 @@ export function EffortSlider({
         {/* Stops */}
         {stops.map((stop, i) => {
           const on = i <= clamped;
-          const isUltra = stop.kind === 'ultracode';
           return (
             <span
               key={i}
@@ -302,11 +289,11 @@ export function EffortSlider({
                 position: 'absolute',
                 top: '50%',
                 left: `${last <= 0 ? 0 : (i / last) * 100}%`,
-                width: isUltra ? 6 : 5,
-                height: isUltra ? 6 : 5,
+                width: 5,
+                height: 5,
                 borderRadius: 999,
                 transform: 'translate(-50%, -50%)',
-                background: on ? (isUltra ? SWARM_ACCENT : accent) : 'color-mix(in srgb, var(--t-text-faint) 40%, transparent)',
+                background: on ? accent : 'color-mix(in srgb, var(--t-text-faint) 40%, transparent)',
               }}
             />
           );
@@ -354,10 +341,7 @@ export function ModelThinkingChip({
   effort,
   adaptiveEnabled,
   onEffortChange,
-  swarmEnabled = false,
-  onSetSwarm,
-  collideEnabled = false,
-  onSetCollide,
+  composerMode = 'solo',
   compact = false,
   split = false,
 }: {
@@ -369,10 +353,7 @@ export function ModelThinkingChip({
   effort: ThinkingEffort;
   adaptiveEnabled: boolean;
   onEffortChange?: (effort: ThinkingEffort) => void;
-  swarmEnabled?: boolean;
-  onSetSwarm?: (enabled: boolean) => void;
-  collideEnabled?: boolean;
-  onSetCollide?: (enabled: boolean) => void;
+  composerMode?: ComposerMode;
   compact?: boolean;
   /** Quiet-text presentation (Q ruling 2026-07-11): model and thinking
       level render as two separate quiet-text triggers ("Fable 5" · "High")
@@ -383,18 +364,15 @@ export function ModelThinkingChip({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
+  const ultraEnabled = useUltraEffortPreference();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const splitRef = useRef<HTMLSpanElement>(null);
-  const baseEffortOptions = adaptiveEnabled ? MODEL_EFFORT_OPTIONS : MODEL_EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
-  // 'ultra' (Codex flagship internal fan-out) is only selectable on the Codex
-  // backend. Every other backend caps
-  // at 'max' — see resolveCodexReasoningEffort / claudeEffortFlagValue.
-  const options = activeBackend === 'codex' ? [...baseEffortOptions, 'ultra' as ThinkingEffort] : baseEffortOptions;
   const selectedLabel = MODEL_EFFORT_LABELS[effort];
-  const ultraActive = Boolean(swarmEnabled);
-  const collideActive = Boolean(collideEnabled);
+  const effortHot = isHotComposerEffort(effort);
+  const mode = composerModeSpec(composerMode);
+  const deepModeActive = composerMode === 'fusion' || composerMode === 'moa';
   const modelSwitchable = Boolean(onModelChange || onBackendChange);
-  const canOpen = Boolean(onEffortChange || onSetSwarm || onSetCollide || onModelChange || onBackendChange);
+  const canOpen = Boolean(onEffortChange || onModelChange || onBackendChange);
   const showingAffordance = canOpen && (hovered || focused || open);
   const isCodexBackend = activeBackend === 'codex';
   const effortSectionLabel = isCodexBackend ? 'Reasoning' : 'Thinking';
@@ -418,7 +396,6 @@ export function ModelThinkingChip({
     ? acpShortModelLabel(normalizedModelId)
     : null;
   const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? searchableHouseLabel ?? modelLabel;
-  const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Fusion' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
   const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode'>(
@@ -443,48 +420,30 @@ export function ModelThinkingChip({
   const isO8Backend = activeBackend === 'o8';
   const { plan: entitlementPlan } = useEntitlement();
   const isFreePlan = entitlementPlan === 'free';
-  // Hide the effort UI when the free o8 rail is active OR the backend has no
-  // steerable thinking and isn't o8 (o8 keeps its own Low/High tier UI for
-  // founders). OpenClaw/Hermes accept no effort, so the slider must not render
-  // and pretend otherwise (adversarial review 2026-07-15).
-  const hideEffortUi = (isO8Backend && isFreePlan) || (!thinkingKnown && !isO8Backend);
+  const options = supportedEffortsForLead(
+    activeBackend ?? 'auto',
+    effectiveModelId ?? '',
+    adaptiveEnabled,
+    isFreePlan,
+    ultraEnabled,
+  );
+  // Backends without steerable thinking expose no effort stops. o8 keeps its
+  // own plan-gated Low/High options from the shared support resolver.
+  const hideEffortUi = options.length === 0 || (!thinkingKnown && !isO8Backend);
   const useSplit = split && !compact;
 
-  // Effort slider stops (Q ruling 2026-07-11): one per selectable effort, then
-  // a final "Fusion" notch that arms the deep multi-agent pass. Swarm is no longer a
-  // separate Mode row — it's the top of the slider.
-  const effortStops: EffortStop[] = isO8Backend
-    ? [
-      { kind: 'effort', effort: 'low', label: 'Low', sub: 'free' },
-      ...(!isFreePlan
-        ? [{ kind: 'effort' as const, effort: 'high' as ThinkingEffort, label: 'High', sub: 'founders' }]
-        : []),
-    ]
-    : [
-      ...options.map((option): EffortStop => ({
-        kind: 'effort',
-        effort: option,
-        label: MODEL_EFFORT_LABELS[option].charAt(0).toUpperCase() + MODEL_EFFORT_LABELS[option].slice(1),
-        sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
-      })),
-      ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Fusion', sub: 'native sub-agents + every runtime’s workers, in parallel' }] : []),
-    ];
-  const currentEffortIndex = isO8Backend
-    ? (effort === 'high' && !isFreePlan ? 1 : 0)
-    : ultraActive
-      ? effortStops.length - 1
-      : Math.max(0, options.indexOf(effort));
+  const effortStops: EffortStop[] = options.map((option) => ({
+    effort: option,
+    label: MODEL_EFFORT_LABELS[option].charAt(0).toUpperCase() + MODEL_EFFORT_LABELS[option].slice(1),
+    sub: isO8Backend
+      ? option === 'high' ? 'founders' : 'free'
+      : option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
+  }));
+  const currentEffortIndex = Math.max(0, options.indexOf(effort));
   const handleEffortPick = (idx: number) => {
     const stop = effortStops[idx];
     if (!stop) return;
-    if (stop.kind === 'ultracode') {
-      onSetSwarm?.(true);
-      onSetCollide?.(false);
-      onEffortChange?.('xhigh');
-    } else {
-      onEffortChange?.(stop.effort);
-      onSetSwarm?.(false);
-    }
+    onEffortChange?.(stop.effort);
   };
 
   const quietTriggerStyle = (active: boolean): React.CSSProperties => ({
@@ -516,12 +475,12 @@ export function ModelThinkingChip({
         // Right cluster: "Fable 5   High" — two quiet text
         // triggers, no border/bars/chevron at rest. Both open the shared menu.
         <span ref={splitRef} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}
+          {deepModeActive ? <SwarmGlyph size={11} /> : null}
           <button
             type="button"
             onClick={() => { if (canOpen) setOpen((current) => !current); }}
             disabled={!canOpen}
-            title={`${triggerModelLabel} · ${modeLabel}`}
+            title={`${triggerModelLabel} · ${mode.label}`}
             aria-haspopup="menu"
             aria-expanded={open}
             style={quietTriggerStyle(open)}
@@ -531,11 +490,7 @@ export function ModelThinkingChip({
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{triggerModelLabel}</span>
           </button>
           {thinkingKnown && onEffortChange ? (() => {
-            // When the deep pass is armed the effort tier reads "Fusion" (the
-            // slider's top notch), not the raw base effort underneath it.
-            const tierLabel = ultraActive
-              ? 'Fusion'
-              : selectedLabel.charAt(0).toUpperCase() + selectedLabel.slice(1);
+            const tierLabel = selectedLabel.charAt(0).toUpperCase() + selectedLabel.slice(1);
             return (
               <button
                 type="button"
@@ -543,9 +498,9 @@ export function ModelThinkingChip({
                 title={`${effortSectionLabel}: ${tierLabel}`}
                 aria-haspopup="menu"
                 aria-expanded={open}
-                style={{ ...quietTriggerStyle(open), color: ultraActive ? SWARM_ACCENT : (open ? 'var(--t-text-muted)' : 'var(--t-text-faint)') }}
-                onMouseEnter={(event) => { event.currentTarget.style.color = ultraActive ? SWARM_ACCENT : 'var(--t-text)'; }}
-                onMouseLeave={(event) => { event.currentTarget.style.color = ultraActive ? SWARM_ACCENT : (open ? 'var(--t-text-muted)' : 'var(--t-text-faint)'); }}
+                style={{ ...quietTriggerStyle(open), color: effortHot ? SWARM_ACCENT : (open ? 'var(--t-text-muted)' : 'var(--t-text-faint)') }}
+                onMouseEnter={(event) => { event.currentTarget.style.color = effortHot ? SWARM_ACCENT : 'var(--t-text)'; }}
+                onMouseLeave={(event) => { event.currentTarget.style.color = effortHot ? SWARM_ACCENT : (open ? 'var(--t-text-muted)' : 'var(--t-text-faint)'); }}
               >
                 {tierLabel}
               </button>
@@ -562,7 +517,7 @@ export function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={`${triggerModelLabel} · ${modeLabel} · ${effortTitle} ${selectedLabel}`}
+        title={`${triggerModelLabel} · ${mode.label} · ${effortTitle} ${selectedLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -577,10 +532,10 @@ export function ModelThinkingChip({
           paddingLeft: canOpen ? 5 : 0,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: ultraActive || collideActive ? `color-mix(in srgb, ${SWARM_ACCENT} 32%, transparent)` : showingAffordance ? 'var(--t-border)' : 'transparent',
+          borderColor: deepModeActive ? `color-mix(in srgb, ${SWARM_ACCENT} 32%, transparent)` : showingAffordance ? 'var(--t-border)' : 'transparent',
           borderRadius: 7,
-          background: ultraActive || collideActive ? `color-mix(in srgb, ${SWARM_ACCENT} 8%, transparent)` : showingAffordance ? 'var(--t-hover)' : 'transparent',
-          color: ultraActive || collideActive ? 'var(--t-text)' : showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+          background: deepModeActive ? `color-mix(in srgb, ${SWARM_ACCENT} 8%, transparent)` : showingAffordance ? 'var(--t-hover)' : 'transparent',
+          color: deepModeActive ? 'var(--t-text)' : showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
           cursor: canOpen ? 'pointer' : 'default',
           outline: focused && canOpen ? '2px solid var(--t-focus-ring)' : 'none',
           outlineOffset: 1,
@@ -593,7 +548,7 @@ export function ModelThinkingChip({
             {triggerModelLabel}
           </span>
         )}
-        {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}
+        {deepModeActive ? <SwarmGlyph size={11} /> : null}
         {isO8Backend ? null : <ThinkingBars effort={effort} active={open || effort === 'max' || effort === 'ultra' || (isCodexBackend && effort === 'xhigh')} />}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: canOpen ? 0.72 : 0 }}>
           <path d="m6 9 6 6 6-6" />
@@ -680,11 +635,6 @@ export function ModelThinkingChip({
                           onSelect={(picked: string) => {
                             if (activeBackend === group.key) onModelChange?.(picked);
                             else onBackendChange?.(group.key as OrchestratorBackendSetting, picked);
-                            // Fan-out backends replace the selected backend at
-                            // send time, so a stale Collide/Swarm flag would
-                            // route the turn away from this pick entirely.
-                            onSetCollide?.(false);
-                            onSetSwarm?.(false);
                             setOpen(false);
                           }}
                         />
@@ -707,15 +657,6 @@ export function ModelThinkingChip({
                               // Codex flagships keep ultra available; Terra + any Claude
                               // model cap at max — drop a stale ultra selection.
                               if (!isCodexUltraCapableModel(option.model) && effort === 'ultra') onEffortChange?.('max');
-                              // Backends without fan-out must clear Collide/Swarm:
-                              // a persisted `collide` flag replaces the selected
-                              // backend with 'collide' at send time, so the turn
-                              // would never reach o8/OpenClaw/Hermes (adversarial
-                              // review 2026-07-15).
-                              if (option.backend === 'o8' || option.backend === 'openclaw' || option.backend === 'hermes') {
-                                onSetCollide?.(false);
-                                onSetSwarm?.(false);
-                              }
                               // o8 auto tier (Q ruling 2026-07-12): founders land on
                               // High, free lands on Low — the server enforces the
                               // same gate regardless.

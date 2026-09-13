@@ -142,6 +142,7 @@ afterEach(async () => {
 
 describe('composer fresh operator defaults at the send seam', () => {
   it('reaches the live resolver through the real ThoughtsChatPanel send callback', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '0');
     await act(async () => root.unmount());
     root = createRoot(host);
     invalidateOperatorDefaultsValuesSnapshot();

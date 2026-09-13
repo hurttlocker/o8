@@ -99,37 +99,41 @@ function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: Think
   const [model, setModel] = useState('gpt-5.6-sol');
   const [backend, setBackend] = useState<OrchestratorBackendSetting>('codex');
   return (
-    <ComposerArea
-      activeComposer
-      input={input}
-      onInputChange={setInput}
-      isOrchestratorMode
-      displayWaiting={false}
-      chatMessages={[]}
-      activeTargetLabel="Orchestrator"
-      targetAgentExists
-      thoughtsBodyBackground="var(--t-chat-surface-bg)"
-      enhancing={false}
-      preEnhanceInput={null}
-      onEnhance={() => {}}
-      onUndoEnhance={() => {}}
-      onSubmit={() => {}}
-      onSlashCommand={() => {}}
-      modelLabel={model === 'gpt-5.6-sol' ? 'Sol' : model}
-      modelId={model}
-      onModelChange={setModel}
-      activeBackend={backend}
-      onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
-      effort={effort}
-      operatorDefaultEffort="high"
-      onEffortChange={setEffort}
-      adaptiveEnabled
-      displayMessagesCount={0}
-      hasAssistantActivity={false}
-      composerMode={mode}
-      onComposerModeChange={setMode}
-      sessionRulesThreadId="thread-test"
-    />
+    <>
+      <span data-testid="real-composer-mode">{mode}</span>
+      <span data-testid="real-composer-effort">{effort}</span>
+      <ComposerArea
+        activeComposer
+        input={input}
+        onInputChange={setInput}
+        isOrchestratorMode
+        displayWaiting={false}
+        chatMessages={[]}
+        activeTargetLabel="Orchestrator"
+        targetAgentExists
+        thoughtsBodyBackground="var(--t-chat-surface-bg)"
+        enhancing={false}
+        preEnhanceInput={null}
+        onEnhance={() => {}}
+        onUndoEnhance={() => {}}
+        onSubmit={() => {}}
+        onSlashCommand={() => {}}
+        modelLabel={model === 'gpt-5.6-sol' ? 'Sol' : model}
+        modelId={model}
+        onModelChange={setModel}
+        activeBackend={backend}
+        onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
+        effort={effort}
+        operatorDefaultEffort="high"
+        onEffortChange={setEffort}
+        adaptiveEnabled
+        displayMessagesCount={0}
+        hasAssistantActivity={false}
+        composerMode={mode}
+        onComposerModeChange={setMode}
+        sessionRulesThreadId="thread-test"
+      />
+    </>
   );
 }
 
@@ -490,6 +494,7 @@ describe('ComposerSelectorFooter', () => {
   });
 
   it('keeps the classic footer and exposes no selector ids while the flag is off', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '0');
     await act(async () => {
       root.render(createElement(InputButtons, {
         input: 'Build it',
@@ -506,6 +511,7 @@ describe('ComposerSelectorFooter', () => {
         onEffortChange: () => {},
         composerMode: 'solo',
         onComposerModeChange: () => {},
+        composerSelectorV1Enabled: false,
       }));
     });
 
@@ -514,12 +520,58 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('button[title="Attach files"]')).not.toBeNull();
   });
 
-  it('uses the selector footer from the real flag gate', async () => {
-    localStorage.setItem('o8:composer-selector-v1', '1');
-    act(() => { root.render(createElement(RealComposerHarness)); });
+  it('defaults to the selector footer and keeps the classic footer behind opt-out', async () => {
+    act(() => { root.render(createElement(RealComposerHarness, { key: 'default' })); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(container.querySelector('[data-testid="composer-selector-footer"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')).not.toBeNull();
     expect(container.querySelector('button[aria-label="Fleet worker: Codex. Starts: Run now"]')).toBeNull();
+
+    localStorage.setItem('o8:composer-selector-v1', '0');
+    act(() => { root.render(createElement(RealComposerHarness, { key: 'classic' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="composer-selector-footer"]')).toBeNull();
+    expect(container.querySelector('button[aria-label^="Mode:"]')).not.toBeNull();
+    expect([...container.querySelectorAll<HTMLButtonElement>('button')]
+      .some((button) => button.title.startsWith('Sol ·'))).toBe(true);
+  });
+
+  it('keeps classic mode labels aligned when the top effort and Fusion are picked', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '0');
+    act(() => { root.render(createElement(RealComposerHarness)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const modeTrigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Mode:"]')!;
+    const modelTrigger = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.title.startsWith('Sol ·'))!;
+    expect(modelTrigger.title).toContain(modeTrigger.getAttribute('aria-label')!.replace('Mode: ', ''));
+
+    const effortTrigger = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.title.startsWith('Reasoning:'))!;
+    act(() => effortTrigger.click());
+    const effortSlider = container.querySelector<HTMLElement>('[role="slider"]')!;
+    expect(effortSlider.getAttribute('aria-valuemax')).toBe(String(
+      supportedEffortsForLead('codex', 'gpt-5.6-sol', true).length - 1,
+    ));
+    for (let index = 0; index < 7; index += 1) {
+      act(() => effortSlider.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowRight',
+        bubbles: true,
+        cancelable: true,
+      })));
+    }
+    expect(container.querySelector('[data-testid="real-composer-mode"]')?.textContent).toBe('solo');
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('max');
+    expect(effortTrigger.textContent).toBe('Max');
+    expect(modelTrigger.title).toContain(modeTrigger.getAttribute('aria-label')!.replace('Mode: ', ''));
+
+    const topEffort = container.querySelector('[data-testid="real-composer-effort"]')?.textContent;
+    act(() => modeTrigger.click());
+    const fusion = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Fusion')!;
+    act(() => fusion.click());
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe(topEffort);
+    expect(modelTrigger.title).toContain('Fusion');
+    expect(modeTrigger.getAttribute('aria-label')).toBe('Mode: Fusion');
   });
 
   it('moves the focused slider with arrows and digit keys', async () => {
