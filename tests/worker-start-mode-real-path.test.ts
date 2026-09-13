@@ -29,7 +29,7 @@ afterAll(() => {
 });
 
 describe.sequential('worker start mode real Settings path', () => {
-  it('defaults to autonomous and persists an ask-first selection', async () => {
+  it('defaults to autonomous and persists a plan-first selection', async () => {
     const initial = await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
     expect(initial.values.workerStartMode).toBe('autonomous');
 
