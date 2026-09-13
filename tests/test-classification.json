@@ -1496,6 +1496,15 @@
       ]
     },
     {
+      "path": "tests/delegate-dispatch-merge-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dependency-seed-lease-namespace-backcompat.test.ts",
       "reasons": [
         "apfs-tool"
@@ -2250,6 +2259,16 @@
         "child-process",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/packet-merge-repository-identity-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {

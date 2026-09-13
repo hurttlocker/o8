@@ -119,7 +119,14 @@ export async function captureWorkspaceMaterializationSnapshot(
     && path.resolve(lane.worktreePath) === path.resolve(workspacePath)
   ));
   if (lanes.length === 0) {
-    if (mergeEvidence) throw new Error('Merge evidence capture found no durable packet lane.');
+    // Name both halves of the identity that failed to meet: an operator reading
+    // the persisted merge_error can tell "the workspace is unbound" apart from
+    // "this merge was aimed at the wrong repository" (#2308).
+    if (mergeEvidence) {
+      throw new Error(
+        `Merge evidence capture found no durable packet lane for ${path.resolve(workspacePath)} in ${repo.localPath}.`,
+      );
+    }
     return null;
   }
   if (lanes.length !== 1) throw new Error('Workspace retirement found ambiguous managed lane truth.');
