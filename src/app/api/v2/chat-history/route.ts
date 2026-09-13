@@ -370,6 +370,9 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
   if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
+  // Full read-modify-write: hold the history lock like POST does, or a PATCH
+  // racing a turn-receipt write would put the pre-race snapshot back on disk.
+  return withCanonicalChatHistoryLock(body.tabId, () => {
   ensureDir();
   const filePath = safePath(body.tabId);
 
@@ -417,6 +420,7 @@ export async function PATCH(request: NextRequest) {
     console.error('[chat-history] PATCH failed', { tabId: body.tabId, message });
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
+  });
 }
 
 export async function DELETE(request: NextRequest) {

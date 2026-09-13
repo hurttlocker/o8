@@ -4,7 +4,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect, afterAll } from 'vitest';
 import { NextRequest } from 'next/server';
-import { POST, GET, DELETE } from '@/app/api/v2/chat-history/route';
+import { POST, GET, DELETE, PATCH } from '@/app/api/v2/chat-history/route';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 // End-to-end verify for #1282: the real chat-history route must merge by default
@@ -16,6 +16,13 @@ const tabId = `thoughts-itest1282-${process.pid}-${Math.floor(performance.now())
 const post = (body: Record<string, unknown>) =>
   POST(new NextRequest('http://localhost/api/v2/chat-history', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
+
+const patch = (body: Record<string, unknown>) =>
+  PATCH(new NextRequest('http://localhost/api/v2/chat-history', {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   }));
@@ -121,6 +128,61 @@ describe('chat-history route merge (#1282)', () => {
         workers: [{ packetId: 'packet-race', runtime: 'codex', model: 'gpt-5.6-terra' }],
       },
     });
+    rmSync(markerPath, { force: true });
+  });
+
+  it('a metadata PATCH waits for a worker receipt append instead of writing its stale snapshot back', async () => {
+    const receipt = { leadModel: 'gpt-5.6-sol', effort: 'high', mode: 'multitask' };
+    await post({ tabId, replace: true, messages: [user, { ...assistant, receipt }] });
+    await patch({ tabId, starred: false });
+    const markerPath = join(getDataDir(), `chat-history-patch-lock-${process.pid}`);
+    rmSync(markerPath, { force: true });
+    const childCode = `
+      import { writeFileSync } from 'node:fs';
+      const { withCanonicalChatHistoryLock } = (await import('./src/lib/llm/chat-history-store.ts')).default;
+      const { appendMobileOrchestratorTurnWorker } = (await import('./src/lib/mobile/orchestrator-turn-receipt.ts')).default;
+      withCanonicalChatHistoryLock(process.env.O8_TEST_TAB_ID, () => {
+        writeFileSync(process.env.O8_TEST_LOCK_MARKER, 'locked');
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 750);
+        if (!appendMobileOrchestratorTurnWorker({
+          tabId: process.env.O8_TEST_TAB_ID,
+          messageId: 'a1',
+          worker: { packetId: 'packet-patch-race', runtime: 'codex', model: 'gpt-5.6-terra' },
+        })) process.exitCode = 1;
+      });
+    `;
+    const child = spawn(process.execPath, [
+      '--import=./scripts/register-server-only-stub.mjs',
+      '--import=tsx',
+      '--input-type=module',
+      '--eval',
+      childCode,
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        O8_TEST_TAB_ID: tabId,
+        O8_TEST_LOCK_MARKER: markerPath,
+      },
+      stdio: 'pipe',
+    });
+    const childExit = once(child, 'exit');
+    await waitForFile(markerPath);
+    expect((await patch({ tabId, starred: true })).ok).toBe(true);
+    // Read the moment PATCH resolves, before the child exits: a PATCH that did
+    // not wait for the lock resolves while the child still sleeps, and the
+    // worker row is not on disk yet.
+    const afterPatch = await storedMessages();
+    expect(afterPatch.find((message) => message.id === 'a1')).toMatchObject({
+      receipt: {
+        ...receipt,
+        workers: [{ packetId: 'packet-patch-race', runtime: 'codex', model: 'gpt-5.6-terra' }],
+      },
+    });
+    const [exitCode] = await childExit;
+    expect(exitCode).toBe(0);
+    const res = await GET(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`));
+    expect((await res.json()).starred).toBe(true);
     rmSync(markerPath, { force: true });
   });
 });
