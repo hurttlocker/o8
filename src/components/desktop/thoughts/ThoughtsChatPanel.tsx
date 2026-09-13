@@ -1246,10 +1246,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const histRes = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(latest.tabId)}`);
         if (!histRes.ok) return;
         const histData = await histRes.json() as ThoughtsHistoryResponse;
-        const msgs = mapHistoryMessagesToTranscript(
-          histData.messages ?? [],
-          histData.pendingTurnWorkers,
-        );
+        const msgs = mapHistoryMessagesToTranscript(histData.messages ?? [], histData.pendingTurnWorkers);
         // Hard cap: never auto-restore a thread above 100 messages — the user
         // almost certainly didn't want yesterday's giant thread paged back in
         // every reload. They can still pick it up explicitly from History.
@@ -1583,7 +1580,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const sendOrchestrator = useCallback((message: string, options: OrchestratorSendOptions) => {
     const handoffMode = backendSwitch.currentHandoffMode();
-    return orchStream.send(message, { ...options, pickedMode: composerModeRef.current,
+    return orchStream.send(message, {
+      ...options, pickedMode: composerModeRef.current,
       ...(handoffMode ? { handoffMode } : {}),
       resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
         repoPath: resolvedRepoPath,

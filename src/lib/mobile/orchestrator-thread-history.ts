@@ -596,125 +596,122 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
   const content = input.content;
-  // The receipt-only row binds worker launches before reply text can stream.
   if ((!content || !content.trim()) && !input.receipt) return null;
   return withCanonicalChatHistoryLock(tabId, () => {
-  const existing = readHistoryRecord(tabId);
-  if (!existing) {
-    // The user-message helper writes the record first. If it's missing here,
-    // we skip rather than orphan an assistant-only record on disk.
-    return null;
-  }
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const messages = Array.isArray(existing.messages) ? existing.messages : [];
-  // The caller (ws-server) freezes the assistant timestamp at turn START, which
-  // can be a millisecond BEFORE the user message is persisted — that inverts the
-  // pair so the timestamp-sorted transcript renders the reply above the question
-  // (#transcript-flip). Clamp the assistant strictly after the most recent
-  // existing message (the user it's answering) so the turn always reads in order.
-  const baseTimestamp = typeof input.timestampMs === 'number' ? input.timestampMs : now.getTime();
-  const lastTimestamp = messages.length > 0 ? (messages[messages.length - 1]?.timestamp ?? 0) : 0;
-  const timestamp = Math.max(baseTimestamp, lastTimestamp + 1);
-
-  // Attribution for THIS turn. Deliberately the explicit inputs only: falling
-  // back to `existing.backend` would stamp the previous agent's identity onto a
-  // message it did not write, which is precisely the mis-attribution this
-  // stamping exists to prevent. Unknown stays undefined.
-  const turnBackend = normalizeBackend(input.backend) ?? undefined;
-  const turnModel = typeof input.model === 'string' && input.model.trim() ? input.model.trim() : undefined;
-  const existingIndex = messages.findIndex((m) => m?.id === input.messageId);
-  let nextMessages: ChatHistoryMessage[];
-  if (existingIndex >= 0) {
-    nextMessages = messages.slice();
-    nextMessages[existingIndex] = {
-      ...nextMessages[existingIndex],
-      role: 'assistant',
-      content,
-      persistedVersion: (nextMessages[existingIndex]?.persistedVersion ?? 0) + 1,
-      // Streaming upserts re-enter here many times per turn; keep whatever was
-      // stamped first rather than letting a later call with no backend blank it.
-      backend: nextMessages[existingIndex]?.backend ?? turnBackend,
-      model: nextMessages[existingIndex]?.model ?? turnModel,
-      receipt: mergeMobileTurnReceipts(nextMessages[existingIndex]?.receipt, input.receipt),
-      ...(input.tokens ? { tokens: input.tokens } : {}),
-    };
-  } else {
-    // Defensive: if the most recent assistant message has identical content,
-    // a full chat client likely POSTed the same turn already. Don't append a
-    // duplicate; just refresh metadata via the savedAt write below.
-    const last = messages[messages.length - 1];
-    if (last?.role === 'assistant' && last.content === content) {
-      nextMessages = messages;
+    const existing = readHistoryRecord(tabId);
+    if (!existing) {
+      // The user-message helper writes the record first. If it's missing here,
+      // we skip rather than orphan an assistant-only record on disk.
+      return null;
+    }
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const messages = Array.isArray(existing.messages) ? existing.messages : [];
+    // The caller (ws-server) freezes the assistant timestamp at turn START, which
+    // can be a millisecond BEFORE the user message is persisted — that inverts the
+    // pair so the timestamp-sorted transcript renders the reply above the question
+    // (#transcript-flip). Clamp the assistant strictly after the most recent
+    // existing message (the user it's answering) so the turn always reads in order.
+    const baseTimestamp = typeof input.timestampMs === 'number' ? input.timestampMs : now.getTime();
+    const lastTimestamp = messages.length > 0 ? (messages[messages.length - 1]?.timestamp ?? 0) : 0;
+    const timestamp = Math.max(baseTimestamp, lastTimestamp + 1);
+    // Attribution for THIS turn. Deliberately the explicit inputs only: falling
+    // back to `existing.backend` would stamp the previous agent's identity onto a
+    // message it did not write, which is precisely the mis-attribution this
+    // stamping exists to prevent. Unknown stays undefined.
+    const turnBackend = normalizeBackend(input.backend) ?? undefined;
+    const turnModel = typeof input.model === 'string' && input.model.trim() ? input.model.trim() : undefined;
+    const existingIndex = messages.findIndex((m) => m?.id === input.messageId);
+    let nextMessages: ChatHistoryMessage[];
+    if (existingIndex >= 0) {
+      nextMessages = messages.slice();
+      nextMessages[existingIndex] = {
+        ...nextMessages[existingIndex],
+        role: 'assistant',
+        content,
+        persistedVersion: (nextMessages[existingIndex]?.persistedVersion ?? 0) + 1,
+        // Streaming upserts re-enter here many times per turn; keep whatever was
+        // stamped first rather than letting a later call with no backend blank it.
+        backend: nextMessages[existingIndex]?.backend ?? turnBackend,
+        model: nextMessages[existingIndex]?.model ?? turnModel,
+        receipt: mergeMobileTurnReceipts(nextMessages[existingIndex]?.receipt, input.receipt),
+        ...(input.tokens ? { tokens: input.tokens } : {}),
+      };
     } else {
-      nextMessages = [
-        ...messages,
-        {
-          id: input.messageId,
-          role: 'assistant',
-          content,
-          timestamp,
-          persistedVersion: 1,
-          backend: turnBackend,
-          model: turnModel,
-          ...(input.receipt ? { receipt: input.receipt } : {}),
-          ...(input.tokens ? { tokens: input.tokens } : {}),
-        },
-      ];
+      // Defensive: if the most recent assistant message has identical content,
+      // a full chat client likely POSTed the same turn already. Don't append a
+      // duplicate; just refresh metadata via the savedAt write below.
+      const last = messages[messages.length - 1];
+      if (last?.role === 'assistant' && last.content === content) {
+        nextMessages = messages;
+      } else {
+        nextMessages = [
+          ...messages,
+          {
+            id: input.messageId,
+            role: 'assistant',
+            content,
+            timestamp,
+            persistedVersion: 1,
+            backend: turnBackend,
+            model: turnModel,
+            ...(input.receipt ? { receipt: input.receipt } : {}),
+            ...(input.tokens ? { tokens: input.tokens } : {}),
+          },
+        ];
+      }
     }
-  }
-  const explicitBackend = normalizeBackend(input.backend);
-  const nextBackend = explicitBackend
-    ?? normalizeBackend(existing.backend)
-    ?? inferBackendFromSessionIds(existing)
-    ?? DEFAULT_BACKEND;
+    const explicitBackend = normalizeBackend(input.backend);
+    const nextBackend = explicitBackend
+      ?? normalizeBackend(existing.backend)
+      ?? inferBackendFromSessionIds(existing)
+      ?? DEFAULT_BACKEND;
 
-  const nextSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
-  let sessionIdsTouched = false;
-  if ((nextBackend === 'claude' || nextBackend === 'codex')
-    && typeof input.sessionId === 'string'
-    && input.sessionId.trim()
-  ) {
-    const trimmed = input.sessionId.trim();
-    if (nextSessionIds[nextBackend] !== trimmed) {
-      nextSessionIds[nextBackend] = trimmed;
-      sessionIdsTouched = true;
+    const nextSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
+    let sessionIdsTouched = false;
+    if ((nextBackend === 'claude' || nextBackend === 'codex')
+      && typeof input.sessionId === 'string'
+      && input.sessionId.trim()
+    ) {
+      const trimmed = input.sessionId.trim();
+      if (nextSessionIds[nextBackend] !== trimmed) {
+        nextSessionIds[nextBackend] = trimmed;
+        sessionIdsTouched = true;
+      }
     }
-  }
 
-  const explicitModel = typeof input.model === 'string' && input.model.trim()
-    ? input.model.trim()
-    : null;
-  const nextModel = explicitModel
-    ?? (typeof existing.model === 'string' && existing.model.trim() ? existing.model.trim() : null)
-    ?? modelForBackend(nextBackend)
-    ?? DEFAULT_MODEL;
+    const explicitModel = typeof input.model === 'string' && input.model.trim()
+      ? input.model.trim()
+      : null;
+    const nextModel = explicitModel
+      ?? (typeof existing.model === 'string' && existing.model.trim() ? existing.model.trim() : null)
+      ?? modelForBackend(nextBackend)
+      ?? DEFAULT_MODEL;
 
-  const consumed = consumePendingTurnWorkers(existing.pendingTurnWorkers, nextMessages);
+    const consumed = consumePendingTurnWorkers(existing.pendingTurnWorkers, nextMessages);
+    writeHistoryRecord(tabId, {
+      ...existing,
+      messages: consumed.messages,
+      pendingTurnWorkers: consumed.pending,
+      model: nextModel,
+      backend: nextBackend,
+      agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
+      orchestratorTerminalStatus: null,
+      orchestratorTerminalError: null,
+      orchestratorTerminalAt: null,
+      savedAt: nowIso,
+      repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
+        ? existing.repoPath
+        : input.repoPath,
+      repoName: typeof existing.repoName === 'string' && existing.repoName.trim()
+        ? existing.repoName
+        : repoNameFromPath(input.repoPath),
+      orchestratorSessionIds: nextSessionIds,
+      orchestratorSessionUpdatedAt: sessionIdsTouched ? nowIso : existing.orchestratorSessionUpdatedAt ?? null,
+      orchestratorVisible: existing.orchestratorVisible === false ? false : true,
+    });
 
-  writeHistoryRecord(tabId, {
-    ...existing,
-    messages: consumed.messages,
-    pendingTurnWorkers: consumed.pending,
-    model: nextModel,
-    backend: nextBackend,
-    agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
-    orchestratorTerminalStatus: null,
-    orchestratorTerminalError: null,
-    orchestratorTerminalAt: null,
-    savedAt: nowIso,
-    repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
-      ? existing.repoPath
-      : input.repoPath,
-    repoName: typeof existing.repoName === 'string' && existing.repoName.trim()
-      ? existing.repoName
-      : repoNameFromPath(input.repoPath),
-    orchestratorSessionIds: nextSessionIds,
-    orchestratorSessionUpdatedAt: sessionIdsTouched ? nowIso : existing.orchestratorSessionUpdatedAt ?? null,
-    orchestratorVisible: existing.orchestratorVisible === false ? false : true,
-  });
-
-  return readProjectedThread(tabId);
+    return readProjectedThread(tabId);
   });
 }
 
