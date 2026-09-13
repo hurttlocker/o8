@@ -31,6 +31,7 @@ export function prepareOrchestratorTurn(message: string, options?: OrchestratorS
     collideBaseBackend: collide ? options?.backend : undefined,
     backend,
     orchestrationMode,
+    pickedMode: options?.pickedMode,
   };
 }
 

@@ -21,7 +21,7 @@ import {
   processStreamEvent,
   type OrchestratorEvent, type OrchestratorTurnUsage,
 } from '@/lib/lane/orchestrator-stream-events';
-import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
@@ -948,7 +948,7 @@ export async function sendToOrchestrator(
   options: SendToOrchestratorOptions = {},
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
-  const thinkingEffort: ThinkingEffort = options.thinkingEffort ?? 'adaptive';
+  const thinkingEffort = claudeEffortFlagValue(options.thinkingEffort ?? 'adaptive') as ThinkingEffort;
   const requestedModel = resolveClaudeOrchestratorModel(options.model);
   const toolProfile: ToolProfile = options.toolProfile ?? 'full';
   const w = getWarmState(session.sessionName);
@@ -1044,7 +1044,7 @@ export async function sendToOrchestrator(
       throw e;
     }
   }
-
+  onEvent({ type: 'turn_receipt', leadModel: model, effort: thinkingEffort });
   // Attachments → image blocks. Same CLI contract as interactive-session.ts;
   // the message is written to the RESIDENT proc's still-open stdin (no
   // stdin.end() — the proc lives on for the next turn).

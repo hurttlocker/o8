@@ -30,12 +30,13 @@ export interface ChatMessageLike {
   timestamp?: unknown;
   backend?: unknown;
   model?: unknown;
+  receipt?: unknown;
   persistedVersion?: unknown;
   type?: unknown;
   handoff?: unknown;
 }
 
-const SERVER_METADATA_FIELDS = ['backend', 'model', 'persistedVersion', 'type', 'handoff'] as const;
+const SERVER_METADATA_FIELDS = ['backend', 'model', 'receipt', 'persistedVersion', 'type', 'handoff'] as const;
 
 function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inbound: T): T {
   const existingRecord = existing as Record<string, unknown>;

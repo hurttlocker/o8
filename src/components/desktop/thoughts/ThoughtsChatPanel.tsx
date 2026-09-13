@@ -1580,8 +1580,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const sendOrchestrator = useCallback((message: string, options: OrchestratorSendOptions) => {
     const handoffMode = backendSwitch.currentHandoffMode();
-    return orchStream.send(message, {
-      ...options,
+    return orchStream.send(message, { ...options, pickedMode: composerModeRef.current,
       ...(handoffMode ? { handoffMode } : {}),
       resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
         repoPath: resolvedRepoPath,

@@ -285,6 +285,39 @@ describe('orchestrator socket — first-turn streaming race', () => {
     });
   });
 
+  it('attaches the terminal turn receipt to the completed assistant entry', () => {
+    const assistant: MobileTranscriptEntry = { id: 'a-receipt', role: 'assistant', text: 'done' };
+    const current: CurrentAssistantStreamState = { id: 'a-receipt', chunks: ['done'], thinkingChunks: [], epoch: 0 };
+    const h = makeHarness({ status: 'busy', current, messages: [userMsg, assistant] });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: 'ready',
+        receipt: {
+          leadModel: 'gpt-5.6-sol',
+          effort: 'high',
+          mode: 'fusion',
+          pickedMode: 'solo',
+        },
+      },
+    });
+
+    const messages = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      [userMsg, assistant],
+    );
+    expect(messages.find((message) => message.id === 'a-receipt')).toMatchObject({
+      receipt: {
+        leadModel: 'gpt-5.6-sol',
+        effort: 'high',
+        mode: 'fusion',
+        pickedMode: 'solo',
+      },
+    });
+  });
+
   it('a snapshot "busy" resyncs an idle client up to busy (reload into an active turn)', () => {
     const h = makeHarness({ status: 'connecting' });
 

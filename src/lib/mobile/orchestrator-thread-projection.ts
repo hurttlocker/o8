@@ -31,6 +31,7 @@ export type ChatHistoryMessage = {
    */
   backend?: string;
   model?: string;
+  receipt?: MobileTranscriptEntry['receipt'];
   type?: MobileTranscriptEntry['type'];
   handoff?: MobileTranscriptEntry['handoff'];
   toolCalls?: MobileTranscriptEntry['toolCalls'];
@@ -51,6 +52,7 @@ export interface OrchestratorAssistantUpsertInput {
   agent?: string | null;
   sessionId?: string | null;
   model?: string | null;
+  receipt?: MobileTranscriptEntry['receipt'];
   tokens?: ChatHistoryMessage['tokens'];
   timestampMs?: number;
 }

@@ -624,7 +624,6 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
   // stamping exists to prevent. Unknown stays undefined.
   const turnBackend = normalizeBackend(input.backend) ?? undefined;
   const turnModel = typeof input.model === 'string' && input.model.trim() ? input.model.trim() : undefined;
-
   const existingIndex = messages.findIndex((m) => m?.id === input.messageId);
   let nextMessages: ChatHistoryMessage[];
   if (existingIndex >= 0) {
@@ -638,6 +637,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
       // stamped first rather than letting a later call with no backend blank it.
       backend: nextMessages[existingIndex]?.backend ?? turnBackend,
       model: nextMessages[existingIndex]?.model ?? turnModel,
+      receipt: input.receipt ?? nextMessages[existingIndex]?.receipt,
       ...(input.tokens ? { tokens: input.tokens } : {}),
     };
   } else {
@@ -658,12 +658,12 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
           persistedVersion: 1,
           backend: turnBackend,
           model: turnModel,
+          ...(input.receipt ? { receipt: input.receipt } : {}),
           ...(input.tokens ? { tokens: input.tokens } : {}),
         },
       ];
     }
   }
-
   const explicitBackend = normalizeBackend(input.backend);
   const nextBackend = explicitBackend
     ?? normalizeBackend(existing.backend)

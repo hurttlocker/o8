@@ -146,7 +146,7 @@ import {
   prepareBackendSwitchHandoff,
   recordBackendSwitchHandoffAudit,
 } from './lib/orchestrator/backend-switch-carry';
-import { resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
+import { isComposerWireMode, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
   resolveOrchestratorRepoPath,
@@ -180,6 +180,7 @@ import {
 import {
   orchestratorModeAllowsBackendFallback,
   resolveOrchestratorExecutionBackendId,
+  resolveTurnReceiptMode,
   sendOrchestratorBackendTurn,
 } from './lib/lane/orchestrator-send-entry';
 import {
@@ -1234,6 +1235,8 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
         data: { repoPath, threadId, turnId: assistantMessageId ?? null, explanation: event.explanation, steps: event.steps, backend },
       });
       break;
+    case 'turn_receipt':
+      break;
     case 'done':
       if (threadId && event.sessionId) {
         writeOrchestratorBackendSessionId(threadId, backend, event.sessionId);
@@ -1411,6 +1414,8 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
       const sessionName = session!.sessionName;
       let wsMsg: string | null = null;
       switch (event.type) {
+        case 'turn_receipt':
+          break;
         case 'text':
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: false, backend: backend.id } });
           break;
@@ -5156,6 +5161,7 @@ async function handleOrchestratorSendMsgOnce(
   // rejected attempt streamed so the retry's reply is not appended to it.
   const assistantText = createAssistantTextBuffer();
   let activeAssistantModel = model ?? null;
+  let activeAssistantReceipt: MobileTranscriptEntry['receipt'];
   // Incremental persistence (2026-06-22): persist the streamed assistant text
   // every ~1.5s WHILE the turn runs, not only at terminal points. Without this,
   // a turn whose child wedges (never emits 'done', the await never resolves)
@@ -5184,6 +5190,7 @@ async function handleOrchestratorSendMsgOnce(
         agent: activeAgentTag,
         sessionId,
         model: assistantModel,
+        receipt: activeAssistantReceipt,
         ...(receipt?.usage ? {
           tokens: {
             input: receipt.usage.inputTokens,
@@ -5442,7 +5449,7 @@ async function handleOrchestratorSendMsgOnce(
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
+            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, receipt: activeAssistantReceipt, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
           }));
         }
       };
@@ -5458,6 +5465,18 @@ async function handleOrchestratorSendMsgOnce(
         let wsMsg: string | null = null;
 
         switch (event.type) {
+          case 'turn_receipt': {
+            const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode);
+            const pickedMode = isComposerWireMode(msg.pickedMode) ? msg.pickedMode : undefined;
+            activeAssistantReceipt = {
+              leadModel: event.leadModel,
+              effort: event.effort,
+              mode,
+              ...(pickedMode && pickedMode !== mode ? { pickedMode } : {}),
+            };
+            break;
+          }
+
           case 'text':
             if (isThreadBacked) {
               assistantText.append(event.text);

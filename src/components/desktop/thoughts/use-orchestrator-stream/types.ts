@@ -3,6 +3,7 @@ import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/typ
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
+import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import type { OrchestratorPermissionMode, OrchestratorStreamStatus } from './shared';
 
@@ -26,6 +27,8 @@ export interface OrchestratorSendOptions {
   displayMessage?: string;
   localEntriesAfterUser?: MobileTranscriptEntry[];
   orchestrationMode?: OrchestratorExecutionMode;
+  /** Composer mode captured when Send was pressed, before backend overrides. */
+  pickedMode?: ComposerWireMode;
   collide?: boolean;
   /** Explicit consent to seed a cold cross-backend continuation. */
   handoffMode?: 'handoff';

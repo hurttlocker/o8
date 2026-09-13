@@ -25,6 +25,7 @@ export interface PersistedLlmChatMessage {
   media?: MobileTranscriptMedia[];
   backend?: MobileTranscriptEntry['backend'];
   model?: string;
+  receipt?: MobileTranscriptEntry['receipt'];
   tokens?: { input: number; output: number };
   costUsd?: number;
   timestamp: number;
@@ -216,6 +217,7 @@ export function mapLlmHistoryToMobileTranscript(messages: PersistedLlmChatMessag
       : ''),
     backend: message.backend,
     model: message.model,
+    receipt: message.receipt,
     tokens: message.tokens,
     costUsd: message.costUsd,
     toolCalls: message.toolCalls,

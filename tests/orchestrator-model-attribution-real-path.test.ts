@@ -19,8 +19,14 @@ import {
   composerBackendTurnOverride,
   resolveFreshComposerTurnOptions,
 } from '@/components/desktop/thoughts/useBackendSwitchChoice';
+import { mapHistoryMessagesToTranscript } from '@/components/desktop/thoughts/history-transcript';
+import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-orchestrator-model-attribution-'));
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
+process.env.O8_DATA_DIR = dataDir;
 const repoPath = join(dataDir, 'repo');
 const token = 'orchestrator-model-attribution-token';
 const sockets = new Set<WebSocket>();
@@ -29,6 +35,7 @@ let wsProcess: ChildProcess;
 let apiPort = 0;
 let wsPort = 0;
 let serverOutput = '';
+const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -65,6 +72,11 @@ async function submitComposerTurn(
   threadId: string,
   capturedModel: string,
   capturedBackend: OrchestratorBackendSetting,
+  options: {
+    thinkingEffort?: ThinkingEffort;
+    orchestrationMode?: OrchestratorExecutionMode;
+    pickedMode?: ComposerWireMode;
+  } = {},
 ) {
   let displayedModel = capturedModel;
   let displayedBackend = capturedBackend;
@@ -74,6 +86,9 @@ async function submitComposerTurn(
   const turnOptions = await resolveOrchestratorTurnOptions({
     model: capturedModel,
     backend: composerBackendTurnOverride(capturedBackend),
+    thinkingEffort: options.thinkingEffort,
+    orchestrationMode: options.orchestrationMode,
+    pickedMode: options.pickedMode,
     resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
       repoPath,
       backend: capturedBackend,
@@ -93,23 +108,32 @@ async function submitComposerTurn(
     displayMessage: turn.displayMessage,
     permissionMode: turn.permissionMode,
     orchestrationMode: turn.orchestrationMode,
+    pickedMode: turn.pickedMode,
+    thinkingEffort: turn.thinkingEffort,
     model: turn.model,
     backend: turn.backend,
   }));
   const historyPath = join(dataDir, 'chat-history', `${threadId}.json`);
   await waitFor(() => {
     try {
-      const history = JSON.parse(readFileSync(historyPath, 'utf8')) as { messages?: Array<{ role?: string; model?: string; content?: string }> };
-      return history.messages?.some((entry) => entry.role === 'assistant' && entry.content === 'deterministic assistant reply') ?? false;
+      const history = JSON.parse(readFileSync(historyPath, 'utf8')) as { messages?: Array<{ role?: string; model?: string; content?: string; receipt?: unknown }> };
+      return history.messages?.some((entry) => (
+        entry.role === 'assistant'
+        && entry.content === 'deterministic assistant reply'
+        && (options.thinkingEffort === undefined || entry.receipt !== undefined)
+      )) ?? false;
     } catch {
       return false;
     }
   }, 'persisted assistant attribution');
   const history = JSON.parse(readFileSync(historyPath, 'utf8')) as { messages: Array<{ role: string; model?: string }> };
+  const persisted = readPersistedLlmChat(threadId);
+  const transcript = mapHistoryMessagesToTranscript(persisted?.history.messages ?? []);
   return {
     displayedModel,
     displayedBackend,
     recordedModel: history.messages.find((entry) => entry.role === 'assistant')?.model,
+    receipt: transcript.find((entry) => entry.role === 'assistant')?.receipt,
   };
 }
 
@@ -168,6 +192,8 @@ afterAll(async () => {
   }
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   rmSync(dataDir, { recursive: true, force: true });
+  delete process.env.CORTEX_IDE_DATA_DIR;
+  delete process.env.O8_DATA_DIR;
   vi.unstubAllGlobals();
 });
 
@@ -184,5 +210,48 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     await persistDefaults('gpt-5.6-terra', 'codex');
     const second = await submitComposerTurn(socket, `thoughts-model-attribution-b-${Date.now()}`, 'gpt-5.6-sol', 'codex');
     expect(second).toMatchObject({ displayedModel: 'gpt-5.6-terra', displayedBackend: 'codex', recordedModel: 'gpt-5.6-terra' });
+  }, 30_000);
+
+  it('persists the effective model, effort, and mode through the desktop history reader', async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+    sockets.add(socket);
+    await once(socket, 'open');
+
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const turn = await submitComposerTurn(
+      socket,
+      `thoughts-turn-receipt-${Date.now()}`,
+      'gpt-5.6-sol',
+      'codex',
+      { thinkingEffort: 'high', orchestrationMode: 'fleet', pickedMode: 'multitask' },
+    );
+
+    expect(turn.receipt).toEqual({
+      leadModel: 'gpt-5.6-sol',
+      effort: 'high',
+      mode: 'multitask',
+    });
+  }, 30_000);
+
+  it('persists the effective Fusion override and the picked Solo mode', async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+    sockets.add(socket);
+    await once(socket, 'open');
+
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const turn = await submitComposerTurn(
+      socket,
+      `thoughts-turn-receipt-override-${Date.now()}`,
+      'gpt-5.6-sol',
+      'codex',
+      { thinkingEffort: 'high', orchestrationMode: 'fusion', pickedMode: 'solo' },
+    );
+
+    expect(turn.receipt).toEqual({
+      leadModel: 'gpt-5.6-sol',
+      effort: 'high',
+      mode: 'fusion',
+      pickedMode: 'solo',
+    });
   }, 30_000);
 });
