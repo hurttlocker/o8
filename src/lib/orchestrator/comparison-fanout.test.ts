@@ -74,6 +74,32 @@ describe('best-of-N fan-out', () => {
     expect(new Set(out.packets.map((p) => p.branchTarget)).size).toBe(3);
   });
 
+  it('preserves staging while clearing a seed lane and review from every candidate', () => {
+    const out = fanOutComparisonPackets(stateWithSeed({
+      comparisonModels: ['codex', 'codex'],
+      queueState: 'held',
+      status: 'draft',
+      lane: {
+        tileId: 'tile-seed',
+        tabId: 'tab-seed',
+        repoPath: '/repo',
+        runtime: 'codex',
+        laneId: 'lane-seed',
+      },
+      review: {
+        approved: true,
+        findings: [],
+        recordedAt: '2026-09-13T00:00:00.000Z',
+        summary: 'seed review',
+      },
+    }));
+
+    expect(out.packets).toHaveLength(2);
+    expect(out.packets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ queueState: 'held', status: 'draft', lane: null, review: null }),
+    ]));
+  });
+
   it('turns an armed quality-search seed into two deliberate roles on one sealed contract', () => {
     const taskContract = {
       version: 1 as const,

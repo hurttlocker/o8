@@ -69,6 +69,9 @@ export async function POST(request: Request) {
       // triage → low, premium action → high). A no-op for gemini/opencode tiers.
       requestedEffort: routing.effort,
       constraints: '',
+      // Target dispatch is an immediate operation; retain scheduler admission
+      // until its synchronous dispatch binds the packet to a lane.
+      dispatchOnCreate: true,
       workerIntent: routing.tier === 'triage' ? 'light_worker' : 'heavy_worker',
     };
     const canonicalBody = JSON.stringify({ repoPath, filePath, score: score.score, createInput });

@@ -112,6 +112,7 @@ interface CreateMissionInput {
   requestedModel?: string | null;
   claudeCodeCarrier?: ClaudeCodeModelSource | null;
   constraints: string;
+  dispatchOnCreate?: boolean;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
@@ -144,6 +145,7 @@ interface CreateMissionInlineInput {
   requestedModel?: string | null;
   claudeCodeCarrier?: ClaudeCodeModelSource | null;
   constraints: string;
+  dispatchOnCreate?: boolean;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
@@ -405,6 +407,7 @@ export async function createMission(input: CreateMissionInput) {
           claudeCodeModel: input.requestedModel,
           claudeCodeCarrier: input.claudeCodeCarrier,
           constraints: input.constraints,
+          dispatchOnCreate: input.dispatchOnCreate,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
@@ -453,6 +456,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           claudeCodeModel: input.requestedModel,
           claudeCodeCarrier: input.claudeCodeCarrier,
           constraints: input.constraints,
+          dispatchOnCreate: input.dispatchOnCreate,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,

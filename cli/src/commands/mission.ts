@@ -292,6 +292,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   if (comparisonModels && comparisonModels.length > 0) body.comparisonModels = comparisonModels;
   if (existingBranchPolicy) body.existingBranchPolicy = existingBranchPolicy;
   if (qualitySearch) body.qualitySearch = qualitySearch;
+  if (hasFlag(rest, 'dispatch')) body.dispatchOnCreate = true;
   body.clientMutationId = flag(rest, 'idempotency-key')?.trim() || randomUUID();
 
   const cfg = resolveConfig();
