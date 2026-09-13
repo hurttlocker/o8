@@ -3,6 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
+import { readStoredComposerMode, writeStoredComposerMode } from './composer-mode-storage';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
 import { fetchRuntimeLaunchReceipt, fetchRuntimeSteerReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
@@ -146,8 +147,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   permissionMode?: ThoughtsChatPermissionMode;
   collideEnabled?: boolean;
   onSetCollide?: (enabled: boolean) => void;
-  initialComposerMode?: ComposerMode;
-  onComposerModePersist?: (mode: ComposerMode) => void;
+  composerModeStorageId?: string;
   repoLabel?: string | null;
   emptyStateOverride?: React.ReactNode;
   // Slot rendered BELOW the composer input when no messages have
@@ -229,8 +229,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   permissionMode = 'full',
   collideEnabled = false,
   onSetCollide,
-  initialComposerMode = 'solo',
-  onComposerModePersist,
+  composerModeStorageId,
   repoLabel,
   emptyStateOverride,
   composerBelowSlot,
@@ -256,26 +255,28 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // Composer mode (Cursor-parity, Q 2026-07-17) — persists across sends until
   // switched, Cursor behavior. Ref mirrors state so handleTaskSend reads the
   // live value without growing its dependency list.
-  const [composerMode, setComposerMode] = useState<ComposerMode>(initialComposerMode);
-  const composerModeRef = useRef<ComposerMode>(initialComposerMode);
+  const [composerMode, setComposerMode] = useState<ComposerMode>(
+    () => composerModeStorageId ? readStoredComposerMode(composerModeStorageId) : 'solo',
+  );
+  const composerModeRef = useRef<ComposerMode>(composerMode);
   composerModeRef.current = composerMode;
   // MoA IS the Collide backend — keep the chip and the model-picker's Mode
   // section telling the same truth in both directions.
   const handleComposerModeChange = useCallback((next: ComposerMode) => {
     setComposerMode(next);
-    onComposerModePersist?.(next);
+    if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, next);
     if (next === 'moa') onSetCollide?.(true);
     else if (collideEnabled) onSetCollide?.(false);
-  }, [collideEnabled, onComposerModePersist, onSetCollide]);
+  }, [collideEnabled, composerModeStorageId, onSetCollide]);
   useEffect(() => {
     if (collideEnabled && composerMode !== 'moa') {
       setComposerMode('moa');
-      onComposerModePersist?.('moa');
+      if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, 'moa');
     } else if (!collideEnabled && composerMode === 'moa') {
       setComposerMode('solo');
-      onComposerModePersist?.('solo');
+      if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, 'solo');
     }
-  }, [collideEnabled, composerMode, onComposerModePersist]);
+  }, [collideEnabled, composerMode, composerModeStorageId]);
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
   // Orchestration mode + runtime + chat-model selection. Per-tab when

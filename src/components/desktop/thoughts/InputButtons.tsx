@@ -543,6 +543,31 @@ export function InputButtons({
           clampNotice={composerEffortClampNotice}
           isFreePlan={composerSelectorIsFreePlan}
           threadId={sessionRulesThreadId ?? null}
+          leadingControls={(
+            <>
+              {inlineLeadingExtras ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+                  {inlineLeadingExtras}
+                </span>
+              ) : null}
+              {showRepoChip ? (
+                <>
+                  {compact || !inlineLeadingExtras ? null : <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
+                  <RepoTargetChip
+                    repoLabel={repoLabel}
+                    workspaceTargets={workspaceTargets}
+                    selectedRepoPath={selectedRepoPath}
+                    onSelectRepoPath={onSelectRepoPath}
+                  />
+                </>
+              ) : null}
+              {sessionRulesThreadId !== undefined ? (
+                <span data-testid="composer-selector-session-rules" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                  <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
+                </span>
+              ) : null}
+            </>
+          )}
           attachControl={(
             <AttachFilesButton
               onUploadDiskFiles={onUploadDiskFiles}
@@ -553,7 +578,11 @@ export function InputButtons({
               onSavePrompt={onSavePrompt}
             />
           )}
+          meterControl={inlineMeterSlot}
           micControl={<MicButton />}
+          voiceControl={onVoiceModeChange ? (
+            <VoiceModeButton enabled={Boolean(voiceModeEnabled)} onChange={onVoiceModeChange} />
+          ) : null}
           sendControl={(
             <SendPill
               canSubmit={canSubmit}
@@ -562,6 +591,7 @@ export function InputButtons({
               onStop={onStop}
             />
           )}
+          containerRef={rowRef}
           onRequestTextareaFocus={onRequestTextareaFocus}
         />
       </ComposerChipCompactContext.Provider>

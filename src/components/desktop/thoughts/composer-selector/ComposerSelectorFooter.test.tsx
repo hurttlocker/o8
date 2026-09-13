@@ -129,6 +129,11 @@ function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: Think
         adaptiveEnabled
         displayMessagesCount={0}
         hasAssistantActivity={false}
+        repoLabel="Test repo"
+        composerLeadingExtras={<span data-testid="test-leading-extra">Extra control</span>}
+        footerMeterSlot={<span data-testid="test-context-meter">Context meter</span>}
+        voiceModeEnabled={false}
+        onVoiceModeChange={() => {}}
         composerMode={mode}
         onComposerModeChange={setMode}
         sessionRulesThreadId="thread-test"
@@ -525,6 +530,11 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(container.querySelector('[data-testid="composer-selector-footer"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="composer-selector-lead"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="test-leading-extra"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Chat target"]')?.textContent).toContain('Test repo');
+    expect(container.querySelector('[data-testid="composer-selector-session-rules"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="test-context-meter"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label^="Voice mode off"]')).not.toBeNull();
     expect(container.querySelector('button[aria-label="Fleet worker: Codex. Starts: Run now"]')).toBeNull();
 
     localStorage.setItem('o8:composer-selector-v1', '0');

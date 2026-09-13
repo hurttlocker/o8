@@ -50,11 +50,6 @@ import { ThoughtsChatPanel, type ThoughtsChatPanelChromeState, type ThoughtsChat
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
 import { ORCHESTRATOR_HOME_REPO_SENTINEL, resolveOrchestratorClientRepoPath } from '@/components/desktop/thoughts/orchestrator-home-mode';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
-import {
-  readStoredComposerMode,
-  writeStoredComposerMode,
-} from '@/components/desktop/thoughts/composer-mode-storage';
-import type { ComposerMode } from '@/components/desktop/thoughts/composer-mode';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
 import { SessionTileSurface, projectLiveSessionMeshParticipants } from './SessionTileSurface';
 import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
@@ -210,7 +205,6 @@ function OrchestratorTabInner({
       return next;
     });
   }, []);
-  const [initialComposerMode] = useState<ComposerMode>(() => readStoredComposerMode(tabId));
   // Collide (MoA) tier (per-tab). The composer mode remains the source of
   // truth; this flag selects the matching comparison backend.
   const [collideEnabled, setCollideEnabled] = useState<boolean>(
@@ -648,10 +642,6 @@ function OrchestratorTabInner({
   const handleSetCollide = useCallback((enabled: boolean) => {
     setCollideEnabled(enabled);
     persistCollide(tabId, enabled);
-  }, [tabId]);
-
-  const handleComposerModePersist = useCallback((mode: ComposerMode) => {
-    writeStoredComposerMode(tabId, mode);
   }, [tabId]);
 
   useEffect(() => {
@@ -1101,8 +1091,7 @@ function OrchestratorTabInner({
       thoughtsMutedGlass={thoughtsMutedGlass}
       collideEnabled={collideEnabled}
       onSetCollide={handleSetCollide}
-      initialComposerMode={initialComposerMode}
-      onComposerModePersist={handleComposerModePersist}
+      composerModeStorageId={tabId}
       repoLabel={repoLabel}
       emptyStateOverride={emptyOrShimmerNode}
       showInlineExport={false}

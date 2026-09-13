@@ -7,6 +7,7 @@ import { GET, POST } from '@/app/api/panel/operator-defaults/route';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 import { writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import { ThoughtsChatPanel, type ThoughtsChatPanelHandle } from '../ThoughtsChatPanel';
+import { composerModeStorageKey, legacySwarmStorageKey } from '../composer-mode-storage';
 import { THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, type OrchestratorBackendSetting } from '../operator-defaults';
 import { resolveFreshComposerTurnOptions } from '../useBackendSwitchChoice';
 import { useOrchestratorStream } from '../useOrchestratorStream';
@@ -142,7 +143,9 @@ afterEach(async () => {
 
 describe('composer fresh operator defaults at the send seam', () => {
   it('reaches the live resolver through the real ThoughtsChatPanel send callback', async () => {
+    const composerModeStorageId = 'live-mode-tab';
     localStorage.setItem('o8:composer-selector-v1', '0');
+    localStorage.setItem(legacySwarmStorageKey(composerModeStorageId), '1');
     await act(async () => root.unmount());
     root = createRoot(host);
     invalidateOperatorDefaultsValuesSnapshot();
@@ -165,6 +168,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         sessionTargets: [],
         workspaceTargets: [],
         repoPath,
+        composerModeStorageId,
         initialMode: 'fleet',
         onModePersist: () => {},
         suppressAutoRestore: true,
@@ -189,7 +193,15 @@ describe('composer fresh operator defaults at the send seam', () => {
     const modelButton = [...host.querySelectorAll('button')]
       .find((button) => button.title.startsWith('Terra'));
     expect(modelButton).toBeTruthy();
-    expect(payload).toMatchObject({ model: 'gpt-5.6-terra', backend: 'codex' });
+    expect(payload).toMatchObject({
+      model: 'gpt-5.6-terra',
+      backend: 'codex',
+      orchestrationMode: 'fusion',
+      displayMessage: 'operator message',
+    });
+    expect(payload.message).toContain('[Mode: Fusion]');
+    expect(localStorage.getItem(composerModeStorageKey(composerModeStorageId))).toBe('fusion');
+    expect(localStorage.getItem(legacySwarmStorageKey(composerModeStorageId))).toBe('0');
   });
 
   it('carries and displays each persisted default without remounting, while retaining a repo model pin', async () => {
