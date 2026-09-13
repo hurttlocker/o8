@@ -122,6 +122,8 @@ interface CreateMissionInput {
   qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
+  /** Exact assistant transcript entry whose receipt owns launched workers. */
+  orchestratorTurnId?: string;
   parentWorkspaceId?: string;
   caller?: string;
   readOnly?: boolean;
@@ -154,6 +156,8 @@ interface CreateMissionInlineInput {
   qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
+  /** Exact assistant transcript entry whose receipt owns launched workers. */
+  orchestratorTurnId?: string;
   parentWorkspaceId?: string;
   caller?: string;
   readOnly?: boolean;
@@ -413,6 +417,7 @@ export async function createMission(input: CreateMissionInput) {
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
+          orchestratorTurnId: input.orchestratorTurnId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
           launchContext: missionLaunchContext(input),
         } satisfies CreateMissionRequest,
@@ -461,6 +466,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
+          orchestratorTurnId: input.orchestratorTurnId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
           launchContext: missionLaunchContext(input),
         } satisfies CreateMissionRequest,

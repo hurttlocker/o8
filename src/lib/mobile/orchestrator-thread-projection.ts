@@ -82,6 +82,7 @@ export type OrchestratorHistoryRecord = {
   orchestratorTerminalAt?: string | null;
   orchestratorSessionIds?: Record<string, string | null>;
   orchestratorSessionUpdatedAt?: string | null;
+  pendingTurnWorkers?: import('@/lib/mobile/types').MobilePendingTurnWorkers;
 };
 
 export function normalizeSessionIds(value: unknown): Record<string, string | null> {

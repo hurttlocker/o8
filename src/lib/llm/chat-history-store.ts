@@ -56,6 +56,7 @@ export interface PersistedLlmChatHistory {
   repoPath?: string;
   repoBranch?: string;
   remoteUrl?: string | null;
+  pendingTurnWorkers?: import('@/lib/mobile/types').MobilePendingTurnWorkers;
 }
 
 export interface PersistedLlmChatRecord {
@@ -150,6 +151,7 @@ export function writePersistedLlmChat(
   let starred = false;
   let title: string | undefined;
   let planText: string | undefined;
+  let pendingTurnWorkers: PersistedLlmChatHistory['pendingTurnWorkers'];
   let existingMessages: PersistedLlmChatMessage[] = [];
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory;
@@ -157,6 +159,7 @@ export function writePersistedLlmChat(
     starred = existing.starred || false;
     title = existing.title;
     planText = normalizePlanText(existing.planText);
+    pendingTurnWorkers = existing.pendingTurnWorkers;
   } catch {
     // no existing history
   }
@@ -177,6 +180,9 @@ export function writePersistedLlmChat(
     starred: history.starred ?? starred,
     title: history.title ?? title,
     planText: normalizePlanText(history.planText) ?? planText,
+    pendingTurnWorkers: Object.prototype.hasOwnProperty.call(history, 'pendingTurnWorkers')
+      ? history.pendingTurnWorkers
+      : pendingTurnWorkers,
   };
   persistCanonicalChatHistoryRecord(tabId, persistedRecord);
 }

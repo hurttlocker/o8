@@ -76,6 +76,17 @@ describe('mergeChatMessages (#1282 transcript-loss)', () => {
     ]);
   });
 
+  it('preserves stored worker rows when a stale client reposts the base receipt', () => {
+    const worker = { packetId: 'packet-1', runtime: 'codex', model: 'gpt-5.6-terra' };
+    const receipt = { leadModel: 'gpt-6-astra', effort: 'high', mode: 'multitask' };
+    const existing = [msg('a1', 'assistant', 101, { receipt: { ...receipt, workers: [worker] } })];
+    const inbound = [msg('a1', 'assistant', 101, { receipt })];
+
+    expect(mergeChatMessages(existing, inbound)).toEqual([
+      expect.objectContaining({ receipt: { ...receipt, workers: [worker] } }),
+    ]);
+  });
+
   it('allows an explicitly attributed inbound turn to replace prior attribution', () => {
     const existing = [msg('a1', 'assistant', 101, { backend: 'codex', model: 'gpt-5.6' })];
     const inbound = [msg('a1', 'assistant', 101, { backend: 'claude', model: 'claude-opus-5' })];

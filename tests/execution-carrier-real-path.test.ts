@@ -187,6 +187,16 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
     const repoPath = createRemoteRepo();
     const { addRepo } = await import('@/lib/repos/registry');
     await addRepo(repoPath);
+    const threadHistory = await import('@/lib/mobile/orchestrator-thread-history');
+    const receiptThread = threadHistory.createMobileOrchestratorThread({ repoPath, backend: 'codex' });
+    const turnId = 'assistant-worker-receipt';
+    threadHistory.appendMobileOrchestratorUserMessage({
+      tabId: receiptThread.id,
+      repoPath,
+      message: 'Dispatch the receipt worker.',
+      messageId: 'user-worker-receipt',
+      backend: 'codex',
+    });
     const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
     const defaults = await updateOperatorDefaults({ defaultDispatchRuntime: 'codex', workerExecutionCarrier: 'ori' });
     expect(defaults.values).toMatchObject({
@@ -203,11 +213,17 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
       repoPath,
       runtime: 'codex',
       constraints: '',
+      orchestratorThreadId: receiptThread.id,
+      orchestratorTurnId: turnId,
     });
     const packetId = mission.packets[0]!.id;
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId)!;
     expect(packet.executionCarrier).toBe('ori');
+    expect(packet).toMatchObject({
+      orchestratorThreadId: receiptThread.id,
+      orchestratorTurnId: turnId,
+    });
     expect((await dispatchMission({ missionId: mission.missionId })).dispatched).toBe(1);
 
     const dispatchedPacket = readOrchestratorControlPlaneState().packets
@@ -216,6 +232,42 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
       ownerId: packetId,
       state: 'committed',
     });
+    threadHistory.upsertMobileOrchestratorAssistantMessage({
+      tabId: receiptThread.id,
+      repoPath,
+      messageId: turnId,
+      content: 'Dispatching now.',
+      backend: 'codex',
+      model: 'gpt-6-astra',
+      receipt: { leadModel: 'gpt-6-astra', effort: 'high', mode: 'multitask' },
+    });
+    threadHistory.appendMobileOrchestratorUserMessage({
+      tabId: receiptThread.id,
+      repoPath,
+      message: 'A later turn must not receive the worker.',
+      messageId: 'user-later-turn',
+      backend: 'codex',
+    });
+    threadHistory.upsertMobileOrchestratorAssistantMessage({
+      tabId: receiptThread.id,
+      repoPath,
+      messageId: 'assistant-later-turn',
+      content: 'No dispatch from this turn.',
+      backend: 'codex',
+      model: 'gpt-6-astra',
+      receipt: { leadModel: 'gpt-6-astra', effort: 'high', mode: 'solo' },
+    });
+    const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+    const { mapHistoryMessagesToTranscript } = await import('@/components/desktop/thoughts/history-transcript');
+    const persistedReceiptHistory = readPersistedLlmChat(receiptThread.id)!.history;
+    expect(persistedReceiptHistory.pendingTurnWorkers).toBeUndefined();
+    const receiptTranscript = mapHistoryMessagesToTranscript(persistedReceiptHistory.messages);
+    expect(receiptTranscript.find((entry) => entry.id === turnId)?.receipt?.workers).toEqual([{
+      packetId,
+      runtime: dispatchedPacket.workerRouting!.selectedRuntime,
+      model: dispatchedPacket.workerRouting!.selectedModel,
+    }]);
+    expect(receiptTranscript.find((entry) => entry.id === 'assistant-later-turn')?.receipt?.workers).toBeUndefined();
 
     const { findLaneByPacket, getLaneEvents } = await import('@/lib/lane/registry');
     const lane = findLaneByPacket(packet.id)!;

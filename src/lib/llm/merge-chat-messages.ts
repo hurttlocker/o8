@@ -25,6 +25,9 @@
  * to the route for a full replace, because a shorter array can't be told apart
  * from a partial-loss array by inspection.
  */
+import type { MobileTurnReceipt } from '@/lib/mobile/types';
+import { mergeMobileTurnReceipts } from '@/lib/mobile/turn-receipt';
+
 export interface ChatMessageLike {
   id?: unknown;
   timestamp?: unknown;
@@ -46,6 +49,18 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
     if (inboundRecord[field] !== undefined || existingRecord[field] === undefined) continue;
     next ??= { ...inboundRecord };
     next[field] = existingRecord[field];
+  }
+  if (existingRecord.receipt && typeof existingRecord.receipt === 'object' && !Array.isArray(existingRecord.receipt)
+    && inboundRecord.receipt && typeof inboundRecord.receipt === 'object' && !Array.isArray(inboundRecord.receipt)
+  ) {
+    const receipt = mergeMobileTurnReceipts(
+      existingRecord.receipt as MobileTurnReceipt,
+      inboundRecord.receipt as MobileTurnReceipt,
+    );
+    if (receipt !== inboundRecord.receipt) {
+      next ??= { ...inboundRecord };
+      next.receipt = receipt;
+    }
   }
   return (next ?? inboundRecord) as T;
 }

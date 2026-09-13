@@ -141,6 +141,7 @@ import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
+import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
 import {
   backendSwitchRequiresExplicitHandoff,
   prepareBackendSwitchHandoff,
@@ -5302,10 +5303,15 @@ async function handleOrchestratorSendMsgOnce(
     const turnBody = backendSwitchHandoff
       ? `${backendSwitchHandoff.prelude}\n\n${message}`
       : message;
-    const turnMessage = withSessionRules(turnBody, threadId);
-    if (turnMessage !== message) {
+    const turnMessageWithRules = withSessionRules(turnBody, threadId);
+    if (turnMessageWithRules !== turnBody) {
       console.log(`[session-rules] Injected session rules into orchestrator turn (thread=${threadId ?? 'none'})`);
     }
+    const turnMessage = withOrchestratorTurnReceiptContext({
+      message: turnMessageWithRules,
+      threadId,
+      turnId: assistantMessageId,
+    });
     // Fable Slice 6 #2 — server-side metered-window valve. The 15K auto-compact
     // target lives in the desktop client's React effect; a headless or mobile
     // operator never mounts it, so a metered window could grow unbounded at

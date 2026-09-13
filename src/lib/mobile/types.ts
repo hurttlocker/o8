@@ -319,6 +319,8 @@ export interface MobileTurnReceipt {
   }>;
 }
 
+export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnReceipt['workers']>>;
+
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
   id: string;

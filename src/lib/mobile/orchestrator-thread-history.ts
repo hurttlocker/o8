@@ -8,6 +8,7 @@ import { createHandoffHistoryMarker, truncateBoundaryWithHandoff } from './orche
 import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
 import { repairComposerPreambleHistory } from './orchestrator-thread-history-repair';
+import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
 import {
   effectiveBackend,
   inferBackendFromSessionIds,
@@ -23,7 +24,6 @@ import {
   type OrchestratorAssistantUpsertInput,
   type OrchestratorHistoryRecord,
 } from './orchestrator-thread-projection';
-
 export { ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 const MAX_THREADS = 20;
 const DEFAULT_MODEL = 'claude-code';
@@ -598,14 +598,13 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
 
   const content = input.content;
   if (!content || !content.trim()) return null;
-
   const existing = readHistoryRecord(tabId);
   if (!existing) {
     // The user-message helper writes the record first. If it's missing here,
     // we skip rather than orphan an assistant-only record on disk.
     return null;
   }
-
+  const pendingReceipt = consumePendingTurnWorkers(existing.pendingTurnWorkers, input.messageId, input.receipt);
   const now = new Date();
   const nowIso = now.toISOString();
   const messages = Array.isArray(existing.messages) ? existing.messages : [];
@@ -637,7 +636,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
       // stamped first rather than letting a later call with no backend blank it.
       backend: nextMessages[existingIndex]?.backend ?? turnBackend,
       model: nextMessages[existingIndex]?.model ?? turnModel,
-      receipt: input.receipt ?? nextMessages[existingIndex]?.receipt,
+      receipt: mergeMobileTurnReceipts(nextMessages[existingIndex]?.receipt, pendingReceipt.receipt),
       ...(input.tokens ? { tokens: input.tokens } : {}),
     };
   } else {
@@ -658,7 +657,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
           persistedVersion: 1,
           backend: turnBackend,
           model: turnModel,
-          ...(input.receipt ? { receipt: input.receipt } : {}),
+          ...(pendingReceipt.receipt ? { receipt: pendingReceipt.receipt } : {}),
           ...(input.tokens ? { tokens: input.tokens } : {}),
         },
       ];
@@ -693,6 +692,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
 
   writeHistoryRecord(tabId, {
     ...existing,
+    pendingTurnWorkers: pendingReceipt.pending,
     messages: nextMessages,
     model: nextModel,
     backend: nextBackend,

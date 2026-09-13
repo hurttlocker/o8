@@ -457,6 +457,8 @@ export interface OrchestratorPacket {
    * mirrors the {@link OrchestratorPacket.useBrain} precedent).
    */
   orchestratorThreadId?: string | null;
+  /** Exact assistant transcript entry that owns this packet's turn receipt. */
+  orchestratorTurnId?: string | null;
   /** Surface that created this packet. Review-worthy work routes back here. */
   dispatcher?: PacketDispatcherAttribution | null;
   /** Outside-launch provenance and desktop reveal behavior. */

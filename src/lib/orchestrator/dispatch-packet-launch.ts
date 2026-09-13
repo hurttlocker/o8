@@ -16,6 +16,7 @@ import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledg
 import type { RoleId, RoleRouteChoice } from '@/lib/operator/role-routing';
 import type { PacketSpendCap } from './metered-spend';
 import { getProjectContext } from '@/lib/projects/context';
+import { appendMobileOrchestratorTurnWorker } from '@/lib/mobile/orchestrator-turn-receipt';
 import { resolveDefaultBranch } from '@/lib/repos/registry';
 import { assertRuntimeDispatchable } from '@/lib/runtimes/shared/auth-detect';
 import { assertExecutionCarrierDispatchable, type ExecutionCarrierPreflightEvidence } from '@/lib/runtimes/shared/execution-carrier-preflight';
@@ -163,6 +164,27 @@ function carrierAuditReason(packet: OrchestratorPacket, routing: WorkerRouting, 
     : reason;
 }
 
+function appendTurnWorkerSafely(
+  packet: OrchestratorPacket,
+  routing: WorkerRouting,
+  launchedModel?: string | null,
+): void {
+  if (!packet.orchestratorThreadId || !packet.orchestratorTurnId) return;
+  const model = launchedModel
+    ?? routing.selectedModel
+    ?? getRuntimeCapability(routing.selectedRuntime).defaultModel;
+  if (!model) return;
+  try {
+    appendMobileOrchestratorTurnWorker({
+      tabId: packet.orchestratorThreadId,
+      messageId: packet.orchestratorTurnId,
+      worker: { packetId: packet.id, runtime: routing.selectedRuntime, model },
+    });
+  } catch (error) {
+    console.warn('[turn-receipt] failed to append launched worker', packet.id, error);
+  }
+}
+
 export async function launchPacketWithStorageAdmission(input: {
   packet: OrchestratorPacket;
   allPackets: OrchestratorPacket[];
@@ -241,6 +263,7 @@ export async function launchPacketWithStorageAdmission(input: {
       reason: carrierAuditReason(packet, workerRouting, workerRouting.reason),
       fallbackReason: fallback ? workerRouting.reason : null,
     });
+    appendTurnWorkerSafely(packet, workerRouting, lane.model);
     return result;
   }
   const claimKey = `packet-storage-launch:${admissionLease.receipt.reservationId}`;
@@ -251,7 +274,7 @@ export async function launchPacketWithStorageAdmission(input: {
     reconcileUnresolved: async () => {
       const lane = await findExactCommittedLaunch(packet, launchGeneration, workerRouting);
       if (!lane) return null;
-      return {
+      const result = {
         laneId: lane.id,
         sessionKey: lane.sessionKey,
         workerRouting,
@@ -259,6 +282,8 @@ export async function launchPacketWithStorageAdmission(input: {
         spendCap,
         dependencyMaterializationMode: packet.lane?.dependencyMaterializationMode ?? null,
       };
+      appendTurnWorkerSafely(packet, workerRouting, lane.model);
+      return result;
     },
   }, async () => {
     let laneResult: Awaited<ReturnType<typeof dispatchLaneCommand>>;
@@ -350,6 +375,7 @@ export async function launchPacketWithStorageAdmission(input: {
         console.warn('[session-rules] failed to record rules_applied event', error);
       }
     }
+    appendTurnWorkerSafely(packet, workerRouting, launchResult.lane?.model);
     return {
       laneId: laneResult.laneId,
       sessionKey: launchResult.lane?.sessionKey ?? null,
