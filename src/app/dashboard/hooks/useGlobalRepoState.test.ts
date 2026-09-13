@@ -234,4 +234,91 @@ describe('global repository worktree discovery', () => {
 
     expect(current.globalRepoEntries).toEqual([]);
   });
+
+  it('lets a newer repos-changed inventory win over a recovery refresh still fanning out worktrees', async () => {
+    const savedRepo = repo(1);
+    const otherRepo = repo(2);
+    const worktreePath = '/tmp/o8-external-worktrees/saved-chat';
+    let resolveSavedWorktrees: ((response: Response) => void) | null = null;
+    mocks.fetchSWRJson.mockImplementation(async () => ({ repos: [otherRepo] }));
+    mocks.ipcFetch.mockImplementation((input: string) => {
+      if (input === '/api/panel/repos') return Promise.resolve(Response.json({ repos: [savedRepo, otherRepo] }));
+      if (input === `/api/worktrees?repo=${encodeURIComponent(savedRepo.localPath)}`) {
+        return new Promise<Response>((resolve) => { resolveSavedWorktrees = resolve; });
+      }
+      if (input === `/api/worktrees?repo=${encodeURIComponent(otherRepo.localPath)}`) {
+        return Promise.resolve(Response.json({ worktrees: [], conflicts: { safe: true, count: 0 }, totalDiskUsage: 0 }));
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Recovery starts fanning out worktree lookups for BOTH repos (savedRepo
+    // is still pending)...
+    const recoveryPending = current.refreshRestoredRepoState([worktreePath]);
+    await act(async () => { await Promise.resolve(); });
+
+    // ...then the operator removes savedRepo entirely (an o8:repos-changed
+    // style authoritative reload) WHILE that recovery is still in flight.
+    await act(async () => { await current.loadRegisteredRepos(); });
+    expect(current.globalRepoEntries).toEqual([otherRepo]);
+
+    // The stale recovery finally finishes its (now-irrelevant) worktree
+    // lookup and must NOT resurrect the removed repo.
+    let refreshed = true;
+    await act(async () => {
+      resolveSavedWorktrees?.(Response.json({
+        worktrees: [{ path: worktreePath, branch: 'saved-chat', status: 'active' }],
+        conflicts: { safe: true, count: 0 },
+        totalDiskUsage: 0,
+      }));
+      refreshed = await recoveryPending;
+    });
+
+    expect(refreshed).toBe(false);
+    expect(current.globalRepoEntries).toEqual([otherRepo]);
+  });
+
+  it('tolerates one unrelated repo worktree lookup failing while still authorizing another repo saved worktree', async () => {
+    const brokenRepo = repo(1);
+    const owningRepo = repo(2);
+    const worktreePath = '/tmp/o8-external-worktrees/saved-chat';
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [] });
+    mocks.ipcFetch.mockImplementation(async (input: string) => {
+      if (input === '/api/panel/repos') return Response.json({ repos: [brokenRepo, owningRepo] });
+      if (input === `/api/worktrees?repo=${encodeURIComponent(brokenRepo.localPath)}`) {
+        return Response.json({ error: 'boom' }, { status: 500 });
+      }
+      if (input === `/api/worktrees?repo=${encodeURIComponent(owningRepo.localPath)}`) {
+        return Response.json({
+          worktrees: [{ path: worktreePath, branch: 'saved-chat', status: 'active' }],
+          conflicts: { safe: true, count: 0 },
+          totalDiskUsage: 0,
+        });
+      }
+      throw new Error(`Unexpected IPC fetch: ${input}`);
+    });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    let refreshed = false;
+    await act(async () => {
+      refreshed = await current.refreshRestoredRepoState([worktreePath]);
+    });
+
+    expect(refreshed).toBe(true);
+    expect(current.globalRepoEntries).toEqual([brokenRepo, owningRepo]);
+    expect(current.workspaceScopeEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ localPath: worktreePath, isWorktree: true }),
+    ]));
+  });
 });

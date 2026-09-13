@@ -109,6 +109,13 @@ export function useGlobalRepoState({
   const selectedRepoWorktreeSnapshotsRef = useRef(new Map<string, RepoWorktreeSummary>());
   const selectedRepoWorktreeGenerationRef = useRef(0);
   const branchGenerationRef = useRef(0);
+  // Shared across loadRegisteredRepos and refreshRestoredRepoState so the
+  // most-recently-STARTED authoritative repo-inventory fetch always wins,
+  // regardless of which one resolves first. A repos-changed/add/remove/touch
+  // refresh that starts while a recovery refresh is still fanning out
+  // worktree lookups must never be clobbered by that older, slower refresh
+  // finishing later.
+  const repoInventoryGenerationRef = useRef(0);
 
   const loadRepoWorktrees = useCallback(async (
     repoPath: string,
@@ -153,12 +160,18 @@ export function useGlobalRepoState({
   }, [globalRepoEntry?.localPath, loadRepoWorktrees]);
 
   const loadRegisteredRepos = useCallback(async () => {
+    const generation = ++repoInventoryGenerationRef.current;
     const cacheKey = 'panel:repos';
     const cached = getSWR<{ repos?: RepoRegistryEntry[] }>(cacheKey);
-    if (cached.data) setGlobalRepoEntries(cached.data.repos ?? []);
+    if (cached.data && generation === repoInventoryGenerationRef.current) {
+      setGlobalRepoEntries(cached.data.repos ?? []);
+    }
     const data = await fetchSWRJson<{ repos?: RepoRegistryEntry[] }>(cacheKey, '/api/panel/repos');
     const repos = data.repos ?? [];
-    setGlobalRepoEntries(repos);
+    // A fresher inventory fetch (this same function re-entered, or a
+    // recovery refresh) may have already started and must win even if it
+    // resolves later — never let a superseded fetch overwrite it.
+    if (generation === repoInventoryGenerationRef.current) setGlobalRepoEntries(repos);
     return repos;
   }, []);
 
@@ -176,6 +189,7 @@ export function useGlobalRepoState({
       signal?.addEventListener('abort', abort, { once: true });
       const refresh = (async () => {
         try {
+          const generation = ++repoInventoryGenerationRef.current;
           const response = await ipcFetch('/api/panel/repos', {
             cache: 'no-store',
             headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
@@ -210,8 +224,17 @@ export function useGlobalRepoState({
             while (!controller.signal.aborted) {
               const repo = reposToLoad[nextRepoIndex++];
               if (!repo) return;
-              const summary = await loadRepoWorktrees(repo.localPath, controller.signal, false);
-              summaries.push([repo.localPath, summary]);
+              try {
+                const summary = await loadRepoWorktrees(repo.localPath, controller.signal, false);
+                summaries.push([repo.localPath, summary]);
+              } catch {
+                // An unrelated repo's worktree lookup failing (e.g. a 500)
+                // must not sink recovery for every other repo. A path that
+                // genuinely depends on THIS repo's worktree list stays
+                // blocked below via hasAuthoritativeScope — absence never
+                // becomes permission — but paths proven by other repos, or
+                // root-owned, still go through.
+              }
             }
           }));
           if (controller.signal.aborted) return false;
@@ -224,6 +247,11 @@ export function useGlobalRepoState({
             || authoritativeWorktreePaths.has(path)
           );
           if (!validatedPaths.every(hasAuthoritativeScope)) return false;
+          // A newer inventory fetch (repos-changed/add/remove/touch, or
+          // another recovery attempt) started while worktrees were still
+          // loading — it may already have committed fresher state. Never let
+          // this older, slower refresh overwrite it.
+          if (generation !== repoInventoryGenerationRef.current) return false;
 
           setGlobalRepoEntries(repos);
           setAllRepoWorktrees((current) => {

@@ -100,7 +100,6 @@ export function useTileLayout({
   const [canvasStateByTileId, setCanvasStateByTileId] = useState<Record<string, CanvasTileState>>({});
   const {
     retryRestoredRepoValidation,
-    queueInitialRestoreSplit,
     restoredRepoValidationState,
     setTileLayoutHydrated,
     tileLayoutHydrated,
@@ -381,10 +380,9 @@ export function useTileLayout({
       ...tileLayout,
       root: result.root,
     };
-    queueInitialRestoreSplit({ content: nextContent, direction, expectedLayout: nextLayout, ratio });
     setTileLayout(nextLayout);
     setActiveTileId(result.newTileId);
-  }, [queueInitialRestoreSplit, setActiveTileId, setTileLayout, tileLayout]);
+  }, [setActiveTileId, setTileLayout, tileLayout]);
 
   const ensureTileKind = useCallback((
     kind: TileContentKind,

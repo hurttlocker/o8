@@ -99,12 +99,14 @@ function LayoutRestoreHarness({
   onLayout,
   onReplaceLayout,
   onSplitTile,
+  onResizeSplit,
   registeredRepos,
   refreshRestoredRepoState = async () => true,
 }: {
   onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
   onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
   onSplitTile?: (split: (tileId: string) => void) => void;
+  onResizeSplit?: (resize: (splitId: string, ratio: number) => void) => void;
   registeredRepos: RepoRegistryEntry[];
   refreshRestoredRepoState?: (validatedPaths: readonly string[]) => Promise<boolean>;
 }) {
@@ -145,6 +147,10 @@ function LayoutRestoreHarness({
   useEffect(() => {
     onSplitTile?.((tileId) => restored.handleSplitTile(tileId, 'horizontal'));
   }, [onSplitTile, restored.handleSplitTile]);
+
+  useEffect(() => {
+    onResizeSplit?.((splitId, ratio) => restored.handleResizeSplit(splitId, ratio));
+  }, [onResizeSplit, restored.handleResizeSplit]);
 
   if (!restored.tileLayoutHydrated) return createElement('div');
   const leaf = getFirstLeaf(layout.root);
@@ -360,7 +366,7 @@ describe('useTileLayout browser-origin restore', () => {
     expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
   });
 
-  it('keeps saved terminal and canvas scopes when the operator splits during initial validation', async () => {
+  it('keeps saved terminal and canvas scopes when the operator splits AND resizes during initial validation', async () => {
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedTerminalCanvasLayout(STALE_REPO_PATH)));
     const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
     let completeInitialValidation: ((response: Response) => void) | null = null;
@@ -376,6 +382,7 @@ describe('useTileLayout browser-origin restore', () => {
     let latestLayout = createDefaultTileLayout();
     let hydrated = false;
     let splitTile: ((tileId: string) => void) | null = null;
+    let resizeSplit: ((splitId: string, ratio: number) => void) | null = null;
     const onLayout = (layout: TileLayout, nextHydrated: boolean) => {
       latestLayout = layout;
       hydrated = nextHydrated;
@@ -383,11 +390,19 @@ describe('useTileLayout browser-origin restore', () => {
     await act(async () => root.render(createElement(LayoutRestoreHarness, {
       onLayout,
       onSplitTile: (split) => { splitTile = split; },
+      onResizeSplit: (resize) => { resizeSplit = resize; },
       registeredRepos,
     })));
     await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
 
-    await act(async () => splitTile?.('tile-root'));
+    // Two DIFFERENT live actions land while the initial validation for the
+    // restored layout is still in flight — a split (real handleSplitTile)
+    // followed by a resize (real handleResizeSplit). The old queued-split
+    // replay matched on the split's captured "expectedLayout" object
+    // identity, which the resize invalidates the moment it fires; the fix
+    // must not depend on replaying anything at all.
+    await act(async () => splitTile?.('saved-terminal'));
+    await act(async () => resizeSplit?.('saved-split', 0.7));
     await act(async () => {
       completeInitialValidation?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
       await Promise.resolve();
@@ -415,6 +430,53 @@ describe('useTileLayout browser-origin restore', () => {
       expect.objectContaining({ kind: 'terminal', repoPath: STALE_REPO_PATH }),
       expect.objectContaining({ kind: 'canvas', repoPath: STALE_REPO_PATH }),
     ]));
+  });
+
+  it('keeps a newly chosen repo scope and its split when a stale initial validation resolves last', async () => {
+    const newerRepoPath = '/tmp/newer-o8-instance/repo';
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH), registeredRepo(newerRepoPath, 'repo-newer')];
+    let completeInitialValidation: ((response: Response) => void) | null = null;
+    let validationCalls = 0;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (!url.startsWith('/api/panel/repos')) return Promise.resolve(Response.json({}));
+      validationCalls += 1;
+      if (validationCalls === 1) return new Promise<Response>((resolve) => { completeInitialValidation = resolve; });
+      return Promise.resolve(repoValidationResponse(url, registeredRepos));
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let replaceLayout: ((layout: TileLayout) => void) | null = null;
+    let splitTile: ((tileId: string) => void) | null = null;
+    const onLayout = (layout: TileLayout) => { latestLayout = layout; };
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onReplaceLayout: (replace) => { replaceLayout = replace; },
+      onSplitTile: (split) => { splitTile = split; },
+      registeredRepos,
+    })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    // The operator abandons the saved STALE scope entirely for a different
+    // repo, then splits the tile they're now looking at, all BEFORE the
+    // original (now-irrelevant) validation resolves.
+    await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
+    await act(async () => splitTile?.('tile-root'));
+    await act(async () => {
+      completeInitialValidation?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
+      await Promise.resolve();
+    });
+
+    // The newer choice AND the split it made survive intact — nothing
+    // resurrects the discarded STALE_REPO_PATH tree.
+    expect(collectLeafNodes(latestLayout.root)).toHaveLength(2);
+    expect(collectLeafNodes(latestLayout.root).some((leaf) => (
+      leaf.content.kind === 'terminal' && leaf.content.repoPath === newerRepoPath
+    ))).toBe(true);
+    expect(collectLeafNodes(latestLayout.root).some((leaf) => (
+      'repoPath' in leaf.content && leaf.content.repoPath === STALE_REPO_PATH
+    ))).toBe(false);
   });
 
   it('ignores a completed repository refresh after the operator changes the restored repo scope', async () => {
@@ -460,7 +522,7 @@ describe('useTileLayout browser-origin restore', () => {
     expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
   });
 
-  it('hydrates the newer layout safely when initial validation becomes stale', async () => {
+  it('lets the newer layout render and launch immediately when initial validation becomes stale', async () => {
     const newerRepoPath = '/tmp/newer-o8-instance/repo';
     const registeredRepos = [registeredRepo(STALE_REPO_PATH), registeredRepo(newerRepoPath, 'repo-newer')];
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
@@ -480,12 +542,10 @@ describe('useTileLayout browser-origin restore', () => {
 
     let latestLayout = createDefaultTileLayout();
     let hydrated = false;
-    let validationState = 'idle';
     let replaceLayout: ((layout: TileLayout) => void) | null = null;
-    const onLayout = (layout: TileLayout, nextHydrated: boolean, nextValidationState: string) => {
+    const onLayout = (layout: TileLayout, nextHydrated: boolean) => {
       latestLayout = layout;
       hydrated = nextHydrated;
-      validationState = nextValidationState;
     };
     await act(async () => root.render(createElement(LayoutRestoreHarness, {
       onLayout,
@@ -493,6 +553,9 @@ describe('useTileLayout browser-origin restore', () => {
       registeredRepos,
     })));
     await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+    // The operator abandons the saved STALE scope for a different,
+    // already-registered repo BEFORE the original (now-irrelevant)
+    // validation resolves. The newer choice is not held hostage by it.
     await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
     await act(async () => {
       completeInitialValidation?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
@@ -500,10 +563,9 @@ describe('useTileLayout browser-origin restore', () => {
     });
 
     expect(hydrated).toBe(true);
-    expect(validationState).toBe('failed');
     expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
-    expect(runtimeLaunches).toEqual([]);
-    expect(container.querySelector('button[aria-label="Retry saved repository scope"]')).not.toBeNull();
+    expect(runtimeLaunches).toContain('/api/runtime/launch');
+    expect(container.querySelector('button[aria-label="Retry saved repository scope"]')).toBeNull();
   });
 
   it('hydrates successfully when StrictMode replays the restore lifecycle', async () => {

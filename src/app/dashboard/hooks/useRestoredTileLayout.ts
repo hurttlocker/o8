@@ -10,17 +10,14 @@ import {
 } from 'react';
 import {
   collectLeafNodes,
-  createDefaultTileLayout,
   deserializeTileLayout,
   findTile,
   getFirstLeaf,
-  wrapRootWithSplit,
 } from '@/lib/tiles/operations';
-import type { TileContent, TileLayout, TileSplitDirection } from '@/lib/tiles/types';
+import type { TileLayout } from '@/lib/tiles/types';
 import {
   loadValidatedRestorePaths,
   validatePersistedLayoutRepos,
-  type RestorePathValidation,
 } from './tileLayoutRestore';
 
 export type RestoredRepoValidationState = 'idle' | 'pending' | 'failed' | 'verified';
@@ -33,13 +30,6 @@ interface UseRestoredTileLayoutArgs {
   storageKey: string;
   tileLayout: TileLayout;
   refreshRestoredRepoState: (validatedPaths: readonly string[], signal?: AbortSignal) => Promise<boolean>;
-}
-
-interface InitialRestoreSplit {
-  content: TileContent;
-  direction: TileSplitDirection;
-  expectedLayout: TileLayout;
-  ratio: number;
 }
 
 function persistedRepoScopes(layout: TileLayout): Map<string, string> {
@@ -69,8 +59,6 @@ export function useRestoredTileLayout({
   const mountedRef = useRef(true);
   const validationControllerRef = useRef<AbortController | null>(null);
   const retryInFlightRef = useRef(false);
-  const initialRestorePendingRef = useRef(false);
-  const initialRestoreSplitsRef = useRef<InitialRestoreSplit[]>([]);
 
   useEffect(() => {
     if (layoutRef.current === tileLayout) return;
@@ -78,7 +66,7 @@ export function useRestoredTileLayout({
     layoutRevisionRef.current += 1;
   }, [tileLayout]);
 
-  const validateLayout = useCallback(async (layout: TileLayout): Promise<RestorePathValidation | null> => {
+  const validateLayout = useCallback(async (layout: TileLayout) => {
     if (validationControllerRef.current) return null;
     const controller = new AbortController();
     const revision = layoutRevisionRef.current;
@@ -96,12 +84,6 @@ export function useRestoredTileLayout({
     return validation;
   }, []);
 
-  const queueInitialRestoreSplit = useCallback((split: InitialRestoreSplit) => {
-    if (!initialRestorePendingRef.current) return false;
-    initialRestoreSplitsRef.current.push(split);
-    return true;
-  }, []);
-
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -109,57 +91,67 @@ export function useRestoredTileLayout({
     };
   }, []);
 
+  // Establishes the saved tree BEFORE any ordinary edit can touch it, then
+  // treats validation as a background annotation pass — never a snapshot
+  // that gets reconstructed and replayed. Splitting, resizing, closing, or
+  // wholesale replacing the scope while validation is still pending are all
+  // just further edits to whatever is already live; validation, whenever it
+  // resolves, can only patch the exact leaf/repoPath pairs it was asked
+  // about (see validatePersistedLayoutRepos), so a stale response can never
+  // resurrect a discarded scope or clobber a newer one (#2338).
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let cancelled = false;
     skipNextTileLayoutPersistenceRef.current = false;
-    const restoreTimer = window.setTimeout(() => {
-      void (async () => {
-        const restored = deserializeTileLayout(window.localStorage.getItem(storageKey));
-        initialRestorePendingRef.current = Boolean(restored);
-        initialRestoreSplitsRef.current = [];
-        const validation = restored ? await validateLayout(restored) : { ok: true, paths: [] };
-        if (cancelled) return;
-        const queuedSplits = initialRestoreSplitsRef.current;
-        const preserveQueuedSplits = Boolean(
-          restored
-          && queuedSplits.length > 0
-          && queuedSplits.at(-1)?.expectedLayout === layoutRef.current,
-        );
-        const restoredWithQueuedSplits = preserveQueuedSplits && restored
-          ? queuedSplits.reduce((layout, split) => ({
-            ...layout,
-            root: wrapRootWithSplit(layout.root, split.direction, split.content, split.ratio).root,
-          }), restored)
-          : restored;
-        const nextLayout = validation
-          ? restoredWithQueuedSplits && validation.ok
-            ? validatePersistedLayoutRepos(restoredWithQueuedSplits, validation.paths)
-            : restoredWithQueuedSplits ?? createDefaultTileLayout()
-          : preserveQueuedSplits
-            ? restoredWithQueuedSplits!
-            : layoutRef.current;
-        const validationUnavailable = !validation || !validation.ok;
-        setBlockedRepoScopes(validationUnavailable ? persistedRepoScopes(nextLayout) : new Map());
-        setRestoredRepoValidationState(validationUnavailable ? 'failed' : 'verified');
-        skipNextTileLayoutPersistenceRef.current = validationUnavailable;
-        const storedActiveTileId = window.localStorage.getItem(activeTileStorageKey);
-        const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
-          ? storedActiveTileId
-          : getFirstLeaf(nextLayout.root).id;
-        if (validation || preserveQueuedSplits) setTileLayout(nextLayout);
-        setActiveTileId(restoredActiveTileId);
-        setTileLayoutHydrated(true);
-        initialRestorePendingRef.current = false;
-      })();
-    }, 0);
+    const restored = deserializeTileLayout(window.localStorage.getItem(storageKey));
+    if (!restored) {
+      setTileLayoutHydrated(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setTileLayout(restored);
+    layoutRef.current = restored;
+    layoutRevisionRef.current += 1;
+    const storedActiveTileId = window.localStorage.getItem(activeTileStorageKey);
+    const restoredActiveTileId = storedActiveTileId && findTile(restored.root, storedActiveTileId)
+      ? storedActiveTileId
+      : getFirstLeaf(restored.root).id;
+    setActiveTileId(restoredActiveTileId);
+    setTileLayoutHydrated(true);
+    setRestoredRepoValidationState('pending');
+    // Never expose a restored scope to a real terminal/canvas before it is
+    // confirmed — mark every persisted scope as pending up front so the
+    // tile shows "Verifying…" instead of launching against an unverified
+    // repo path while the network round trip is still in flight.
+    setBlockedRepoScopes(persistedRepoScopes(restored));
+
+    void (async () => {
+      const validation = await validateLayout(restored);
+      if (cancelled || !mountedRef.current) return;
+      if (!validation || !validation.ok) {
+        // Either superseded mid-flight by another layout change, or the
+        // round trip genuinely failed. Re-assert blocking for exactly the
+        // scopes THIS attempt was requested for — never a broader "whatever
+        // is on screen now" snapshot, so a newer, unrelated scope the
+        // operator already switched to is never retroactively blocked.
+        // unverifiedRestoredRepoTileIds below further intersects this with
+        // the CURRENT layout, so a tile the operator already rescoped away
+        // from the failed path drops out on its own.
+        setBlockedRepoScopes(persistedRepoScopes(restored));
+        setRestoredRepoValidationState('failed');
+        return;
+      }
+      setTileLayout((current) => validatePersistedLayoutRepos(current, validation));
+      setBlockedRepoScopes(new Map());
+      setRestoredRepoValidationState('verified');
+    })();
 
     return () => {
       cancelled = true;
-      window.clearTimeout(restoreTimer);
       validationControllerRef.current?.abort();
       validationControllerRef.current = null;
-      initialRestorePendingRef.current = false;
     };
   }, [activeTileStorageKey, setActiveTileId, setTileLayout, skipNextTileLayoutPersistenceRef, storageKey, validateLayout]);
 
@@ -202,7 +194,7 @@ export function useRestoredTileLayout({
         }
         setTileLayout((current) => (
           current === layoutAtStart
-            ? validatePersistedLayoutRepos(current, validation.paths)
+            ? validatePersistedLayoutRepos(current, validation)
             : current
         ));
         setBlockedRepoScopes(new Map());
@@ -226,7 +218,6 @@ export function useRestoredTileLayout({
 
   return {
     retryRestoredRepoValidation,
-    queueInitialRestoreSplit,
     restoredRepoValidationState,
     setTileLayoutHydrated,
     tileLayoutHydrated,
