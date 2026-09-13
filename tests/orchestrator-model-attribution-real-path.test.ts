@@ -1,6 +1,6 @@
 import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -293,6 +293,11 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     if (request.url === '/api/setup/identity') {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ configured: false }));
+      return;
+    }
+    if (request.url === '/api/setup/status') {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ ready: true }));
       return;
     }
     response.writeHead(404);
