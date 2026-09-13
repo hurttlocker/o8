@@ -2,11 +2,16 @@ import { COMPOSER_MODE_DIRECTIVES } from '@/lib/orchestrator/composer-wire';
 import { isCodexUltraCapableModel } from '@/lib/codex/reasoning-effort';
 import {
   isThinkingEffort,
+  THINKING_EFFORT_LABELS,
   type ThinkingEffort,
 } from '@/lib/orchestrator/thinking-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { MODEL_IDS } from '@/lib/models';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  WORKER_START_OPTIONS,
+  type WorkerStartMode,
+} from '@/lib/operator/worker-start-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 
 export const COMPOSER_SELECTOR_V1_STORAGE_KEY = 'o8:composer-selector-v1';
@@ -66,16 +71,6 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
   workerRuntimes: Record<OrchestratorRuntime, ComposerProviderMark>;
 };
 
-export const COMPOSER_EFFORT_CONSEQUENCES: Record<ThinkingEffort, string> = {
-  low: 'Low · fast, cheapest',
-  medium: 'Medium · balanced',
-  adaptive: 'Adaptive · the model picks',
-  high: 'High · default for real work',
-  xhigh: 'Extra · longer turns',
-  max: 'Max · usage limits apply',
-  ultra: 'Ultra · may fan out to sub-agents outside o8. Longest turns, usage limits apply',
-};
-
 export function providerMarkForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
@@ -93,8 +88,10 @@ export function composerEffortConsequence(
   backend: OrchestratorBackendSetting,
   effort: ThinkingEffort,
 ): string {
-  if (backend === 'o8') return effort === 'high' ? 'High · founders' : 'Low · free';
-  return COMPOSER_EFFORT_CONSEQUENCES[effort];
+  if (backend === 'o8') {
+    return `${THINKING_EFFORT_LABELS[effort].long} · ${effort === 'high' ? 'founders' : 'free'}`;
+  }
+  return THINKING_EFFORT_LABELS[effort].detail;
 }
 
 export function isHotComposerEffort(effort: ThinkingEffort): boolean {
@@ -103,8 +100,8 @@ export function isHotComposerEffort(effort: ThinkingEffort): boolean {
 
 export interface ComposerSelectorModeSpec {
   id: ComposerSelectorMode;
-  label: string;
-  chip: string;
+  long: string;
+  short: string;
   sublabel: string;
   placeholder: string;
   directive: string;
@@ -113,32 +110,32 @@ export interface ComposerSelectorModeSpec {
 export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
   {
     id: 'solo',
-    label: 'Solo',
-    chip: 'Solo',
+    long: 'Solo',
+    short: 'Solo',
     sublabel: 'Works alone, nothing is dispatched',
     placeholder: 'Build solo, no dispatches · / for commands',
     directive: COMPOSER_MODE_DIRECTIVES.solo,
   },
   {
     id: 'multitask',
-    label: 'Multitask',
-    chip: 'Multitask',
+    long: 'Multitask',
+    short: 'Multitask',
     sublabel: 'Parallel packets in isolated worktrees',
     placeholder: 'Parallel packets in isolated worktrees…',
     directive: COMPOSER_MODE_DIRECTIVES.multitask,
   },
   {
     id: 'moa',
-    label: 'Compare plans',
-    chip: 'Compare plans',
+    long: 'Compare plans',
+    short: 'MoA',
     sublabel: 'Two independent plans, then synthesis and workers',
     placeholder: 'Two independent plans, then synthesis and workers…',
     directive: COMPOSER_MODE_DIRECTIVES.moa,
   },
   {
     id: 'fusion',
-    label: 'Fusion',
-    chip: 'Fusion',
+    long: 'Fusion',
+    short: 'Fusion',
     sublabel: 'Sub-agents and every runtime’s workers, in parallel',
     placeholder: 'Sub-agents and every runtime’s workers, in parallel…',
     directive: COMPOSER_MODE_DIRECTIVES.fusion,
@@ -167,9 +164,29 @@ export interface ResolveComposerSelectorInput {
   adaptiveEnabled: boolean;
   ultraEnabled?: boolean;
   isFreePlan?: boolean;
-  workerRuntimeLabel: string;
+  inSessionSettings?: ComposerSelectorSettingState;
+  threadSettings?: ComposerSelectorSettingState;
+  operatorDefaultSettings?: ComposerSelectorSettingState;
+  workerRuntimeLabel?: string;
   workerModelLabel?: string | null;
   clampNotice?: ComposerEffortClampNotice | null;
+}
+
+export interface ComposerSelectorSettingState {
+  mode?: ComposerSelectorMode;
+  workerRuntime?: OrchestratorRuntime;
+  workerModel?: string | null;
+  workerStartMode?: WorkerStartMode;
+}
+
+function resolveSelectorSetting<K extends keyof ComposerSelectorSettingState>(
+  key: K,
+  ...sources: Array<ComposerSelectorSettingState | undefined>
+): ComposerSelectorSettingState[K] | undefined {
+  for (const source of sources) {
+    if (source && Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+  }
+  return undefined;
 }
 
 export interface ComposerEffortClampNotice {
@@ -187,6 +204,7 @@ export interface ComposerLeadCatalogueOption {
 export interface ResolvedComposerSelectorState {
   mode: ComposerSelectorMode;
   modeLabel: string;
+  modeShortLabel: string;
   modeSublabel: string;
   modeDirective: string;
   orchestrationMode: 'single' | 'fleet' | 'fusion';
@@ -197,8 +215,13 @@ export interface ResolvedComposerSelectorState {
   leadModelId: string;
   leadModelLabel: string;
   leadBackend: OrchestratorBackendSetting;
+  workerRuntime: OrchestratorRuntime | null;
   workerRuntimeLabel: string;
+  workerModel: string | null;
   workerModelLabel: string | null;
+  workerStartMode: WorkerStartMode | null;
+  workerStartModeLabel: string | null;
+  workerStartModeShortLabel: string | null;
   atRestText: string;
   chipTitle: string;
 }
@@ -323,15 +346,36 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
   const effort = clamped.effort;
   const clampedFrom = clamped.clampedFrom
     ?? (input.clampNotice?.modelId === input.leadModelId ? input.clampNotice.from : null);
-  const mode = composerSelectorModeSpec(input.mode);
-  const workerModelLabel = input.workerModelLabel?.trim() || null;
+  const settingSources = [
+    input.inSessionSettings,
+    input.threadSettings,
+    input.operatorDefaultSettings,
+  ];
+  const resolvedSettings = {
+    mode: resolveSelectorSetting('mode', ...settingSources) ?? input.mode,
+    workerRuntime: resolveSelectorSetting('workerRuntime', ...settingSources) ?? null,
+    workerModel: resolveSelectorSetting('workerModel', ...settingSources) ?? null,
+    workerStartMode: resolveSelectorSetting('workerStartMode', ...settingSources) ?? null,
+  };
+  const mode = composerSelectorModeSpec(resolvedSettings.mode);
+  const workerRuntimeLabel = resolvedSettings.workerRuntime
+    ? getRuntimeCapability(resolvedSettings.workerRuntime).label
+    : input.workerRuntimeLabel?.trim() || '';
+  const workerModel = resolvedSettings.workerModel?.trim() || null;
+  const workerModelLabel = workerModel
+    ? workerModel.slice(workerModel.lastIndexOf('/') + 1)
+    : input.workerModelLabel?.trim() || null;
+  const workerStartOption = WORKER_START_OPTIONS.find((option) => (
+    option.value === resolvedSettings.workerStartMode
+  )) ?? null;
   const workerTail = workerModelLabel
-    ? `${input.workerRuntimeLabel} · ${workerModelLabel}`
-    : input.workerRuntimeLabel;
-  const atRestText = `${input.leadModelLabel} · ${effort} / workers ${workerTail}`;
+    ? `${workerRuntimeLabel} · ${workerModelLabel}`
+    : workerRuntimeLabel;
+  const atRestText = `${input.leadModelLabel} · ${THINKING_EFFORT_LABELS[effort].short} / workers ${workerTail}`;
   return {
     mode: mode.id,
-    modeLabel: mode.label,
+    modeLabel: mode.long,
+    modeShortLabel: mode.short,
     modeSublabel: mode.sublabel,
     modeDirective: mode.directive,
     orchestrationMode: resolveComposerSelectorExecutionMode(mode.id),
@@ -342,11 +386,16 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     leadModelId: input.leadModelId,
     leadModelLabel: input.leadModelLabel,
     leadBackend: input.leadBackend,
-    workerRuntimeLabel: input.workerRuntimeLabel,
+    workerRuntime: resolvedSettings.workerRuntime,
+    workerRuntimeLabel,
+    workerModel,
     workerModelLabel,
+    workerStartMode: resolvedSettings.workerStartMode,
+    workerStartModeLabel: workerStartOption?.long ?? null,
+    workerStartModeShortLabel: workerStartOption?.short ?? null,
     atRestText,
     chipTitle: clampedFrom
-      ? `${atRestText}. ${clampedFrom} is unsupported for ${input.leadModelLabel}; clamped to ${effort}.`
+      ? `${atRestText}. ${THINKING_EFFORT_LABELS[clampedFrom].long} is unsupported for ${input.leadModelLabel}; clamped to ${THINKING_EFFORT_LABELS[effort].long}.`
       : atRestText,
   };
 }

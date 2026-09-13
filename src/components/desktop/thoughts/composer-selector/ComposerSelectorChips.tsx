@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, type RefObject } from 'react';
-import { MODEL_EFFORT_LABELS } from '../ModelThinkingChip';
+import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
 import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { ProviderMarkGlyph } from './provider-marks';
 import {
@@ -72,7 +72,7 @@ export function LeadChip({
       data-accent={topActive ? 'swarm' : 'lead'}
       type="button"
       title={state.chipTitle}
-      aria-label={`Lead: ${state.leadModelLabel}, ${MODEL_EFFORT_LABELS[state.effort]}`}
+      aria-label={`Lead: ${state.leadModelLabel}, ${THINKING_EFFORT_LABELS[state.effort].long}`}
       aria-expanded={open}
       disabled={saving}
       onClick={onClick}
@@ -118,7 +118,7 @@ export function LeadChip({
         data-testid="composer-selector-effort-word"
         style={{ flexShrink: 0, color: accent, fontWeight: 450 }}
       >
-        {MODEL_EFFORT_LABELS[state.effort]}
+        {THINKING_EFFORT_LABELS[state.effort].short}
       </span>
     </button>
   );

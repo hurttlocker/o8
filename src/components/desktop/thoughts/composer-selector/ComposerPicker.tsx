@@ -9,8 +9,8 @@ import {
 import {
   shortWorkerModelLabel,
   workerModelForDisplay,
-  type DispatchDefaults,
-} from '../ComposerFleetChips';
+  type ComposerWorkerDefaults,
+} from './worker-settings';
 import { ComposerPopover } from '../chat-panel/ComposerPopover';
 import {
   isComposerEffortShortcut,
@@ -69,7 +69,7 @@ export function ComposerPicker({
   saving = false,
 }: {
   state: ResolvedComposerSelectorState;
-  defaults: DispatchDefaults;
+  defaults: ComposerWorkerDefaults;
   composerModelGroups: ComposerModelGroup[];
   onModelChange?: (model: string) => void;
   onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
@@ -352,7 +352,7 @@ export function ComposerPicker({
                   const selected = option.value === defaults.workerStartMode;
                   return (
                     <button key={option.value} type="button" aria-pressed={selected} disabled={saving} onClick={() => onWorkerStartModeChange(option.value)} style={{ flex: 1, height: 22, borderRadius: 6, borderWidth: 1, borderStyle: 'solid', borderColor: selected ? 'transparent' : 'var(--t-border)', background: selected ? 'var(--t-accent-soft)' : 'transparent', color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1 }}>
-                      {option.label}
+                      {option.long}
                     </button>
                   );
                 })}

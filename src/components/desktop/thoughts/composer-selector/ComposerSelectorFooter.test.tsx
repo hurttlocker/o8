@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ComposerSelectorFooter } from './ComposerSelectorFooter';
 import {
   COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY,
+  COMPOSER_SELECTOR_MODES,
   cycleComposerSelectorMode,
   resolveEffectiveComposerLeadModelId,
   supportedEffortsForLead,
@@ -19,6 +20,8 @@ import { COMPOSER_MODEL_GROUPS } from '../ModelThinkingChip';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
+import { WORKER_START_OPTIONS } from '@/lib/operator/worker-start-mode';
 import { MODEL_IDS } from '@/lib/models';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
@@ -94,7 +97,7 @@ function O8PlanHarness({ isFreePlan }: { isFreePlan: boolean }) {
   );
 }
 
-function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: ThinkingEffort }) {
+function RealComposerHarness({ initialEffort = 'high', threadId = 'thread-test', operatorDefaultEffort = 'high' }: { initialEffort?: ThinkingEffort; threadId?: string; operatorDefaultEffort?: ThinkingEffort }) {
   const [input, setInput] = useState('Build it');
   const [mode, setMode] = useState<ComposerSelectorMode>('solo');
   const [effort, setEffort] = useState<ThinkingEffort>(initialEffort);
@@ -126,7 +129,7 @@ function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: Think
         activeBackend={backend}
         onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
         effort={effort}
-        operatorDefaultEffort="high"
+        operatorDefaultEffort={operatorDefaultEffort}
         onEffortChange={setEffort}
         adaptiveEnabled
         displayMessagesCount={0}
@@ -138,7 +141,7 @@ function RealComposerHarness({ initialEffort = 'high' }: { initialEffort?: Think
         onVoiceModeChange={() => {}}
         composerMode={mode}
         onComposerModeChange={setMode}
-        sessionRulesThreadId="thread-test"
+        sessionRulesThreadId={threadId}
       />
     </>
   );
@@ -276,6 +279,24 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
   });
 
+  it('renders composer setting text from the shared label tables', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
+    act(() => lead.click());
+    const pickerText = container.textContent ?? '';
+    for (const effort of supportedEffortsForLead('codex', 'gpt-5.6-sol', true)) {
+      expect(pickerText).toContain(THINKING_EFFORT_LABELS[effort].long);
+    }
+    for (const option of WORKER_START_OPTIONS) expect(pickerText).toContain(option.long);
+
+    act(() => lead.click());
+    const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    act(() => mode.click());
+    const modeText = container.textContent ?? '';
+    for (const option of COMPOSER_SELECTOR_MODES) expect(modeText).toContain(option.long);
+    expect(mode.textContent).toContain(COMPOSER_SELECTOR_MODES[0].short);
+  });
+
   it('persists Extra through the real flag-on composer path', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
@@ -292,6 +313,30 @@ describe('ComposerSelectorFooter', () => {
     expect(lead.getAttribute('data-accent')).toBe('swarm');
     expect(lead.querySelector<HTMLElement>('[data-testid="composer-selector-effort-word"]')?.style.color)
       .toBe('var(--t-brand-orange)');
+  });
+
+  it('resolves thread storage through the real ComposerArea path before the operator default', async () => {
+    localStorage.setItem(`${COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY}:thread:thread-real`, JSON.stringify({ 'gpt-5.6-sol': 'high' }));
+    await act(async () => { root.render(createElement(RealComposerHarness, { threadId: 'thread-real', operatorDefaultEffort: 'low' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('high');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
+      .find((stop) => stop.textContent === 'Extra')!.click());
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('xhigh');
+    localStorage.removeItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => { root.render(createElement(RealComposerHarness, { threadId: 'thread-fresh', operatorDefaultEffort: 'medium' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('medium');
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => { root.render(createElement(RealComposerHarness, { threadId: 'thread-real', operatorDefaultEffort: 'low' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('xhigh');
   });
 
   it('uses the full runtime label in the bounded workers chip', async () => {
@@ -400,7 +445,7 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const textarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
     textarea.focus();
-    for (const label of ['Multitask', 'Compare plans', 'Fusion', 'Solo']) {
+    for (const label of ['Multitask', 'MoA', 'Fusion', 'Solo']) {
       await act(async () => {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, shiftKey: true, bubbles: true, cancelable: true }));
       });

@@ -107,7 +107,7 @@ describe('composer selector state', () => {
     expect(resolved.effort).toBe('xhigh');
     expect(resolved.effortOptions).not.toContain('max');
     expect(resolved.effortOptions).not.toContain('ultra');
-    expect(resolved.chipTitle).toContain('ultra is unsupported for Terra; clamped to xhigh');
+    expect(resolved.chipTitle).toContain('Ultra is unsupported for Terra; clamped to Extra');
   });
 
   it('hides Ultra until enabled and clamps a stored Ultra effort to Max', () => {
@@ -191,6 +191,47 @@ describe('composer selector state', () => {
       threadEffortByModel: {},
       operatorDefaultEffort: 'medium',
     }).effort).toBe('medium');
+  });
+
+  it.each([
+    ['solo', 'Codex', 'Sol', 'single'],
+    ['multitask', 'OpenCode 2', null, 'fleet'],
+    ['moa', 'Codex', 'Sol', 'fleet'],
+    ['fusion', 'Codex', null, 'fusion'],
+  ] as const)('keeps resolved mode and worker fields coherent for %s', (mode, runtime, workerModel, execution) => {
+    const resolved = resolveComposerSelectorState({
+      mode,
+      leadModelId: 'gpt-5.6-sol', leadModelLabel: 'Sol', leadBackend: 'codex',
+      inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
+      adaptiveEnabled: true, workerRuntimeLabel: runtime, workerModelLabel: workerModel,
+    });
+    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
+    expect(resolved.orchestrationMode).toBe(execution);
+    expect(resolved.workerRuntimeLabel).toBe(runtime);
+    expect(resolved.workerModelLabel).toBe(workerModel);
+  });
+
+  it('resolves mode and worker settings by session, thread, then operator default', () => {
+    const resolved = resolveComposerSelectorState({
+      mode: 'solo',
+      leadModelId: 'gpt-5.6-sol', leadModelLabel: 'Sol', leadBackend: 'codex',
+      inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
+      adaptiveEnabled: true,
+      inSessionSettings: { mode: 'fusion', workerRuntime: 'opencode' },
+      threadSettings: { mode: 'moa', workerRuntime: 'gemini', workerStartMode: 'huddle' },
+      operatorDefaultSettings: {
+        mode: 'multitask',
+        workerRuntime: 'codex',
+        workerModel: 'provider/default-model',
+        workerStartMode: 'autonomous',
+      },
+    });
+    expect(resolved.mode).toBe('fusion');
+    expect(resolved.workerRuntime).toBe('opencode');
+    expect(resolved.workerModel).toBe('provider/default-model');
+    expect(resolved.workerModelLabel).toBe('default-model');
+    expect(resolved.workerStartMode).toBe('huddle');
+    expect(resolved.workerStartModeLabel).toBe('Plan first');
   });
 
   it('matches the Codex backend fallback, including local dispatch defaults', () => {

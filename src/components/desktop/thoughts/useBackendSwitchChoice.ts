@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { formatModelLabel } from '@/lib/format';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { updateOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
+import { readStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import type { PendingBackendSwitch } from './chat-panel/BackendSwitchChoice';
 import { fetchFreshThoughtsOperatorDefaults, type OrchestratorBackendSetting, type ThoughtsOperatorDefaults } from './operator-defaults';
 
@@ -60,7 +61,6 @@ export function useBackendSwitchChoice(input: {
     currentModel,
     latestAssistantBackendRef,
     operatorDefaults,
-    repoPath,
     setActiveThreadAgent,
     setActiveThreadBackend,
     setBackend,
@@ -77,15 +77,10 @@ export function useBackendSwitchChoice(input: {
     setBackend(backend);
     if (model) {
       setModel(model);
-      writeStoredOrchestratorModel(repoPath, model);
     }
     setActiveThreadBackend(composerBackendTurnOverride(backend) ?? null);
     setActiveThreadAgent(null);
-    void fetch('/api/panel/operator-defaults', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orchestratorBackend: backend }),
-    }).then(async (response) => {
+    void updateOperatorDefaultsValues({ orchestratorBackend: backend }).then(async (response) => {
       const payload = await response.json().catch(() => null) as { values?: Partial<ThoughtsOperatorDefaults>; error?: string } | null;
       if (!response.ok) throw new Error(payload?.error || 'Failed to persist orchestrator backend.');
       return payload;
@@ -98,7 +93,7 @@ export function useBackendSwitchChoice(input: {
       console.log('[thoughts] failed to persist orchestrator backend', error);
       setBackend(resolveActiveComposerBackend(operatorDefaults));
     });
-  }, [backendSourceRef, onBeforeApply, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
+  }, [backendSourceRef, onBeforeApply, operatorDefaults, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
   const reset = useCallback(() => {
     setPending(null);
     handoffModeRef.current = null;
@@ -108,8 +103,7 @@ export function useBackendSwitchChoice(input: {
     onBeforeApply?.();
     reset();
     setModel(model);
-    writeStoredOrchestratorModel(repoPath, model);
-  }, [onBeforeApply, repoPath, reset, setModel]);
+  }, [onBeforeApply, reset, setModel]);
   const request = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
     reset();
     const destination = composerBackendTurnOverride(backend) ?? backend;

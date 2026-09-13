@@ -16,8 +16,11 @@ import {
   ORCHESTRATOR_ULTRA_EFFORT_STORAGE_KEY,
 } from '@/lib/orchestrator/thinking-preferences';
 import type { OperatorDefaults, OperatorDefaultSources } from './dispatch-shared';
+import { THINKING_EFFORT_OPTIONS } from './dispatch-shared';
+import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
 
 const values = {
+  thinkingEffort: 'xhigh',
   targetingTriage: { runtime: 'codex', model: '', effort: 'low' },
   targetingAction: { runtime: 'codex', model: '', effort: 'low' },
 } as OperatorDefaults;
@@ -66,5 +69,25 @@ describe('DispatchFoundersSection Ultra effort setting', () => {
     expect(window.localStorage.getItem(ORCHESTRATOR_ULTRA_EFFORT_STORAGE_KEY)).toBe('1');
     expect(listener).toHaveBeenCalledTimes(1);
     window.removeEventListener(ORCHESTRATOR_THINKING_PREFERENCES_EVENT, listener);
+  });
+
+  it('renders every Settings effort option from the shared label table', async () => {
+    await act(async () => {
+      root.render(createElement(DispatchFoundersSection, {
+        values,
+        sources,
+        busyField: null,
+        updateField: vi.fn(),
+        showExperimental: false,
+      }));
+    });
+    const effortPicker = container.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!;
+    expect(effortPicker.textContent).toContain(THINKING_EFFORT_LABELS.xhigh.long);
+    await act(async () => { effortPicker.click(); });
+    const rendered = document.body.textContent ?? '';
+    for (const option of THINKING_EFFORT_OPTIONS) {
+      expect(option.label).toBe(THINKING_EFFORT_LABELS[option.value].long);
+      expect(rendered).toContain(option.label);
+    }
   });
 });

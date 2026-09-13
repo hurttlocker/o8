@@ -22,7 +22,6 @@ import {
   readComposerSelectorV1Flag,
   resolveEffectiveComposerLeadModelId,
   stepComposerEffort,
-  supportedEffortsForLead,
 } from '../composer-selector/state';
 import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
 
@@ -76,6 +75,7 @@ interface ComposerAreaProps {
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   composerMode?: ComposerMode;
   onComposerModeChange?: (mode: ComposerMode) => void;
+  composerModeStorageId?: string;
   repoPath?: string | null;
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
@@ -133,6 +133,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onUploadDiskFiles,
   composerMode,
   onComposerModeChange,
+  composerModeStorageId,
   repoPath,
   workspaceTargets,
   selectedRepoPath,
@@ -153,8 +154,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   }, []);
   const selectorModelId = resolveEffectiveComposerLeadModelId(activeBackend, modelId, codexDefaultDispatchModel);
   const selectorControls = useComposerSelectorState({
-    enabled: composerSelectorV1Enabled,
+    enabled: isOrchestratorMode,
     mode: composerMode,
+    modeStorageId: composerModeStorageId,
     modelId: selectorModelId,
     modelLabel,
     backend: activeBackend,
@@ -162,6 +164,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     operatorDefaultEffort,
     adaptiveEnabled,
     threadId: sessionRulesThreadId ?? null,
+    repoPath,
+    onModeChange: onComposerModeChange,
     onModelChange,
     onBackendChange,
     onEffortChange,
@@ -596,7 +600,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 && document.activeElement === event.currentTarget
               ) {
                 event.preventDefault();
-                onComposerModeChange(cycleComposerSelectorMode(composerMode));
+                selectorControls.onModeChange(cycleComposerSelectorMode(selectorControls.state.mode));
                 return;
               }
               if (
@@ -607,8 +611,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 && document.activeElement === event.currentTarget
               ) {
                 event.preventDefault();
-                const options = supportedEffortsForLead(activeBackend, selectorModelId, adaptiveEnabled, selectorControls.isFreePlan);
-                selectorControls.onEffortChange(stepComposerEffort(effort, options, event.shiftKey ? -1 : 1));
+                selectorControls.onEffortChange(stepComposerEffort(
+                  selectorControls.state.effort,
+                  selectorControls.state.effortOptions,
+                  event.shiftKey ? -1 : 1,
+                ));
                 return;
               }
               if (slashSuggestions.length > 0) {
@@ -725,11 +732,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onSubmit={onSubmit}
             modelLabel={modelLabel}
             modelId={isOrchestratorMode ? selectorModelId : undefined}
-            onModelChange={isOrchestratorMode ? (composerSelectorV1Enabled ? selectorControls.onModelChange : onModelChange) : undefined}
+            onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
             activeBackend={isOrchestratorMode ? activeBackend : undefined}
-            onBackendChange={isOrchestratorMode ? (composerSelectorV1Enabled ? selectorControls.onBackendChange : onBackendChange) : undefined}
-            effort={effort}
-            onEffortChange={composerSelectorV1Enabled ? selectorControls.onEffortChange : onEffortChange}
+            onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
+            effort={selectorControls.state.effort}
+            onEffortChange={selectorControls.onEffortChange}
             adaptiveEnabled={adaptiveEnabled}
             sessionRulesThreadId={sessionRulesThreadId}
             repoLabel={showReasoningControls ? repoLabel : null}
@@ -738,7 +745,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onStop={isOrchestratorMode ? onStop : undefined}
             onUploadDiskFiles={onUploadDiskFiles}
             composerMode={composerMode}
-            onComposerModeChange={onComposerModeChange}
+            onComposerModeChange={selectorControls.onModeChange}
+            composerSelectorController={selectorControls}
             onFileReferenceSelect={handleFileReferenceSelect}
             repoPath={repoPath}
             workspaceTargets={workspaceTargets}
@@ -757,9 +765,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }));
             } : undefined}
             composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
-            operatorDefaultEffort={operatorDefaultEffort}
-            composerEffortClampNotice={selectorControls.clampNotice}
-            composerSelectorIsFreePlan={selectorControls.isFreePlan}
             onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
           />
         </div>

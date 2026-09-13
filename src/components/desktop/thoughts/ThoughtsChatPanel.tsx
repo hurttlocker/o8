@@ -3,7 +3,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
-import { readStoredComposerMode, writeStoredComposerMode } from './composer-mode-storage';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
 import { fetchRuntimeLaunchReceipt, fetchRuntimeSteerReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
@@ -18,7 +17,6 @@ import {
 } from '@/lib/orchestrator/thinking-preferences';
 import {
   queueOrchestratorSessionPrelude,
-  readStoredOrchestratorModel,
   searchOrchestratorArchive,
   writeStoredOrchestratorModel,
 } from '@/lib/orchestrator/store';
@@ -255,28 +253,23 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // Composer mode (Cursor-parity, Q 2026-07-17) — persists across sends until
   // switched, Cursor behavior. Ref mirrors state so handleTaskSend reads the
   // live value without growing its dependency list.
-  const [composerMode, setComposerMode] = useState<ComposerMode>(
-    () => composerModeStorageId ? readStoredComposerMode(composerModeStorageId) : 'solo',
-  );
+  const [composerMode, setComposerMode] = useState<ComposerMode>('solo');
   const composerModeRef = useRef<ComposerMode>(composerMode);
   composerModeRef.current = composerMode;
   // MoA IS the Collide backend — keep the chip and the model-picker's Mode
   // section telling the same truth in both directions.
   const handleComposerModeChange = useCallback((next: ComposerMode) => {
     setComposerMode(next);
-    if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, next);
     if (next === 'moa') onSetCollide?.(true);
     else if (collideEnabled) onSetCollide?.(false);
-  }, [collideEnabled, composerModeStorageId, onSetCollide]);
+  }, [collideEnabled, onSetCollide]);
   useEffect(() => {
     if (collideEnabled && composerMode !== 'moa') {
       setComposerMode('moa');
-      if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, 'moa');
     } else if (!collideEnabled && composerMode === 'moa') {
       setComposerMode('solo');
-      if (composerModeStorageId) writeStoredComposerMode(composerModeStorageId, 'solo');
     }
-  }, [collideEnabled, composerMode, composerModeStorageId]);
+  }, [collideEnabled, composerMode]);
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
   // Orchestration mode + runtime + chat-model selection. Per-tab when
@@ -550,7 +543,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setOrchestratorModel(operatorDefaults.orchestratorModel);
       return;
     }
-    setOrchestratorModel(readStoredOrchestratorModel(resolvedRepoPath) ?? operatorDefaults.orchestratorModel);
+    setOrchestratorModel(operatorDefaults.orchestratorModel);
   }, [operatorDefaults.orchestratorModel, resolvedRepoPath]);
 
   useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
@@ -2384,6 +2377,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onUploadDiskFiles={processAttachmentFiles}
         composerMode={isOrchestratorMode && !isChatMode ? composerMode : undefined}
         onComposerModeChange={isOrchestratorMode && !isChatMode ? handleComposerModeChange : undefined}
+        composerModeStorageId={composerModeStorageId}
         repoPath={resolvedRepoPath}
         workspaceTargets={workspaceTargets}
         selectedRepoPath={resolvedRepoPath}

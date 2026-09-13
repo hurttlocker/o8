@@ -1,7 +1,11 @@
 'use client';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
+import {
+  fetchFreshOperatorDefaultsValues,
+  fetchOperatorDefaultsRuntimeSnapshot,
+  fetchOperatorDefaultsValues,
+} from '@/lib/operator/operator-defaults-values-client';
 import { DEFAULT_ORCHESTRATOR_MODEL } from './use-orchestrator-stream/shared';
 import { MODEL_IDS } from '@/lib/models';
 
@@ -68,7 +72,7 @@ export async function fetchThoughtsOperatorDefaults(signal?: AbortSignal): Promi
 /** Bypass the short UI snapshot when a turn needs persisted truth at send time. */
 export async function fetchFreshThoughtsOperatorDefaults(signal?: AbortSignal): Promise<ThoughtsOperatorDefaults> {
   return await parseThoughtsOperatorDefaults(
-    fetch('/api/panel/operator-defaults?include=values', { cache: 'no-store', signal }),
+    fetchFreshOperatorDefaultsValues(signal),
     signal,
   );
 }
@@ -89,7 +93,7 @@ async function parseThoughtsOperatorDefaults(
 export async function fetchThoughtsRuntimeReadiness(): Promise<number | null> {
   if (readyRuntimeCount !== null) return readyRuntimeCount;
   if (!readyRuntimeCountInFlight) {
-    const request = fetch('/api/panel/operator-defaults', { cache: 'no-store' })
+    const request = fetchOperatorDefaultsRuntimeSnapshot()
       .then(async (response) => {
         if (!response.ok) return null;
         const payload = await response.json().catch(() => null) as OperatorDefaultsPayload | null;

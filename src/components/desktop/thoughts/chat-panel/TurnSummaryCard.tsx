@@ -18,7 +18,7 @@ import { useState } from 'react';
 import { formatModelLabel } from '@/lib/format';
 import type { MobileTranscriptEntry, MobileTurnReceipt } from '@/lib/mobile/types';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import { MODEL_EFFORT_LABELS } from '../ModelThinkingChip';
+import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
 import { composerSelectorModeSpec } from '../composer-selector/state';
 import { ChatActionCard } from './ChatActionCard';
 
@@ -100,9 +100,9 @@ function formatCost(value: number): string {
 }
 
 function TurnReceiptLine({ receipt }: { receipt: MobileTurnReceipt }) {
-  const mode = composerSelectorModeSpec(receipt.mode).label;
+  const mode = composerSelectorModeSpec(receipt.mode).long;
   const pickedMode = receipt.pickedMode && receipt.pickedMode !== receipt.mode
-    ? composerSelectorModeSpec(receipt.pickedMode).label
+    ? composerSelectorModeSpec(receipt.pickedMode).long
     : null;
   const workers = (receipt.workers ?? []).filter((worker) => isOrchestratorRuntime(worker.runtime));
 
@@ -121,7 +121,7 @@ function TurnReceiptLine({ receipt }: { receipt: MobileTurnReceipt }) {
       }}
     >
       <div>
-        {formatModelLabel(receipt.leadModel)} · {MODEL_EFFORT_LABELS[receipt.effort]} · {pickedMode
+        {formatModelLabel(receipt.leadModel)} · {THINKING_EFFORT_LABELS[receipt.effort].short} · {pickedMode
           ? `ran as ${mode}, picked ${pickedMode}`
           : mode}
       </div>

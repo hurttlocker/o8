@@ -199,7 +199,7 @@ export function AttachFilesButton({
         <button
           type="button"
           title={activeSpec.sublabel}
-          aria-label={`Mode: ${activeSpec.label}`}
+          aria-label={`Mode: ${activeSpec.long}`}
           onClick={() => setOpen((current) => !current)}
           style={{
             display: 'inline-flex',
@@ -221,7 +221,7 @@ export function AttachFilesButton({
           onMouseEnter={(event) => { if (mode === 'solo') event.currentTarget.style.color = 'var(--t-text)'; }}
           onMouseLeave={(event) => { if (mode === 'solo') event.currentTarget.style.color = 'var(--t-text-faint)'; }}
         >
-          {activeSpec.chip}
+          {activeSpec.short}
         </button>
       ) : null}
 
@@ -291,7 +291,7 @@ export function AttachFilesButton({
                       letterSpacing: '-0.1px',
                     }}
                   >
-                    <span style={{ flex: 1, minWidth: 0 }}>{spec.label}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>{spec.long}</span>
                     <span style={{ width: 13, flexShrink: 0, color: 'var(--t-accent)', visibility: active ? 'visible' : 'hidden' }}>
                       <CheckGlyph />
                     </span>
