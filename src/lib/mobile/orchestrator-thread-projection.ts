@@ -1,6 +1,11 @@
 import { basename } from 'node:path';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
+import type {
+  MobileOrchestratorBackend,
+  MobileOrchestratorThread,
+  MobilePendingTurnWorkers,
+  MobileTranscriptEntry,
+} from '@/lib/mobile/types';
 import {
   ORCHESTRATOR_RUNTIME_IDS,
   isOrchestratorRuntime,
@@ -82,7 +87,7 @@ export type OrchestratorHistoryRecord = {
   orchestratorTerminalAt?: string | null;
   orchestratorSessionIds?: Record<string, string | null>;
   orchestratorSessionUpdatedAt?: string | null;
-  pendingTurnWorkers?: import('@/lib/mobile/types').MobilePendingTurnWorkers;
+  pendingTurnWorkers?: MobilePendingTurnWorkers;
 };
 
 export function normalizeSessionIds(value: unknown): Record<string, string | null> {
@@ -190,7 +195,11 @@ export function projectOrchestratorThread(
     runtime: inferRuntime(effectiveModel(tabId, record)),
     status: record.orchestratorTerminalStatus === 'failed'
       ? 'failed'
-      : messages.length === 0 ? 'idle' : lastMessage?.role === 'user' ? 'busy' : 'ready',
+      : messages.length === 0
+        ? 'idle'
+        : lastMessage?.role === 'user' || (lastMessage?.role === 'assistant' && !(lastMessage.content ?? '').trim())
+          ? 'busy'
+          : 'ready',
     messageCount: messages.length,
     projectId: typeof record.projectId === 'string' && record.projectId.trim()
       ? record.projectId.trim()

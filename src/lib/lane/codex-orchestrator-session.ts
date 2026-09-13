@@ -303,7 +303,7 @@ export async function sendToCodexOrchestrator(
   await sendToCodexOrchestratorAttempt(session, message, (event) => {
     if (event.type === 'error' || event.type === 'done') deferredTerminalEvents.push(event);
     else {
-      streamed = true;
+      if (event.type !== 'turn_receipt') streamed = true;
       onEvent(event);
     }
   }, options);

@@ -1,4 +1,9 @@
-import type { MobilePendingTurnWorkers, MobileTurnReceipt } from '@/lib/mobile/types';
+import type {
+  MobilePendingTurnWorkers,
+  MobileTurnReceipt,
+} from '@/lib/mobile/types';
+
+type TurnReceiptWorker = NonNullable<MobileTurnReceipt['workers']>[number];
 
 export function mergeMobileTurnReceipts(
   existing: MobileTurnReceipt | undefined,
@@ -18,17 +23,44 @@ export function mergeMobileTurnReceipts(
   };
 }
 
-export function consumePendingTurnWorkers(
+export function appendPendingTurnWorker(
   pending: MobilePendingTurnWorkers | undefined,
   messageId: string,
-  receipt: MobileTurnReceipt | undefined,
-): { pending: MobilePendingTurnWorkers | undefined; receipt: MobileTurnReceipt | undefined } {
-  const workers = pending?.[messageId];
-  if (!workers?.length || !receipt) return { pending, receipt };
-  const nextPending = { ...pending };
-  delete nextPending[messageId];
+  worker: TurnReceiptWorker,
+): MobilePendingTurnWorkers {
+  const workers = new Map((pending?.[messageId] ?? []).map((row) => [row.packetId, row]));
+  workers.set(worker.packetId, worker);
   return {
+    ...pending,
+    [messageId]: Array.from(workers.values()),
+  };
+}
+
+export function consumePendingTurnWorkers<
+  T extends { id?: unknown; receipt?: unknown },
+>(
+  pending: MobilePendingTurnWorkers | undefined,
+  messages: T[],
+): { messages: T[]; pending: MobilePendingTurnWorkers | undefined } {
+  if (!pending || Object.keys(pending).length === 0) return { messages, pending: undefined };
+  const nextPending = { ...pending };
+  let changed = false;
+  const nextMessages = messages.map((message) => {
+    const messageId = typeof message.id === 'string' ? message.id : null;
+    const receipt = message.receipt && typeof message.receipt === 'object'
+      ? message.receipt as MobileTurnReceipt
+      : undefined;
+    const workers = messageId ? nextPending[messageId] : undefined;
+    if (!messageId || !receipt || !workers?.length) return message;
+    delete nextPending[messageId];
+    changed = true;
+    return {
+      ...message,
+      receipt: mergeMobileTurnReceipts(receipt, { ...receipt, workers }),
+    };
+  });
+  return {
+    messages: changed ? nextMessages : messages,
     pending: Object.keys(nextPending).length > 0 ? nextPending : undefined,
-    receipt: mergeMobileTurnReceipts(receipt, { ...receipt, workers }),
   };
 }

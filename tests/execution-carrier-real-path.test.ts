@@ -197,6 +197,15 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
       messageId: 'user-worker-receipt',
       backend: 'codex',
     });
+    threadHistory.upsertMobileOrchestratorAssistantMessage({
+      tabId: receiptThread.id,
+      repoPath,
+      messageId: turnId,
+      content: '',
+      backend: 'codex',
+      model: 'gpt-6-astra',
+      receipt: { leadModel: 'gpt-6-astra', effort: 'high', mode: 'multitask' },
+    });
     const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
     const defaults = await updateOperatorDefaults({ defaultDispatchRuntime: 'codex', workerExecutionCarrier: 'ori' });
     expect(defaults.values).toMatchObject({
@@ -260,7 +269,6 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
     const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
     const { mapHistoryMessagesToTranscript } = await import('@/components/desktop/thoughts/history-transcript');
     const persistedReceiptHistory = readPersistedLlmChat(receiptThread.id)!.history;
-    expect(persistedReceiptHistory.pendingTurnWorkers).toBeUndefined();
     const receiptTranscript = mapHistoryMessagesToTranscript(persistedReceiptHistory.messages);
     expect(receiptTranscript.find((entry) => entry.id === turnId)?.receipt?.workers).toEqual([{
       packetId,

@@ -104,7 +104,11 @@ async function searchThreadHistory(repoPath: string, query: string, limit: numbe
     if (!history?.messages?.length) continue;
     if ((history.repoPath ?? '').trim().replace(/\/+$/, '') !== repoPath) continue;
 
-    const transcript = mapLlmHistoryToMobileTranscript(history.messages);
+    const transcript = mapLlmHistoryToMobileTranscript(
+      history.messages,
+      undefined,
+      history.pendingTurnWorkers,
+    );
     transcript.forEach((entry, index) => {
       const score = scoreEntry(entry, normalizedQuery, tokens);
       if (score <= 0) return;

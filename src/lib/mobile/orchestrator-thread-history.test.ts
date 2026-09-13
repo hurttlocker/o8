@@ -91,6 +91,71 @@ describe('orchestrator thread history persistence', () => {
     ]);
   });
 
+  it('consumes a worker buffered before the assistant receipt exists', async () => {
+    const history = await loadHistoryModule();
+    const receiptStore = await import('./orchestrator-turn-receipt');
+    const chatStore = await import('@/lib/llm/chat-history-store');
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      message: 'dispatch first',
+      backend: 'codex',
+      timestampMs: 1_500,
+    });
+
+    expect(receiptStore.appendMobileOrchestratorTurnWorker({
+      tabId: thread.id,
+      messageId: 'assistant-1500',
+      worker: { packetId: 'packet-early', runtime: 'codex', model: 'gpt-5.6-terra' },
+    })).toBe(true);
+    expect(chatStore.readPersistedLlmChat(thread.id)?.history.pendingTurnWorkers).toEqual({
+      'assistant-1500': [
+        { packetId: 'packet-early', runtime: 'codex', model: 'gpt-5.6-terra' },
+      ],
+    });
+    const beforeClientWrite = chatStore.readPersistedLlmChat(thread.id)?.history;
+    chatStore.writePersistedLlmChat(thread.id, { messages: beforeClientWrite?.messages ?? [] });
+    expect(chatStore.readPersistedLlmChat(thread.id)?.history.pendingTurnWorkers).toEqual({
+      'assistant-1500': [
+        { packetId: 'packet-early', runtime: 'codex', model: 'gpt-5.6-terra' },
+      ],
+    });
+
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      messageId: 'assistant-1500',
+      content: 'done',
+      backend: 'codex',
+      receipt: { leadModel: 'gpt-5.6-sol', effort: 'high', mode: 'multitask' },
+      timestampMs: 1_501,
+    });
+
+    const persisted = chatStore.readPersistedLlmChat(thread.id)?.history;
+    expect(persisted?.pendingTurnWorkers).toBeUndefined();
+    expect(chatStore.mapLlmHistoryToMobileTranscript(persisted?.messages ?? [])[1]?.receipt?.workers).toEqual([
+      { packetId: 'packet-early', runtime: 'codex', model: 'gpt-5.6-terra' },
+    ]);
+  });
+
+  it('projects pending workers at read time when a late buffer survives beside a receipt', async () => {
+    await loadHistoryModule();
+    const chatStore = await import('@/lib/llm/chat-history-store');
+    const worker = { packetId: 'packet-late', runtime: 'codex' as const, model: 'gpt-5.6-terra' };
+    const transcript = chatStore.mapLlmHistoryToMobileTranscript([
+      {
+        id: 'assistant-late',
+        role: 'assistant',
+        content: 'done',
+        timestamp: 1_600,
+        receipt: { leadModel: 'gpt-5.6-sol', effort: 'high', mode: 'multitask' },
+      },
+    ], undefined, { 'assistant-late': [worker] });
+
+    expect(transcript[0]?.receipt?.workers).toEqual([worker]);
+  });
+
   it('persists terminal cache and cost truth onto the streamed assistant message', async () => {
     const history = await loadHistoryModule();
     const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });

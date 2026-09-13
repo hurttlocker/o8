@@ -8,14 +8,20 @@ import {
   type SearchableChatHistoryRecord,
 } from '@/lib/search/conversations';
 import type {
+  MobilePendingTurnWorkers,
   MobileTranscriptEntry,
   MobileTranscriptMedia,
   MobileTranscriptSource,
   MobileTranscriptThinkingStep,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
+import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
+const heldHistoryLocks = new Set<string>();
+const HISTORY_LOCK_TIMEOUT_MS = 5_000;
+const HISTORY_STALE_LOCK_MS = 30_000;
+const historyLockWaiter = new Int32Array(new SharedArrayBuffer(4));
 
 export interface PersistedLlmChatMessage {
   id: string;
@@ -56,7 +62,7 @@ export interface PersistedLlmChatHistory {
   repoPath?: string;
   repoBranch?: string;
   remoteUrl?: string | null;
-  pendingTurnWorkers?: import('@/lib/mobile/types').MobilePendingTurnWorkers;
+  pendingTurnWorkers?: MobilePendingTurnWorkers;
 }
 
 export interface PersistedLlmChatRecord {
@@ -77,17 +83,52 @@ export type CanonicalChatHistoryRecord = SearchableChatHistoryRecord & {
   [key: string]: unknown;
 };
 
-/**
- * The only canonical chat-history write seam. SQLite is authoritative and is
- * updated first; the file replacement is atomic, so search can never lag a
- * successful durable history write.
- */
-export function persistCanonicalChatHistoryRecord(
+/** Serialize chat-history read/modify/write cycles across the WS and API processes. */
+export function withCanonicalChatHistoryLock<T>(tabId: string, task: () => T): T {
+  ensureDir();
+  const lockPath = `${getCanonicalChatHistoryPath(tabId)}.lock`;
+  if (heldHistoryLocks.has(lockPath)) return task();
+
+  const deadline = Date.now() + HISTORY_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      writeFileSync(lockPath, `${process.pid}\n`, { flag: 'wx', mode: 0o600 });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > HISTORY_STALE_LOCK_MS) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out acquiring chat-history lock for ${tabId}.`);
+      }
+      Atomics.wait(historyLockWaiter, 0, 0, 10);
+    }
+  }
+
+  heldHistoryLocks.add(lockPath);
+  try {
+    return task();
+  } finally {
+    heldHistoryLocks.delete(lockPath);
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      // A stale-lock recovery may already have removed it.
+    }
+  }
+}
+
+export function persistCanonicalChatHistoryRecordUnlocked(
   tabId: string,
   record: CanonicalChatHistoryRecord,
-  modifiedAt = new Date().toISOString(),
+  modifiedAt: string,
 ): void {
-  ensureDir();
   syncChatHistorySearchRecord(tabId, record, modifiedAt);
   const filePath = getCanonicalChatHistoryPath(tabId);
   const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -102,6 +143,21 @@ export function persistCanonicalChatHistoryRecord(
     }
     throw error;
   }
+}
+
+/**
+ * The only canonical chat-history write seam. SQLite is authoritative and is
+ * updated first; the file replacement is atomic, so search can never lag a
+ * successful durable history write.
+ */
+export function persistCanonicalChatHistoryRecord(
+  tabId: string,
+  record: CanonicalChatHistoryRecord,
+  modifiedAt = new Date().toISOString(),
+): void {
+  withCanonicalChatHistoryLock(tabId, () => {
+    persistCanonicalChatHistoryRecordUnlocked(tabId, record, modifiedAt);
+  });
 }
 
 export function deleteCanonicalChatHistoryRecord(tabId: string): void {
@@ -146,45 +202,51 @@ export function writePersistedLlmChat(
   history: PersistedLlmChatHistory,
   opts?: { replace?: boolean },
 ) {
-  ensureDir();
-  const filePath = getCanonicalChatHistoryPath(tabId);
-  let starred = false;
-  let title: string | undefined;
-  let planText: string | undefined;
-  let pendingTurnWorkers: PersistedLlmChatHistory['pendingTurnWorkers'];
-  let existingMessages: PersistedLlmChatMessage[] = [];
-  try {
-    const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory;
-    existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
-    starred = existing.starred || false;
-    title = existing.title;
-    planText = normalizePlanText(existing.planText);
-    pendingTurnWorkers = existing.pendingTurnWorkers;
-  } catch {
-    // no existing history
-  }
+  return withCanonicalChatHistoryLock(tabId, () => {
+    const filePath = getCanonicalChatHistoryPath(tabId);
+    let starred = false;
+    let title: string | undefined;
+    let planText: string | undefined;
+    let existingPendingTurnWorkers: MobilePendingTurnWorkers | undefined;
+    let existingMessages: PersistedLlmChatMessage[] = [];
+    try {
+      const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory;
+      existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
+      starred = existing.starred || false;
+      title = existing.title;
+      planText = normalizePlanText(existing.planText);
+      existingPendingTurnWorkers = existing.pendingTurnWorkers;
+    } catch {
+      // no existing history
+    }
 
   // #1282 — non-destructive store: merge onto the on-disk transcript so a partial
   // write, or a stale read-modify-write racing a concurrent writer (e.g. the
   // desktop ws-server upserting a reply), can never drop a stored turn. This is
   // the second write path alongside the /api/v2/chat-history route. Pass
   // replace:true only for an intentional truncation (none today).
-  const mergedMessages = opts?.replace === true
-    ? history.messages
-    : mergeChatMessages(existingMessages, history.messages);
+    const mergedMessages = opts?.replace === true
+      ? history.messages
+      : mergeChatMessages(existingMessages, history.messages);
 
-  const persistedRecord = {
-    ...history,
-    messages: mergedMessages.map(stripImages),
-    savedAt: new Date().toISOString(),
-    starred: history.starred ?? starred,
-    title: history.title ?? title,
-    planText: normalizePlanText(history.planText) ?? planText,
-    pendingTurnWorkers: Object.prototype.hasOwnProperty.call(history, 'pendingTurnWorkers')
+    const selectedPendingTurnWorkers = Object.prototype.hasOwnProperty.call(history, 'pendingTurnWorkers')
       ? history.pendingTurnWorkers
-      : pendingTurnWorkers,
-  };
-  persistCanonicalChatHistoryRecord(tabId, persistedRecord);
+      : existingPendingTurnWorkers;
+    const consumed = consumePendingTurnWorkers(
+      selectedPendingTurnWorkers,
+      mergedMessages.map(stripImages),
+    );
+    const persistedRecord = {
+      ...history,
+      messages: consumed.messages,
+      savedAt: new Date().toISOString(),
+      starred: history.starred ?? starred,
+      title: history.title ?? title,
+      planText: normalizePlanText(history.planText) ?? planText,
+      pendingTurnWorkers: consumed.pending,
+    };
+    persistCanonicalChatHistoryRecordUnlocked(tabId, persistedRecord, new Date().toISOString());
+  });
 }
 
 export function deletePersistedLlmChat(tabId: string) {
@@ -206,8 +268,13 @@ export function listPersistedLlmChats() {
   }
 }
 
-export function mapLlmHistoryToMobileTranscript(messages: PersistedLlmChatMessage[], limit?: number): MobileTranscriptEntry[] {
-  const filtered = messages
+export function mapLlmHistoryToMobileTranscript(
+  messages: PersistedLlmChatMessage[],
+  limit?: number,
+  pendingTurnWorkers?: MobilePendingTurnWorkers,
+): MobileTranscriptEntry[] {
+  const withPendingWorkers = consumePendingTurnWorkers(pendingTurnWorkers, messages).messages;
+  const filtered = withPendingWorkers
     .filter((message) => !message.isPartial)
     .slice(limit ? -limit : undefined);
 

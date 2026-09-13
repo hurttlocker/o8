@@ -5177,10 +5177,11 @@ async function handleOrchestratorSendMsgOnce(
     backendId: OrchestratorBackendId = activeBackend.id,
     receipt?: Extract<OrchestratorEvent, { type: 'done' }>,
     assistantModel: string | null = activeAssistantModel,
+    receiptOnly = false,
   ) => {
     if (!isThreadBacked || !assistantMessageId) return;
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
-    if (!assistantText.shouldPersist(!!receipt)) return;
+    if (!receiptOnly && !assistantText.shouldPersist(!!receipt)) return;
     try {
       const updatedThread = upsertMobileOrchestratorAssistantMessage({
         tabId: threadId,
@@ -5480,6 +5481,9 @@ async function handleOrchestratorSendMsgOnce(
               mode,
               ...(pickedMode && pickedMode !== mode ? { pickedMode } : {}),
             };
+            // The effective settings are known before the backend can launch a
+            // worker. Create the durable turn row now; text fills it in later.
+            persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel, true);
             break;
           }
 
@@ -5645,6 +5649,9 @@ async function handleOrchestratorSendMsgOnce(
                 console.warn('[ws-server][orchestrator] failed to drop discarded attempt text', trimErr);
               }
             }
+            // A retry reuses the same resolved settings and does not emit a
+            // second receipt, so restore the row removed with attempt one.
+            persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel, true);
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'retry',

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { persistCanonicalChatHistoryRecord, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { createHandoffHistoryMarker, truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
 import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
@@ -595,16 +595,16 @@ export function truncateMobileOrchestratorThreadFromMessage(input: {
 export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssistantUpsertInput): MobileOrchestratorThread | null {
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
-
   const content = input.content;
-  if (!content || !content.trim()) return null;
+  // The receipt-only row binds worker launches before reply text can stream.
+  if ((!content || !content.trim()) && !input.receipt) return null;
+  return withCanonicalChatHistoryLock(tabId, () => {
   const existing = readHistoryRecord(tabId);
   if (!existing) {
     // The user-message helper writes the record first. If it's missing here,
     // we skip rather than orphan an assistant-only record on disk.
     return null;
   }
-  const pendingReceipt = consumePendingTurnWorkers(existing.pendingTurnWorkers, input.messageId, input.receipt);
   const now = new Date();
   const nowIso = now.toISOString();
   const messages = Array.isArray(existing.messages) ? existing.messages : [];
@@ -636,7 +636,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
       // stamped first rather than letting a later call with no backend blank it.
       backend: nextMessages[existingIndex]?.backend ?? turnBackend,
       model: nextMessages[existingIndex]?.model ?? turnModel,
-      receipt: mergeMobileTurnReceipts(nextMessages[existingIndex]?.receipt, pendingReceipt.receipt),
+      receipt: mergeMobileTurnReceipts(nextMessages[existingIndex]?.receipt, input.receipt),
       ...(input.tokens ? { tokens: input.tokens } : {}),
     };
   } else {
@@ -657,7 +657,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
           persistedVersion: 1,
           backend: turnBackend,
           model: turnModel,
-          ...(pendingReceipt.receipt ? { receipt: pendingReceipt.receipt } : {}),
+          ...(input.receipt ? { receipt: input.receipt } : {}),
           ...(input.tokens ? { tokens: input.tokens } : {}),
         },
       ];
@@ -690,10 +690,12 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
     ?? modelForBackend(nextBackend)
     ?? DEFAULT_MODEL;
 
+  const consumed = consumePendingTurnWorkers(existing.pendingTurnWorkers, nextMessages);
+
   writeHistoryRecord(tabId, {
     ...existing,
-    pendingTurnWorkers: pendingReceipt.pending,
-    messages: nextMessages,
+    messages: consumed.messages,
+    pendingTurnWorkers: consumed.pending,
     model: nextModel,
     backend: nextBackend,
     agent: normalizeAgent(input.agent) ?? normalizeAgent(existing.agent),
@@ -713,6 +715,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
   });
 
   return readProjectedThread(tabId);
+  });
 }
 
 export function markMobileOrchestratorThreadFailed(input: {

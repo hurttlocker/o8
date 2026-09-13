@@ -37,7 +37,7 @@ import type {
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
-import { type OpenclawAgentResult, resolveOpenclawPromptSeeded } from './openclaw-turn-state';
+import { readOpenclawAgentPrimaryModel, type OpenclawAgentResult, resolveOpenclawPromptSeeded } from './openclaw-turn-state';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { ORCHESTRATOR_OUTCOME_OWNERSHIP_FALLBACK_V1 } from '@/lib/prompts/v1';
@@ -61,14 +61,11 @@ interface OpenclawOrchestratorSession {
  * path was flat (`{ payloads, meta }`). Both shapes are unwrapped where parsed.
  */
 let openclawRealtimeMutationSeq = 0;
-
 // ── Constants ────────────────────────────────────────────────────────────────
-
 /** Dedicated openclaw profile — isolates state/config under ~/.openclaw-o8. */
 const OPENCLAW_PROFILE = 'o8';
 /** Mirror of the other orchestrator backends' 4-hour process budget (hang watchdog, not a work budget). */
 const PROCESS_TIMEOUT_MS = 14_400_000;
-
 const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
 const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
 const OPENCLAW_O8_HOME = join(homedir(), `.openclaw-${OPENCLAW_PROFILE}`);
@@ -730,10 +727,12 @@ async function sendToOpenclawOrchestrator(
   const thinking = thinkingFlag(options.thinkingEffort);
   if (thinking) args.push('--thinking', thinking);
   const requestedModel = options.model?.trim();
+  let effectiveModel = readOpenclawAgentPrimaryModel(OPENCLAW_O8_CONFIG, session.agentId);
   if (requestedModel) {
     const allowed = openclawAgentAllowedModels(session.agentId);
     if (allowed.has(requestedModel)) {
       args.push('--model', requestedModel);
+      effectiveModel = requestedModel;
     } else {
       // A model chip from another backend (e.g. a Codex id after a backend
       // switch) hard-errors the whole turn in OpenClaw 2026.7.1. Use the
@@ -742,6 +741,7 @@ async function sendToOpenclawOrchestrator(
       emitEvent({ type: 'thinking', text: `Model ${requestedModel} isn't configured for the OpenClaw agent "${session.agentId}" — using its default model instead.` });
     }
   }
+  emitEvent({ type: 'turn_receipt', leadModel: effectiveModel, effort: options.thinkingEffort ?? 'adaptive' });
   console.log(`[openclaw-diag] spawn args: ${args.map((a, i) => (args[i - 1] === '--message' ? `<message ${fullMessage.length} chars>` : a)).join(' ')}`);
   return new Promise<void>((promiseResolve, promiseReject) => {
     const launch = cliInvocation(openclawBin, args);

@@ -237,6 +237,7 @@ async function sendToO8Orchestrator(
   const hasRepo = Boolean(repoPath && repoPath.trim());
   const repoName = hasRepo ? (repoPath.split('/').filter(Boolean).pop() ?? '') : '';
   const { tier, toolsEnabled } = o8TierAccess(paidPlan, options.thinkingEffort, hasRepo);
+  onEvent({ type: 'turn_receipt', leadModel: 'o8-operator', effort: tier });
   const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier, toolsEnabled, repoName) }, ...history];
 
   // Inactivity watchdog: every await below (the fetch AND each stream read) is
