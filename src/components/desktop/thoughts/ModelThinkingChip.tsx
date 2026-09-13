@@ -10,7 +10,7 @@ import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-mo
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
 import { formatModelLabel } from '@/lib/format';
 
-const EFFORT_LABELS: Record<ThinkingEffort, string> = {
+export const MODEL_EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
   low: 'low',
   medium: 'medium',
@@ -26,7 +26,7 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
 // and its half-lit fourth bar reads the same way (operator, 2026-07-06).
 // 'ultra' is Codex-flagship-only (appended dynamically below) — not in the
 // base list, so it never shows for Claude/Fable turns.
-const EFFORT_OPTIONS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
+export const MODEL_EFFORT_OPTIONS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
   // bars fill 3 solid + a half-lit fourth — reading as "between medium and high".
@@ -52,7 +52,7 @@ const SEARCHABLE_HOUSE_MENU_WIDTH = 300;
 // This value is what `onModelChange` stores and what `activeModelOption` matches.
 const O8_FREE_MODEL_ID = 'o8-free';
 
-type ComposerModelOption = {
+export type ComposerModelOption = {
   value: string;
   label: string;
   backend: OrchestratorBackendSetting;
@@ -62,7 +62,7 @@ type ComposerModelOption = {
   triggerLabel?: string;
 };
 
-type ComposerModelGroup = {
+export type ComposerModelGroup = {
   key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode';
   label: string;
   options: ComposerModelOption[];
@@ -79,7 +79,7 @@ type ComposerModelGroup = {
 // models nested under each. Codex exposes Astra, Sol, and Terra as
 // orchestrator-worthy picks. Each runs as the Codex
 // orchestrator model via resolveOrchestratorModelSync.
-const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
+export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   {
     key: 'claude',
     label: 'Claude',
@@ -132,6 +132,56 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   },
 ];
 
+export interface ComposerModelCatalogue {
+  groups: ComposerModelGroup[];
+  carrier: { source: 'native' | 'openrouter' | 'codex-subscription'; model: string | null } | null;
+}
+
+export function useComposerModelCatalogue(): ComposerModelCatalogue {
+  const [carrier, setCarrier] = useState<ComposerModelCatalogue['carrier']>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      void fetch('/api/runtime/claude-code-profile', { cache: 'no-store' })
+        .then(async (response) => response.ok ? response.json() : null)
+        .then((payload: { profile?: { source?: unknown }; effectiveModel?: unknown } | null) => {
+          const source = payload?.profile?.source;
+          const model = payload?.effectiveModel;
+          if (!cancelled && (source === 'native' || source === 'openrouter' || source === 'codex-subscription')) {
+            setCarrier({ source, model: typeof model === 'string' ? model : null });
+          }
+        })
+        .catch(() => {});
+    };
+    load();
+    window.addEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load);
+    return () => { cancelled = true; window.removeEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load); };
+  }, []);
+  const carrierModel = carrier?.model ?? null;
+  const carrierSource = carrier?.source;
+  const groups = carrierSource && carrierSource !== 'native' && carrierModel
+    ? COMPOSER_MODEL_GROUPS.map((group): ComposerModelGroup => group.key === 'claude'
+      ? {
+          ...group,
+          options: [
+            ...group.options.filter((option) => option.backend === 'fable'),
+            {
+              value: `claude-harness:${carrierModel}`,
+              label: `${formatModelLabel(carrierModel)} in Claude Code`,
+              triggerLabel: formatModelLabel(carrierModel),
+              backend: 'claude',
+              model: carrierModel,
+              sub: carrierSource === 'codex-subscription'
+                ? 'Codex subscription · full harness'
+                : 'OpenRouter · full harness',
+            },
+          ],
+        }
+      : group)
+    : COMPOSER_MODEL_GROUPS;
+  return { groups, carrier };
+}
+
 function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; active?: boolean }) {
   const level = EFFORT_LEVEL[effort];
   const color = active
@@ -163,7 +213,7 @@ function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; acti
   );
 }
 
-type EffortStop =
+export type EffortStop =
   | { kind: 'effort'; effort: ThinkingEffort; label: string; sub: string }
   | { kind: 'ultracode'; label: string; sub: string };
 
@@ -176,7 +226,7 @@ type EffortStop =
  * (The animated glitch-fill inside the track that the reference shows at the
  * Fusion tier is a deliberate follow-up pass — slider first.)
  */
-function EffortSlider({
+export function EffortSlider({
   stops,
   index,
   onPick,
@@ -332,58 +382,15 @@ export function ModelThinkingChip({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [harnessCarrier, setHarnessCarrier] = useState<{
-    source: 'native' | 'openrouter' | 'codex-subscription';
-    model: string | null;
-  } | null>(null);
+  const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const splitRef = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      void fetch('/api/runtime/claude-code-profile', { cache: 'no-store' })
-        .then(async (response) => response.ok ? response.json() : null)
-        .then((payload: { profile?: { source?: unknown }; effectiveModel?: unknown } | null) => {
-          const source = payload?.profile?.source;
-          const model = payload?.effectiveModel;
-          if (!cancelled && (source === 'native' || source === 'openrouter' || source === 'codex-subscription')) {
-            setHarnessCarrier({ source, model: typeof model === 'string' ? model : null });
-          }
-        })
-        .catch(() => {});
-    };
-    load();
-    window.addEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load);
-    return () => { cancelled = true; window.removeEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load); };
-  }, []);
-  const carrierModel = harnessCarrier?.model ?? null;
-  const carrierSource = harnessCarrier?.source;
-  const composerModelGroups = carrierSource && carrierSource !== 'native' && carrierModel
-    ? COMPOSER_MODEL_GROUPS.map((group): ComposerModelGroup => group.key === 'claude'
-      ? {
-          ...group,
-          options: [
-            ...group.options.filter((option) => option.backend === 'fable'),
-            {
-              value: `claude-harness:${carrierModel}`,
-              label: `${formatModelLabel(carrierModel)} in Claude Code`,
-              triggerLabel: formatModelLabel(carrierModel),
-              backend: 'claude',
-              model: carrierModel,
-              sub: carrierSource === 'codex-subscription'
-                ? 'Codex subscription · full harness'
-                : 'OpenRouter · full harness',
-            },
-          ],
-        }
-      : group)
-    : COMPOSER_MODEL_GROUPS;
-  const baseEffortOptions = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
+  const baseEffortOptions = adaptiveEnabled ? MODEL_EFFORT_OPTIONS : MODEL_EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
   // 'ultra' (Codex flagship internal fan-out) is only selectable on the Codex
   // backend. Every other backend caps
   // at 'max' — see resolveCodexReasoningEffort / claudeEffortFlagValue.
   const options = activeBackend === 'codex' ? [...baseEffortOptions, 'ultra' as ThinkingEffort] : baseEffortOptions;
-  const selectedLabel = EFFORT_LABELS[effort];
+  const selectedLabel = MODEL_EFFORT_LABELS[effort];
   const ultraActive = Boolean(swarmEnabled);
   const collideActive = Boolean(collideEnabled);
   const modelSwitchable = Boolean(onModelChange || onBackendChange);
@@ -457,7 +464,7 @@ export function ModelThinkingChip({
       ...options.map((option): EffortStop => ({
         kind: 'effort',
         effort: option,
-        label: EFFORT_LABELS[option].charAt(0).toUpperCase() + EFFORT_LABELS[option].slice(1),
+        label: MODEL_EFFORT_LABELS[option].charAt(0).toUpperCase() + MODEL_EFFORT_LABELS[option].slice(1),
         sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
       })),
       ...(onSetSwarm ? [{ kind: 'ultracode' as const, label: 'Fusion', sub: 'native sub-agents + every runtime’s workers, in parallel' }] : []),

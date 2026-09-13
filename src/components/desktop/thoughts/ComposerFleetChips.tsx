@@ -28,7 +28,7 @@ import {
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
 
-interface DispatchDefaults {
+export interface DispatchDefaults {
   defaultDispatchRuntime: OrchestratorRuntime;
   defaultDispatchModel: string;
   opencodeWorkerModel: string | null;
@@ -37,14 +37,14 @@ interface DispatchDefaults {
 
 type FleetPickerView = 'runtimes' | 'opencode-model';
 
-const FALLBACK_DEFAULTS: DispatchDefaults = {
+export const FALLBACK_DISPATCH_DEFAULTS: DispatchDefaults = {
   defaultDispatchRuntime: 'codex',
   defaultDispatchModel: '',
   opencodeWorkerModel: null,
   workerStartMode: 'autonomous',
 };
 
-const WORKER_START_OPTIONS: Array<{
+export const WORKER_START_OPTIONS: Array<{
   value: WorkerStartMode;
   label: string;
   shortLabel: string;
@@ -56,12 +56,12 @@ const WORKER_START_OPTIONS: Array<{
 ];
 
 /** Last path segment of a provider-qualified model id, for chip width. */
-function shortModelLabel(model: string): string {
+export function shortWorkerModelLabel(model: string): string {
   const cut = model.lastIndexOf('/');
   return cut >= 0 ? model.slice(cut + 1) : model;
 }
 
-function workerModelForDisplay(runtime: OrchestratorRuntime, defaults: DispatchDefaults): string {
+export function workerModelForDisplay(runtime: OrchestratorRuntime, defaults: DispatchDefaults): string {
   if (runtime === 'opencode' && defaults.opencodeWorkerModel) {
     return defaults.opencodeWorkerModel;
   }
@@ -232,7 +232,7 @@ export function ComposerModeChip({
 export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<FleetPickerView>('runtimes');
-  const [defaults, setDefaults] = useState<DispatchDefaults>(FALLBACK_DEFAULTS);
+  const [defaults, setDefaults] = useState<DispatchDefaults>(FALLBACK_DISPATCH_DEFAULTS);
   const [workerModelLocked, setWorkerModelLocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -319,7 +319,7 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
     ?? WORKER_START_OPTIONS[0];
   const chipText = compact
     ? `${runtimeLabel} · ${startOption.shortLabel}`
-    : `${model ? `${runtimeLabel} · ${shortModelLabel(model)}` : runtimeLabel} · ${startOption.shortLabel}`;
+    : `${model ? `${runtimeLabel} · ${shortWorkerModelLabel(model)}` : runtimeLabel} · ${startOption.shortLabel}`;
 
   return (
     <>
@@ -494,7 +494,7 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
                       color: 'var(--t-text-faint)',
                       textAlign: 'right',
                     }}>
-                      {rowModel ? shortModelLabel(rowModel) : ''}
+                      {rowModel ? shortWorkerModelLabel(rowModel) : ''}
                     </span>
                     <span style={{ width: 13, flexShrink: 0, color: 'var(--t-accent)', visibility: active ? 'visible' : 'hidden' }}>
                       <CheckGlyph />

@@ -11,6 +11,8 @@ import { ModelThinkingChip } from './ModelThinkingChip';
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { ComposerSelectorFooter } from './composer-selector/ComposerSelectorFooter';
+import type { ComposerEffortClampNotice } from './composer-selector/state';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
@@ -439,6 +441,11 @@ export function InputButtons({
   onVoiceModeChange,
   onBrowsePrompts,
   onSavePrompt,
+  onRequestTextareaFocus,
+  composerSelectorV1Enabled = false,
+  operatorDefaultEffort = effort,
+  composerEffortClampNotice = null,
+  composerSelectorIsFreePlan = false,
 }: {
   input: string;
   enhancing: boolean;
@@ -493,6 +500,11 @@ export function InputButtons({
   onVoiceModeChange?: (enabled: boolean) => void;
   onBrowsePrompts?: () => void;
   onSavePrompt?: (body: string) => void;
+  onRequestTextareaFocus?: () => void;
+  composerSelectorV1Enabled?: boolean;
+  operatorDefaultEffort?: ThinkingEffort;
+  composerEffortClampNotice?: ComposerEffortClampNotice | null;
+  composerSelectorIsFreePlan?: boolean;
 }) {
   const canSubmit = Boolean(input.trim());
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
@@ -513,6 +525,58 @@ export function InputButtons({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  if (
+    composerSelectorV1Enabled
+    && composerMode
+    && onComposerModeChange
+    && modelLabel
+    && modelId
+    && activeBackend
+    && onEffortChange
+  ) {
+    return (
+      <ComposerChipCompactContext.Provider value={compact}>
+        <ComposerSelectorFooter
+          input={input}
+          mode={composerMode}
+          onModeChange={onComposerModeChange}
+          modelId={modelId}
+          modelLabel={modelLabel}
+          activeBackend={activeBackend}
+          onModelChange={onModelChange}
+          onBackendChange={onBackendChange}
+          effort={effort}
+          onEffortChange={onEffortChange}
+          adaptiveEnabled={adaptiveEnabled}
+          operatorDefaultEffort={operatorDefaultEffort}
+          clampNotice={composerEffortClampNotice}
+          isFreePlan={composerSelectorIsFreePlan}
+          threadId={sessionRulesThreadId ?? null}
+          attachControl={(
+            <AttachFilesButton
+              onUploadDiskFiles={onUploadDiskFiles}
+              onFileReferenceSelect={onFileReferenceSelect}
+              repoPath={repoPath}
+              promptBody={input}
+              onBrowsePrompts={onBrowsePrompts}
+              onSavePrompt={onSavePrompt}
+            />
+          )}
+          micControl={<MicButton />}
+          sendControl={(
+            <SendPill
+              canSubmit={canSubmit}
+              working={working}
+              onSubmit={onSubmit}
+              onStop={onStop}
+            />
+          )}
+          onRequestTextareaFocus={onRequestTextareaFocus}
+        />
+      </ComposerChipCompactContext.Provider>
+    );
+  }
 
   return (
     <ComposerChipCompactContext.Provider value={compact}>

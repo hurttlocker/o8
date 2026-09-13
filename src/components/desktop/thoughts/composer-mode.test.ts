@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { COMPOSER_MODE_DIRECTIVES } from '@/lib/orchestrator/composer-wire';
 import { composeComposerModeMessage, resolveComposerExecutionMode } from './composer-mode';
 
 describe('composeComposerModeMessage', () => {
@@ -17,6 +18,16 @@ describe('composeComposerModeMessage', () => {
       wireMessage: '/chat Explain this diff',
     });
   });
+
+  it('puts the Fusion directive on the wire without changing display text', () => {
+    const prompt = 'Build the selector';
+    const result = composeComposerModeMessage(prompt, 'fusion');
+    expect(result.wireMessage).toContain('[Mode: Fusion]');
+    expect(result).toEqual({
+      displayMessage: prompt,
+      wireMessage: `${COMPOSER_MODE_DIRECTIVES.fusion}\n\n${prompt}`,
+    });
+  });
 });
 
 describe('resolveComposerExecutionMode', () => {
@@ -24,6 +35,7 @@ describe('resolveComposerExecutionMode', () => {
     expect(resolveComposerExecutionMode('solo', false, false)).toBe('single');
     expect(resolveComposerExecutionMode('multitask', false, false)).toBe('fleet');
     expect(resolveComposerExecutionMode('solo', true, false)).toBe('fusion');
+    expect(resolveComposerExecutionMode('fusion', false, false)).toBe('fusion');
   });
 
   it('keeps the automatic single-runtime policy ahead of Fusion', () => {
