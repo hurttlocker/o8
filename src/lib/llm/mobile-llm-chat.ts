@@ -13,6 +13,10 @@ export function loadMobileLlmChatHistory(sessionKey: string, limit?: number): Mo
 
   return {
     sessionKey,
-    transcript: mapLlmHistoryToMobileTranscript(record.history.messages, limit),
+    transcript: mapLlmHistoryToMobileTranscript(
+      record.history.messages,
+      limit,
+      record.history.pendingTurnWorkers,
+    ),
   };
 }

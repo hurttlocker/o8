@@ -1,5 +1,9 @@
 export type ComposerWireMode = 'solo' | 'multitask' | 'moa' | 'fusion';
 
+export function isComposerWireMode(value: unknown): value is ComposerWireMode {
+  return value === 'solo' || value === 'multitask' || value === 'moa' || value === 'fusion';
+}
+
 /**
  * Dispatch is an MCP tool on the `cortex` server, and every orchestrator backend
  * namespaces it differently in the model's tool list (Claude:

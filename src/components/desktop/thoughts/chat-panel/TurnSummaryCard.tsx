@@ -15,6 +15,11 @@
  */
 
 import { useState } from 'react';
+import { formatModelLabel } from '@/lib/format';
+import type { MobileTranscriptEntry, MobileTurnReceipt } from '@/lib/mobile/types';
+import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { MODEL_EFFORT_LABELS } from '../ModelThinkingChip';
+import { composerSelectorModeSpec } from '../composer-selector/state';
 import { ChatActionCard } from './ChatActionCard';
 
 export type TurnSummary = {
@@ -66,7 +71,8 @@ export type TurnSummary = {
 };
 
 type Props = {
-  summary: TurnSummary;
+  summary?: TurnSummary;
+  persistedEntry?: Pick<MobileTranscriptEntry, 'receipt'>;
 };
 
 function formatElapsed(ms: number): string {
@@ -91,6 +97,41 @@ function formatTokens(value: number): string {
 function formatCost(value: number): string {
   if (value <= 0) return '$0.00';
   return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+}
+
+function TurnReceiptLine({ receipt }: { receipt: MobileTurnReceipt }) {
+  const mode = composerSelectorModeSpec(receipt.mode).label;
+  const pickedMode = receipt.pickedMode && receipt.pickedMode !== receipt.mode
+    ? composerSelectorModeSpec(receipt.pickedMode).label
+    : null;
+  const workers = (receipt.workers ?? []).filter((worker) => isOrchestratorRuntime(worker.runtime));
+
+  return (
+    <div
+      aria-label="Turn receipt"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 3,
+        minWidth: 0,
+        fontFamily: 'SF Mono, Menlo, Monaco, monospace',
+        fontSize: 10.5,
+        lineHeight: 1.45,
+        color: 'var(--t-text-muted)',
+      }}
+    >
+      <div>
+        {formatModelLabel(receipt.leadModel)} · {MODEL_EFFORT_LABELS[receipt.effort]} · {pickedMode
+          ? `ran as ${mode}, picked ${pickedMode}`
+          : mode}
+      </div>
+      {workers.map((worker) => (
+        <div key={worker.packetId}>
+          {getRuntimeCapability(worker.runtime).label} · {formatModelLabel(worker.model)}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function buildTurnSummaryStats(summary: TurnSummary): { key: string; value: string }[] {
@@ -125,8 +166,10 @@ export function buildTurnSummaryStats(summary: TurnSummary): { key: string; valu
   ];
 }
 
-export function TurnSummaryCard({ summary }: Props) {
+export function TurnSummaryCard({ summary, persistedEntry }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const receipt = persistedEntry?.receipt;
+  if (!summary) return receipt ? <TurnReceiptLine receipt={receipt} /> : null;
   const elapsed = formatElapsed(summary.elapsedMs);
   const toolPreview = summary.toolNames.slice(0, 3).join(', ');
   const toolOverflow = Math.max(0, summary.toolNameTotal - summary.toolNames.slice(0, 3).length);
@@ -222,6 +265,8 @@ export function TurnSummaryCard({ summary }: Props) {
               </span>
             ) : null}
           </div>
+
+          {receipt ? <TurnReceiptLine receipt={receipt} /> : null}
 
           {summary.filesEditedCount > 0 ? (
             <div

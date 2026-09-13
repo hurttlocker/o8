@@ -349,6 +349,9 @@ export async function POST(request: NextRequest) {
       ...(typeof record.orchestratorThreadId === 'string' && record.orchestratorThreadId.trim()
         ? { orchestratorThreadId: record.orchestratorThreadId.trim() }
         : {}),
+      ...(typeof record.orchestratorTurnId === 'string' && record.orchestratorTurnId.trim()
+        ? { orchestratorTurnId: record.orchestratorTurnId.trim() }
+        : {}),
       dispatcher: resolveDispatcher(request, record),
       ...(launchContext ? { launchContext } : {}),
       ...(normalizeComparisonModels(record.comparisonModels)

@@ -13,6 +13,7 @@ export type StoredTranscriptMessage = {
   timestampLabel?: string;
   backend?: MobileTranscriptEntry['backend'];
   model?: string;
+  receipt?: MobileTranscriptEntry['receipt'];
   tokens?: MobileTranscriptEntry['tokens'];
   costUsd?: number;
   sources?: MobileTranscriptEntry['sources'];
@@ -88,6 +89,7 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
     model: dropInvalid
       ? (typeof message.model === 'string' ? message.model : undefined)
       : message.model,
+    receipt: message.receipt,
     tokens: message.tokens,
     costUsd: dropInvalid
       ? (typeof message.costUsd === 'number' ? message.costUsd : undefined)
@@ -127,6 +129,7 @@ export function serializeTranscriptForStorage(
     timestampLabel: entry.timestampLabel,
     backend: entry.backend,
     model: entry.model,
+    receipt: entry.receipt,
     tokens: entry.tokens,
     costUsd: entry.costUsd,
     sources: entry.sources,

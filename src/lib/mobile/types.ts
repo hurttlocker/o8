@@ -9,6 +9,7 @@ import type { MobileApprovalCard } from '@/lib/approvals/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorPacketRecovery } from '@/lib/orchestrator/types';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 import type { CompactionTrigger } from '@/lib/runtimes/compaction-detector';
 
@@ -306,6 +307,20 @@ export interface MobileTranscriptCommand {
   };
 }
 
+export interface MobileTurnReceipt {
+  leadModel: string;
+  effort: ThinkingEffort;
+  mode: 'solo' | 'multitask' | 'moa' | 'fusion';
+  pickedMode?: 'solo' | 'multitask' | 'moa' | 'fusion';
+  workers?: Array<{
+    packetId: string;
+    runtime: OrchestratorRuntime;
+    model: string;
+  }>;
+}
+
+export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnReceipt['workers']>>;
+
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
   id: string;
@@ -322,6 +337,7 @@ export interface MobileTranscriptEntry {
   /** Runtime family that authored this individual turn. */
   backend?: OrchestratorBackendId;
   model?: string;
+  receipt?: MobileTurnReceipt;
   tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   costUsd?: number;
   sources?: MobileTranscriptSource[];

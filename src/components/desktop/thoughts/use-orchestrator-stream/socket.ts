@@ -8,6 +8,7 @@ import {
   formatTimestampLabel,
   type OrchestratorStreamStatus,
 } from './shared';
+import { parseTerminalTurnReceipt, parseTerminalUsage } from './terminal-receipt';
 import { parseHandoffEventData } from './handoff-socket';
 
 interface RefLike<T> {
@@ -146,22 +147,6 @@ function createAssistantState(
     backend: isOrchestratorBackendId(backend) ? backend : undefined,
     model: typeof model === 'string' && model.trim() ? model.trim() : undefined,
     verbatimStream: typeof backend === 'string' && VERBATIM_STREAM_BACKENDS.has(backend),
-  };
-}
-
-function terminalUsage(value: unknown): MobileTranscriptEntry['tokens'] | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const usage = value as Record<string, unknown>;
-  const token = (candidate: unknown) => (
-    typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0
-      ? Math.floor(candidate)
-      : 0
-  );
-  return {
-    input: token(usage.inputTokens),
-    output: token(usage.outputTokens),
-    cacheRead: token(usage.cacheReadTokens),
-    cacheWrite: token(usage.cacheWriteTokens),
   };
 }
 
@@ -570,15 +555,17 @@ export function createOrchestratorMessageHandler(
             const finalThinkingDurationMs = endedState.thinkingDurationMs ?? undefined;
             options.flushCurrentAssistant();
             const finalId = endedState.id;
-            const tokens = terminalUsage(msg.data?.usage);
+            const tokens = parseTerminalUsage(msg.data?.usage);
+            const receipt = parseTerminalTurnReceipt(msg.data?.receipt);
             setTranscriptMessages((prev) => prev.map((message) => {
               if (message.id !== finalId) return message;
               const needsToolSettle = message.toolCalls?.some((tool) => tool.status === 'running');
               const needsThinkingSettle = message.thinkingActive === true;
-              if (!needsToolSettle && !needsThinkingSettle && !tokens) return message;
+              if (!needsToolSettle && !needsThinkingSettle && !tokens && !receipt) return message;
               return {
                 ...message,
                 ...(tokens ? { tokens } : {}),
+                ...(receipt ? { receipt } : {}),
                 ...(needsToolSettle
                   ? { toolCalls: message.toolCalls!.map((tool) => (tool.status === 'running' ? { ...tool, status: 'done' as const } : tool)) }
                   : {}),

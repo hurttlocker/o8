@@ -130,6 +130,10 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
         },
+        orchestratorTurnId: {
+          type: 'string',
+          description: 'Exact assistant transcript message id for the current sent turn. Pass it with orchestratorThreadId so successful worker launches append to that turn receipt.',
+        },
         parentWorkspaceId: { type: 'string', description: 'Optional durable workspace placement for the worker split.' },
         caller: { type: 'string', description: 'Optional short label for the outside agent or terminal that started this work. The o8 app shows it on the worker pane.' },
       },
@@ -790,6 +794,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
     const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
+    const orchestratorTurnId = optionalString(args, 'orchestratorTurnId') || undefined;
     const parentWorkspaceId = optionalString(args, 'parentWorkspaceId') || undefined;
     const caller = optionalString(args, 'caller') || undefined;
     const readOnly = args.readOnly === true;
@@ -824,7 +829,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         huddle, taskContract: parseTaskContractSetting(args.taskContract),
         comparisonModels,
         qualitySearch,
-        orchestratorThreadId, parentWorkspaceId, caller, readOnly,
+        orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -860,7 +865,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       huddle, taskContract: parseTaskContractSetting(args.taskContract),
       comparisonModels,
       qualitySearch,
-      orchestratorThreadId, parentWorkspaceId, caller, readOnly,
+      orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {

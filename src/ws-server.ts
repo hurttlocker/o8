@@ -141,12 +141,13 @@ import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
+import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
 import {
   backendSwitchRequiresExplicitHandoff,
   prepareBackendSwitchHandoff,
   recordBackendSwitchHandoffAudit,
 } from './lib/orchestrator/backend-switch-carry';
-import { resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
+import { isComposerWireMode, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
   resolveOrchestratorRepoPath,
@@ -180,6 +181,7 @@ import {
 import {
   orchestratorModeAllowsBackendFallback,
   resolveOrchestratorExecutionBackendId,
+  resolveTurnReceiptMode,
   sendOrchestratorBackendTurn,
 } from './lib/lane/orchestrator-send-entry';
 import {
@@ -1234,6 +1236,8 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
         data: { repoPath, threadId, turnId: assistantMessageId ?? null, explanation: event.explanation, steps: event.steps, backend },
       });
       break;
+    case 'turn_receipt':
+      break;
     case 'done':
       if (threadId && event.sessionId) {
         writeOrchestratorBackendSessionId(threadId, backend, event.sessionId);
@@ -1411,6 +1415,8 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
       const sessionName = session!.sessionName;
       let wsMsg: string | null = null;
       switch (event.type) {
+        case 'turn_receipt':
+          break;
         case 'text':
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: false, backend: backend.id } });
           break;
@@ -5156,6 +5162,7 @@ async function handleOrchestratorSendMsgOnce(
   // rejected attempt streamed so the retry's reply is not appended to it.
   const assistantText = createAssistantTextBuffer();
   let activeAssistantModel = model ?? null;
+  let activeAssistantReceipt: MobileTranscriptEntry['receipt'];
   // Incremental persistence (2026-06-22): persist the streamed assistant text
   // every ~1.5s WHILE the turn runs, not only at terminal points. Without this,
   // a turn whose child wedges (never emits 'done', the await never resolves)
@@ -5170,10 +5177,11 @@ async function handleOrchestratorSendMsgOnce(
     backendId: OrchestratorBackendId = activeBackend.id,
     receipt?: Extract<OrchestratorEvent, { type: 'done' }>,
     assistantModel: string | null = activeAssistantModel,
+    receiptOnly = false,
   ) => {
     if (!isThreadBacked || !assistantMessageId) return;
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
-    if (!assistantText.shouldPersist(!!receipt)) return;
+    if (!receiptOnly && !assistantText.shouldPersist(!!receipt)) return;
     try {
       const updatedThread = upsertMobileOrchestratorAssistantMessage({
         tabId: threadId,
@@ -5184,6 +5192,7 @@ async function handleOrchestratorSendMsgOnce(
         agent: activeAgentTag,
         sessionId,
         model: assistantModel,
+        receipt: activeAssistantReceipt,
         ...(receipt?.usage ? {
           tokens: {
             input: receipt.usage.inputTokens,
@@ -5295,10 +5304,15 @@ async function handleOrchestratorSendMsgOnce(
     const turnBody = backendSwitchHandoff
       ? `${backendSwitchHandoff.prelude}\n\n${message}`
       : message;
-    const turnMessage = withSessionRules(turnBody, threadId);
-    if (turnMessage !== message) {
+    const turnMessageWithRules = withSessionRules(turnBody, threadId);
+    if (turnMessageWithRules !== turnBody) {
       console.log(`[session-rules] Injected session rules into orchestrator turn (thread=${threadId ?? 'none'})`);
     }
+    const turnMessage = withOrchestratorTurnReceiptContext({
+      message: turnMessageWithRules,
+      threadId,
+      turnId: assistantMessageId,
+    });
     // Fable Slice 6 #2 — server-side metered-window valve. The 15K auto-compact
     // target lives in the desktop client's React effect; a headless or mobile
     // operator never mounts it, so a metered window could grow unbounded at
@@ -5442,7 +5456,7 @@ async function handleOrchestratorSendMsgOnce(
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
+            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, receipt: activeAssistantReceipt, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
           }));
         }
       };
@@ -5458,6 +5472,21 @@ async function handleOrchestratorSendMsgOnce(
         let wsMsg: string | null = null;
 
         switch (event.type) {
+          case 'turn_receipt': {
+            const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode);
+            const pickedMode = isComposerWireMode(msg.pickedMode) ? msg.pickedMode : undefined;
+            activeAssistantReceipt = {
+              leadModel: event.leadModel,
+              effort: event.effort,
+              mode,
+              ...(pickedMode && pickedMode !== mode ? { pickedMode } : {}),
+            };
+            // The effective settings are known before the backend can launch a
+            // worker. Create the durable turn row now; text fills it in later.
+            persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel, true);
+            break;
+          }
+
           case 'text':
             if (isThreadBacked) {
               assistantText.append(event.text);
@@ -5620,6 +5649,9 @@ async function handleOrchestratorSendMsgOnce(
                 console.warn('[ws-server][orchestrator] failed to drop discarded attempt text', trimErr);
               }
             }
+            // A retry reuses the same resolved settings and does not emit a
+            // second receipt, so restore the row removed with attempt one.
+            persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel, true);
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'retry',

@@ -1,5 +1,6 @@
-import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { MobilePendingTurnWorkers, MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { ExportThreadMessage } from '@/lib/llm/export-thread';
+import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
 import {
   deserializeStoredTranscript,
   type StoredTranscriptMessage,
@@ -10,6 +11,12 @@ export type ThoughtsHistoryMessage = ExportThreadMessage & StoredTranscriptMessa
   role: MobileTranscriptEntry['role'];
 };
 
-export function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[]): MobileTranscriptEntry[] {
-  return deserializeStoredTranscript(messages);
+export function mapHistoryMessagesToTranscript(
+  messages: ThoughtsHistoryMessage[],
+  pendingTurnWorkers?: MobilePendingTurnWorkers,
+): MobileTranscriptEntry[] {
+  return consumePendingTurnWorkers(
+    pendingTurnWorkers,
+    deserializeStoredTranscript(messages),
+  ).messages;
 }

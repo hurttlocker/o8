@@ -1222,6 +1222,12 @@
       ]
     },
     {
+      "path": "tests/chat-history-merge.integration.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/claude-auth-preflight-real-path.test.ts",
       "reasons": [
         "executable-fixture",

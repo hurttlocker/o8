@@ -72,6 +72,8 @@ export interface CreateMissionInput {
    * dispatches (no session-rule inheritance).
    */
   orchestratorThreadId?: string | null;
+  /** Exact assistant transcript entry that receives successful worker launches. */
+  orchestratorTurnId?: string | null;
   /** Durable origin for routing review-worthy terminal work back to its caller. */
   dispatcher?: PacketDispatcherAttribution | null;
   /** Outside-launch provenance; transient repos are not written to Projects. */

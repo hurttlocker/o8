@@ -272,6 +272,9 @@ export async function createMission(input: CreateMissionInput) {
       ...(typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()
         ? { orchestratorThreadId: input.orchestratorThreadId.trim() }
         : {}),
+      ...(typeof input.orchestratorTurnId === 'string' && input.orchestratorTurnId.trim()
+        ? { orchestratorTurnId: input.orchestratorTurnId.trim() }
+        : {}),
       dispatcher,
       ...(launchContext ? { launchContext } : {}),
       // Best-of-N: stamp the seed packet so fanOutComparisonPackets (scheduling.ts)

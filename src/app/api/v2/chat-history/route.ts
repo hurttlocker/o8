@@ -23,10 +23,13 @@ import {
   deleteCanonicalChatHistoryRecord,
   getCanonicalChatHistoryPath,
   persistCanonicalChatHistoryRecord,
+  withCanonicalChatHistoryLock,
 } from '@/lib/llm/chat-history-store';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
+import type { MobilePendingTurnWorkers } from '@/lib/mobile/types';
+import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
 import {
   chatHistoryRevision,
   ensureStableChatMessageIds,
@@ -210,6 +213,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'tabId and messages required' }, { status: 400 });
   }
 
+  return withCanonicalChatHistoryLock(body.tabId, () => {
   ensureDir();
   const filePath = safePath(body.tabId);
 
@@ -240,6 +244,7 @@ export async function POST(request: NextRequest) {
   let mobileRevealRequestedAt: string | null | undefined;
   let orchestratorSessionIds: Record<string, string | null> | undefined;
   let orchestratorSessionUpdatedAt: string | null | undefined;
+  let pendingTurnWorkers: MobilePendingTurnWorkers | undefined;
   let model: string | undefined;
   let existingMessages: Array<Record<string, unknown>> = [];
   try {
@@ -263,6 +268,7 @@ export async function POST(request: NextRequest) {
     mobileRevealRequestedAt = normalizeNullableDate(existing.mobileRevealRequestedAt);
     orchestratorSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
     orchestratorSessionUpdatedAt = normalizeNullableDate(existing.orchestratorSessionUpdatedAt);
+    pendingTurnWorkers = existing.pendingTurnWorkers;
   } catch { /* new file */ }
 
   // #1282 — non-destructive by default: merge the inbound transcript onto the
@@ -273,7 +279,11 @@ export async function POST(request: NextRequest) {
   const finalMessages = ensureStableChatMessageIds(body.replace === true
     ? messages
     : mergeChatMessages(existingMessages, messages));
-  const extractedPlanText = extractPlanFromTranscript(finalMessages.map((m: Record<string, unknown>) => ({
+  const selectedPendingTurnWorkers = Object.prototype.hasOwnProperty.call(body, 'pendingTurnWorkers')
+    ? body.pendingTurnWorkers as MobilePendingTurnWorkers | undefined
+    : pendingTurnWorkers;
+  const consumed = consumePendingTurnWorkers(selectedPendingTurnWorkers, finalMessages);
+  const extractedPlanText = extractPlanFromTranscript(consumed.messages.map((m: Record<string, unknown>) => ({
     role: typeof m.role === 'string' ? m.role : undefined,
     content: m.content,
     toolCalls: m.toolCalls,
@@ -314,7 +324,7 @@ export async function POST(request: NextRequest) {
   }
 
   const persistedRecord = {
-    messages: finalMessages,
+    messages: consumed.messages,
     model: nextModel,
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,
@@ -338,6 +348,7 @@ export async function POST(request: NextRequest) {
     mobileRevealRequestedAt,
     orchestratorSessionIds: nextSessionIds,
     orchestratorSessionUpdatedAt: normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? orchestratorSessionUpdatedAt ?? null,
+    pendingTurnWorkers: consumed.pending,
   };
   try {
     persistCanonicalChatHistoryRecord(body.tabId, persistedRecord);
@@ -349,15 +360,19 @@ export async function POST(request: NextRequest) {
 
   // Auto-title (2026-07-13): once the thread has a real exchange, a free
   // model names it properly — fire-and-forget, never blocks the persist.
-  if (finalMessages.length >= 2) maybeQueueThreadAutoTitle(filePath);
+  if (consumed.messages.length >= 2) maybeQueueThreadAutoTitle(filePath);
 
   return NextResponse.json({ ok: true });
+  });
 }
 
 export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
   if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
+  // Full read-modify-write: hold the history lock like POST does, or a PATCH
+  // racing a turn-receipt write would put the pre-race snapshot back on disk.
+  return withCanonicalChatHistoryLock(body.tabId, () => {
   ensureDir();
   const filePath = safePath(body.tabId);
 
@@ -405,6 +420,7 @@ export async function PATCH(request: NextRequest) {
     console.error('[chat-history] PATCH failed', { tabId: body.tabId, message });
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
+  });
 }
 
 export async function DELETE(request: NextRequest) {
