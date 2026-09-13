@@ -96,7 +96,9 @@ async function getWaveMergeOrder(
   }
 
   const targetPacket = packetById.get(packetId);
-  const repoPath = state.repoPath ?? targetPacket?.workspaceTargetPath ?? null;
+  // Same ownership rule as the merge dispatch below: the packet names its own
+  // repository, and the ambient mission is only a fallback.
+  const repoPath = targetPacket?.workspaceTargetPath ?? state.repoPath ?? null;
   if (!repoPath) {
     return null;
   }
@@ -325,7 +327,15 @@ async function dispatchPacketMerge(
     // Advisory only; commands.ts re-derives authorization from durable review rows.
     orchestratorReviewed: packet.review?.approved === true,
     expectedHeadSha: input.expectedHeadSha?.trim() || carriedReviewedHeadSha || packet.review?.reviewedHeadSha?.trim() || undefined,
-    canonicalRepoPath: missionState.repoPath?.trim() || packet.workspaceTargetPath?.trim() || lane.repoPath,
+    // #2308 — the packet's own workspace target is the canonical repository for
+    // its merge. `currentMissionState().repoPath` belongs to whichever mission
+    // the control plane currently holds, and dispatched packets (delegate, board
+    // tasks, intake) are appended to that state without changing it — so leading
+    // with it aimed locking, integration, publication and evidence capture at a
+    // repository the packet never targeted. Mission state stays the fallback for
+    // packets with no recorded target; #1630's rule still holds — a lane's own
+    // repoPath can be a relocated packet clone, so it remains last.
+    canonicalRepoPath: packet.workspaceTargetPath?.trim() || missionState.repoPath?.trim() || lane.repoPath,
     surfaceDispatcherApproved: input.actor === 'user',
     actor,
   });
