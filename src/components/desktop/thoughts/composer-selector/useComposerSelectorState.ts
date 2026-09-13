@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   readComposerEffortMaps,
   resolveComposerSelectorState,
+  resolveSupportedEffortChange,
   setModelEffort,
+  supportedEffortsForLead,
   writeComposerModelEffort,
   type ComposerEffortMap,
   type ComposerEffortClampNotice,
@@ -92,11 +94,20 @@ export function useComposerSelectorState(input: {
 
   const onEffortChange = useCallback((nextEffort: ThinkingEffort) => {
     setClampNotice(null);
-    if (!modelId) return changeEffort(nextEffort);
-    inSessionEffortsRef.current = setModelEffort(inSessionEffortsRef.current, modelId, nextEffort);
-    writeComposerModelEffort(modelId, nextEffort, threadId);
-    changeEffort(nextEffort);
-  }, [changeEffort, modelId, threadId]);
+    const supported = backend
+      ? supportedEffortsForLead(backend, modelId ?? '', adaptiveEnabled, plan === 'free')
+      : [nextEffort];
+    const change = resolveSupportedEffortChange(nextEffort, effort, supported);
+    if (!change.accepted) {
+      if (change.effort !== effort) changeEffort(change.effort);
+      return;
+    }
+    if (change.effort === effort) return;
+    if (!modelId) return changeEffort(change.effort);
+    inSessionEffortsRef.current = setModelEffort(inSessionEffortsRef.current, modelId, change.effort);
+    writeComposerModelEffort(modelId, change.effort, threadId);
+    changeEffort(change.effort);
+  }, [adaptiveEnabled, backend, changeEffort, effort, modelId, plan, threadId]);
 
   const onModelChange = useCallback((model: string) => {
     if (modelId) {

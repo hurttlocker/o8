@@ -166,7 +166,8 @@ export function ComposerPicker({
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (isComposerEffortShortcut(event.nativeEvent)) {
       event.preventDefault();
-      onEffortChange(stepComposerEffort(state.effort, state.effortOptions, event.shiftKey ? -1 : 1));
+      const nextEffort = stepComposerEffort(state.effort, state.effortOptions, event.shiftKey ? -1 : 1);
+      if (nextEffort !== state.effort) onEffortChange(nextEffort);
       return;
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -287,7 +288,9 @@ export function ComposerPicker({
                         disabled={saving}
                         onClick={() => selectLead(option)}
                       />
-                      {selected && !normalizedQuery && state.effortOptions.length > 0 ? (
+                      {selected && !normalizedQuery && (
+                        state.effortOptions.length > 0 || state.lockedEffortOptions.length > 0
+                      ) ? (
                         <EffortSegments state={state} onPick={onEffortChange} disabled={saving} />
                       ) : null}
                     </div>
@@ -312,7 +315,9 @@ export function ComposerPicker({
                         disabled={saving}
                         onClick={() => setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting })}
                       />
-                      {selected && !normalizedQuery && state.effortOptions.length > 0 ? (
+                      {selected && !normalizedQuery && (
+                        state.effortOptions.length > 0 || state.lockedEffortOptions.length > 0
+                      ) ? (
                         <EffortSegments state={state} onPick={onEffortChange} disabled={saving} />
                       ) : null}
                     </div>

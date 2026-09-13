@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ComposerSelectorFooter } from './ComposerSelectorFooter';
 import {
+  COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY,
   cycleComposerSelectorMode,
   supportedEffortsForLead,
   type ComposerSelectorMode,
@@ -59,6 +60,30 @@ function Harness() {
         effort={effort}
         onEffortChange={setEffort}
         adaptiveEnabled
+        attachControl={<button type="button">Attach</button>}
+        micControl={<button type="button">Mic</button>}
+        sendControl={<button type="button">Send</button>}
+      />
+    </div>
+  );
+}
+
+function O8PlanHarness({ isFreePlan }: { isFreePlan: boolean }) {
+  const [effort, setEffort] = useState<ThinkingEffort>('low');
+  return (
+    <div>
+      <span data-testid="o8-plan-effort">{effort}</span>
+      <ComposerSelectorFooter
+        input="Build it"
+        mode="solo"
+        onModeChange={() => {}}
+        modelId="o8-free"
+        modelLabel="o8"
+        activeBackend="o8"
+        effort={effort}
+        onEffortChange={setEffort}
+        adaptiveEnabled
+        isFreePlan={isFreePlan}
         attachControl={<button type="button">Attach</button>}
         micControl={<button type="button">Mic</button>}
         sendControl={<button type="button">Send</button>}
@@ -289,6 +314,53 @@ describe('ComposerSelectorFooter', () => {
     act(() => o8Segments[1]!.click());
     expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
       .toContain('High · founders');
+  });
+
+  it('shows but refuses the locked founders effort on the free o8 plan', async () => {
+    await act(async () => { root.render(createElement(O8PlanHarness, { isFreePlan: true })); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')]
+      .find((segment) => segment.textContent === 'High')!;
+
+    expect(high).not.toBeUndefined();
+    expect(high.getAttribute('aria-disabled')).toBe('true');
+    expect(high.style.color).toBe('var(--t-text-faint)');
+    expect(high.style.cursor).toBe('default');
+    expect(high.style.background).toBe('transparent');
+    act(() => high.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
+      .toBe('High · founders');
+    expect(high.style.background).toBe('transparent');
+    act(() => high.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
+      .toBe('Low · free');
+    act(() => high.focus());
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
+      .toBe('High · founders');
+    act(() => high.click());
+    act(() => high.dispatchEvent(new KeyboardEvent('keydown', {
+      key: '†',
+      code: 'KeyT',
+      altKey: true,
+      bubbles: true,
+    })));
+
+    expect(container.querySelector('[data-testid="o8-plan-effort"]')?.textContent).toBe('low');
+    expect(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY)).toBeNull();
+  });
+
+  it('selects and persists the founders effort on the paid o8 plan', async () => {
+    await act(async () => { root.render(createElement(O8PlanHarness, { isFreePlan: false })); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-segment"]')]
+      .find((segment) => segment.textContent === 'High')!;
+
+    expect(high.getAttribute('aria-disabled')).toBeNull();
+    act(() => high.click());
+
+    expect(container.querySelector('[data-testid="o8-plan-effort"]')?.textContent).toBe('high');
+    expect(JSON.parse(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY) ?? '{}'))
+      .toEqual({ 'o8-free': 'high' });
   });
 
   it('cycles all four modes with Shift+Tab and keeps textarea focus', async () => {

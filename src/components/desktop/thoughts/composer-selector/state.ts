@@ -195,6 +195,7 @@ export interface ResolvedComposerSelectorState {
   effort: ThinkingEffort;
   effortClampedFrom: ThinkingEffort | null;
   effortOptions: readonly ThinkingEffort[];
+  lockedEffortOptions: readonly ThinkingEffort[];
   leadModelId: string;
   leadModelLabel: string;
   leadBackend: OrchestratorBackendSetting;
@@ -259,9 +260,9 @@ export function supportedEffortsForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
   adaptiveEnabled: boolean,
-  _isFreePlan = false,
+  isFreePlan = false,
 ): readonly ThinkingEffort[] {
-  if (backend === 'o8') return ['low', 'high'];
+  if (backend === 'o8') return isFreePlan ? ['low'] : ['low', 'high'];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
   const ultraCapable = backend === 'codex' && isCodexUltraCapableModel(modelId);
@@ -280,6 +281,16 @@ export function clampEffortToLead(
     return leftDistance - rightDistance || EFFORT_RANK[right] - EFFORT_RANK[left];
   })[0];
   return { effort: fallback, clampedFrom: effort };
+}
+
+export function resolveSupportedEffortChange(
+  requested: ThinkingEffort,
+  current: ThinkingEffort,
+  supported: readonly ThinkingEffort[],
+): { effort: ThinkingEffort; accepted: boolean } {
+  if (supported.includes(requested)) return { effort: requested, accepted: true };
+  if (supported.length === 0) return { effort: current, accepted: false };
+  return { effort: clampEffortToLead(requested, supported).effort, accepted: false };
 }
 
 export function setModelEffort(
@@ -302,6 +313,9 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     input.adaptiveEnabled,
     input.isFreePlan,
   );
+  const lockedEffortOptions: readonly ThinkingEffort[] = input.leadBackend === 'o8' && input.isFreePlan
+    ? ['high']
+    : [];
   const clamped = clampEffortToLead(requestedEffort, effortOptions);
   const effort = clamped.effort;
   const clampedFrom = clamped.clampedFrom
@@ -321,6 +335,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     effort,
     effortClampedFrom: clampedFrom,
     effortOptions,
+    lockedEffortOptions,
     leadModelId: input.leadModelId,
     leadModelLabel: input.leadModelLabel,
     leadBackend: input.leadBackend,

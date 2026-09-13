@@ -7,6 +7,7 @@ import {
   readComposerEffortMaps,
   resolveComposerLeadCatalogueLabel,
   resolveComposerSelectorState,
+  resolveSupportedEffortChange,
   writeComposerModelEffort,
   type ComposerEffortClampNotice,
   type ComposerSelectorMode,
@@ -127,9 +128,15 @@ export function ComposerSelectorFooter({
   }), [activeBackend, adaptiveEnabled, clampNotice, effort, isFreePlan, mode, modelId, operatorDefaultEffort, resolvedModelLabel, runtimeLabel, threadEfforts, workerModel]);
 
   const setEffort = (next: ThinkingEffort) => {
-    writeComposerModelEffort(modelId, next, threadId);
-    setThreadEfforts((current) => ({ ...current, [modelId]: next }));
-    onEffortChange(next);
+    const change = resolveSupportedEffortChange(next, resolved.effort, resolved.effortOptions);
+    if (!change.accepted) {
+      if (effort !== change.effort) onEffortChange(change.effort);
+      return;
+    }
+    if (change.effort === effort) return;
+    writeComposerModelEffort(modelId, change.effort, threadId);
+    setThreadEfforts((current) => ({ ...current, [modelId]: change.effort }));
+    onEffortChange(change.effort);
   };
 
   const persistDefaults = useCallback(async (patch: Partial<DispatchDefaults>) => {

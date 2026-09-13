@@ -4,13 +4,17 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { composeComposerTurnMessage } from '../composer-mode';
 import {
+  clampEffortToLead,
   composerEffortConsequence,
   providerMarkForLead,
   providerMarkForRuntime,
   resolveEffectiveComposerLeadModelId,
   resolveComposerSelectorState,
+  resolveSupportedEffortChange,
   readComposerEffortMaps,
   setModelEffort,
+  stepComposerEffort,
+  supportedEffortsForLead,
   type ComposerSelectorMode,
 } from './state';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -109,9 +113,19 @@ describe('composer selector state', () => {
     });
 
     expect(resolved.effort).toBe('low');
-    expect(resolved.effortOptions).toEqual(['low', 'high']);
+    expect(resolved.effortOptions).toEqual(['low']);
+    expect(resolved.lockedEffortOptions).toEqual(['high']);
     expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
     expect(composerEffortConsequence('o8', 'high')).toBe('High · founders');
+  });
+
+  it('clamps a free o8 effort change before it reaches persistence callbacks', () => {
+    const supported = supportedEffortsForLead('o8', 'o8-free', true, true);
+
+    expect(clampEffortToLead('high', supported)).toEqual({ effort: 'low', clampedFrom: 'high' });
+    expect(resolveSupportedEffortChange('high', 'low', supported))
+      .toEqual({ effort: 'low', accepted: false });
+    expect(stepComposerEffort('low', supported, 1)).toBe('low');
   });
 
   it('maps lead families and worker runtimes to provider marks', () => {
