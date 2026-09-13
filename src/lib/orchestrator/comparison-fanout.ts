@@ -71,9 +71,11 @@ export function fanOutComparisonPackets(state: OrchestratorMissionState): Orches
           ? `${packet.title} (${qualitySearchRole === 'minimal_complete' ? 'smallest complete' : 'robustness'})`
           : `${packet.title} (${model})`,
         branchTarget: `${packet.branchTarget}-cmp-${index}`,
-        queueState: 'queued',
+        // Preserve staging. Explicit dispatch re-arms the seed before this
+        // transform, at which point candidates inherit its queued state.
+        queueState: packet.queueState,
         releaseState: 'pending',
-        status: 'queued',
+        status: packet.status,
         blockedReason: null,
         lastEventAt: null,
         lastEventLabel: null,

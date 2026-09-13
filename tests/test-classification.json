@@ -428,6 +428,13 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/mission-staging-headless.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/mission-stop.test.ts",
       "reasons": [
         "process-signal"

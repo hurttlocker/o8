@@ -321,6 +321,9 @@ export async function POST(request: NextRequest) {
   if (qualitySearch && taskContract === 'off') {
     return operatorError('invalid_request', 'qualitySearch already uses a sealed contract and cannot be combined with taskContract: "off".', 400);
   }
+  if (record.dispatchOnCreate !== undefined && typeof record.dispatchOnCreate !== 'boolean') {
+    return operatorError('invalid_request', 'dispatchOnCreate must be a boolean when provided.', 400);
+  }
   const createInput = {
       issues,
       repoPath,
@@ -334,6 +337,7 @@ export async function POST(request: NextRequest) {
       ...(hasClaudeCodePacket && claudeCodeCarrier ? { claudeCodeCarrier } : {}),
       requestedEffort,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
+      dispatchOnCreate: record.dispatchOnCreate === true,
       ...(origin ? { origin } : {}),
       sequential: record.sequential === true,
       existingBranchPolicy,
