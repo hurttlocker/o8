@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useEffect, useRef, useState } from 'react';
+import { act, createElement, StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -333,6 +333,74 @@ describe('useTileLayout browser-origin restore', () => {
 
     expect(validationCalls).toBe(2);
     expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+  });
+
+  it('hydrates the newer layout safely when initial validation becomes stale', async () => {
+    const newerRepoPath = '/tmp/newer-o8-instance/repo';
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH), registeredRepo(newerRepoPath, 'repo-newer')];
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const runtimeLaunches: string[] = [];
+    let completeInitialValidation: ((response: Response) => void) | null = null;
+    let validationCalls = 0;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/panel/repos')) {
+        validationCalls += 1;
+        if (validationCalls === 1) return new Promise<Response>((resolve) => { completeInitialValidation = resolve; });
+        return Promise.resolve(repoValidationResponse(url, registeredRepos));
+      }
+      if (url.startsWith('/api/runtime/launch')) runtimeLaunches.push(url);
+      return Promise.resolve(Response.json({}));
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let hydrated = false;
+    let validationState = 'idle';
+    let replaceLayout: ((layout: TileLayout) => void) | null = null;
+    const onLayout = (layout: TileLayout, nextHydrated: boolean, nextValidationState: string) => {
+      latestLayout = layout;
+      hydrated = nextHydrated;
+      validationState = nextValidationState;
+    };
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      onReplaceLayout: (replace) => { replaceLayout = replace; },
+      registeredRepos,
+    })));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+    await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
+    await act(async () => {
+      completeInitialValidation?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
+      await Promise.resolve();
+    });
+
+    expect(hydrated).toBe(true);
+    expect(validationState).toBe('failed');
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+    expect(runtimeLaunches).toEqual([]);
+    expect(container.querySelector('button[aria-label="Retry saved repository scope"]')).not.toBeNull();
+  });
+
+  it('hydrates successfully when StrictMode replays the restore lifecycle', async () => {
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/panel/repos')) return repoValidationResponse(url, registeredRepos);
+      return Response.json({});
+    }));
+
+    let latestLayout = createDefaultTileLayout();
+    let hydrated = false;
+    const onLayout = (layout: TileLayout, nextHydrated: boolean) => {
+      latestLayout = layout;
+      hydrated = nextHydrated;
+    };
+    await act(async () => root.render(createElement(StrictMode, null, createElement(LayoutRestoreHarness, { onLayout, registeredRepos }))));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    expect(hydrated).toBe(true);
+    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
   });
 
   it('preserves a persisted repo scope but blocks launch when validation times out', async () => {

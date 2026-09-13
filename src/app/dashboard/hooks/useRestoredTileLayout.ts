@@ -98,18 +98,21 @@ export function useRestoredTileLayout({
       void (async () => {
         const restored = deserializeTileLayout(window.localStorage.getItem(storageKey));
         const validation = restored ? await validateLayout(restored) : { ok: true, paths: [] };
-        if (cancelled || !validation) return;
-        const nextLayout = restored && validation.ok
+        if (cancelled) return;
+        const nextLayout = validation
+          ? restored && validation.ok
           ? validatePersistedLayoutRepos(restored, validation.paths)
-          : restored ?? createDefaultTileLayout();
-        setBlockedRepoScopes(restored && !validation.ok ? persistedRepoScopes(restored) : new Map());
-        setRestoredRepoValidationState(restored && !validation.ok ? 'failed' : 'verified');
-        skipNextTileLayoutPersistenceRef.current = !validation.ok;
+          : restored ?? createDefaultTileLayout()
+          : layoutRef.current;
+        const validationUnavailable = !validation || !validation.ok;
+        setBlockedRepoScopes(validationUnavailable ? persistedRepoScopes(nextLayout) : new Map());
+        setRestoredRepoValidationState(validationUnavailable ? 'failed' : 'verified');
+        skipNextTileLayoutPersistenceRef.current = validationUnavailable;
         const storedActiveTileId = window.localStorage.getItem(activeTileStorageKey);
         const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
           ? storedActiveTileId
           : getFirstLeaf(nextLayout.root).id;
-        setTileLayout(nextLayout);
+        if (validation) setTileLayout(nextLayout);
         setActiveTileId(restoredActiveTileId);
         setTileLayoutHydrated(true);
       })();
