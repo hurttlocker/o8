@@ -20,6 +20,7 @@ import {
   cycleComposerSelectorMode,
   isComposerEffortShortcut,
   readComposerSelectorV1Flag,
+  resolveEffectiveComposerLeadModelId,
   stepComposerEffort,
   supportedEffortsForLead,
 } from '../composer-selector/state';
@@ -55,6 +56,7 @@ interface ComposerAreaProps {
   onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   effort: ThinkingEffort;
   operatorDefaultEffort?: ThinkingEffort;
+  codexDefaultDispatchModel?: string;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;
   /** UltraCode / swarm tier — surfaced in the thinking dropdown. */
@@ -119,6 +121,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onBackendChange,
   effort,
   operatorDefaultEffort = effort,
+  codexDefaultDispatchModel,
   onEffortChange,
   adaptiveEnabled,
   swarmEnabled,
@@ -158,10 +161,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   useEffect(() => {
     setComposerSelectorV1Enabled(readComposerSelectorV1Flag());
   }, []);
+  const selectorModelId = resolveEffectiveComposerLeadModelId(activeBackend, modelId, codexDefaultDispatchModel);
   const selectorControls = useComposerSelectorState({
     enabled: composerSelectorV1Enabled,
     mode: composerMode,
-    modelId,
+    modelId: selectorModelId,
     modelLabel,
     backend: activeBackend,
     effort,
@@ -617,12 +621,12 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
               if (
                 composerSelectorV1Enabled
-                && modelId
+                && selectorModelId
                 && activeBackend
                 && isComposerEffortShortcut(event.nativeEvent)
               ) {
                 event.preventDefault();
-                const options = supportedEffortsForLead(activeBackend, modelId, adaptiveEnabled, selectorControls.isFreePlan);
+                const options = supportedEffortsForLead(activeBackend, selectorModelId, adaptiveEnabled, selectorControls.isFreePlan);
                 selectorControls.onEffortChange(stepComposerEffort(effort, options, event.shiftKey ? -1 : 1));
                 return;
               }
@@ -739,7 +743,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onUndoEnhance={onUndoEnhance}
             onSubmit={onSubmit}
             modelLabel={modelLabel}
-            modelId={isOrchestratorMode ? modelId : undefined}
+            modelId={isOrchestratorMode ? (composerSelectorV1Enabled ? selectorModelId : modelId) : undefined}
             onModelChange={isOrchestratorMode ? (composerSelectorV1Enabled ? selectorControls.onModelChange : onModelChange) : undefined}
             activeBackend={isOrchestratorMode ? activeBackend : undefined}
             onBackendChange={isOrchestratorMode ? (composerSelectorV1Enabled ? selectorControls.onBackendChange : onBackendChange) : undefined}

@@ -12,6 +12,8 @@ import { COMPOSER_MODEL_GROUPS } from '../ModelThinkingChip';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { MODEL_IDS } from '@/lib/models';
+import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
 vi.mock('../chat-panel/ComposerPopover', async () => {
   const React = await import('react');
@@ -100,12 +102,50 @@ function RealComposerHarness() {
   );
 }
 
+function NoPinCodexHarness({ codexDefaultDispatchModel }: { codexDefaultDispatchModel?: string }) {
+  const [input, setInput] = useState('Build it');
+  const [mode, setMode] = useState<ComposerSelectorMode>('solo');
+  const [effort, setEffort] = useState<ThinkingEffort>('xhigh');
+  return (
+    <ComposerArea
+      activeComposer
+      input={input}
+      onInputChange={setInput}
+      isOrchestratorMode
+      displayWaiting={false}
+      chatMessages={[]}
+      activeTargetLabel="Orchestrator"
+      targetAgentExists
+      thoughtsBodyBackground="var(--t-chat-surface-bg)"
+      enhancing={false}
+      preEnhanceInput={null}
+      onEnhance={() => {}}
+      onUndoEnhance={() => {}}
+      onSubmit={() => {}}
+      onSlashCommand={() => {}}
+      modelLabel="Codex"
+      activeBackend="codex"
+      effort={effort}
+      operatorDefaultEffort="xhigh"
+      codexDefaultDispatchModel={codexDefaultDispatchModel}
+      onEffortChange={setEffort}
+      adaptiveEnabled
+      displayMessagesCount={0}
+      hasAssistantActivity={false}
+      composerMode={mode}
+      onComposerModeChange={setMode}
+      sessionRulesThreadId="thread-no-pin"
+    />
+  );
+}
+
 describe('ComposerSelectorFooter', () => {
   let container: HTMLDivElement;
   let root: Root;
 
   beforeEach(() => {
     localStorage.clear();
+    invalidateOperatorDefaultsValuesSnapshot();
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {};
       return new Response(JSON.stringify({
@@ -130,6 +170,7 @@ describe('ComposerSelectorFooter', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    invalidateOperatorDefaultsValuesSnapshot();
     vi.unstubAllGlobals();
   });
 
@@ -279,5 +320,68 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(container.querySelector('[data-testid="composer-selector-footer"]')).not.toBeNull();
     expect(container.querySelector('button[aria-label="Fleet worker: Codex. Starts: Run now"]')).toBeNull();
+  });
+
+  it('resolves a no-pin Codex lead to the effective catalogue default', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '1');
+    act(() => { root.render(createElement(NoPinCodexHarness, {})); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const catalogueDefault = COMPOSER_MODEL_GROUPS
+      .flatMap((group) => group.options)
+      .find((option) => option.backend === 'codex' && option.model === MODEL_IDS.codexDefault)!;
+    const picker = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!;
+    expect(picker.textContent).toContain(`${catalogueDefault.label}· xhigh`);
+
+    act(() => picker.click());
+    const selectedLeadRows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-row-"][aria-pressed="true"]')];
+    expect(selectedLeadRows).toHaveLength(1);
+    expect(selectedLeadRows[0]?.dataset.testid).toBe(`lead-row-${MODEL_IDS.codexDefault}`);
+    expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')).not.toBeNull();
+  });
+
+  it('bounds worker scrolling without removing runtimes or the fixed controls', async () => {
+    const scrollIntoView = vi.fn();
+    const lastRuntime = listDispatchableRuntimes().at(-1)!;
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    vi.mocked(fetch).mockImplementation(async (input) => new Response(JSON.stringify(
+      String(input).includes('include=values') ? {
+        values: {
+          defaultDispatchRuntime: lastRuntime,
+          defaultDispatchModel: '',
+          opencodeWorkerModel: null,
+          workerStartMode: 'autonomous',
+        },
+        sources: {},
+      } : {},
+    ), { status: 200 }));
+    await act(async () => { root.render(createElement(Harness)); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    const popover = container.querySelector<HTMLElement>('[data-testid="composer-selector-popover"]')!;
+    const workerScroll = container.querySelector<HTMLElement>('[data-testid="composer-selector-workers-scroll"]')!;
+    expect(popover.style.height).toContain('460px');
+    expect(popover.style.overflowY).toBe('hidden');
+    expect(workerScroll.style.overflowY).toBe('auto');
+    expect(workerScroll.querySelectorAll('[data-testid^="worker-row-"]')).toHaveLength(listDispatchableRuntimes().length);
+    expect(workerScroll.querySelector(`[data-testid="worker-row-${lastRuntime}"]`)?.getAttribute('aria-pressed')).toBe('true');
+    expect(workerScroll.textContent).not.toContain('Plan first');
+    expect(popover.textContent).toContain('Plan first');
+    expect(popover.textContent).toContain('pick');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(scrollIntoView.mock.instances).toContain(workerScroll.querySelector(`[data-testid="worker-row-${lastRuntime}"]`));
+  });
+
+  it('shows a configured local Codex default as the selected lead', async () => {
+    localStorage.setItem('o8:composer-selector-v1', '1');
+    act(() => { root.render(createElement(NoPinCodexHarness, { codexDefaultDispatchModel: 'ollama:local-code:32b' })); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const picker = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!;
+    expect(picker.textContent).toContain('local-code:32b');
+    act(() => picker.click());
+    const selectedLeadRows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-row-"][aria-pressed="true"]')];
+    expect(selectedLeadRows).toHaveLength(1);
+    expect(selectedLeadRows[0]?.dataset.testid).toBe('lead-row-ollama:local-code:32b');
   });
 });

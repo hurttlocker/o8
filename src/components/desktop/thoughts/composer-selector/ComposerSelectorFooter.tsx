@@ -5,6 +5,7 @@ import { ComposerPicker } from './ComposerPicker';
 import { ModeChip } from './ModeChip';
 import {
   readComposerEffortMaps,
+  resolveComposerLeadCatalogueLabel,
   resolveComposerSelectorState,
   writeComposerModelEffort,
   type ComposerEffortClampNotice,
@@ -21,6 +22,9 @@ import { fetchOperatorDefaultsValues, invalidateOperatorDefaultsValuesSnapshot }
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { useComposerModelCatalogue } from '../ModelThinkingChip';
+import { parseLocalModel } from '@/lib/codex/local-model';
+import { formatModelLabel } from '@/lib/format';
 
 export function ComposerSelectorFooter({
   mode,
@@ -65,6 +69,23 @@ export function ComposerSelectorFooter({
   const [defaults, setDefaults] = useState<DispatchDefaults>(FALLBACK_DISPATCH_DEFAULTS);
   const [threadEfforts, setThreadEfforts] = useState(() => readComposerEffortMaps(threadId, modelId).thread);
   const [saving, setSaving] = useState(false);
+  const { groups: baseComposerModelGroups } = useComposerModelCatalogue();
+  const localLead = useMemo(() => activeBackend === 'codex' ? parseLocalModel(modelId) : null, [activeBackend, modelId]);
+  const composerModelGroups = useMemo(() => {
+    if (!localLead || baseComposerModelGroups.some((group) => group.options.some((option) => (option.model ?? option.value) === modelId))) {
+      return baseComposerModelGroups;
+    }
+    return baseComposerModelGroups.map((group) => group.key === 'codex' ? {
+      ...group,
+      options: [{ value: modelId, label: formatModelLabel(localLead.model), backend: 'codex' as const, model: modelId, sub: `${localLead.provider} · local` }, ...group.options],
+    } : group);
+  }, [baseComposerModelGroups, localLead, modelId]);
+  const resolvedModelLabel = resolveComposerLeadCatalogueLabel(
+    activeBackend,
+    modelId,
+    modelLabel,
+    composerModelGroups.flatMap((group) => group.options),
+  );
 
   const refetchDefaults = useCallback(async () => {
     try {
@@ -93,7 +114,7 @@ export function ComposerSelectorFooter({
   const resolved = useMemo(() => resolveComposerSelectorState({
     mode,
     leadModelId: modelId,
-    leadModelLabel: modelLabel,
+    leadModelLabel: resolvedModelLabel,
     leadBackend: activeBackend,
     inSessionEffortByModel: { [modelId]: effort },
     threadEffortByModel: threadEfforts,
@@ -103,7 +124,7 @@ export function ComposerSelectorFooter({
     workerRuntimeLabel: runtimeLabel,
     workerModelLabel: workerModel ? shortWorkerModelLabel(workerModel) : null,
     clampNotice,
-  }), [activeBackend, adaptiveEnabled, clampNotice, effort, isFreePlan, mode, modelId, modelLabel, operatorDefaultEffort, runtimeLabel, threadEfforts, workerModel]);
+  }), [activeBackend, adaptiveEnabled, clampNotice, effort, isFreePlan, mode, modelId, operatorDefaultEffort, resolvedModelLabel, runtimeLabel, threadEfforts, workerModel]);
 
   const setEffort = (next: ThinkingEffort) => {
     writeComposerModelEffort(modelId, next, threadId);
@@ -149,6 +170,7 @@ export function ComposerSelectorFooter({
       <ComposerPicker
         state={resolved}
         defaults={defaults}
+        composerModelGroups={composerModelGroups}
         onModelChange={onModelChange}
         onBackendChange={onBackendChange}
         onEffortChange={setEffort}

@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { composeComposerTurnMessage } from '../composer-mode';
 import {
+  resolveEffectiveComposerLeadModelId,
   resolveComposerSelectorState,
   readComposerEffortMaps,
   setModelEffort,
   type ComposerSelectorMode,
 } from './state';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { MODEL_IDS } from '@/lib/models';
 
 const MODES: ComposerSelectorMode[] = ['solo', 'multitask', 'moa', 'fusion'];
 const EFFORTS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max', 'ultra'];
@@ -136,5 +138,14 @@ describe('composer selector state', () => {
       threadEffortByModel: {},
       operatorDefaultEffort: 'medium',
     }).effort).toBe('medium');
+  });
+
+  it('matches the Codex backend fallback, including local dispatch defaults', () => {
+    expect(resolveEffectiveComposerLeadModelId('codex', 'claude-opus-4-8', 'gpt-5.6-terra'))
+      .toBe(MODEL_IDS.codexDefault);
+    expect(resolveEffectiveComposerLeadModelId('codex', undefined, 'ollama:local-code:32b'))
+      .toBe('ollama:local-code:32b');
+    expect(resolveEffectiveComposerLeadModelId('codex', 'gpt-5.6-sol', 'ollama:local-code:32b'))
+      .toBe('gpt-5.6-sol');
   });
 });

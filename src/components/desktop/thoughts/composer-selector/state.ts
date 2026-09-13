@@ -4,6 +4,8 @@ import {
   isThinkingEffort,
   type ThinkingEffort,
 } from '@/lib/orchestrator/thinking-effort';
+import { parseLocalModel } from '@/lib/codex/local-model';
+import { MODEL_IDS } from '@/lib/models';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 
 export const COMPOSER_SELECTOR_V1_STORAGE_KEY = 'o8:composer-selector-v1';
@@ -89,6 +91,13 @@ export interface ComposerEffortClampNotice {
   from: ThinkingEffort;
 }
 
+export interface ComposerLeadCatalogueOption {
+  backend: OrchestratorBackendSetting;
+  model?: string;
+  value: string;
+  label: string;
+}
+
 export interface ResolvedComposerSelectorState {
   mode: ComposerSelectorMode;
   modeLabel: string;
@@ -114,6 +123,31 @@ export function readComposerSelectorV1Flag(): boolean {
   } catch {
     return false;
   }
+}
+
+export function resolveEffectiveComposerLeadModelId(
+  backend: OrchestratorBackendSetting | undefined,
+  modelId: string | undefined,
+  defaultDispatchModel?: string,
+): string | undefined {
+  const configuredModel = modelId?.trim();
+  if (backend === 'codex') {
+    if (configuredModel && !/^claude/i.test(configuredModel)) return configuredModel;
+    const dispatchModel = defaultDispatchModel?.trim();
+    return dispatchModel && parseLocalModel(dispatchModel) ? dispatchModel : MODEL_IDS.codexDefault;
+  }
+  return configuredModel || undefined;
+}
+
+export function resolveComposerLeadCatalogueLabel(
+  backend: OrchestratorBackendSetting,
+  modelId: string,
+  fallbackLabel: string,
+  options: readonly ComposerLeadCatalogueOption[],
+): string {
+  return options.find((option) => (
+    option.backend === backend && (option.model ?? option.value) === modelId
+  ))?.label ?? fallbackLabel;
 }
 
 export function composerSelectorModeSpec(mode: ComposerSelectorMode): ComposerSelectorModeSpec {
