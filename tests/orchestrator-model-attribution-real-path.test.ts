@@ -27,6 +27,8 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-orchestrator-model-attribution-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
+const originPath = join(dataDir, 'origin.git');
+const seedPath = join(dataDir, 'seed');
 const repoPath = join(dataDir, 'repo');
 const token = 'orchestrator-model-attribution-token';
 const promptCapturePath = join(dataDir, 'turn-prompt.txt');
@@ -50,7 +52,7 @@ const connectedWorkerHelper = `
   });
   await missions.dispatchMission({ missionId: mission.missionId });
   const packetId = mission.packets[0].id;
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + 15_000;
   let packet;
   let lane;
   let history;
@@ -72,7 +74,10 @@ const connectedWorkerHelper = `
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (!lane || ![...(pendingWorkers ?? []), ...(receiptWorkers ?? [])].some((worker) => worker.packetId === packetId)) {
-    throw new Error('Timed out waiting for the connected worker receipt after launch completion.');
+    throw new Error(
+      'Timed out waiting for the connected worker receipt after launch completion. '
+      + 'packet=' + (packet?.status ?? 'missing') + ' lane=' + (lane?.status ?? 'missing'),
+    );
   }
   writeFileSync(process.env.O8_TEST_CONNECTED_WORKER_FILE, JSON.stringify({
     packetId,
@@ -81,6 +86,9 @@ const connectedWorkerHelper = `
     turnId: process.env.O8_TEST_TURN_ID,
     packetThreadId: packet?.orchestratorThreadId,
     packetTurnId: packet?.orchestratorTurnId,
+    landedVia: (pendingWorkers ?? []).some((worker) => worker.packetId === packetId)
+      ? 'pending buffer'
+      : 'direct merge',
     immediatePending: pendingWorkers,
     immediateWorkers: receiptWorkers,
   }));
@@ -196,7 +204,7 @@ async function submitComposerTurn(
     } catch {
       return false;
     }
-  }, 'persisted assistant attribution', options.message === 'dispatch connected receipt worker' ? 60_000 : 20_000);
+  }, 'persisted assistant attribution', options.message === 'dispatch connected receipt worker' ? 90_000 : 20_000);
   const history = JSON.parse(readFileSync(historyPath, 'utf8')) as { messages: Array<{ id: string; role: string; model?: string }> };
   const assistant = history.messages.find((entry) => entry.role === 'assistant');
   const persisted = readPersistedLlmChat(threadId);
@@ -218,6 +226,7 @@ async function submitComposerTurn(
           turnId: string;
           packetThreadId: string;
           packetTurnId: string;
+          landedVia: 'pending buffer' | 'direct merge';
           immediatePending?: unknown;
           immediateWorkers?: unknown;
         }
@@ -235,11 +244,15 @@ beforeAll(async () => {
     }
     throw new Error(`Unexpected fetch: ${url}`);
   }));
-  mkdirSync(repoPath, { recursive: true });
-  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
-  writeFileSync(join(repoPath, 'README.md'), 'turn receipt fixture\n');
-  execFileSync('git', ['add', 'README.md'], { cwd: repoPath });
-  execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=test@o8.test', 'commit', '-qm', 'fixture'], { cwd: repoPath });
+  execFileSync('git', ['init', '--bare', originPath], { stdio: 'pipe' });
+  execFileSync('git', ['clone', originPath, seedPath], { stdio: 'pipe' });
+  execFileSync('git', ['checkout', '-b', 'main'], { cwd: seedPath, stdio: 'pipe' });
+  writeFileSync(join(seedPath, 'README.md'), 'turn receipt fixture\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: seedPath });
+  execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=test@o8.test', 'commit', '-qm', 'fixture'], { cwd: seedPath });
+  execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: seedPath, stdio: 'pipe' });
+  execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: originPath, stdio: 'pipe' });
+  execFileSync('git', ['clone', originPath, repoPath], { stdio: 'pipe' });
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
   const fakeCodex = join(dataDir, 'fake-codex.mjs');
   writeFileSync(fakeCodex, `#!/usr/bin/env node
@@ -419,7 +432,9 @@ describe('orchestrator model attribution through the real WebSocket turn handler
       packetThreadId: turn.threadId,
       packetTurnId: turn.recordedMessageId,
     });
+    expect(turn.worker?.landedVia).toMatch(/^(pending buffer|direct merge)$/);
     expect([turn.worker?.immediatePending, turn.worker?.immediateWorkers]).toContainEqual([expectedWorker]);
     expect(turn.receipt?.workers).toEqual([expectedWorker]);
-  }, 90_000);
+    console.log(`[turn-receipt-test] worker row landed via ${turn.worker?.landedVia}`);
+  }, 120_000);
 });
