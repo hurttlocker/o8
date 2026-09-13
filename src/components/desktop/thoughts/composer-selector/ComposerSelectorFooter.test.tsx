@@ -204,7 +204,7 @@ describe('ComposerSelectorFooter', () => {
     }
   });
 
-  it('steps effort with Option+T and Option+Shift+T, including the macOS dead-key character', async () => {
+  it('steps effort only while the textarea is focused, including the macOS dead-key character', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
@@ -217,14 +217,20 @@ describe('ComposerSelectorFooter', () => {
 
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-picker"]')!.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
+    search.focus();
+    expect(document.activeElement).toBe(search);
     await act(async () => {
-      search.dispatchEvent(new KeyboardEvent('keydown', { key: 'T', code: 'KeyT', altKey: true, shiftKey: true, bubbles: true }));
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'T', code: 'KeyT', altKey: true, shiftKey: true, bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('high');
+    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('xhigh');
     await act(async () => {
       search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(document.activeElement).toBe(textarea);
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'T', code: 'KeyT', altKey: true, shiftKey: true, bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="composer-selector-picker"]')?.textContent).toContain('high');
   });
 
   it('selecting Fusion leaves effort unchanged', async () => {

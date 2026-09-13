@@ -2273,14 +2273,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         showDraftClearedToast={showDraftClearedToast}
         thoughtsBodyBackground={thoughtsBodyBackground}
       />
-
       <div
         // Compose-first lift — when the transcript is empty, the composer
         // rises from its bottom-of-column rest position so the operator
         // types in the middle of the canvas (Codex / Cortex pattern). On
         // first message it eases back to 0 and the transcript fills the
         // space above.
-        //
         // Lift is expressed in `cqh` (container query height) rather than
         // `vh` so the translation scales with the actual workspace area
         // — when the bottom panel halves the workspace, the lift halves
@@ -2362,7 +2360,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onBackendChange={isOrchestratorMode ? backendSwitch.request : undefined}
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
-        adaptiveEnabled={adaptiveThinkingEnabled} operatorDefaultEffort={operatorDefaults.thinkingEffort} codexDefaultDispatchModel={operatorDefaults.defaultDispatchModel}
+        adaptiveEnabled={adaptiveThinkingEnabled}
+        operatorDefaultEffort={operatorDefaults.thinkingEffort}
+        codexDefaultDispatchModel={operatorDefaults.defaultDispatchModel}
         swarmEnabled={swarmEnabled}
         onSetSwarm={onSetSwarm}
         collideEnabled={collideEnabled}

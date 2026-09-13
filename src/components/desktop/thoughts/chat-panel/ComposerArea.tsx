@@ -571,7 +571,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               ))}
             </div>
           ) : null}
-
           <textarea
             ref={inputRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
@@ -624,6 +623,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 && selectorModelId
                 && activeBackend
                 && isComposerEffortShortcut(event.nativeEvent)
+                && document.activeElement === event.currentTarget
               ) {
                 event.preventDefault();
                 const options = supportedEffortsForLead(activeBackend, selectorModelId, adaptiveEnabled, selectorControls.isFreePlan);
