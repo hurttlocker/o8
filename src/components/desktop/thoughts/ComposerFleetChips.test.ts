@@ -82,15 +82,18 @@ describe('FleetWorkerChip', () => {
     });
   });
 
-  it('lets the operator choose whether workers run or ask first', async () => {
+  it('lets the operator choose whether workers run or plan first', async () => {
     await act(async () => { root.render(createElement(FleetWorkerChip)); });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
     act(() => trigger?.click());
 
-    const askFirst = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Ask first');
-    expect(askFirst).toBeDefined();
-    await act(async () => { askFirst?.click(); await Promise.resolve(); });
+    const planFirst = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Plan first');
+    expect(planFirst).toBeDefined();
+    expect(planFirst?.title).toBe(
+      'The worker reads the task, shares a plan with the lead, and waits before editing.',
+    );
+    await act(async () => { planFirst?.click(); await Promise.resolve(); });
 
     expect(requests).toContainEqual({
       method: 'POST',

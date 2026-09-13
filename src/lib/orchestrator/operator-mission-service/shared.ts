@@ -45,6 +45,14 @@ export function isInlineIssue(issue: LoadedIssue) {
   return !issue.url && issue.number >= 90001;
 }
 
+export function branchTargetForMissionIssue(issue: LoadedIssue, branchPrefix: string, maxInlineLength: number) {
+  if (!isInlineIssue(issue)) {
+    return `${branchPrefix}/${issue.number}-${slugify(issue.title)}`;
+  }
+  const prefix = `inline/${issue.number}-`;
+  return `${prefix}${slugify(issue.title, Math.max(1, maxInlineLength - prefix.length))}`;
+}
+
 const INLINE_ISSUE_BASE = 90_000_000_000;
 const INLINE_ISSUE_RANDOM_SPACE = 2 ** 47;
 const issuedInlineIssueNumbers = new Set<number>();

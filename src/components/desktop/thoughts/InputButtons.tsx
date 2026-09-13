@@ -418,10 +418,6 @@ export function InputButtons({
   effort = 'adaptive',
   onEffortChange,
   adaptiveEnabled = true,
-  swarmEnabled = false,
-  onSetSwarm,
-  collideEnabled = false,
-  onSetCollide,
   sessionRulesThreadId,
   repoLabel,
   displayMessagesCount = 0,
@@ -465,12 +461,6 @@ export function InputButtons({
   effort?: ThinkingEffort;
   onEffortChange?: (effort: ThinkingEffort) => void;
   adaptiveEnabled?: boolean;
-  /** UltraCode / swarm tier — Claude fans work out to native sub-agents + Codex. */
-  swarmEnabled?: boolean;
-  onSetSwarm?: (enabled: boolean) => void;
-  /** Collide / MoA tier — Claude + Codex propose independently, Claude synthesizes. */
-  collideEnabled?: boolean;
-  onSetCollide?: (enabled: boolean) => void;
   /**
    * Session rules (#1329). `undefined` = surface doesn't carry session rules
    * (CLI lanes) → chip hidden. `null` = orchestrator surface, thread not yet
@@ -553,6 +543,31 @@ export function InputButtons({
           clampNotice={composerEffortClampNotice}
           isFreePlan={composerSelectorIsFreePlan}
           threadId={sessionRulesThreadId ?? null}
+          leadingControls={(
+            <>
+              {inlineLeadingExtras ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+                  {inlineLeadingExtras}
+                </span>
+              ) : null}
+              {showRepoChip ? (
+                <>
+                  {compact || !inlineLeadingExtras ? null : <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
+                  <RepoTargetChip
+                    repoLabel={repoLabel}
+                    workspaceTargets={workspaceTargets}
+                    selectedRepoPath={selectedRepoPath}
+                    onSelectRepoPath={onSelectRepoPath}
+                  />
+                </>
+              ) : null}
+              {sessionRulesThreadId !== undefined ? (
+                <span data-testid="composer-selector-session-rules" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                  <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
+                </span>
+              ) : null}
+            </>
+          )}
           attachControl={(
             <AttachFilesButton
               onUploadDiskFiles={onUploadDiskFiles}
@@ -563,7 +578,11 @@ export function InputButtons({
               onSavePrompt={onSavePrompt}
             />
           )}
+          meterControl={inlineMeterSlot}
           micControl={<MicButton />}
+          voiceControl={onVoiceModeChange ? (
+            <VoiceModeButton enabled={Boolean(voiceModeEnabled)} onChange={onVoiceModeChange} />
+          ) : null}
           sendControl={(
             <SendPill
               canSubmit={canSubmit}
@@ -572,6 +591,7 @@ export function InputButtons({
               onStop={onStop}
             />
           )}
+          containerRef={rowRef}
           onRequestTextareaFocus={onRequestTextareaFocus}
         />
       </ComposerChipCompactContext.Provider>
@@ -680,10 +700,7 @@ export function InputButtons({
           effort={effort}
           adaptiveEnabled={adaptiveEnabled}
           onEffortChange={onEffortChange}
-          swarmEnabled={swarmEnabled}
-          onSetSwarm={onSetSwarm}
-          collideEnabled={collideEnabled}
-          onSetCollide={onSetCollide}
+          composerMode={composerMode}
         />
       ) : null}
       {composerMode && composerMode !== 'solo' ? (

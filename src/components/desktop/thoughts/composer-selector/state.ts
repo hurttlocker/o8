@@ -204,11 +204,11 @@ export interface ResolvedComposerSelectorState {
 }
 
 export function readComposerSelectorV1Flag(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return true;
   try {
-    return window.localStorage.getItem(COMPOSER_SELECTOR_V1_STORAGE_KEY) === '1';
+    return window.localStorage.getItem(COMPOSER_SELECTOR_V1_STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 

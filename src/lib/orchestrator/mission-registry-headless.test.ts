@@ -232,7 +232,42 @@ afterEach(() => {
 });
 
 describe('headless mission registry dispatch', () => {
-  it('dispatches a non-current mission packet after a newer mission becomes current', async () => {
+  it('keeps an MCP dispatch:false mission staged across a real scheduler tick, then launches it once on explicit dispatch', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+
+    const { handleCreateMission, handleDispatchMission } = await import('@/lib/mcp/operator-handlers/mission');
+    const created = parseMissionResult(await handleCreateMission({
+      issues_inline: [{ title: 'staged MCP mission', body: 'Wait for an explicit dispatch.' }],
+      repoPath,
+      runtime: 'codex',
+      model: 'gpt-5.6-sol',
+      dispatch: false,
+    }));
+    const packetId = created.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+
+    const { runHeadlessSprintTick } = await import('@/lib/orchestrator/headless-loop');
+    await runHeadlessSprintTick();
+    expect(launchMock.calls).toEqual([]);
+
+    const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+    expect(currentMissionState().packets.find((packet) => packet.id === packetId)).toMatchObject({
+      queueState: 'held',
+      runtime: 'codex',
+      assignedModel: 'gpt-5.6-sol',
+      workerRouting: { requestedModel: 'gpt-5.6-sol', selectedModel: 'gpt-5.6-sol' },
+    });
+
+    const dispatched = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: created.missionId }));
+    expect(dispatched.dispatched).toBe(1);
+    expect(launchMock.calls).toEqual([{ packetId, repoPath }]);
+
+    await runHeadlessSprintTick();
+    expect(launchMock.calls).toEqual([{ packetId, repoPath }]);
+  }, 20_000);
+
+  it('keeps a non-current staged mission idle until an explicit dispatch', async () => {
     const repoPath = createTempRepo();
     stubMissionApiFetch();
 
@@ -248,9 +283,13 @@ describe('headless mission registry dispatch', () => {
 
     const firstPacketId = first.packets[0]?.id;
     expect(firstPacketId).toBeTruthy();
-    expect(findLaneByPacket(firstPacketId!)?.id).toMatch(/^lane-/);
+    expect(findLaneByPacket(firstPacketId!)).toBeNull();
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
-    expect(launchMock.calls.some((call) => call.packetId === firstPacketId)).toBe(true);
+    expect(launchMock.calls.some((call) => call.packetId === firstPacketId)).toBe(false);
+
+    const { handleDispatchMission } = await import('@/lib/mcp/operator-handlers/mission');
+    expect(parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId }))).toMatchObject({ dispatched: 1 });
+    expect(findLaneByPacket(firstPacketId!)?.id).toMatch(/^lane-/);
   }, 20_000);
 
   it('inserts the outgoing current snapshot when its registry row is missing', async () => {
@@ -994,4 +1033,5 @@ describe('headless mission registry dispatch', () => {
       clock.mockRestore();
     }
   });
+
 });

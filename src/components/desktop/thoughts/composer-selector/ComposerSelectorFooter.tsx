@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode, type Ref } from 'react';
 import { ComposerPicker } from './ComposerPicker';
 import { ModeChip } from './ModeChip';
 import {
@@ -43,9 +43,13 @@ export function ComposerSelectorFooter({
   clampNotice = null,
   isFreePlan = false,
   threadId = null,
+  leadingControls,
   attachControl,
+  meterControl,
   micControl,
+  voiceControl,
   sendControl,
+  containerRef,
   onRequestTextareaFocus,
 }: {
   input: string;
@@ -63,9 +67,13 @@ export function ComposerSelectorFooter({
   clampNotice?: ComposerEffortClampNotice | null;
   isFreePlan?: boolean;
   threadId?: string | null;
+  leadingControls?: ReactNode;
   attachControl?: ReactNode;
+  meterControl?: ReactNode;
   micControl?: ReactNode;
+  voiceControl?: ReactNode;
   sendControl?: ReactNode;
+  containerRef?: Ref<HTMLDivElement>;
   onRequestTextareaFocus?: () => void;
 }) {
   const [defaults, setDefaults] = useState<DispatchDefaults>(FALLBACK_DISPATCH_DEFAULTS);
@@ -162,6 +170,7 @@ export function ComposerSelectorFooter({
 
   return (
     <div
+      ref={containerRef}
       data-testid="composer-selector-footer"
       style={{
         display: 'flex',
@@ -176,7 +185,17 @@ export function ComposerSelectorFooter({
     >
       <ModeChip state={resolved} onModeChange={onModeChange} />
       <span data-testid="composer-selector-attach" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{attachControl}</span>
+      {leadingControls ? (
+        <span data-testid="composer-selector-leading-controls" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
+          {leadingControls}
+        </span>
+      ) : null}
       <span data-testid="composer-selector-spacer" style={{ flex: 1, minWidth: 0 }} />
+      {meterControl ? (
+        <span data-testid="composer-selector-meter" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {meterControl}
+        </span>
+      ) : null}
       <ComposerPicker
         state={resolved}
         defaults={defaults}
@@ -191,6 +210,7 @@ export function ComposerSelectorFooter({
         saving={saving}
       />
       <span data-testid="composer-selector-mic" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{micControl}</span>
+      {voiceControl ? <span data-testid="composer-selector-voice" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{voiceControl}</span> : null}
       <span data-testid="composer-selector-send" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{sendControl}</span>
     </div>
   );

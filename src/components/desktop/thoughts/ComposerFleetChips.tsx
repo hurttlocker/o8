@@ -26,7 +26,7 @@ import {
   type OrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
-import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { WORKER_START_OPTIONS, type WorkerStartMode } from '@/lib/operator/worker-start-mode';
 
 export interface DispatchDefaults {
   defaultDispatchRuntime: OrchestratorRuntime;
@@ -43,17 +43,6 @@ export const FALLBACK_DISPATCH_DEFAULTS: DispatchDefaults = {
   opencodeWorkerModel: null,
   workerStartMode: 'autonomous',
 };
-
-export const WORKER_START_OPTIONS: Array<{
-  value: WorkerStartMode;
-  label: string;
-  shortLabel: string;
-  detail: string;
-}> = [
-  { value: 'autonomous', label: 'Run now', shortLabel: 'Run', detail: 'The worker implements immediately inside its worktree.' },
-  { value: 'huddle', label: 'Ask first', shortLabel: 'Ask', detail: 'The worker reads the task, shares a plan, and waits before editing.' },
-  { value: 'adaptive', label: 'Adaptive', shortLabel: 'Adaptive', detail: 'Lower-cost subscription workers ask first; other workers run immediately.' },
-];
 
 /** Last path segment of a provider-qualified model id, for chip width. */
 export function shortWorkerModelLabel(model: string): string {

@@ -143,6 +143,9 @@ export async function POST(request: NextRequest) {
       requestedRuntime: profileRouting.requestedRuntime,
       requestedModel: workerRouting.requestedModel,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
+      // This endpoint creates and dispatches as one durable operation. Keep
+      // scheduler admission if the synchronous dispatch is interrupted.
+      dispatchOnCreate: true,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
       huddle,
   };

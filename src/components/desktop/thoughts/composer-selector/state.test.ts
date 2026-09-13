@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { composeComposerTurnMessage } from '../composer-mode';
+import { prepareOrchestratorTurn } from '../use-orchestrator-stream/turn-option-resolution';
 import {
   clampEffortToLead,
   composerEffortConsequence,
@@ -43,10 +44,19 @@ describe('composer selector state', () => {
           workerRuntimeLabel: 'Codex',
           workerModelLabel: 'Sol',
         });
-        const turn = composeComposerTurnMessage('Build it', resolved.mode, false, false);
+        const turn = composeComposerTurnMessage('Build it', resolved.mode, false);
+        const route = prepareOrchestratorTurn(turn.wireMessage, {
+          displayMessage: turn.displayMessage,
+          wireMessage: turn.wireMessage,
+          orchestrationMode: turn.orchestrationMode,
+          thinkingEffort: resolved.effort,
+        });
 
         expect(turn.orchestrationMode, mode).toBe(resolved.orchestrationMode);
         expect(turn.wireMessage, mode).toContain(resolved.modeDirective);
+        expect(route.orchestrationMode, mode).toBe(resolved.orchestrationMode);
+        expect(route.wireMessage, mode).toContain(resolved.modeDirective);
+        expect(route.thinkingEffort, `${mode}:${effort}`).toBe(effort);
         expect(resolved.effort, `${mode}:${effort}`).toBe(effort);
       }
     }

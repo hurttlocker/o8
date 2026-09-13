@@ -52,6 +52,8 @@ export interface CreateMissionInput {
    *  today's behavior (runtime default). */
   requestedEffort?: ThinkingEffort | null;
   constraints: string;
+  /** Durable scheduler admission for callers that explicitly requested immediate dispatch. */
+  dispatchOnCreate?: boolean;
   /** Persisted only for exact post-crash receipt reconciliation. */
   clientMutationId?: string | null;
   /** When true, packets are chained sequentially (P2 after P1, etc.). Default: false (parallel). */
