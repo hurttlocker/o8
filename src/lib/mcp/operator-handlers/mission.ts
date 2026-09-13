@@ -24,7 +24,6 @@ import {
   reportTask,
 } from '@/lib/tasks/actions';
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
-import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import {
@@ -42,7 +41,6 @@ import {
   requiredString,
   textResult,
 } from './shared';
-import type { WorkerIntent } from '@/lib/orchestrator/types';
 import {
   findMissionAttentionPacket,
   missionPacketSignature,
@@ -51,6 +49,7 @@ import {
 import { parseMissionCandidateMode, parseTaskContractSetting, QUALITY_SEARCH_INPUT_SCHEMA, TASK_CONTRACT_SETTING_SCHEMA } from './quality-search-input';
 import { MISSION_WORKER_PIN_PROPERTIES, parseMissionWorkerPinInput, parseWorkerProvider, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
+import { parseExistingBranchPolicy, parseWorkerIntent } from './mission-input';
 export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'create_mission',
@@ -768,28 +767,6 @@ export const MISSION_TOOLS: McpTool[] = [
   },
 ];
 
-function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (value === 'auto' || value === 'reset' || value === 'continue' || value === 'error') {
-    return value;
-  }
-  throw new Error('existingBranchPolicy must be one of: auto, reset, continue, error.');
-}
-
-function parseWorkerIntent(value: unknown): WorkerIntent | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (
-    value === 'light_worker'
-    || value === 'heavy_worker'
-    || value === 'reviewer'
-    || value === 'diagnostic'
-    || value === 'orchestrator'
-  ) {
-    return value;
-  }
-  throw new Error('workerIntent must be one of: light_worker, heavy_worker, reviewer, diagnostic, orchestrator.');
-}
-
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repoPath = requiredString(args, 'repoPath');
@@ -838,6 +815,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         requestedRuntime: runtime,
         ...workerPinInput,
         constraints,
+        dispatchOnCreate: shouldDispatch,
         sequential,
         existingBranchPolicy,
         useBrain,
@@ -873,6 +851,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       requestedRuntime: runtime,
       ...workerPinInput,
       constraints,
+      dispatchOnCreate: shouldDispatch,
       sequential,
       existingBranchPolicy,
       useBrain,

@@ -98,10 +98,6 @@ interface OrchestratorTabProps {
   persistLastThread?: boolean; suppressRuntimePrewarm?: boolean;
   turnInjection?: OrchestratorTurnInjection;
 }
-function swarmStorageKey(tabId: string): string {
-  return `cortex-ide:orchestrator-swarm:tab:${tabId}`;
-}
-
 // One-shot claim on the global "last-active orchestrator thread" pointer.
 //
 // Plain orchestrator tabs carry an `orchestrator-…` id (no explicit
@@ -126,24 +122,6 @@ const tabIdsMountedThisLoad = new Set<string>();
 // Persistence helpers for the cross-reload thread restore live in a
 // shared module so the workspace controller can read the same values
 // at tab-creation time (pre-set tab.label) without re-implementing.
-
-function readStoredSwarm(tabId: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(swarmStorageKey(tabId)) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function persistSwarm(tabId: string, enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(swarmStorageKey(tabId), enabled ? '1' : '0');
-  } catch {
-    // ignore
-  }
-}
 
 function collideStorageKey(tabId: string): string {
   return `cortex-ide:orchestrator-collide:tab:${tabId}`;
@@ -227,14 +205,8 @@ function OrchestratorTabInner({
       return next;
     });
   }, []);
-  // Fusion / swarm tier (per-tab). Picking "Fusion" in the composer's
-  // thinking dropdown flips this on; the orchestrator then fans work out to a
-  // parallel crew — native Claude sub-agents + Codex workers via o8.
-  const [swarmEnabled, setSwarmEnabled] = useState<boolean>(
-    () => readStoredSwarm(tabId),
-  );
-  // Collide (MoA) tier (per-tab). Claude + Codex propose independently, Claude
-  // synthesizes + does the work. Mutually exclusive with swarm.
+  // Collide (MoA) tier (per-tab). The composer mode remains the source of
+  // truth; this flag selects the matching comparison backend.
   const [collideEnabled, setCollideEnabled] = useState<boolean>(
     () => readStoredCollide(tabId),
   );
@@ -667,23 +639,9 @@ function OrchestratorTabInner({
     tabId,
   ]);
 
-  const handleSetSwarm = useCallback((enabled: boolean) => {
-    setSwarmEnabled(enabled);
-    persistSwarm(tabId, enabled);
-    // Swarm and Collide are alternative fusion modes — arming one disarms the other.
-    if (enabled) {
-      setCollideEnabled(false);
-      persistCollide(tabId, false);
-    }
-  }, [tabId]);
-
   const handleSetCollide = useCallback((enabled: boolean) => {
     setCollideEnabled(enabled);
     persistCollide(tabId, enabled);
-    if (enabled) {
-      setSwarmEnabled(false);
-      persistSwarm(tabId, false);
-    }
   }, [tabId]);
 
   useEffect(() => {
@@ -1131,10 +1089,9 @@ function OrchestratorTabInner({
       thoughtsElevatedBorder={thoughtsElevatedBorder}
       thoughtsElevatedShadow={thoughtsElevatedShadow}
       thoughtsMutedGlass={thoughtsMutedGlass}
-      swarmEnabled={swarmEnabled}
-      onSetSwarm={handleSetSwarm}
       collideEnabled={collideEnabled}
       onSetCollide={handleSetCollide}
+      composerModeStorageId={tabId}
       repoLabel={repoLabel}
       emptyStateOverride={emptyOrShimmerNode}
       showInlineExport={false}

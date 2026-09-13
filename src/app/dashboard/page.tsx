@@ -147,6 +147,13 @@ import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
 import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useRightPanelPersistence } from './hooks/useRightPanelPersistence';
+import {
+  MAX_O8_PANEL_WIDTH,
+  MAX_RIGHT_PANEL_WIDTH,
+  MIN_O8_PANEL_WIDTH,
+  MIN_RIGHT_PANEL_WIDTH,
+  useRightPanelWidths,
+} from '@/components/desktop/hooks/useRightPanelWidths';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
@@ -237,10 +244,6 @@ const SIDEBAR_PREVIEW_INSET = 8;
 const SIDEBAR_PREVIEW_TOP = 36 + SIDEBAR_PREVIEW_INSET;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
-const MIN_RIGHT_PANEL_WIDTH = 240;
-const MAX_RIGHT_PANEL_WIDTH = 720;
-const MIN_O8_PANEL_WIDTH = 400;
-const MAX_O8_PANEL_WIDTH = 1200;
 const O8_SPEC_PANEL_TARGET_WIDTH = 600;
 // The N-up compare matrix needs width — two candidate columns fit comfortably at
 // ~960px; 3+ horizontally scroll (see ComparisonMatrix).
@@ -1213,31 +1216,7 @@ function DashboardInner() {
     sidebarVisible,
     viewportBands,
   ]);
-  const [rightWidth, setRightWidth] = useState(() => {
-    if (typeof window === 'undefined') return 280;
-    try {
-      const stored = Number(window.localStorage.getItem('o8:right-panel:width-chat') ?? 0);
-      if (Number.isFinite(stored) && stored >= MIN_RIGHT_PANEL_WIDTH && stored <= MAX_RIGHT_PANEL_WIDTH) return stored;
-    } catch { /* ignore */ }
-    return 280;
-  });
-  // Default 440px is a balance: wide enough for PRs/Activity content but
-  // doesn't eat the workspace on a 1280px laptop viewport. User resizes
-  // persist via the o8:right-panel:width-o8 key.
-  const [o8Width, setO8Width] = useState(() => {
-    if (typeof window === 'undefined') return 440;
-    try {
-      const stored = Number(window.localStorage.getItem('o8:right-panel:width-o8') ?? 0);
-      if (Number.isFinite(stored) && stored >= MIN_O8_PANEL_WIDTH && stored <= MAX_O8_PANEL_WIDTH) return stored;
-    } catch { /* ignore */ }
-    return 440;
-  });
-  useEffect(() => {
-    try { window.localStorage.setItem('o8:right-panel:width-chat', String(rightWidth)); } catch { /* ignore */ }
-  }, [rightWidth]);
-  useEffect(() => {
-    try { window.localStorage.setItem('o8:right-panel:width-o8', String(o8Width)); } catch { /* ignore */ }
-  }, [o8Width]);
+  const { rightWidth, setRightWidth, o8Width, setO8Width } = useRightPanelWidths();
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const [o8ReviewLaneId, setO8ReviewLaneId] = useState<string | null>(null);
   const o8SpecAutoWidenedRef = useRef(false);
@@ -1261,7 +1240,7 @@ function DashboardInner() {
     }
     if (tab !== 'review') setO8ReviewLaneId(null);
     setO8ActiveTab(tab);
-  }, []);
+  }, [setO8Width]);
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
@@ -2486,7 +2465,7 @@ function DashboardInner() {
     setO8ActiveTab(nextTab);
     setRightPanelKind('o8');
     openRightPanelFromUser();
-  }, [openRightPanelFromUser]);
+  }, [openRightPanelFromUser, setO8Width]);
 
   const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {
     if (repoPath) setO8RepoPathOverride(repoPath);
@@ -3933,12 +3912,12 @@ function DashboardInner() {
   }, []);
   const startRightDrag = useCallback((e: React.MouseEvent) => {
     startRightColumnDrag(e, rightWidth, MIN_RIGHT_PANEL_WIDTH, MAX_RIGHT_PANEL_WIDTH, setRightWidth);
-  }, [rightWidth, startRightColumnDrag]);
+  }, [rightWidth, setRightWidth, startRightColumnDrag]);
 
   // ── O8 panel drag handle ──
   const startO8Drag = useCallback((e: React.MouseEvent) => {
     startRightColumnDrag(e, o8Width, MIN_O8_PANEL_WIDTH, MAX_O8_PANEL_WIDTH, setO8Width);
-  }, [o8Width, startRightColumnDrag]);
+  }, [o8Width, setO8Width, startRightColumnDrag]);
 
   const firstFileChangeCandidate = useMemo(() => {
     const source = parsedAgents.find((agent) => (
