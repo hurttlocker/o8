@@ -3,22 +3,34 @@ import type { TileLayout } from '@/lib/tiles/types';
 
 export interface RestorePathValidation {
   ok: boolean;
+  requestedPaths: string[];
   paths: Array<{ requestedPath: string; canonicalPath: string }>;
 }
 
+/**
+ * Applies a validation result to whatever layout is passed in — the CURRENT
+ * layout at apply time, not a snapshot captured when validation started. Only
+ * leaves whose repoPath was part of THIS validation's requestedPaths are
+ * touched; a repoPath the operator chose afterward (a newer, unrelated
+ * scope) was never requested and is left alone, so a stale response can
+ * never clobber a newer choice.
+ */
 export function validatePersistedLayoutRepos(
   layout: TileLayout,
-  validatedRestorePaths: RestorePathValidation['paths'],
+  validation: Pick<RestorePathValidation, 'requestedPaths' | 'paths'>,
 ): TileLayout {
-  const canonicalByRequestedPath = new Map(validatedRestorePaths.map((validation) => (
-    [validation.requestedPath, validation.canonicalPath]
+  const requestedPaths = new Set(validation.requestedPaths);
+  const canonicalByRequestedPath = new Map(validation.paths.map((entry) => (
+    [entry.requestedPath, entry.canonicalPath]
   )));
   let root = layout.root;
   for (const leaf of collectLeafNodes(layout.root)) {
     if (leaf.content.kind !== 'terminal' && leaf.content.kind !== 'canvas') continue;
     const repoPath = leaf.content.repoPath;
     if (!repoPath) continue;
-    const canonicalPath = canonicalByRequestedPath.get(repoPath.trim()) ?? null;
+    const trimmedPath = repoPath.trim();
+    if (!requestedPaths.has(trimmedPath)) continue;
+    const canonicalPath = canonicalByRequestedPath.get(trimmedPath) ?? null;
     if (canonicalPath === repoPath) continue;
     root = replaceTileContent(root, leaf.id, { ...leaf.content, repoPath: canonicalPath });
   }
@@ -34,18 +46,21 @@ export function collectPersistedRepoTileIds(layout: TileLayout): ReadonlySet<str
     .map((leaf) => leaf.id));
 }
 
-export async function loadValidatedRestorePaths(layout: TileLayout): Promise<RestorePathValidation> {
+export async function loadValidatedRestorePaths(layout: TileLayout, signal?: AbortSignal): Promise<RestorePathValidation> {
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const abortValidation = () => controller.abort();
+  const requestedPaths = new Set<string>();
+  for (const leaf of collectLeafNodes(layout.root)) {
+    if (leaf.content.kind !== 'terminal' && leaf.content.kind !== 'canvas') continue;
+    const repoPath = leaf.content.repoPath?.trim();
+    if (repoPath) requestedPaths.add(repoPath);
+  }
   try {
+    if (signal?.aborted) return { ok: false, requestedPaths: Array.from(requestedPaths), paths: [] };
+    signal?.addEventListener('abort', abortValidation, { once: true });
+    if (requestedPaths.size === 0) return { ok: true, requestedPaths: [], paths: [] };
     const searchParams = new URLSearchParams({ restoreValidationOnly: '1' });
-    const requestedPaths = new Set<string>();
-    for (const leaf of collectLeafNodes(layout.root)) {
-      if (leaf.content.kind !== 'terminal' && leaf.content.kind !== 'canvas') continue;
-      const repoPath = leaf.content.repoPath?.trim();
-      if (repoPath) requestedPaths.add(repoPath);
-    }
-    if (requestedPaths.size === 0) return { ok: true, paths: [] };
     for (const repoPath of requestedPaths) searchParams.append('restorePath', repoPath);
     const result = await Promise.race([
       fetch(`/api/panel/repos?${searchParams.toString()}`, {
@@ -60,7 +75,9 @@ export async function loadValidatedRestorePaths(layout: TileLayout): Promise<Res
         }, 2000);
       }),
     ]) as { validatedRestorePaths?: unknown } | null;
-    if (!Array.isArray(result?.validatedRestorePaths)) return { ok: false, paths: [] };
+    if (!Array.isArray(result?.validatedRestorePaths)) {
+      return { ok: false, requestedPaths: Array.from(requestedPaths), paths: [] };
+    }
     const paths = result.validatedRestorePaths.filter((entry): entry is {
       requestedPath: string;
       canonicalPath: string;
@@ -70,10 +87,11 @@ export async function loadValidatedRestorePaths(layout: TileLayout): Promise<Res
       && typeof (entry as { requestedPath?: unknown }).requestedPath === 'string'
       && typeof (entry as { canonicalPath?: unknown }).canonicalPath === 'string'
     ));
-    return { ok: true, paths };
+    return { ok: true, requestedPaths: Array.from(requestedPaths), paths };
   } catch {
-    return { ok: false, paths: [] };
+    return { ok: false, requestedPaths: Array.from(requestedPaths), paths: [] };
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', abortValidation);
   }
 }

@@ -109,18 +109,42 @@ export function useGlobalRepoState({
   const selectedRepoWorktreeSnapshotsRef = useRef(new Map<string, RepoWorktreeSummary>());
   const selectedRepoWorktreeGenerationRef = useRef(0);
   const branchGenerationRef = useRef(0);
+  // Shared across loadRegisteredRepos and refreshRestoredRepoState so the
+  // most-recently-STARTED authoritative repo-inventory fetch always wins,
+  // regardless of which one resolves first. A repos-changed/add/remove/touch
+  // refresh that starts while a recovery refresh is still fanning out
+  // worktree lookups must never be clobbered by that older, slower refresh
+  // finishing later.
+  const repoInventoryGenerationRef = useRef(0);
+  // A confirmed mutation (a completed remove/touch response, or any other
+  // caller-side authoritative rewrite of the repo list — see
+  // page.tsx's handleRepoRemoved) is newer truth than anything currently in
+  // flight. Bump the epoch so a loadRegisteredRepos/refreshRestoredRepoState
+  // call that started BEFORE this mutation can never overwrite it with
+  // pre-mutation data once that older, slower call finally resolves.
+  const bumpRepoInventoryGeneration = useCallback(() => {
+    repoInventoryGenerationRef.current += 1;
+  }, []);
 
-  const loadRepoWorktrees = useCallback(async (repoPath: string): Promise<RepoWorktreeSummary> => {
-    const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(repoPath)}`);
+  const loadRepoWorktrees = useCallback(async (
+    repoPath: string,
+    signal?: AbortSignal,
+    commit = true,
+  ): Promise<RepoWorktreeSummary> => {
+    const url = `/api/worktrees?repo=${encodeURIComponent(repoPath)}`;
+    const response = signal ? await ipcFetch(url, { signal }) : await ipcFetch(url);
     const data = await response.json() as RepoWorktreeSummary & { error?: string };
     if (!response.ok) {
       throw new Error(data.error || 'Unable to load worktree summary.');
     }
+    if (signal?.aborted) throw new DOMException('Request was aborted.', 'AbortError');
     const worktrees = Array.isArray(data.worktrees) ? data.worktrees : [];
-    setAllRepoWorktrees((current) => ({
-      ...current,
-      [repoPath]: worktrees,
-    }));
+    if (commit) {
+      setAllRepoWorktrees((current) => ({
+        ...current,
+        [repoPath]: worktrees,
+      }));
+    }
     return { ...data, worktrees };
   }, []);
 
@@ -145,14 +169,125 @@ export function useGlobalRepoState({
   }, [globalRepoEntry?.localPath, loadRepoWorktrees]);
 
   const loadRegisteredRepos = useCallback(async () => {
+    const generation = ++repoInventoryGenerationRef.current;
     const cacheKey = 'panel:repos';
     const cached = getSWR<{ repos?: RepoRegistryEntry[] }>(cacheKey);
-    if (cached.data) setGlobalRepoEntries(cached.data.repos ?? []);
+    if (cached.data && generation === repoInventoryGenerationRef.current) {
+      setGlobalRepoEntries(cached.data.repos ?? []);
+    }
     const data = await fetchSWRJson<{ repos?: RepoRegistryEntry[] }>(cacheKey, '/api/panel/repos');
     const repos = data.repos ?? [];
-    setGlobalRepoEntries(repos);
+    // A fresher inventory fetch (this same function re-entered, or a
+    // recovery refresh) may have already started and must win even if it
+    // resolves later — never let a superseded fetch overwrite it.
+    if (generation === repoInventoryGenerationRef.current) setGlobalRepoEntries(repos);
     return repos;
   }, []);
+
+  // A saved workspace may finish its path validation after the initial repo
+  // inventory request failed. Re-read the authoritative inventory and only
+  // report recovery when every validated scope is present in that inventory
+  // (or its authoritative worktree list). This is deliberately an explicit
+  // retry path, not a second registry or a polling loop.
+  const refreshRestoredRepoState = useCallback(async (validatedPaths: readonly string[], signal?: AbortSignal) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      if (signal?.aborted) return false;
+      signal?.addEventListener('abort', abort, { once: true });
+      const refresh = (async () => {
+        try {
+          const generation = ++repoInventoryGenerationRef.current;
+          const response = await ipcFetch('/api/panel/repos', {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+            signal: controller.signal,
+          });
+          const data = await response.json().catch(() => null) as { repos?: unknown } | null;
+          if (controller.signal.aborted || !response.ok || !Array.isArray(data?.repos)) return false;
+          const repos = data.repos.filter((entry): entry is RepoRegistryEntry => (
+            typeof entry === 'object'
+            && entry !== null
+            && typeof (entry as { id?: unknown }).id === 'string'
+            && typeof (entry as { localPath?: unknown }).localPath === 'string'
+          ));
+          if (repos.length !== data.repos.length) return false;
+          const rootOwnedPaths = new Set(repos.filter((repo) => validatedPaths.some((path) => (
+            path === repo.localPath || path.startsWith(`${repo.localPath}/`)
+          ))));
+          // Worktree paths often live outside their repository root. If a
+          // validated path is not root-owned, inspect every registered repo's
+          // authoritative worktree list; exact membership below is the only
+          // authorization decision for that external path.
+          if (validatedPaths.some((path) => !Array.from(rootOwnedPaths).some((repo) => (
+            path === repo.localPath || path.startsWith(`${repo.localPath}/`)
+          )))) {
+            repos.forEach((repo) => rootOwnedPaths.add(repo));
+          }
+          const reposToLoad = Array.from(rootOwnedPaths);
+          const summaries: Array<readonly [string, RepoWorktreeSummary]> = [];
+          let nextRepoIndex = 0;
+          const workerCount = Math.min(8, reposToLoad.length);
+          await Promise.all(Array.from({ length: workerCount }, async () => {
+            while (!controller.signal.aborted) {
+              const repo = reposToLoad[nextRepoIndex++];
+              if (!repo) return;
+              try {
+                const summary = await loadRepoWorktrees(repo.localPath, controller.signal, false);
+                summaries.push([repo.localPath, summary]);
+              } catch {
+                // An unrelated repo's worktree lookup failing (e.g. a 500)
+                // must not sink recovery for every other repo. A path that
+                // genuinely depends on THIS repo's worktree list stays
+                // blocked below via hasAuthoritativeScope — absence never
+                // becomes permission — but paths proven by other repos, or
+                // root-owned, still go through.
+              }
+            }
+          }));
+          if (controller.signal.aborted) return false;
+          const authoritativeWorktreePaths = new Set<string>();
+          for (const [, summary] of summaries) {
+            for (const worktree of summary.worktrees) authoritativeWorktreePaths.add(worktree.path);
+          }
+          const hasAuthoritativeScope = (path: string) => (
+            repos.some((repo) => path === repo.localPath || path.startsWith(`${repo.localPath}/`))
+            || authoritativeWorktreePaths.has(path)
+          );
+          if (!validatedPaths.every(hasAuthoritativeScope)) return false;
+          // A newer inventory fetch (repos-changed/add/remove/touch, or
+          // another recovery attempt) started while worktrees were still
+          // loading — it may already have committed fresher state. Never let
+          // this older, slower refresh overwrite it.
+          if (generation !== repoInventoryGenerationRef.current) return false;
+
+          setGlobalRepoEntries(repos);
+          setAllRepoWorktrees((current) => {
+            const next = Object.fromEntries(Object.entries(current)
+              .filter(([repoPath]) => repos.some((repo) => repo.localPath === repoPath)));
+            for (const [repoPath, summary] of summaries) next[repoPath] = summary.worktrees;
+            return next;
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      return await Promise.race([
+        refresh,
+        new Promise<false>((resolve) => {
+          timeoutId = setTimeout(() => {
+            controller.abort();
+            resolve(false);
+          }, 2_000);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', abort);
+    }
+  }, [loadRepoWorktrees]);
 
   // Fetch registered repos on mount — prefer saved repo, otherwise restore the first registered repo
   useEffect(() => {
@@ -172,7 +307,8 @@ export function useGlobalRepoState({
         }
       })
       .catch(() => {
-        setGlobalRepoEntries([]);
+        // A failed startup request does not invalidate a newer successful
+        // recovery or the last known inventory.
       });
   }, [loadRegisteredRepos]);
 
@@ -215,6 +351,7 @@ export function useGlobalRepoState({
       .then(async (response) => {
         const data = await response.json() as { repo?: RepoRegistryEntry };
         if (data.repo) {
+          bumpRepoInventoryGeneration();
           setGlobalRepoEntries((current) => {
             const next = current.map((repo) => (repo.id === data.repo?.id ? data.repo : repo));
             return next;
@@ -222,7 +359,7 @@ export function useGlobalRepoState({
         }
       })
       .catch(() => null);
-  }, [globalRepoEntries]);
+  }, [bumpRepoInventoryGeneration, globalRepoEntries]);
 
   const handleRemoveRegisteredRepo = useCallback(async (repoId: string) => {
     const target = globalRepoEntries.find((repo) => repo.id === repoId);
@@ -246,6 +383,7 @@ export function useGlobalRepoState({
       throw new Error(data.error ?? 'Unable to remove repository.');
     }
 
+    bumpRepoInventoryGeneration();
     setGlobalRepoEntries((current) => current.filter((repo) => repo.id !== repoId));
     if (globalRepoId === repoId) {
       setGlobalRepoId(null);
@@ -254,7 +392,7 @@ export function useGlobalRepoState({
         sessionStorage.removeItem('cortex-global-repo-id');
       }
     }
-  }, [globalRepoEntries, globalRepoId]);
+  }, [bumpRepoInventoryGeneration, globalRepoEntries, globalRepoId]);
 
   // Fetch branch when selected repo changes
   useEffect(() => {
@@ -423,6 +561,7 @@ export function useGlobalRepoState({
 
   return {
     allRepoWorktrees,
+    bumpRepoInventoryGeneration,
     globalRepo,
     globalRepoBranch,
     globalRepoEntries,
@@ -435,6 +574,7 @@ export function useGlobalRepoState({
     handleSelectRegisteredRepo,
     loadRegisteredRepos,
     loadRepoWorktrees,
+    refreshRestoredRepoState,
     openRepoWorkspaceModal,
     orchestratorWorkspaceTargets,
     focusRepoSetup,

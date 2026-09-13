@@ -45,6 +45,29 @@ const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then
 
 const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 
+function RestoredRepoScopeStatus({
+  pending,
+  onRetry,
+}: {
+  pending: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div role="status" aria-live="polite" style={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--t-text-muted)', fontSize: 13 }}>
+      <span>{pending ? 'Verifying saved repository scope…' : 'Couldn’t verify this saved repository scope.'}</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        disabled={pending}
+        aria-label="Retry saved repository scope"
+        style={{ border: '1px solid var(--t-divider-subtle)', borderRadius: 6, background: 'var(--t-input-bg)', color: 'var(--t-text)', cursor: pending ? 'default' : 'pointer', fontSize: 12, paddingTop: 5, paddingRight: 9, paddingBottom: 5, paddingLeft: 9 }}
+      >
+        {pending ? 'Retrying…' : 'Retry'}
+      </button>
+    </div>
+  );
+}
+
 interface WorkspaceAgentLaunchRequest {
   repoPath: string;
   runtime?: OrchestratorRuntime;
@@ -107,6 +130,8 @@ export interface TileRegistryDeps {
   thoughtsDraftInjection: { id: string; text: string } | null;
   thoughtsMissionState: OrchestratorMissionState;
   tileLayout: TileLayout;
+  restoredRepoValidationState: 'idle' | 'pending' | 'failed' | 'verified';
+  retryRestoredRepoValidation: () => void;
   unverifiedRestoredRepoTileIds: ReadonlySet<string>;
   workspacePreviews: DetectedLocalhostPreview[];
   workspaceScopeEntries: WorkspaceScopeEntry[];
@@ -140,6 +165,8 @@ export function createTileRegistry({
   parsedAgents,
   registerContextualPanelHandle,
   registerWorkspaceTerminalHandle,
+  restoredRepoValidationState,
+  retryRestoredRepoValidation,
   selectCanvasTab,
   setActiveTileId,
   setActiveWorkspace,
@@ -250,11 +277,7 @@ export function createTileRegistry({
       // closable determined dynamically in TileContainer (last terminal is protected)
       render: ({ tileId, content }) => {
         if (unverifiedRestoredRepoTileIds.has(tileId)) {
-          return (
-            <div role="status" style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-              Couldn’t verify this saved repository scope. Reload to try again.
-            </div>
-          );
+          return <RestoredRepoScopeStatus pending={restoredRepoValidationState === 'pending'} onRetry={retryRestoredRepoValidation} />;
         }
         const firstTerminalLeafId = (() => {
           const firstLeaf = getFirstLeaf(tileLayout.root);
@@ -455,15 +478,13 @@ export function createTileRegistry({
       description: 'Legacy canvas surface for diffs, issues, PRs, and session replay.',
       render: ({ tileId, content }) => {
         if (unverifiedRestoredRepoTileIds.has(tileId)) {
-          return (
-            <div role="status" style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-              Couldn’t verify this saved repository scope. Reload to try again.
-            </div>
-          );
+          return <RestoredRepoScopeStatus pending={restoredRepoValidationState === 'pending'} onRetry={retryRestoredRepoValidation} />;
         }
         const tileState = canvasStateByTileId[tileId] ?? { tabs: [], activeTabId: null, revealKey: 0 };
         const tileRepoEntry = content.kind === 'canvas' && content.repoPath
-          ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null
+          ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath)
+            ?? globalRepoEntries.find((repo) => repo.localPath === content.repoPath)
+            ?? null
           : null;
 
         return (

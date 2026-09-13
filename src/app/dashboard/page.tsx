@@ -1449,6 +1449,7 @@ function DashboardInner() {
 
   const {
     allRepoWorktrees,
+    bumpRepoInventoryGeneration,
     globalRepo,
     globalRepoBranch,
     globalRepoEntries,
@@ -1462,6 +1463,7 @@ function DashboardInner() {
     loadRepoWorktrees,
     openRepoWorkspaceModal,
     orchestratorWorkspaceTargets,
+    refreshRestoredRepoState,
     focusRepoSetup,
     selectedRepoWorktrees,
     selectedRepoWorktreesLoading,
@@ -1953,6 +1955,8 @@ function DashboardInner() {
     setWorkspacePreviews,
     tileLayoutHydrated,
     toggleContextualPanelTile,
+    restoredRepoValidationState,
+    retryRestoredRepoValidation,
     unverifiedRestoredRepoTileIds,
     workspaceChatTargetLabel,
     workspaceChatTargetRepoPath,
@@ -1965,6 +1969,7 @@ function DashboardInner() {
     findWorkspaceTarget,
     globalRepoEntries,
     globalRepoEntry,
+    refreshRestoredRepoState,
     setActiveTileId,
     setTileLayout,
     tileLayout,
@@ -2069,6 +2074,13 @@ function DashboardInner() {
     ]);
 
     setAgentsJson(JSON.stringify(filteredAgents));
+    // A confirmed removal (this callback only fires after AgentPanel's own
+    // DELETE succeeds) is newer truth than anything in flight — bump the
+    // shared epoch so a repo-inventory refresh that started earlier (e.g.
+    // useGlobalRepoState's saved-scope recovery, still waiting on worktree
+    // lookups) can never resurrect this repo by overwriting with
+    // pre-removal data once it resolves.
+    bumpRepoInventoryGeneration();
     setGlobalRepoEntries(nextGlobalRepoEntries);
     setAllRepoWorktrees((current) => {
       const next = { ...current };
@@ -2178,6 +2190,7 @@ function DashboardInner() {
     activeSessionKey,
     activeWorkspace,
     agentsJson,
+    bumpRepoInventoryGeneration,
     globalRepoEntries,
     globalRepoEntry?.localPath,
     globalRepoId,
@@ -4347,6 +4360,8 @@ function DashboardInner() {
     thoughtsDraftInjection,
     thoughtsMissionState,
     tileLayout,
+    restoredRepoValidationState,
+    retryRestoredRepoValidation,
     unverifiedRestoredRepoTileIds,
     workspacePreviews,
     workspaceScopeEntries,
@@ -4398,6 +4413,8 @@ function DashboardInner() {
     thoughtsDraftInjection,
     thoughtsMissionState,
     unverifiedRestoredRepoTileIds,
+    restoredRepoValidationState,
+    retryRestoredRepoValidation,
     activeTileId,
     orchestratorWorkspaceTargets,
     launchOrchestrationPacket,
