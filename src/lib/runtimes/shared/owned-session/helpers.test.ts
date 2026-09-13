@@ -66,6 +66,14 @@ describe('commandLineMatchesOwnedRun', () => {
     expect(commandLineMatchesOwnedRun('git fetch origin', 'ori', 'codex')).toBe(false);
     expect(commandLineMatchesOwnedRun('/Users/victoria/bin/node task.js', 'ori', 'codex')).toBe(false);
   });
+
+  it.each([
+    ['/opt/runtime/opencode2 serve --service', 'darwin'],
+    ['C:\\Tools\\runtime\\opencode2.exe serve --service', 'win32'],
+    ['cmd.exe /d /c "C:\\Tools\\runtime\\opencode2.exe" serve --service', 'win32'],
+  ] as const)('does not classify a resident service as an owned worker: %s', (commandLine, platform) => {
+    expect(commandLineMatchesOwnedRun(commandLine, undefined, 'opencode2', platform)).toBe(false);
+  });
 });
 
 describe('isOwnedRunAlive — finished runs are terminal (#1293)', () => {

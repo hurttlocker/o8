@@ -45,6 +45,7 @@ import {
   buildMissionSummary,
   buildPacketId,
   buildPacketSummary,
+  branchTargetForMissionIssue,
   currentMissionState,
   ensureRepoPath,
   extractIssueDependencies,
@@ -52,7 +53,6 @@ import {
   log,
   missionAgentKeys,
   normalizeLoadedIssue,
-  slugify,
 } from './shared';
 import type {
   CreateMissionInput,
@@ -94,15 +94,6 @@ export function resolveMissionDispatchTarget(missionId?: string): string {
   return requestedMissionId;
 }
 
-function branchTargetForIssue(issue: LoadedIssue) {
-  if (!isInlineIssue(issue)) {
-    return `${resolveBranchPrefixSync()}/${issue.number}-${slugify(issue.title)}`;
-  }
-
-  const prefix = `inline/${issue.number}-`;
-  return `${prefix}${slugify(issue.title, Math.max(1, INLINE_BRANCH_MAX_LENGTH - prefix.length))}`;
-}
-
 export async function createMission(input: CreateMissionInput) {
   const repoPath = ensureRepoPath(input.repoPath);
   if (!Array.isArray(input.issues) || input.issues.length === 0) {
@@ -137,7 +128,8 @@ export async function createMission(input: CreateMissionInput) {
   );
   const packetIdByIssueNumber = new Map(loadedIssues.map((issue, index) => [issue.number, packetIds[index] as string]));
   const referenceLabelByIssueNumber = new Map(loadedIssues.map((issue, index) => [issue.number, referenceLabels[index] as string]));
-  const branchTargets = loadedIssues.map((issue) => branchTargetForIssue(issue));
+  const branchPrefix = resolveBranchPrefixSync();
+  const branchTargets = loadedIssues.map((issue) => branchTargetForMissionIssue(issue, branchPrefix, INLINE_BRANCH_MAX_LENGTH));
   const priorState = currentMissionState();
   const workerRouting = resolveWorkerRouting({
     workerIntent: input.workerIntent,
@@ -241,9 +233,11 @@ export async function createMission(input: CreateMissionInput) {
       runtime: packetRouting.selectedRuntime,
       dependencyLabels: dependencyNumbers.map((dependency) => referenceLabelByIssueNumber.get(dependency) ?? `#${dependency}`),
       dependencyPacketIds: dependencyNumbers.map((dependency) => packetIdByIssueNumber.get(dependency) ?? '').filter(Boolean),
-      queueState: 'queued',
+      // Creation is a staging operation. The headless scheduler only consumes
+      // queued packets, so an explicit dispatch is required to arm this packet.
+      queueState: input.dispatchOnCreate ? 'queued' : 'held',
       releaseState: 'pending',
-      status: 'queued',
+      status: input.dispatchOnCreate ? 'queued' : 'draft',
       blockedReason: null,
       lastEventAt: null,
       lastEventLabel: null,
@@ -277,6 +271,9 @@ export async function createMission(input: CreateMissionInput) {
       // inherits that thread's session rules via `buildPacketPrompt`.
       ...(typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()
         ? { orchestratorThreadId: input.orchestratorThreadId.trim() }
+        : {}),
+      ...(typeof input.orchestratorTurnId === 'string' && input.orchestratorTurnId.trim()
+        ? { orchestratorTurnId: input.orchestratorTurnId.trim() }
         : {}),
       dispatcher,
       ...(launchContext ? { launchContext } : {}),
@@ -434,9 +431,10 @@ export async function dispatchMission(input: DispatchMissionInput) {
         reconcileOrchestratorControlPlaneState(stored),
         { allowOwnerTakeover: true },
       );
+      const beforeDispatch = structuredClone(registryBefore);
       if (!registryBefore.lifecycleHold) preparePacketsForExplicitDispatch(registryBefore, input.runtime);
       const afterDispatch = await runDispatchTick(registryBefore, { launchBudget: buildRemainingLaunchBudget() });
-      return { state: afterDispatch, result: summarizeDispatchMission(registryBefore, afterDispatch) };
+      return { state: afterDispatch, result: summarizeDispatchMission(beforeDispatch, afterDispatch) };
     });
 
     const packetIds = new Set(finalState.packets.map((packet) => packet.id));
@@ -453,6 +451,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
   // Use locked state to prevent race with headless loop tick
   const { result, state: finalState } = await withLockedState(async (current) => {
     assertOrchestratorRepoPath(current.repoPath);
+    const beforeDispatch = structuredClone(current);
     // #23 — an EXPLICIT dispatch re-arms any packet a prior reset_packet left in
     // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
     // (so reset doesn't boomerang); an explicit dispatch_mission is the operator
@@ -467,7 +466,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
     Object.assign(current, afterDispatch);
     writeOrchestratorControlPlaneState(afterDispatch);
 
-    return summarizeDispatchMission(before, afterDispatch);
+    return summarizeDispatchMission(beforeDispatch, afterDispatch);
   });
 
   const packetIds = new Set(finalState.packets.map((packet) => packet.id));

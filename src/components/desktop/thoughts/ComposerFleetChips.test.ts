@@ -32,24 +32,8 @@ ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
 describe('FleetWorkerChip', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let requests: Array<{ method: string; body: Record<string, unknown> | null }>;
 
   beforeEach(() => {
-    requests = [];
-    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const method = init?.method ?? 'GET';
-      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
-      requests.push({ method, body });
-      return new Response(JSON.stringify({
-        values: {
-          defaultDispatchRuntime: body?.defaultDispatchRuntime ?? 'codex',
-          defaultDispatchModel: '',
-          opencodeWorkerModel: body?.opencodeWorkerModel ?? null,
-          workerStartMode: body?.workerStartMode ?? 'autonomous',
-        },
-        sources: {},
-      }), { status: 200 });
-    }));
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -62,7 +46,8 @@ describe('FleetWorkerChip', () => {
   });
 
   it('sets the OpenCode 2 worker model from the fleet popover', async () => {
-    await act(async () => { root.render(createElement(FleetWorkerChip)); });
+    const onWorkerModelChange = vi.fn();
+    await act(async () => { root.render(createElement(FleetWorkerChip, { onWorkerModelChange })); });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
     act(() => trigger?.click());
 
@@ -76,25 +61,23 @@ describe('FleetWorkerChip', () => {
     expect(pick).toBeDefined();
     await act(async () => { pick?.click(); await Promise.resolve(); });
 
-    expect(requests).toContainEqual({
-      method: 'POST',
-      body: { opencodeWorkerModel: 'openrouter/deepseek/deepseek-v4-flash' },
-    });
+    expect(onWorkerModelChange).toHaveBeenCalledWith('openrouter/deepseek/deepseek-v4-flash');
   });
 
-  it('lets the operator choose whether workers run or ask first', async () => {
-    await act(async () => { root.render(createElement(FleetWorkerChip)); });
+  it('lets the operator choose whether workers run or plan first', async () => {
+    const onWorkerStartModeChange = vi.fn();
+    await act(async () => { root.render(createElement(FleetWorkerChip, { onWorkerStartModeChange })); });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
     act(() => trigger?.click());
 
-    const askFirst = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Ask first');
-    expect(askFirst).toBeDefined();
-    await act(async () => { askFirst?.click(); await Promise.resolve(); });
+    const planFirst = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Plan first');
+    expect(planFirst).toBeDefined();
+    expect(planFirst?.title).toBe(
+      'The worker reads the task, shares a plan with the lead, and waits before editing.',
+    );
+    await act(async () => { planFirst?.click(); await Promise.resolve(); });
 
-    expect(requests).toContainEqual({
-      method: 'POST',
-      body: { workerStartMode: 'huddle' },
-    });
+    expect(onWorkerStartModeChange).toHaveBeenCalledWith('huddle');
   });
 });

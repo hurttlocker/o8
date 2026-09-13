@@ -428,6 +428,13 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/mission-staging-headless.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/mission-stop.test.ts",
       "reasons": [
         "process-signal"
@@ -1215,6 +1222,12 @@
       ]
     },
     {
+      "path": "tests/chat-history-merge.integration.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/claude-auth-preflight-real-path.test.ts",
       "reasons": [
         "executable-fixture",
@@ -1472,6 +1485,13 @@
       ]
     },
     {
+      "path": "tests/data-handoff-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/declarative-dispatch-worktree-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1485,6 +1505,15 @@
     {
       "path": "tests/deepseek-harness-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/delegate-dispatch-merge-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },
@@ -1984,6 +2013,7 @@
     {
       "path": "tests/merge-checkout-coupling-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "git-cli",
         "real-path",
@@ -2141,6 +2171,17 @@
       ]
     },
     {
+      "path": "tests/orchestrator-model-attribution-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-spawn-preflight.test.ts",
       "reasons": [
         "child-process",
@@ -2231,6 +2272,16 @@
         "child-process",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/packet-merge-repository-identity-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -2502,10 +2553,36 @@
       ]
     },
     {
+      "path": "tests/reset-partial-bind-recovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/reset-receipt-reconciliation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/reset-stop-registry-truth.test.ts",
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/resident-service-close-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
       ]
     },
     {
@@ -2514,6 +2591,14 @@
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/retry-salvage-lock-reentry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -2564,6 +2649,14 @@
     },
     {
       "path": "tests/review-supersede-retry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/reviewer-concurrency-real-path.test.ts",
       "reasons": [
         "child-process",
         "git-cli",
@@ -2808,6 +2901,7 @@
       "path": "tests/test-gate-runner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "process-signal",
         "real-path"
       ]
@@ -2885,6 +2979,15 @@
     {
       "path": "tests/ui-loop-warm-lane-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-check-state-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },

@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { deserializeStoredTranscript, serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 import { buildTurnSummaryStats, TurnSummaryCard } from './TurnSummaryCard';
 
 describe('TurnSummaryCard', () => {
@@ -59,5 +60,36 @@ describe('TurnSummaryCard', () => {
       repoPath: '/repo',
     });
     expect(stats).toContainEqual({ key: 'cache', value: 'cold prompt' });
+  });
+
+  it('renders effective receipt labels and workers from a persisted entry after reload', () => {
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'assistant-receipt',
+      role: 'assistant',
+      text: 'Complete.',
+      receipt: {
+        leadModel: 'gpt-6-astra',
+        effort: 'xhigh',
+        mode: 'fusion',
+        pickedMode: 'solo',
+        workers: [{ packetId: 'packet-1', runtime: 'codex', model: 'gpt-5.6-terra' }],
+      },
+    }]));
+    const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+
+    expect(html).toContain('GPT-6 Astra');
+    expect(html).toContain('extra');
+    expect(html).toContain('ran as Fusion, picked Solo');
+    expect(html).toContain('Codex · GPT-5.6 Terra');
+  });
+
+  it('renders no receipt line and does not crash for a legacy persisted entry', () => {
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'assistant-legacy',
+      role: 'assistant',
+      text: 'Legacy turn.',
+    }]));
+
+    expect(renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }))).toBe('');
   });
 });

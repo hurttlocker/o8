@@ -2,6 +2,7 @@ import type { TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
+import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { OrchestratorPermissionMode } from './shared';
 
 export function buildOrchestratorSendPayload(input: {
@@ -13,6 +14,7 @@ export function buildOrchestratorSendPayload(input: {
   displayMessage: string;
   permissionMode: OrchestratorPermissionMode;
   orchestrationMode: OrchestratorExecutionMode;
+  pickedMode?: ComposerWireMode;
   thinkingEffort?: ThinkingEffort;
   model: string;
   backend?: OrchestratorBackendId;
@@ -31,6 +33,7 @@ export function buildOrchestratorSendPayload(input: {
     displayMessage: input.displayMessage,
     permissionMode: input.permissionMode,
     orchestrationMode: input.orchestrationMode,
+    ...(input.pickedMode ? { pickedMode: input.pickedMode } : {}),
     ...(input.thinkingEffort && input.thinkingEffort !== 'adaptive'
       ? { thinkingEffort: input.thinkingEffort }
       : {}),

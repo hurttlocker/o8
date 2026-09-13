@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   fetchThoughtsOperatorDefaults,
+  fetchFreshThoughtsOperatorDefaults,
   normalizeThoughtsOperatorDefaults,
   scheduleThoughtsRuntimeReadiness,
   THOUGHTS_OPERATOR_DEFAULTS_FALLBACK,
   THOUGHTS_RUNTIME_READINESS_DELAY_MS,
 } from './operator-defaults';
+import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -44,6 +46,14 @@ describe('thoughts operator defaults', () => {
       '/api/panel/operator-defaults?include=values',
       expect.objectContaining({ cache: 'no-store' }),
     );
+  });
+
+  it('keeps initial-load fallback but rejects a failed fresh turn refresh', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })));
+    invalidateOperatorDefaultsValuesSnapshot();
+
+    await expect(fetchFreshThoughtsOperatorDefaults()).rejects.toThrow('Failed to load operator defaults.');
+    await expect(fetchThoughtsOperatorDefaults()).resolves.toEqual(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
   });
 
   it('defers the full readiness probe until after first paint', async () => {

@@ -73,6 +73,7 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
     expect(events).toEqual([
+      { type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' },
       { type: 'text', text: 'Hel' },
       { type: 'text', text: 'lo' },
       { type: 'done', sessionId: expect.any(String), cost: 0 },
@@ -98,12 +99,13 @@ describe('o8 backend event mapping', () => {
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
-    expect(events[0]).toEqual({ type: 'text', text: 'partial' });
-    expect(events[1]).toEqual({ type: 'error', error: 'model exploded' });
+    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' });
+    expect(events[1]).toEqual({ type: 'text', text: 'partial' });
+    expect(events[2]).toEqual({ type: 'error', error: 'model exploded' });
     expect(events[events.length - 1].type).toBe('done');
   });
 
-  it('emits only done on a user abort (a stop is not an error)', async () => {
+  it('emits the receipt and done on a user abort (a stop is not an error)', async () => {
     const controller = new AbortController();
     controller.abort();
     mockFetch.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }));
@@ -111,7 +113,10 @@ describe('o8 backend event mapping', () => {
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', signal: controller.signal });
 
-    expect(events).toEqual([{ type: 'done', sessionId: expect.any(String), cost: 0 }]);
+    expect(events).toEqual([
+      { type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' },
+      { type: 'done', sessionId: expect.any(String), cost: 0 },
+    ]);
   });
 
   it('surfaces a non-200 proxy response (JSON error body) as an error line, then done', async () => {
@@ -126,8 +131,8 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(events[0].type).toBe('error');
-    expect((events[0] as { error: string }).error).toContain('Gemini quota exhausted');
+    expect(events[1].type).toBe('error');
+    expect((events[1] as { error: string }).error).toContain('Gemini quota exhausted');
     expect(events[events.length - 1].type).toBe('done');
   });
 
@@ -285,8 +290,8 @@ describe('o8 backend inactivity watchdog (wedged-turn class)', () => {
     await vi.advanceTimersByTimeAsync(300_000);
     await turn;
 
-    expect(events[0].type).toBe('error');
-    expect((events[0] as { error: string }).error).toMatch(/went silent/);
+    expect(events[1].type).toBe('error');
+    expect((events[1] as { error: string }).error).toMatch(/went silent/);
     expect(events[events.length - 1].type).toBe('done');
   });
 
@@ -303,8 +308,8 @@ describe('o8 backend inactivity watchdog (wedged-turn class)', () => {
     await vi.advanceTimersByTimeAsync(300_000);
     await turn;
 
-    expect(events[0].type).toBe('error');
-    expect((events[0] as { error: string }).error).toMatch(/went silent/);
+    expect(events[1].type).toBe('error');
+    expect((events[1] as { error: string }).error).toMatch(/went silent/);
     expect(events[events.length - 1].type).toBe('done');
   });
 

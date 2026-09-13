@@ -1,6 +1,7 @@
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { createBackendRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
+import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import { resolveOrchestratorExecutionMode } from './orchestrator-backends/orchestration-mode';
 import type { OrchestratorBackend, OrchestratorBackendId, OrchestratorTurnOptions } from './orchestrator-backends/types';
 
@@ -16,6 +17,16 @@ export function resolveOrchestratorExecutionBackendId(
 /** Solo must stay on the selected runtime rather than silently changing houses. */
 export function orchestratorModeAllowsBackendFallback(rawOrchestrationMode: unknown): boolean {
   return resolveOrchestratorExecutionMode(rawOrchestrationMode) !== 'single';
+}
+
+export function resolveTurnReceiptMode(
+  backendId: OrchestratorBackendId,
+  rawOrchestrationMode: unknown,
+): ComposerWireMode {
+  const executionMode = resolveOrchestratorExecutionMode(rawOrchestrationMode);
+  if (executionMode === 'single') return 'solo';
+  if (executionMode === 'fusion') return 'fusion';
+  return backendId === 'collide' ? 'moa' : 'multitask';
 }
 
 /** Backend invocation seam used by ws-server's orchestrator-send handler. */

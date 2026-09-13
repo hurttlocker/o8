@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   DEFAULT_STALE_FIXTURE_AGE_MS,
   fixtureSweepSummary,
+  pathIsWithinRealTemporaryRoot,
   removeFixtureDirectoryIfUnmountedSync,
   removeOwnedTestRunRootSync,
   sweepStaleTestFixtures,
@@ -67,20 +68,43 @@ export default async function setupTestRunDataRoot(): Promise<() => Promise<void
   };
   const configuredParent = process.env.CORTEX_IDE_DATA_DIR?.trim();
   const sweepOverride = process.env.O8_TEST_FIXTURE_SWEEP_PARENT?.trim();
-  const sweepParents = sweepOverride
-    ? [path.resolve(sweepOverride)]
-    : [...new Set([os.tmpdir(), configuredParent ? path.resolve(configuredParent) : os.tmpdir()])];
+  const defaultParent = path.resolve(os.tmpdir());
+  const resolvedConfiguredParent = configuredParent ? path.resolve(configuredParent) : null;
+  const configuredParentIsSafe = resolvedConfiguredParent !== null
+    && await pathIsWithinRealTemporaryRoot(resolvedConfiguredParent);
+  // Packet connection settings can name live application storage. Isolate
+  // that inherited path before cleanup, without sweeping shared temp siblings.
+  let isolatedRunRoot: string | null = null;
+  if (resolvedConfiguredParent && !configuredParentIsSafe && !sweepOverride) {
+    if (!await pathIsWithinRealTemporaryRoot(defaultParent)) {
+      throw new Error(`Test temporary parent is outside a real temporary root: ${defaultParent}`);
+    }
+    isolatedRunRoot = await createTestRunDataRoot(defaultParent);
+  }
+  const sweepParents = isolatedRunRoot
+    ? [isolatedRunRoot]
+    : sweepOverride
+      ? [path.resolve(sweepOverride)]
+      : [...new Set([defaultParent, ...(configuredParentIsSafe ? [resolvedConfiguredParent!] : [])])];
   const thresholdValue = Number(process.env.O8_TEST_FIXTURE_MAX_AGE_MS);
   const thresholdMs = Number.isFinite(thresholdValue) && thresholdValue >= 0
     ? thresholdValue
     : DEFAULT_STALE_FIXTURE_AGE_MS;
-  for (const sweepParent of sweepParents) {
-    await mkdir(sweepParent, { recursive: true });
-    const receipt = await sweepStaleTestFixtures(sweepParent, { thresholdMs });
-    console.log(fixtureSweepSummary(receipt));
+  try {
+    for (const sweepParent of sweepParents) {
+      if (!await pathIsWithinRealTemporaryRoot(sweepParent)) {
+        throw new Error(`Fixture sweep parent is outside a real temporary root: ${sweepParent}`);
+      }
+      const receipt = await sweepStaleTestFixtures(sweepParent, { thresholdMs });
+      console.log(fixtureSweepSummary(receipt));
+    }
+  } catch (error) {
+    if (isolatedRunRoot) removeOwnedTestRunRootUnlessRetained(defaultParent, isolatedRunRoot);
+    throw error;
   }
-  const parentDir = configuredParent ? path.resolve(configuredParent) : sweepParents[0]!;
-  const runRoot = await createTestRunDataRoot(parentDir);
+  const parentDir = isolatedRunRoot ? defaultParent
+    : configuredParentIsSafe ? resolvedConfiguredParent! : sweepParents[0]!;
+  const runRoot = isolatedRunRoot ?? await createTestRunDataRoot(parentDir);
   process.env.O8_TEST_RUN_DATA_ROOT = runRoot;
   process.env.TMPDIR = runRoot;
   process.env.TMP = runRoot;

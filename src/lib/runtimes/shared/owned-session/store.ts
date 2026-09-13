@@ -275,6 +275,9 @@ export function createOwnedSessionStore(
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
     }
+    if (session.detachedAt) {
+      throw new Error(`This owned ${adapter.squadShortName} session was detached from its closed packet and cannot be resumed.`);
+    }
 
     const rollbackColdRestore = async () => {
       if (!coldRestored || !session) return;
@@ -412,6 +415,36 @@ export function createOwnedSessionStore(
         ? 'Marked this owned result resolved. It stays visible, but no longer needs active attention unless new evidence appears.'
         : 'Switched this owned result back to keep-watching mode.',
     };
+  }
+
+  function setDetachedSession(surfaceId: string, reason: string | null) {
+    return withSurfaceLock(surfaceId, async () => {
+      const session = await io.findSession(surfaceId);
+      if (!session) {
+        return {
+          updated: false,
+          previouslyDetached: false,
+          note: 'Owned session was not found.',
+        };
+      }
+      const previouslyDetached = Boolean(session.detachedAt);
+      if (reason === null) {
+        delete session.detachedAt;
+        delete session.detachedReason;
+      } else {
+        session.detachedAt = session.detachedAt ?? nowIso();
+        session.detachedReason = reason;
+      }
+      await io.saveSession(session);
+      invalidateFleetCache();
+      return {
+        updated: true,
+        previouslyDetached,
+        note: reason === null
+          ? 'Owned session was restored to active discovery.'
+          : 'Owned session recovery metadata was preserved outside active fleet discovery.',
+      };
+    });
   }
 
   async function getFleetAdditions(options: { fresh?: boolean } = {}): Promise<OwnedFleetAdditions> {
@@ -633,6 +666,7 @@ export function createOwnedSessionStore(
     getFleetAdditions,
     sessionState: (surfaceId) => readOwnedSessionState(root, surfaceId, surfacePrefix),
     archiveSession: io.archiveSession,
+    setDetachedSession,
     sweepOrphanedSessions: fleetComputer.sweepOrphanedSessions,
     getTelemetrySources: reviewTailController.getTelemetrySources,
     getSessionIdentityId,

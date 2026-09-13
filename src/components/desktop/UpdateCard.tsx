@@ -50,6 +50,12 @@ interface UpdateInfo {
   releaseUrl?: string;
 }
 
+interface UpdateCheckReport {
+  outcome: 'never' | 'available' | 'current' | 'failed';
+  checkedAt: string | null;
+  error: string | null;
+}
+
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
 const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 const EXPANDED_KEY = 'o8:update-card:expanded';
@@ -146,8 +152,31 @@ function normalizeUpdateInfo(payload: unknown): UpdateInfo | null {
   };
 }
 
+function updateCheckReport(
+  outcome: UpdateCheckReport['outcome'],
+  error: unknown = null,
+  checkedAt = new Date().toISOString(),
+): UpdateCheckReport {
+  const errorText = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error ?? '');
+  return {
+    outcome,
+    checkedAt: outcome === 'never' ? null : checkedAt,
+    error: outcome === 'failed' ? errorText.trim().slice(0, 1_000) || 'Unknown updater error.' : null,
+  };
+}
+
+function normalizeUpdateCheckReport(payload: unknown): UpdateCheckReport | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const outcome = record.outcome;
+  if (outcome !== 'current' && outcome !== 'failed') return null;
+  const checkedAt = stringFromRecord(record, ['checkedAt', 'checked_at']) ?? new Date().toISOString();
+  return updateCheckReport(outcome, record.error, checkedAt);
+}
+
 export function UpdateCard() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [checkReport, setCheckReport] = useState<UpdateCheckReport>(() => updateCheckReport('never'));
   const [installing, setInstalling] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(() => readDismissedVersion());
   const [expanded, setExpanded] = useState<boolean>(() => readExpanded());
@@ -210,6 +239,7 @@ export function UpdateCard() {
       } catch { /* ignore */ }
       setDismissed(null);
       setUpdate(next);
+      setCheckReport(updateCheckReport('available'));
       setExpanded(true);
     };
     window.addEventListener('o8:update-found', onFound);
@@ -227,7 +257,7 @@ export function UpdateCard() {
   }, []);
 
   const checkForUpdate = useCallback(async () => {
-    if (!isTauri()) return;
+    if (!canUseTauriEvents()) return;
     try {
       const { check } = await import('@tauri-apps/plugin-updater');
       const result = await check();
@@ -237,11 +267,13 @@ export function UpdateCard() {
           notes: result.body ?? undefined,
           date: result.date ?? undefined,
         });
+        setCheckReport(updateCheckReport('available'));
       } else {
         setUpdate(null);
+        setCheckReport(updateCheckReport('current'));
       }
-    } catch {
-      // Update checks are best-effort; next interval retries.
+    } catch (error) {
+      setCheckReport(updateCheckReport('failed', error));
     }
   }, []);
 
@@ -280,12 +312,24 @@ export function UpdateCard() {
       if (cancelled) return;
       availableUnlisten = listen<UpdateInfo>(UPDATE_AVAILABLE_EVENT, (event) => {
         const next = normalizeUpdateInfo(event.payload);
-        if (next) setUpdate(next);
+        if (next) {
+          const payload = event.payload as unknown as Record<string, unknown>;
+          setUpdate(next);
+          setCheckReport(updateCheckReport(
+            'available',
+            null,
+            stringFromRecord(payload, ['checkedAt', 'checked_at']) ?? new Date().toISOString(),
+          ));
+        }
       });
-      clearUnlisten = listen<void>(UPDATE_CLEAR_EVENT, () => {
-        setUpdate(null);
-        setInstalling(false);
-        restartDeferredRef.current = false;
+      clearUnlisten = listen<unknown>(UPDATE_CLEAR_EVENT, (event) => {
+        const nextReport = normalizeUpdateCheckReport(event.payload) ?? updateCheckReport('current');
+        setCheckReport(nextReport);
+        if (nextReport.outcome === 'current') {
+          setUpdate(null);
+          setInstalling(false);
+          restartDeferredRef.current = false;
+        }
       });
       integrityUnlisten = listen<BundleIntegrityStatus>(BUNDLE_SIGNATURE_INVALID_EVENT, (event) => {
         setBundleIntegrity(event.payload);
@@ -306,12 +350,19 @@ export function UpdateCard() {
   }, [checkForUpdate]);
 
   useEffect(() => {
+    if (checkReport.outcome === 'never') return;
     fetch('/api/panel/app/update-state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updatePending: Boolean(update), version: update?.version ?? null }),
+      body: JSON.stringify({
+        updatePending: Boolean(update),
+        version: update?.version ?? null,
+        checkOutcome: checkReport.outcome,
+        checkedAt: checkReport.checkedAt,
+        checkError: checkReport.error,
+      }),
     }).catch(() => { /* route is best-effort state for CLI --if-update-pending */ });
-  }, [update]);
+  }, [checkReport, update]);
 
   // Fetch summary when the card is expanded and we have a version. Cache
   // by version in localStorage so repeated opens are instant.

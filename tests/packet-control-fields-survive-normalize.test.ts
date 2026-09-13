@@ -175,6 +175,7 @@ function fullPacketFixture() {
     }),
     dispatchRuntimePin: 'codex',
     orchestratorThreadId: 'thoughts-123',
+    orchestratorTurnId: 'assistant-456',
     dispatcher: { surface: 'orchestrator', id: 'thoughts-123' },
     launchContext: {
       source: 'mcp',

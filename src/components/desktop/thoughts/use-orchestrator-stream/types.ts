@@ -3,6 +3,7 @@ import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/typ
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
+import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import type { OrchestratorPermissionMode, OrchestratorStreamStatus } from './shared';
 
@@ -26,10 +27,18 @@ export interface OrchestratorSendOptions {
   displayMessage?: string;
   localEntriesAfterUser?: MobileTranscriptEntry[];
   orchestrationMode?: OrchestratorExecutionMode;
+  /** Composer mode captured when Send was pressed, before backend overrides. */
+  pickedMode?: ComposerWireMode;
   collide?: boolean;
   /** Explicit consent to seed a cold cross-backend continuation. */
   handoffMode?: 'handoff';
   attachments?: Array<{ dataUri: string; name?: string }>;
+  /**
+   * Resolves settings which must be current when this turn is constructed.
+   * The composer uses this for persisted operator defaults, which can change
+   * while a tab remains mounted.
+   */
+  resolveTurnOptions?: (signal: AbortSignal) => Promise<Pick<OrchestratorSendOptions, 'backend' | 'model'>>;
 }
 
 export interface OrchestratorStreamOptions {

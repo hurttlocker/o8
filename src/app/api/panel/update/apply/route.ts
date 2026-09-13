@@ -59,10 +59,25 @@ export async function POST(request: Request) {
   const force = body.force === true;
   const state = getAppUpdateState();
   if (!state.updatePending) {
+    if (state.check.outcome === 'current') {
+      return response({
+        ok: true,
+        requested: false,
+        result: { code: 'already_current' },
+        message: 'The last updater check completed and this install is current.',
+        state,
+      });
+    }
+    const errorCode = state.check.errorCode ?? 'update_state_inconsistent';
+    const message = state.check.outcome === 'failed'
+      ? `The last updater check failed${state.check.error ? `: ${state.check.error}` : '.'}`
+      : force
+        ? 'Force cannot apply an update because no updater check has completed since the app server started.'
+        : state.check.error ?? 'No updater check has completed since the app server started.';
     return response({
       ok: false,
       requested: false,
-      error: { code: 'no_update_available', message: 'No staged or available update is known to the app.' },
+      error: { code: errorCode, message },
       state,
     }, 409);
   }

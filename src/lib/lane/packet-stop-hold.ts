@@ -94,11 +94,15 @@ function acceptedSteerRunState(packetId: string): 'absent' | 'active' | 'closed'
   if (lane.status !== 'running') return 'closed';
   // Query only lifecycle evidence, not the last N transcript/tool events. A
   // long turn must not lose admission merely because it produced more output.
+  // A DIFFERENT steer attempt's own intent/failure ('steered_packet',
+  // 'steer_failed') is excluded here: a later steer that the runtime refuses
+  // as still-busy appends both, but never supersedes this grant — only a
+  // newer admission ('steer_run_admitted', picked up as `grant` above) or a
+  // terminal lane event actually closes it (#2342).
   const event = getSqlite().prepare(`
     SELECT id FROM lane_events
     WHERE lane_id = ? AND verb IN (
-      'steer_run_admitted', 'steered_packet', 'steer_failed',
-      'runtime_process_exit', 'status_change'
+      'steer_run_admitted', 'runtime_process_exit', 'status_change'
     ) ORDER BY timestamp DESC, rowid DESC LIMIT 1
   `).get(lane.id) as { id: string } | undefined;
   if (event?.id !== grant.id || typeof payload.steerEventId !== 'string') return 'closed';

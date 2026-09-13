@@ -126,6 +126,9 @@ export interface OwnedSessionRecord {
   orphanedAt?: string;
   orphanedReason?: string;
   orphanedCostLine?: string;
+  /** Packet ownership ended without process-exit proof; keep recovery data but hide active discovery. */
+  detachedAt?: string;
+  detachedReason?: string;
 }
 
 export interface OwnedWorkspaceBinding {
@@ -428,6 +431,11 @@ export interface OwnedSessionStore {
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
+    updated: boolean;
+    previouslyDetached: boolean;
+    note: string;
+  }>;
   /** #1292 — archive owned-session dirs not bound to an active lane (orphans) so
    *  discovery can't re-spawn phantom lanes. Skips active/in-flight sessions. */
   sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number>;

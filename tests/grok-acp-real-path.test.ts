@@ -83,7 +83,16 @@ describe('Grok official ACP production runtime seam', () => {
         ownership: 'owned',
       }),
     ]);
-    const { archiveOwnedGrokSession, ownedGrokSessionState } = await import('@/lib/grok/owned');
+    const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
+    const lifecycle = getOwnedSessionLifecycle(sessionKey);
+    await expect(lifecycle?.setDetachedSession?.(sessionKey, 'fixture detached close')).resolves.toMatchObject({
+      updated: true,
+    });
+    await expect(grokRuntime.discoverSessions()).resolves.toEqual([]);
+    const { archiveOwnedGrokSession, ownedGrokSessionState, sweepOrphanedGrokSessions } = await import('@/lib/grok/owned');
+    await expect(sweepOrphanedGrokSessions(new Set(), 0)).resolves.toBe(0);
+    await expect(grokRuntime.resume(sessionKey, 'detached turn')).rejects.toThrow('detached from its closed packet');
+    await expect(lifecycle?.setDetachedSession?.(sessionKey, null)).resolves.toMatchObject({ updated: true });
     await expect(archiveOwnedGrokSession(sessionKey)).resolves.toMatchObject({ archived: true });
     await expect(ownedGrokSessionState(sessionKey)).resolves.toBe('archived');
   }, 30_000);

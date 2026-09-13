@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { formatModelLabel } from '@/lib/format';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import { writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { updateOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
+import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import type { PendingBackendSwitch } from './chat-panel/BackendSwitchChoice';
-import type { OrchestratorBackendSetting, ThoughtsOperatorDefaults } from './operator-defaults';
+import { fetchFreshThoughtsOperatorDefaults, type OrchestratorBackendSetting, type ThoughtsOperatorDefaults } from './operator-defaults';
 
 export function resolveActiveComposerBackend(defaults: Pick<ThoughtsOperatorDefaults, 'orchestratorBackend' | 'inAppOrchestratorEnabled'>): OrchestratorBackendSetting {
   if (defaults.orchestratorBackend !== 'auto') return defaults.orchestratorBackend;
@@ -22,6 +23,26 @@ export function composerBackendTurnOverride(backend: OrchestratorBackendSetting)
   return backend === 'auto' ? undefined : backend;
 }
 
+export async function resolveFreshComposerTurnOptions(input: {
+  repoPath: string | null;
+  backend: OrchestratorBackendSetting;
+  backendSourceRef: MutableRefObject<'default' | 'thread' | 'user'>;
+  setBackend: Dispatch<SetStateAction<OrchestratorBackendSetting>>;
+  setModel: Dispatch<SetStateAction<string>>;
+  setOperatorDefaults: Dispatch<SetStateAction<ThoughtsOperatorDefaults>>;
+}, signal?: AbortSignal) {
+  const defaults = await fetchFreshThoughtsOperatorDefaults(signal);
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const model = readStoredOrchestratorModel(input.repoPath) ?? defaults.orchestratorModel;
+  const backend = input.backendSourceRef.current === 'default'
+    ? resolveActiveComposerBackend(defaults)
+    : input.backend;
+  input.setOperatorDefaults(defaults);
+  input.setModel(model);
+  if (input.backendSourceRef.current === 'default') input.setBackend(backend);
+  return { model, backend: composerBackendTurnOverride(backend) };
+}
+
 export function useBackendSwitchChoice(input: {
   currentModel: string;
   backendSourceRef: MutableRefObject<'default' | 'thread' | 'user'>;
@@ -31,8 +52,9 @@ export function useBackendSwitchChoice(input: {
   setActiveThreadAgent: Dispatch<SetStateAction<string | null>>;
   setActiveThreadBackend: Dispatch<SetStateAction<OrchestratorBackendId | null>>;
   setBackend: Dispatch<SetStateAction<OrchestratorBackendSetting>>;
-  setModel: Dispatch<SetStateAction<string>>;
+  setModel: (model: string) => void;
   setOperatorDefaults: Dispatch<SetStateAction<ThoughtsOperatorDefaults>>;
+  onBeforeApply?: () => void;
 }) {
   const {
     backendSourceRef,
@@ -45,42 +67,55 @@ export function useBackendSwitchChoice(input: {
     setBackend,
     setModel,
     setOperatorDefaults,
+    onBeforeApply,
   } = input;
   const [pending, setPending] = useState<PendingBackendSwitch | null>(null);
+  const applyGenerationRef = useRef(0);
   const handoffModeRef = useRef<'handoff' | null>(null);
   const handoffTargetRef = useRef<OrchestratorBackendId | null>(null);
   const apply = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
+    const applyGeneration = ++applyGenerationRef.current;
+    onBeforeApply?.();
     backendSourceRef.current = 'user';
     setBackend(backend);
     if (model) {
-      setModel(model);
       writeStoredOrchestratorModel(repoPath, model);
+      setModel(model);
     }
     setActiveThreadBackend(composerBackendTurnOverride(backend) ?? null);
     setActiveThreadAgent(null);
-    void fetch('/api/panel/operator-defaults', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orchestratorBackend: backend }),
-    }).then(async (response) => {
+    void updateOperatorDefaultsValues({ orchestratorBackend: backend }).then(async (response) => {
       const payload = await response.json().catch(() => null) as { values?: Partial<ThoughtsOperatorDefaults>; error?: string } | null;
       if (!response.ok) throw new Error(payload?.error || 'Failed to persist orchestrator backend.');
       return payload;
     }).then((payload) => {
+      if (applyGeneration !== applyGenerationRef.current) return;
       if (!payload?.values) return;
       const defaults = { ...operatorDefaults, ...payload.values };
       setOperatorDefaults(defaults);
       setBackend(resolveActiveComposerBackend(defaults));
     }).catch((error) => {
+      if (applyGeneration !== applyGenerationRef.current) return;
       console.log('[thoughts] failed to persist orchestrator backend', error);
+      if (model) {
+        writeStoredOrchestratorModel(repoPath, currentModel);
+        setModel(currentModel);
+      }
       setBackend(resolveActiveComposerBackend(operatorDefaults));
     });
-  }, [backendSourceRef, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
+  }, [backendSourceRef, currentModel, onBeforeApply, operatorDefaults, repoPath, setActiveThreadAgent, setActiveThreadBackend, setBackend, setModel, setOperatorDefaults]);
   const reset = useCallback(() => {
     setPending(null);
     handoffModeRef.current = null;
     handoffTargetRef.current = null;
   }, []);
+  const selectModel = useCallback((model: string) => {
+    applyGenerationRef.current += 1;
+    onBeforeApply?.();
+    reset();
+    writeStoredOrchestratorModel(repoPath, model);
+    setModel(model);
+  }, [onBeforeApply, repoPath, reset, setModel]);
   const request = useCallback((backend: OrchestratorBackendSetting, model?: string) => {
     reset();
     const destination = composerBackendTurnOverride(backend) ?? backend;
@@ -112,5 +147,6 @@ export function useBackendSwitchChoice(input: {
     pending,
     request,
     reset,
-  }), [acceptHandoff, apply, clearPending, observeLatestBackend, pending, request, reset]);
+    selectModel,
+  }), [acceptHandoff, apply, clearPending, observeLatestBackend, pending, request, reset, selectModel]);
 }

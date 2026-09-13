@@ -523,6 +523,7 @@ describe('reset and stop preserve runtime truth', () => {
     const closePromise = closeRoute.POST(post('/api/orchestrator/discard-packet', {
       packetId: current.packetId,
       disposition: 'wontfix',
+      acknowledgeMissingWorktree: true,
       clientMutationId: 'close-outgoing-handoff',
     }));
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -531,14 +532,14 @@ describe('reset and stop preserve runtime truth', () => {
     releaseHandoff();
     const next = await switchPromise;
     const response = await closePromise;
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      ok: false,
-      error: { code: 'kill_unconfirmed' },
+      ok: true,
+      result: { closed: true, note: expect.stringContaining('Kill unconfirmed') },
     });
     expect(readOrchestratorControlPlaneState().missionId).toBe(next.missionId);
     expect(readMissionRegistryEntry(current.missionId, { includeArchived: true })?.mission.packets[0])
-      .toMatchObject({ status: 'blocked', queueState: 'held', blockedReason: 'kill_unconfirmed' });
+      .toMatchObject({ status: 'archived', queueState: 'held', blockedReason: null });
   });
 
   it('serializes distinct retry and reset requests and rejects the queued destructive intent', async () => {
@@ -1486,6 +1487,7 @@ describe('reset and stop preserve runtime truth', () => {
     const closePromise = closeRoute.POST(post('/api/orchestrator/discard-packet', {
       packetId,
       disposition: 'wontfix',
+      acknowledgeMissingWorktree: true,
       clientMutationId: 'close-kill-window',
     }));
     await vi.waitFor(() => expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
@@ -1503,15 +1505,15 @@ describe('reset and stop preserve runtime truth', () => {
     });
     releaseKill();
     const response = await closePromise;
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      ok: false,
-      error: { code: 'kill_unconfirmed' },
+      ok: true,
+      result: { closed: true, note: expect.stringContaining('Kill unconfirmed') },
     });
     expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
-      status: 'blocked',
-      blockedReason: 'kill_unconfirmed',
-      lane: { sessionKey: packet.lane.sessionKey, worktreePath: packet.lane.worktreePath },
+      status: 'archived',
+      blockedReason: null,
+      lane: null,
     });
   });
 

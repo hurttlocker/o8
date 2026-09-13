@@ -184,6 +184,10 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       break;
     }
   }
+  const turnSummaryReceiptEntry = turnSummary
+    ? displayMessages.find((entry) => entry.id === turnSummary.assistantMessageId && entry.receipt)
+      ?? displayMessages.find((entry) => entry.id === turnSummary.firstAssistantMessageId && entry.receipt)
+    : undefined;
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
   const isCompacting = displayWaiting && displayMessages.length > 0 &&
@@ -283,10 +287,16 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
           const summaryAnchorsAfter = turnSummary && !turnSummary.firstAssistantMessageId
             ? msg.id === turnSummary.assistantMessageId
             : false;
+          const belongsToCurrentSummary = Boolean(turnSummary && (
+            msg.id === turnSummary.assistantMessageId
+            || msg.id === turnSummary.firstAssistantMessageId
+          ));
+          const showsPersistedReceipt = msg.role === 'assistant' && Boolean(msg.receipt) && !belongsToCurrentSummary;
           return (
             <Fragment key={msg.id}>
+              {showsPersistedReceipt ? <TurnSummaryCard persistedEntry={msg} /> : null}
               {summaryAnchorsBefore && turnSummary ? (
-                <TurnSummaryCard summary={turnSummary} />
+                <TurnSummaryCard summary={turnSummary} persistedEntry={turnSummaryReceiptEntry} />
               ) : null}
               <DesktopAgentMessage
                 entry={msg}
@@ -296,7 +306,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
                 onRetryDelivery={onRetryDelivery}
               />
               {summaryAnchorsAfter && turnSummary ? (
-                <TurnSummaryCard summary={turnSummary} />
+                <TurnSummaryCard summary={turnSummary} persistedEntry={turnSummaryReceiptEntry} />
               ) : null}
               {renderTaskArtifacts(index)}
               {showChipsHere ? (

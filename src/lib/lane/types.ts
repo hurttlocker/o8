@@ -377,6 +377,9 @@ export type LaneEventVerb =
   // Payload: { surface, reviewer, packetId, reason, attempts, rawText, note }
   | 'review_unavailable'
   | 'second_pass_rearmed'
+  // A durable review row is waiting for a bounded reviewer slot.
+  // Payload: { packetId, reviewId, state, queueDepth, concurrencyLimit }
+  | 'review_queued'
   | 'review_queue_blocked'
   // A claimed review_queue row that never ran a reviewer turn (#1856). The
   // reason is durable so a skipped job can never read as a completed review.

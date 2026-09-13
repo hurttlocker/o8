@@ -24,8 +24,23 @@ process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 const { publishRealtimeMutation } = vi.hoisted(() => ({
   publishRealtimeMutation: vi.fn(async () => {}),
 }));
+const mergeFailure = vi.hoisted(() => ({ reason: null as string | null }));
 
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation }));
+vi.mock('@/lib/lane/worktree-merge-git', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/worktree-merge-git')>();
+  return {
+    ...actual,
+    hasPushRemote: async (...args: Parameters<typeof actual.hasPushRemote>) => {
+      if (mergeFailure.reason) {
+        const reason = mergeFailure.reason;
+        mergeFailure.reason = null;
+        throw new Error(reason);
+      }
+      return actual.hasPushRemote(...args);
+    },
+  };
+});
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -39,11 +54,23 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   })),
 }));
 
+vi.mock('@/lib/worktree/apfs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/apfs')>(),
+  getApfsCowCapability: vi.fn(async () => ({
+    macos: true,
+    apfs: true,
+    sameVolume: true,
+    canCowClone: true,
+  })),
+}));
+
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const laneEventsRoute = await import('@/app/api/lanes/[id]/events/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
-const { recordOrchestratorReview } = await import('@/lib/approvals/store');
-const { createLane } = await import('@/lib/lane/registry');
+const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
@@ -73,7 +100,12 @@ function commitAll(cwd: string, message: string): void {
 
 type LintFixtureMode = 'error' | 'clean' | 'no-config';
 
-async function createFixture(label: string, approved: boolean, lintMode?: LintFixtureMode) {
+async function createFixture(
+  label: string,
+  approved: boolean,
+  lintMode?: LintFixtureMode,
+  isolationPreference: 'git-worktree' | 'apfs-cow-clone' = 'git-worktree',
+) {
   const root = mkdtempSync(join(os.tmpdir(), `o8-merge-checkout-${label}-`));
   const origin = join(root, 'origin.git');
   const repo = join(root, 'operator');
@@ -114,7 +146,7 @@ async function createFixture(label: string, approved: boolean, lintMode?: LintFi
     baseBranch: 'main',
     packetId,
     skipSetup: true,
-    isolationPreference: 'git-worktree',
+    isolationPreference,
   });
   git(worktree.path, ['config', 'user.name', 'o8-test']);
   git(worktree.path, ['config', 'user.email', 'o8@example.test']);
@@ -216,6 +248,15 @@ function mergeRequest(packetId: string): NextRequest {
   });
 }
 
+function laneEventsRequest(laneId: string): NextRequest {
+  return new NextRequest(`http://localhost:3001/api/lanes/${laneId}/events`, {
+    headers: {
+      host: 'localhost:3001',
+      authorization: `Bearer ${getOrCreateWsToken()}`,
+    },
+  });
+}
+
 function reviewStateRequest(packetId: string): NextRequest {
   return new NextRequest(
     `http://localhost:3001/api/orchestrator/review-state?packetId=${encodeURIComponent(packetId)}&spoken=1`,
@@ -251,6 +292,7 @@ beforeAll(async () => {
 afterEach(() => {
   __resetIdempotencyStoreForTests();
   publishRealtimeMutation.mockClear();
+  mergeFailure.reason = null;
 });
 
 afterAll(() => {
@@ -260,6 +302,98 @@ afterAll(() => {
 });
 
 describe('merge checkout coupling through real handlers', () => {
+  it.each(['git-worktree', 'apfs-cow-clone'] as const)(
+    'keeps an approved %s packet mergeable after a dirty checkout blocks the late fast-forward',
+    async (isolationPreference) => {
+      const fixture = await createFixture(
+        `approval-survives-failure-${isolationPreference}`,
+        true,
+        undefined,
+        isolationPreference,
+      );
+      if (isolationPreference === 'apfs-cow-clone') {
+        expect(() => git(fixture.repo, [
+          'cat-file', '-e', `${fixture.reviewedHeadSha}^{commit}`,
+        ])).toThrow();
+      }
+      writeFileSync(join(fixture.repo, 'base-advance.txt'), 'new base work\n');
+      commitAll(fixture.repo, 'advance base after review');
+      git(fixture.repo, ['remote', 'remove', 'origin']);
+      writeFileSync(join(fixture.repo, 'file.txt'), 'base\noperator work\n');
+      setLaneStatus(fixture.lane.id, 'reviewing', 'system', 'review_ready');
+
+      const blockedResponse = await mergeRoute.POST(mergeRequest(fixture.packetId));
+      const blockedPayload = await blockedResponse.json();
+      const reviewApproval = listApprovalsForContext({
+        packetId: fixture.packetId,
+        laneId: fixture.lane.id,
+        sessionKey: fixture.lane.sessionKey ?? undefined,
+      }).find((approval) => approval.toolName === 'orchestrator_review');
+
+      expect(blockedResponse.status).toBe(200);
+      expect(blockedPayload).toMatchObject({ ok: true, result: { merged: false } });
+      expect(reviewApproval).toMatchObject({
+        status: 'approved',
+        args: { approved: true, reviewedHeadSha: fixture.reviewedHeadSha },
+      });
+      expect(await assessDurableApprovedReview(fixture.lane)).toMatchObject({ approved: true });
+      expect(git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+
+      writeFileSync(join(fixture.repo, 'file.txt'), 'base\n');
+      expect(git(fixture.repo, ['status', '--porcelain'])).toBe('');
+
+      const retryResponse = await mergeRoute.POST(mergeRequest(fixture.packetId));
+      const retryPayload = await retryResponse.json();
+
+      expect(retryResponse.status).toBe(200);
+      expect(retryPayload).toMatchObject({ ok: true, result: { merged: true } });
+      expect(git(fixture.repo, ['show', 'refs/heads/main:file.txt'])).toBe('base\nworker');
+    }, 60_000,
+  );
+
+  it('persists an unexpected merge failure reason and correlated server log', async () => {
+    const fixture = await createFixture('merge-error-reason', true);
+    const failureReason = 'synthetic late merge failure';
+    setLaneStatus(fixture.lane.id, 'reviewing', 'system', 'review_ready');
+    mergeFailure.reason = failureReason;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const mergeResponse = await mergeRoute.POST(mergeRequest(fixture.packetId));
+      const mergePayload = await mergeResponse.json();
+      const eventsResponse = await laneEventsRoute.GET(
+        laneEventsRequest(fixture.lane.id),
+        { params: Promise.resolve({ id: fixture.lane.id }) },
+      );
+      const eventsPayload = await eventsResponse.json();
+      const mergeError = eventsPayload.events.find((event: {
+        laneId?: string;
+        verb?: string;
+        payload?: Record<string, unknown>;
+      }) => event.laneId === fixture.lane.id
+        && event.verb === 'status_change'
+        && event.payload?.eventLabel === 'merge_error');
+
+      expect(mergeResponse.status).toBe(200);
+      expect(mergePayload).toMatchObject({ ok: true, result: { merged: false } });
+      expect(eventsResponse.status).toBe(200);
+      expect(mergeError?.payload).toMatchObject({
+        status: 'reviewing',
+        eventLabel: 'merge_error',
+        reason: failureReason,
+      });
+      expect(getLane(fixture.lane.id)).toMatchObject({
+        status: 'reviewing',
+        lastEventLabel: 'merge_error',
+      });
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(
+        `[lane-merge] Merge failed for lane ${fixture.lane.id} (packet ${fixture.packetId}):`,
+      ));
+    } finally {
+      consoleError.mockRestore();
+    }
+  }, 30_000);
+
   it('refuses lint errors and reports the changed-file diagnostic through preview and approve_and_merge', async () => {
     const fixture = await createFixture('lint-error', true, 'error');
     const baseHead = git(fixture.repo, ['rev-parse', 'refs/heads/main']);

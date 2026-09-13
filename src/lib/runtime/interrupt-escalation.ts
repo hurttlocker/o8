@@ -3,7 +3,11 @@ import { promisify } from 'node:util';
 
 import { isBridgeSessionAlive, signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
-import { commandLineMatchesOwnedRun, isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/helpers';
+import {
+  classifyOwnedRunCommandLine,
+  isPidAlive,
+  pidCommandLine,
+} from '@/lib/runtimes/shared/owned-session/helpers';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 import { withOwnedStopOutcome } from '@/lib/runtimes/shared/owned-session/stop-outcome';
 import {
@@ -571,8 +575,19 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
     : false;
   if (activeRun.pid && !bridgeAlive) {
     const expectedCommand = activeRun.commandIdentity ?? commandLabel;
+    const pidAlive = isPidAlive(activeRun.pid);
+    const commandLine = surfaceId.startsWith('opencode-owned:')
+      || process.platform === 'win32'
+      || !pidAlive
+      ? await pidCommandLine(activeRun.pid)
+      : null;
+    const commandClassification = classifyOwnedRunCommandLine(
+      commandLine,
+      activeRun.commandIdentity,
+      commandLabel,
+    );
     let identityMatches: boolean;
-    if (process.platform !== 'win32' && isPidAlive(activeRun.pid)) {
+    if (process.platform !== 'win32' && pidAlive) {
       // A launcher can exec the runtime without changing PID. The persisted
       // run marker survives that transition; a binary name does not. Require
       // both the exact PID's marker and its recorded group before signaling.
@@ -583,14 +598,14 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
       const group = claim?.state === 'match'
         ? await resolveSpawnedProcessGroupId(activeRun.pid)
         : undefined;
-      identityMatches = claim?.state === 'match'
+      identityMatches = commandClassification !== 'resident-service'
+        && claim?.state === 'match'
         && group !== undefined
         && group === (activeRun.processGroupId ?? activeRun.pid);
     } else {
-      const commandLine = await pidCommandLine(activeRun.pid);
       identityMatches = commandLine
-        ? commandLineMatchesOwnedRun(commandLine, activeRun.commandIdentity, commandLabel)
-        : !isPidAlive(activeRun.pid);
+        ? commandClassification === 'owned-run'
+        : !pidAlive;
     }
     if (!identityMatches) {
       return {
@@ -600,7 +615,9 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
         steps: [],
         pid: activeRun.pid,
         tmuxSession: activeRun.tmuxSession,
-        note: `Stored pid ${activeRun.pid} could not be verified as the owned ${expectedCommand} run, so its process tree was not signaled or confirmed stopped. Legacy runs require an owner-verified stop before retry.`,
+        note: commandClassification === 'resident-service'
+          ? 'The stored pid belongs to the resident service, not the packet worker. The service was not signaled, and worker exit remains unconfirmed.'
+          : `Stored pid ${activeRun.pid} could not be verified as the owned ${expectedCommand} run, so its process tree was not signaled or confirmed stopped. Legacy runs require an owner-verified stop before retry.`,
       };
     }
   }

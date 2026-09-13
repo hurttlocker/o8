@@ -16,6 +16,14 @@ import { registerComposerCenter } from '../../composer-center-registry';
 import { PromptStashRow } from '../PromptStashRow';
 import { stashPrompt, type PromptStashContext } from '@/lib/orchestrator/prompt-stash';
 import { OPEN_PROMPT_LIBRARY_EVENT, SAVE_PROMPT_LIBRARY_EVENT } from '@/lib/prompt-library/client';
+import {
+  cycleComposerSelectorMode,
+  isComposerEffortShortcut,
+  readComposerSelectorV1Flag,
+  resolveEffectiveComposerLeadModelId,
+  stepComposerEffort,
+} from '../composer-selector/state';
+import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
 
 interface ComposerAreaProps {
   activeComposer?: boolean;
@@ -41,19 +49,17 @@ interface ComposerAreaProps {
   modelLabel: string;
   /** Raw orchestrator model id — only meaningful in orchestrator mode. */
   modelId?: string;
+  /** Restore persisted model state without applying user-pick side effects. */
+  onModelRestore?: (model: string) => void;
   /** Orchestrator-mode model switching from the composer chip. */
   onModelChange?: (model: string) => void;
   activeBackend?: OrchestratorBackendSetting;
   onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   effort: ThinkingEffort;
+  operatorDefaultEffort?: ThinkingEffort;
+  codexDefaultDispatchModel?: string;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;
-  /** UltraCode / swarm tier — surfaced in the thinking dropdown. */
-  swarmEnabled?: boolean;
-  onSetSwarm?: (enabled: boolean) => void;
-  /** Collide / MoA tier — icon chip sibling to the permission toggle. */
-  collideEnabled?: boolean;
-  onSetCollide?: (enabled: boolean) => void;
   /** Clarify-first (#1489) — per-send interview-before-dispatch toggle. */
   /** Session rules (#1329) — forwarded to InputButtons; undefined hides the chip. */
   sessionRulesThreadId?: string | null;
@@ -71,6 +77,7 @@ interface ComposerAreaProps {
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   composerMode?: ComposerMode;
   onComposerModeChange?: (mode: ComposerMode) => void;
+  composerModeStorageId?: string;
   repoPath?: string | null;
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
@@ -105,16 +112,15 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSlashCommand,
   modelLabel,
   modelId,
+  onModelRestore,
   onModelChange,
   activeBackend,
   onBackendChange,
   effort,
+  operatorDefaultEffort = effort,
+  codexDefaultDispatchModel,
   onEffortChange,
   adaptiveEnabled,
-  swarmEnabled,
-  onSetSwarm,
-  collideEnabled,
-  onSetCollide,
   sessionRulesThreadId,
   repoLabel,
   displayMessagesCount,
@@ -130,6 +136,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onUploadDiskFiles,
   composerMode,
   onComposerModeChange,
+  composerModeStorageId,
   repoPath,
   workspaceTargets,
   selectedRepoPath,
@@ -144,6 +151,29 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
+  const [composerSelectorV1Enabled, setComposerSelectorV1Enabled] = useState(true);
+  useEffect(() => {
+    setComposerSelectorV1Enabled(readComposerSelectorV1Flag());
+  }, []);
+  const selectorModelId = resolveEffectiveComposerLeadModelId(activeBackend, modelId, codexDefaultDispatchModel);
+  const selectorControls = useComposerSelectorState({
+    enabled: isOrchestratorMode,
+    mode: composerMode,
+    modeStorageId: composerModeStorageId,
+    modelId: selectorModelId,
+    modelLabel,
+    backend: activeBackend,
+    effort,
+    operatorDefaultEffort,
+    adaptiveEnabled,
+    threadId: sessionRulesThreadId ?? null,
+    repoPath,
+    onModeChange: onComposerModeChange,
+    onModelRestore,
+    onModelChange,
+    onBackendChange,
+    onEffortChange,
+  });
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -530,7 +560,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               ))}
             </div>
           ) : null}
-
           <textarea
             ref={inputRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
@@ -560,6 +589,37 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 if (!entry) return;
                 updateInput('');
                 event.currentTarget.style.height = 'auto';
+                return;
+              }
+              if (
+                composerSelectorV1Enabled
+                && composerMode
+                && onComposerModeChange
+                && event.key === 'Tab'
+                && event.shiftKey
+                && !event.altKey
+                && !event.metaKey
+                && !event.ctrlKey
+                && slashSuggestions.length === 0
+                && document.activeElement === event.currentTarget
+              ) {
+                event.preventDefault();
+                selectorControls.onModeChange(cycleComposerSelectorMode(selectorControls.state.mode));
+                return;
+              }
+              if (
+                composerSelectorV1Enabled
+                && selectorModelId
+                && activeBackend
+                && isComposerEffortShortcut(event.nativeEvent)
+                && document.activeElement === event.currentTarget
+              ) {
+                event.preventDefault();
+                selectorControls.onEffortChange(stepComposerEffort(
+                  selectorControls.state.effort,
+                  selectorControls.state.effortOptions,
+                  event.shiftKey ? -1 : 1,
+                ));
                 return;
               }
               if (slashSuggestions.length > 0) {
@@ -675,17 +735,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onUndoEnhance={onUndoEnhance}
             onSubmit={onSubmit}
             modelLabel={modelLabel}
-            modelId={isOrchestratorMode ? modelId : undefined}
-            onModelChange={isOrchestratorMode ? onModelChange : undefined}
+            modelId={isOrchestratorMode ? selectorModelId : undefined}
+            onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
             activeBackend={isOrchestratorMode ? activeBackend : undefined}
-            onBackendChange={isOrchestratorMode ? onBackendChange : undefined}
-            effort={effort}
-            onEffortChange={onEffortChange}
+            onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
+            effort={selectorControls.state.effort}
+            onEffortChange={selectorControls.onEffortChange}
             adaptiveEnabled={adaptiveEnabled}
-            swarmEnabled={isOrchestratorMode ? swarmEnabled : false}
-            onSetSwarm={isOrchestratorMode ? onSetSwarm : undefined}
-            collideEnabled={isOrchestratorMode ? collideEnabled : false}
-            onSetCollide={isOrchestratorMode ? onSetCollide : undefined}
             sessionRulesThreadId={sessionRulesThreadId}
             repoLabel={showReasoningControls ? repoLabel : null}
             displayMessagesCount={displayMessagesCount}
@@ -693,7 +749,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onStop={isOrchestratorMode ? onStop : undefined}
             onUploadDiskFiles={onUploadDiskFiles}
             composerMode={composerMode}
-            onComposerModeChange={onComposerModeChange}
+            onComposerModeChange={selectorControls.onModeChange}
+            composerSelectorController={selectorControls}
             onFileReferenceSelect={handleFileReferenceSelect}
             repoPath={repoPath}
             workspaceTargets={workspaceTargets}
@@ -711,6 +768,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 detail: { body, repoPath: repoPath ?? null },
               }));
             } : undefined}
+            composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
+            onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
           />
         </div>
       </div>

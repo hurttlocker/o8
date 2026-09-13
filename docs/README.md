@@ -75,6 +75,7 @@ For maintainers who build, verify, release, recover, or harden o8.
 | [Crash survival](operations/daemon-crash-survival.md) | How worker processes and transcripts recover after app or server failure. |
 | [Project hardening](operations/project-hardening.md) | The multi-repo project contract, retrieval scope, locks, and expected invariants. |
 | [Substrate evaluation gate](operations/substrate-eval-gate.md) | The thresholds and sustainment checks for memory and retrieval quality. |
+| [Governed task evaluation](operations/governed-task-evaluation.md) | The sealed paired protocol for final task outcomes, operator effort, recovery evidence, and overhead. |
 | [Dependency cache retention](operations/dependency-cache-retention.md) | Download-cache bounds, active-installer protection, legacy preservation, and maintenance receipts. |
 
 Questions or problems? [Open an issue](https://github.com/hurttlocker/o8/issues) — the bug template asks for the details that make reports actionable.

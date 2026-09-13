@@ -556,16 +556,13 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       reviewedSnapshotSha = await readHeadSha(worktreePath);
     }
 
-    let mergeWorktreePath = worktreePath;
-    if (spokenEvidence.present) {
-      const integration = await createDetachedIntegrationWorktree({
-        repoPath: lane.repoPath,
-        sourceWorktreePath: worktreePath,
-        sourceSha: reviewedSnapshotSha,
-      });
-      mergeWorktreePath = integration.path;
-      cleanupIntegrationWorktree = integration.cleanup;
-    }
+    const integration = await createDetachedIntegrationWorktree({
+      repoPath: lane.repoPath,
+      sourceWorktreePath: worktreePath,
+      sourceSha: reviewedSnapshotSha,
+    });
+    const mergeWorktreePath = integration.path;
+    cleanupIntegrationWorktree = integration.cleanup;
 
     const rebaseStrategy: WorktreeRebaseStrategy | undefined = command.strategy === 'ours' || command.strategy === 'theirs'
       ? command.strategy
@@ -627,7 +624,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     if (publicationGovernanceDrift) return publicationGovernanceDrift;
     const integrationRef = mergeRefForLane(command.laneId);
     let mergeCandidateSha = rebasedSha;
-    let mergedEquivalentHeadSha = spokenEvidence.present ? reviewedSnapshotSha : rebasedSha;
+    const mergedEquivalentHeadSha = reviewedSnapshotSha;
     let expectedRemoteBaseSha: string | undefined;
     const originPushAvailable = await hasPushRemote(lane.repoPath);
     try {
@@ -652,7 +649,6 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
 
       const integrationSha = (await git(lane.repoPath, ['rev-parse', integrationRef], { timeout: 5000 })).stdout.trim();
       mergeCandidateSha = integrationSha;
-      if (!spokenEvidence.present) mergedEquivalentHeadSha = integrationSha;
       if (originPushAvailable && integrationSha !== rebasedSha) {
         await pushWorkerBranchLeaseBestEffort(worktreePath, actualBranch, integrationSha, rebasedSha);
       }
@@ -774,8 +770,10 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       blockers: [],
     };
   } catch (error) {
-    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
-    return { ok: false, laneId: command.laneId, note: gitErrorMessage(error) };
+    const reason = gitErrorMessage(error);
+    console.error(`[lane-merge] Merge failed for lane ${lane.id} (packet ${lane.packetId ?? 'unbound'}): ${reason}`);
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error', { reason });
+    return { ok: false, laneId: command.laneId, note: reason };
   } finally {
     await cleanupIntegrationWorktree?.();
   }

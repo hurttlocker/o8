@@ -57,6 +57,7 @@ export interface ThoughtsHistoryListResponse {
 
 export interface ThoughtsHistoryResponse {
   messages?: ThoughtsHistoryMessage[];
+  pendingTurnWorkers?: import('@/lib/mobile/types').MobilePendingTurnWorkers;
   planText?: string | null;
   backend?: OrchestratorBackendId | null;
   agent?: string | null;

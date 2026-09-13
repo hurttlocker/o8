@@ -242,6 +242,8 @@ export interface CodexAutoReviewRetryInput {
   /** The exact review prompt to re-send with the stricter verdict contract. */
   reviewPrompt: string;
   threadId: string;
+  /** Bounded reviewer pool identity used by the backend session registry. */
+  sessionThreadId?: string;
   /** Test seams — mirror runReviewerTurnWithQuotaFallback's backend overrides. */
   initialBackend?: OrchestratorBackend;
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
@@ -257,6 +259,7 @@ async function retryReviewTurnForVerdict(
       laneId: lane.id,
       repoPath: lane.repoPath,
       threadId: retry.threadId,
+      sessionThreadId: retry.sessionThreadId,
       surface: 'auto-review',
       prompt: buildStrictCodexAutoReviewRetryPrompt(retry.reviewPrompt),
       ...(retry.initialBackend ? { initialBackend: retry.initialBackend } : {}),

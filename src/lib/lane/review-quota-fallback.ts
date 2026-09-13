@@ -53,6 +53,7 @@ async function runAttempt(input: {
   backend: OrchestratorBackend;
   repoPath: string;
   threadId: string;
+  sessionThreadId?: string;
   laneId: string;
   surface: string;
   prompt: string;
@@ -61,7 +62,8 @@ async function runAttempt(input: {
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
-  const session = input.backend.ensureSession(input.repoPath, undefined, input.threadId);
+  const sessionThreadId = input.sessionThreadId ?? input.threadId;
+  const session = input.backend.ensureSession(input.repoPath, undefined, sessionThreadId);
   if (session.status === 'busy') {
     return {
       text: '',
@@ -104,7 +106,7 @@ async function runAttempt(input: {
       }
       input.onEvent?.(input.backend, event);
     }, {
-      threadId: input.threadId,
+      threadId: sessionThreadId,
       ...(input.model ? { model: input.model } : {}),
       signal: turnController.signal,
     });
@@ -143,6 +145,8 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   laneId: string;
   repoPath: string;
   threadId: string;
+  /** Backend session pool identity; audit events keep the attempt-specific threadId. */
+  sessionThreadId?: string;
   surface: 'auto-review' | 'merge-gate-review' | 'packet-explainer' | 'buyin-doc';
   prompt: string | ((backend: OrchestratorBackendId) => string);
   /** HEAD this turn's prompt and diff describe. */
@@ -209,6 +213,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     surface: input.surface,
     repoPath: input.repoPath,
     threadId: input.threadId,
+    sessionThreadId: input.sessionThreadId,
     prompt: promptFor(initialBackend.id),
     expectedHeadSha: input.expectedHeadSha,
     onEvent: input.onEvent,
@@ -289,6 +294,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     surface: input.surface,
     repoPath: input.repoPath,
     threadId: input.threadId,
+    sessionThreadId: input.sessionThreadId,
     prompt: promptFor(fallbackBackend.id),
     expectedHeadSha: input.expectedHeadSha,
     model: decision.toModel,

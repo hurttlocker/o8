@@ -286,14 +286,16 @@ export function isPidAlive(pid?: number) {
   }
 }
 
-export function commandLineMatchesOwnedRun(
+export type OwnedRunCommandLineClassification = 'owned-run' | 'resident-service' | 'mismatch';
+
+export function classifyOwnedRunCommandLine(
   commandLine: string | null,
   commandIdentity: string | undefined,
   fallbackBinaryName: string,
   platform: NodeJS.Platform = process.platform,
-): boolean {
+): OwnedRunCommandLineClassification {
   const identity = commandIdentity?.trim() || fallbackBinaryName;
-  if (!commandLine) return false;
+  if (!commandLine) return 'mismatch';
   const normalize = (value: string) => platform === 'win32' ? value.toLowerCase() : value;
   const normalizedIdentity = normalize(identity);
   const tokens = commandLine.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
@@ -302,20 +304,56 @@ export function commandLineMatchesOwnedRun(
   // Only that executable position is authority, never a later argv mention.
   if (platform === 'win32' && path.win32.basename(unquote(tokens[0] ?? '')).toLowerCase() === 'cmd.exe'
     && tokens[1]?.toLowerCase() === '/d' && tokens[2]?.toLowerCase() === '/c') {
-    return commandLineMatchesOwnedRun(tokens.slice(3).join(' '), commandIdentity, fallbackBinaryName, platform);
+    return classifyOwnedRunCommandLine(tokens.slice(3).join(' '), commandIdentity, fallbackBinaryName, platform);
   }
   const identityIsPath = identity.includes('/') || identity.includes('\\');
+  let matches = false;
+  let args: string[] = [];
   if (identityIsPath) {
     const normalizedCommandLine = normalize(commandLine.trimStart());
-    return [normalizedIdentity, `"${normalizedIdentity}"`, `'${normalizedIdentity}'`].some((prefix) => (
-      normalizedCommandLine.startsWith(prefix)
-      && (!normalizedCommandLine[prefix.length] || /\s/.test(normalizedCommandLine[prefix.length]!))
+    const prefix = [normalizedIdentity, `"${normalizedIdentity}"`, `'${normalizedIdentity}'`].find((candidate) => (
+      normalizedCommandLine.startsWith(candidate)
+      && (!normalizedCommandLine[candidate.length] || /\s/.test(normalizedCommandLine[candidate.length]!))
     ));
+    matches = Boolean(prefix);
+    args = prefix
+      ? normalizedCommandLine.slice(prefix.length).trim().match(/"[^"]*"|'[^']*'|\S+/g) ?? []
+      : [];
+  } else {
+    const token = normalize(unquote(tokens[0] ?? ''));
+    const basename = platform === 'win32' ? path.win32.basename(token) : path.basename(token);
+    matches = basename === normalizedIdentity || (platform === 'win32' && !path.win32.extname(identity)
+      && ['.cmd', '.exe', '.com'].some((extension) => basename === `${normalizedIdentity}${extension}`));
+    args = tokens.slice(1);
   }
-  const token = normalize(unquote(tokens[0] ?? ''));
-  const basename = platform === 'win32' ? path.win32.basename(token) : path.basename(token);
-  return basename === normalizedIdentity || (platform === 'win32' && !path.win32.extname(identity)
-    && ['.cmd', '.exe', '.com'].some((extension) => basename === `${normalizedIdentity}${extension}`));
+  if (!matches) return 'mismatch';
+  const normalizedArgs = args.map((token) => normalize(unquote(token)));
+  const identityBasename = platform === 'win32'
+    ? path.win32.basename(normalizedIdentity)
+    : path.basename(normalizedIdentity);
+  const residentServiceIdentity = platform === 'win32'
+    ? identityBasename.replace(/\.(?:cmd|exe|com)$/i, '')
+    : identityBasename;
+  if (residentServiceIdentity === 'opencode2'
+    && normalizedArgs[0] === 'serve'
+    && normalizedArgs.includes('--service')) {
+    return 'resident-service';
+  }
+  return 'owned-run';
+}
+
+export function commandLineMatchesOwnedRun(
+  commandLine: string | null,
+  commandIdentity: string | undefined,
+  fallbackBinaryName: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return classifyOwnedRunCommandLine(
+    commandLine,
+    commandIdentity,
+    fallbackBinaryName,
+    platform,
+  ) === 'owned-run';
 }
 
 /** POSIX run ownership survives wrapper exec; an argv mention does not prove ownership. */

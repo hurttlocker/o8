@@ -24,7 +24,6 @@ import {
   reportTask,
 } from '@/lib/tasks/actions';
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
-import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import {
@@ -42,7 +41,6 @@ import {
   requiredString,
   textResult,
 } from './shared';
-import type { WorkerIntent } from '@/lib/orchestrator/types';
 import {
   findMissionAttentionPacket,
   missionPacketSignature,
@@ -51,6 +49,7 @@ import {
 import { parseMissionCandidateMode, parseTaskContractSetting, QUALITY_SEARCH_INPUT_SCHEMA, TASK_CONTRACT_SETTING_SCHEMA } from './quality-search-input';
 import { MISSION_WORKER_PIN_PROPERTIES, parseMissionWorkerPinInput, parseWorkerProvider, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
+import { parseExistingBranchPolicy, parseWorkerIntent } from './mission-input';
 export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'create_mission',
@@ -130,6 +129,10 @@ export const MISSION_TOOLS: McpTool[] = [
         orchestratorThreadId: {
           type: 'string',
           description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
+        },
+        orchestratorTurnId: {
+          type: 'string',
+          description: 'Exact assistant transcript message id for the current sent turn. Pass it with orchestratorThreadId so successful worker launches append to that turn receipt.',
         },
         parentWorkspaceId: { type: 'string', description: 'Optional durable workspace placement for the worker split.' },
         caller: { type: 'string', description: 'Optional short label for the outside agent or terminal that started this work. The o8 app shows it on the worker pane.' },
@@ -770,28 +773,6 @@ export const MISSION_TOOLS: McpTool[] = [
   },
 ];
 
-function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (value === 'auto' || value === 'reset' || value === 'continue' || value === 'error') {
-    return value;
-  }
-  throw new Error('existingBranchPolicy must be one of: auto, reset, continue, error.');
-}
-
-function parseWorkerIntent(value: unknown): WorkerIntent | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (
-    value === 'light_worker'
-    || value === 'heavy_worker'
-    || value === 'reviewer'
-    || value === 'diagnostic'
-    || value === 'orchestrator'
-  ) {
-    return value;
-  }
-  throw new Error('workerIntent must be one of: light_worker, heavy_worker, reviewer, diagnostic, orchestrator.');
-}
-
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repoPath = requiredString(args, 'repoPath');
@@ -813,6 +794,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
     const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
+    const orchestratorTurnId = optionalString(args, 'orchestratorTurnId') || undefined;
     const parentWorkspaceId = optionalString(args, 'parentWorkspaceId') || undefined;
     const caller = optionalString(args, 'caller') || undefined;
     const readOnly = args.readOnly === true;
@@ -840,13 +822,14 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         requestedRuntime: runtime,
         ...workerPinInput,
         constraints,
+        dispatchOnCreate: shouldDispatch,
         sequential,
         existingBranchPolicy,
         useBrain,
         huddle, taskContract: parseTaskContractSetting(args.taskContract),
         comparisonModels,
         qualitySearch,
-        orchestratorThreadId, parentWorkspaceId, caller, readOnly,
+        orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -875,13 +858,14 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       requestedRuntime: runtime,
       ...workerPinInput,
       constraints,
+      dispatchOnCreate: shouldDispatch,
       sequential,
       existingBranchPolicy,
       useBrain,
       huddle, taskContract: parseTaskContractSetting(args.taskContract),
       comparisonModels,
       qualitySearch,
-      orchestratorThreadId, parentWorkspaceId, caller, readOnly,
+      orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {

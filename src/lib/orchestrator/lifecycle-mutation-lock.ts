@@ -11,6 +11,13 @@ const missionHandoffChains = new Map<string, Promise<unknown>>();
 export interface PacketLifecycleMutationContext {
   /** Another lifecycle mutation for this packet was already queued or running. */
   contended: boolean;
+  /**
+   * Contention came from a competing intent — a queued in-process mutation or a
+   * lease owner that could not be proven dead. Reclaiming a crashed owner's
+   * abandoned lease sets `contended` but NOT this, so recovery of that owner's
+   * own interrupted request is not refused as if it were newer intent (#2313).
+   */
+  contendedByLiveIntent: boolean;
 }
 
 /**
@@ -30,7 +37,10 @@ export async function withPacketLifecycleMutationLock<T>(
     return await chainOnKey(packetLifecycleChains, key, async () => {
       const lease = await acquireWorkspaceLifecycleLease(key);
       try {
-        return await mutation({ contended: contended || lease.contended });
+        return await mutation({
+          contended: contended || lease.contended,
+          contendedByLiveIntent: contended || lease.contendedByLiveOwner,
+        });
       } finally {
         releaseWorkspaceLifecycleLease(lease);
       }

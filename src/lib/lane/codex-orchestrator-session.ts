@@ -213,12 +213,15 @@ function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): string[] {
   return ['--dangerously-bypass-approvals-and-sandbox'];
 }
 
-function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined, model?: string): string {
+function reasoningEffortFromThinkingEffort(
+  effort: ThinkingEffort | undefined,
+  model?: string,
+): Exclude<ThinkingEffort, 'adaptive'> {
   if (!effort || effort === 'adaptive') return 'xhigh';
   // Codex effort tiers: low, medium, high, xhigh, max, ultra. The `max`/`ultra`
   // tiers are honored only on flagship models; every other model clamps to
   // xhigh. See resolveCodexReasoningEffort.
-  return resolveCodexReasoningEffort(effort, model);
+  return resolveCodexReasoningEffort(effort, model) as Exclude<ThinkingEffort, 'adaptive'>;
 }
 
 /**
@@ -300,7 +303,7 @@ export async function sendToCodexOrchestrator(
   await sendToCodexOrchestratorAttempt(session, message, (event) => {
     if (event.type === 'error' || event.type === 'done') deferredTerminalEvents.push(event);
     else {
-      streamed = true;
+      if (event.type !== 'turn_receipt') streamed = true;
       onEvent(event);
     }
   }, options);
@@ -431,6 +434,8 @@ async function sendToCodexOrchestratorAttempt(
     return;
   }
   if (settleBeforeSpawnIfAborted()) return;
+
+  onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort });
 
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);

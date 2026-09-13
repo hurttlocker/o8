@@ -148,6 +148,7 @@ o8 packet runtime-drift                    # exit 5 when the bound runtime drift
 o8 packet stop|cancel [packet-id]           # interrupt and hold; resume with reset/rerun
 o8 packet reset [--packet <id>] [--reason "..."]         # wipe worktree + lane, then redispatch
 o8 packet retry [--packet <id>] [--reason "..."]         # reset while keeping the worktree
+o8 packet retry --packet <id> --reason "<original reason>" --idempotency-key <original> --expected-generation <g> --expected-candidate-lane <lane-id>   # recover the original interrupted retry; preserve its packet, reason, and key. Committed-work salvage only; omit --reason if originally absent
 o8 packet rerun --feedback "..." [--packet <id>]         # fresh worker, immediate relaunch
 o8 packet steer --message "..." [--packet <id>]          # nudge the warm session
 o8 packet merge-preview [--packet <id>]                  # read-only five-layer merge preview

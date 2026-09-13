@@ -303,6 +303,11 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       try {
         const sessionId = await ensureHandshake(session);
         await applyModel(session, sessionId, options?.model, countingOnEvent);
+        countingOnEvent({
+          type: 'turn_receipt',
+          leadModel: session.appliedModel ?? defaultModelFor(id) ?? id,
+          effort: options?.thinkingEffort ?? 'adaptive',
+        });
         const stopReason = await session.client.prompt(sessionId, message);
         const doneOrError = produced === 0 && stopReason === 'end_turn'
           ? ({

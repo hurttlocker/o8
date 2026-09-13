@@ -25,6 +25,7 @@ import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle
 import { markOutcomeClosedUnmerged } from '@/lib/orchestrator/context-relay';
 import { removeMergedWorktree } from '@/lib/orchestrator/worktree-cleanup';
 import { runRuntimeAwareWorktreeCleanup } from '@/lib/orchestrator/runtime-worktree-cleanup';
+import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 import { formatWorktreeHolderPids } from '@/lib/worktree/holder-diagnostics';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
@@ -203,6 +204,11 @@ async function closePacketUnmergedUnlocked(input: {
       ? [`${target.id}\0${worktreePath}`]
       : [];
   }));
+  const detachedSessionRollbacks: Array<() => Promise<unknown>> = [];
+  const restoreDetachedSessions = async () => {
+    await Promise.allSettled(detachedSessionRollbacks.map((rollback) => rollback()));
+    detachedSessionRollbacks.length = 0;
+  };
   try {
     const stoppedReviewTurns = [];
     const reviewedLaneIds = new Set<string>();
@@ -216,15 +222,7 @@ async function closePacketUnmergedUnlocked(input: {
 
     const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(lanesToClose));
     const survivors = kills.filter((outcome) => !outcome.confirmed && !outcome.alreadyDead);
-    if (survivors.length > 0) {
-      await markPacketLifecycleFailure(guard, 'kill_unconfirmed');
-      return {
-        ok: false,
-        code: 'kill_unconfirmed',
-        message: `Close refused because ${survivors.length} worker session class process${survivors.length === 1 ? '' : 'es'} could not be confirmed stopped. The lane and worktree remain intact.`,
-        status: 409,
-      };
-    }
+    const survivorLaneIds = new Set(survivors.map((outcome) => outcome.laneId));
     const unverifiedMissing = lanesToClose.find((target) => {
       const worktreePath = target.worktreePath?.trim();
       if (!worktreePath || !missingWorktreeBindings.has(`${target.id}\0${worktreePath}`)) return false;
@@ -280,18 +278,53 @@ async function closePacketUnmergedUnlocked(input: {
     }
     const preservedBranch = preservedBranches.length === 1 ? preservedBranches[0] ?? null : null;
 
-    const outcomeNote = closeUnmergedOutcomeNote({
+    const killUnconfirmedNote = survivors.length > 0
+      ? ` Kill unconfirmed for ${survivors.length} worker session class process${survivors.length === 1 ? '' : 'es'}. The packet was closed; any existing worktree and owned-session recovery metadata were preserved.`
+      : '';
+    const outcomeNote = `${closeUnmergedOutcomeNote({
       disposition: rawDisposition,
       note,
       preservedBranch,
       preservedBranches,
       preservationReceipts,
       preservationFailure,
-    });
+    })}${killUnconfirmedNote}`;
+    for (const survivor of survivors) {
+      const lifecycle = getOwnedSessionLifecycle(survivor.sessionKey);
+      if (!lifecycle?.setDetachedSession) {
+        if (!survivor.sessionKey.includes('-owned:')) continue;
+        await restoreDetachedSessions();
+        await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
+        return {
+          ok: false,
+          code: 'session_archive_unconfirmed',
+          message: `Close could not detach owned-session recovery metadata for ${survivor.sessionKey}; the packet remains held.`,
+          status: 409,
+        };
+      }
+      const detached = await lifecycle.setDetachedSession(
+        survivor.sessionKey,
+        `Packet ${input.packetId} closed while worker exit remained unconfirmed.`,
+      );
+      if (!detached.updated) {
+        await restoreDetachedSessions();
+        await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
+        return {
+          ok: false,
+          code: 'session_archive_unconfirmed',
+          message: `Close could not preserve detached owned-session recovery metadata for ${survivor.sessionKey}; the packet remains held.`,
+          status: 409,
+        };
+      }
+      if (!detached.previouslyDetached) {
+        detachedSessionRollbacks.push(() => lifecycle.setDetachedSession!(survivor.sessionKey, null));
+      }
+    }
     try {
-      await archiveLaneSessionsConfirmed(lanesToClose);
+      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id)));
     } catch (error) {
       if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
+      await restoreDetachedSessions();
       await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
       return {
         ok: false,
@@ -300,11 +333,11 @@ async function closePacketUnmergedUnlocked(input: {
         status: 409,
       };
     }
-    for (const candidate of lanesToClose) {
+    for (const candidate of lanesToClose.filter((target) => !survivorLaneIds.has(target.id))) {
       if (candidate.sessionKey?.trim()) unregisterWatchedAgent(candidate.sessionKey.trim());
     }
     let worktreeRemoved = false;
-    for (const candidate of lanesToClose) {
+    for (const candidate of survivors.length === 0 ? lanesToClose : []) {
       const worktreePath = candidate.worktreePath?.trim();
       if (worktreePath && missingWorktreeBindings.has(`${candidate.id}\0${worktreePath}`)) {
         continue;
@@ -355,6 +388,7 @@ async function closePacketUnmergedUnlocked(input: {
         actor: 'user',
       });
       if (!archived.ok) {
+        await restoreDetachedSessions();
         await markPacketLifecycleFailure(guard, 'lane_archive_failed');
         return {
           ok: false,
@@ -388,17 +422,29 @@ async function closePacketUnmergedUnlocked(input: {
         reason: candidateCleanup === 'missing' ? 'worktree_missing' : 'close_unmerged',
         acknowledgedMissingWorktree: input.acknowledgeMissingWorktree,
         stoppedReviewTurns: stoppedReviewTurns.length,
+        killUnconfirmed: survivors.length,
       });
     }
 
     const closedAt = new Date().toISOString();
     if (!await markPacketClosed(guard, closedAt, worktreeCleanup)) {
+      await restoreDetachedSessions();
       return {
         ok: false,
         code: 'close_failed',
         message: `Packet ${input.packetId} disappeared before its closed state could be persisted.`,
         status: 409,
       };
+    }
+    detachedSessionRollbacks.length = 0;
+    for (const survivor of survivors) {
+      recordLaneEvent(survivor.laneId, 'update', 'system', {
+        code: 'kill_unconfirmed',
+        packetId: input.packetId,
+        sessionKey: survivor.sessionKey,
+        resolution: 'closed_unmerged_worker_ownership_preserved',
+        note: survivor.note,
+      });
     }
     await markOutcomeClosedUnmerged({
       laneId: lane.id,
@@ -460,6 +506,7 @@ async function closePacketUnmergedUnlocked(input: {
       },
     };
   } catch (error) {
+    await restoreDetachedSessions();
     await markPacketLifecycleFailure(guard, 'close_failed');
     return {
       ok: false,

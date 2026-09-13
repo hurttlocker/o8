@@ -1,20 +1,22 @@
+import { randomUUID } from 'node:crypto';
 import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
 import {
-  bindCommittedRetryWork,
-  findCommittedRetryWork,
+  resetFailureReceipt,
+  resetSuccessReceipt,
+  type ResetReceipt,
+} from './reset-receipt';
+import { commitResetRequestJournal, writeResetRequestJournal } from './reset-recovery-journal';
+import {
   holdPacketForRetrySalvage,
-  markRetrySalvageKillUnconfirmed,
-  markRetrySalvageSessionArchiveUnconfirmed,
   retrySalvageGenerationSource,
   retrySalvageGuardIsCurrent,
-  RetrySalvageKillUnconfirmedError,
-  RetrySalvageStateChangedError,
   scopedPacketGenerationMatches,
-  type RetrySalvage,
+  type RetrySalvageBindCheckpoint,
+  type RetrySalvageGuard,
 } from './retry-salvage';
+import { attemptCommittedWorkSalvage } from './committed-work-salvage';
 import { log } from './shared';
 import type { ResetPacketInput } from './types';
-import { LaneSessionArchiveUnconfirmedError } from '@/lib/lane/reap-sessions';
 import { removeCortexWorktreePath } from '@/lib/lane/worktree-clone-removal';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import {
@@ -335,51 +337,50 @@ async function resetRegistryPacket(
   return result;
 }
 
-async function resetPacketUnlocked(input: ResetPacketInput) {
-  const retrySalvageGuard = await holdPacketForRetrySalvage(input);
-  let committedRetryWork: Awaited<ReturnType<typeof findCommittedRetryWork>> = null;
-  try {
-    committedRetryWork = retrySalvageGuard
-      ? await findCommittedRetryWork(input, retrySalvageGuard)
-      : null;
-  } catch (error) {
-    if (!(error instanceof RetrySalvageKillUnconfirmedError) || !retrySalvageGuard) throw error;
-    await markRetrySalvageKillUnconfirmed(input.packetId, retrySalvageGuard);
-    throw new ResetKillUnconfirmedError(error.message);
-  }
-  if (retrySalvageGuard && committedRetryWork) {
-    let retrySalvage: RetrySalvage;
-    try {
-      retrySalvage = await bindCommittedRetryWork(input, retrySalvageGuard, committedRetryWork);
-    } catch (error) {
-      if (error instanceof LaneSessionArchiveUnconfirmedError) {
-        await markRetrySalvageSessionArchiveUnconfirmed(input.packetId, retrySalvageGuard);
-        throw new ResetSessionArchiveUnconfirmedError(error.message);
-      }
-      if (!(error instanceof RetrySalvageStateChangedError)) throw error;
-      log(error.message);
-      return {
-        reset: false,
-        salvaged: false,
-        packetId: input.packetId,
-        referenceLabel: retrySalvageGuard.referenceLabel,
-        worktreePruned: false,
-        branchDeleted: false,
-        note: error.message,
-      };
-    }
-    await supersedeDurableApprovedReviews(input.packetId, 'Superseded by retry salvage.');
-    log(`Retry salvaged committed work for ${retrySalvage.referenceLabel} (${input.packetId}) into lane ${retrySalvage.laneId}.`);
-    return {
-      reset: false,
-      salvaged: true,
+/**
+ * #2313 — the bind's non-repeatable checkpoint. Recorded (and verified) before
+ * the bind's first irreversible change, so an owner that dies mid-bind leaves
+ * evidence that the partial operation must stay held. `commitResetRequestJournal`
+ * throws rather than degrading: a bind that cannot record this must not start.
+ */
+export function resetBindCheckpointRecorder(
+  input: ResetPacketInput,
+  guard: RetrySalvageGuard,
+): ((checkpoint: RetrySalvageBindCheckpoint) => void) | undefined {
+  const requestKey = input.recovery?.requestKey;
+  if (!requestKey) return undefined;
+  return (checkpoint) => commitResetRequestJournal(requestKey, {
+    phase: 'binding',
+    packetId: input.packetId,
+    clearWorktree: input.clearWorktree === true,
+    generation: guard.generation,
+    guard,
+    bind: checkpoint,
+  });
+}
+
+async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: string) {
+  const retrySalvageGuard = await holdPacketForRetrySalvage(input, plannedGeneration);
+  // #2313 — the hold is the request's first durable side effect. Journal the
+  // rehydratable guard the moment it lands, inside the lifecycle lease, so an
+  // interrupted request can be resumed from its own generation instead of
+  // being re-run from scratch.
+  if (retrySalvageGuard && input.recovery) {
+    writeResetRequestJournal(input.recovery.requestKey, {
+      phase: 'guarded',
       packetId: input.packetId,
-      referenceLabel: retrySalvage.referenceLabel,
-      worktreePruned: false,
-      branchDeleted: false,
-      laneId: retrySalvage.laneId,
-      note: `Packet ${retrySalvage.referenceLabel} already had a clean committed result. Its existing worktree is preserved and awaiting review; no worker was relaunched.`,
-    };
+      clearWorktree: input.clearWorktree === true,
+      generation: retrySalvageGuard.generation,
+      guard: retrySalvageGuard,
+    });
+  }
+  if (retrySalvageGuard) {
+    const salvage = await attemptCommittedWorkSalvage(
+      input,
+      retrySalvageGuard,
+      resetBindCheckpointRecorder(input, retrySalvageGuard),
+    );
+    if (salvage.kind !== 'unproven') return salvage.result;
   }
   if (retrySalvageGuard && !await retrySalvageGuardIsCurrent(input.packetId, retrySalvageGuard)) {
     const note = `Packet ${input.packetId} changed while retry salvage was probing; the newer generation was left untouched.`;
@@ -669,10 +670,30 @@ async function resetPacketUnlocked(input: ResetPacketInput) {
   };
 }
 
+/**
+ * Record the request's terminal receipt while the lifecycle lease is still
+ * held (#2313). This is the write that closes the window the reservation alone
+ * cannot cover: the interval after the lease is released and before the
+ * idempotency receipt is finalized.
+ */
+function journalResetCompletion(input: ResetPacketInput, receipt: ResetReceipt, generation: string): void {
+  if (!input.recovery) return;
+  writeResetRequestJournal(input.recovery.requestKey, {
+    phase: 'completed',
+    packetId: input.packetId,
+    clearWorktree: input.clearWorktree === true,
+    generation,
+    receipt,
+  });
+}
+
 export async function resetPacket(input: ResetPacketInput) {
   return withPacketLifecycleMutationLock(input.packetId, async ({ contended }) => {
+    // Minted before the hold so the journal names this request's intended
+    // generation even if the process ends while the hold is being stamped.
+    const plannedGeneration = randomUUID();
     if (contended && !input.scope) {
-      return {
+      const result = {
         reset: false,
         salvaged: false,
         packetId: input.packetId,
@@ -681,7 +702,24 @@ export async function resetPacket(input: ResetPacketInput) {
         branchDeleted: false,
         note: `Packet ${input.packetId} changed while another reset or retry was in progress; this queued lifecycle request was not applied.`,
       };
+      journalResetCompletion(input, resetSuccessReceipt(result), plannedGeneration);
+      return result;
     }
-    return resetPacketUnlocked(input);
+    if (input.recovery) {
+      writeResetRequestJournal(input.recovery.requestKey, {
+        phase: 'started',
+        packetId: input.packetId,
+        clearWorktree: input.clearWorktree === true,
+        generation: plannedGeneration,
+      });
+    }
+    try {
+      const result = await resetPacketUnlocked(input, plannedGeneration);
+      journalResetCompletion(input, resetSuccessReceipt(result), plannedGeneration);
+      return result;
+    } catch (error) {
+      journalResetCompletion(input, resetFailureReceipt(error), plannedGeneration);
+      throw error;
+    }
   });
 }
