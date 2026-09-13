@@ -14,8 +14,9 @@ import {
   deserializeTileLayout,
   findTile,
   getFirstLeaf,
+  wrapRootWithSplit,
 } from '@/lib/tiles/operations';
-import type { TileLayout } from '@/lib/tiles/types';
+import type { TileContent, TileLayout, TileSplitDirection } from '@/lib/tiles/types';
 import {
   loadValidatedRestorePaths,
   validatePersistedLayoutRepos,
@@ -31,7 +32,14 @@ interface UseRestoredTileLayoutArgs {
   skipNextTileLayoutPersistenceRef: MutableRefObject<boolean>;
   storageKey: string;
   tileLayout: TileLayout;
-  refreshRestoredRepoState: (validatedPaths: readonly string[]) => Promise<boolean>;
+  refreshRestoredRepoState: (validatedPaths: readonly string[], signal?: AbortSignal) => Promise<boolean>;
+}
+
+interface InitialRestoreSplit {
+  content: TileContent;
+  direction: TileSplitDirection;
+  expectedLayout: TileLayout;
+  ratio: number;
 }
 
 function persistedRepoScopes(layout: TileLayout): Map<string, string> {
@@ -61,6 +69,8 @@ export function useRestoredTileLayout({
   const mountedRef = useRef(true);
   const validationControllerRef = useRef<AbortController | null>(null);
   const retryInFlightRef = useRef(false);
+  const initialRestorePendingRef = useRef(false);
+  const initialRestoreSplitsRef = useRef<InitialRestoreSplit[]>([]);
 
   useEffect(() => {
     if (layoutRef.current === tileLayout) return;
@@ -86,6 +96,12 @@ export function useRestoredTileLayout({
     return validation;
   }, []);
 
+  const queueInitialRestoreSplit = useCallback((split: InitialRestoreSplit) => {
+    if (!initialRestorePendingRef.current) return false;
+    initialRestoreSplitsRef.current.push(split);
+    return true;
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -100,13 +116,29 @@ export function useRestoredTileLayout({
     const restoreTimer = window.setTimeout(() => {
       void (async () => {
         const restored = deserializeTileLayout(window.localStorage.getItem(storageKey));
+        initialRestorePendingRef.current = Boolean(restored);
+        initialRestoreSplitsRef.current = [];
         const validation = restored ? await validateLayout(restored) : { ok: true, paths: [] };
         if (cancelled) return;
+        const queuedSplits = initialRestoreSplitsRef.current;
+        const preserveQueuedSplits = Boolean(
+          restored
+          && queuedSplits.length > 0
+          && queuedSplits.at(-1)?.expectedLayout === layoutRef.current,
+        );
+        const restoredWithQueuedSplits = preserveQueuedSplits && restored
+          ? queuedSplits.reduce((layout, split) => ({
+            ...layout,
+            root: wrapRootWithSplit(layout.root, split.direction, split.content, split.ratio).root,
+          }), restored)
+          : restored;
         const nextLayout = validation
-          ? restored && validation.ok
-          ? validatePersistedLayoutRepos(restored, validation.paths)
-          : restored ?? createDefaultTileLayout()
-          : layoutRef.current;
+          ? restoredWithQueuedSplits && validation.ok
+            ? validatePersistedLayoutRepos(restoredWithQueuedSplits, validation.paths)
+            : restoredWithQueuedSplits ?? createDefaultTileLayout()
+          : preserveQueuedSplits
+            ? restoredWithQueuedSplits!
+            : layoutRef.current;
         const validationUnavailable = !validation || !validation.ok;
         setBlockedRepoScopes(validationUnavailable ? persistedRepoScopes(nextLayout) : new Map());
         setRestoredRepoValidationState(validationUnavailable ? 'failed' : 'verified');
@@ -115,9 +147,10 @@ export function useRestoredTileLayout({
         const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
           ? storedActiveTileId
           : getFirstLeaf(nextLayout.root).id;
-        if (validation) setTileLayout(nextLayout);
+        if (validation || preserveQueuedSplits) setTileLayout(nextLayout);
         setActiveTileId(restoredActiveTileId);
         setTileLayoutHydrated(true);
+        initialRestorePendingRef.current = false;
       })();
     }, 0);
 
@@ -126,6 +159,7 @@ export function useRestoredTileLayout({
       window.clearTimeout(restoreTimer);
       validationControllerRef.current?.abort();
       validationControllerRef.current = null;
+      initialRestorePendingRef.current = false;
     };
   }, [activeTileStorageKey, setActiveTileId, setTileLayout, skipNextTileLayoutPersistenceRef, storageKey, validateLayout]);
 
@@ -145,7 +179,19 @@ export function useRestoredTileLayout({
           setRestoredRepoValidationState('failed');
           return;
         }
-        const refreshed = await refreshRestoredRepoState(validation.paths.map((path) => path.canonicalPath));
+        const recoveryController = new AbortController();
+        validationControllerRef.current = recoveryController;
+        let refreshed = false;
+        try {
+          refreshed = await refreshRestoredRepoState(
+            validation.paths.map((path) => path.canonicalPath),
+            recoveryController.signal,
+          );
+        } finally {
+          if (validationControllerRef.current === recoveryController) {
+            validationControllerRef.current = null;
+          }
+        }
         if (!mountedRef.current || layoutRef.current !== layoutAtStart) {
           if (mountedRef.current) setRestoredRepoValidationState('idle');
           return;
@@ -180,6 +226,7 @@ export function useRestoredTileLayout({
 
   return {
     retryRestoredRepoValidation,
+    queueInitialRestoreSplit,
     restoredRepoValidationState,
     setTileLayoutHydrated,
     tileLayoutHydrated,

@@ -110,17 +110,25 @@ export function useGlobalRepoState({
   const selectedRepoWorktreeGenerationRef = useRef(0);
   const branchGenerationRef = useRef(0);
 
-  const loadRepoWorktrees = useCallback(async (repoPath: string): Promise<RepoWorktreeSummary> => {
-    const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(repoPath)}`);
+  const loadRepoWorktrees = useCallback(async (
+    repoPath: string,
+    signal?: AbortSignal,
+    commit = true,
+  ): Promise<RepoWorktreeSummary> => {
+    const url = `/api/worktrees?repo=${encodeURIComponent(repoPath)}`;
+    const response = signal ? await ipcFetch(url, { signal }) : await ipcFetch(url);
     const data = await response.json() as RepoWorktreeSummary & { error?: string };
     if (!response.ok) {
       throw new Error(data.error || 'Unable to load worktree summary.');
     }
+    if (signal?.aborted) throw new DOMException('Request was aborted.', 'AbortError');
     const worktrees = Array.isArray(data.worktrees) ? data.worktrees : [];
-    setAllRepoWorktrees((current) => ({
-      ...current,
-      [repoPath]: worktrees,
-    }));
+    if (commit) {
+      setAllRepoWorktrees((current) => ({
+        ...current,
+        [repoPath]: worktrees,
+      }));
+    }
     return { ...data, worktrees };
   }, []);
 
@@ -159,35 +167,89 @@ export function useGlobalRepoState({
   // report recovery when every validated scope is present in that inventory
   // (or its authoritative worktree list). This is deliberately an explicit
   // retry path, not a second registry or a polling loop.
-  const refreshRestoredRepoState = useCallback(async (validatedPaths: readonly string[]) => {
-    const response = await ipcFetch('/api/panel/repos', {
-      cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-    });
-    const data = await response.json().catch(() => null) as { repos?: unknown } | null;
-    if (!response.ok || !Array.isArray(data?.repos)) return false;
-    const repos = data.repos as RepoRegistryEntry[];
-    const relevantRepos = repos.filter((repo) => validatedPaths.some((path) => (
-      path === repo.localPath || path.startsWith(`${repo.localPath}/`)
-    )));
-    const summaries = await Promise.all(relevantRepos.map(async (repo) => [
-      repo.localPath,
-      await loadRepoWorktrees(repo.localPath),
-    ] as const));
-    const availablePaths = new Set(repos.map((repo) => repo.localPath));
-    for (const [, summary] of summaries) {
-      for (const worktree of summary.worktrees) availablePaths.add(worktree.path);
-    }
-    if (!validatedPaths.every((path) => availablePaths.has(path))) return false;
+  const refreshRestoredRepoState = useCallback(async (validatedPaths: readonly string[], signal?: AbortSignal) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      if (signal?.aborted) return false;
+      signal?.addEventListener('abort', abort, { once: true });
+      const refresh = (async () => {
+        try {
+          const response = await ipcFetch('/api/panel/repos', {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+            signal: controller.signal,
+          });
+          const data = await response.json().catch(() => null) as { repos?: unknown } | null;
+          if (controller.signal.aborted || !response.ok || !Array.isArray(data?.repos)) return false;
+          const repos = data.repos.filter((entry): entry is RepoRegistryEntry => (
+            typeof entry === 'object'
+            && entry !== null
+            && typeof (entry as { id?: unknown }).id === 'string'
+            && typeof (entry as { localPath?: unknown }).localPath === 'string'
+          ));
+          if (repos.length !== data.repos.length) return false;
+          const rootOwnedPaths = new Set(repos.filter((repo) => validatedPaths.some((path) => (
+            path === repo.localPath || path.startsWith(`${repo.localPath}/`)
+          ))));
+          // Worktree paths often live outside their repository root. If a
+          // validated path is not root-owned, inspect every registered repo's
+          // authoritative worktree list; exact membership below is the only
+          // authorization decision for that external path.
+          if (validatedPaths.some((path) => !Array.from(rootOwnedPaths).some((repo) => (
+            path === repo.localPath || path.startsWith(`${repo.localPath}/`)
+          )))) {
+            repos.forEach((repo) => rootOwnedPaths.add(repo));
+          }
+          const reposToLoad = Array.from(rootOwnedPaths);
+          const summaries: Array<readonly [string, RepoWorktreeSummary]> = [];
+          let nextRepoIndex = 0;
+          const workerCount = Math.min(8, reposToLoad.length);
+          await Promise.all(Array.from({ length: workerCount }, async () => {
+            while (!controller.signal.aborted) {
+              const repo = reposToLoad[nextRepoIndex++];
+              if (!repo) return;
+              const summary = await loadRepoWorktrees(repo.localPath, controller.signal, false);
+              summaries.push([repo.localPath, summary]);
+            }
+          }));
+          if (controller.signal.aborted) return false;
+          const authoritativeWorktreePaths = new Set<string>();
+          for (const [, summary] of summaries) {
+            for (const worktree of summary.worktrees) authoritativeWorktreePaths.add(worktree.path);
+          }
+          const hasAuthoritativeScope = (path: string) => (
+            repos.some((repo) => path === repo.localPath || path.startsWith(`${repo.localPath}/`))
+            || authoritativeWorktreePaths.has(path)
+          );
+          if (!validatedPaths.every(hasAuthoritativeScope)) return false;
 
-    setGlobalRepoEntries(repos);
-    setAllRepoWorktrees((current) => {
-      const next = Object.fromEntries(Object.entries(current)
-        .filter(([repoPath]) => repos.some((repo) => repo.localPath === repoPath)));
-      for (const [repoPath, summary] of summaries) next[repoPath] = summary.worktrees;
-      return next;
-    });
-    return true;
+          setGlobalRepoEntries(repos);
+          setAllRepoWorktrees((current) => {
+            const next = Object.fromEntries(Object.entries(current)
+              .filter(([repoPath]) => repos.some((repo) => repo.localPath === repoPath)));
+            for (const [repoPath, summary] of summaries) next[repoPath] = summary.worktrees;
+            return next;
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      return await Promise.race([
+        refresh,
+        new Promise<false>((resolve) => {
+          timeoutId = setTimeout(() => {
+            controller.abort();
+            resolve(false);
+          }, 2_000);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', abort);
+    }
   }, [loadRepoWorktrees]);
 
   // Fetch registered repos on mount — prefer saved repo, otherwise restore the first registered repo

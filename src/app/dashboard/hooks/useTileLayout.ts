@@ -58,7 +58,7 @@ interface UseTileLayoutArgs {
   findWorkspaceTarget: () => TileLeafNode | null;
   globalRepoEntries: RepoRegistryEntry[];
   globalRepoEntry: RepoRegistryEntry | null;
-  refreshRestoredRepoState: (validatedPaths: readonly string[]) => Promise<boolean>;
+  refreshRestoredRepoState: (validatedPaths: readonly string[], signal?: AbortSignal) => Promise<boolean>;
   setActiveTileId: Dispatch<SetStateAction<string | null>>;
   setTileLayout: Dispatch<SetStateAction<TileLayout>>;
   tileLayout: TileLayout;
@@ -100,6 +100,7 @@ export function useTileLayout({
   const [canvasStateByTileId, setCanvasStateByTileId] = useState<Record<string, CanvasTileState>>({});
   const {
     retryRestoredRepoValidation,
+    queueInitialRestoreSplit,
     restoredRepoValidationState,
     setTileLayoutHydrated,
     tileLayoutHydrated,
@@ -376,12 +377,14 @@ export function useTileLayout({
     if (!result.newTileId) {
       return;
     }
-    setTileLayout({
+    const nextLayout = {
       ...tileLayout,
       root: result.root,
-    });
+    };
+    queueInitialRestoreSplit({ content: nextContent, direction, expectedLayout: nextLayout, ratio });
+    setTileLayout(nextLayout);
     setActiveTileId(result.newTileId);
-  }, [setActiveTileId, setTileLayout, tileLayout]);
+  }, [queueInitialRestoreSplit, setActiveTileId, setTileLayout, tileLayout]);
 
   const ensureTileKind = useCallback((
     kind: TileContentKind,

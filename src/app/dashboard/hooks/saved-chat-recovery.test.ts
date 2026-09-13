@@ -14,8 +14,20 @@ import { useGlobalRepoState } from './useGlobalRepoState';
 import { TILE_LAYOUT_STORAGE_KEY, useTileLayout } from './useTileLayout';
 
 const REPO_PATH = '/tmp/saved-chat-repo';
-const WORKTREE_PATH = `${REPO_PATH}/.worktrees/saved-chat`;
+const WORKTREE_PATH = '/tmp/o8-external-worktrees/saved-chat';
 const SESSION_KEY = 'codex-owned:saved-chat';
+
+function selectedRepoFromCanvasElement(element: unknown): string | null {
+  if (typeof element !== 'object' || element === null) return null;
+  const props = (element as { props?: { selectedRepo?: unknown; children?: unknown } }).props;
+  if (typeof props?.selectedRepo === 'string') return props.selectedRepo;
+  const children = Array.isArray(props?.children) ? props.children : [props?.children];
+  for (const child of children) {
+    const selectedRepo = selectedRepoFromCanvasElement(child);
+    if (selectedRepo) return selectedRepo;
+  }
+  return null;
+}
 
 function registeredRepo(): RepoRegistryEntry {
   return {
@@ -141,15 +153,20 @@ function RecoveryHarness({ onSessions }: { onSessions: (sessions: MobileInboxSna
     unverifiedRestoredRepoTileIds: restored.unverifiedRestoredRepoTileIds,
   } as unknown as Parameters<typeof createTileRegistry>[0]);
   const scope = repos.workspaceScopeEntries.find((entry) => entry.localPath === WORKTREE_PATH) ?? null;
+  const canvasElement = registry.canvas.render({ active: true, content: canvas.content, tileId: 'saved-canvas' });
+  const canvasRepo = selectedRepoFromCanvasElement(canvasElement);
 
   return createElement(Fragment, null,
     restored.unverifiedRestoredRepoTileIds.has('saved-terminal')
       ? registry.terminal.render({ active: true, content: terminal.content, tileId: 'saved-terminal' })
       : null,
     restored.unverifiedRestoredRepoTileIds.has('saved-canvas')
-      ? registry.canvas.render({ active: true, content: canvas.content, tileId: 'saved-canvas' })
+      ? canvasElement
       : null,
-    scope ? createElement(SavedChatConsumer, { repo: scope, onSessions }) : null,
+    scope && canvasRepo ? createElement(Fragment, null,
+      createElement('output', { 'data-testid': 'restored-canvas-repo' }, canvasRepo),
+      createElement(SavedChatConsumer, { repo: scope, onSessions }),
+    ) : null,
   );
 }
 
@@ -223,6 +240,7 @@ describe('saved chat recovery after a cold repository-list failure', () => {
     await act(async () => new Promise((resolve) => window.setTimeout(resolve, 80)));
 
     expect(container.querySelector('[data-testid="restored-chat-session"]')?.textContent).toBe(SESSION_KEY);
+    expect(container.querySelector('[data-testid="restored-canvas-repo"]')?.textContent).toBe('example/saved-chat-repo');
     expect(sessions.some((value) => value.some((session) => session.sessionKey === SESSION_KEY))).toBe(true);
     expect(container.textContent).toContain('saved-chat-repo');
     expect(inventoryCalls).toBeGreaterThanOrEqual(2);
