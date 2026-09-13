@@ -1,5 +1,20 @@
 # Standalone Worker CLI
 
+## Current protocol boundary
+
+This executable uses the legacy `/api/worker/*` contract described below. The
+durable cloud adapter uses `/api/cloud/*` with a separate scoped cloud-worker key
+lifecycle, job leases, persisted events, and control acknowledgements. These
+contracts and credentials are not interchangeable. The current standalone poll
+loop waits for execution to finish and does not cancel an in-flight run.
+
+[#2278](https://github.com/hurttlocker/o8/issues/2278) tracks integrating this
+existing executable with the durable protocol. The
+[remote project milestone](../../docs/operations/remote-project-milestone.md)
+defines the required dispatch, workspace, recovery, review, and operational proof.
+The instructions below describe the legacy worker; they are not a runbook for
+that planned durable integration.
+
 The standalone worker CLI runs remote o8 packets on a separate machine, pushes the finished branch back to `origin`, and reports progress back to the o8 instance so the lane merge gate can pick it up.
 
 ## Prerequisites
