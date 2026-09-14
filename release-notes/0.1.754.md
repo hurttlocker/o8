@@ -1,0 +1,2 @@
+- Managed workspaces keep their ownership receipts valid after a restart when macOS changes the volume device number. Path and inode mismatches still block access.
+- Failed worktree provisioning releases its storage reservation when the checkout is confirmed absent. Uncertain cleanup keeps the reservation and shows an operator decision.
