@@ -44,6 +44,12 @@ import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 export interface RerunWithFeedbackInput {
   packetId: string;
   feedback: string;
+  /**
+   * Automatic recovery sets this so the lifecycle admission refuses when the
+   * packet already carries a durable operator Stop. Explicit/manual rerun
+   * callers omit it and keep their behavior.
+   */
+  preserveOperatorStop?: boolean;
 }
 
 export interface RerunEscalationSuggestion {
@@ -357,7 +363,11 @@ async function rerunWithFeedbackUnlocked(input: RerunWithFeedbackInput): Promise
     throw new Error('feedback is required.');
   }
 
-  const guard = await holdPacketLifecycleMutation({ packetId, kind: 'rerun' });
+  const guard = await holdPacketLifecycleMutation({
+    packetId,
+    kind: 'rerun',
+    ...(input.preserveOperatorStop === true ? { preserveOperatorStop: true } : {}),
+  });
   if (!guard) throw new Error(`Packet ${packetId} not found.`);
   const resolvesAlignment = packetAwaitsAlignmentFeedback(guard.previousPacket);
   const worktreePruned = await retireRerunGeneration(guard);
