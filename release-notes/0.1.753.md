@@ -1,0 +1,8 @@
+- Pick work mode, lead and worker models, and effort from one composer selector.
+- See the effective execution settings alongside each orchestrator turn.
+- Retry saved-chat repository checks without reloading the app.
+- Fix stale display selection when moving the Mac window between screens.
+- Merge worker packets into their own repository target while preserving review evidence.
+- Recover interrupted retry results without duplicating work or accepting a stale approval.
+- Keep staged missions waiting for dispatch and preserve active checks when an overlapping steer is refused.
+- Isolate managed test fixtures and report process cleanup failures accurately.
