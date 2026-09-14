@@ -61,7 +61,7 @@ A mission is a goal. Each packet is a scoped unit of work, and each lane is the 
             merge  ──▶  audit trail, session ledger, memory
 ```
 
-![Four agents on the canvas: two finished and waiting for review, one still working, and a live browser card previewing the page they built](./assets/fleet.gif)
+![One ask, three workers: the orchestrator splits the task into packets, each worker builds its page in its own worktree, and the plan and every tile report as they go](./assets/three-workers.gif)
 
 *The canvas — a spatial view of the same fleet. Two agents done and waiting at the gate, one still working, and a browser card previewing the page they just built.*
 
