@@ -1179,6 +1179,15 @@
       ]
     },
     {
+      "path": "tests/boot-stable-workspace-receipts-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/brain-codex-settings-real-path.test.ts",
       "reasons": [
         "executable-fixture",

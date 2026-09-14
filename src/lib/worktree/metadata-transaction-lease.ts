@@ -37,6 +37,13 @@ export interface MetadataTransactionBoundary {
   metadataRootIdentity: { canonicalPath: string; device: number; inode: number };
 }
 
+export interface MetadataMirrorIdentity {
+  device: number;
+  inode: number;
+  canonicalPath?: string;
+  volumeId?: string;
+}
+
 export class MetadataTransactionLeaseUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -249,7 +256,7 @@ function assertLeaseOwner(
 
 export function readMetadataTransactionState(
   lease: MetadataTransactionLease,
-): { payload: string; mirrorIdentity: { device: number; inode: number } | null } | null {
+): { payload: string; mirrorIdentity: MetadataMirrorIdentity | null } | null {
   return withLeaseDatabase((sqlite) => {
     assertLeaseOwner(sqlite, lease);
     const row = sqlite.prepare(`
@@ -263,7 +270,7 @@ export function readMetadataTransactionState(
     return {
       payload: row.payload_json,
       mirrorIdentity: row.mirror_identity_json
-        ? JSON.parse(row.mirror_identity_json) as { device: number; inode: number }
+        ? JSON.parse(row.mirror_identity_json) as MetadataMirrorIdentity
         : null,
     };
   });
@@ -272,7 +279,7 @@ export function readMetadataTransactionState(
 export function readMetadataTransactionStateSnapshot(
   metadataRoot: string,
   sqlite: Database.Database,
-): { payload: string; mirrorIdentity: { device: number; inode: number } | null } | null {
+): { payload: string; mirrorIdentity: MetadataMirrorIdentity | null } | null {
   const schema = sqlite.prepare(`
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'worktree_metadata_state'
   `).get();
@@ -288,7 +295,7 @@ export function readMetadataTransactionStateSnapshot(
   return {
     payload: row.payload_json,
     mirrorIdentity: row.mirror_identity_json
-      ? JSON.parse(row.mirror_identity_json) as { device: number; inode: number }
+      ? JSON.parse(row.mirror_identity_json) as MetadataMirrorIdentity
       : null,
   };
 }
@@ -296,7 +303,7 @@ export function readMetadataTransactionStateSnapshot(
 export function writeMetadataTransactionState(
   lease: MetadataTransactionLease,
   payload: string,
-  mirrorIdentity: { device: number; inode: number } | null,
+  mirrorIdentity: MetadataMirrorIdentity | null,
 ): void {
   withLeaseDatabase((sqlite) => sqlite.transaction(() => {
     assertLeaseOwner(sqlite, lease);

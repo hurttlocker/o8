@@ -409,7 +409,7 @@ describe('storage admission', () => {
       probePath: dir,
       error: null,
     });
-    expect(receipt.volumeId).toMatch(/^device:\d+$/);
+    expect(receipt.volumeId).toMatch(/^(?:volume-(?:uuid|mount|unique):.+|device:\d+)$/);
     expect(receipt.availableBytes).toBeGreaterThan(0);
     expect(receipt.totalBytes).toBeGreaterThan(receipt.availableBytes!);
     expect(receipt.observedAt).toBeGreaterThanOrEqual(before);

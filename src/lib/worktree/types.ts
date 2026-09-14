@@ -190,12 +190,14 @@ export interface WorktreeMetaEntry {
     device: number;
     inode: number;
     canonicalPath: string;
+    volumeId?: string;
   };
   /** Exact parent namespace that owns the materialized directory name. */
   materializationParentIdentity?: {
     device: number;
     inode: number;
     canonicalPath: string;
+    volumeId?: string;
   };
   /** Durable exact restore target prepared before external Git creation. */
   restorePreparation?: {
