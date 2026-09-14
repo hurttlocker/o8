@@ -1979,8 +1979,10 @@ export class WorktreeManager {
       }
     }
 
-    // Optionally delete the branch
-    if (opts?.deleteBranch && entry) {
+    // A missing checkout with no verified snapshot has not passed committed-
+    // work preservation. Keep its branch: it may be the last named reference
+    // to work that survived the directory's removal.
+    if (opts?.deleteBranch && entry && !confirmedMissingRetirement) {
       const branchName = entry.branchName ?? `worktree/${entry.agentType}/${worktreeId}`;
       await execFileAsync('git', ['branch', '-D', branchName], {
         windowsHide: true,

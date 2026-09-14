@@ -544,3 +544,38 @@ it('does not record a retirement completion claim when dependency cleanup fails 
     closeDb();
   }
 }, 60_000);
+
+it('retains unique committed work when cleaning up a missing directory twice', async () => {
+  const fixture = await setupTrackedWorkspace(`branch-preservation-${Date.now()}`, {
+    gitWorktree: true,
+  });
+  writeFileSync(path.join(fixture.worktreePath, 'unique.txt'), 'unique committed work\n');
+  execFileSync('git', ['add', 'tracked.txt', 'unique.txt'], { cwd: fixture.worktreePath });
+  execFileSync('git', [
+    '-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test',
+    'commit', '-q', '-m', 'unique work',
+  ], { cwd: fixture.worktreePath });
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: fixture.worktreePath,
+    encoding: 'utf8',
+  }).trim();
+  const main = execFileSync('git', ['rev-parse', 'main'], {
+    cwd: fixture.repoPath,
+    encoding: 'utf8',
+  }).trim();
+  expect(head).not.toBe(main);
+  rmSync(fixture.worktreePath, { recursive: true, force: true });
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    expect(await cleanupOutcome(fixture.repoPath, fixture.id)).toBe('retired');
+    expect(await readDurableEntry(fixture.repoPath, fixture.id)).toBeUndefined();
+    const retainedHead = execFileSync('git', [
+      'rev-parse', '--verify', `refs/heads/${fixture.branch}`,
+    ], { cwd: fixture.repoPath, encoding: 'utf8' }).trim();
+    expect(retainedHead).toBe(head);
+    expect(execFileSync('git', ['show', `${retainedHead}:unique.txt`], {
+      cwd: fixture.repoPath,
+      encoding: 'utf8',
+    })).toBe('unique committed work\n');
+  }
+}, 60_000);
