@@ -2,8 +2,11 @@ import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
-import { archiveLane, listLanes } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, listLanes } from '@/lib/lane/registry';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
+import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
+import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
+import type { WorktreeMetaEntry } from '@/lib/worktree/types';
 import {
   createWorkspaceSnapshot,
   listWorkspaceSnapshotTransitions,
@@ -26,6 +29,17 @@ export type WorkspaceRetirementAction = 'pr' | 'merge' | 'discard' | 'cleanup';
 interface MergeWorkspaceSnapshotEvidence {
   mergeCandidateSha: string;
   reviewedHeadSha: string;
+}
+
+export interface WorkspaceMaterializationCaptureOptions {
+  /**
+   * Ordinary `cleanup` may retire an exactly-owned workspace whose child
+   * directory is positively gone; pr/merge/discard capture never does, because
+   * an absent checkout cannot produce the verified evidence those terminals
+   * require. The capture layer re-checks the action so a mis-set flag still
+   * refuses strict non-cleanup capture.
+   */
+  allowConfirmedMissingDirectory?: boolean;
 }
 
 interface WorkspaceRetirementReceipt {
@@ -66,6 +80,85 @@ function exactSnapshot(workspacePath: string): WorkspaceSnapshotRecord | null {
   return matches[0] ?? null;
 }
 
+/** The one durable packet lane that owns this exact manager path, if any. */
+function retirementLanes(repoLocalPath: string, workspacePath: string) {
+  return listLanes().filter((lane) => (
+    lane.packetId?.trim()
+    && lane.worktreePath
+    && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repoLocalPath)
+    && path.resolve(lane.worktreePath) === path.resolve(workspacePath)
+  ));
+}
+
+type ExactManagedChildObservation =
+  | { status: 'present' }
+  | { status: 'missing' }
+  | { status: 'uncertain'; reason: string };
+
+function compactError(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 500);
+}
+
+/**
+ * Distinguish a positively verified missing child from every inconclusive probe.
+ *
+ * A child `lstat` ENOENT is meaningful only after the durable parent receipt
+ * still owns the child namespace. Anything else — an unreadable receipt, a
+ * replaced/missing/inaccessible parent, a canonical-authority mismatch, a
+ * non-directory occupant, or any non-ENOENT child error — is `uncertain` and
+ * must keep durable metadata intact.
+ */
+async function observeExactManagedChild(
+  repoPath: string,
+  workspacePath: string,
+): Promise<ExactManagedChildObservation> {
+  const requestedPath = path.resolve(workspacePath);
+  const worktreeId = path.basename(requestedPath);
+  let metadata: WorktreeMetaEntry | undefined;
+  try {
+    metadata = (await readWorktreeMetaSnapshot(repoPath))[worktreeId];
+  } catch (error) {
+    return {
+      status: 'uncertain',
+      reason: `durable manager metadata is unreadable: ${compactError(error)}`,
+    };
+  }
+  if (!metadata || metadata.id !== worktreeId || metadata.claudeManaged) {
+    return { status: 'uncertain', reason: 'durable manager metadata is absent or unowned' };
+  }
+  const identity = metadata.materializationIdentity;
+  const parent = metadata.materializationParentIdentity;
+  if (!identity || !parent) {
+    return { status: 'uncertain', reason: 'workspace has no exact ownership receipt' };
+  }
+  if (path.basename(identity.canonicalPath) !== worktreeId) {
+    return { status: 'uncertain', reason: 'durable child name does not match the requested path' };
+  }
+  try {
+    await assertWorktreeMaterializationIdentity(parent.canonicalPath, parent);
+  } catch (error) {
+    return {
+      status: 'uncertain',
+      reason: `parent ownership could not be proven: ${compactError(error)}`,
+    };
+  }
+  const exactChildPath = path.join(parent.canonicalPath, worktreeId);
+  if (identity.canonicalPath !== exactChildPath) {
+    return { status: 'uncertain', reason: 'durable child canonical authority changed' };
+  }
+  try {
+    const child = await lstat(exactChildPath);
+    if (!child.isDirectory() || child.isSymbolicLink()) {
+      return { status: 'uncertain', reason: 'child occupant is not a regular directory' };
+    }
+    return { status: 'present' };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { status: 'missing' }
+      : { status: 'uncertain', reason: `child probe failed: ${compactError(error)}` };
+  }
+}
+
 function archiveTerminalLane(snapshot: WorkspaceSnapshotRecord, action: WorkspaceRetirementAction): void {
   if (!snapshot.laneId || action === 'cleanup') return;
   const endings = {
@@ -91,8 +184,15 @@ export async function prepareWorkspaceMaterializationRetirement(
   repoPath: string,
   workspacePath: string,
   action: WorkspaceRetirementAction,
+  options: WorkspaceMaterializationCaptureOptions = {},
 ): Promise<WorkspaceSnapshotRecord | null> {
-  const snapshot = await captureWorkspaceMaterializationSnapshot(repoPath, workspacePath, action);
+  const snapshot = await captureWorkspaceMaterializationSnapshot(
+    repoPath,
+    workspacePath,
+    action,
+    undefined,
+    options,
+  );
   return snapshot ? beginWorkspaceMaterializationRetirement(workspacePath, action) : null;
 }
 
@@ -102,6 +202,7 @@ export async function captureWorkspaceMaterializationSnapshot(
   workspacePath: string,
   action: WorkspaceRetirementAction,
   mergeEvidence?: MergeWorkspaceSnapshotEvidence,
+  options: WorkspaceMaterializationCaptureOptions = {},
 ): Promise<WorkspaceSnapshotRecord | null> {
   const existing = exactSnapshot(workspacePath);
   if (existing) {
@@ -112,12 +213,7 @@ export async function captureWorkspaceMaterializationSnapshot(
   }
   const repo = await findRepoByLocalPath(repoPath);
   if (!repo) return null;
-  const lanes = listLanes().filter((lane) => (
-    lane.packetId?.trim()
-    && lane.worktreePath
-    && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repo.localPath)
-    && path.resolve(lane.worktreePath) === path.resolve(workspacePath)
-  ));
+  const lanes = retirementLanes(repo.localPath, workspacePath);
   if (lanes.length === 0) {
     // Name both halves of the identity that failed to meet: an operator reading
     // the persisted merge_error can tell "the workspace is unbound" apart from
@@ -132,6 +228,22 @@ export async function captureWorkspaceMaterializationSnapshot(
   if (lanes.length !== 1) throw new Error('Workspace retirement found ambiguous managed lane truth.');
   const lane = lanes[0]!;
   const packetId = lane.packetId!;
+  if (options.allowConfirmedMissingDirectory && action === 'cleanup') {
+    const observation = await observeExactManagedChild(repo.localPath, workspacePath);
+    if (observation.status === 'missing') {
+      appendEvent(lane.id, 'workspace_absence_observed', 'system', {
+        reason: 'confirmed-missing-directory',
+        action,
+        workspacePath: path.resolve(workspacePath),
+      });
+      return null;
+    }
+    if (observation.status === 'uncertain') {
+      throw new Error(
+        `Workspace retirement could not confirm the exact child directory: ${observation.reason}`,
+      );
+    }
+  }
   const managed = await readManagedWorkspaceMaterialization(repo.localPath, workspacePath);
   const isolationKind = managed.metadata.isolationKind;
   if (isolationKind !== 'git-worktree' && isolationKind !== 'apfs-cow-clone') {
@@ -306,6 +418,27 @@ export function getWorkspaceRetirementAction(
   return snapshot && (snapshot.state === 'retiring' || snapshot.state === 'retired')
     ? recordedAction(snapshot)
     : null;
+}
+
+/**
+ * Record the terminal completion claim for an observed-absent workspace.
+ * Callers must invoke this only after metadata removal succeeded; a late
+ * failure must leave no completion receipt behind.
+ */
+export async function confirmWorkspaceMaterializationRetirement(
+  repoPath: string,
+  workspacePath: string,
+  action: WorkspaceRetirementAction,
+): Promise<void> {
+  const repo = await findRepoByLocalPath(repoPath);
+  if (!repo) return;
+  const lanes = retirementLanes(repo.localPath, workspacePath);
+  if (lanes.length !== 1) return;
+  appendEvent(lanes[0]!.id, 'workspace_retirement_confirmed', 'system', {
+    reason: 'confirmed-missing-directory',
+    action,
+    workspacePath: path.resolve(workspacePath),
+  });
 }
 
 /** Read exact terminal replay truth without advancing durable or physical state. */

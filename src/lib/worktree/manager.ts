@@ -63,6 +63,7 @@ import {
 } from '@/lib/workspace/exact-managed-directory-retirement';
 import { readExactWorkspaceClaim } from '@/lib/workspace/exact-workspace-claim-state';
 import {
+  confirmWorkspaceMaterializationRetirement,
   finishWorkspaceMaterializationRetirement,
   getWorkspaceRetirementAction,
   prepareWorkspaceMaterializationRetirement,
@@ -1850,6 +1851,7 @@ export class WorktreeManager {
       ?? 'cleanup';
 
     let cleanupIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = null;
+    let confirmedMissingRetirement = false;
 
     // Safety: preserve uncommitted agent work before removing. Every Git read
     // and preservation write stays on the same captured workspace inode that
@@ -1911,6 +1913,7 @@ export class WorktreeManager {
       try {
         retirementTruth = await prepareWorkspaceMaterializationRetirement(
           this.repoRoot, worktreePath, retirementAction,
+          retirementAction === 'cleanup' ? { allowConfirmedMissingDirectory: true } : {},
         );
       } catch (error) {
         console.error(
@@ -1966,6 +1969,7 @@ export class WorktreeManager {
       }
       if (await this.pathExists(worktreePath)) return false;
       await finishWorkspaceMaterializationRetirement(worktreePath, retirementAction);
+      confirmedMissingRetirement = retirementTruth === null && !pathInitiallyExists;
       if ((entry?.isolationKind ?? 'git-worktree') === 'git-worktree') {
         await execFileAsync('git', ['worktree', 'prune'], {
           windowsHide: true,
@@ -1988,6 +1992,11 @@ export class WorktreeManager {
     // Remove our metadata
     await this.removeMeta(worktreeId);
     completeExactManagedDirectoryRetirement(this.repoRoot, worktreeId);
+    if (confirmedMissingRetirement) {
+      await confirmWorkspaceMaterializationRetirement(
+        this.repoRoot, worktreePath, retirementAction,
+      );
+    }
     return true;
   }
 
