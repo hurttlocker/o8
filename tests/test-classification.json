@@ -1853,6 +1853,15 @@
       ]
     },
     {
+      "path": "tests/managed-cleanup-missing-directory-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/managed-create-prune-concurrency-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -344,6 +344,14 @@ export type LaneEventVerb =
   // Payload adds storageRelease: { decision, ownerGeneration,
   // releasedReservations, releasedBytes, retainedOwnerIds, reason }.
   | 'worktree_provision_failed'
+  // Cleanup positively confirmed the tracked child directory was gone. This
+  // records observation only; it never claims retirement completed.
+  // Payload: { reason: 'confirmed-missing-directory', action, workspacePath }
+  | 'workspace_absence_observed'
+  // Cleanup finished retiring that observed-absent workspace and removed its
+  // durable metadata. Emitted only after removal, so a late failure leaves no
+  // completion claim behind. Payload: { reason, action, workspacePath }
+  | 'workspace_retirement_confirmed'
   // Dependency setup completed and its package-script binaries were checked
   // before a worker could start. The incomplete event is a launch blocker.
   | 'dependency_materialized'
