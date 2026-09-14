@@ -5,6 +5,14 @@ import {
   guardedWorkspaceInvocation,
 } from './materialization-execution';
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
+import { resolveStorageVolumeId } from './storage-telemetry';
+
+export interface PinnedWorkspaceFileIdentity {
+  device: number;
+  inode: number;
+  canonicalPath?: string;
+  volumeId?: string;
+}
 
 export class PinnedWorkspacePublishError extends Error {
   constructor(message: string) {
@@ -260,6 +268,7 @@ async function main() {
           content: fs.readFileSync(handle).toString('base64'),
           device: identity.dev,
           inode: identity.ino,
+          canonicalPath: fs.realpathSync(prepared.target),
         }));
       } finally {
         fs.closeSync(handle);
@@ -345,7 +354,11 @@ async function main() {
         || published.dev !== receipt.dev || published.ino !== receipt.ino) {
         throw new Error('Pinned workspace direct write lost its exact target.');
       }
-      process.stdout.write(JSON.stringify({ device: receipt.dev, inode: receipt.ino }));
+      process.stdout.write(JSON.stringify({
+        device: receipt.dev,
+        inode: receipt.ino,
+        canonicalPath: fs.realpathSync(prepared.target),
+      }));
     } finally {
       fs.closeSync(handle);
     }
@@ -503,7 +516,7 @@ async function runPinnedLeaf(
   sourceOrTarget?: string,
   content?: string,
   afterPinnedStep?: (segment: string) => Promise<void>,
-  expectedTargetIdentity?: { device: number; inode: number } | null,
+  expectedTargetIdentity?: PinnedWorkspaceFileIdentity | null,
 ): Promise<{ code: number; stdout: string }> {
   const invocation = guardedWorkspaceInvocation(process.execPath, [
     '-e', PINNED_LEAF_IO_SCRIPT, operation, safeRelativePath(relativePath),
@@ -593,21 +606,26 @@ export async function readPinnedWorkspaceFileReceipt(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
   relativePath: string,
-): Promise<{ content: string; device: number; inode: number } | null> {
+): Promise<{ content: string } & Required<PinnedWorkspaceFileIdentity> | null> {
   const receipt = await runPinnedLeaf(workspacePath, identity, 'read', relativePath);
   if (receipt.code === 44) return null;
   const parsed = JSON.parse(receipt.stdout) as {
-    content?: unknown; device?: unknown; inode?: unknown;
+    content?: unknown; device?: unknown; inode?: unknown; canonicalPath?: unknown;
   };
   if (typeof parsed.content !== 'string'
     || !Number.isSafeInteger(parsed.device)
-    || !Number.isSafeInteger(parsed.inode)) {
+    || !Number.isSafeInteger(parsed.inode)
+    || typeof parsed.canonicalPath !== 'string'
+    || !path.isAbsolute(parsed.canonicalPath)) {
     throw new Error('Pinned workspace read returned an invalid file receipt.');
   }
+  const canonicalPath = parsed.canonicalPath;
   return {
     content: Buffer.from(parsed.content, 'base64').toString('utf8'),
     device: parsed.device as number,
     inode: parsed.inode as number,
+    canonicalPath,
+    volumeId: await resolveStorageVolumeId(canonicalPath),
   };
 }
 
@@ -635,17 +653,48 @@ export async function writePinnedWorkspaceFile(
   relativePath: string,
   content: string,
   afterPinnedStep?: (segment: string) => Promise<void>,
-  expectedTargetIdentity?: { device: number; inode: number } | null,
-): Promise<{ device: number; inode: number }> {
+  expectedTargetIdentity?: PinnedWorkspaceFileIdentity | null,
+): Promise<Required<PinnedWorkspaceFileIdentity>> {
+  let pinnedTargetIdentity = expectedTargetIdentity;
+  if (expectedTargetIdentity) {
+    const current = await readPinnedWorkspaceFileReceipt(workspacePath, identity, relativePath);
+    if (!current) throw new Error('Pinned workspace direct-write target is missing.');
+    const expectedCanonicalPath = expectedTargetIdentity.canonicalPath
+      ?? path.join(identity.canonicalPath, safeRelativePath(relativePath));
+    if (current.canonicalPath !== expectedCanonicalPath) {
+      throw new Error('Pinned workspace direct-write target canonical path does not match its durable receipt.');
+    }
+    if (current.inode !== expectedTargetIdentity.inode) {
+      throw new Error('Pinned workspace direct-write target inode does not match its durable receipt.');
+    }
+    const expectedVolumeId = expectedTargetIdentity.volumeId
+      ?? identity.volumeId
+      ?? await resolveStorageVolumeId(identity.canonicalPath);
+    if (current.volumeId !== expectedVolumeId) {
+      throw new Error('Pinned workspace direct-write target volume identity does not match its durable receipt.');
+    }
+    pinnedTargetIdentity = { device: current.device, inode: current.inode };
+  }
   const receipt = await runPinnedLeaf(
     workspacePath, identity, 'atomic-write', relativePath, undefined, content, afterPinnedStep,
-    expectedTargetIdentity,
+    pinnedTargetIdentity,
   );
-  const parsed = JSON.parse(receipt.stdout) as { device?: unknown; inode?: unknown };
-  if (!Number.isSafeInteger(parsed.device) || !Number.isSafeInteger(parsed.inode)) {
+  const parsed = JSON.parse(receipt.stdout) as {
+    device?: unknown; inode?: unknown; canonicalPath?: unknown;
+  };
+  if (!Number.isSafeInteger(parsed.device)
+    || !Number.isSafeInteger(parsed.inode)
+    || typeof parsed.canonicalPath !== 'string'
+    || !path.isAbsolute(parsed.canonicalPath)) {
     throw new Error('Pinned workspace direct write returned an invalid target receipt.');
   }
-  return { device: parsed.device as number, inode: parsed.inode as number };
+  const canonicalPath = parsed.canonicalPath;
+  return {
+    device: parsed.device as number,
+    inode: parsed.inode as number,
+    canonicalPath,
+    volumeId: await resolveStorageVolumeId(canonicalPath),
+  };
 }
 
 export async function ensurePinnedWorkspaceFile(
@@ -689,5 +738,6 @@ export async function ensurePinnedWorkspaceDirectory(
     || !path.isAbsolute(parsed.canonicalPath)) {
     throw new Error('Pinned workspace directory returned an invalid identity.');
   }
-  return parsed as WorktreeMaterializationIdentity;
+  const result = parsed as WorktreeMaterializationIdentity;
+  return { ...result, volumeId: await resolveStorageVolumeId(result.canonicalPath) };
 }

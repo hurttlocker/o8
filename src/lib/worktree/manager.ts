@@ -340,6 +340,7 @@ export class WorktreeManager {
           canonicalPath: capturedBase.canonicalPath,
           device: Number(capturedBase.device),
           inode: Number(capturedBase.inode),
+          volumeId,
         },
       }, () => withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
           const entry = (await transaction.readAll())[created.id];

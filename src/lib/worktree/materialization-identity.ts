@@ -1,8 +1,13 @@
 import { lstat, realpath } from 'node:fs/promises';
 
 import type { WorktreeMetaEntry } from './types';
+import { resolveStorageVolumeId } from './storage-telemetry';
 
 export type WorktreeMaterializationIdentity = NonNullable<WorktreeMetaEntry['materializationIdentity']>;
+
+export interface MaterializationIdentityAssertionOptions {
+  legacyVolumeId?: string;
+}
 
 /** Capture one regular directory through both its lexical and canonical names. */
 export async function captureWorktreeMaterializationIdentity(
@@ -23,22 +28,43 @@ export async function captureWorktreeMaterializationIdentity(
     || before.dev !== canonical.dev || before.ino !== canonical.ino) {
     throw new Error('Managed workspace materialization changed during ownership capture.');
   }
-  return { device: before.dev, inode: before.ino, canonicalPath };
+  const volumeId = await resolveStorageVolumeId(canonicalPath);
+  const repeated = await lstat(workspacePath);
+  if (!repeated.isDirectory() || repeated.isSymbolicLink()
+    || repeated.dev !== before.dev || repeated.ino !== before.ino
+    || await realpath(workspacePath) !== canonicalPath) {
+    throw new Error('Managed workspace materialization changed during volume identity capture.');
+  }
+  return {
+    device: before.dev,
+    inode: before.ino,
+    canonicalPath,
+    volumeId,
+  };
 }
 
 /** Re-prove the exact directory receipt immediately before a workspace consumer acts. */
 export async function assertWorktreeMaterializationIdentity(
   workspacePath: string,
   expected: WorktreeMaterializationIdentity | undefined,
+  options: MaterializationIdentityAssertionOptions = {},
 ): Promise<WorktreeMaterializationIdentity> {
   if (!expected) {
     throw new Error('Managed workspace materialization has no durable ownership receipt.');
   }
   const actual = await captureWorktreeMaterializationIdentity(workspacePath);
-  if (actual.device !== expected.device
-    || actual.inode !== expected.inode
-    || actual.canonicalPath !== expected.canonicalPath) {
-    throw new Error('Managed workspace materialization ownership changed.');
+  if (actual.canonicalPath !== expected.canonicalPath) {
+    throw new Error('Managed workspace materialization ownership changed: canonical path mismatch.');
+  }
+  if (actual.inode !== expected.inode) {
+    throw new Error('Managed workspace materialization ownership changed: inode mismatch.');
+  }
+  if (expected.volumeId && actual.volumeId !== expected.volumeId) {
+    throw new Error('Managed workspace materialization ownership changed: volume identity mismatch.');
+  }
+  if (!expected.volumeId && actual.device !== expected.device
+    && actual.volumeId !== options.legacyVolumeId) {
+    throw new Error('Managed workspace materialization ownership changed: device mismatch without a matching stable volume identity.');
   }
   return actual;
 }

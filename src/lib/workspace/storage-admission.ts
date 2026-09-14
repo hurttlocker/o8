@@ -1,11 +1,10 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
-import { measureHostVolume } from '@/lib/worktree/storage-telemetry';
+import { measureHostVolume, resolveStorageVolumeId } from '@/lib/worktree/storage-telemetry';
 
 export const DEFAULT_STORAGE_RESERVE_RATIO = 0.1;
 export const DEFAULT_STORAGE_RESERVE_FLOOR_BYTES = 10 * 1024 * 1024 * 1024;
@@ -248,13 +247,13 @@ export async function observeStorageVolume(
     );
   }
   try {
-    const identity = await stat(host.probePath, { bigint: true });
+    const volumeId = host.volumeId ?? await resolveStorageVolumeId(host.probePath);
     const observedAt = clock();
     return {
       status: 'observed',
       targetPath: resolvedPath,
       probePath: host.probePath,
-      volumeId: `device:${identity.dev.toString()}`,
+      volumeId,
       availableBytes: host.availableBytes,
       freeBytes: host.freeBytes,
       totalBytes: host.totalBytes,

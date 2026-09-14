@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readdir, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const DU_TIMEOUT_MS = 30_000;
+const VOLUME_ID_TIMEOUT_MS = 5_000;
+const stableVolumeIds = new Map<string, Promise<string>>();
 
 export type StorageAccountingStatus = 'observed' | 'partial' | 'unknown';
 export type MeasurementAccounting = 'observed' | 'unknown';
@@ -343,16 +346,94 @@ async function readStatFs(targetPath: string): Promise<StatFsLike> {
   return statfs(targetPath, { bigint: true });
 }
 
+function opaqueVolumeId(prefix: string, value: string): string {
+  return `${prefix}:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+async function platformVolumeId(targetPath: string): Promise<string | null> {
+  if (process.platform === 'darwin') {
+    const { stdout: dfOutput } = await execFileAsync('/bin/df', ['-P', targetPath], {
+      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      windowsHide: true,
+      timeout: VOLUME_ID_TIMEOUT_MS,
+    });
+    const device = dfOutput.trim().split('\n')[1]?.trim().split(/\s+/)[0];
+    if (!device) return null;
+    const { stdout } = await execFileAsync('/usr/sbin/diskutil', ['info', '-plist', device], {
+      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      windowsHide: true,
+      timeout: VOLUME_ID_TIMEOUT_MS,
+      maxBuffer: 256 * 1024,
+    });
+    const uuid = /<key>(?:VolumeUUID|DiskUUID)<\/key>\s*<string>([0-9A-Fa-f-]+)<\/string>/.exec(stdout)?.[1];
+    return uuid ? `volume-uuid:${uuid.toLowerCase()}` : null;
+  }
+  if (process.platform === 'linux') {
+    const uuid = await execFileAsync('findmnt', ['-T', targetPath, '-n', '-o', 'UUID'], {
+      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      windowsHide: true,
+      timeout: VOLUME_ID_TIMEOUT_MS,
+    }).then(({ stdout }) => stdout.trim()).catch(() => '');
+    if (uuid && uuid !== '-') return `volume-uuid:${uuid.toLowerCase()}`;
+    const mount = await execFileAsync('findmnt', ['-T', targetPath, '-n', '-o', 'SOURCE,FSTYPE,TARGET'], {
+      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      windowsHide: true,
+      timeout: VOLUME_ID_TIMEOUT_MS,
+    }).then(({ stdout }) => stdout.trim()).catch(() => '');
+    return mount ? opaqueVolumeId('volume-mount', mount) : null;
+  }
+  if (process.platform === 'win32') {
+    const encodedPath = Buffer.from(targetPath, 'utf8').toString('base64');
+    const script = [
+      '$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($args[0]))',
+      '$volume = Get-Volume -FilePath $path -ErrorAction Stop',
+      '[Console]::Out.Write($volume.UniqueId)',
+    ].join('; ');
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command', script, encodedPath,
+    ], {
+      windowsHide: true,
+      timeout: VOLUME_ID_TIMEOUT_MS,
+      maxBuffer: 64 * 1024,
+    });
+    const uniqueId = stdout.trim();
+    return uniqueId ? opaqueVolumeId('volume-unique', uniqueId) : null;
+  }
+  return null;
+}
+
+/** Resolve a boot-stable filesystem identity, with st_dev as a conservative last resort. */
+export async function resolveStorageVolumeId(targetPath: string): Promise<string> {
+  const resolvedPath = path.resolve(targetPath);
+  const identity = await stat(resolvedPath, { bigint: true });
+  const cacheKey = `${process.platform}:${identity.dev.toString()}`;
+  let pending = stableVolumeIds.get(cacheKey);
+  if (!pending) {
+    pending = (async () => {
+      const volumeId = await platformVolumeId(resolvedPath).catch(() => null);
+      const repeated = await stat(resolvedPath, { bigint: true });
+      if (repeated.dev !== identity.dev) {
+        throw new Error('Filesystem volume changed during identity capture.');
+      }
+      return volumeId ?? `device:${identity.dev.toString()}`;
+    })();
+    stableVolumeIds.set(cacheKey, pending);
+  }
+  try {
+    return await pending;
+  } catch (error) {
+    if (stableVolumeIds.get(cacheKey) === pending) stableVolumeIds.delete(cacheKey);
+    throw error;
+  }
+}
+
 export async function measureHostVolume(
   targetPath: string,
   dependencies: VolumeTelemetryDependencies = {},
 ): Promise<HostVolumeTelemetry> {
   const resolvedTarget = path.resolve(targetPath);
   const statFsReader = dependencies.readStatFs ?? readStatFs;
-  const volumeIdReader = dependencies.readVolumeId ?? (async (candidate: string) => {
-    const identity = await stat(candidate, { bigint: true });
-    return `device:${identity.dev.toString()}`;
-  });
+  const volumeIdReader = dependencies.readVolumeId ?? resolveStorageVolumeId;
   let probePath = resolvedTarget;
 
   while (true) {

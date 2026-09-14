@@ -54,6 +54,7 @@ async function captureMetadataBoundary(repoPath: string): Promise<WorktreeMetada
       canonicalPath: base.canonicalPath,
       device: Number(base.device),
       inode: Number(base.inode),
+      volumeId: observation.volumeId!,
     },
   };
 }
@@ -131,14 +132,20 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
         && Number.isFinite(entry.materializationIdentity.device)
         && Number.isFinite(entry.materializationIdentity.inode)
         && typeof entry.materializationIdentity.canonicalPath === 'string'
-        && entry.materializationIdentity.canonicalPath.length > 0))
+        && entry.materializationIdentity.canonicalPath.length > 0
+        && (entry.materializationIdentity.volumeId === undefined
+          || (typeof entry.materializationIdentity.volumeId === 'string'
+            && entry.materializationIdentity.volumeId.length > 0))))
     && (entry.materializationParentIdentity === undefined
       || (typeof entry.materializationParentIdentity === 'object'
         && entry.materializationParentIdentity !== null
         && Number.isFinite(entry.materializationParentIdentity.device)
         && Number.isFinite(entry.materializationParentIdentity.inode)
         && typeof entry.materializationParentIdentity.canonicalPath === 'string'
-        && entry.materializationParentIdentity.canonicalPath.length > 0))
+        && entry.materializationParentIdentity.canonicalPath.length > 0
+        && (entry.materializationParentIdentity.volumeId === undefined
+          || (typeof entry.materializationParentIdentity.volumeId === 'string'
+            && entry.materializationParentIdentity.volumeId.length > 0))))
     && (entry.restorePreparation === undefined
       || (typeof entry.restorePreparation === 'object'
         && entry.restorePreparation !== null
@@ -265,7 +272,12 @@ export async function withWorktreeMetaTransaction<T>(
     const metaPath = path.join(resolveWorktreeRootLayout(repoPath).primaryBase, META_FILENAME);
     const durableState = readMetadataTransactionState(lease);
     let entries: Record<string, WorktreeMetaEntry>;
-    let mirrorIdentity: { device: number; inode: number } | null;
+    let mirrorIdentity: {
+      device: number;
+      inode: number;
+      canonicalPath?: string;
+      volumeId?: string;
+    } | null;
     if (durableState === null) {
       const imported = await readPinnedWorkspaceFileReceipt(
         path.dirname(metaPath), boundary.base, META_FILENAME,
@@ -274,7 +286,12 @@ export async function withWorktreeMetaTransaction<T>(
         ? validatedMetaStore(JSON.parse(imported.content) as unknown, metaPath).worktrees
         : {};
       mirrorIdentity = imported
-        ? { device: imported.device, inode: imported.inode }
+        ? {
+            device: imported.device,
+            inode: imported.inode,
+            canonicalPath: imported.canonicalPath,
+            volumeId: imported.volumeId,
+          }
         : null;
       writeMetadataTransactionState(
         lease,
