@@ -1,4 +1,8 @@
 import { recordLaneEvent } from '@/lib/lane/events';
+import {
+  releasePacketStorageAfterWorktreeProvisionFailure,
+  type PacketWorktreeProvisionStorageRelease,
+} from '@/lib/lane/lane-storage-release';
 import { getLane, setLaneStatus } from '@/lib/lane/registry';
 import type { LaneStatus } from '@/lib/lane/types';
 
@@ -27,12 +31,36 @@ export function packetWorktreeProvisionError(
   }
 
   const laneId = request.existingLaneId!;
+  const packetId = request.packetId!;
   const cause = causeInput instanceof Error ? causeInput.message : String(causeInput);
   const lane = getLane(laneId);
+  let storageRelease: PacketWorktreeProvisionStorageRelease = {
+    decision: 'deferred',
+    ownerGeneration: null,
+    releasedReservations: 0,
+    releasedBytes: 0,
+    retainedOwnerIds: [packetId],
+    reason: 'packet_association_unprovable',
+  };
+  if (lane) {
+    try {
+      storageRelease = releasePacketStorageAfterWorktreeProvisionFailure(lane, packetId);
+    } catch (error) {
+      storageRelease = {
+        ...storageRelease,
+        reason: 'storage_release_failed',
+        error: error instanceof Error ? error.message : String(error),
+      };
+      console.warn(
+        `[runtime-launch] Failed to release packet storage after worktree provision failure for ${laneId}:`,
+        error,
+      );
+    }
+  }
   if (lane?.status === 'launching') {
     setLaneStatus(
       laneId,
-      laneStatus ?? 'failed',
+      storageRelease.decision === 'deferred' ? 'awaiting_input' : laneStatus ?? 'failed',
       'system',
       PACKET_WORKTREE_PROVISION_FAILED,
     );
@@ -41,11 +69,12 @@ export function packetWorktreeProvisionError(
     recordLaneEvent(laneId, 'worktree_provision_failed', 'system', {
       code: PACKET_WORKTREE_PROVISION_FAILED,
       runtime,
-      packetId: request.packetId,
+      packetId,
       laneId,
       repoPath,
       cause,
       note,
+      storageRelease,
     });
   } catch (error) {
     console.warn(

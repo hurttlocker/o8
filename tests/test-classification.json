@@ -2824,6 +2824,14 @@
       ]
     },
     {
+      "path": "tests/storage-admission-provision-failure-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/storage-admission-rerun-release-real-path.test.ts",
       "reasons": [
         "child-process",

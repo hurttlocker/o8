@@ -341,7 +341,8 @@ export type LaneEventVerb =
   // { code, reason, packetId, branch, ref, note, gcRisk }
   | 'branch_preservation_failed'
   // Packet dispatch refused to launch without a managed worktree.
-  // Payload: { code, runtime, packetId, laneId, repoPath, cause, note }
+  // Payload adds storageRelease: { decision, ownerGeneration,
+  // releasedReservations, releasedBytes, retainedOwnerIds, reason }.
   | 'worktree_provision_failed'
   // Dependency setup completed and its package-script binaries were checked
   // before a worker could start. The incomplete event is a launch blocker.
