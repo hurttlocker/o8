@@ -2020,6 +2020,15 @@
       ]
     },
     {
+      "path": "tests/merge-check-stop-race-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/merge-checkout-coupling-real-path.test.ts",
       "reasons": [
         "apfs-tool",
@@ -2542,6 +2551,12 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/rerun-operator-stop-admission-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

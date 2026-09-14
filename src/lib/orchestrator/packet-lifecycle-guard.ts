@@ -46,18 +46,46 @@ export function packetLifecycleGuardMatches(
     && packet.releaseStatePayload?.source === guard.source;
 }
 
+/**
+ * Thrown when an automatic caller asked to preserve a durable operator Stop and
+ * the packet already carries one. Refusing before marking the lifecycle hold
+ * keeps the stop, its retry budget, and any bound lanes intact.
+ */
+export class PacketOperatorStopPreservedError extends Error {
+  constructor(packetId: string) {
+    super(`Packet ${packetId} has a durable operator stop; the requested lifecycle mutation was refused so the stop is preserved.`);
+    this.name = 'PacketOperatorStopPreservedError';
+  }
+}
+
+const OPERATOR_STOP_REFUSAL = 'operator_stop_refusal' as const;
+
 export function holdPacketLifecycleMutation(input: {
   packetId: string;
   kind: 'close' | 'rerun' | 'stop';
+  /**
+   * Automatic recovery sets this so a durable operator Stop that already owns
+   * the packet is preserved. Explicit/manual callers omit it: an operator rerun
+   * may intentionally clear a prior stop.
+   */
+  preserveOperatorStop?: boolean;
 }): Promise<PacketLifecycleGuard | null> {
-  return withMissionHandoffBarrier(async () => {
+  return withMissionHandoffBarrier(async (): Promise<PacketLifecycleGuard | null> => {
     const source = `${input.kind === 'stop' ? 'operator_stop' : input.kind}:${randomUUID()}`;
     const blockedReason = `${input.kind}_in_progress`;
     let currentMissionId = '';
-    const { result: currentGuard } = await withLockedState((state) => {
+    const { result: activeResult } = await withLockedState<
+      PacketLifecycleGuard | typeof OPERATOR_STOP_REFUSAL | null
+    >((state) => {
       currentMissionId = state.missionId?.trim() ?? '';
       const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-      if (!packet || !currentMissionId) return null;
+      if (!packet) return null;
+      // Refuse inside the owning state's lock BEFORE marking the hold, and never
+      // let the refusal fall through to an older registry copy.
+      if (input.preserveOperatorStop === true && packet.operatorStopped === true) {
+        return OPERATOR_STOP_REFUSAL;
+      }
+      if (!currentMissionId) return null;
       const previousPacket = structuredClone(packet);
       markPacketLifecycleHeld(packet, source, blockedReason);
       return {
@@ -69,16 +97,24 @@ export function holdPacketLifecycleMutation(input: {
         heldPacket: structuredClone(packet),
       } satisfies PacketLifecycleGuard;
     });
-    if (currentGuard) return currentGuard;
+    if (activeResult === OPERATOR_STOP_REFUSAL) {
+      throw new PacketOperatorStopPreservedError(input.packetId);
+    }
+    if (activeResult) return activeResult;
 
     const entry = findMissionRegistryEntryByPacketId(input.packetId, {
       includeArchived: true,
       excludeMissionId: currentMissionId || undefined,
     });
     if (!entry) return null;
-    const { result } = await withMissionRegistryState(entry.id, (state) => {
+    const { result } = await withMissionRegistryState<
+      PacketLifecycleGuard | typeof OPERATOR_STOP_REFUSAL | null
+    >(entry.id, (state) => {
       const packet = state.packets.find((candidate) => candidate.id === input.packetId);
       if (!packet) return { state, result: null };
+      if (input.preserveOperatorStop === true && packet.operatorStopped === true) {
+        return { state, result: OPERATOR_STOP_REFUSAL };
+      }
       const previousPacket = structuredClone(packet);
       markPacketLifecycleHeld(packet, source, blockedReason);
       return {
@@ -93,6 +129,9 @@ export function holdPacketLifecycleMutation(input: {
         } satisfies PacketLifecycleGuard,
       };
     });
+    if (result === OPERATOR_STOP_REFUSAL) {
+      throw new PacketOperatorStopPreservedError(input.packetId);
+    }
     return result;
   });
 }
