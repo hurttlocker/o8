@@ -987,6 +987,12 @@
       ]
     },
     {
+      "path": "tests/agent-tile-header-layout-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/agents-presence-foreign-write-real-path.test.ts",
       "reasons": [
         "real-path"

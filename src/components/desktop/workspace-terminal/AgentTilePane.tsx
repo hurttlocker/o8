@@ -291,6 +291,10 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
   ), [entries, name, packet?.id, packet?.issue?.body]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
+  const runtimeModelLabel = runtimeModelDisplayLabel(
+    runtime,
+    agent?.model ?? packet?.lane?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel,
+  );
   const statusEvidence = packet?.statusEvidence ?? agent?.statusEvidence;
   const status = useMemo(
     () => statusEvidence
@@ -446,40 +450,63 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         }}
       >
         <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            title={runtimeModelLabel}
+            style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}
+          >
+            {/* Identity never flex-shrinks (subpixel shrink already triggers ellipsis);
+                maxWidth reserves the 8px gap plus a 10px status dot floor so long
+                titles stay bounded and the status indicator always survives. */}
             <div
               title={name}
               style={{
-                minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                flexShrink: 0, maxWidth: 'calc(100% - 18px)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontSize: 12, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.1px',
               }}
             >
               {name}
             </div>
-            <span
-              style={{
-                display: 'inline-flex', alignItems: 'center', flexShrink: 0,
-                color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, lineHeight: 1,
-              }}
-            >
-              {runtimeModelDisplayLabel(runtime, agent?.model ?? packet?.lane?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel)}
-            </span>
+            {/* Metadata row is the only flexible track, and the model is its only
+                shrinkable child: the model yields to zero before the status box can
+                shrink at all. The zone clips so nothing paints over the controls. */}
+            <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+              <span
+                title={runtimeModelLabel}
+                style={{
+                  minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1000,
+                  color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, lineHeight: 1,
+                }}
+              >
+                {runtimeModelLabel}
+              </span>
+              <span
+                title={statusEvidence?.summary ?? STATUS_META[status].label}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, marginLeft: 'auto',
+                  maxWidth: '100%', overflow: 'hidden',
+                  color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 300,
+                }}
+              >
+                <span
+                  style={{
+                    width: 5, height: 5, borderRadius: 999, background: STATUS_META[status].color, flexShrink: 0,
+                  }}
+                />
+                <span
+                  style={{
+                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                >
+                  {statusEvidence
+                    ? terminalStatusCaption(statusEvidence)
+                    : STATUS_META[status].label}
+                </span>
+              </span>
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span
-            title={statusEvidence?.summary ?? STATUS_META[status].label}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 300 }}
-          >
-            <span
-              style={{
-                width: 5, height: 5, borderRadius: 999, background: STATUS_META[status].color, flexShrink: 0,
-              }}
-            />
-            {statusEvidence
-              ? terminalStatusCaption(statusEvidence)
-              : STATUS_META[status].label}
-          </span>
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
           <button
             type="button"
