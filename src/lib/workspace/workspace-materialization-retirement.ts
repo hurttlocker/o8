@@ -2,7 +2,7 @@ import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
-import { appendEvent, archiveLane, listLanes } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, getLane, listLanes } from '@/lib/lane/registry';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
@@ -161,6 +161,11 @@ async function observeExactManagedChild(
 
 function archiveTerminalLane(snapshot: WorkspaceSnapshotRecord, action: WorkspaceRetirementAction): void {
   if (!snapshot.laneId || action === 'cleanup') return;
+  const lane = getLane(snapshot.laneId);
+  if (!lane || lane.status === 'archived') return;
+  if (lane.packetId !== snapshot.packetId) return;
+  if (lane.worktreePath
+    && path.resolve(lane.worktreePath) !== path.resolve(snapshot.originalPath)) return;
   const endings = {
     pr: { outcome: 'pr_opened' as const, outcomeNote: 'Pull request opened; local workspace retired.' },
     merge: { outcome: 'merged' as const, outcomeNote: 'Merged; local workspace retired.' },
@@ -418,6 +423,12 @@ export function getWorkspaceRetirementAction(
   return snapshot && (snapshot.state === 'retiring' || snapshot.state === 'retired')
     ? recordedAction(snapshot)
     : null;
+}
+
+export function getRecordedRetirementAction(
+  snapshot: WorkspaceSnapshotRecord,
+): WorkspaceRetirementAction | null {
+  return recordedAction(snapshot);
 }
 
 /**
