@@ -3,6 +3,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
 import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { useComposerChipCompact } from '../composer-compact-context';
 import { ProviderMarkGlyph } from './provider-marks';
 import {
   isHotComposerEffort,
@@ -41,6 +42,7 @@ export function LeadChip({
   buttonRef: RefObject<HTMLButtonElement | null>;
   onClick: () => void;
 }) {
+  const compact = useComposerChipCompact();
   const selectedIndex = Math.max(0, state.effortOptions.indexOf(state.effort));
   const topActive = isHotComposerEffort(state.effort);
   const accent = topActive ? 'var(--t-brand-orange)' : 'var(--t-accent)';
@@ -78,21 +80,45 @@ export function LeadChip({
       onClick={onClick}
       style={{
         ...sharedChipStyle,
-        gap: 5,
+        gap: compact ? 4 : 5,
         maxWidth: 260,
+        // A floor reserves a readable model prefix before the row collapses
+        // anything else; the effort meter yields into it first.
+        minWidth: compact ? 68 : 0,
         borderColor: open ? 'var(--t-border)' : 'transparent',
         background: open ? 'var(--t-hover)' : 'transparent',
         color: 'var(--t-text-secondary)',
         cursor: saving ? 'default' : 'pointer',
         fontSize: 11,
         opacity: saving ? 0.6 : 1,
+        // The row clamps at narrow widths; keep the model label inside the
+        // chip instead of letting the mark/meter paint over the Workers chip.
+        overflow: 'hidden',
       }}
     >
-      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'currentColor' }}>
-        <ProviderMarkGlyph mark={providerMarkForLead(state.leadBackend, state.leadModelId)} />
+      {compact ? null : (
+        <span style={{ display: 'inline-flex', flexShrink: 0, color: 'currentColor' }}>
+          <ProviderMarkGlyph mark={providerMarkForLead(state.leadBackend, state.leadModelId)} />
+        </span>
+      )}
+      <span
+        data-testid="composer-selector-lead-label"
+        style={{
+          // Guarantee a readable model prefix (roughly the first several
+          // glyphs) when the row is tight; the effort meter yields first.
+          minWidth: compact ? 40 : 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          fontWeight: 550,
+        }}
+      >
+        {state.leadModelLabel}
       </span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 550 }}>{state.leadModelLabel}</span>
-      <span aria-hidden style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 2, height: 9 }}>
+      <span
+        data-testid="composer-selector-effort-meter"
+        aria-hidden
+        style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 2, height: 9, flexShrink: 0 }}
+      >
         {state.effortOptions.map((effort, index) => {
           const lit = index <= selectedIndex;
           return (
@@ -114,12 +140,14 @@ export function LeadChip({
           );
         })}
       </span>
-      <span
-        data-testid="composer-selector-effort-word"
-        style={{ flexShrink: 0, color: accent, fontWeight: 450 }}
-      >
-        {THINKING_EFFORT_LABELS[state.effort].short}
-      </span>
+      {compact ? null : (
+        <span
+          data-testid="composer-selector-effort-word"
+          style={{ flexShrink: 0, color: accent, fontWeight: 450 }}
+        >
+          {THINKING_EFFORT_LABELS[state.effort].short}
+        </span>
+      )}
     </button>
   );
 }
@@ -139,6 +167,7 @@ export function WorkersChip({
   buttonRef: RefObject<HTMLButtonElement | null>;
   onClick: () => void;
 }) {
+  const compact = useComposerChipCompact();
   useEffect(() => {
     const node = buttonRef.current;
     if (!node || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
@@ -207,7 +236,7 @@ export function WorkersChip({
       </span>
       <span
         data-testid="composer-selector-workers-label"
-        style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+        style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: compact ? 'none' : undefined }}
       >
         {label}
       </span>

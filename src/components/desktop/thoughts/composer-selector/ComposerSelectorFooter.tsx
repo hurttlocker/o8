@@ -8,6 +8,7 @@ import type { ComposerModelGroup } from '../ModelThinkingChip';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { ComposerPicker } from './ComposerPicker';
 import { ModeChip } from './ModeChip';
+import { useComposerChipCompact } from '../composer-compact-context';
 import type { ResolvedComposerSelectorState } from './state';
 import type { ComposerWorkerDefaults } from './worker-settings';
 
@@ -53,6 +54,7 @@ export function ComposerSelectorFooterView({
   containerRef?: Ref<HTMLDivElement>;
   onRequestTextareaFocus?: () => void;
 }) {
+  const compact = useComposerChipCompact();
   return (
     <div
       ref={containerRef}
@@ -60,7 +62,7 @@ export function ComposerSelectorFooterView({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
+        gap: compact ? 4 : 6,
         minHeight: 36,
         paddingTop: 4,
         paddingRight: 8,
