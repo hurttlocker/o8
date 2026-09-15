@@ -73,6 +73,16 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       return repoName ? `${repoName} / ${kindLabel}` : kindLabel;
     })();
 
+    // Render-derived active identity for the MCP surface-state reader. Source
+    // is the same `activeTab` the header/broadcast use — never a parsed label
+    // or an arbitrary button — and the pane marks itself active so a split
+    // layout resolves the pane the operator is actually on.
+    const activeTabRepoName = activeTab?.repo?.name
+      ?? (activeTab?.repo?.localPath ? activeTab.repo.localPath.split('/').filter(Boolean).pop() ?? null : null);
+    const activeWorkspaceRepoName = activeTabRepoName
+      ?? controller.activeRepo?.name
+      ?? (controller.activeRepo?.localPath ? controller.activeRepo.localPath.split('/').filter(Boolean).pop() ?? null : null);
+
     useOutsideWorkerSplitMount({
       active: props.activeWorkspaceSurface === true,
       activeTabId: controller.activeTab?.id ?? null,
@@ -294,6 +304,11 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       <div
         ref={containerDivRef}
         data-vibrancy-passthrough=""
+        data-o8-workspace-root="1"
+        data-o8-workspace-active={props.activeWorkspaceSurface === true ? 'true' : undefined}
+        data-o8-active-tab-id={activeTab?.id ?? undefined}
+        data-o8-active-tab-kind={activeTab?.kind ?? undefined}
+        data-o8-active-repo={activeWorkspaceRepoName ?? undefined}
         style={{
           flex: 1,
           display: 'flex',
