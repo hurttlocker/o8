@@ -2718,6 +2718,13 @@
       ]
     },
     {
+      "path": "tests/roadmap-status.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "tests/runtime-action-idempotency-real-path.test.ts",
       "reasons": [
         "real-path"
