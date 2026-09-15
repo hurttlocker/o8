@@ -3,15 +3,19 @@ import { access } from 'node:fs/promises';
 import path from 'node:path';
 
 import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { getLane } from '@/lib/lane/registry';
+import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import { listRepos } from '@/lib/repos/registry';
 import {
   getWorkspaceSnapshot,
   listWorkspaceSnapshotTransitions,
   scanWorkspaceSnapshotsForReconciliation,
+  scanRetiredSnapshotsPendingLaneSettlement,
   transitionWorkspaceSnapshot,
   type WorkspaceSnapshotErrorReceipt,
   type WorkspaceSnapshotRecord,
 } from '@/lib/worktree/snapshot-state';
+import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { verifyImmutableWorkspaceTruth } from './hibernator';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
 import {
@@ -31,12 +35,15 @@ import {
   inspectExactWorktreeQuarantine,
   resolveExactWorktreeQuarantine,
 } from './worktree-exact';
-import { finishWorkspaceMaterializationRetirement } from './workspace-materialization-retirement';
+import {
+  finishWorkspaceMaterializationRetirement,
+  getRecordedRetirementAction,
+} from './workspace-materialization-retirement';
 
 export interface WorkspaceReconciliationReceipt {
   repositoryUuid: string;
   packetId: string;
-  fromState: 'parkable' | 'hibernating' | 'restoring' | 'retiring';
+  fromState: 'parkable' | 'hibernating' | 'restoring' | 'retiring' | 'retired';
   toState: 'materialized' | 'parkable' | 'parked' | 'hibernating' | 'restoring' | 'retiring' | 'retired';
   disposition: 'reconciled' | 'quarantined' | 'unchanged';
   note: string;
@@ -462,6 +469,67 @@ export async function reconcileWorkspaceSnapshot(
   });
 }
 
+/**
+ * Settle the bound lane of a historical retired snapshot whose terminal archival
+ * never ran. All awaited lookups resolve BEFORE current snapshot/lane truth is
+ * read inside the packet lifecycle lock, so binding validation observes any
+ * rebound that happened while lookups were pending, and the synchronous retired
+ * branch of the production settlement path performs the mutation without a
+ * further await. Cleanup never settles a lane; retired recovery never deletes a
+ * workspace or reruns quarantine/restore.
+ */
+export async function reconcileRetiredWorkspaceLane(
+  snapshot: WorkspaceSnapshotRecord,
+  overrides: Partial<WorkspaceReconcilerDependencies> = {},
+): Promise<WorkspaceReconciliationReceipt> {
+  const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides };
+  const repos = await dependencies.listRepos();
+  const skip = (note: string): WorkspaceReconciliationReceipt => ({
+    repositoryUuid: snapshot.repositoryUuid,
+    packetId: snapshot.packetId,
+    fromState: 'retired',
+    toState: 'retired',
+    disposition: 'unchanged',
+    note,
+  });
+  return withPacketLifecycleMutationLock(snapshot.packetId, async ({ contended }) => {
+    if (contended) return skip('Another packet lifecycle mutation ran first.');
+    const current = getWorkspaceSnapshot(snapshot.repositoryUuid, snapshot.packetId);
+    if (!current || current.state !== 'retired' || !current.laneId) {
+      return skip('Snapshot is no longer a retired row with a bound lane.');
+    }
+    const action = getRecordedRetirementAction(current);
+    if (!action || action === 'cleanup') {
+      return skip('Retired snapshot has no lane-settling terminal action.');
+    }
+    const lane = getLane(current.laneId);
+    if (!lane || isLaneTerminal(lane.status)) {
+      return skip('Bound lane is missing or already reached a terminal outcome.');
+    }
+    if (lane.packetId !== current.packetId) {
+      return skip('Bound lane was rebound to another packet.');
+    }
+    if (lane.worktreePath
+      && path.resolve(lane.worktreePath) !== path.resolve(current.originalPath)) {
+      return skip('Bound lane no longer owns the retired workspace path.');
+    }
+    const repo = repos.find((entry) => entry.id === current.repositoryUuid);
+    if (!repo || canonicalRepoRoot(repo.localPath) !== canonicalRepoRoot(lane.repoPath)) {
+      return skip('Bound lane no longer belongs to the snapshot repository.');
+    }
+    const retired = await finishWorkspaceMaterializationRetirement(current.originalPath, action);
+    if (!retired) return skip('Retired snapshot vanished before lane settlement.');
+    return {
+      repositoryUuid: retired.repositoryUuid,
+      packetId: retired.packetId,
+      fromState: 'retired',
+      toState: 'retired',
+      disposition: 'reconciled',
+      note: `Terminal ${action} lane archival completed after retirement.`,
+    };
+  });
+}
+
 export async function reconcileInterruptedWorkspaces(): Promise<WorkspaceReconciliationReceipt[]> {
   const results: WorkspaceReconciliationReceipt[] = [];
   const scan = scanWorkspaceSnapshotsForReconciliation();
@@ -476,6 +544,21 @@ export async function reconcileInterruptedWorkspaces(): Promise<WorkspaceReconci
     } catch (error) {
       console.warn(
         `[workspace-reconcile] Snapshot ${snapshot.repositoryUuid}/${snapshot.packetId} remains quarantined: ${compactError(error)}`,
+      );
+    }
+  }
+  const retiredScan = scanRetiredSnapshotsPendingLaneSettlement();
+  for (const corruption of retiredScan.corruptions) {
+    console.warn(
+      `[workspace-reconcile] Quarantined corrupt retired snapshot ${corruption.repositoryUuid}/${corruption.packetId}: ${corruption.note}`,
+    );
+  }
+  for (const snapshot of retiredScan.snapshots) {
+    try {
+      results.push(await reconcileRetiredWorkspaceLane(snapshot));
+    } catch (error) {
+      console.warn(
+        `[workspace-reconcile] Retired snapshot ${snapshot.repositoryUuid}/${snapshot.packetId} lane settlement failed: ${compactError(error)}`,
       );
     }
   }

@@ -733,6 +733,31 @@ export function listWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotReco
   return readConsistentSnapshot(() => selectWorkspaceSnapshotsForReconciliation().map(mapSnapshotRow));
 }
 
+function selectRetiredSnapshotsPendingLaneSettlement(): WorkspaceSnapshotRow[] {
+  return getSqlite().prepare(`
+    SELECT * FROM workspace_snapshots s WHERE s.state = 'retired' AND EXISTS (
+      SELECT 1 FROM lanes WHERE lanes.id = s.lane_id AND lanes.packet_id = s.packet_id
+        AND lanes.status NOT IN ('archived', 'completed', 'failed')
+    ) ORDER BY s.updated_at ASC
+  `).all() as WorkspaceSnapshotRow[];
+}
+
+export function scanRetiredSnapshotsPendingLaneSettlement(): WorkspaceSnapshotReconciliationScan {
+  return readConsistentSnapshot(() => {
+    const scan: WorkspaceSnapshotReconciliationScan = { snapshots: [], corruptions: [] };
+    for (const row of selectRetiredSnapshotsPendingLaneSettlement()) {
+      try { scan.snapshots.push(mapSnapshotRow(row)); }
+      catch (error) {
+        scan.corruptions.push({
+          repositoryUuid: row.repository_uuid, packetId: row.packet_id,
+          note: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return scan;
+  });
+}
+
 /** Isolate corrupt fleet rows during startup; point reads remain strict. */
 export function scanWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotReconciliationScan {
   return readConsistentSnapshot(() => {

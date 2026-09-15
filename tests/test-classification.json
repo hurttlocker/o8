@@ -2634,6 +2634,15 @@
       ]
     },
     {
+      "path": "tests/retired-workspace-lane-recovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/retry-salvage-lock-reentry-real-path.test.ts",
       "reasons": [
         "child-process",
