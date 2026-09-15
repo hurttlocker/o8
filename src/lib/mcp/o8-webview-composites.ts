@@ -163,47 +163,46 @@ function buildSurfaceStateScript({ focusComposer }: { focusComposer: boolean }):
   return buildJsonEval(`
     ${visibleDomHelpers()}
     const route = window.location.pathname + window.location.search + window.location.hash;
-    const active = document.activeElement;
     const composerCandidates = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]')).filter(isVisible);
     const composer = composerCandidates.find((el) => el.getAttribute('data-o8-active-composer') === 'true') || composerCandidates.find((el) => {
       const label = lower(labelFor(el));
       return label.includes('message') || label.includes('ask') || label.includes('queue') || label.includes('reply') || label.includes('orchestrator');
     }) || composerCandidates[0] || null;
-    const activeText = (() => {
-      const buttons = Array.from(document.querySelectorAll('button')).filter(isVisible);
-      const activeLike = buttons.find((el) => {
-        const bg = window.getComputedStyle(el).backgroundColor;
-        return el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-current') || (el.style && Number(el.style.zIndex || 0) >= 2) || (bg && bg !== 'rgba(0, 0, 0, 0)');
-      });
-      return activeLike ? labelFor(activeLike) : '';
-    })();
-    const bodyText = norm(document.body ? document.body.innerText : '');
-    const activeLabel = lower(activeText);
-    const composerLabel = lower(labelFor(composer));
-    const activeTabKind = activeLabel.includes('terminal')
-      ? 'terminal'
-      : activeLabel.includes('chat')
-        ? 'chat'
-        : activeLabel.includes('orchestrator') || (!!composer && (composerLabel.includes('orchestrator') || bodyText.includes('Orchestrator')))
-          ? 'orchestrator'
-          : null;
     const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
       .filter(isVisible)
       .map((el) => labelFor(el) || norm((el.innerText || el.textContent || '').slice(0, 80)))
       .filter(Boolean);
-    const activeWorkspaceRepo = (() => {
-      const label = activeText || labelFor(composer);
-      const match = label.match(/^([^/]+)\\s+\\/\\s+/);
-      return match ? match[1].trim() : null;
-    })();
+    // Active workspace identity is render-derived by WorkspaceTerminalRoot and
+    // read straight from its data attributes — never guessed from labels or
+    // buttons. Identity comes only from a pane explicitly marked active that is
+    // actually visible (no display:none / visibility:hidden ancestor): a single
+    // unmarked root is NOT active, and an ambiguous/duplicate case yields null.
+    const isActiveRootVisible = (el) => {
+      let node = el;
+      while (node && node instanceof HTMLElement) {
+        const style = window.getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        node = node.parentElement;
+      }
+      return true;
+    };
+    const activeRoots = Array.from(document.querySelectorAll('[data-o8-workspace-root]'))
+      .filter((el) => el.getAttribute('data-o8-workspace-active') === 'true' && isActiveRootVisible(el));
+    const activeRoot = activeRoots.length === 1 ? activeRoots[0] : null;
+    const rootAttr = (name) => (activeRoot ? (activeRoot.getAttribute(name) || null) : null);
+    const rawKind = rootAttr('data-o8-active-tab-kind');
+    const activeTabKind = rawKind === 'terminal'
+      ? 'terminal'
+      : rawKind === 'chat' || rawKind === 'llm-chat'
+        ? 'chat'
+        : rawKind === 'orchestrator'
+          ? 'orchestrator'
+          : null;
+    const activeTabId = rootAttr('data-o8-active-tab-id');
+    const activeWorkspaceRepo = rootAttr('data-o8-active-repo');
     if (${focusComposer ? 'true' : 'false'} && composer && !composer.hasAttribute('disabled')) {
       try { composer.focus({ preventScroll: true }); } catch (_) {}
     }
-    const activeTabId = (() => {
-      const activePill = document.querySelector('[data-pill-active="true"]');
-      const tabButton = activePill && activePill.querySelector('[data-tab-id], [aria-controls], button');
-      return (tabButton && (tabButton.getAttribute('data-tab-id') || tabButton.getAttribute('aria-controls'))) || null;
-    })();
     return JSON.stringify({
       ok: true,
       route,
