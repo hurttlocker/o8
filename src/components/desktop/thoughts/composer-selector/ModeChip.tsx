@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { ComposerPopover } from '../chat-panel/ComposerPopover';
+import { useComposerChipCompact } from '../composer-compact-context';
 import {
   COMPOSER_SELECTOR_MODES,
   type ResolvedComposerSelectorState,
@@ -39,6 +40,7 @@ export function ModeChip({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const compact = useComposerChipCompact();
   const fusion = state.mode === 'fusion';
   const setPopoverOpen = (next: boolean) => {
     setOpen(next);
@@ -81,7 +83,23 @@ export function ModeChip({
       >
         {fusion ? <FusionGlyph /> : null}
         {state.modeShortLabel}
-        <span style={{ fontSize: 9, color: 'var(--t-text-faint)', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-border)', borderRadius: 4, paddingLeft: 3, paddingRight: 3, lineHeight: '13px' }}>
+        <span
+          data-testid="composer-selector-mode-hint"
+          style={{
+            fontSize: 9,
+            color: 'var(--t-text-faint)',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-border)',
+            borderRadius: 4,
+            paddingLeft: 3,
+            paddingRight: 3,
+            lineHeight: '13px',
+            // Narrow rows drop the decorative shortcut hint; the mode label,
+            // title/aria, menu, and Shift+Tab handling all stay intact.
+            display: compact ? 'none' : undefined,
+          }}
+        >
           ⇧⇥
         </span>
       </button>
