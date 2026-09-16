@@ -2201,6 +2201,12 @@
       ]
     },
     {
+      "path": "tests/operator-corrections-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/operator-defaults-mcp-routing.test.ts",
       "reasons": [
         "child-process",

@@ -40,6 +40,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { and, desc, eq } from 'drizzle-orm';
 
+import { formatCorrectionLine, readOperatorCorrections, type OperatorCorrection } from '@/lib/cortex/operator-corrections';
 import { getDb, sessionOutcomes } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { liveOutcomeFilter } from '@/lib/cortex/decay';
@@ -59,6 +60,7 @@ import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
 const MAX_BLOCK_CHARS = 4000;
 const MAX_DIRECTIVES = 5;
 const MAX_OUTCOMES = 5;
+const MAX_CORRECTIONS = 3;
 const MAX_SYMBOLS = 3;
 const DIRECTIVE_BODY_CHARS = 240;
 const OUTCOME_SUMMARY_CHARS = 160;
@@ -82,6 +84,8 @@ interface BuildContextBlockInput {
   packetBody: string;
   /** Active project id. Falls back to ~/.o8/projects.json when omitted. */
   projectId?: string | null;
+  /** #2219 — packet whose own corrections are rendered separately in its prompt. */
+  excludeCorrectionsForPacketId?: string;
 }
 
 function readDirectives(): DirectiveEntry[] {
@@ -250,6 +254,14 @@ function renderOutcomesSection(rows: OutcomeRow[]): string[] {
   return lines;
 }
 
+function renderCorrectionsSection(rows: OperatorCorrection[]): string[] {
+  if (rows.length === 0) return [];
+  return [
+    `## Recent Operator Corrections (last ${rows.length})`,
+    ...rows.map((row) => formatCorrectionLine(row, OUTCOME_SUMMARY_CHARS)),
+  ];
+}
+
 function renderSymbolGraphSection(edges: SymbolEdge[]): string[] {
   const useful = edges.filter((e) => e.neighbours.length > 0 || e.file);
   if (useful.length === 0) return [];
@@ -354,8 +366,8 @@ function renderPendingSpecSection(repoPath: string): string[] {
  * `<context>` wrapper is included in the budget. Operator o8.md notes are the
  * highest priority — dropped last.
  */
-function fitWithinBudget(sections: { heading: 'spec' | 'project' | 'directives' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
-  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'directives', 'project', 'spec'];
+function fitWithinBudget(sections: { heading: 'spec' | 'project' | 'directives' | 'corrections' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
+  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'corrections', 'directives', 'project', 'spec'];
   const drop: Set<typeof sections[number]['heading']> = new Set();
 
   const render = () => {
@@ -388,6 +400,7 @@ export async function buildContextBlock({
   repoPath,
   packetBody,
   projectId,
+  excludeCorrectionsForPacketId,
 }: BuildContextBlockInput): Promise<string> {
   if (!repoPath?.trim()) return '';
   const projectContext = await getProjectContext({ repoPath, projectId });
@@ -403,6 +416,11 @@ export async function buildContextBlock({
     ? await filterDirectivesForRepo(readDirectives(), repoPath)
     : [];
   const outcomes = await readRecentOutcomes(repoPath, activeProjectId);
+  const corrections = readOperatorCorrections({
+    repoPaths: [repoPath],
+    excludePacketId: excludeCorrectionsForPacketId,
+    limit: MAX_CORRECTIONS,
+  });
 
   // Symbol graph is best-effort — `extractGraphResolvedSymbols` traces a
   // wider candidate set and keeps only the symbols that actually have a
@@ -425,6 +443,7 @@ export async function buildContextBlock({
     { heading: 'spec', lines: renderPendingSpecSection(repoPath) },
     { heading: 'project', lines: renderProjectScopeSection(projectContext) },
     { heading: 'directives', lines: renderDirectivesSection(directives) },
+    { heading: 'corrections', lines: renderCorrectionsSection(corrections) },
     { heading: 'outcomes', lines: renderOutcomesSection(outcomes) },
     { heading: 'symbols', lines: renderSymbolGraphSection(edges) },
   ]);
