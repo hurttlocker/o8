@@ -227,9 +227,34 @@ The mint first reads the standard Codex ChatGPT-OAuth credential and uses its
 access token to request the short-lived Realtime client secret. This path is
 reported as `billingSource:"chatgpt-subscription"` and does not resolve or send a
 Platform API key. Ordinary sessions retain the existing BYOK fallback, reported
-as `billingSource:"openai-api-key"`, for users without ChatGPT OAuth. Repository
-catch-up fails closed when OAuth is unavailable so it can never spend Platform
-credits.
+as `billingSource:"openai-api-key"`, for users without ChatGPT OAuth. After each
+successful phone mint, the Mac records the billing source in the o8 data
+directory. If the previous mint used the subscription and the next mint would
+use BYOK, the route returns `billing_changed` without minting. The phone can
+retry once with `acknowledgeBillingChange:true`; that successful mint records
+the new source. Setting `symon.voice.subscriptionOnly = true` makes missing or
+expired ChatGPT OAuth fail with `subscription_unavailable` before the route
+reads the BYOK key. The setting defaults to `false`. Repository catch-up also
+fails closed when OAuth is unavailable so it can never spend Platform credits.
+
+The transition response is:
+
+```json
+{
+  "ok": false,
+  "error": "billing_changed",
+  "detail": "Symon voice would move from ChatGPT subscription billing to the metered OpenAI API key.",
+  "previous": "chatgpt-subscription",
+  "next": "openai-api-key"
+}
+```
+
+The setting is stored in `settings.toml`:
+
+```toml
+[symon.voice]
+subscriptionOnly = true
+```
 
 Ordinary Life uses `gpt-realtime-2.1-mini`; repository catch-up uses
 `gpt-realtime-2.1`. Code reads
@@ -246,8 +271,9 @@ Errors (typed, structured, never thrown):
 |---|---|---|
 | 401 | `unauthorized` | missing/bad Bearer (middleware) |
 | 403 | `locked` | entitlement does not include S2S (same rule as the desk mint) |
+| 409 | `billing_changed` | previous mint used ChatGPT subscription billing and this mint would use the metered API key; body includes `previous` and `next` |
 | 501 | `no_key` | BYOK OpenAI key absent (same rule as the desk mint — managed proxy does not carry realtime in v1) |
-| 501 | `subscription_unavailable` | repository catch-up requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
+| 501 | `subscription_unavailable` | repository catch-up or `symon.voice.subscriptionOnly` requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
 | 502 | `mint_failed` | upstream OpenAI session-mint failure (body includes `detail`) |
 | 503 | `desktop_unavailable` | webview/eval bridge unreachable, or the live catalog is missing a required Code tool |
 

@@ -65,6 +65,7 @@ const NON_DEFAULT_UPDATE = {
   experimentalCanvas: true,
   nativeBrowserView: false,
   inAppOrchestratorEnabled: false,
+  symonVoiceSubscriptionOnly: true,
   brainUseClaudeCli: false,
   workersUseBrain: 'off',
   uiLoopMaxIterations: 6,
