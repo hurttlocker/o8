@@ -10,7 +10,16 @@ function receipt(status, extra = {}) {
 }
 
 function credentialFile(env) {
-  const dataDir = env.O8_DATA_DIR
+  // O8_OPERATOR_DATA_DIR wins because the ship deliberately relocates
+  // O8_DATA_DIR to a throwaway build directory so the release cannot inherit
+  // the operator's runtime state (scripts/lib/ship-broadcast.mjs,
+  // runShipWorkflow). That isolation is correct for build state and wrong for
+  // this credential: the publish step runs as a child of that workflow, so it
+  // looked for the intake token inside the empty temp directory and reported
+  // "not configured" on every ship, which silently skipped reconciling anyone
+  // else's bug reports. The ship now names the operator's real directory here.
+  const dataDir = env.O8_OPERATOR_DATA_DIR
+    || env.O8_DATA_DIR
     || env.CORTEX_IDE_DATA_DIR
     || path.join(env.HOME || os.homedir(), '.o8');
   return path.join(dataDir, 'discord-bot-token');
