@@ -43,6 +43,10 @@ const {
 } = await import('@/lib/orchestrator/control-plane');
 const { createLane } = await import('@/lib/lane/registry');
 const { stopPacket } = await import('@/lib/orchestrator/stop-packet');
+// stopPacket imports the service lazily. Resolve the mock (and the real graph
+// its importOriginal loads) here, so the 5s ack deadline below measures the
+// stop path rather than a cold module transform.
+await import('@/lib/orchestrator/operator-mission-service');
 
 function packetFixture(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
   return {
