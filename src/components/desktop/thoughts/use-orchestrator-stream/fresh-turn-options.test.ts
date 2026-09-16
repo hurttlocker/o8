@@ -52,6 +52,18 @@ function blockFreshFetch() {
   freshFetchGate = new Promise<void>((resolve) => { releaseFreshFetch = resolve; });
 }
 
+async function releaseAndSettleFreshFetch() {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  const refreshIndex = fetchMock.mock.calls
+    .findLastIndex(([input]) => String(input).startsWith('/api/panel/operator-defaults'));
+  const pending = fetchMock.mock.results[refreshIndex]?.value as Promise<unknown> | undefined;
+  await act(async () => {
+    releaseFreshFetch?.();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+}
+
 async function persistDefaults(orchestratorModel: string, orchestratorBackend: 'claude' | 'codex') {
   const response = await POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
     method: 'POST',
@@ -434,18 +446,19 @@ describe('composer fresh operator defaults at the send seam', () => {
     await act(async () => {
       invokeComposerAction('submitComposerTurn');
       invokeComposerAction('interruptComposerTurn');
-      releaseFreshFetch?.();
-      await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    await releaseAndSettleFreshFetch();
     expect(sentTurnPayloads()).toHaveLength(0);
 
+    // The repo switch only cancels once React commits it, and act defers that
+    // commit to the end of its scope. Close the scope before releasing the
+    // refresh so the cancellation cannot race the resolved defaults.
     blockFreshFetch();
     await act(async () => {
       invokeComposerAction('submitComposerTurn');
       invokeComposerAction('switchComposerRepo');
-      releaseFreshFetch?.();
-      await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    await releaseAndSettleFreshFetch();
     expect(sentTurnPayloads()).toHaveLength(0);
   });
 });
