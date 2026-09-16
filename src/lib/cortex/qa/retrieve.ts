@@ -12,6 +12,7 @@
 
 import 'server-only';
 
+import { correctionsRetriever } from '@/lib/cortex/qa/retrievers/corrections';
 import { retrieveFacts } from '@/lib/cortex/qa/retrievers/facts';
 import { ftsRetriever } from '@/lib/cortex/qa/retrievers/fts';
 import { graphRetriever } from '@/lib/cortex/qa/retrievers/graph';
@@ -73,11 +74,12 @@ export async function retrieveAll(input: RetrieverInput): Promise<RetrieverResul
     ftsRetriever(input),
     graphRetriever(input),
     retrieveFacts(input),
+    correctionsRetriever(input),
   ]);
 
   return settled.map((entry, idx) => {
     if (entry.status === 'fulfilled') return entry.value;
-    const retriever: RetrieverResult['retriever'] = (['sql', 'fts', 'graph', 'facts'] as const)[idx];
+    const retriever: RetrieverResult['retriever'] = (['sql', 'fts', 'graph', 'facts', 'corrections'] as const)[idx];
     console.warn(
       `[qa][retrieve] ${retriever} retriever rejected:`,
       entry.reason instanceof Error ? entry.reason.message : entry.reason,

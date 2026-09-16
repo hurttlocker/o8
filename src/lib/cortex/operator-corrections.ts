@@ -1,0 +1,207 @@
+/**
+ * Operator corrections ledger reader (#2219).
+ *
+ * A rejection reason lands on the approval's resolution record
+ * (`approvals.resolution_json.note`, written by the approvals route) and a
+ * steer message lands on the packet lane as a `steered_packet` event. Both are
+ * the operator saying "not like that, here is why". This module is the single
+ * read path that turns those persisted rows into corrections the next worker
+ * on the packet, the repo context block, and the Brain retriever consume.
+ */
+
+import path from 'node:path';
+
+import { getSqlite } from '@/lib/db';
+
+export interface OperatorCorrection {
+  /** `approval:<id>` or `steer:<lane-event-id>` — unique across both sources. */
+  id: string;
+  kind: 'rejected' | 'steered';
+  /** Source row id inside `table`. */
+  rowId: string;
+  table: 'approvals' | 'lane_events';
+  packetId: string | null;
+  repoPath: string | null;
+  /** Approval title or lane label — what was being corrected. */
+  title: string;
+  reason: string;
+  /** Steer source (`operator` / `orchestrator` / `heal-bot`) when known. */
+  source: string | null;
+  /** ISO timestamp of the rejection or steer. */
+  at: string;
+}
+
+export interface ReadOperatorCorrectionsOptions {
+  /** Only corrections recorded against this packet. */
+  packetId?: string;
+  /** Only corrections whose lane resolves to one of these repo paths. */
+  repoPaths?: string[];
+  /** Packet whose own corrections should be left out (already shown per-packet). */
+  excludePacketId?: string;
+  limit?: number;
+}
+
+const DEFAULT_LIMIT = 5;
+const MAX_SCAN = 200;
+
+interface RejectionRow {
+  id: string;
+  title: string;
+  packet_id: string | null;
+  note: string | null;
+  resolved_at: number | null;
+  updated_at: number;
+  repo_path: string | null;
+  lane_packet_id: string | null;
+}
+
+interface SteerRow {
+  id: string;
+  payload_json: string;
+  timestamp: string;
+  packet_id: string | null;
+  repo_path: string;
+  label: string;
+}
+
+function resolvePathSafe(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  try {
+    return path.resolve(value);
+  } catch {
+    return null;
+  }
+}
+
+function parsePayload(json: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function readRejections(packetId: string | undefined, scan: number): OperatorCorrection[] {
+  const packetClause = packetId
+    ? `AND (a.packet_id = @packetId
+         OR a.lane_id IN (SELECT id FROM lanes WHERE packet_id = @packetId)
+         OR json_extract(a.continuation_json, '$.laneId') IN (SELECT id FROM lanes WHERE packet_id = @packetId))`
+    : '';
+  const rows = getSqlite().prepare(`
+    SELECT a.id, a.title, a.packet_id, a.resolved_at, a.updated_at,
+           json_extract(a.resolution_json, '$.note') AS note,
+           l.repo_path AS repo_path, l.packet_id AS lane_packet_id
+    FROM approvals a
+    LEFT JOIN lanes l ON l.id = COALESCE(
+      a.lane_id,
+      json_extract(a.continuation_json, '$.laneId'),
+      (SELECT id FROM lanes WHERE a.packet_id IS NOT NULL AND packet_id = a.packet_id ORDER BY created_at DESC LIMIT 1)
+    )
+    WHERE a.status = 'rejected'
+      AND json_valid(a.resolution_json)
+      AND TRIM(COALESCE(json_extract(a.resolution_json, '$.note'), '')) != ''
+      ${packetClause}
+    ORDER BY COALESCE(a.resolved_at, a.updated_at) DESC
+    LIMIT @scan
+  `).all({ packetId: packetId ?? null, scan }) as RejectionRow[];
+
+  return rows.map((row) => ({
+    id: `approval:${row.id}`,
+    kind: 'rejected' as const,
+    rowId: row.id,
+    table: 'approvals' as const,
+    packetId: row.packet_id ?? row.lane_packet_id ?? null,
+    repoPath: row.repo_path ?? null,
+    title: row.title,
+    reason: String(row.note).trim(),
+    source: null,
+    at: new Date(row.resolved_at ?? row.updated_at).toISOString(),
+  }));
+}
+
+function readSteers(packetId: string | undefined, scan: number): OperatorCorrection[] {
+  const packetClause = packetId
+    ? `AND (l.packet_id = @packetId OR json_extract(e.payload_json, '$.packetId') = @packetId)`
+    : '';
+  const rows = getSqlite().prepare(`
+    SELECT e.id, e.payload_json, e.timestamp, l.packet_id, l.repo_path, l.label
+    FROM lane_events e
+    JOIN lanes l ON l.id = e.lane_id
+    WHERE e.verb = 'steered_packet'
+      AND json_valid(e.payload_json)
+      ${packetClause}
+    ORDER BY e.timestamp DESC
+    LIMIT @scan
+  `).all({ packetId: packetId ?? null, scan }) as SteerRow[];
+
+  return rows.flatMap((row) => {
+    const payload = parsePayload(row.payload_json);
+    const message = typeof payload.message === 'string' ? payload.message.trim() : '';
+    if (!message) return [];
+    return [{
+      id: `steer:${row.id}`,
+      kind: 'steered' as const,
+      rowId: row.id,
+      table: 'lane_events' as const,
+      packetId: typeof payload.packetId === 'string' ? payload.packetId : row.packet_id,
+      repoPath: row.repo_path,
+      title: row.label,
+      reason: message,
+      source: typeof payload.source === 'string' ? payload.source : null,
+      at: row.timestamp,
+    }];
+  });
+}
+
+/**
+ * Read rejection and steer reasons, newest first. Never throws — a missing
+ * table or malformed row degrades to "no corrections" so dispatch and Q&A
+ * keep working.
+ */
+export function readOperatorCorrections(options: ReadOperatorCorrectionsOptions = {}): OperatorCorrection[] {
+  const limit = Math.max(1, options.limit ?? DEFAULT_LIMIT);
+  const packetId = options.packetId?.trim() || undefined;
+  const scopedPaths = options.repoPaths
+    ? new Set(options.repoPaths.map(resolvePathSafe).filter((value): value is string => Boolean(value)))
+    : null;
+  const scan = Math.min(MAX_SCAN, Math.max(limit * 5, 20));
+  try {
+    return [...readRejections(packetId, scan), ...readSteers(packetId, scan)]
+      .filter((correction) => !options.excludePacketId || correction.packetId !== options.excludePacketId)
+      .filter((correction) => {
+        if (!scopedPaths) return true;
+        const resolved = resolvePathSafe(correction.repoPath);
+        return resolved !== null && scopedPaths.has(resolved);
+      })
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, limit);
+  } catch (error) {
+    console.warn('[operator-corrections] read failed:', error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
+function clamp(text: string, maxLen: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= maxLen ? flat : `${flat.slice(0, maxLen - 1)}…`;
+}
+
+/** One line per correction: `[rejected 2026-09-16] <title>: <reason>`. */
+export function formatCorrectionLine(correction: OperatorCorrection, maxReasonChars = 600): string {
+  const day = correction.at.slice(0, 10);
+  const label = correction.kind === 'steered' && correction.source && correction.source !== 'operator'
+    ? `steered via ${correction.source}`
+    : correction.kind;
+  return `- [${label} ${day}] ${clamp(correction.title, 80)}: ${clamp(correction.reason, maxReasonChars)}`;
+}
+
+/** Packet-prompt block for the next worker on the same packet; null when none. */
+export function buildPacketCorrectionsSection(packetId: string): string | null {
+  const corrections = readOperatorCorrections({ packetId, limit: DEFAULT_LIMIT });
+  if (corrections.length === 0) return null;
+  return [
+    'Operator corrections for this packet (an earlier attempt was rejected or steered; address each one):',
+    ...corrections.map((correction) => formatCorrectionLine(correction)),
+  ].join('\n');
+}

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   LAUNCH_AGENT_WINDOW_MS,
@@ -15,8 +15,18 @@ import {
 } from './launch-agent-crash-counter';
 
 const roots: string[] = [];
+let callerServiceName: string | undefined;
+
+// A runner launched by a launchd service inherits its XPC_SERVICE_NAME; the
+// fixture starts from a neutral identity so default-label cases stay default.
+beforeEach(() => {
+  callerServiceName = process.env.XPC_SERVICE_NAME;
+  delete process.env.XPC_SERVICE_NAME;
+});
 
 afterEach(() => {
+  if (callerServiceName === undefined) delete process.env.XPC_SERVICE_NAME;
+  else process.env.XPC_SERVICE_NAME = callerServiceName;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -54,6 +64,7 @@ describe('LaunchAgent crash counter', () => {
     expect(readLaunchAgentCounters(dataDir, nowMs)).toEqual([{ label, startsMs: [nowMs] }]);
     expect(resolveLaunchAgentLabel({ XPC_SERVICE_NAME: label })).toBe(label);
     expect(resolveLaunchAgentLabel({ XPC_SERVICE_NAME: '0' })).toBe('com.rainwater.mcp-o8');
+    expect(resolveLaunchAgentLabel({})).toBe('com.rainwater.mcp-o8');
   });
 
   it('resets the consecutive-failure sequence only after the latest start stays healthy', () => {

@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
+import { buildPacketCorrectionsSection } from '@/lib/cortex/operator-corrections';
 import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
@@ -342,6 +343,9 @@ export async function buildPacketPrompt(
   const priorAttemptLearningSections = buildAttemptLearningSections(
     await readPacketAttemptLearnings(packet.id, worktreePath),
   );
+  // #2219 — a rejection reason or steer message recorded against this packet
+  // reaches the next worker dispatched or rerun on it.
+  const operatorCorrectionsSection = buildPacketCorrectionsSection(packet.id);
   const fileSizeSections = checkFileSizeThresholds(packet);
   const preservationSections = buildPreservationEnvelope(packet);
   const packetType = packet.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
@@ -421,6 +425,7 @@ export async function buildPacketPrompt(
   const contextBlock = packet.workspaceTargetPath
     ? await buildContextBlock({
         repoPath: packet.workspaceTargetPath,
+        excludeCorrectionsForPacketId: packet.id,
         packetBody: [packet.title, packet.summary, packet.issue?.body]
           .filter((value): value is string => Boolean(value))
           .join('\n\n'),
@@ -442,6 +447,9 @@ export async function buildPacketPrompt(
   }
   if (priorAttemptLearningSections.length > 0) {
     console.log(`[dispatch] Injected prior attempt learnings for packet ${packet.id}`);
+  }
+  if (operatorCorrectionsSection) {
+    console.log(`[operator-corrections] Injected prior rejection/steer reasons for packet ${packet.id}`);
   }
   if (fileSizeSections.length > 0) {
     console.log(`[dispatch] Injected file size governance guidance for packet ${packet.id}`);
@@ -487,6 +495,7 @@ export async function buildPacketPrompt(
     ...dependencySections,
     priorAttemptLearningSections.length > 0 ? 'Prior attempt learnings:' : null,
     ...priorAttemptLearningSections,
+    operatorCorrectionsSection,
     ...fileSizeSections,
     ...preservationSections,
     ...readBudgetSections,

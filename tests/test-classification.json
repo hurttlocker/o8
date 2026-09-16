@@ -2201,6 +2201,12 @@
       ]
     },
     {
+      "path": "tests/operator-corrections-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/operator-defaults-mcp-routing.test.ts",
       "reasons": [
         "child-process",
@@ -2780,6 +2786,12 @@
       "path": "tests/ship-intake-credential-real-path.test.ts",
       "reasons": [
         "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/ship-ledger-operator-dir-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
