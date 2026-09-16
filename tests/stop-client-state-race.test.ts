@@ -8,6 +8,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 const h = vi.hoisted(() => ({
   killGate: null as Promise<void> | null,
   killsStarted: 0,
+  killWaiters: [] as Array<{ count: number; resolve: () => void }>,
   resetPacket: vi.fn(async () => ({ reset: true, worktreePruned: false })),
 }));
 vi.mock('@/lib/runtime/inventory', () => ({
@@ -17,6 +18,11 @@ vi.mock('@/lib/lane/reap-sessions', () => ({
   archiveLaneSessions: vi.fn(),
   killLaneSessionsConfirmed: vi.fn(async (lanes: Array<{ id: string; sessionKey: string; runtime: string }>) => {
     h.killsStarted += 1;
+    h.killWaiters = h.killWaiters.filter((waiter) => {
+      if (waiter.count > h.killsStarted) return true;
+      waiter.resolve();
+      return false;
+    });
     if (h.killGate) await h.killGate;
     return lanes.map((lane) => ({
       laneId: lane.id,
@@ -56,6 +62,12 @@ const { updateOrchestratorMissionState } = await import('@/lib/orchestrator/stor
 const { archivePacket } = await import('@/components/desktop/workspace-terminal/terminal-tab-handlers');
 const { holdPacketLifecycleMutation } = await import('@/lib/orchestrator/packet-lifecycle-guard');
 const { readOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+
+/** Resolves when the kill ladder has been entered `count` times. */
+function killsStarted(count: number): Promise<void> {
+  if (h.killsStarted >= count) return Promise.resolve();
+  return new Promise((resolve) => { h.killWaiters.push({ count, resolve }); });
+}
 
 function request(body: unknown, method = 'POST', pathname = '/api/orchestrator/state') {
   return new NextRequest(`http://localhost${pathname}`, {
@@ -104,6 +116,7 @@ function seedMission(withTwoLanes = false) {
 
 beforeEach(() => {
   h.killsStarted = 0;
+  h.killWaiters = [];
   h.killGate = null;
   h.resetPacket.mockClear();
   vi.unstubAllGlobals();
@@ -122,7 +135,7 @@ describe('cached client mission writes during stop', () => {
     const stopping = stopRoute.POST(request({ packetId: 'b' }, 'POST', '/api/orchestrator/stop-packet'));
     let guardSource: unknown;
     try {
-      await vi.waitFor(() => expect(h.killsStarted).toBe(1));
+      await killsStarted(1);
       guardSource = readOrchestratorControlPlaneState().packets[1]?.releaseStatePayload?.source;
       const response = await stateRoute.POST(request({
         mission: {
@@ -153,9 +166,17 @@ describe('cached client mission writes during stop', () => {
     const cached = seedMission(true);
     let releaseKill!: () => void;
     h.killGate = new Promise<void>((resolve) => { releaseKill = resolve; });
-    const stopping = ['a', 'b'].map((packetId) => stopRoute.POST(request({ packetId }, 'POST', '/api/orchestrator/stop-packet')));
+    const stop = (packetId: string) => stopRoute.POST(request({ packetId }, 'POST', '/api/orchestrator/stop-packet'));
+    // Start the second stop once the first is inside kill confirmation. Two
+    // same-tick dynamic imports of a vi.mock'd module share the runner's
+    // importer callstack, so the second import skips the mock factory and
+    // evaluates the real mission-service graph, which takes seconds under load.
+    // Both stops still overlap for the cached reconciliation below.
+    const stopping = [stop('a')];
     try {
-      await vi.waitFor(() => expect(h.killsStarted).toBe(2), { timeout: 5_000 });
+      await killsStarted(1);
+      stopping.push(stop('b'));
+      await killsStarted(2);
       expect((await stateRoute.POST(request({ mission: cached }))).status).toBe(200);
     } finally {
       releaseKill();
