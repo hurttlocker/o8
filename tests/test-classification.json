@@ -2060,6 +2060,13 @@
       ]
     },
     {
+      "path": "tests/merge-gate-typecheck-environment-failure-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/merge-truth-ancestry-real-git.test.ts",
       "reasons": [
         "child-process",
