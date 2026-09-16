@@ -815,7 +815,11 @@ export async function loadOrchestratorMissionState(): Promise<OrchestratorMissio
   return orchestratorMissionCache;
 }
 
-export async function persistOrchestratorMissionState(state: OrchestratorMissionState) {
+// The server never deletes a packet the snapshot merely omits (#2351).
+export async function persistOrchestratorMissionState(
+  state: OrchestratorMissionState,
+  removedPacketIds: readonly string[] = [],
+) {
   if (typeof window === 'undefined') return;
   const normalized = normalizeOrchestratorMissionState({
     ...state,
@@ -826,7 +830,7 @@ export async function persistOrchestratorMissionState(state: OrchestratorMission
     const response = await fetch(ORCHESTRATOR_STATE_API_PATH, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mission: normalized }),
+      body: JSON.stringify({ mission: normalized, removedPacketIds }),
     });
     if (response.ok) {
       const payload = await response.json() as Partial<OrchestratorStateApiResponse>;

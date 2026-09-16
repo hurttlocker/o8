@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CliError } from '../../cli/src/api';
 import { runMission } from '../../cli/src/commands/mission';
+// Loaded at collection time: the handler graph takes seconds to transform on a
+// cold worker, and that cost must not count against the test timeout.
+import { handleCreateMission } from '../../src/lib/mcp/operator-handlers/mission';
 import {
   GOVERNED_EXISTING_BRANCH_POLICY,
   governedMissionCreateArgs,
@@ -27,7 +30,6 @@ afterEach(() => {
 
 describe('mission existing-branch policy', () => {
   it('rejects an invalid CLI value with the same message as the MCP path', async () => {
-    const { handleCreateMission } = await import('../../src/lib/mcp/operator-handlers/mission');
     const mcpResult = await handleCreateMission({
       repoPath: '/tmp/o8-policy-test',
       issues_inline: [{ title: 'policy parity' }],

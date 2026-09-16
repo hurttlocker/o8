@@ -11,6 +11,7 @@ import {
   subscribeOrchestratorMissionState,
   updateOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
+import { removedOrchestratorPacketIds } from '@/lib/orchestrator/client-mission-removals';
 
 const MISSION_STATE_LIFECYCLE_REFETCH_DEBOUNCE_MS = 350;
 
@@ -32,6 +33,9 @@ async function refetchOrchestratorMissionState(): Promise<OrchestratorMissionSta
 export function useOrchestratorMission() {
   const [thoughtsMissionState, setThoughtsMissionState] = useState<OrchestratorMissionState>(() => readOrchestratorMissionState());
   const thoughtsPersistTimerRef = useRef<number | null>(null);
+  // Deletes made through handleThoughtsMissionStateChange since the last POST.
+  // The debounce collapses several changes into one write, so they accumulate.
+  const pendingRemovedPacketIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     return subscribeOrchestratorMissionState(setThoughtsMissionState);
@@ -99,14 +103,18 @@ export function useOrchestratorMission() {
     }
     thoughtsPersistTimerRef.current = window.setTimeout(() => {
       thoughtsPersistTimerRef.current = null;
-      void persistOrchestratorMissionState(next);
+      const removedPacketIds = [...pendingRemovedPacketIdsRef.current];
+      pendingRemovedPacketIdsRef.current.clear();
+      void persistOrchestratorMissionState(next, removedPacketIds);
     }, 180);
   }, []);
 
   const handleThoughtsMissionStateChange = useCallback((
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState),
   ) => {
+    const previous = readOrchestratorMissionState();
     const updated = updateOrchestratorMissionState(next);
+    for (const id of removedOrchestratorPacketIds(previous, updated)) pendingRemovedPacketIdsRef.current.add(id);
     setThoughtsMissionState(updated);
     scheduleThoughtsMissionPersist(updated);
   }, [scheduleThoughtsMissionPersist]);

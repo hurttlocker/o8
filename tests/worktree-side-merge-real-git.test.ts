@@ -30,7 +30,7 @@ const { getWorktreeManager } = await import('@/lib/worktree/launch');
 const { steerPacket } = await import('@/lib/orchestrator/operator-mission-service/steer');
 const typecheckAvailability = await import('@/lib/lane/typecheck-availability');
 const runtimeActions = await import('@/lib/runtime/actions');
-const { createApproval, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { createApproval, getApproval, listApprovalsForContext, recordOrchestratorReview, toMobileApprovalCard } = await import('@/lib/approvals/store');
 const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
 const { currentSpokenReviewGovernanceFingerprint } = await import('@/lib/approvals/spoken-review-guard');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
@@ -787,6 +787,83 @@ describe('worktree-side merge with real git repos', () => {
     expect(git(repo, ['show', 'HEAD:upstream.txt'])).toBe('upstream');
     expect(git(repo, ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'])).toBe('');
   }, 20_000);
+
+  async function escalateBaseMovedMerge(name: string, workerPath: string) {
+    const { repo, origin, root } = makeRepo(name);
+    const worktree = await makeWorktree(repo, `pkt-${name}`, `inline/${name}`);
+    mkdirSync(join(worktree.path, workerPath, '..'), { recursive: true });
+    writeFileSync(join(worktree.path, workerPath), 'worker\n');
+    commitAll(worktree.path, 'worker change');
+
+    // Each time a rebased candidate lands on the operator checkout's merge ref,
+    // origin/main moves again, so the auto-rebase retries run out and the
+    // merge escalates as a base-moved fast-forward failure.
+    const moveOrigin = [
+      'unset $(git rev-parse --local-env-vars)',
+      'tmp="$(mktemp -d)"',
+      `git clone "${origin}" "$tmp/repo" >/dev/null 2>&1`,
+      'cd "$tmp/repo" || exit 0',
+      'git checkout main >/dev/null 2>&1',
+      'git config user.name o8-test',
+      'git config user.email o8@example.test',
+      'mkdir -p docs',
+      'n="$(ls docs | wc -l | tr -d " ")"',
+      'printf "upstream\\n" > "docs/upstream-$n.md"',
+      'git add docs',
+      'git commit -m "upstream moved" >/dev/null 2>&1',
+      'git push origin main >/dev/null 2>&1',
+      `touch "${join(root, 'base-moved')}"`,
+    ];
+    const hooks = join(repo, '.git', 'hooks');
+    writeFileSync(join(hooks, 'reference-transaction'), [
+      '#!/bin/sh',
+      '[ "$1" = committed ] || exit 0',
+      'grep -v "^[0-9a-f]* 0\\{40\\} " | grep -q " refs/o8/merge/" || exit 0',
+      ...moveOrigin,
+      'exit 0',
+      '',
+    ].join('\n'));
+    chmodSync(join(hooks, 'reference-transaction'), 0o755);
+
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: worktree.path,
+      branch: `inline/${name}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: `pkt-${name}`,
+      sessionKey: `codex:pkt-${name}`,
+    });
+    const result = await performWorktreeSideMerge({
+      lane,
+      command: mergeCommand(lane.id),
+      actor: 'system',
+      gateResult: { passed: true, violations: [] },
+      createLaneActionApproval,
+    });
+    expect(existsSync(join(root, 'base-moved'))).toBe(true);
+    expect(result.ok).toBe(false);
+    const approval = getApproval(result.approvalId!);
+    expect(approval?.policyRuleId).toBe('fast_forward_failure_escalation');
+    expect(approval?.metadata?.FailureCategory).toBe('non-fast-forward');
+    expect(approval?.title).toContain('(base moved)');
+    return approval!;
+  }
+
+  it('rates a base-moved escalation of a docs-only diff as low risk', async () => {
+    const approval = await escalateBaseMovedMerge('o8-merge-base-moved-docs', 'docs/worker-notes.md');
+
+    expect(approval.risk).toBe('low');
+    expect(approval.gateResult).toMatchObject({ passed: true, violations: [] });
+    expect(toMobileApprovalCard(approval).severity).not.toBe('critical');
+  }, 60_000);
+
+  it('keeps high risk on a base-moved escalation that touches code', async () => {
+    const approval = await escalateBaseMovedMerge('o8-merge-base-moved-code', 'src/worker.ts');
+
+    expect(approval.risk).toBe('high');
+    expect(toMobileApprovalCard(approval).severity).toBe('critical');
+  }, 60_000);
 
   it('does not recreate a remotely deleted base branch from a stale reviewed candidate', async () => {
     const { repo, origin } = makeRepo('o8-merge-base-deleted');
