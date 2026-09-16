@@ -100,15 +100,32 @@ describe('publish-side feedback paths under the ship environment', () => {
   });
 
   // The regression guard: the pre-fix shape, where only the build dir is named,
-  // puts everything inside the directory the ship deletes.
+  // puts everything inside the directory the ship deletes and reads back an
+  // empty manifest even though the operator's real one is sitting there.
   it('falls back into the build dir when the operator dir is not named', () => {
     const operator = tempDir('o8-operator-data-');
     const build = tempDir('o8-release-build-data-');
+
+    mkdirSync(join(operator, 'feedback'), { recursive: true });
+    writeFileSync(
+      join(operator, 'feedback', 'published.json'),
+      JSON.stringify({
+        fixed: [{ id: 'ABC123', title: 'Earlier fix', version: '0.1.700' }],
+      }),
+      'utf8',
+    );
+
     const env = shipEnv(operator, build);
     delete (env as Record<string, string | undefined>).O8_OPERATOR_DATA_DIR;
     applyEnv(env as Record<string, string>);
 
     expect(publishedPath().startsWith(build)).toBe(true);
+    // The operator's history is right there and this resolution cannot see it.
+    // That blindness is the whole bug; if this ever returns the seeded entry,
+    // the precedence has been reordered and the fix above is gone.
     expect(readPublished()).toEqual([]);
+
+    applyEnv(shipEnv(operator, build));
+    expect(readPublished()).toHaveLength(1);
   });
 });
