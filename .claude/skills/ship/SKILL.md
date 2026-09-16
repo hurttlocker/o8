@@ -36,10 +36,32 @@ Amending a trailer onto an already-made commit is fine — do it before the bump
 ## Ship sequence
 
 1. Collision gate (above) must print "clear to ship".
-2. Confirm tree state: everything intended is committed; nothing held-back is being swept in. Discard post-build `src-tauri/Cargo.lock` noise (`git checkout -- src-tauri/Cargo.lock`) — a dirty tree fails the bump.
-3. **Bump first — `npm run ship` does NOT bump.** `npm version patch` (commits manifests + tags via sync-version.mjs), then `git push origin main --tags`. Skipping this makes release.mjs silently REPLACE the previous already-published release's assets under the same version (2026-07-08 incident, #1499) — updaters then never see the new build.
-4. `npm run ship` — signs, notarizes, builds the installer, publishes the release. Deep spec + hazards: repo CLAUDE.md "Shipping".
-5. **Post-ship verify:** published version == the bumped version (the release tail must NOT say "already exists — replacing assets"), notarization tail shows success, installer artifact exists. Report the verification tail, not just "shipped".
+2. Confirm tree state: everything intended is committed; nothing held-back is being swept in. Discard post-build `src-tauri/Cargo.lock` noise (`git checkout -- src-tauri/Cargo.lock`). `npm version` refuses a dirty tree, so an operator note sitting in `o8.md` has to be stashed before the bump (`git stash push -m "operator note" -- o8.md`) and popped after. The ship preflight itself exempts `o8.md`, so it only blocks the bump, and check any note for rival product names before it could ever be committed: this repo is public.
+3. **Bump through a release PR. `npm run ship` does NOT bump, and `main` is protected.**
+
+   `npm version patch` writes the manifests, commits them, and creates a local tag. Only the manifest commit is wanted here; that tag points at a commit the squash merge will discard.
+
+   **Never `git push origin main --tags`.** It fails twice over. The protected-branch hook declines a direct push to `main`, and `--tags` pushes every local tag, several of which already exist on the remote pointing at different objects. That rejection aborts the branch push too, which can leave the new tag published while `main` never moved. That split is exactly what makes release.mjs replace the previous release's assets (2026-07-08 incident, #1499).
+
+   ```bash
+   npm version patch                    # manifests committed, local tag created
+   git branch release/vX.Y.Z main
+   git reset --hard origin/main         # put main back
+   git checkout release/vX.Y.Z
+   git tag -d vX.Y.Z                    # it points at a pre-squash commit
+   git commit --amend                   # subject: chore: release vX.Y.Z
+   git push -u origin release/vX.Y.Z
+   gh pr create --base main --title "chore: release vX.Y.Z"
+   ```
+
+   Wait for checks, squash-merge, then `git checkout main && git pull --ff-only origin main`. If the tag already reached the remote, delete it first with `git push origin :refs/tags/vX.Y.Z`, otherwise the release ties to a commit that is not on main. Precedent: v0.1.754 landed as `chore: release v0.1.754` (#2355), v0.1.755 as (#2385).
+4. **Tag the merged commit, then push the tag.** `performShipPreflight` (`scripts/lib/ship-preflight.mjs`) requires a LOCAL tag `vX.Y.Z` that resolves to HEAD. Without it the ship dies in preflight with `local tag vX.Y.Z is missing`, and with a stale one it dies with `points to <sha>, not HEAD`.
+
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+   ```
+5. `npm run ship` — signs, notarizes, builds the installer, publishes the release. Deep spec + hazards: repo CLAUDE.md "Shipping".
+6. **Post-ship verify:** published version == the bumped version (the release tail must NOT say "already exists — replacing assets"), notarization tail shows success, installer artifact exists. Report the verification tail, not just "shipped".
 
 ## Report format
 
