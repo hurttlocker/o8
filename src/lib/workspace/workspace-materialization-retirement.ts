@@ -6,6 +6,7 @@ import { appendEvent, archiveLane, getLane, listLanes } from '@/lib/lane/registr
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
+import { beginWorkspaceSnapshotGeneration } from '@/lib/worktree/snapshot-generation';
 import type { WorktreeMetaEntry } from '@/lib/worktree/types';
 import {
   createWorkspaceSnapshot,
@@ -21,7 +22,7 @@ import {
   materializationAwareExecFile,
   withWorktreeMaterializationExecution,
 } from '@/lib/worktree/materialization-execution';
-import { ensureWorkspaceRecoveryRef } from './hibernator';
+import { ensureWorkspaceRecoveryRef, workspaceRecoveryRef } from './hibernator';
 import { readManagedWorkspaceMaterialization } from './managed-materialization-identity';
 
 export type WorkspaceRetirementAction = 'pr' | 'merge' | 'discard' | 'cleanup';
@@ -70,6 +71,21 @@ function recordedAction(snapshot: WorkspaceSnapshotRecord): WorkspaceRetirementA
   return action === 'pr' || action === 'merge' || action === 'discard' || action === 'cleanup'
     ? action
     : null;
+}
+
+/**
+ * A snapshot certifies merge evidence only for the HEAD it captured, and for the
+ * merge candidate its generation recorded when one was recorded.
+ */
+function certifiesMergeEvidence(
+  snapshot: WorkspaceSnapshotRecord,
+  evidence: MergeWorkspaceSnapshotEvidence,
+): boolean {
+  if (snapshot.headCommit !== evidence.reviewedHeadSha) return false;
+  const creation = listWorkspaceSnapshotTransitions(snapshot.repositoryUuid, snapshot.packetId)
+    .findLast((entry) => entry.kind === 'created' && entry.snapshotGeneration === snapshot.snapshotGeneration);
+  const recordedCandidate = creation?.receipt?.mergeCandidateSha;
+  return recordedCandidate === undefined || recordedCandidate === evidence.mergeCandidateSha;
 }
 
 function exactSnapshot(workspacePath: string): WorkspaceSnapshotRecord | null {
@@ -210,11 +226,15 @@ export async function captureWorkspaceMaterializationSnapshot(
   options: WorkspaceMaterializationCaptureOptions = {},
 ): Promise<WorkspaceSnapshotRecord | null> {
   const existing = exactSnapshot(workspacePath);
-  if (existing) {
-    if (mergeEvidence && existing.headCommit !== mergeEvidence.reviewedHeadSha) {
-      throw new Error('Workspace snapshot no longer identifies the reviewed merge HEAD.');
-    }
+  if (existing && (!mergeEvidence || certifiesMergeEvidence(existing, mergeEvidence))) {
     return existing;
+  }
+  // Merge evidence for a newer reviewed HEAD (or merge candidate) supersedes the
+  // older generation below; the older one stays in the append-only receipt chain.
+  if (existing && existing.state !== 'materialized') {
+    throw new Error(
+      `Workspace snapshot is ${existing.state}; merge evidence for a new reviewed HEAD cannot supersede it.`,
+    );
   }
   const repo = await findRepoByLocalPath(repoPath);
   if (!repo) return null;
@@ -233,6 +253,9 @@ export async function captureWorkspaceMaterializationSnapshot(
   if (lanes.length !== 1) throw new Error('Workspace retirement found ambiguous managed lane truth.');
   const lane = lanes[0]!;
   const packetId = lane.packetId!;
+  if (existing && (existing.repositoryUuid !== repo.id || existing.packetId !== packetId)) {
+    throw new Error('Workspace snapshot belongs to a different packet than its managed lane.');
+  }
   if (options.allowConfirmedMissingDirectory && action === 'cleanup') {
     const observation = await observeExactManagedChild(repo.localPath, workspacePath);
     if (observation.status === 'missing') {
@@ -280,7 +303,10 @@ export async function captureWorkspaceMaterializationSnapshot(
       await gitValue(repo.localPath, ['fetch', '--no-tags', workspacePath, headCommit]);
     }
     const baseCommit = await gitValue(repo.localPath, ['merge-base', baseTip, headCommit]);
-    const recoveryRef = `refs/o8/recovery/${repo.id}/${packetId}`;
+    const nextGeneration = existing ? existing.snapshotGeneration + 1 : 1;
+    const recoveryRef = existing
+      ? workspaceRecoveryRef(repo.id, packetId, nextGeneration)
+      : `refs/o8/recovery/${repo.id}/${packetId}`;
     const diffFingerprint = spokenReviewSnapshotFingerprint(headCommit, baseCommit, treeSha);
     await ensureWorkspaceRecoveryRef(repo.localPath, workspacePath, {
       branch,
@@ -291,7 +317,7 @@ export async function captureWorkspaceMaterializationSnapshot(
       diffFingerprint,
       isolationKind,
     });
-    createWorkspaceSnapshot({
+    const truth = {
       repositoryUuid: repo.id,
       packetId,
       laneId: lane.id,
@@ -305,11 +331,34 @@ export async function captureWorkspaceMaterializationSnapshot(
       sessionIdentities: lane.sessionKey
         ? [{ kind: 'owned-session', identity: lane.sessionKey }]
         : [],
-      creationId: `retire:${action}:create`,
-      receipt: { terminalBootstrap: true, terminalAction: action, ...mergeEvidence },
+    };
+    if (!existing) {
+      createWorkspaceSnapshot({
+        ...truth,
+        creationId: `retire:${action}:create`,
+        receipt: { terminalBootstrap: true, terminalAction: action, ...mergeEvidence },
+      });
+      return;
+    }
+    // A lost compare-and-swap is settled by the postcondition below: a
+    // concurrent capture for the same evidence is reused, anything else refuses.
+    beginWorkspaceSnapshotGeneration({
+      ...truth,
+      missionId: existing.missionId,
+      dependencyRecipeKey: existing.dependencyRecipeKey,
+      reservation: existing.reservation,
+      creationId: `retire:${action}:g${nextGeneration}:${headCommit}:${mergeCandidate}`,
+      expectedState: 'materialized',
+      expectedVersion: existing.version,
+      expectedGeneration: existing.snapshotGeneration,
+      receipt: { terminalAction: action, ...mergeEvidence },
     });
   });
-  return exactSnapshot(workspacePath);
+  const captured = exactSnapshot(workspacePath);
+  if (mergeEvidence && (!captured || !certifiesMergeEvidence(captured, mergeEvidence))) {
+    throw new Error('Workspace snapshot no longer identifies the reviewed merge HEAD.');
+  }
+  return captured;
 }
 
 /** Persist terminal cleanup intent before any exact path removal begins. */
