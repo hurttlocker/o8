@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -285,6 +285,33 @@ function runCommand(spec, root, options = {}) {
   });
 }
 
+/** The operator's runtime directory, resolved before the build redirect. */
+function operatorDataDir(env) {
+  return env.O8_OPERATOR_DATA_DIR
+    || env.O8_DATA_DIR
+    || env.CORTEX_IDE_DATA_DIR
+    || join(env.HOME || homedir(), '.o8');
+}
+
+/**
+ * The environment every ship step runs under.
+ *
+ * O8_DATA_DIR is redirected at a throwaway directory so the release cannot
+ * read or write the operator's live runtime state. O8_OPERATOR_DATA_DIR then
+ * names where that state actually lives, because the publish step still has to
+ * find one operator credential — the external intake read token. Before it
+ * existed, publish resolved that token against the empty build directory and
+ * reported it unconfigured on every ship.
+ */
+export function buildWorkflowEnv(buildDataDir, env = process.env) {
+  return {
+    ...env,
+    O8_DATA_DIR: buildDataDir,
+    CORTEX_IDE_DATA_DIR: buildDataDir,
+    O8_OPERATOR_DATA_DIR: operatorDataDir(env),
+  };
+}
+
 export async function runShipWorkflow({ root, version }) {
   const plan = readShipPlan(root);
   const lock = acquireReleaseLock();
@@ -295,11 +322,7 @@ export async function runShipWorkflow({ root, version }) {
     lock.release();
     throw error;
   }
-  const workflowEnv = {
-    ...process.env,
-    O8_DATA_DIR: buildDataDir,
-    CORTEX_IDE_DATA_DIR: buildDataDir,
-  };
+  const workflowEnv = buildWorkflowEnv(buildDataDir);
   const broadcast = createShipBroadcast(version);
   const emitted = new Set();
   let activeStage = 'pre-release cleanup';
