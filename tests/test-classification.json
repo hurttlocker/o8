@@ -1589,6 +1589,15 @@
       ]
     },
     {
+      "path": "tests/durable-review-uncommitted-edits-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/execution-carrier-real-path.test.ts",
       "reasons": [
         "child-process",
