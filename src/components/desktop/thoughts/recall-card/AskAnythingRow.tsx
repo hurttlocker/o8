@@ -87,6 +87,7 @@ const CITATION_KINDS: Record<CitationKind, true> = {
   symbol: true,
   project: true,
   project_repo: true,
+  correction: true,
 };
 
 function coerceCitation(payload: unknown): Citation | null {

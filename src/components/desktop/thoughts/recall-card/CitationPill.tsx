@@ -41,6 +41,7 @@ const KIND_LABEL: Record<CitationKind, string> = {
   symbol: 'S',
   project: 'PROJ',
   project_repo: 'PRJREPO',
+  correction: 'COR',
 };
 
 export function citationLabel(citation: Citation): string {
