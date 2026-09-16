@@ -243,6 +243,15 @@ export function buildSpokenReviewBrief(input: SpokenReviewInput): SpokenReviewBr
   const failedChecks = input.mergeGate.checks
     .filter((check) => check.verdict === 'fail')
     .map((check) => check.detail ? `${check.name}: ${check.detail}` : check.name);
+  // A gate that could not run is neither a pass nor a failure. Left out of the
+  // brief entirely, a merge that was never typechecked read to the operator
+  // exactly like one that passed its typecheck (#2383). The wording names the
+  // state so it cannot be mistaken for either.
+  const skippedChecks = input.mergeGate.checks
+    .filter((check) => check.verdict === 'skipped')
+    .map((check) => check.detail
+      ? `${check.name} did not run: ${check.detail}`
+      : `${check.name} did not run`);
   const findingFlags = input.review.findings
     .filter((finding) => finding.severity !== 'info')
     .map((finding) => {
@@ -252,6 +261,7 @@ export function buildSpokenReviewBrief(input: SpokenReviewInput): SpokenReviewBr
   const riskFlags = unique([
     ...(input.reviewRiskReasons ?? []),
     ...failedChecks,
+    ...skippedChecks,
     ...findingFlags,
     ...(input.secondPass.status === 'blocked' && input.secondPass.detail
       ? [`second pass: ${input.secondPass.detail}`]
