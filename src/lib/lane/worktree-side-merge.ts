@@ -83,6 +83,7 @@ type CreateLaneActionApproval = (
     description: string;
     summary: string;
     risk: ApprovalRisk;
+    riskFromChangedPaths?: boolean;
     policyRuleId: string;
     metadata?: Record<string, string>;
     note: string;
@@ -213,6 +214,7 @@ async function createRebaseConflictApproval(
     description: `Worktree-side rebase failed before main was touched: ${error.message}${conflictList}\n\n${recoveryInstruction} o8 will not fall back to merging this packet into the operator checkout.`,
     summary: `Rebase conflict on ${lane.branch} -> ${lane.baseBranch}. ${files.length} file${files.length === 1 ? '' : 's'} conflicting.`,
     risk: 'high',
+    riskFromChangedPaths: true,
     policyRuleId: 'rebase_conflict_escalation',
     metadata: {
       ConflictFiles: files.join(', ') || 'unknown',
@@ -256,6 +258,7 @@ async function createFastForwardFailureApproval(
     description: `The packet rebased cleanly in its worktree, but the final fast-forward in ${lane.repoPath} failed: ${message}\n\no8 did not stash, checkout, or run a fallback merge in the operator checkout.`,
     summary,
     risk: 'high',
+    riskFromChangedPaths: true,
     policyRuleId: 'fast_forward_failure_escalation',
     metadata: {
       ConflictFiles: 'n/a',
