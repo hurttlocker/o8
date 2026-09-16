@@ -179,6 +179,7 @@ export async function GET(req: NextRequest) {
 function mergeClientMissionUnderLock(
   incoming: OrchestratorMissionState,
   current: OrchestratorMissionState,
+  removedPacketIds: ReadonlySet<string>,
 ): OrchestratorMissionState | null {
   const serverMissionId = (current.missionId ?? '').trim();
   const incomingMissionId = (incoming.missionId ?? '').trim();
@@ -213,14 +214,17 @@ function mergeClientMissionUnderLock(
         return persisted;
       })
     : [];
-  // An old snapshot may not contain the packet at all. Omitting it cannot
-  // delete the durable stop or a packet whose lifecycle has since advanced.
+  // An old snapshot may not contain the packet at all: a packet persisted by
+  // the server after the client cached its mission (#2351, a delegated packet
+  // erased by the dashboard's lane-reconcile POST). Omission is never a delete.
+  // Only an explicit `removedPacketIds` entry removes a packet, and even that
+  // cannot delete a durable stop or a packet whose lifecycle has advanced.
   const incomingIds = new Set(packets.map((packet) => packet.id));
   for (const packet of current.packets) {
-    if (!incomingIds.has(packet.id) && (packet.operatorStopped === true
-      || normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch) > 1)) {
-      packets.push(packet);
-    }
+    if (incomingIds.has(packet.id)) continue;
+    const lifecycleProtected = packet.operatorStopped === true
+      || normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch) > 1;
+    if (lifecycleProtected || !removedPacketIds.has(packet.id)) packets.push(packet);
   }
   return {
     ...incoming,
@@ -240,8 +244,14 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const body = await req.json().catch(() => ({})) as { mission?: OrchestratorMissionState };
+    const body = await req.json().catch(() => ({})) as {
+      mission?: OrchestratorMissionState;
+      removedPacketIds?: unknown;
+    };
     const incoming = body.mission;
+    const removedPacketIds = new Set(Array.isArray(body.removedPacketIds)
+      ? body.removedPacketIds.filter((id): id is string => typeof id === 'string')
+      : []);
 
     if (!incoming) {
       // No payload — fall back to the existing "reconcile current" behavior.
@@ -256,7 +266,7 @@ export async function POST(req: NextRequest) {
     // our write can't be clobbered. If the client is stale, drop the body
     // and just return the server's current state.
     const { state: mission } = await withLockedState((current) => {
-      const merged = mergeClientMissionUnderLock(incoming, current);
+      const merged = mergeClientMissionUnderLock(incoming, current, removedPacketIds);
       if (!merged) return { dropped: true } as const;
 
       // Replace the in-lock state with the merged body so the post-callback
