@@ -34,6 +34,7 @@ export async function runLaneRebaseTypecheck(input: {
     );
     return { ok: true, skipped: skip.reason };
   }
+  const startedAt = Date.now();
   try {
     const typecheck = cliInvocation('npx', ['tsc', '--noEmit']);
     await execFileAsync(typecheck.command, typecheck.args, {
@@ -57,6 +58,25 @@ export async function runLaneRebaseTypecheck(input: {
       return { ok: true, skipped: 'no local TypeScript compiler was found' };
     }
 
+    // A compiler that exited non-zero without writing a single byte never got
+    // far enough to look for a type error. A timeout kill and a worktree whose
+    // contents were not ready both look like this from execFile. Blocking the
+    // merge on it hands the operator a review decision no judgment can resolve,
+    // so record it the way this module already records a missing compiler
+    // (#1255) and let the merge continue with the check marked skipped.
+    //
+    // Deliberately keyed on empty output rather than "no diagnostics parsed": a
+    // compiler that crashes on the diff's own types writes a stack trace with
+    // no `error TS` line, and that has to keep blocking the merge, carrying its
+    // evidence, exactly as it did before.
+    if (producedNoOutput(error)) {
+      const detail = `${describeExecFailure(error)}, no output after ${Date.now() - startedAt}ms`;
+      console.warn(
+        `[${input.logPrefix}] Typecheck for ${input.actualBranch} wrote no output; treating as an environment failure (${detail}).`,
+      );
+      return { ok: true, skipped: `typecheck did not run to completion (${detail})` };
+    }
+
     const diagnostics = splitDiagnosticBlocks(output);
     const ignorableDiagnostics = diagnostics.filter(isIgnorableGhostFileDiagnostic);
 
@@ -74,6 +94,37 @@ export async function runLaneRebaseTypecheck(input: {
     console.error(`[${input.logPrefix}] Typecheck failed for ${input.actualBranch}:\n${preview}`);
     return { ok: false, output: preview };
   }
+}
+
+/**
+ * True when the compiler wrote nothing at all. Read from the error's own
+ * streams rather than the collapsed preview, which falls back to the exec
+ * message and would be indistinguishable from a real one-line stderr.
+ */
+function producedNoOutput(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const streams = error as { stdout?: unknown; stderr?: unknown };
+  const stdout = String(streams.stdout ?? '').trim();
+  const stderr = String(streams.stderr ?? '').trim();
+  return stdout === '' && stderr === '';
+}
+
+/**
+ * Name what actually happened to the process, so an environment failure is
+ * diagnosable from the lane log instead of collapsing to "Command failed".
+ */
+function describeExecFailure(error: unknown): string {
+  if (!(error instanceof Error)) return 'unknown failure';
+  const detail = error as { killed?: boolean; signal?: string | null; code?: number | string };
+  const parts: string[] = [];
+  if (detail.killed && detail.signal) {
+    parts.push(`killed with ${detail.signal} at the ${TYPECHECK_TIMEOUT_MS / 1_000}s timeout`);
+  } else if (detail.signal) {
+    parts.push(`terminated by ${detail.signal}`);
+  }
+  if (typeof detail.code === 'number') parts.push(`exit code ${detail.code}`);
+  else if (typeof detail.code === 'string') parts.push(detail.code);
+  return parts.length > 0 ? parts.join(', ') : error.message;
 }
 
 function extractTypecheckOutput(error: unknown) {
