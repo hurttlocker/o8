@@ -26,7 +26,17 @@ import { redact } from './sanitize-title.mjs';
 export const MANIFEST_SCHEMA = 1;
 
 export function dataDir() {
-  return process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8');
+  // O8_OPERATOR_DATA_DIR wins for the same reason it does in
+  // intake-reconciliation.mjs (#2387): the ship redirects O8_DATA_DIR at a
+  // throwaway build directory it deletes afterwards, and the publish step runs
+  // as a child of that environment. Without this the ledger and the cumulative
+  // manifest were read and written inside that directory, so every release
+  // started from an empty ledger and shipped a fixed.json containing only the
+  // current release's fixes — the opposite of the CUMULATIVE contract above.
+  return process.env.O8_OPERATOR_DATA_DIR
+    || process.env.O8_DATA_DIR
+    || process.env.CORTEX_IDE_DATA_DIR
+    || path.join(os.homedir(), '.o8');
 }
 export function feedbackDir() {
   return path.join(dataDir(), 'feedback');
