@@ -213,6 +213,11 @@ export async function POST(request: NextRequest) {
   }
 
   const editedCommand = typeof body.editedCommand === 'string' ? body.editedCommand : undefined;
+  // #2219 — the operator's rejection reason is the correction the next worker on
+  // the packet and the Brain read back; it must land on the resolution record.
+  const rejectReason = action === 'reject' && typeof body.reason === 'string'
+    ? body.reason.trim().slice(0, 4000) || undefined
+    : undefined;
   const requestedStrategy = typeof body.strategy === 'string'
     && (body.strategy === 'ours' || body.strategy === 'theirs' || body.strategy === 'manual')
     ? body.strategy
@@ -272,7 +277,7 @@ export async function POST(request: NextRequest) {
       id,
       action,
       'desktop',
-      undefined,
+      rejectReason,
       current.updatedAt,
     );
     const approval = resolutionClaim.approval;

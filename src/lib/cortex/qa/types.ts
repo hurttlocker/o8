@@ -22,7 +22,9 @@ export type CitationKind =
   | 'fact'
   | 'symbol'
   | 'project'
-  | 'project_repo';
+  | 'project_repo'
+  /** #2219 — operator rejection or steer reason (approvals / lane_events). */
+  | 'correction';
 
 /**
  * Engineering Brain Indexer typed-row shape (epic #915 north star #1).
@@ -85,7 +87,7 @@ export interface TypedRow {
 }
 
 export interface RetrieverResult {
-  retriever: 'sql' | 'fts' | 'graph' | 'facts';
+  retriever: 'sql' | 'fts' | 'graph' | 'facts' | 'corrections';
   rows: TypedRow[];
   durationMs: number;
 }
