@@ -40,6 +40,9 @@ export function rowFullText(row: TypedRow): string {
     case 'doc':
       text = pick('content', 'body', 'excerpt');
       break;
+    case 'correction':
+      text = [pick('title'), pick('body')].filter(Boolean).join(' — ');
+      break;
     default:
       text = pick('body', 'content', 'title', 'excerpt');
   }
@@ -135,6 +138,10 @@ export function rowAuthority(row: TypedRow): number {
       return 0.75;
     case 'comment':
       return 0.7;
+    case 'correction':
+      // An explicit operator ruling on a packet — below directives, above
+      // agent-written outcomes.
+      return 0.95;
     case 'fact':
       // No explicit field on a fact row — legacy data pre-v18 backfill.
       // 0.5 is the column default and signals "unknown" to the LLM.
@@ -173,6 +180,8 @@ export function buildCitationHandle(row: TypedRow): string {
       // in an LLM bracket. Hash deterministically to a 10-char tag so the
       // handle stays bracket-safe and the lookup map can index both forms.
       return `DOC-${shortDocHandle(rowId)}`;
+    case 'correction':
+      return `COR-${rowId}`;
     case 'fact':
       // Engineering Brain Indexer (#915 north star #1). Fact rowIds are short
       // ULIDs/uuids so we embed verbatim — no hashing needed. FACT- prefix

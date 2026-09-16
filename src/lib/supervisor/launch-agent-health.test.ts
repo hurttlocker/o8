@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
@@ -10,8 +10,17 @@ import { listInboxItems } from '@/lib/supervisor/inbox';
 import { surfaceLaunchAgentCrashLoop, surfaceLaunchAgentCrashLoops } from './launch-agent-health';
 
 const SECONDARY_LABEL = 'com.rainwater.o8-worker';
+let callerServiceName: string | undefined;
+
+// Default-label cases must not pick up a launchd identity inherited by the runner.
+beforeEach(() => {
+  callerServiceName = process.env.XPC_SERVICE_NAME;
+  delete process.env.XPC_SERVICE_NAME;
+});
 
 afterEach(() => {
+  if (callerServiceName === undefined) delete process.env.XPC_SERVICE_NAME;
+  else process.env.XPC_SERVICE_NAME = callerServiceName;
   rmSync(launchAgentCounterPath(getDataDir()), { force: true });
   rmSync(launchAgentCounterPath(getDataDir(), SECONDARY_LABEL), { force: true });
   rmSync(launchAgentCounterPath(getDataDir(), '0'), { force: true });
