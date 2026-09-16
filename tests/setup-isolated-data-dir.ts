@@ -95,6 +95,12 @@ if (ownedRunRoot) {
   });
 }
 delete process.env.O8_DATA_DIR;
+// The ship sets this to the operator's REAL data dir so the publish step can
+// find the intake ledger and credential while O8_DATA_DIR points at the
+// throwaway build directory (#2387, #2389). It is load-bearing in two scripts
+// now, so a test file that leaks it would send a later file in the same worker
+// at a real home directory. Clear it with the others.
+delete process.env.O8_OPERATOR_DATA_DIR;
 process.env.CORTEX_IDE_DATA_DIR = pinnedDataDir;
 
 // Layer 3 — sever the OWNED-RUNTIME-ROOT leak (#1585, 2026-07-18).
