@@ -10,6 +10,7 @@ import type { Lane, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { resolvePacketDispatcher } from '@/lib/orchestrator/dispatcher-attribution';
 import { assessDurableApprovedReview } from './durable-review-approval';
 import { preserveAndRecordLaneRecovery } from './merge-recovery';
+import { riskForChangedPaths } from './changed-path-risk';
 
 const RECOVERABLE_MERGE_FAILURE_POLICIES = new Set([
   'merge-gate-violation',
@@ -114,6 +115,8 @@ export async function createLaneActionApproval(
     description: string;
     summary: string;
     risk: ApprovalRisk;
+    /** Merge-mechanics failures: rate risk from the changed paths, with `risk` as the fallback. */
+    riskFromChangedPaths?: boolean;
     policyRuleId: string;
     metadata?: Record<string, string>;
     note: string;
@@ -161,7 +164,7 @@ export async function createLaneActionApproval(
     },
     gateResult: input.gateResult,
     conflictReport: input.conflictReport,
-    risk: input.risk,
+    risk: input.riskFromChangedPaths ? riskForChangedPaths(files, input.risk) : input.risk,
     policyRuleId: input.policyRuleId,
     args: surfaceRoute || recovery ? {
       ...(surfaceRoute ? {

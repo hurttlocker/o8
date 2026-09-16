@@ -170,14 +170,50 @@ async function listChangedPathsForCoverage(
     comparisonRef = null;
   }
 
-  // Committed range across the whole packet, plus anything still in the tree.
+  // The reviewed commit range only. Uncommitted edits are not part of the
+  // commit the review is pinned to, so they cannot satisfy its evidence (#2254).
   const committed = comparisonRef ? await collect(['diff', '--name-only', `${comparisonRef}..${headSha}`]) : null;
-  const working = await collect(['diff', '--name-only', 'HEAD']);
 
   // If we could not establish the packet's range, say so rather than silently
   // grading against a narrower set of files than the packet really touched.
-  if (committed === null) return { paths: working ?? [], resolved: false };
-  return { paths: Array.from(new Set([...committed, ...(working ?? [])])), resolved: true };
+  if (committed === null) return { paths: [], resolved: false };
+  return { paths: committed, resolved: true };
+}
+
+const UNCOMMITTED_PATHS_SHOWN = 10;
+
+/**
+ * Paths with uncommitted changes (tracked or untracked, respecting ignores).
+ * Returns null when git cannot answer, so callers fail closed.
+ */
+async function listUncommittedPaths(cwd: string): Promise<string[] | null> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  try {
+    const { stdout } = await promisify(execFile)(
+      'git',
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 },
+    );
+    const entries = stdout.split('\0');
+    const paths: string[] = [];
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      if (!entry || entry.length < 4) continue;
+      paths.push(entry.slice(3));
+      // Renames and copies carry their source path as the next entry.
+      if (entry[0] === 'R' || entry[0] === 'C') index += 1;
+    }
+    return paths;
+  } catch {
+    return null;
+  }
+}
+
+function formatUncommittedPaths(paths: string[]): string {
+  const shown = paths.slice(0, UNCOMMITTED_PATHS_SHOWN).join(', ');
+  const more = paths.length - UNCOMMITTED_PATHS_SHOWN;
+  return more > 0 ? `${shown} (+${more} more)` : shown;
 }
 
 // Durable approved-review reader. This is the only signal that authorizes a
@@ -265,6 +301,23 @@ export async function assessDurableApprovedReview(
       : undefined;
     if (!matching) {
       return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, reason: 'The latest AI review does not authorize the current HEAD.' };
+    }
+
+    // The review approves the commit at its pinned HEAD and nothing else. Edits
+    // left in the worktree after that commit would be auto-committed into the
+    // publication, so they withhold authorization until committed and reviewed.
+    const uncommitted = await listUncommittedPaths(cwd);
+    if (uncommitted === null) {
+      return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, reason: 'Uncommitted worktree changes could not be checked against the reviewed HEAD.' };
+    }
+    if (uncommitted.length > 0) {
+      return {
+        approved: false,
+        diffBudgetWaived,
+        highConfidence: false,
+        approvalId: null,
+        reason: `Uncommitted edits are not covered by the AI review of ${currentHead}: ${formatUncommittedPaths(uncommitted)}. Commit them and review again.`,
+      };
     }
 
     // Coverage gate: an approved-looking review cannot authorize a merge unless

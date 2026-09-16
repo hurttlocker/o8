@@ -121,6 +121,13 @@ function supervisorItem(id: string, problemDossierId: string | null): Supervisor
 
 let root: Root | null = null;
 
+/** Lets real timers and fetches run inside act until the rendered DOM shows `text`. */
+async function renderUntil(container: HTMLElement, text: string) {
+  while (!container.textContent?.includes(text)) {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+  }
+}
+
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -160,11 +167,9 @@ describe('Activity recurring-problem surface', () => {
 
     const accept = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept');
     if (!accept) throw new Error('Accept button was not rendered.');
-    await act(async () => {
-      accept.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 850));
-    });
-    expect(container.textContent).toContain('Accepted');
+    await act(async () => accept.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+    // The 202 receipt is replayed on its poll interval; wait for the settled render.
+    await renderUntil(container, 'Accepted');
 
     const inspect = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Inspect history');
     if (!inspect) throw new Error('Inspect history button was not rendered.');
@@ -202,10 +207,8 @@ describe('Activity recurring-problem surface', () => {
     if (!container) throw new Error('Missing test root.');
     root = createRoot(container);
 
-    await act(async () => {
-      root?.render(createElement(O8InboxPane, { active: true }));
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    });
+    await act(async () => root?.render(createElement(O8InboxPane, { active: true })));
+    await renderUntil(container, 'unlinked-source incident');
 
     expect(container.textContent).toContain('unlinked-source incident');
     expect(container.textContent).not.toContain('dossier-source incident');
