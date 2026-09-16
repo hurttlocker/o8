@@ -2069,6 +2069,15 @@
       ]
     },
     {
+      "path": "tests/merge-evidence-superseding-snapshot-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/merge-gate-typecheck-environment-failure-real-path.test.ts",
       "reasons": [
         "executable-fixture",
