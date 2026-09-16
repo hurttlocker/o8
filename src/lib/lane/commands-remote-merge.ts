@@ -79,6 +79,7 @@ export async function performRemoteCustomerMerge(
     console.log(`[remote-merge] Actual worktree branch: ${actualBranch} (base ref: ${fetched.baseRef})`);
 
     let rebaseFailed = false;
+    let typecheckSkipped: string | null = null;
     try {
       await execFileAsync('git', ['rebase', lane.baseBranch], { windowsHide: true, cwd: fetched.tempWorktreePath });
       console.log(`[remote-merge] Rebased ${actualBranch} onto ${lane.baseBranch}`);
@@ -98,6 +99,10 @@ export async function performRemoteCustomerMerge(
         actualBranch,
         logPrefix: 'remote-merge',
       });
+      // Held for the success note below. Dropping it here left the operator
+      // reading an unqualified "Merged" for a merge that was never
+      // typechecked (#2383).
+      if (typecheck.ok && typecheck.skipped) typecheckSkipped = typecheck.skipped;
       if (!typecheck.ok) {
         setLaneStatus(command.laneId, 'reviewing', 'system', 'typecheck_failed');
         return {
@@ -245,9 +250,10 @@ export async function performRemoteCustomerMerge(
     }
 
     const updated = getLane(command.laneId);
+    const skipNote = typecheckSkipped ? ` Typecheck did not run: ${typecheckSkipped}` : '';
     const mergeNote = pushedToOrigin
-      ? `Merged ${lane.branch} into ${lane.baseBranch} and pushed to origin.${decompositionNote}`
-      : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${decompositionNote}`;
+      ? `Merged ${lane.branch} into ${lane.baseBranch} and pushed to origin.${skipNote}${decompositionNote}`
+      : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${skipNote}${decompositionNote}`;
     return {
       ok: true,
       laneId: command.laneId,

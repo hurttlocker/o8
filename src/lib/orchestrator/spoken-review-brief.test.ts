@@ -2,6 +2,32 @@ import { describe, expect, it } from 'vitest';
 import { buildSpokenReviewBrief } from './spoken-review-brief';
 
 describe('buildSpokenReviewBrief', () => {
+  // #2383: a gate that could not run used to vanish from the brief, so a merge
+  // that was never typechecked read exactly like one that passed.
+  it('names a merge gate check that did not run', () => {
+    const brief = buildSpokenReviewBrief({
+      packetId: 'pkt-2383',
+      title: 'Skipped gate',
+      evidence: { headSha: 'c'.repeat(40), fingerprint: 'd'.repeat(64), diffBase: 'main', stat: '1 file changed' },
+      fileChanges: [{ path: 'src/lib/thing.ts', status: 'modified' }],
+      review: { verdict: 'approved', summary: 'Reviewed.', findings: [] },
+      mergeGate: {
+        verdict: 'passing',
+        checks: [
+          { name: 'typecheck', verdict: 'skipped', detail: 'typecheck did not run to completion (killed, no output after 812ms)' },
+          { name: 'lint', verdict: 'pass' },
+        ],
+      },
+      secondPass: { status: 'not-required' },
+    });
+
+    const flags = brief.riskFlags.join(' | ');
+    expect(flags).toContain('typecheck did not run');
+    expect(flags).toContain('killed, no output after 812ms');
+    // It must not be dressed up as a failure either.
+    expect(brief.riskFlags.some((flag) => /^lint/.test(flag))).toBe(false);
+  });
+
   it('speaks renamed-away API and migration surfaces by their previous paths', () => {
     const brief = buildSpokenReviewBrief({
       packetId: 'packet-renames',

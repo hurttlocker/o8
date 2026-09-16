@@ -2790,6 +2790,12 @@
       ]
     },
     {
+      "path": "tests/ship-ledger-operator-dir-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/shipped-dark-audit-real-path.test.ts",
       "reasons": [
         "child-process",
