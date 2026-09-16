@@ -25,6 +25,7 @@ import {
   PHONE_CODE_SURFACE_INSTRUCTIONS,
   PHONE_CODE_TOOL_INSTRUCTIONS,
   selectPhoneCodeTools,
+  selectPhoneO8Tools,
   selectPhoneRealtimeModel,
   RENDER_SURFACE_TOOL,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
@@ -470,23 +471,26 @@ export async function POST(request: NextRequest) {
 
   const sessionId = `sym-${randomUUID()}`;
   const voice = bridge.voice;
-  let phoneBridgeTools = bridge.tools;
-  if (workspaceContext.workspaceMode === 'code') {
-    const selection = selectPhoneCodeTools(bridge.tools);
-    if (selection.missing.length > 0) {
-      const detail = `Code tool catalog incomplete; missing: ${selection.missing.join(', ')}`;
-      console.error(`${LOG} code_tools_incomplete: ${detail}`);
-      return NextResponse.json(
-        { ok: false, error: 'desktop_unavailable', detail },
-        { status: 503 },
-      );
-    }
-    phoneBridgeTools = selection.tools;
+  const usesCodePack =
+    workspaceContext.workspaceMode === 'code' ||
+    workspaceContext.launchKind === 'repository-catch-up';
+  const phonePack = usesCodePack
+    ? { label: 'Code', logKey: 'code_tools_incomplete', ...selectPhoneCodeTools(bridge.tools) }
+    : { label: 'o8', logKey: 'o8_tools_incomplete', ...selectPhoneO8Tools(bridge.tools) };
+  if (phonePack.missing.length > 0) {
+    const detail = `${phonePack.label} tool catalog incomplete; missing: ${phonePack.missing.join(', ')}`;
+    console.error(`${LOG} ${phonePack.logKey}: ${detail}`);
+    return NextResponse.json(
+      { ok: false, error: 'desktop_unavailable', detail },
+      { status: 503 },
+    );
   }
+  const phoneBridgeTools = phonePack.tools;
+  const mintedPhoneTools = [...phoneBridgeTools, RENDER_SURFACE_TOOL];
 
-  // Mint the ephemeral token carrying the shared brain/config. Code gets its
-  // bounded phone pack; Life keeps the complete live bridge catalog. The raw
-  // subscription bearer or BYOK key never leaves the Mac.
+  // Mint the ephemeral token carrying the shared brain/config. Code and
+  // repository catch-up use the Code pack; default o8 uses its bounded pack.
+  // The raw subscription bearer or BYOK key never leaves the Mac.
   try {
     const mint = await fetch(CLIENT_SECRETS_URL, {
       method: 'POST',
@@ -509,7 +513,7 @@ export async function POST(request: NextRequest) {
                 ? PHONE_CODE_TOOL_INSTRUCTIONS + PHONE_CODE_SURFACE_INSTRUCTIONS
                 : '') +
               workspaceContextInstructions(workspaceContext),
-            tools: [...phoneBridgeTools, RENDER_SURFACE_TOOL],
+            tools: mintedPhoneTools,
             inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
             micProfile: 'near_field',
           },
@@ -559,7 +563,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(
-      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${phoneBridgeTools.length}` +
+      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
         `${bridge.deskWasLive ? ' preempted=desk' : ''})`,
     );
 

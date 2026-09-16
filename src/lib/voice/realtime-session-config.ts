@@ -179,10 +179,10 @@ export const DEFAULT_INSTRUCTIONS =
 export const SURFACE_TOOL_NAME = 'render_surface';
 
 /**
- * The bounded Mac-executed tool catalog exposed to PHONE Symon on Code. Life
- * keeps the full bridge catalog, and desktop callers never pass through this
- * selector. Keep this list explicit so a new mail/media/browser tool cannot
- * silently become available merely because the desktop catalog grew.
+ * The bounded Mac-executed tool catalog exposed to PHONE Symon on Code. Desktop
+ * callers never pass through this selector. Keep this list explicit so a new
+ * mail/media/browser tool cannot silently become available merely because the
+ * desktop catalog grew.
  */
 export const PHONE_CODE_TOOL_NAMES = [
   'symon_execute_plan',
@@ -208,7 +208,47 @@ export const PHONE_CODE_TOOL_NAMES = [
   'symon_ledger_undo',
 ] as const;
 
-export interface PhoneCodeToolSelection {
+/**
+ * The bounded Mac-executed pack for the phone's default o8 workspace. It keeps
+ * the tools named by the shared conductor instructions (plans, dispatch,
+ * delegation, ledger), the phone-native machine/agent/terminal/GitHub families,
+ * and the read-oriented o8 control plane. Desktop Life catalogs such as mail,
+ * calendar, browser, shell, file, screen, and mac_* stay out. MCP tools are not
+ * listed here because selectPhoneO8Tools appends every live mcp__ schema: adding
+ * that server to Symon is already an explicit operator opt-in.
+ */
+export const PHONE_O8_TOOL_NAMES = [
+  'symon_machine_list',
+  'symon_machine_switch',
+  'symon_execute_plan',
+  'o8_status',
+  'o8_team_inbox',
+  'o8_ask',
+  'o8_needs_me',
+  'o8_attention_why',
+  'o8_review_diff',
+  'o8_packet_wait',
+  'o8_recap',
+  'o8_usage',
+  'o8_panel_read',
+  'o8_dispatch',
+  'o8_delegate',
+  'escalate',
+  'agent_turn',
+  'terminal_list',
+  'terminal_send',
+  'gh_issue_create',
+  'gh_comment',
+  'gh_pr_list',
+  'gh_issue_list',
+  'gh_issue_view',
+  'gh_pr_view',
+  'gh_triage',
+  'symon_ledger_recent',
+  'symon_ledger_undo',
+] as const;
+
+export interface PhoneToolSelection {
   tools: Array<Record<string, unknown>>;
   missing: string[];
 }
@@ -248,7 +288,7 @@ function phoneScopedTool(tool: Record<string, unknown>): Record<string, unknown>
 /** Select exactly the frozen Code pack, in canonical order, from the live Mac catalog. */
 export function selectPhoneCodeTools(
   tools: Array<Record<string, unknown>>,
-): PhoneCodeToolSelection {
+): PhoneToolSelection {
   const available = new Map<string, Record<string, unknown>>();
   for (const tool of tools) {
     if (tool.type !== 'function' || typeof tool.name !== 'string' || available.has(tool.name)) continue;
@@ -261,6 +301,34 @@ export function selectPhoneCodeTools(
       return tool ? [phoneScopedTool(tool)] : [];
     }),
     missing: PHONE_CODE_TOOL_NAMES.filter((name) => !available.has(name)),
+  };
+}
+
+/** Select the frozen o8 pack, followed by operator-attached MCP tools in bridge order. */
+export function selectPhoneO8Tools(
+  tools: Array<Record<string, unknown>>,
+): PhoneToolSelection {
+  const available = new Map<string, Record<string, unknown>>();
+  for (const tool of tools) {
+    if (tool.type !== 'function' || typeof tool.name !== 'string' || available.has(tool.name)) continue;
+    available.set(tool.name, tool);
+  }
+
+  const selectedNames = new Set<string>(PHONE_O8_TOOL_NAMES);
+  const mcpTools = Array.from(available.entries()).flatMap(([name, tool]) => {
+    if (!name.startsWith('mcp__') || selectedNames.has(name)) return [];
+    selectedNames.add(name);
+    return [tool];
+  });
+  return {
+    tools: [
+      ...PHONE_O8_TOOL_NAMES.flatMap((name) => {
+        const tool = available.get(name);
+        return tool ? [tool] : [];
+      }),
+      ...mcpTools,
+    ],
+    missing: PHONE_O8_TOOL_NAMES.filter((name) => !available.has(name)),
   };
 }
 

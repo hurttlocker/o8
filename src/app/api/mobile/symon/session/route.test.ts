@@ -10,7 +10,43 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { PHONE_CODE_TOOL_NAMES } from '@/lib/voice/realtime-session-config';
+import {
+  PHONE_CODE_TOOL_NAMES,
+  PHONE_O8_TOOL_NAMES,
+} from '@/lib/voice/realtime-session-config';
+
+const EXPECTED_PHONE_O8_TOOL_NAMES = [
+  'symon_machine_list',
+  'symon_machine_switch',
+  'symon_execute_plan',
+  'o8_status',
+  'o8_team_inbox',
+  'o8_ask',
+  'o8_needs_me',
+  'o8_attention_why',
+  'o8_review_diff',
+  'o8_packet_wait',
+  'o8_recap',
+  'o8_usage',
+  'o8_panel_read',
+  'o8_dispatch',
+  'o8_delegate',
+  'escalate',
+  'agent_turn',
+  'terminal_list',
+  'terminal_send',
+  'gh_issue_create',
+  'gh_comment',
+  'gh_pr_list',
+  'gh_issue_list',
+  'gh_issue_view',
+  'gh_pr_view',
+  'gh_triage',
+  'symon_ledger_recent',
+  'symon_ledger_undo',
+] as const;
+
+const MCP_TOOL_NAMES = ['mcp__fixture__search', 'mcp__fixture__lookup'] as const;
 
 const h = vi.hoisted(() => ({
   evalJs: vi.fn<(code: string) => Promise<{ result: string }>>(),
@@ -78,10 +114,32 @@ function toolSchemas(names: readonly string[]) {
   }));
 }
 
-/** Default bridge: desk NOT live, one tool published, voice=marin. */
+function fullDesktopBridgeTools() {
+  const desktopLifeTools = [
+    'send_email',
+    'calendar_list',
+    'browser_open',
+    'shell_execute',
+    'file_read',
+    'mac_weather',
+    'mac_music_play',
+    'read_screen',
+    ...Array.from({ length: 53 }, (_, index) => `desktop_life_fixture_${index + 1}`),
+  ];
+  const names = Array.from(new Set([
+    ...EXPECTED_PHONE_O8_TOOL_NAMES,
+    ...PHONE_CODE_TOOL_NAMES,
+    ...desktopLifeTools,
+    ...MCP_TOOL_NAMES,
+  ]));
+  expect(names).toHaveLength(101);
+  return toolSchemas(names);
+}
+
+/** Default bridge: desk NOT live, 101-tool desktop catalog, voice=marin. */
 function bridgeReady(
   deskWasLive = false,
-  tools: Array<Record<string, unknown>> = toolSchemas(['o8_status']),
+  tools: Array<Record<string, unknown>> = fullDesktopBridgeTools(),
 ) {
   h.evalJs.mockImplementation(async (code: string) => {
     if (code.includes('deskWasLive')) return { result: JSON.stringify({ deskWasLive }) };
@@ -159,20 +217,20 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       workspaceMode: 'o8',
       repoId: null,
       repoPath: null,
-      allowedTools: ['o8_status'],
+      allowedTools: [...EXPECTED_PHONE_O8_TOOL_NAMES, ...MCP_TOOL_NAMES],
       scopeVersion: 1,
     }));
 
     // Config parity: instructions + tools (+auto) + input transcription baked in.
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(sentBody.session.instructions).toContain('You are Symon');
-    // Phone-only superset: the desk tool set PLUS the client-rendered surface
-    // tool, and the persona carries the surface-authoring guidance.
+    // Phone-only bounded pack plus the client-rendered surface tool. The persona
+    // carries the surface-authoring guidance.
     expect(sentBody.session.instructions).toContain('render_surface');
     expect(sentBody.session.instructions).toContain('Never send a root-only shell');
     expect(sentBody.session.instructions).toContain('Named arguments such as `title:`');
     expect(sentBody.session.instructions).toContain('dotState is exactly idle|running|review|rejected|failed|merged');
-    expect(sentBody.session.tools).toHaveLength(2);
+    expect(sentBody.session.tools).toHaveLength(31);
     expect(
       sentBody.session.tools.map((t: { name?: string }) => t.name),
     ).toContain('render_surface');
@@ -206,6 +264,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('200: repository catch-up uses subscription OAuth and the flagship voice model', async () => {
+    bridgeReady(false, fullDesktopBridgeTools());
     h.resolveChatGPTRealtimeCredential.mockResolvedValue({
       accessToken: 'oauth-subscription-token',
       accountId: 'acct-founder',
@@ -232,6 +291,11 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(sentBody.session.instructions).toContain(
       '"launchKind":"repository-catch-up"',
     );
+    expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).toEqual([
+      ...PHONE_CODE_TOOL_NAMES,
+      'render_surface',
+    ]);
+    expect(sentBody.session.tools).toHaveLength(22);
   });
 
   it('501: repository catch-up never falls through to metered BYOK credits', async () => {
@@ -289,7 +353,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('200: appends rich bounded Code context, frozen markers, and the Code authoring pack', async () => {
-    codeBridgeReady(['send_email', 'spotify_play']);
+    bridgeReady(false, fullDesktopBridgeTools());
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek', expires_at: 1 }),
@@ -352,6 +416,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       ...PHONE_CODE_TOOL_NAMES,
       'render_surface',
     ]);
+    expect(sentBody.session.tools).toHaveLength(22);
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('send_email');
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('spotify_play');
     for (const tool of sentBody.session.tools.filter((tool: { name?: string }) => tool.name !== 'render_surface')) {
@@ -415,8 +480,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('200: keeps Life on the generic surface vocabulary and omits the Code authoring pack', async () => {
-    const lifeTools = ['o8_status', 'send_email', 'spotify_play', 'browser_open'];
-    bridgeReady(false, toolSchemas(lifeTools));
+    bridgeReady(false, fullDesktopBridgeTools());
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek', expires_at: 1 }),
@@ -439,10 +503,13 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(instructions).toContain('"sourceRoute":"/ask"');
     expect(instructions).not.toContain('CODE WORKSPACE SURFACES');
     expect(instructions).not.toContain('RepoState(targetId');
+    expect(PHONE_O8_TOOL_NAMES).toEqual(EXPECTED_PHONE_O8_TOOL_NAMES);
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).toEqual([
-      ...lifeTools,
+      ...EXPECTED_PHONE_O8_TOOL_NAMES,
+      ...MCP_TOOL_NAMES,
       'render_surface',
     ]);
+    expect(sentBody.session.tools).toHaveLength(31);
   });
 
   it('200: ignores unknown, malformed, overlong, and prompt-shaped context fields', async () => {
@@ -512,6 +579,23 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     const body = await res.json();
     expect(body.error).toBe('desktop_unavailable');
     expect(body.detail).toContain('Code tool catalog incomplete');
+    expect(body.detail).toContain('o8_needs_me');
+    expect(body.detail).not.toContain('o8_status');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('503: fails loud when the live Mac catalog cannot supply the complete o8 pack', async () => {
+    const tools = fullDesktopBridgeTools().filter((tool) => tool.name !== 'o8_needs_me');
+    bridgeReady(false, tools);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ workspaceMode: 'o8' })));
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe('desktop_unavailable');
+    expect(body.detail).toContain('o8 tool catalog incomplete');
     expect(body.detail).toContain('o8_needs_me');
     expect(body.detail).not.toContain('o8_status');
     expect(fetchMock).not.toHaveBeenCalled();
