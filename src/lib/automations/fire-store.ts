@@ -7,7 +7,13 @@ import { computeNextRunAt, computePreviousRunAt } from './cron';
 import type { AutomationSourceEvent } from './source-events';
 
 export type AutomationFireSource = 'scheduled' | 'manual' | 'watch';
-export type AutomationWatchActionKind = 'dispatch' | 'notify' | 'steer' | 'approval';
+export type AutomationWatchActionKind =
+  | 'dispatch'
+  | 'notify'
+  | 'steer'
+  | 'approval'
+  | 'symon_report'
+  | 'symon_plan';
 export type AutomationFireStatus =
   | 'pending'
   | 'leased'

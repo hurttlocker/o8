@@ -32,6 +32,7 @@ pub mod o8_ui;
 mod safe_file;
 pub mod terminal_ctl;
 pub mod symon_mcp;
+pub mod symon_watch;
 
 use super::{safety, TaskCtx};
 use chrono::{Datelike, Timelike};
@@ -1215,6 +1216,84 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "symon_watch",
+            "description": "Hold one standing intent past the end of this turn. Use when the user says 'tell me when X', 'let me know once X lands', or 'when X happens, do Y' and X is something o8 already tracks: a packet reaching a state, a lane or agent finishing, or a repository's check runs, pull request state, or new commits. The desktop keeps watching after the conversation ends and after the phone locks, and reports the next time a session is connected. A plan body never runs unattended: it is offered behind the ordinary confirmation card. Say plainly that you will be watching; do not promise anything the condition does not cover.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "condition": {
+                        "type": "object",
+                        "description": "The observable to wait on.",
+                        "properties": {
+                            "text": { "type": "string", "description": "What you are waiting for, in the operator's own words. This is what they will hear back." },
+                            "source": { "type": "string", "enum": ["packet", "repository", "managed_run"], "description": "packet for a packet/lane/agent, repository for check runs, pull request state, and commits, managed_run for a tracked run." },
+                            "id": { "type": "string", "description": "Exact packet id, owner/repo, or run id. Omit to watch every source of that kind." },
+                            "events": { "type": "array", "items": { "type": "string" }, "description": "Event labels that satisfy the condition, for example check_completed or merged. Omit to accept any event from that source." },
+                            "repo_path": { "type": "string", "description": "Absolute local repo path when the condition is scoped to one repo." }
+                        },
+                        "required": ["text", "source"],
+                        "additionalProperties": false
+                    },
+                    "then": {
+                        "type": "object",
+                        "description": "What happens once the condition holds.",
+                        "properties": {
+                            "kind": { "type": "string", "enum": ["report", "plan"], "description": "report speaks say to the operator; plan offers the steps behind a confirmation card." },
+                            "say": { "type": "string", "description": "One sentence telling the operator what became true. Written now, spoken later." },
+                            "steps": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 5,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tool": { "type": "string", "description": "Exact name of another tool offered in this session. Never a watch tool or a plan tool." },
+                                        "args": { "type": "object", "description": "Arguments for that tool, matching its schema exactly." }
+                                    },
+                                    "required": ["tool", "args"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": ["kind", "say"],
+                        "additionalProperties": false
+                    },
+                    "deadline_minutes": { "type": "integer", "description": "Stop watching after this many minutes. Default 1440 (one day), maximum 10080 (one week)." }
+                },
+                "required": ["condition", "then"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "symon_watch_list",
+            "description": "List the standing watches Symon is holding for this session. Use for 'what are you waiting on?', 'what are you still watching?', or before cancelling one so you use its exact id.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }),
+        json!({
+            "name": "symon_watch_cancel",
+            "description": "Stop one standing watch. Call symon_watch_list first and pass its exact id. Cancelling never runs the watch's saved plan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Exact watch id returned by symon_watch_list." }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "symon_watch_run",
+            "description": "Run the plan a watch saved, now that its condition holds. Only call this for a watch that has already fired and is waiting — symon_watch_list shows it as parked, and the watch report names the id. The native plan executor reads the exact steps back and asks for confirmation before anything runs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Exact id of the waiting watch." }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "symon_skills_list",
             "description": "List local SKILL.md capabilities Symon can use, including which ones are active. Use when the user asks what skills are installed or wants a writing style/skill but has not named it exactly.",
             "parameters": { "type": "object", "properties": {}, "required": [] }
@@ -1301,6 +1380,12 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         }
         "symon_execute_plan" => Err(
             "symon_execute_plan must run through the governed native plan executor".to_string(),
+        ),
+        "symon_watch" => symon_watch::register(args, ctx).await,
+        "symon_watch_list" => symon_watch::list(args, ctx).await,
+        "symon_watch_cancel" => symon_watch::cancel(args, ctx).await,
+        "symon_watch_run" => Err(
+            "symon_watch_run must run through the governed native plan executor".to_string(),
         ),
         "open_app" => apps::open_app(args).await,
         "list_apps" => apps::list_apps(args).await,

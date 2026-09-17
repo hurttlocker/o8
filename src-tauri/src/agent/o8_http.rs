@@ -177,6 +177,16 @@ pub async fn patch_json(path: &str, body: Value) -> Result<Value, String> {
     read_json(path, resp).await
 }
 
+/// DELETE a loopback path, parsing the JSON response.
+pub async fn delete_json(path: &str) -> Result<Value, String> {
+    let url = format!("{}{}", base(), path);
+    let resp = with_auth(client()?.delete(&url))
+        .send()
+        .await
+        .map_err(|e| format!("o8 DELETE {path} failed: {e}"))?;
+    read_json(path, resp).await
+}
+
 async fn read_json(path: &str, resp: reqwest::Response) -> Result<Value, String> {
     let status = resp.status();
     let text = resp

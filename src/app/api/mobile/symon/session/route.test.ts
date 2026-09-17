@@ -47,6 +47,10 @@ const EXPECTED_PHONE_O8_TOOL_NAMES = [
   'gh_triage',
   'symon_ledger_recent',
   'symon_ledger_undo',
+  'symon_watch',
+  'symon_watch_list',
+  'symon_watch_cancel',
+  'symon_watch_run',
 ] as const;
 
 const MCP_TOOL_NAMES = ['mcp__fixture__search', 'mcp__fixture__lookup'] as const;
@@ -143,7 +147,7 @@ function fullDesktopBridgeTools() {
   return toolSchemas(names);
 }
 
-/** Default bridge: desk NOT live, 101-tool desktop catalog, voice=marin. */
+/** Default bridge: desk NOT live, 105-tool desktop catalog, voice=marin. */
 function bridgeReady(
   deskWasLive = false,
   tools: Array<Record<string, unknown>> = fullDesktopBridgeTools(),
@@ -209,8 +213,8 @@ afterEach(() => {
 });
 
 describe('POST /api/mobile/symon/session — mint assembly + error table', () => {
-  it('fixture catalog mirrors the desktop 101-tool count', () => {
-    expect(fullDesktopBridgeTools()).toHaveLength(101);
+  it('fixture catalog mirrors the desktop 105-tool count', () => {
+    expect(fullDesktopBridgeTools()).toHaveLength(105);
   });
 
   it('200: without a previous source, mints with BYOK and records the billing source', async () => {
@@ -262,7 +266,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(sentBody.session.instructions).toContain('Never send a root-only shell');
     expect(sentBody.session.instructions).toContain('Named arguments such as `title:`');
     expect(sentBody.session.instructions).toContain('dotState is exactly idle|running|review|rejected|failed|merged');
-    expect(sentBody.session.tools).toHaveLength(31);
+    expect(sentBody.session.tools).toHaveLength(35);
     expect(
       sentBody.session.tools.map((t: { name?: string }) => t.name),
     ).toContain('render_surface');
@@ -324,7 +328,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       ...PHONE_CODE_TOOL_NAMES,
       'render_surface',
     ]);
-    expect(sentBody.session.tools).toHaveLength(22);
+    expect(sentBody.session.tools).toHaveLength(26);
     expect(h.persistSymonScopeGrant).toHaveBeenCalledWith(expect.objectContaining({
       workspaceMode: 'o8',
       toolPack: 'code',
@@ -561,7 +565,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       ...PHONE_CODE_TOOL_NAMES,
       'render_surface',
     ]);
-    expect(sentBody.session.tools).toHaveLength(22);
+    expect(sentBody.session.tools).toHaveLength(26);
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('send_email');
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('spotify_play');
     for (const tool of sentBody.session.tools.filter((tool: { name?: string }) => tool.name !== 'render_surface')) {
@@ -656,7 +660,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       ...MCP_TOOL_NAMES,
       'render_surface',
     ]);
-    expect(sentBody.session.tools).toHaveLength(31);
+    expect(sentBody.session.tools).toHaveLength(35);
   });
 
   it('200: ignores unknown, malformed, overlong, and prompt-shaped context fields', async () => {

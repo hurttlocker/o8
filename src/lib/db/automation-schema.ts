@@ -30,11 +30,15 @@ export const automations = sqliteTable('automations', {
   watchMaxFiresPerTick: integer('watch_max_fires_per_tick').notNull().default(4),
   watchExpiresAt: integer('watch_expires_at'),
   watchActionKind: text('watch_action_kind', {
-    enum: ['dispatch', 'notify', 'steer', 'approval'],
+    enum: ['dispatch', 'notify', 'steer', 'approval', 'symon_report', 'symon_plan'],
   }).notNull().default('dispatch'),
   watchTargetLaneId: text('watch_target_lane_id'),
   watchCheckpoint: integer('watch_checkpoint').notNull().default(0),
   watchLastFireAt: integer('watch_last_fire_at'),
+  symonSessionId: text('symon_session_id'),
+  symonThenJson: text('symon_then_json'),
+  symonParkedAt: integer('symon_parked_at'),
+  symonParkedFireId: text('symon_parked_fire_id'),
   lastRunAt: integer('last_run_at'),
   lastRunStatus: text('last_run_status', {
     enum: ['idle', 'running', 'ok', 'error'],

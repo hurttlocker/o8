@@ -239,6 +239,7 @@ import {
 import { isLoopbackAddress } from './lib/auth/loopback-request';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
+import { drainParkedSymonWatches } from './lib/automations/symon-watch';
 import { startBroadcastDirectorLoop } from './lib/broadcast/director';
 import { startBroadcastSpeakerLoop } from './lib/broadcast/speaker';
 import type {
@@ -4154,6 +4155,11 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
     activeMachine: existingOwner?.activeMachine ?? DEFAULT_SYMON_MACHINE,
   });
   preemptOtherSymonSessions(sessionId, 'preempted');
+  // A watch that fired while the phone was away is owed its report the moment a
+  // session is live again. Best effort: registration never waits on delivery.
+  void drainParkedSymonWatches().catch((error) => {
+    console.warn('[symon-watch] drain on registration failed:', error);
+  });
   updateAgentStatus(sessionId, status);
   persistAgentRegistry();
 }

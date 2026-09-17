@@ -11,6 +11,7 @@ import {
 } from './fire-store';
 import { runClaimedAutomationFire } from './fire-runner';
 import { materializeWatchAutomationFires } from './watch-store';
+import { materializeSymonWatchFires } from './symon-watch';
 
 const TICK_MS = 30_000;
 const DEFAULT_LEASE_MS = 60 * 60 * 1000;
@@ -54,6 +55,10 @@ export async function runAutomationSchedulerTick(input: {
   ));
   const leaseMs = input.leaseMs ?? positiveEnv('O8_AUTOMATION_LEASE_MS', DEFAULT_LEASE_MS);
   const maxClaims = Math.max(concurrencyCap, Math.floor(input.maxClaims ?? concurrencyCap * 4));
+  // Symon watches settle their own deadlines and parked deliveries FIRST: the
+  // shared materializer also disables an expired row, but only this pass can
+  // write the matching Symon ledger entry.
+  const symonDrained = await materializeSymonWatchFires(nowMs);
   const materialized = [
     ...materializeDueAutomationFires(nowMs),
     ...materializeWatchAutomationFires(nowMs),
@@ -82,6 +87,7 @@ export async function runAutomationSchedulerTick(input: {
   writeHeartbeat(Date.now(), {
     materialized: materialized.length,
     completed: completed.length,
+    symonWatchesDrained: symonDrained.length,
   });
   return { materialized, completed };
 }
