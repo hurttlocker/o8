@@ -436,10 +436,7 @@ export async function POST(request: NextRequest) {
   // is present. This is the proven #1616 path: the OAuth bearer mints the same
   // short-lived Realtime client secret as BYOK, so the phone keeps the existing
   // WebRTC + o8 tool/approval plane without spending Platform API credits.
-  const configuredAuthPath = process.env.O8_SYMON_CODEX_AUTH_PATH?.trim();
-  const chatgptCredential = await resolveChatGPTRealtimeCredential(
-    configuredAuthPath ? { authPath: configuredAuthPath } : undefined,
-  );
+  const chatgptCredential = await resolveChatGPTRealtimeCredential();
   const requiresSubscription =
     workspaceContext.launchKind === 'repository-catch-up';
   let realtimeBearer: string;
@@ -587,10 +584,6 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'billing source persistence failed';
       console.error(`${LOG} billing_state_failed: ${detail}`);
-      return NextResponse.json(
-        { ok: false, error: 'desktop_unavailable', detail: 'Unable to record the Symon billing source.' },
-        { status: 503 },
-      );
     }
 
     // OpenAI reports expires_at in unix SECONDS; the contract wants epoch millis.

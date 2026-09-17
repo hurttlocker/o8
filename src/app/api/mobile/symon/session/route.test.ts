@@ -8,7 +8,7 @@
  * preempted, and the full structured error table (403/501/502/503) fires — the
  * route never throws.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,12 +16,11 @@ import { NextRequest } from 'next/server';
 import { PHONE_CODE_TOOL_NAMES } from '@/lib/voice/realtime-session-config';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-symon-session-'));
-const authPath = join(dataDir, 'codex-auth.json');
+const authPath = join(dataDir, 'auth.json');
 const billingStatePath = join(dataDir, 'symon-phone-billing.json');
 const settingsPath = join(dataDir, 'settings.toml');
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CODEX_HOME = dataDir;
-process.env.O8_SYMON_CODEX_AUTH_PATH = authPath;
 
 const h = vi.hoisted(() => ({
   evalJs: vi.fn<(code: string) => Promise<{ result: string }>>(),
@@ -632,6 +631,26 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(body.error).toBe('desktop_unavailable');
     expect(JSON.stringify(body)).not.toContain('ek-never-returned');
     expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
+  });
+
+  it('200: returns the minted session when billing state persistence fails', async () => {
+    mkdirSync(billingStatePath);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek-persistence-failed', expires_at: 1 }),
+    }));
+
+    try {
+      const res = await POST(req());
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).session.clientSecret).toBe('ek-persistence-failed');
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('billing_state_failed:'));
+    } finally {
+      errorSpy.mockRestore();
+      rmSync(billingStatePath, { recursive: true, force: true });
+    }
   });
 
   it('200: malformed JSON remains compatible with the old body-optional caller', async () => {

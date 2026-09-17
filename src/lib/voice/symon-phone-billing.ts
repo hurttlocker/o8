@@ -26,6 +26,8 @@ function isBillingSource(value: unknown): value is SymonPhoneBillingSource {
 }
 
 export async function readLastSymonPhoneBillingSource(): Promise<SymonPhoneBillingSource | null> {
+  // This read/decision/write sequence is intentionally unlocked on one desktop.
+  // A racing mint can cause one extra acknowledgement prompt, but cannot skip one.
   try {
     const parsed = JSON.parse(await readFile(statePath(), 'utf8')) as Partial<SymonPhoneBillingState>;
     return parsed.version === STATE_VERSION && isBillingSource(parsed.billingSource)
