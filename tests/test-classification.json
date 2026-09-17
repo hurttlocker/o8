@@ -1044,6 +1044,15 @@
       ]
     },
     {
+      "path": "tests/approval-referee-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/approve-and-merge-squash-real-path.test.ts",
       "reasons": [
         "child-process",

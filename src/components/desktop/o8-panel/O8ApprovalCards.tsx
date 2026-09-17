@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import type { ApprovalRecord, ApprovalRisk } from '@/lib/approvals/types';
 import { isGateApprovalRow } from '@/lib/approvals/gating';
 import { composeApprovalCardCopy } from '@/lib/inbox/card-copy';
+import { O8RefereeRow } from './O8RefereeRow';
 
 type ApprovalAction = 'approve' | 'reject';
 
@@ -223,6 +224,8 @@ function ApprovalRequestCard({
           {tool}
         </span>
       </div>
+
+      {approval.referee ? <O8RefereeRow referee={approval.referee} /> : null}
 
       <div style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-muted)', overflowWrap: 'anywhere' }}>
         {approval.description || approval.summary}
