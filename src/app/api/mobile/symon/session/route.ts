@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { getEntitlement } from '@/lib/entitlement/store';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { resolveChatGPTRealtimeCredential } from '@/lib/voice/chatgpt-realtime-credential';
 import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
@@ -44,6 +45,7 @@ import {
   REALTIME_TOKEN_TTL_SECONDS,
   assertRealtimeCapableModel,
   buildClientSecretsBody,
+  type SymonBrain,
 } from '@/lib/voice/realtime-session-config';
 
 /**
@@ -101,6 +103,13 @@ interface PhoneWorkspaceContext {
 interface PhoneSessionRequest {
   context: PhoneWorkspaceContext;
   acknowledgeBillingChange: boolean;
+  /** The brain the phone asked for. Absent or unrecognized means `realtime`. */
+  brain: SymonBrain;
+}
+
+/** No body, an oversized body, or malformed JSON — the legacy empty request. */
+function emptyPhoneSessionRequest(): PhoneSessionRequest {
+  return { context: {}, acknowledgeBillingChange: false, brain: 'realtime' };
 }
 
 interface ResolvedPhoneScope {
@@ -181,17 +190,17 @@ function safeSurface(value: unknown): string | undefined {
 async function readPhoneSessionRequest(request: NextRequest): Promise<PhoneSessionRequest> {
   const declaredLength = Number(request.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > CONTEXT_BODY_MAX_CHARS) {
-    return { context: {}, acknowledgeBillingChange: false };
+    return emptyPhoneSessionRequest();
   }
 
   try {
     const text = await request.text();
     if (!text || text.length > CONTEXT_BODY_MAX_CHARS) {
-      return { context: {}, acknowledgeBillingChange: false };
+      return emptyPhoneSessionRequest();
     }
     const body = JSON.parse(text) as unknown;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return { context: {}, acknowledgeBillingChange: false };
+      return emptyPhoneSessionRequest();
     }
     const record = body as Record<string, unknown>;
     const repoPath = safeRepoPath(record.repoPath);
@@ -199,6 +208,9 @@ async function readPhoneSessionRequest(request: NextRequest): Promise<PhoneSessi
     const agentId = safeIdentifier(record.agentId, 128);
     return {
       acknowledgeBillingChange: record.acknowledgeBillingChange === true,
+      // Only the two contract values exist. Anything else is absent, and absent
+      // is the standard brain every plan gets.
+      brain: record.brain === 'live' ? 'live' : 'realtime',
       context: {
         workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code'
           ? record.workspaceMode
@@ -244,8 +256,24 @@ async function readPhoneSessionRequest(request: NextRequest): Promise<PhoneSessi
   } catch {
     // The body is optional and additive. Malformed input must not make a legacy
     // caller lose voice access, and no raw body text is ever echoed to the model.
-    return { context: {}, acknowledgeBillingChange: false };
+    return emptyPhoneSessionRequest();
   }
+}
+
+/**
+ * A developer override (the env experiment or the operator-only header) is a
+ * convenience for the machine in front of you, never a way past the plan. On a
+ * plan without the live brain a `live` override is dropped and said out loud,
+ * so the mint that follows is the one the plan actually allows.
+ */
+function planAllowedVariant(
+  requested: string | null | undefined,
+  liveBrainAllowed: boolean,
+  source: string,
+): string | null | undefined {
+  if (requested !== 'live' || liveBrainAllowed) return requested;
+  console.warn(`${LOG} live_override_ignored: ${source} asked for the live brain on a plan without it`);
+  return undefined;
 }
 
 async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<ResolvedPhoneScope | null> {
@@ -457,14 +485,42 @@ export async function POST(request: NextRequest) {
   }
   const workspaceContext = resolvedScope.context;
 
+  // The brain choice is a PLAN decision, settled before a credential is read or
+  // an upstream mint is attempted: a plan that may not run the live brain must
+  // never spend a token finding that out. One flag names the gate.
+  const entitlement = await getEntitlement();
+  const liveBrainAllowed = entitlement.flags['voice.liveBrain'];
+  if (sessionRequest.brain === 'live' && !liveBrainAllowed) {
+    console.warn(`${LOG} brain_locked: plan=${entitlement.plan}`);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'brain_locked',
+        detail: 'The live brain is a paid-plan option. This plan runs Symon on the standard brain.',
+      },
+      { status: 403 },
+    );
+  }
+  const brain: SymonBrain = sessionRequest.brain === 'live' ? 'live' : 'realtime';
+  const availableBrains: SymonBrain[] = liveBrainAllowed ? ['realtime', 'live'] : ['realtime'];
+
   const requestedModelVariant = principal === 'operator'
     ? request.headers.get('x-o8-symon-code-model')
     : null;
   const modelSelection = selectPhoneRealtimeModel({
     workspaceMode: resolvedScope.workspaceMode,
-    experiment: process.env.O8_SYMON_CODE_REALTIME_EXPERIMENT,
+    brain,
+    experiment: planAllowedVariant(
+      process.env.O8_SYMON_CODE_REALTIME_EXPERIMENT,
+      liveBrainAllowed,
+      'the realtime experiment switch',
+    ),
     bucketKey: `${subject.subject}:${subject.deviceId ?? 'operator'}:${resolvedScope.repoId ?? 'life'}`,
-    operatorOverride: requestedModelVariant,
+    operatorOverride: planAllowedVariant(
+      requestedModelVariant,
+      liveBrainAllowed,
+      'the operator model header',
+    ),
     experience: workspaceContext.launchKind,
     liveBackendModel: process.env.O8_SYMON_LIVE_BACKEND_MODEL,
   });
@@ -680,7 +736,7 @@ export async function POST(request: NextRequest) {
 
     console.log(
       `${LOG} minted ${sessionId} (model=${model}${backendModel ? ` backend=${backendModel}` : ''}` +
-        ` billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
+        ` brain=${brain} billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
         ` briefing=${briefing.length}${bridge.deskWasLive ? ' preempted=desk' : ''})`,
     );
 
@@ -693,6 +749,10 @@ export async function POST(request: NextRequest) {
         expiresAt,
         model,
         modelVariant: modelSelection.variant,
+        // What this session runs on, and what this plan may choose — the phone
+        // shows the switch only when `brains` offers something to switch to.
+        brain,
+        brains: availableBrains,
         billingSource,
         voice,
         baseUrl: REALTIME_BASE_URL,
