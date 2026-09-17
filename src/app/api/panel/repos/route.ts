@@ -65,6 +65,14 @@ function isWithinRealRoot(root: string, candidate: string) {
   );
 }
 
+async function realpathOrNull(localPath: string) {
+  try {
+    return await realpath(localPath);
+  } catch {
+    return null;
+  }
+}
+
 async function validateRestorePaths(
   requestedPaths: string[],
   registeredRepos: Array<{ localPath: string }>,
@@ -72,55 +80,58 @@ async function validateRestorePaths(
   const registeredPaths = Array.from(new Set(registeredRepos
     .map((repo) => repo.localPath.trim())
     .filter((localPath) => isAbsolute(localPath))));
-  const registeredRealPaths = (await Promise.all(registeredPaths.map(async (localPath) => {
-    try {
-      return await realpath(localPath);
-    } catch {
-      return null;
-    }
-  }))).filter((localPath): localPath is string => Boolean(localPath));
-  const listedWorktreePaths = (await Promise.all(registeredRealPaths.map(async (registeredRoot) => {
-    try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['-C', registeredRoot, 'worktree', 'list', '--porcelain', '-z'],
-        { windowsHide: true, timeout: 5_000, maxBuffer: 4 * 1024 * 1024 },
-      );
-      return stdout
-        .split('\0')
-        .filter((field) => field.startsWith('worktree '))
-        .map((field) => field.slice('worktree '.length))
-        .filter((localPath) => isAbsolute(localPath));
-    } catch {
-      return [];
-    }
-  }))).flat();
-  const worktreeRealPaths = (await Promise.all(listedWorktreePaths.map(async (localPath) => {
-    try {
-      return await realpath(localPath);
-    } catch {
-      return null;
-    }
-  }))).filter((localPath): localPath is string => Boolean(localPath));
-  const allowedRealRoots = Array.from(new Set([
-    ...registeredRealPaths,
-    ...worktreeRealPaths,
-  ]));
-
   const uniqueRequestedPaths = Array.from(new Set(requestedPaths
     .map((requestedPath) => requestedPath.trim())
     .filter((requestedPath) => isAbsolute(requestedPath))));
-  const validations = await Promise.all(uniqueRequestedPaths.map(async (requestedPath) => {
-    try {
-      const canonicalPath = await realpath(requestedPath);
-      return allowedRealRoots.some((root) => isWithinRealRoot(root, canonicalPath))
-        ? { requestedPath, canonicalPath }
-        : null;
-    } catch {
-      return null;
+  const [registeredRealPaths, requested] = await Promise.all([
+    Promise.all(registeredPaths.map(realpathOrNull))
+      .then((paths) => paths.filter((localPath): localPath is string => Boolean(localPath))),
+    Promise.all(uniqueRequestedPaths.map(async (requestedPath) => ({
+      requestedPath,
+      canonicalPath: await realpathOrNull(requestedPath),
+    }))),
+  ]);
+
+  // Fast path: a saved scope inside a registered root is authorized by the
+  // registry alone, so no git subprocess runs for the common case (#2456).
+  const settledByRegistry = new Set(requested
+    .filter(({ canonicalPath }) => canonicalPath !== null
+      && registeredRealPaths.some((root) => isWithinRealRoot(root, canonicalPath)))
+    .map(({ requestedPath }) => requestedPath));
+  const needsWorktreeList = requested.some(({ requestedPath, canonicalPath }) => (
+    canonicalPath !== null && !settledByRegistry.has(requestedPath)
+  ));
+
+  let worktreeRealPaths: string[] = [];
+  if (needsWorktreeList) {
+    const listedWorktreePaths = (await Promise.all(registeredRealPaths.map(async (registeredRoot) => {
+      try {
+        const { stdout } = await execFileAsync(
+          'git',
+          ['-C', registeredRoot, 'worktree', 'list', '--porcelain', '-z'],
+          { windowsHide: true, timeout: 5_000, maxBuffer: 4 * 1024 * 1024 },
+        );
+        return stdout
+          .split('\0')
+          .filter((field) => field.startsWith('worktree '))
+          .map((field) => field.slice('worktree '.length))
+          .filter((localPath) => isAbsolute(localPath));
+      } catch {
+        return [];
+      }
+    }))).flat();
+    worktreeRealPaths = (await Promise.all(listedWorktreePaths.map(realpathOrNull)))
+      .filter((localPath): localPath is string => Boolean(localPath));
+  }
+
+  return requested.flatMap(({ requestedPath, canonicalPath }) => {
+    if (canonicalPath === null) return [];
+    if (settledByRegistry.has(requestedPath)
+      || worktreeRealPaths.some((root) => isWithinRealRoot(root, canonicalPath))) {
+      return [{ requestedPath, canonicalPath }];
     }
-  }));
-  return validations.filter((validation): validation is NonNullable<typeof validation> => Boolean(validation));
+    return [];
+  });
 }
 
 function normalizeScopePath(filePath?: string | null) {

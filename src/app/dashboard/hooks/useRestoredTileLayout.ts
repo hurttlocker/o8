@@ -17,6 +17,7 @@ import {
 import type { TileLayout } from '@/lib/tiles/types';
 import {
   loadValidatedRestorePaths,
+  loadValidatedRestorePathsWithRetry,
   validatePersistedLayoutRepos,
 } from './tileLayoutRestore';
 
@@ -30,6 +31,8 @@ interface UseRestoredTileLayoutArgs {
   storageKey: string;
   tileLayout: TileLayout;
   refreshRestoredRepoState: (validatedPaths: readonly string[], signal?: AbortSignal) => Promise<boolean>;
+  /** Bumps each time the registered-repo inventory finishes loading (useGlobalRepoState). */
+  repoInventoryRevision?: number;
 }
 
 function persistedRepoScopes(layout: TileLayout): Map<string, string> {
@@ -50,6 +53,7 @@ export function useRestoredTileLayout({
   storageKey,
   tileLayout,
   refreshRestoredRepoState,
+  repoInventoryRevision = 0,
 }: UseRestoredTileLayoutArgs) {
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
   // Keyed by repoPath VALUE, not tile id — blocking is a property of the
@@ -71,12 +75,14 @@ export function useRestoredTileLayout({
     layoutRevisionRef.current += 1;
   }, [tileLayout]);
 
-  const validateLayout = useCallback(async (layout: TileLayout) => {
+  const validateLayout = useCallback(async (layout: TileLayout, withRetry = false) => {
     if (validationControllerRef.current) return null;
     const controller = new AbortController();
     const revision = layoutRevisionRef.current;
     validationControllerRef.current = controller;
-    const validation = await loadValidatedRestorePaths(layout, controller.signal);
+    const validation = withRetry
+      ? await loadValidatedRestorePathsWithRetry(layout, controller.signal, () => layoutRevisionRef.current === revision)
+      : await loadValidatedRestorePaths(layout, controller.signal);
     if (validationControllerRef.current === controller) {
       validationControllerRef.current = null;
     }
@@ -135,7 +141,7 @@ export function useRestoredTileLayout({
     setBlockedRepoPaths(new Set(persistedRepoScopes(restored).values()));
 
     void (async () => {
-      const validation = await validateLayout(restored);
+      const validation = await validateLayout(restored, true);
       if (cancelled || !mountedRef.current) return;
       if (!validation || !validation.ok) {
         // Either superseded mid-flight by another layout change, or the
@@ -215,6 +221,33 @@ export function useRestoredTileLayout({
       }
     })();
   }, [refreshRestoredRepoState, restoredRepoValidationState, setTileLayout, validateLayout]);
+
+  // A failed validation re-runs on its own when the repo inventory finishes
+  // loading and on the next window focus, so an operator who walks away from
+  // a cold launch never returns to a dead end (#2456). Each trigger fires at
+  // most once per failure: the retry flips the state to 'pending', which
+  // tears these down until the next failure re-arms them.
+  const handledInventoryRevisionRef = useRef(repoInventoryRevision);
+  useEffect(() => {
+    if (restoredRepoValidationState !== 'failed') return;
+    if (handledInventoryRevisionRef.current === repoInventoryRevision) return;
+    handledInventoryRevisionRef.current = repoInventoryRevision;
+    retryRestoredRepoValidation();
+  }, [repoInventoryRevision, restoredRepoValidationState, retryRestoredRepoValidation]);
+
+  useEffect(() => {
+    if (restoredRepoValidationState !== 'failed' || typeof window === 'undefined') return;
+    const revalidateOnFocus = () => retryRestoredRepoValidation();
+    const revalidateWhenVisible = () => {
+      if (document.visibilityState === 'visible') retryRestoredRepoValidation();
+    };
+    window.addEventListener('focus', revalidateOnFocus);
+    document.addEventListener('visibilitychange', revalidateWhenVisible);
+    return () => {
+      window.removeEventListener('focus', revalidateOnFocus);
+      document.removeEventListener('visibilitychange', revalidateWhenVisible);
+    };
+  }, [restoredRepoValidationState, retryRestoredRepoValidation]);
 
   const unverifiedRestoredRepoTileIds = useMemo(() => {
     const currentScopes = persistedRepoScopes(tileLayout);

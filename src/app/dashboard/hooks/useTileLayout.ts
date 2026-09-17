@@ -59,6 +59,7 @@ interface UseTileLayoutArgs {
   globalRepoEntries: RepoRegistryEntry[];
   globalRepoEntry: RepoRegistryEntry | null;
   refreshRestoredRepoState: (validatedPaths: readonly string[], signal?: AbortSignal) => Promise<boolean>;
+  repoInventoryRevision?: number;
   setActiveTileId: Dispatch<SetStateAction<string | null>>;
   setTileLayout: Dispatch<SetStateAction<TileLayout>>;
   tileLayout: TileLayout;
@@ -84,6 +85,7 @@ export function useTileLayout({
   globalRepoEntries,
   globalRepoEntry,
   refreshRestoredRepoState,
+  repoInventoryRevision,
   setActiveTileId,
   setTileLayout,
   tileLayout,
@@ -112,6 +114,7 @@ export function useTileLayout({
     storageKey: TILE_LAYOUT_STORAGE_KEY,
     tileLayout,
     refreshRestoredRepoState,
+    repoInventoryRevision,
   });
 
   const registerContextualPanelHandle = useCallback((tileId: string, handle: ContextualPanelHandle | null) => {

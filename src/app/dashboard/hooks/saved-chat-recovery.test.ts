@@ -10,6 +10,7 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { createDefaultTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
 import { createTileRegistry } from '../tileRegistry';
+import { RESTORE_VALIDATION_BUDGET_MS } from './tileLayoutRestore';
 import { useGlobalRepoState } from './useGlobalRepoState';
 import { TILE_LAYOUT_STORAGE_KEY, useTileLayout } from './useTileLayout';
 
@@ -119,6 +120,7 @@ function RecoveryHarness({ onSessions }: { onSessions: (sessions: MobileInboxSna
     // structurally compatible with the pre-fix source lets the detached
     // baseline exercise the same mounted path for its red receipt.
     refreshRestoredRepoState: (repos as { refreshRestoredRepoState?: (paths: readonly string[]) => Promise<boolean> }).refreshRestoredRepoState,
+    repoInventoryRevision: (repos as { repoInventoryRevision?: number }).repoInventoryRevision,
     setActiveTileId,
     setTileLayout: setLayout,
     tileLayout: layout,
@@ -191,13 +193,13 @@ describe('saved chat recovery after a cold repository-list failure', () => {
   });
 
   it('keeps terminal and canvas blocked, then restores the persisted chat from refreshed repo and worktree state', async () => {
+    vi.useFakeTimers();
     let inventoryCalls = 0;
-    let validationCalls = 0;
+    let validationFailing = true;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), window.location.href);
       if (url.pathname === '/api/panel/repos' && url.searchParams.has('restoreValidationOnly')) {
-        validationCalls += 1;
-        if (validationCalls === 1) return Response.json({}, { status: 503 });
+        if (validationFailing) return Response.json({}, { status: 503 });
         return Response.json({ validatedRestorePaths: [{ requestedPath: WORKTREE_PATH, canonicalPath: WORKTREE_PATH }] });
       }
       if (url.pathname === '/api/panel/repos') {
@@ -228,21 +230,28 @@ describe('saved chat recovery after a cold repository-list failure', () => {
     }));
     const sessions: MobileInboxSnapshot['sessions'][] = [];
 
-    await act(async () => root.render(createElement(RecoveryHarness, { onSessions: (value) => sessions.push(value) })));
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 30)));
+    try {
+      await act(async () => root.render(createElement(RecoveryHarness, { onSessions: (value) => sessions.push(value) })));
+      // Every bounded attempt inside the retry budget fails, so the operator
+      // reaches the same cold dead end this recovery path was built for.
+      await act(async () => vi.advanceTimersByTimeAsync(RESTORE_VALIDATION_BUDGET_MS + 100));
 
-    const retry = container.querySelector<HTMLButtonElement>('[aria-label="Retry saved repository scope"]');
-    expect(retry).not.toBeNull();
-    expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
-    expect(container.querySelector('[data-testid="restored-chat-session"]')).toBeNull();
+      const retry = container.querySelector<HTMLButtonElement>('[aria-label="Retry saved repository scope"]');
+      expect(retry).not.toBeNull();
+      expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
+      expect(container.querySelector('[data-testid="restored-chat-session"]')).toBeNull();
 
-    await act(async () => retry?.click());
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 80)));
+      validationFailing = false;
+      await act(async () => retry?.click());
+      await act(async () => vi.advanceTimersByTimeAsync(200));
 
-    expect(container.querySelector('[data-testid="restored-chat-session"]')?.textContent).toBe(SESSION_KEY);
-    expect(container.querySelector('[data-testid="restored-canvas-repo"]')?.textContent).toBe('example/saved-chat-repo');
-    expect(sessions.some((value) => value.some((session) => session.sessionKey === SESSION_KEY))).toBe(true);
-    expect(container.textContent).toContain('saved-chat-repo');
-    expect(inventoryCalls).toBeGreaterThanOrEqual(2);
+      expect(container.querySelector('[data-testid="restored-chat-session"]')?.textContent).toBe(SESSION_KEY);
+      expect(container.querySelector('[data-testid="restored-canvas-repo"]')?.textContent).toBe('example/saved-chat-repo');
+      expect(sessions.some((value) => value.some((session) => session.sessionKey === SESSION_KEY))).toBe(true);
+      expect(container.textContent).toContain('saved-chat-repo');
+      expect(inventoryCalls).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
