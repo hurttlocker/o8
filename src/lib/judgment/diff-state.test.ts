@@ -99,6 +99,19 @@ describe('buildDiffState sanitizer', () => {
     expect(buildDiffState([{ path: 'src/lib/format.ts' }], filePatch('src/lib/format.ts', ['x'])).pathTouchesMiddlewareOrAuth).toBe(false);
   });
 
+  it('adds diff sections missing from the caller file list so they reach docsOnly and the path check', () => {
+    const diffText = `${filePatch('README.md', ['hello'])}\n${filePatch('src/middleware.ts', ['export const open = true;'], 1, ['old mode 100644', 'new mode 100755'])}`;
+    const built = buildDiffState([{ path: 'README.md' }], diffText);
+    expect(built.state.docsOnly).toBe(false);
+    expect(built.state.files).toEqual([
+      { path: 'README.md', additions: 1, deletions: 0, modeChanged: false, symlink: false, renamed: false },
+      { path: 'src/middleware.ts', additions: 1, deletions: 0, modeChanged: true, symlink: false, renamed: false },
+    ]);
+    expect(built.pathTouchesMiddlewareOrAuth).toBe(true);
+    expect(built.filesAddedFromDiff).toBe(1);
+    expect(buildDiffState([{ path: 'README.md' }], filePatch('README.md', ['hello'])).filesAddedFromDiff).toBe(0);
+  });
+
   it('flags zero-width, bidi, homoglyph, and mixed line endings and normalizes the copy sent', () => {
     const clean = buildDiffState([{ path: 'src/a.ts' }], filePatch('src/a.ts', ['const ok = 1;']));
     expect(clean.state.hiddenText).toBe(false);

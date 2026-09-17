@@ -61,6 +61,12 @@ export interface BuiltDiffState {
   textFlags: TextScanFlags;
   /** o8's own path check for middleware and auth code, shown beside the referee's advisory answer. */
   pathTouchesMiddlewareOrAuth: boolean;
+  /**
+   * Files that had a section in the diff but were missing from the caller's
+   * list. They are added from the section headers and judged by the same docs
+   * rule, so a short file list cannot hide a code file behind docsOnly.
+   */
+  filesAddedFromDiff: number;
   strippedLines: number;
   keptChars: number;
   fullChars: number;
@@ -248,7 +254,14 @@ export function buildDiffState(
     if (sectionFact.path) facts.set(sectionFact.path, { ...sectionFact, ...countChanges(section) });
   }
 
-  const described = files.map((file) => {
+  // A section the caller's list does not name still counts: add it from its
+  // own headers so it reaches docsOnly and the path check.
+  const listed = new Set(files.flatMap((file) => [file.path, normalizeDiffPath(file.path) ?? file.path]));
+  const unlisted: DiffStateFileInput[] = [...facts.entries()]
+    .filter(([sectionFile]) => !listed.has(sectionFile) && !listed.has(normalizeDiffPath(sectionFile) ?? sectionFile))
+    .map(([sectionFile, fact]) => ({ path: sectionFile, oldPath: fact.oldPath }));
+
+  const described = [...files, ...unlisted].map((file) => {
     const fact = facts.get(file.path);
     const stateFile: DiffStateFile = {
       path: normalizeDiffPath(file.path) ?? file.path,
@@ -284,7 +297,7 @@ export function buildDiffState(
       return normalizeForJudgment(orderHunks(kept));
     });
   const full = sections.join('\n');
-  const extras = { hiddenText, textFlags, pathTouchesMiddlewareOrAuth: pathAuth, strippedLines };
+  const extras = { hiddenText, textFlags, pathTouchesMiddlewareOrAuth: pathAuth, filesAddedFromDiff: unlisted.length, strippedLines };
 
   const overheadChars = JSON.stringify({ files: stateFiles, docsOnly, hiddenText, truncated: true }).length;
   const budgetChars = Math.max(0, Math.floor(budgetTokens * DIFF_CHARS_PER_TOKEN) - overheadChars);
