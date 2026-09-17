@@ -11,6 +11,7 @@ import {
 } from './fire-store';
 import { runClaimedAutomationFire } from './fire-runner';
 import { materializeWatchAutomationFires } from './watch-store';
+import { drainParkedSymonWatches, expireSymonWatches } from './symon-watch';
 
 const TICK_MS = 30_000;
 const DEFAULT_LEASE_MS = 60 * 60 * 1000;
@@ -54,6 +55,15 @@ export async function runAutomationSchedulerTick(input: {
   ));
   const leaseMs = input.leaseMs ?? positiveEnv('O8_AUTOMATION_LEASE_MS', DEFAULT_LEASE_MS);
   const maxClaims = Math.max(concurrencyCap, Math.floor(input.maxClaims ?? concurrencyCap * 4));
+  // Deadlines first, and only deadlines: the shared materializer also disables
+  // an expired row, but only this pass can write the matching Symon ledger
+  // entry. It touches no network, so running it first costs a tick nothing.
+  let symonExpired: string[] = [];
+  try {
+    symonExpired = expireSymonWatches(nowMs);
+  } catch (error) {
+    console.warn('[automations-scheduler] Symon watch expiry failed:', error);
+  }
   const materialized = [
     ...materializeDueAutomationFires(nowMs),
     ...materializeWatchAutomationFires(nowMs),
@@ -79,9 +89,21 @@ export async function runAutomationSchedulerTick(input: {
     completed.push(...settled.filter((fire): fire is AutomationFire => Boolean(fire)));
   }
 
+  // Announcing parked watches makes bounded network calls, so it runs LAST and
+  // inside its own guard: a failure here must never cost the ordinary
+  // automations their tick.
+  let symonDrained = 0;
+  try {
+    symonDrained = (await drainParkedSymonWatches(nowMs)).length;
+  } catch (error) {
+    console.warn('[automations-scheduler] Symon watch drain failed:', error);
+  }
+
   writeHeartbeat(Date.now(), {
     materialized: materialized.length,
     completed: completed.length,
+    symonWatchesExpired: symonExpired.length,
+    symonWatchesDrained: symonDrained,
   });
   return { materialized, completed };
 }

@@ -2968,6 +2968,15 @@
       ]
     },
     {
+      "path": "tests/symon-watch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/task-artifacts-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -197,8 +197,11 @@ fn validate_plan_position(
     if plan_id.trim().is_empty() {
         return Err("plan id cannot be empty".to_string());
     }
-    if !(2..=5).contains(&step_count) {
-        return Err("plan step count must be between 2 and 5".to_string());
+    // A live plan carries two to five steps, but a watch's saved body may carry
+    // one: the operator approved the standing intent, and the run still cards.
+    // The invariant that matters here is the bound and the one-based index.
+    if !(1..=5).contains(&step_count) {
+        return Err("plan step count must be between 1 and 5".to_string());
     }
     if let Some(step_index) = step_index {
         if !(1..=step_count).contains(&step_index) {
@@ -436,10 +439,80 @@ fn recent_with_conn(
             }))
         })
         .map_err(|error| format!("query recent actions failed: {error}"))?;
-    let actions = rows
+    let mut actions = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("read recent action failed: {error}"))?;
+    // A watch acts long after the turn that registered it, so its lifecycle
+    // lives in the plan-event table rather than the action table. "What did you
+    // just do?" has to see both or it silently omits everything a watch did.
+    actions.extend(recent_watch_events(conn, limit, session_id)?);
+    actions.sort_by_key(|action| {
+        std::cmp::Reverse(action.get("timestamp").and_then(Value::as_i64).unwrap_or(0))
+    });
+    actions.truncate(limit.clamp(1, 20));
     Ok(json!({ "actions": actions }))
+}
+
+/// Plain phrasing for one watch lifecycle checkpoint. The condition is the
+/// operator's own wording, captured when the watch was registered.
+fn watch_event_summary(phase: &str, condition: &str, outcome: &str) -> String {
+    match phase {
+        "watch_registered" => format!("started watching for \u{201c}{condition}\u{201d}"),
+        "watch_fired" => format!("reported that \u{201c}{condition}\u{201d} came true"),
+        "watch_parked" => {
+            format!("held the report for \u{201c}{condition}\u{201d} until the phone came back")
+        }
+        "watch_drained" => format!("delivered the held report for \u{201c}{condition}\u{201d}"),
+        "watch_ran" => {
+            format!("ran the plan saved for \u{201c}{condition}\u{201d} and it was {outcome}")
+        }
+        "watch_cancelled" => format!("stopped watching for \u{201c}{condition}\u{201d}"),
+        "watch_expired" => {
+            format!("stopped watching for \u{201c}{condition}\u{201d} at its deadline")
+        }
+        other => format!("recorded {other} for the watch \u{201c}{condition}\u{201d}"),
+    }
+}
+
+fn recent_watch_events(
+    conn: &Connection,
+    limit: usize,
+    session_id: Option<&str>,
+) -> Result<Vec<Value>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT plan_id, created_at, phase, redacted_summary, outcome, session_id
+             FROM agent_plan_events
+             WHERE source = 'symon_watch' AND (?2 IS NULL OR session_id = ?2)
+             ORDER BY created_at DESC, seq DESC
+             LIMIT ?1",
+        )
+        .map_err(|error| format!("prepare recent watch events failed: {error}"))?;
+    let rows = statement
+        .query_map(params![limit.clamp(1, 20) as i64, session_id], |row| {
+            let watch_id: String = row.get(0)?;
+            let created_at: i64 = row.get(1)?;
+            let phase: String = row.get(2)?;
+            let condition: String = row.get(3)?;
+            let outcome: String = row.get(4)?;
+            let summary = watch_event_summary(&phase, &condition, &outcome);
+            Ok(json!({
+                "action_id": format!("watch:{watch_id}:{created_at}"),
+                "timestamp": created_at,
+                "tool": "symon_watch",
+                "watch_id": watch_id,
+                "phase": phase,
+                "outcome": outcome,
+                "summary": summary,
+                "session_id": row.get::<_, Option<String>>(5)?,
+                "source": "symon_watch",
+                "confirmation": "not_required",
+                "undoable": false,
+            }))
+        })
+        .map_err(|error| format!("query recent watch events failed: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("read recent watch event failed: {error}"))
 }
 
 pub fn recent(limit: usize, session_id: Option<&str>) -> Result<Value, String> {

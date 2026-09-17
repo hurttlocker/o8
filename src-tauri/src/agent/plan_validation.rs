@@ -43,15 +43,24 @@ pub(super) struct ValidatedPlan {
 pub(super) fn validate_plan(args: Value, surface: PlanSurface) -> Result<ValidatedPlan, String> {
     let input: PlanInput =
         serde_json::from_value(args).map_err(|error| format!("Invalid plan shape: {error}"))?;
-    if !(MIN_PLAN_STEPS..=MAX_PLAN_STEPS).contains(&input.steps.len()) {
+    // A watch's saved plan may hold a single action: the operator already
+    // approved the standing intent, and the run still shows its own card.
+    let min_steps = if surface == PlanSurface::WatchRun {
+        1
+    } else {
+        MIN_PLAN_STEPS
+    };
+    if !(min_steps..=MAX_PLAN_STEPS).contains(&input.steps.len()) {
         return Err(format!(
-            "A plan must contain {MIN_PLAN_STEPS} to {MAX_PLAN_STEPS} steps"
+            "A plan must contain {min_steps} to {MAX_PLAN_STEPS} steps"
         ));
     }
 
     let all_schemas = schema_map(tools::all_tools());
     let available_schemas = match surface {
-        PlanSurface::Cascaded => schema_map(tools::enabled_tools()),
+        // A watch body was authored in an earlier turn, so it is held to the
+        // narrower catalog the model is ever shown, not the full one.
+        PlanSurface::Cascaded | PlanSurface::WatchRun => schema_map(tools::enabled_tools()),
         PlanSurface::Realtime => all_schemas.clone(),
     };
     let mut steps = Vec::with_capacity(input.steps.len());
@@ -388,6 +397,40 @@ mod tests {
             PlanSurface::Cascaded
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_watch_body_may_hold_one_step_and_still_refuses_control_tools() {
+        // The operator already approved the standing intent, so a saved body of
+        // one action is legitimate — it still passes the confirmation card when
+        // it runs. The live-plan surfaces keep their two-step floor.
+        assert!(validate_plan(
+            plan_args(vec![json!({ "tool": "mac_weather", "args": {} })]),
+            PlanSurface::WatchRun
+        )
+        .is_ok());
+        assert!(validate_plan(
+            plan_args(vec![json!({ "tool": "mac_weather", "args": {} })]),
+            PlanSurface::Realtime
+        )
+        .is_err());
+        // A watch body can neither re-enter the watch machinery nor smuggle a
+        // tool the model is never shown.
+        assert!(validate_plan(
+            plan_args(vec![json!({ "tool": "symon_watch_run", "args": { "id": "watch_1" } })]),
+            PlanSurface::WatchRun
+        )
+        .unwrap_err()
+        .contains("control tool"));
+        assert!(validate_plan(
+            plan_args(vec![
+                json!({ "tool": "mac_mail_send_draft", "args": { "subject": "Hello" } }),
+                json!({ "tool": "mac_weather", "args": {} }),
+            ]),
+            PlanSurface::WatchRun
+        )
+        .unwrap_err()
+        .contains("not available"));
     }
 
     #[test]

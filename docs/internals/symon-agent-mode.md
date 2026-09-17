@@ -538,6 +538,131 @@ resource inverses compare the current post-state before changing it; a later
 edit, symlink replacement, resource mutation, consumed token, or app restart
 for an in-memory edit makes the undo fail closed.
 
+## Watches — standing intents that outlive the turn
+
+Symon can act inside a turn and can run a short ordered plan, but until watches
+neither survived the conversation ending. A watch is a durable standing intent:
+"tell me when the checks on that pull request finish", "when that packet merges,
+take these steps". It survives the turn, the session, the phone locking, and a
+desktop restart.
+
+A watch is **not a second engine**. It is an ordinary row in o8's `automations`
+table with `triggerKind: 'watch'` and a Symon action kind, so it inherits the
+existing source-event checkpointing, fan-out rate limiting, and deadline
+handling in `src/lib/automations/`. Schema v62 adds three columns plus the park
+pointer: `symon_session_id`, `symon_then_json`, `symon_parked_at`, and
+`symon_parked_fire_id`.
+
+### The four tools
+
+| Tool | Class | What it does |
+|---|---|---|
+| `symon_watch(condition, then, deadline_minutes)` | Reversible | Registers one watch. `condition` names an observable o8 already tracks; `then` is `{kind:"report", say}` or `{kind:"plan", say, steps}`. |
+| `symon_watch_list` | ReadOnly | What Symon is still waiting on, for this session. |
+| `symon_watch_cancel(id)` | Reversible | Clears one watch. Never runs its saved plan. |
+| `symon_watch_run(id)` | Reversible | Runs the plan a fired watch saved, through the native plan executor. |
+
+All four are plan-control tools, so a plan can never nest one. Registering and
+cancelling both card, and the card reads the whole standing intent back: the
+condition in the operator's words, what will happen, the saved steps through the
+same read-back `execute_plan` uses, and when the watch gives up. A plan body that
+cannot be read back is refused at registration rather than at three in the
+morning.
+
+### The two action kinds
+
+`watch_action_kind` gains `symon_report` and `symon_plan` beside the existing
+`dispatch` / `notify` / `steer` / `approval`. Neither opens a lane:
+
+- **`symon_report`** pushes a spoken report through the same loopback bridge the
+  background brain uses — `POST /symon-task-complete` on the WS port, fanned out
+  as a `symon-task-complete` frame on the `symon` channel. `taskId` is the watch
+  id, `intentText` is the operator's own wording of the condition, `resultText`
+  is the model's `say` plus the observed event.
+- **`symon_plan`** pushes the same frame, naming the watch id and telling the
+  model to call `symon_watch_run`. The steps themselves never run from the fire.
+
+A Symon watch is **one-shot**: the question is answered once and the row closes.
+"Keep going until this is true" ends when the condition first holds. One-shot is
+enforced twice, because a loose condition can match several events at once: the
+row carries `watchMaxFiresPerTick: 1`, and the action closes the row *before* it
+delivers, so a second fire finds nothing to report.
+
+### Park and drain — the offline confirm rule
+
+`confirm_with_receipt` needs a live session and expires in 120 seconds, so a fire
+that lands while the phone is away cannot raise a card. When the push returns
+`delivered: 0`, the watch **parks**: `symon_parked_at` is stamped, the row is
+disabled so the shared materializer cannot fan out a second fire, and nothing
+else happens.
+
+The park drains when a Symon session **registers** — a new owner for the session,
+not every `connecting`/`live`/`acting` frame a phone sends inside one — and, as a
+safety net, once per scheduler tick after the ordinary automations have had
+theirs. Draining re-pushes the frame.
+
+A parked watch is announced **exactly once**. `symon_nudged_at` is both the
+record that the operator has been told and the claim that decides which of two
+overlapping drains speaks: the stamp is taken with a conditional UPDATE and only
+the writer that changed the row delivers. It is cleared by running or cancelling
+the watch, by nothing else. A failed delivery releases the claim so the next
+registration retries.
+
+A report is complete once it is spoken. A plan body stays parked until the model
+calls `symon_watch_run`, which takes the body with a second conditional UPDATE
+(so two calls cannot raise two cards for one body, and a claim older than fifteen
+minutes is reclaimable), then enters `plan::execute_plan` on the
+`PlanSurface::WatchRun` surface and shows the ordinary confirmation card carrying
+the condition that fired. The decision is written back to the watch row and to
+the ledger.
+
+**There is no new approval transport and nothing auto-approves.** A watch grants
+no execution authority; it only decides *when* to ask.
+
+A watch body may hold a single step, unlike a live plan's two-step floor: the
+operator already approved the standing intent, and the run still cards. The
+catalog is the narrower `enabled_tools()` set, so a Destructive tool can never
+appear in a saved body.
+
+### Deadline
+
+Every watch carries a deadline (default one day, maximum one week). A watch past
+its deadline is disabled with a `watch_expired` ledger entry and no fire. A
+**parked** watch expires too: a deadline the operator set is a deadline, and a
+watch that nobody came back for must not wait forever. Expiry runs before the
+shared materializer in a tick, because that engine also disables an expired row
+but cannot reach Symon's ledger.
+
+### Ledger
+
+Watch lifecycle events land in the same append-only `agent_plan_events` table as
+plan lifecycle events, with `source = 'symon_watch'` and `plan_id = task_id =` the
+watch id. Phases: `watch_registered`, `watch_fired`, `watch_parked`,
+`watch_drained`, `watch_ran`, `watch_cancelled`, `watch_expired`. The Node
+scheduler writes these directly because a watch fires long after the native turn
+that registered it ended; both sides create the table with identical
+`CREATE TABLE IF NOT EXISTS` DDL and only ever INSERT.
+
+Two surfaces read them. `symon_watch_list` carries each watch's latest ledger
+event, and `symon_ledger_recent` merges watch events with the action ledger, so
+"what did you just do?" cannot silently omit everything a watch did while the
+operator was away. A watch body may hold a single step, so the ledger's plan
+position check accepts a step count of one through five rather than two through
+five — without that, a one-step body failed its first checkpoint and never ran.
+
+### Cut from the first version
+
+- **Pull request mergeability.** Nothing emits an event when a PR becomes
+  mergeable, so there is no observable to checkpoint. Watching it would mean
+  polling GitHub, which is a separate decision.
+- **An approval appearing.** Approvals have no source-event producer feeding
+  `automation_source_events`.
+
+Both are additive: they need a producer, not a change to this design. What is
+observable today is packet state and lane/agent finish (`sourceKind: 'packet'`,
+from `ingestLaneAutomationSourceEvents`) and check runs, workflow runs, pull
+request state, and commits (`sourceKind: 'repository'`, from the GitHub webhook).
+
 ## Mutual exclusion — LAST-START-WINS (symmetric)
 
 One operator, one Symon voice at a time:
