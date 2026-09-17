@@ -3,16 +3,20 @@
  *
  * Before the layer-1 automatic rerun after a post-rebase verification failure,
  * and only when `judgment.provider` is on, ask the referee's locked risk
- * question about the packet's current diff. The diff comes from git in the
- * lane's worktree, the same way the approval card reads it, never from a
- * worker-written title or summary. Nothing reads the answer: the rerun fires
- * exactly as it would without it. A null answer (setting off, missing key,
- * failed call, abstain) yields null and the caller records nothing.
+ * question about the packet's current diff. The diff comes from git, the same
+ * command shape the approval card uses, run in the DETACHED INTEGRATION
+ * worktree the verification just failed in — not the lane's persistent
+ * worktree, whose tree is the pre-rebase one and differs from the verified
+ * tree whenever the base moved or a conflict was resolved. No worker-written
+ * title or summary reaches the state. Nothing reads the answer: the rerun
+ * fires exactly as it would without it. A null answer (setting off, missing
+ * key, failed call, abstain) yields null and the caller records nothing.
  *
- * The call is bounded by the judgment client's own timeout and retry budget.
+ * The merge command's result waits on this call, so the surface asks for a
+ * single attempt (`maxAttempts: 1`) through the client's per-call override:
+ * at most one client timeout (10s), with no retries or backoff.
  */
-import { createHash } from 'node:crypto';
-
+import { approvalDiffFingerprint } from '@/lib/approvals/referee';
 import { askJudgment, thresholdAnswer, type AskJudgmentOptions } from '@/lib/judgment/client';
 import { buildDiffState } from '@/lib/judgment/diff-state';
 import { DIFF_QUESTIONS } from '@/lib/judgment/questions';
@@ -37,6 +41,9 @@ export interface GateFailureWarning {
   diffFingerprint: string;
 }
 
+/** One attempt: the merge result waits on this call. */
+const WARNING_TRANSPORT: AskJudgmentOptions = { maxAttempts: 1 };
+
 let transportOverride: AskJudgmentOptions | undefined;
 
 /** Test-only: point the warning at a local endpoint fixture. */
@@ -44,23 +51,22 @@ export function setGateFailureWarningTransportForTests(options: AskJudgmentOptio
   transportOverride = options;
 }
 
-function diffFingerprint(diffText: string, paths: readonly string[]): string {
-  const hash = createHash('sha256');
-  hash.update(diffText);
-  for (const path of [...paths].sort()) hash.update(`\0${path}`);
-  return hash.digest('hex');
-}
-
 /** Ask for the diff's gate-failure risk. Never throws; null means record nothing. */
 export async function assessGateFailureRisk(
   lane: Pick<Lane, 'id' | 'packetId' | 'baseBranch' | 'worktreePath' | 'repoPath'>,
+  /** The tree the post-rebase verification ran in; falls back to the lane's own worktree. */
+  verifiedWorktreePath?: string | null,
 ): Promise<GateFailureWarning | null> {
   try {
     if (!lane.packetId) return null;
     if (getOperatorDefaultsSync().values.judgmentProvider === 'off') return null;
     const { getDiffForLane } = await import('@/lib/lane/commands-approval');
     const { parseGitDiff } = await import('@/lib/worktree/diff-parser');
-    const diffText = await getDiffForLane(lane);
+    const diffText = await getDiffForLane({
+      baseBranch: lane.baseBranch,
+      worktreePath: verifiedWorktreePath || lane.worktreePath,
+      repoPath: lane.repoPath,
+    });
     const files = parseGitDiff(diffText).map((file) => ({ path: file.path }));
     if (!diffText.trim() && files.length === 0) return null;
 
@@ -75,7 +81,7 @@ export async function assessGateFailureRisk(
         truncated: built.truncated,
         hiddenText: built.hiddenText,
       },
-    }, transportOverride);
+    }, { ...WARNING_TRANSPORT, ...transportOverride });
     const risk = thresholdAnswer(result?.answers.risk);
     if (!result || !risk) return null;
     return {
@@ -87,7 +93,7 @@ export async function assessGateFailureRisk(
       abstain: risk.abstain,
       truncated: built.truncated,
       hiddenText: built.hiddenText,
-      diffFingerprint: diffFingerprint(diffText, files.map((file) => file.path)),
+      diffFingerprint: approvalDiffFingerprint(diffText, files.map((file) => file.path)),
     };
   } catch (error) {
     console.warn('[gate-failure-warning] skipped:', error instanceof Error ? error.message : 'error');

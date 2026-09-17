@@ -9,6 +9,11 @@
  * run (so the failure is deterministic) and the worker launch behind
  * `rerunWithFeedback`, which records the launch's `session_launched` status
  * exactly as the lane launch command does.
+ *
+ * The fixture drifts the base after the packet branch forks, so the lane's
+ * persistent worktree and the detached integration worktree produce different
+ * diff text for the same commit. That is what proves the referee read the tree
+ * the verification actually failed in (#2437 ticket 3).
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -75,8 +80,11 @@ const KEY = 'ts-fixture-key-gate-failure-2437';
 const FAILURE_OUTPUT = "src/broken.ts(1,14): error TS2322: Type 'number' is not assignable to type 'string'.";
 const PACKET_TITLE = 'Rewrite the auth middleware';
 const TIMEOUT_MS = 150;
-const MAX_ATTEMPTS = 3;
+/** The surface's own single-attempt budget; the test transport does not override it. */
+const MAX_ATTEMPTS = 1;
 const RETRY_BASE_MS = 10;
+const BASE_LINES = Array.from({ length: 12 }, (_, index) => `line ${String(index + 1).padStart(2, '0')}`);
+const CHANGED_PATHS = ['broken.ts', 'file.txt'];
 
 let fixture: JudgmentEndpointFixture;
 const gitDirs: string[] = [];
@@ -146,7 +154,7 @@ async function setupPacket(packetId: string) {
   git(repo, ['checkout', '-b', 'main']);
   git(repo, ['config', 'user.name', 'o8-test']);
   git(repo, ['config', 'user.email', 'o8@example.test']);
-  writeFileSync(join(repo, 'file.txt'), 'base\n');
+  writeFileSync(join(repo, 'file.txt'), `${BASE_LINES.join('\n')}\n`);
   commitAll(repo, 'base');
   git(repo, ['push', '-u', 'origin', 'main']);
   const repoPath = realpathSync(repo);
@@ -168,7 +176,15 @@ async function setupPacket(packetId: string) {
   git(worktree.path, ['config', 'user.name', 'o8-test']);
   git(worktree.path, ['config', 'user.email', 'o8@example.test']);
   writeFileSync(join(worktree.path, 'broken.ts'), 'export const broken: string = 123;\n');
+  writeFileSync(join(worktree.path, 'file.txt'), `${[...BASE_LINES, 'packet tail'].join('\n')}\n`);
   commitAll(worktree.path, 'break typecheck');
+  const packetSha = git(worktree.path, ['rev-parse', 'HEAD']);
+
+  // Base drift AFTER the fork: two lines ahead of the packet's hunk, so the
+  // rebase is clean but the post-rebase diff carries shifted hunk offsets.
+  writeFileSync(join(repo, 'file.txt'), `${['drift one', 'drift two', ...BASE_LINES].join('\n')}\n`);
+  commitAll(repo, 'base drift');
+  git(repo, ['push', 'origin', 'main']);
 
   const lane = createLane({
     repoPath,
@@ -184,7 +200,31 @@ async function setupPacket(packetId: string) {
     findings: [],
     reviewedHeadSha: git(worktree.path, ['rev-parse', 'HEAD']),
   });
-  return { worktree, lane };
+  return { repoPath, worktree, lane, packetSha };
+}
+
+/**
+ * The diff the detached integration worktree holds after its rebase, rebuilt
+ * in a scratch clone: the packet commit replayed onto the drifted base.
+ */
+function integrationDiff(repoPath: string, packetSha: string): string {
+  const scratch = mkdtempSync(join(os.tmpdir(), 'o8-gate-warning-scratch-'));
+  gitDirs.push(scratch);
+  const clone = join(scratch, 'clone');
+  execFileSync('git', ['clone', '--quiet', repoPath, clone], { stdio: 'pipe' });
+  git(clone, ['config', 'user.name', 'o8-test']);
+  git(clone, ['config', 'user.email', 'o8@example.test']);
+  git(clone, ['fetch', '--no-tags', '--quiet', repoPath, packetSha]);
+  git(clone, ['checkout', '-q', '-b', 'integration', 'main']);
+  git(clone, ['cherry-pick', packetSha]);
+  return git(clone, ['diff', 'main...HEAD', '--no-color']);
+}
+
+function fingerprint(diffText: string, paths: readonly string[]): string {
+  const hash = createHash('sha256');
+  hash.update(diffText);
+  for (const path of [...paths].sort()) hash.update(`\0${path}`);
+  return hash.digest('hex');
 }
 
 async function mergeAndWaitForRerun(lane: ReturnType<typeof createLane>) {
@@ -231,7 +271,6 @@ beforeAll(async () => {
   setGateFailureWarningTransportForTests({
     endpoint: fixture.endpoint,
     timeoutMs: TIMEOUT_MS,
-    maxAttempts: MAX_ATTEMPTS,
     retryBaseMs: RETRY_BASE_MS,
   });
   writeFileSync(judgmentKeyPath(), `${KEY}\n`);
@@ -274,7 +313,7 @@ afterAll(async () => {
 
 describe('gate-failure warning before the layer-1 automatic rerun', () => {
   it('records the referee risk before typecheck_auto_retry and the rerun launch, with the receipt linked', async () => {
-    const { worktree, lane } = await setupPacket('pkt-gate-warning-on');
+    const { repoPath, worktree, lane, packetSha } = await setupPacket('pkt-gate-warning-on');
     fixture.replies.push(riskReply());
 
     const { result } = await mergeAndWaitForRerun(lane);
@@ -304,10 +343,13 @@ describe('gate-failure warning before the layer-1 automatic rerun', () => {
     });
     expect((warning.legend as Record<string, string>)['3']).toBe(DIFF_QUESTIONS.risk.criteria[3]);
 
-    // The state came from git in the lane's worktree, never from the packet title or summary.
-    const gitDiff = git(worktree.path, ['diff', 'main...HEAD', '--no-color']);
-    const expectedFingerprint = createHash('sha256').update(gitDiff).update('\0broken.ts').digest('hex');
-    expect(warning.diffFingerprint).toBe(expectedFingerprint);
+    // The state came from git, and from the tree the verification failed in:
+    // the integration worktree's post-rebase diff, not the lane's stale one.
+    const staleDiff = git(worktree.path, ['diff', 'main...HEAD', '--no-color']);
+    const verifiedDiff = integrationDiff(repoPath, packetSha);
+    expect(verifiedDiff).not.toBe(staleDiff);
+    expect(warning.diffFingerprint).toBe(fingerprint(verifiedDiff, CHANGED_PATHS));
+    expect(warning.diffFingerprint).not.toBe(fingerprint(staleDiff, CHANGED_PATHS));
     expect(fixture.seen).toHaveLength(1);
     const sent = JSON.stringify(fixture.seen[0].body);
     expect(sent).toContain('export const broken: string = 123;');
@@ -340,6 +382,7 @@ describe('gate-failure warning before the layer-1 automatic rerun', () => {
     const { lane } = await setupPacket('pkt-gate-warning-timeout');
     const heldPastTimeout = TIMEOUT_MS * 3;
     fixture.replies.push(riskReply(heldPastTimeout), riskReply(heldPastTimeout), riskReply(heldPastTimeout));
+    // Extra replies stay queued: a retry would consume them and fail the attempt count below.
 
     const { result, rerunAfterMs } = await mergeAndWaitForRerun(lane);
 
