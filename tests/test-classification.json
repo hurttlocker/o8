@@ -2865,6 +2865,12 @@
       ]
     },
     {
+      "path": "tests/steer-correction-standing-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/steer-idempotency-real-path.test.ts",
       "reasons": [
         "real-path"
