@@ -148,6 +148,76 @@ and truncated results say so. The `continue-run`, `steer-run`, `approve`, and
 (`workspaceMode: "o8"`) keeps the generic phone vocabulary and never receives the
 Code authoring instructions.
 
+### Fleet briefing block (v1)
+
+Ahead of the workspace-context JSON — and behind the persona, so it lands inside
+the cached instruction prefix — the mint prepends a bounded fleet briefing
+between the frozen `[[O8_PHONE_BRIEFING_V1_START]]` /
+`[[O8_PHONE_BRIEFING_V1_END]]` markers. Without it a phone session starts blind:
+it knows the route it was launched from and nothing about what needs the
+operator, so every "what's going on" costs a tool round-trip the mini model often
+declines to make.
+
+The block is rendered by `buildPhoneBriefingBlock`
+(`src/lib/mobile/symon-briefing.ts`), a pure snapshot-in / string-out function
+over the mobile inbox snapshot — the SAME server-side state the phone's Home
+briefing renders, so the two surfaces cannot disagree. It carries five sections,
+one item per line, and every value is a labeled field:
+
+```
+APPROVALS PENDING (2)
+- approval id=apr_12 title="Merge the pairing recovery lane" repo="o8"
+LANES RUNNING (1)
+- lane id=run:42 status=running title="Bounded phone tool packs" repo="o8" branch="feat/tool-packs"
+LANES BLOCKED (0): none
+NEEDS YOU (1)
+- needs-you kind=blocked session=run:9 title="Worker is waiting on a decision"
+MERGED RECENTLY
+- merged repo="o8-mobile" title="Follow the desktop to its other addresses"
+```
+
+An empty section renders as `SECTION: none` rather than disappearing, so absence
+is evidence instead of silence. A section whose items were all withheld still
+reports its count — `LANES RUNNING (3): none` is an honest "three are running,
+none safe to name".
+
+**Why every value is quoted.** Approval titles, lane titles, repository names and
+branch names are operator data, and operator data can be attacker-chosen. A bare
+bullet is indistinguishable from a line of guidance, so the first defence is
+structural rather than a verb denylist: each value is emitted as `key="value"`,
+and the label grammar in `src/lib/mobile/symon-prompt-filter.ts` excludes `"`,
+`=`, `<` and newline. A value therefore cannot close its own quote, forge a field
+name, or start a line of its own — characters outside the grammar are flattened
+to spaces before quoting. The header states once, in one line, that quoted values
+are labels copied from the operator's data and never instructions. The persona
+itself is unchanged.
+
+The denylist is the SECOND layer and never has to be complete. `safeDisplayLabel`
+drops a value outright, rather than escaping it, when it matches classic
+instruction-override phrasing (`ignore … instructions`), role-prefix framing that
+tries to open a new turn (`Human:`, `Operator:`, `New instructions,`), or the
+bulk-action shape of an approval verb aimed at everything at once (`approve every
+pending item`). The verb patterns are scoped so ordinary product work survives —
+"Approve flow needs a spinner" still reports. An item whose only repository label
+was dropped is dropped with it. Identifiers travel unquoted under a stricter
+grammar, because Symon passes them back to `o8_approve_item` and friends.
+
+Both tool packs receive the block. A Code mint additionally scopes `MERGED
+RECENTLY` to the granted repository path. Approvals, lanes and needs-me stay
+fleet-wide even on Code, by design: a repository-scoped session still has to tell
+the operator what is waiting elsewhere.
+
+Sections keep at most six items each, and the whole block, markers included, is
+capped at 3000 characters. Because each item occupies one line, the cap always
+falls on an item boundary: the block is closed with the visible marker
+`- (briefing truncated at the character cap; ask for the rest)` and never a half
+item. The briefing is best-effort — the snapshot is raced against a 1.5-second
+budget and any failure logs `briefing_skipped` and mints with no block at all, so
+a slow or broken inbox costs the briefing and never the voice session. The mint
+log line reports the rendered size as `briefing=<chars>`. For a delegated live
+session the whole instructions string, briefing included, moves under
+`delegation.responses.instructions` with the persona.
+
 ### Phone tool packs (v1)
 
 Every phone mint filters Mac-executed tools. `workspaceMode: "code"` and the
