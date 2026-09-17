@@ -50,6 +50,7 @@ export const SYMON_SCOPE_VERSION = 1 as const;
 
 export type SymonScopeSubject = 'operator' | 'device';
 export type SymonWorkspaceMode = 'o8' | 'code';
+export type SymonToolPack = 'o8' | 'code';
 
 /**
  * Server-issued authority for one phone-hosted Symon session. This is persisted
@@ -61,6 +62,7 @@ export interface SymonScopeGrant {
   subject: SymonScopeSubject;
   deviceId: string | null;
   workspaceMode: SymonWorkspaceMode;
+  toolPack: SymonToolPack;
   repoId: string | null;
   repoPath: string | null;
   allowedTools: string[];
@@ -91,6 +93,18 @@ const STABLE_TARGET_TOOLS = new Set([
   'o8_needs_me',
   'o8_review_diff',
   'o8_packet_wait',
+  'o8_packet_steer',
+  'o8_agent_task',
+  'o8_packet_rerun',
+  'o8_packet_reset',
+  'o8_approve_item',
+  'o8_reject_item',
+]);
+
+const REPO_SCOPED_MUTATION_TOOLS = new Set([
+  'o8_dispatch',
+  'o8_delegate',
+  'o8_stop_agent',
   'o8_packet_steer',
   'o8_agent_task',
   'o8_packet_rerun',
@@ -249,9 +263,12 @@ function isValidScopeGrant(value: unknown): value is SymonScopeGrant {
   if (grant.subject === 'device' && (typeof grant.deviceId !== 'string' || !grant.deviceId.trim())) return false;
   if (grant.subject === 'operator' && grant.deviceId !== null) return false;
   if (grant.workspaceMode !== 'o8' && grant.workspaceMode !== 'code') return false;
+  if (grant.toolPack !== 'o8' && grant.toolPack !== 'code') return false;
+  if (grant.workspaceMode === 'code' && grant.toolPack !== 'code') return false;
   if (grant.repoId !== null && (typeof grant.repoId !== 'string' || !grant.repoId.trim())) return false;
   if (grant.repoPath !== null && (typeof grant.repoPath !== 'string' || !grant.repoPath.startsWith('/'))) return false;
   if (grant.workspaceMode === 'code' && (grant.repoId === null || grant.repoPath === null)) return false;
+  if ((grant.repoId === null) !== (grant.repoPath === null)) return false;
   if (!Array.isArray(grant.allowedTools) || grant.allowedTools.length === 0) return false;
   if (!grant.allowedTools.every((tool) => typeof tool === 'string' && /^[A-Za-z0-9_:-]{1,96}$/.test(tool))) return false;
   return typeof grant.issuedAt === 'number' && Number.isFinite(grant.issuedAt) && grant.issuedAt > 0;
@@ -342,8 +359,9 @@ export function scopeGrantMatchesClient(
 }
 
 /**
- * Apply the immutable Code repo scope at the last server-controlled boundary
- * before native tool execution. Life sessions retain their existing arguments.
+ * Apply the immutable Code-pack repo scope at the last server-controlled
+ * boundary before native tool execution. o8-pack sessions retain their existing
+ * arguments.
  */
 export function scopeSymonToolArgs(
   grant: SymonScopeGrant,
@@ -383,7 +401,17 @@ export function scopeSymonToolArgs(
     }
     return { ok: true, args: { ...args, steps: scopedSteps } };
   }
-  if (grant.workspaceMode !== 'code' || !grant.repoId || !grant.repoPath) return { ok: true, args: { ...args } };
+  if (grant.toolPack !== 'code') return { ok: true, args: { ...args } };
+  if (!grant.repoId || !grant.repoPath) {
+    if (REPO_SCOPED_MUTATION_TOOLS.has(tool)) {
+      return {
+        ok: false,
+        error: 'repo_scope_mismatch',
+        detail: `${tool} requires an active repository in this Symon scope`,
+      };
+    }
+    return { ok: true, args: { ...args } };
+  }
 
   const scopedArgs = {
     ...args,

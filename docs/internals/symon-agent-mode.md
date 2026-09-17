@@ -235,10 +235,16 @@ Success `200`:
 
 Code requires an exact registered `repoPath`. The Mac resolves that path to its
 canonical registry pair and persists an immutable session grant containing the
-subject/device identity, workspace mode, `repoId`, `repoPath`, allowed tools,
-issue time, and scope version. The phone refuses to open WebRTC unless a Code
-mint returns version 1 and the exact requested path. Repo changes therefore
-tear down and remint the session instead of editing instructions in place.
+subject/device identity, workspace mode, selected tool pack, `repoId`,
+`repoPath`, allowed tools, issue time, and scope version. The registry applies
+the same immutable repository scope whenever the grant's selected tool pack is
+Code, including a repository-bound catch-up launch whose workspace mode remains
+o8. The cross-repository catch-up launch keeps its null repository identity so
+read tools can summarize every tracked repository; repository-mutating Code
+tools fail closed until a repository is selected. The phone refuses to open
+WebRTC unless a Code-workspace mint returns version 1 and the exact requested
+path. Repo changes therefore tear down and remint the session instead of editing
+instructions in place.
 
 The mint first reads the standard Codex ChatGPT-OAuth credential and uses its
 access token to request the short-lived Realtime client secret. This path is

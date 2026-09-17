@@ -12,6 +12,7 @@ import {
   persistSymonScopeGrant,
   SYMON_SCOPE_VERSION,
   type SymonClientSubject,
+  type SymonToolPack,
   type SymonWorkspaceMode,
 } from '@/lib/mobile/symon-agent-registry';
 import { DEFAULT_SYMON_MACHINE } from '@/lib/symon/machine-registry';
@@ -92,6 +93,7 @@ interface PhoneWorkspaceContext {
 interface ResolvedPhoneScope {
   context: PhoneWorkspaceContext;
   workspaceMode: SymonWorkspaceMode;
+  toolPack: SymonToolPack;
   repoId: string | null;
   repoPath: string | null;
 }
@@ -233,10 +235,18 @@ async function readPhoneWorkspaceContext(request: NextRequest): Promise<PhoneWor
 
 async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<ResolvedPhoneScope | null> {
   const workspaceMode: SymonWorkspaceMode = context.workspaceMode === 'code' ? 'code' : 'o8';
-  if (workspaceMode !== 'code') {
-    return { context, workspaceMode, repoId: null, repoPath: null };
+  const toolPack: SymonToolPack =
+    workspaceMode === 'code' || context.launchKind === 'repository-catch-up'
+      ? 'code'
+      : 'o8';
+  if (toolPack !== 'code') {
+    return { context, workspaceMode, toolPack, repoId: null, repoPath: null };
   }
-  if (!context.repoPath) return null;
+  if (!context.repoPath) {
+    return workspaceMode === 'code'
+      ? null
+      : { context, workspaceMode, toolPack, repoId: null, repoPath: null };
+  }
 
   const repo = await findRepoByLocalPath(context.repoPath);
   if (!repo) return null;
@@ -248,6 +258,7 @@ async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<Resolv
       repoName: safeDisplayLabel(repo.name, 96),
     },
     workspaceMode,
+    toolPack,
     repoId: repo.id,
     repoPath,
   };
@@ -382,7 +393,11 @@ export async function POST(request: NextRequest) {
   const resolvedScope = await resolvePhoneScope(requestedContext);
   if (!resolvedScope) {
     return NextResponse.json(
-      { ok: false, error: 'invalid_repo', detail: 'Code mode requires an exact registered repository.' },
+      {
+        ok: false,
+        error: 'invalid_repo',
+        detail: 'Code mode requires an exact registered repository.',
+      },
       { status: 400 },
     );
   }
@@ -471,9 +486,7 @@ export async function POST(request: NextRequest) {
 
   const sessionId = `sym-${randomUUID()}`;
   const voice = bridge.voice;
-  const usesCodePack =
-    workspaceContext.workspaceMode === 'code' ||
-    workspaceContext.launchKind === 'repository-catch-up';
+  const usesCodePack = resolvedScope.toolPack === 'code';
   const phonePack = usesCodePack
     ? { label: 'Code', logKey: 'code_tools_incomplete', ...selectPhoneCodeTools(bridge.tools) }
     : { label: 'o8', logKey: 'o8_tools_incomplete', ...selectPhoneO8Tools(bridge.tools) };
@@ -509,7 +522,7 @@ export async function POST(request: NextRequest) {
             instructions:
               DEFAULT_INSTRUCTIONS +
               PHONE_SURFACE_INSTRUCTIONS +
-              (workspaceContext.workspaceMode === 'code'
+              (usesCodePack
                 ? PHONE_CODE_TOOL_INSTRUCTIONS + PHONE_CODE_SURFACE_INSTRUCTIONS
                 : '') +
               workspaceContextInstructions(workspaceContext),
@@ -547,6 +560,7 @@ export async function POST(request: NextRequest) {
         sessionId,
         ...subject,
         workspaceMode: resolvedScope.workspaceMode,
+        toolPack: resolvedScope.toolPack,
         repoId: resolvedScope.repoId,
         repoPath: resolvedScope.repoPath,
         allowedTools,

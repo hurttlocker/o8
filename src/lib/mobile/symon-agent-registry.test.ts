@@ -146,6 +146,7 @@ describe('symon-agent-registry — immutable scope grant', () => {
     subject: 'device' as const,
     deviceId: 'device-7',
     workspaceMode: 'code' as const,
+    toolPack: 'code' as const,
     repoId: 'repo-o8-mobile',
     repoPath: '/Users/operator/o8-mobile',
     allowedTools: ['o8_status', 'o8_dispatch', 'o8_delegate', 'o8_review_diff', 'git_status'],
@@ -293,5 +294,28 @@ describe('symon-agent-registry — immutable scope grant', () => {
       packetId: 'pkt-auth',
       repoId: 'repo-other',
     })).toMatchObject({ ok: false, error: 'repo_scope_mismatch' });
+  });
+
+  it('applies the immutable Code scope to repository catch-up grants', () => {
+    const catchUpGrant = {
+      ...deviceGrant,
+      sessionId: 'sym-catch-up',
+      workspaceMode: 'o8' as const,
+      allowedTools: [...deviceGrant.allowedTools, 'o8_approve_item'],
+    };
+    persistSymonScopeGrant(catchUpGrant);
+    const registeredGrant = loadSymonScopeGrant();
+    expect(registeredGrant).toEqual(catchUpGrant);
+
+    expect(scopeSymonToolArgs(registeredGrant!, 'o8_approve_item', {
+      packetId: 'pkt-repo-b',
+      repoId: 'repo-b',
+    })).toMatchObject({ ok: false, error: 'repo_scope_mismatch' });
+
+    expect(scopeSymonToolArgs(registeredGrant!, 'o8_dispatch', {
+      task: 'Fix the bug',
+    })).toEqual(scopeSymonToolArgs(deviceGrant, 'o8_dispatch', {
+      task: 'Fix the bug',
+    }));
   });
 });

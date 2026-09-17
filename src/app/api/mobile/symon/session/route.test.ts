@@ -74,6 +74,7 @@ vi.mock('@/lib/voice/chatgpt-realtime-credential', () => ({
 }));
 vi.mock('@/lib/voice/realtime-access', () => ({ resolveRealtimeAccess: h.resolveRealtimeAccess }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: h.resolveRequestPrincipal }));
+vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
 vi.mock('@/lib/mobile/device-registry', () => ({ resolveDeviceByToken: h.resolveDeviceByToken }));
 vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: h.findRepoByLocalPath }));
 vi.mock('@/lib/voice/realtime-session-config', async (importOriginal) => {
@@ -92,6 +93,7 @@ vi.mock('@/lib/mobile/symon-agent-registry', async (importOriginal) => {
 });
 
 const { POST } = await import('./route');
+const { POST: POST_TOOL } = await import('../tool/route');
 
 function req(body = '{}', bearer?: string, extraHeaders: Record<string, string> = {}) {
   return new NextRequest('http://localhost:3001/api/mobile/symon/session', {
@@ -132,7 +134,6 @@ function fullDesktopBridgeTools() {
     ...desktopLifeTools,
     ...MCP_TOOL_NAMES,
   ]));
-  expect(names).toHaveLength(101);
   return toolSchemas(names);
 }
 
@@ -182,6 +183,10 @@ afterEach(() => {
 });
 
 describe('POST /api/mobile/symon/session — mint assembly + error table', () => {
+  it('fixture catalog mirrors the desktop 101-tool count', () => {
+    expect(fullDesktopBridgeTools()).toHaveLength(101);
+  });
+
   it('200: mints, and the token body carries the SAME config the desk session uses', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -215,6 +220,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       subject: 'operator',
       deviceId: null,
       workspaceMode: 'o8',
+      toolPack: 'o8',
       repoId: null,
       repoPath: null,
       allowedTools: [...EXPECTED_PHONE_O8_TOOL_NAMES, ...MCP_TOOL_NAMES],
@@ -265,6 +271,10 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
 
   it('200: repository catch-up uses subscription OAuth and the flagship voice model', async () => {
     bridgeReady(false, fullDesktopBridgeTools());
+    const registry = await vi.importActual<typeof import('@/lib/mobile/symon-agent-registry')>(
+      '@/lib/mobile/symon-agent-registry',
+    );
+    h.persistSymonScopeGrant.mockImplementation(registry.persistSymonScopeGrant);
     h.resolveChatGPTRealtimeCredential.mockResolvedValue({
       accessToken: 'oauth-subscription-token',
       accountId: 'acct-founder',
@@ -291,11 +301,61 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(sentBody.session.instructions).toContain(
       '"launchKind":"repository-catch-up"',
     );
+    expect(sentBody.session.instructions).toContain('CODE TOOL ROUTING');
+    expect(sentBody.session.instructions).toContain('Never ask for spoken confirmation');
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).toEqual([
       ...PHONE_CODE_TOOL_NAMES,
       'render_surface',
     ]);
     expect(sentBody.session.tools).toHaveLength(22);
+    expect(h.persistSymonScopeGrant).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceMode: 'o8',
+      toolPack: 'code',
+      repoId: null,
+      repoPath: null,
+    }));
+
+    try {
+      const mismatch = await POST_TOOL(new NextRequest(
+        'http://localhost:3001/api/mobile/symon/tool',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: json.session.sessionId,
+            callId: 'catch-up-mismatch',
+            tool: 'o8_approve_item',
+            args: { packetId: 'pkt-repo-b', repoId: 'repo-b' },
+            dryRun: true,
+          }),
+        },
+      ));
+      expect(await mismatch.json()).toMatchObject({
+        ok: false,
+        result: { error: 'repo_scope_mismatch' },
+      });
+
+      const unscopedDispatch = await POST_TOOL(new NextRequest(
+        'http://localhost:3001/api/mobile/symon/tool',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: json.session.sessionId,
+            callId: 'catch-up-injection',
+            tool: 'o8_dispatch',
+            args: { task: 'Fix the bug' },
+            dryRun: true,
+          }),
+        },
+      ));
+      expect(await unscopedDispatch.json()).toMatchObject({
+        ok: false,
+        result: { error: 'repo_scope_mismatch' },
+      });
+    } finally {
+      registry.clearSymonScopeGrant(json.session.sessionId);
+    }
   });
 
   it('501: repository catch-up never falls through to metered BYOK credits', async () => {
@@ -435,6 +495,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(h.persistSymonScopeGrant).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: json.session.sessionId,
       workspaceMode: 'code',
+      toolPack: 'code',
       repoId: 'repo-o8-mobile',
       repoPath: '/Users/operator/o8-mobile',
       allowedTools: [...PHONE_CODE_TOOL_NAMES],
@@ -502,6 +563,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(instructions).toContain('"workspaceMode":"o8"');
     expect(instructions).toContain('"sourceRoute":"/ask"');
     expect(instructions).not.toContain('CODE WORKSPACE SURFACES');
+    expect(instructions).not.toContain('CODE TOOL ROUTING');
     expect(instructions).not.toContain('RepoState(targetId');
     expect(PHONE_O8_TOOL_NAMES).toEqual(EXPECTED_PHONE_O8_TOOL_NAMES);
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).toEqual([
