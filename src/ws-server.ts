@@ -4147,6 +4147,10 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
     void abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
     pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
   }
+  // Only a NEW owner is a registration. A phone sends connecting/live/acting
+  // repeatedly through one session, and re-draining on each of those would make
+  // Symon repeat a parked watch every few seconds.
+  const isNewRegistration = !existingOwner || existingOwner.clientId !== client.id;
   startAgentSession(sessionId);
   symonSessions.set(sessionId, {
     clientId: client.id,
@@ -4157,9 +4161,11 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
   preemptOtherSymonSessions(sessionId, 'preempted');
   // A watch that fired while the phone was away is owed its report the moment a
   // session is live again. Best effort: registration never waits on delivery.
-  void drainParkedSymonWatches().catch((error) => {
-    console.warn('[symon-watch] drain on registration failed:', error);
-  });
+  if (isNewRegistration) {
+    void drainParkedSymonWatches().catch((error) => {
+      console.warn('[symon-watch] drain on registration failed:', error);
+    });
+  }
   updateAgentStatus(sessionId, status);
   persistAgentRegistry();
 }

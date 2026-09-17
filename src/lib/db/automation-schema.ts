@@ -39,6 +39,8 @@ export const automations = sqliteTable('automations', {
   symonThenJson: text('symon_then_json'),
   symonParkedAt: integer('symon_parked_at'),
   symonParkedFireId: text('symon_parked_fire_id'),
+  symonNudgedAt: integer('symon_nudged_at'),
+  symonRunClaimedAt: integer('symon_run_claimed_at'),
   lastRunAt: integer('last_run_at'),
   lastRunStatus: text('last_run_status', {
     enum: ['idle', 'running', 'ok', 'error'],

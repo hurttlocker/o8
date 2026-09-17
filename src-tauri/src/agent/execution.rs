@@ -325,6 +325,7 @@ pub(crate) async fn execute_cascaded_tool_call(
             "cascaded",
             Some(&ctx.utterance),
             Some(spoke_filler),
+            None,
         )
         .await;
     }
@@ -376,6 +377,7 @@ pub(crate) async fn execute_realtime_tool_call(
             source,
             Some(&ctx.utterance),
             None,
+            None,
         )
         .await;
     }
@@ -422,6 +424,7 @@ pub(crate) async fn execute_text_tool_call(
             Some(correlation),
             "phone_text",
             Some(&ctx.utterance),
+            None,
             None,
         )
         .await;

@@ -68,7 +68,7 @@ const { createLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
 const { listAutomationFires } = await import('@/lib/automations/fire-store');
 const { runAutomationSchedulerTick } = await import('@/lib/automations/scheduler');
-const { listSymonWatches } = await import('@/lib/automations/symon-watch');
+const { drainParkedSymonWatches, listSymonWatches } = await import('@/lib/automations/symon-watch');
 const { readSymonWatchLedger, closeSymonWatchLedger } = await import('@/lib/automations/symon-watch-ledger');
 const { persistSymonScopeGrant, SYMON_SCOPE_VERSION } = await import('@/lib/mobile/symon-agent-registry');
 
@@ -175,7 +175,7 @@ async function createWatch(input: {
   return (await response.json() as { watch: { id: string; state: string } }).watch;
 }
 
-function firePacketEvent(packetId: string, eventLabel: string): void {
+function firePacketEvent(packetId: string, ...eventLabels: string[]): void {
   const lane = createLane({
     repoPath,
     branch: `packet/${packetId}`,
@@ -183,7 +183,24 @@ function firePacketEvent(packetId: string, eventLabel: string): void {
     runtime: 'codex',
     packetId,
   });
-  recordLaneEvent(lane.id, 'update', 'system', { eventLabel });
+  for (const eventLabel of eventLabels) {
+    recordLaneEvent(lane.id, 'update', 'system', { eventLabel });
+  }
+}
+
+function reportsFor(watchId: string, ...sessions: LiveSession[]): SymonFrame[] {
+  return sessions.flatMap((session) => (
+    session.taskCompletes.filter((frame) => frame.taskId === watchId)
+  ));
+}
+
+/** Give the server time to push anything it was going to push. */
+function settle(ms: number = 800): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function tick(nowMs: number, workerId: string) {
+  return runAutomationSchedulerTick({ nowMs, workerId, concurrencyCap: 1, maxClaims: 4 });
 }
 
 beforeAll(async () => {
@@ -351,6 +368,126 @@ describe('Symon standing watches through their durable production seams', () => 
     expect(tick.completed[0]).toMatchObject({ automationId: watch.id, actionKind: 'symon_report' });
     expect(listAutomationFires(watch.id)).toHaveLength(1);
   }, 30_000);
+
+  it('announces a parked watch once across repeated status frames, ticks, and a new session', async () => {
+    const watch = await createWatch({
+      text: 'when packet quiet-5 merges, take the follow-up steps',
+      sourceId: 'quiet-5',
+      events: ['merged'],
+      then: { kind: 'plan', say: 'Packet quiet-5 merged.', steps: [{ tool: 'o8_status', args: {} }] },
+    });
+    firePacketEvent('quiet-5', 'merged');
+    await tick(Date.now(), 'symon-watch-quiet-worker');
+    expect(listSymonWatches().find((entry) => entry.id === watch.id)?.state).toBe('parked');
+
+    const first = await openSymonSession('symon-watch-quiet-a');
+    try {
+      await waitForTaskComplete(first, watch.id);
+      expect(reportsFor(watch.id, first)).toHaveLength(1);
+
+      // A phone sends connecting/live/acting repeatedly inside one session.
+      for (const status of ['live', 'acting', 'live']) {
+        first.socket.send(JSON.stringify({
+          channel: 'symon',
+          type: 'symon-agent-status',
+          sessionId: 'symon-watch-quiet-a',
+          status,
+        }));
+      }
+      await settle();
+      // And the scheduler keeps ticking underneath it.
+      await tick(Date.now(), 'symon-watch-quiet-worker-2');
+      await tick(Date.now(), 'symon-watch-quiet-worker-3');
+      await settle();
+      expect(reportsFor(watch.id, first)).toHaveLength(1);
+
+      // Even a brand new session hears it only once: the announcement stamp is
+      // cleared by running or cancelling the watch, by nothing else.
+      const second = await openSymonSession('symon-watch-quiet-b');
+      try {
+        await settle();
+        expect(reportsFor(watch.id, first, second)).toHaveLength(1);
+        expect(listSymonWatches().find((entry) => entry.id === watch.id))
+          .toMatchObject({ state: 'parked', announcedAt: expect.any(Number) });
+      } finally {
+        await second.close();
+      }
+    } finally {
+      await first.close();
+    }
+  }, 40_000);
+
+  it('delivers one report when two drains overlap', async () => {
+    const watch = await createWatch({
+      text: 'when packet race-6 merges, take the follow-up steps',
+      sourceId: 'race-6',
+      events: ['merged'],
+      then: { kind: 'plan', say: 'Packet race-6 merged.', steps: [{ tool: 'o8_status', args: {} }] },
+    });
+    firePacketEvent('race-6', 'merged');
+    await tick(Date.now(), 'symon-watch-race-worker');
+
+    const session = await openSymonSession('symon-watch-race');
+    try {
+      await waitForTaskComplete(session, watch.id);
+      // The registration drain has spoken. Clear the stamp to stand in for a
+      // watch that parked while this session was already live, then race two
+      // drains at it — the tick's and the one a reconnect would start.
+      const before = reportsFor(watch.id, session).length;
+      getSqlite().prepare('UPDATE automations SET symon_nudged_at = NULL WHERE id = ?').run(watch.id);
+      await Promise.all([
+        drainParkedSymonWatches(Date.now()),
+        drainParkedSymonWatches(Date.now()),
+      ]);
+      await settle();
+      expect(reportsFor(watch.id, session).length - before).toBe(1);
+    } finally {
+      await session.close();
+    }
+  }, 40_000);
+
+  it('produces exactly one fire and one report from a condition that matches several events', async () => {
+    const session = await openSymonSession('symon-watch-loose');
+    try {
+      const watch = await createWatch({
+        text: 'tell me when anything happens to packet loose-7',
+        sourceId: 'loose-7',
+        events: [],
+        then: { kind: 'report', say: 'Packet loose-7 moved.' },
+      });
+      firePacketEvent('loose-7', 'started', 'review_requested', 'merged', 'exit_clean');
+
+      await tick(Date.now(), 'symon-watch-loose-worker');
+      await tick(Date.now(), 'symon-watch-loose-worker-2');
+      await settle();
+
+      expect(listAutomationFires(watch.id)).toHaveLength(1);
+      expect(reportsFor(watch.id, session)).toHaveLength(1);
+      expect(listSymonWatches().find((entry) => entry.id === watch.id)?.state).toBe('closed');
+    } finally {
+      await session.close();
+    }
+  }, 40_000);
+
+  it('expires a parked watch on its deadline rather than holding it forever', async () => {
+    const watch = await createWatch({
+      text: 'when packet stale-8 merges, take the follow-up steps',
+      sourceId: 'stale-8',
+      events: ['merged'],
+      then: { kind: 'plan', say: 'Packet stale-8 merged.', steps: [{ tool: 'o8_status', args: {} }] },
+      deadlineMs: 60_000,
+    });
+    firePacketEvent('stale-8', 'merged');
+    await tick(Date.now(), 'symon-watch-stale-worker');
+    expect(listSymonWatches().find((entry) => entry.id === watch.id)?.state).toBe('parked');
+
+    await tick(Date.now() + 61_000, 'symon-watch-stale-worker-2');
+    expect(listSymonWatches().find((entry) => entry.id === watch.id)).toMatchObject({
+      state: 'closed',
+      lastErrorMessage: 'Watch expired.',
+    });
+    expect(readSymonWatchLedger(watch.id).map((entry) => entry.phase)).toContain('watch_expired');
+  }, 40_000);
 
   it('expires a watch past its deadline with a ledger entry and no fire', async () => {
     const watch = await createWatch({

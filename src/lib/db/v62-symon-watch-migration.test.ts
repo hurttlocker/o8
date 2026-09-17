@@ -19,6 +19,8 @@ describe('Symon watch migration', () => {
         symon_then_json: null,
         symon_parked_at: null,
         symon_parked_fire_id: null,
+        symon_nudged_at: null,
+        symon_run_claimed_at: null,
       });
     } finally {
       sqlite.close();

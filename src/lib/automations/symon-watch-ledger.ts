@@ -119,7 +119,7 @@ export function recordSymonWatchLedgerEvent(event: SymonWatchLedgerEvent): boole
   }
 }
 
-/** Read this watch's ledger trail, newest first. Used by `symon_watch_list`. */
+/** Read this watch's ledger trail, newest first. Feeds `symonWatchRecord`. */
 export function readSymonWatchLedger(watchId: string, limit: number = 10): Array<{
   phase: string;
   outcome: string;

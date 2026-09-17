@@ -26,6 +26,11 @@ export function ensureV62SymonWatchSchema(sqlite: Database.Database): void {
   addColumn(sqlite, 'automations', 'symon_then_json', 'TEXT');
   addColumn(sqlite, 'automations', 'symon_parked_at', 'INTEGER');
   addColumn(sqlite, 'automations', 'symon_parked_fire_id', 'TEXT');
+  // The nudge stamp is the delivery claim: it is set by whichever drain wins
+  // the conditional UPDATE, so a parked watch announces itself once and two
+  // overlapping drains cannot both speak.
+  addColumn(sqlite, 'automations', 'symon_nudged_at', 'INTEGER');
+  addColumn(sqlite, 'automations', 'symon_run_claimed_at', 'INTEGER');
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_automations_symon_watch
       ON automations(symon_session_id, symon_parked_at);

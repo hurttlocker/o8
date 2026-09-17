@@ -18,6 +18,20 @@ use super::{
 
 pub(super) const PLAN_TOOL_NAME: &str = "symon_execute_plan";
 pub(super) const WATCH_RUN_TOOL_NAME: &str = "symon_watch_run";
+
+/// Read one saved watch body back exactly the way `execute_plan` reads a live
+/// plan, so the registration card shows the operator the same thing the run
+/// card will. `Err` means the body could never run, which the card says plainly.
+pub(super) fn watch_body_readback(steps: &[Value]) -> Result<String, String> {
+    let plan = validate_plan(json!({ "steps": steps }), PlanSurface::WatchRun)?;
+    Ok(plan
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(offset, step)| format!("{}. {}", offset + 1, step.summary))
+        .collect::<Vec<_>>()
+        .join("; "))
+}
 const PLAN_GRANT_TTL_MS: u64 = 15 * 60 * 1_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,6 +161,7 @@ pub(super) async fn execute_watch_run(
             })
         }
     };
+    let intro = format!("Your watch \u{201c}{condition}\u{201d} fired.");
     let mut result = execute_plan(
         ctx,
         json!({ "steps": steps }),
@@ -156,6 +171,7 @@ pub(super) async fn execute_watch_run(
         source,
         utterance,
         spoke_filler,
+        Some(&intro),
     )
     .await;
     let outcome = if result.get("ok") == Some(&Value::Bool(true)) {
@@ -189,6 +205,9 @@ pub(super) async fn execute_plan(
     source: &str,
     utterance: Option<&str>,
     mut spoke_filler: Option<&mut bool>,
+    // `intro` is trusted, caller-authored context shown ahead of the plan
+    // read-back. A watch run uses it to name the standing intent that fired.
+    intro: Option<&str>,
 ) -> Value {
     let plan = match validate_plan(args, surface) {
         Ok(plan) => plan,
@@ -202,8 +221,9 @@ pub(super) async fn execute_plan(
         }
     };
     let step_count = plan.steps.len();
+    let lead = intro.map(|text| format!("{text} ")).unwrap_or_default();
     let plan_summary = format!(
-        "Run this {step_count}-step plan: {}",
+        "{lead}Run this {step_count}-step plan: {}",
         plan.steps
             .iter()
             .enumerate()
@@ -211,7 +231,7 @@ pub(super) async fn execute_plan(
             .collect::<Vec<_>>()
             .join("; ")
     );
-    let spoken_readback = spoken_plan_readback(&plan.steps);
+    let spoken_readback = format!("{lead}{}", spoken_plan_readback(&plan.steps));
     let plan_steps = plan
         .steps
         .iter()

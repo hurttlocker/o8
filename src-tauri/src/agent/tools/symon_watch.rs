@@ -44,6 +44,18 @@ pub async fn register(args: Value, ctx: &TaskCtx) -> Result<Value, String> {
         .map(|minutes| minutes.clamp(1, 7 * 24 * 60) * 60_000)
         .unwrap_or(24 * 60 * 60 * 1_000);
 
+    // A plan body that cannot be read back can never run, so it never becomes a
+    // durable watch. This is the same validator the run card uses.
+    if then.get("kind").and_then(Value::as_str) == Some("plan") {
+        let steps = then
+            .get("steps")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        super::super::plan::watch_body_readback(&steps)
+            .map_err(|error| format!("This watch's plan cannot run: {error}"))?;
+    }
+
     let body = json!({
         "sessionId": ctx.ledger_session_id,
         "condition": {
@@ -80,6 +92,9 @@ pub async fn list(_args: Value, ctx: &TaskCtx) -> Result<Value, String> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    // The cancel and run cards read the operator's own wording from here, so a
+    // card never has to say a bare id back to them.
+    super::super::remember_watch_conditions(&watches);
     Ok(json!({
         "ok": true,
         "count": watches.len(),
@@ -106,8 +121,10 @@ pub async fn cancel(args: Value, _ctx: &TaskCtx) -> Result<Value, String> {
 /// Read one watch's saved plan body. Used by the governed run path, never by
 /// the model directly.
 pub async fn plan_body(id: &str) -> Result<(String, Vec<Value>), String> {
+    // `claim=1` takes the body for exactly one run, so two concurrent calls
+    // cannot raise two cards for the same saved plan.
     let response = o8_http::get_json(&format!(
-        "/api/symon/watches/{}",
+        "/api/symon/watches/{}?claim=1",
         urlencoding_minimal(id)
     ))
     .await?;

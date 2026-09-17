@@ -11,6 +11,7 @@ import {
   cancelSymonWatch,
   claimSymonWatchPlanBody,
   getSymonWatch,
+  peekSymonWatchPlanBody,
   settleSymonWatchRun,
   symonWatchRecord,
 } from '@/lib/automations/symon-watch';
@@ -20,10 +21,23 @@ export const runtime = 'nodejs';
 
 const RUN_OUTCOMES = ['approved', 'denied', 'failed'] as const;
 
-export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
+/**
+ * `?claim=1` takes the plan body for one run and blocks a second concurrent
+ * card. Without it the body is only read, which is what a card read-back and
+ * the watch list need.
+ */
+export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const row = getSymonWatch(id);
   if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 });
+  if (new URL(request.url).searchParams.get('claim') !== '1') {
+    const steps = peekSymonWatchPlanBody(id);
+    return NextResponse.json({
+      watch: symonWatchRecord(row),
+      plan: steps ? { steps, condition: row.name } : null,
+      planError: steps ? null : 'this watch reports, it has no plan to run',
+    });
+  }
   const plan = claimSymonWatchPlanBody(id);
   return NextResponse.json({
     watch: symonWatchRecord(row),

@@ -111,6 +111,9 @@ export async function POST(request: Request) {
     watchSourceKind: source,
     watchSourceId: sourceId,
     watchEventTypesJson: JSON.stringify(events),
+    // A standing intent is answered once, so a loose condition matching several
+    // events in one tick must still produce exactly one fire.
+    watchMaxFiresPerTick: 1,
     watchExpiresAt: now + deadlineMs,
     watchActionKind: then.kind === 'plan' ? 'symon_plan' : 'symon_report',
     watchCheckpoint,
