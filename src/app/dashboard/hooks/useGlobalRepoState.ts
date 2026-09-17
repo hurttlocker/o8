@@ -116,6 +116,9 @@ export function useGlobalRepoState({
   // worktree lookups must never be clobbered by that older, slower refresh
   // finishing later.
   const repoInventoryGenerationRef = useRef(0);
+  // Counts completed, non-superseded inventory loads. Saved-scope restore
+  // watches it to re-validate a failed scope once the inventory is in.
+  const [repoInventoryRevision, setRepoInventoryRevision] = useState(0);
   // A confirmed mutation (a completed remove/touch response, or any other
   // caller-side authoritative rewrite of the repo list — see
   // page.tsx's handleRepoRemoved) is newer truth than anything currently in
@@ -180,7 +183,10 @@ export function useGlobalRepoState({
     // A fresher inventory fetch (this same function re-entered, or a
     // recovery refresh) may have already started and must win even if it
     // resolves later — never let a superseded fetch overwrite it.
-    if (generation === repoInventoryGenerationRef.current) setGlobalRepoEntries(repos);
+    if (generation === repoInventoryGenerationRef.current) {
+      setGlobalRepoEntries(repos);
+      setRepoInventoryRevision((revision) => revision + 1);
+    }
     return repos;
   }, []);
 
@@ -575,6 +581,7 @@ export function useGlobalRepoState({
     loadRegisteredRepos,
     loadRepoWorktrees,
     refreshRestoredRepoState,
+    repoInventoryRevision,
     openRepoWorkspaceModal,
     orchestratorWorkspaceTargets,
     focusRepoSetup,

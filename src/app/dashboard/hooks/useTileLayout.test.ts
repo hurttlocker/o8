@@ -7,6 +7,7 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { collectLeafNodes, createDefaultTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
 import { createTileRegistry } from '../tileRegistry';
+import { RESTORE_VALIDATION_BUDGET_MS } from './tileLayoutRestore';
 import { TILE_LAYOUT_STORAGE_KEY, useTileLayout } from './useTileLayout';
 
 const STALE_REPO_PATH = '/tmp/first-o8-instance/repo';
@@ -102,6 +103,7 @@ function LayoutRestoreHarness({
   onResizeSplit,
   onUnverifiedIds,
   registeredRepos,
+  repoInventoryRevision = 0,
   refreshRestoredRepoState = async () => true,
 }: {
   onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
@@ -110,6 +112,7 @@ function LayoutRestoreHarness({
   onResizeSplit?: (resize: (splitId: string, ratio: number) => void) => void;
   onUnverifiedIds?: (ids: ReadonlySet<string>) => void;
   registeredRepos: RepoRegistryEntry[];
+  repoInventoryRevision?: number;
   refreshRestoredRepoState?: (validatedPaths: readonly string[]) => Promise<boolean>;
 }) {
   const [layout, setLayout] = useState(createDefaultTileLayout);
@@ -125,6 +128,7 @@ function LayoutRestoreHarness({
     globalRepoEntries: registeredRepos,
     globalRepoEntry: null,
     refreshRestoredRepoState,
+    repoInventoryRevision,
     setActiveTileId,
     setTileLayout: setLayout,
     tileLayout: layout,
@@ -370,6 +374,7 @@ describe('useTileLayout browser-origin restore', () => {
   });
 
   it('fails closed without erasing the stored layout when registry validation is unavailable', async () => {
+    vi.useFakeTimers();
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
     const runtimeLaunches: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -387,29 +392,35 @@ describe('useTileLayout browser-origin restore', () => {
     };
 
     const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
-    await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+    try {
+      await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
+      await act(async () => vi.advanceTimersByTimeAsync(RESTORE_VALIDATION_BUDGET_MS + 100));
 
-    expect(hydrated).toBe(true);
-    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
-    const stored = JSON.parse(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY) ?? 'null') as TileLayout | null;
-    expect(stored && getFirstLeaf(stored.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
-    expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
-    expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
-    expect(runtimeLaunches).toEqual([]);
+      expect(hydrated).toBe(true);
+      expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+      const stored = JSON.parse(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY) ?? 'null') as TileLayout | null;
+      expect(stored && getFirstLeaf(stored.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+      expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
+      expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
+      expect(runtimeLaunches).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retries a failed saved scope from the rendered tile without remounting', async () => {
+    vi.useFakeTimers();
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
     const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
     const runtimeLaunches: string[] = [];
     let validationCalls = 0;
+    let validationFailing = true;
     let completeRetry: ((response: Response) => void) | null = null;
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (url.startsWith('/api/panel/repos')) {
         validationCalls += 1;
-        if (validationCalls === 1) return Promise.resolve(Response.json({}, { status: 503 }));
+        if (validationFailing) return Promise.resolve(Response.json({}, { status: 503 }));
         return new Promise<Response>((resolve) => { completeRetry = resolve; });
       }
       if (url.startsWith('/api/runtime/launch')) runtimeLaunches.push(url);
@@ -425,67 +436,81 @@ describe('useTileLayout browser-origin restore', () => {
       validationState = nextValidationState;
     };
 
-    await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+    try {
+      await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
+      await act(async () => vi.advanceTimersByTimeAsync(RESTORE_VALIDATION_BUDGET_MS + 100));
 
-    expect(hydrated).toBe(true);
-    expect(validationState).toBe('failed');
-    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
-    expect(runtimeLaunches).toEqual([]);
-    const retryButton = container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]');
-    expect(retryButton).not.toBeNull();
+      expect(hydrated).toBe(true);
+      expect(validationState).toBe('failed');
+      expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+      expect(runtimeLaunches).toEqual([]);
+      const retryButton = container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]');
+      expect(retryButton).not.toBeNull();
 
-    await act(async () => retryButton?.click());
-    expect(validationState).toBe('pending');
-    expect(retryButton?.disabled).toBe(true);
-    expect(runtimeLaunches).toEqual([]);
+      const callsBeforeRetry = validationCalls;
+      validationFailing = false;
+      await act(async () => retryButton?.click());
+      expect(validationState).toBe('pending');
+      expect(retryButton?.disabled).toBe(true);
+      expect(runtimeLaunches).toEqual([]);
 
-    await act(async () => {
-      completeRetry?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
-      await Promise.resolve();
-    });
+      await act(async () => {
+        completeRetry?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
+        await Promise.resolve();
+      });
 
-    expect(validationCalls).toBe(2);
-    expect(validationState).toBe('verified');
-    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
-    expect(workspaceBoundary.preferredRepoPaths).toEqual([STALE_REPO_PATH]);
-    expect(runtimeLaunches).toContain('/api/runtime/launch');
+      expect(validationCalls).toBe(callsBeforeRetry + 1);
+      expect(validationState).toBe('verified');
+      expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+      expect(workspaceBoundary.preferredRepoPaths).toEqual([STALE_REPO_PATH]);
+      expect(runtimeLaunches).toContain('/api/runtime/launch');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ignores a retry response after the operator changes the restored repo scope', async () => {
+    vi.useFakeTimers();
     const newerRepoPath = '/tmp/newer-o8-instance/repo';
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
     const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
     let validationCalls = 0;
+    let validationFailing = true;
     let completeRetry: ((response: Response) => void) | null = null;
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (!url.startsWith('/api/panel/repos')) return Promise.resolve(Response.json({}));
       validationCalls += 1;
-      if (validationCalls === 1) return Promise.resolve(Response.json({}, { status: 503 }));
+      if (validationFailing) return Promise.resolve(Response.json({}, { status: 503 }));
       return new Promise<Response>((resolve) => { completeRetry = resolve; });
     }));
 
     let latestLayout = createDefaultTileLayout();
     let replaceLayout: ((layout: TileLayout) => void) | null = null;
     const onLayout = (layout: TileLayout) => { latestLayout = layout; };
-    await act(async () => root.render(createElement(LayoutRestoreHarness, {
-      onLayout,
-      onReplaceLayout: (replace) => { replaceLayout = replace; },
-      registeredRepos,
-    })));
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+    try {
+      await act(async () => root.render(createElement(LayoutRestoreHarness, {
+        onLayout,
+        onReplaceLayout: (replace) => { replaceLayout = replace; },
+        registeredRepos,
+      })));
+      await act(async () => vi.advanceTimersByTimeAsync(RESTORE_VALIDATION_BUDGET_MS + 100));
 
-    const retryButton = container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]');
-    await act(async () => retryButton?.click());
-    await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
-    await act(async () => {
-      completeRetry?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
-      await Promise.resolve();
-    });
+      const callsBeforeRetry = validationCalls;
+      validationFailing = false;
+      const retryButton = container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]');
+      await act(async () => retryButton?.click());
+      await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
+      await act(async () => {
+        completeRetry?.(repoValidationResponse(`/api/panel/repos?restorePath=${encodeURIComponent(STALE_REPO_PATH)}`, registeredRepos));
+        await Promise.resolve();
+      });
 
-    expect(validationCalls).toBe(2);
-    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+      expect(validationCalls).toBe(callsBeforeRetry + 1);
+      expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps saved terminal and canvas scopes when the operator splits AND resizes during initial validation', async () => {
@@ -606,12 +631,14 @@ describe('useTileLayout browser-origin restore', () => {
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
     const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
     let validationCalls = 0;
+    let validationFailing = true;
     let completeRefresh: ((available: boolean) => void) | null = null;
+    vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (!url.startsWith('/api/panel/repos')) return Response.json({});
       validationCalls += 1;
-      return validationCalls === 1
+      return validationFailing
         ? Response.json({}, { status: 503 })
         : repoValidationResponse(url, registeredRepos);
     }));
@@ -624,24 +651,30 @@ describe('useTileLayout browser-origin restore', () => {
       validationState = nextValidationState;
     };
     const refreshRestoredRepoState = () => new Promise<boolean>((resolve) => { completeRefresh = resolve; });
-    await act(async () => root.render(createElement(LayoutRestoreHarness, {
-      onLayout,
-      onReplaceLayout: (replace) => { replaceLayout = replace; },
-      refreshRestoredRepoState,
-      registeredRepos,
-    })));
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 20)));
+    try {
+      await act(async () => root.render(createElement(LayoutRestoreHarness, {
+        onLayout,
+        onReplaceLayout: (replace) => { replaceLayout = replace; },
+        refreshRestoredRepoState,
+        registeredRepos,
+      })));
+      await act(async () => vi.advanceTimersByTimeAsync(RESTORE_VALIDATION_BUDGET_MS + 100));
 
-    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]')?.click());
-    await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
-    await act(async () => {
-      completeRefresh?.(true);
-      await Promise.resolve();
-    });
+      const callsBeforeRetry = validationCalls;
+      validationFailing = false;
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]')?.click());
+      await act(async () => replaceLayout?.(persistedLayout(newerRepoPath)));
+      await act(async () => {
+        completeRefresh?.(true);
+        await Promise.resolve();
+      });
 
-    expect(validationCalls).toBe(2);
-    expect(validationState).toBe('idle');
-    expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+      expect(validationCalls).toBe(callsBeforeRetry + 1);
+      expect(validationState).toBe('idle');
+      expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: newerRepoPath });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lets the newer layout render and launch immediately when initial validation becomes stale', async () => {
@@ -733,7 +766,7 @@ describe('useTileLayout browser-origin restore', () => {
       };
 
       await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
-      await act(async () => vi.advanceTimersByTimeAsync(2100));
+      await act(async () => vi.advanceTimersByTimeAsync(RESTORE_VALIDATION_BUDGET_MS + 100));
 
       expect(hydrated).toBe(true);
       expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
@@ -774,5 +807,144 @@ describe('useTileLayout browser-origin restore', () => {
     expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: null });
     expect(workspaceBoundary.preferredRepoPaths).toEqual([null]);
     expect(runtimeLaunches).toEqual([]);
+  });
+
+  it('verifies a saved scope with zero clicks when the first cold attempt times out', async () => {
+    vi.useFakeTimers();
+    const attemptLogs: string[] = [];
+    vi.spyOn(console, 'info').mockImplementation((...args: unknown[]) => {
+      attemptLogs.push(args.map((arg) => String(arg)).join(' '));
+    });
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    const runtimeLaunches: string[] = [];
+    let validationCalls = 0;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/panel/repos')) {
+        validationCalls += 1;
+        // The cold first request after launch never answers; the second one does.
+        if (validationCalls === 1) return new Promise<Response>(() => undefined);
+        return Promise.resolve(repoValidationResponse(url, registeredRepos));
+      }
+      if (url.startsWith('/api/runtime/launch')) runtimeLaunches.push(url);
+      return Promise.resolve(Response.json({}));
+    }));
+
+    const observedStates: string[] = [];
+    let latestLayout = createDefaultTileLayout();
+    const onLayout = (layout: TileLayout, _hydrated: boolean, nextValidationState: string) => {
+      latestLayout = layout;
+      observedStates.push(nextValidationState);
+    };
+
+    try {
+      await act(async () => root.render(createElement(LayoutRestoreHarness, { onLayout, registeredRepos })));
+      await act(async () => vi.advanceTimersByTimeAsync(100));
+
+      // Still inside the first attempt: the placeholder says "verifying", and
+      // nothing has launched against the unverified path.
+      expect(container.textContent).toContain('Verifying saved repository scope');
+      expect(container.textContent).not.toContain('Couldn’t verify this saved repository scope.');
+      expect(runtimeLaunches).toEqual([]);
+      expect(workspaceBoundary.preferredRepoPaths).toEqual([]);
+
+      // First attempt times out at 7s, the 1s backoff elapses, the second
+      // attempt answers — with no Retry click anywhere in this test.
+      await act(async () => vi.advanceTimersByTimeAsync(8_100));
+
+      expect(validationCalls).toBe(2);
+      expect(observedStates).not.toContain('failed');
+      expect(observedStates.at(-1)).toBe('verified');
+      expect(container.textContent).not.toContain('Couldn’t verify this saved repository scope.');
+      expect(getFirstLeaf(latestLayout.root).content).toMatchObject({ repoPath: STALE_REPO_PATH });
+      expect(workspaceBoundary.preferredRepoPaths).toEqual([STALE_REPO_PATH]);
+      expect(runtimeLaunches).toContain('/api/runtime/launch');
+
+      // One line per attempt, with the failure class and the duration.
+      const timeoutLog = attemptLogs.find((line) => line.startsWith('[tile-restore] validation attempt 1:'));
+      expect(timeoutLog).toBeDefined();
+      const timeoutMatch = timeoutLog?.match(/^\[tile-restore\] validation attempt 1: timeout in (\d+)ms$/);
+      expect(timeoutMatch).not.toBeNull();
+      expect(Number(timeoutMatch?.[1])).toBeGreaterThanOrEqual(7_000);
+      expect(attemptLogs.some((line) => /^\[tile-restore\] validation attempt 2: ok in \d+ms$/.test(line))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces the failed placeholder only after the budget, then re-validates on retry, repo inventory, and focus', async () => {
+    vi.useFakeTimers();
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(persistedLayout(STALE_REPO_PATH)));
+    const registeredRepos = [registeredRepo(STALE_REPO_PATH)];
+    const runtimeLaunches: string[] = [];
+    let validationCalls = 0;
+    let validationFailing = true;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/panel/repos')) {
+        validationCalls += 1;
+        return Promise.resolve(validationFailing
+          ? Response.json({}, { status: 503 })
+          : repoValidationResponse(url, registeredRepos));
+      }
+      if (url.startsWith('/api/runtime/launch')) runtimeLaunches.push(url);
+      return Promise.resolve(Response.json({}));
+    }));
+
+    let validationState = 'idle';
+    const onLayout = (_layout: TileLayout, _hydrated: boolean, nextValidationState: string) => {
+      validationState = nextValidationState;
+    };
+    const renderHarness = (repoInventoryRevision: number) => root.render(createElement(LayoutRestoreHarness, {
+      onLayout,
+      registeredRepos,
+      repoInventoryRevision,
+    }));
+
+    try {
+      await act(async () => renderHarness(1));
+      await act(async () => vi.advanceTimersByTimeAsync(RESTORE_VALIDATION_BUDGET_MS - 1_000));
+
+      // Attempts keep failing, but the operator still sees "verifying" — the
+      // dead-end placeholder is not allowed to appear inside the budget.
+      expect(validationCalls).toBeGreaterThan(1);
+      expect(validationState).toBe('pending');
+      expect(container.textContent).toContain('Verifying saved repository scope');
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_200));
+      expect(validationState).toBe('failed');
+      expect(container.textContent).toContain('Couldn’t verify this saved repository scope.');
+      expect(runtimeLaunches).toEqual([]);
+
+      // A window focus re-validates on its own, with no click.
+      const callsBeforeFocus = validationCalls;
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(validationCalls).toBe(callsBeforeFocus + 1);
+      expect(validationState).toBe('failed');
+
+      // The Retry button still works.
+      const callsBeforeRetry = validationCalls;
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Retry saved repository scope"]')?.click());
+      await act(async () => vi.advanceTimersByTimeAsync(50));
+      expect(validationCalls).toBe(callsBeforeRetry + 1);
+      expect(validationState).toBe('failed');
+
+      // A completed repo-inventory load re-validates on its own, with no click.
+      validationFailing = false;
+      const callsBeforeInventory = validationCalls;
+      await act(async () => renderHarness(2));
+      await act(async () => vi.advanceTimersByTimeAsync(50));
+
+      expect(validationCalls).toBe(callsBeforeInventory + 1);
+      expect(validationState).toBe('verified');
+      expect(workspaceBoundary.preferredRepoPaths).toEqual([STALE_REPO_PATH]);
+      expect(runtimeLaunches).toContain('/api/runtime/launch');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
