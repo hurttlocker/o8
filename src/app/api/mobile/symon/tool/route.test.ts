@@ -45,6 +45,7 @@ beforeEach(() => {
     subject: 'operator',
     deviceId: null,
     workspaceMode: 'code',
+    toolPack: 'code',
     repoId: 'repo-1',
     repoPath: '/repo',
     allowedTools: ['o8_dispatch'],

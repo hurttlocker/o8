@@ -13,6 +13,7 @@ import {
   persistSymonScopeGrant,
   SYMON_SCOPE_VERSION,
   type SymonClientSubject,
+  type SymonToolPack,
   type SymonWorkspaceMode,
 } from '@/lib/mobile/symon-agent-registry';
 import { DEFAULT_SYMON_MACHINE } from '@/lib/symon/machine-registry';
@@ -31,6 +32,7 @@ import {
   PHONE_CODE_SURFACE_INSTRUCTIONS,
   PHONE_CODE_TOOL_INSTRUCTIONS,
   selectPhoneCodeTools,
+  selectPhoneO8Tools,
   selectPhoneRealtimeModel,
   RENDER_SURFACE_TOOL,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
@@ -102,6 +104,7 @@ interface PhoneSessionRequest {
 interface ResolvedPhoneScope {
   context: PhoneWorkspaceContext;
   workspaceMode: SymonWorkspaceMode;
+  toolPack: SymonToolPack;
   repoId: string | null;
   repoPath: string | null;
 }
@@ -252,10 +255,18 @@ async function readPhoneSessionRequest(request: NextRequest): Promise<PhoneSessi
 
 async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<ResolvedPhoneScope | null> {
   const workspaceMode: SymonWorkspaceMode = context.workspaceMode === 'code' ? 'code' : 'o8';
-  if (workspaceMode !== 'code') {
-    return { context, workspaceMode, repoId: null, repoPath: null };
+  const toolPack: SymonToolPack =
+    workspaceMode === 'code' || context.launchKind === 'repository-catch-up'
+      ? 'code'
+      : 'o8';
+  if (toolPack !== 'code') {
+    return { context, workspaceMode, toolPack, repoId: null, repoPath: null };
   }
-  if (!context.repoPath) return null;
+  if (!context.repoPath) {
+    return workspaceMode === 'code'
+      ? null
+      : { context, workspaceMode, toolPack, repoId: null, repoPath: null };
+  }
 
   const repo = await findRepoByLocalPath(context.repoPath);
   if (!repo) return null;
@@ -267,6 +278,7 @@ async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<Resolv
       repoName: safeDisplayLabel(repo.name, 96),
     },
     workspaceMode,
+    toolPack,
     repoId: repo.id,
     repoPath,
   };
@@ -401,7 +413,11 @@ export async function POST(request: NextRequest) {
   const resolvedScope = await resolvePhoneScope(sessionRequest.context);
   if (!resolvedScope) {
     return NextResponse.json(
-      { ok: false, error: 'invalid_repo', detail: 'Code mode requires an exact registered repository.' },
+      {
+        ok: false,
+        error: 'invalid_repo',
+        detail: 'Code mode requires an exact registered repository.',
+      },
       { status: 400 },
     );
   }
@@ -521,23 +537,24 @@ export async function POST(request: NextRequest) {
 
   const sessionId = `sym-${randomUUID()}`;
   const voice = bridge.voice;
-  let phoneBridgeTools = bridge.tools;
-  if (workspaceContext.workspaceMode === 'code') {
-    const selection = selectPhoneCodeTools(bridge.tools);
-    if (selection.missing.length > 0) {
-      const detail = `Code tool catalog incomplete; missing: ${selection.missing.join(', ')}`;
-      console.error(`${LOG} code_tools_incomplete: ${detail}`);
-      return NextResponse.json(
-        { ok: false, error: 'desktop_unavailable', detail },
-        { status: 503 },
-      );
-    }
-    phoneBridgeTools = selection.tools;
+  const usesCodePack = resolvedScope.toolPack === 'code';
+  const phonePack = usesCodePack
+    ? { label: 'Code', logKey: 'code_tools_incomplete', ...selectPhoneCodeTools(bridge.tools) }
+    : { label: 'o8', logKey: 'o8_tools_incomplete', ...selectPhoneO8Tools(bridge.tools) };
+  if (phonePack.missing.length > 0) {
+    const detail = `${phonePack.label} tool catalog incomplete; missing: ${phonePack.missing.join(', ')}`;
+    console.error(`${LOG} ${phonePack.logKey}: ${detail}`);
+    return NextResponse.json(
+      { ok: false, error: 'desktop_unavailable', detail },
+      { status: 503 },
+    );
   }
+  const phoneBridgeTools = phonePack.tools;
+  const mintedPhoneTools = [...phoneBridgeTools, RENDER_SURFACE_TOOL];
 
-  // Mint the ephemeral token carrying the shared brain/config. Code gets its
-  // bounded phone pack; Life keeps the complete live bridge catalog. The raw
-  // subscription bearer or BYOK key never leaves the Mac.
+  // Mint the ephemeral token carrying the shared brain/config. Code and
+  // repository catch-up use the Code pack; default o8 uses its bounded pack.
+  // The raw subscription bearer or BYOK key never leaves the Mac.
   try {
     const mint = await fetch(CLIENT_SECRETS_URL, {
       method: 'POST',
@@ -556,11 +573,11 @@ export async function POST(request: NextRequest) {
             instructions:
               DEFAULT_INSTRUCTIONS +
               PHONE_SURFACE_INSTRUCTIONS +
-              (workspaceContext.workspaceMode === 'code'
+              (usesCodePack
                 ? PHONE_CODE_TOOL_INSTRUCTIONS + PHONE_CODE_SURFACE_INSTRUCTIONS
                 : '') +
               workspaceContextInstructions(workspaceContext),
-            tools: [...phoneBridgeTools, RENDER_SURFACE_TOOL],
+            tools: mintedPhoneTools,
             inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
             micProfile: 'near_field',
           },
@@ -601,6 +618,7 @@ export async function POST(request: NextRequest) {
         sessionId,
         ...subject,
         workspaceMode: resolvedScope.workspaceMode,
+        toolPack: resolvedScope.toolPack,
         repoId: resolvedScope.repoId,
         repoPath: resolvedScope.repoPath,
         allowedTools,
@@ -617,7 +635,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(
-      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${phoneBridgeTools.length}` +
+      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
         `${bridge.deskWasLive ? ' preempted=desk' : ''})`,
     );
 
