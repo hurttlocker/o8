@@ -38,6 +38,11 @@ export function isPaidPlan(plan: Plan): boolean {
  *   lockstep.
  *
  * cloud.runners isn't built yet → false for every plan until that lever ships.
+ *
+ * voice.liveBrain is the phone's per-session brain choice
+ * (docs/internals/symon-agent-mode.md). It follows the same all-paid-tiers rule
+ * as the relay, and free keeps the standard realtime brain rather than losing
+ * voice: the lever is the metered live layer, never Symon itself.
  */
 export function resolveFlags(plan: Plan): EntitlementFlags {
   const proxy = isPaidPlan(plan);
@@ -49,5 +54,8 @@ export function resolveFlags(plan: Plan): EntitlementFlags {
     'relay.offNetwork': proxy,
     'cloud.runners': false,
     'team.shared': team,
+    // The live brain bills per voice minute plus the backend model's tokens, so
+    // it tracks the paid predicate exactly like the other metered levers.
+    'voice.liveBrain': proxy,
   };
 }

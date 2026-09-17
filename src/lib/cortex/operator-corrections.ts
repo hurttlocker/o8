@@ -3,15 +3,24 @@
  *
  * A rejection reason lands on the approval's resolution record
  * (`approvals.resolution_json.note`, written by the approvals route) and a
- * steer message lands on the packet lane as a `steered_packet` event. Both are
- * the operator saying "not like that, here is why". This module is the single
- * read path that turns those persisted rows into corrections the next worker
- * on the packet, the repo context block, and the Brain retriever consume.
+ * steer message lands on the packet lane as a `steered_packet` event. This
+ * module is the single read path that turns those persisted rows into
+ * corrections the next worker on the packet, the repo context block, and the
+ * Brain retriever consume.
+ *
+ * Standing (#2395): a rejection is operator-only (the approvals route refuses
+ * every other principal), so it always carries operator standing. A steer can
+ * come from the operator, the orchestrator, or the heal-bot, recorded in
+ * `payload.source`. Only `source: 'operator'` carries operator standing; any
+ * other or missing source is machine steering, labeled as such and ranked
+ * below operator rows.
  */
 
 import path from 'node:path';
 
 import { getSqlite } from '@/lib/db';
+
+export type CorrectionStanding = 'operator' | 'machine';
 
 export interface OperatorCorrection {
   /** `approval:<id>` or `steer:<lane-event-id>` — unique across both sources. */
@@ -27,6 +36,8 @@ export interface OperatorCorrection {
   reason: string;
   /** Steer source (`operator` / `orchestrator` / `heal-bot`) when known. */
   source: string | null;
+  /** `operator` for rejections and operator-sourced steers; `machine` otherwise. */
+  standing: CorrectionStanding;
   /** ISO timestamp of the rejection or steer. */
   at: string;
 }
@@ -116,6 +127,7 @@ function readRejections(packetId: string | undefined, scan: number): OperatorCor
     title: row.title,
     reason: String(row.note).trim(),
     source: null,
+    standing: 'operator' as const,
     at: new Date(row.resolved_at ?? row.updated_at).toISOString(),
   }));
 }
@@ -139,6 +151,7 @@ function readSteers(packetId: string | undefined, scan: number): OperatorCorrect
     const payload = parsePayload(row.payload_json);
     const message = typeof payload.message === 'string' ? payload.message.trim() : '';
     if (!message) return [];
+    const source = typeof payload.source === 'string' ? payload.source.trim().toLowerCase() || null : null;
     return [{
       id: `steer:${row.id}`,
       kind: 'steered' as const,
@@ -148,14 +161,19 @@ function readSteers(packetId: string | undefined, scan: number): OperatorCorrect
       repoPath: row.repo_path,
       title: row.label,
       reason: message,
-      source: typeof payload.source === 'string' ? payload.source : null,
+      source,
+      standing: source === 'operator' ? 'operator' as const : 'machine' as const,
       at: row.timestamp,
     }];
   });
 }
 
+function standingRank(correction: OperatorCorrection): number {
+  return correction.standing === 'operator' ? 0 : 1;
+}
+
 /**
- * Read rejection and steer reasons, newest first. Never throws — a missing
+ * Read rejection and steer reasons, operator standing first, then newest first. Never throws — a missing
  * table or malformed row degrades to "no corrections" so dispatch and Q&A
  * keep working.
  */
@@ -174,7 +192,9 @@ export function readOperatorCorrections(options: ReadOperatorCorrectionsOptions 
         const resolved = resolvePathSafe(correction.repoPath);
         return resolved !== null && scopedPaths.has(resolved);
       })
-      .sort((a, b) => b.at.localeCompare(a.at))
+      // Operator rows first so machine steering never crowds them out of the
+      // limit; newest first within each standing.
+      .sort((a, b) => standingRank(a) - standingRank(b) || b.at.localeCompare(a.at))
       .slice(0, limit);
   } catch (error) {
     console.warn('[operator-corrections] read failed:', error instanceof Error ? error.message : error);
@@ -187,21 +207,40 @@ function clamp(text: string, maxLen: number): string {
   return flat.length <= maxLen ? flat : `${flat.slice(0, maxLen - 1)}…`;
 }
 
-/** One line per correction: `[rejected 2026-09-16] <title>: <reason>`. */
+/**
+ * One line per correction: `[rejected 2026-09-16] <title>: <reason>`, or
+ * `[machine steer via orchestrator 2026-09-16] ...` for a non-operator steer.
+ */
 export function formatCorrectionLine(correction: OperatorCorrection, maxReasonChars = 600): string {
   const day = correction.at.slice(0, 10);
-  const label = correction.kind === 'steered' && correction.source && correction.source !== 'operator'
-    ? `steered via ${correction.source}`
+  const label = correction.standing === 'machine'
+    ? `machine steer via ${correction.source ?? 'unknown'}`
     : correction.kind;
   return `- [${label} ${day}] ${clamp(correction.title, 80)}: ${clamp(correction.reason, maxReasonChars)}`;
 }
 
-/** Packet-prompt block for the next worker on the same packet; null when none. */
+/**
+ * Packet-prompt block for the next worker on the same packet; null when none.
+ * Operator rulings and machine steering render under separate headings so a
+ * machine nudge is never presented with operator standing.
+ */
 export function buildPacketCorrectionsSection(packetId: string): string | null {
   const corrections = readOperatorCorrections({ packetId, limit: DEFAULT_LIMIT });
   if (corrections.length === 0) return null;
-  return [
-    'Operator corrections for this packet (an earlier attempt was rejected or steered; address each one):',
-    ...corrections.map((correction) => formatCorrectionLine(correction)),
-  ].join('\n');
+  const operator = corrections.filter((correction) => correction.standing === 'operator');
+  const machine = corrections.filter((correction) => correction.standing === 'machine');
+  const blocks: string[] = [];
+  if (operator.length > 0) {
+    blocks.push([
+      'Operator corrections for this packet (an earlier attempt was rejected or steered; address each one):',
+      ...operator.map((correction) => formatCorrectionLine(correction)),
+    ].join('\n'));
+  }
+  if (machine.length > 0) {
+    blocks.push([
+      'Machine steering for this packet (sent by the orchestrator or heal-bot, not an operator ruling; operator corrections take precedence):',
+      ...machine.map((correction) => formatCorrectionLine(correction)),
+    ].join('\n'));
+  }
+  return blocks.join('\n\n');
 }
