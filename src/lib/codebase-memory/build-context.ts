@@ -255,11 +255,22 @@ function renderOutcomesSection(rows: OutcomeRow[]): string[] {
 }
 
 function renderCorrectionsSection(rows: OperatorCorrection[]): string[] {
-  if (rows.length === 0) return [];
-  return [
-    `## Recent Operator Corrections (last ${rows.length})`,
-    ...rows.map((row) => formatCorrectionLine(row, OUTCOME_SUMMARY_CHARS)),
-  ];
+  const operator = rows.filter((row) => row.standing === 'operator');
+  const machine = rows.filter((row) => row.standing === 'machine');
+  const lines: string[] = [];
+  if (operator.length > 0) {
+    lines.push(
+      `## Recent Operator Corrections (last ${operator.length})`,
+      ...operator.map((row) => formatCorrectionLine(row, OUTCOME_SUMMARY_CHARS)),
+    );
+  }
+  if (machine.length > 0) {
+    lines.push(
+      `## Recent Machine Steering (last ${machine.length}; not operator rulings)`,
+      ...machine.map((row) => formatCorrectionLine(row, OUTCOME_SUMMARY_CHARS)),
+    );
+  }
+  return lines;
 }
 
 function renderSymbolGraphSection(edges: SymbolEdge[]): string[] {

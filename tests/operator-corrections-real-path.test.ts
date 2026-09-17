@@ -98,12 +98,12 @@ describe('#2219 rejection reason → next worker prompt (real reject route)', ()
     expect(prompt).toContain(REJECT_REASON);
   });
 
-  it('a steer message recorded on the packet lane appears in the rerun prompt', async () => {
+  it('an operator steer message recorded on the packet lane appears in the rerun prompt', async () => {
     const packetId = 'pkt-2219-steer';
     const { lane } = seedMergeCard(packetId);
     recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
       packetId,
-      source: 'mcp',
+      source: 'operator',
       message: STEER_MESSAGE,
       clientMutationId: 'steer-2219',
     });

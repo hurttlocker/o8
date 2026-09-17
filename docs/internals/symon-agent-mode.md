@@ -112,9 +112,15 @@ Request body (all fields optional; legacy `{}` remains valid):
   "selectedFile": "src/app/symon.tsx",
   "controlTab": "changes",
   "runStatus": "review",
-  "activeSurface": "symon"
+  "activeSurface": "symon",
+  "brain": "live"
 }
 ```
+
+`brain` accepts only `"realtime"` and `"live"`. Absent or unrecognized means
+`"realtime"`, which mints exactly what every plan gets today. `"live"` is the
+delegated voice brain below, and it is honored only on a paid plan; see the plan
+rule after the model contract.
 
 `launchKind` accepts only `"repository-catch-up"`. It is a server-owned routing
 discriminator for the Home briefing, not model evidence; the phone sends the
@@ -288,6 +294,8 @@ Success `200`:
     "expiresAt": 1783490000000,
     "model": "gpt-realtime-2.1-mini",
     "modelVariant": "mini",
+    "brain": "realtime",
+    "brains": ["realtime"],
     "billingSource": "chatgpt-subscription",
     "voice": "<same voice>",
     "baseUrl": "https://api.openai.com/v1/realtime",
@@ -358,6 +366,32 @@ operator-only test may override one Code mint with
 `gpt-realtime-2.1`; the response exposes `modelVariant` so eval reports cannot
 confuse the cohorts.
 
+#### Which brain a session runs on (#2423)
+
+The brain is the operator's per-session choice, resolved from the plan before any
+credential is read or any token is minted:
+
+| Plan | `brains` in the response | `brain: "live"` in the request |
+|---|---|---|
+| free | `["realtime"]` | `403 brain_locked`, nothing minted |
+| pro, team, founder | `["realtime","live"]` | honored — mints the delegated session |
+
+`session.brain` names what was minted and `session.brains` names what this plan
+may choose, so the phone shows a brain switch only when there is something to
+switch to. With no `brain` in the request every plan mints the standard model
+exactly as before, byte for byte. The gate has one name,
+`voice.liveBrain` in `src/lib/entitlement/flags.ts`, equal to `isPaidPlan`; it is
+a cost lever, not a capability gate, because the live layer bills per voice
+minute on top of its backend model's tokens. An explicit `brain` outranks the
+workspace mode, the catch-up experience, and the experiment switch. The mint log
+line records it: `[symon-agent] minted sym-… (model=… brain=live billing=… )`.
+
+`O8_SYMON_CODE_REALTIME_EXPERIMENT` and the operator-only
+`x-o8-symon-code-model` header remain developer overrides, and neither widens
+what the plan allows. On a free plan a `live` override is dropped, the mint
+continues on the standard model, and the Mac logs
+`[symon-agent] live_override_ignored: …`.
+
 #### The `live` variant (delegated voice, #2411 — TRIAL, unproven)
 
 `gpt-live-1` is a full-duplex voice layer that does not reason. It delegates
@@ -369,7 +403,7 @@ product wants for Symon, which is why the id was admitted to
 
 | Env | Default | Effect |
 |---|---|---|
-| `O8_SYMON_CODE_REALTIME_EXPERIMENT=live` | unset | Code mints `gpt-live-1` instead of a realtime model |
+| `O8_SYMON_CODE_REALTIME_EXPERIMENT=live` | unset | Code mints `gpt-live-1` instead of a realtime model, on a paid plan only |
 | `O8_SYMON_LIVE_BACKEND_MODEL` | `gpt-5.6-terra` | the backend Responses model that reasons and calls tools |
 
 Because the voice layer holds no brain, the `live` mint moves the persona and
@@ -428,6 +462,7 @@ Errors (typed, structured, never thrown):
 |---|---|---|
 | 401 | `unauthorized` | missing/bad Bearer (middleware) |
 | 403 | `locked` | entitlement does not include S2S (same rule as the desk mint) |
+| 403 | `brain_locked` | the request asked for `brain:"live"` on a plan that does not include it; nothing is minted and no credential is read |
 | 409 | `billing_changed` | previous mint used ChatGPT subscription billing and this mint would use the metered API key; body includes `previous` and `next` |
 | 501 | `no_key` | BYOK OpenAI key absent (same rule as the desk mint — managed proxy does not carry realtime in v1) |
 | 501 | `subscription_unavailable` | repository catch-up or `symon.voice.subscriptionOnly` requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
