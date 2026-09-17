@@ -148,6 +148,51 @@ and truncated results say so. The `continue-run`, `steer-run`, `approve`, and
 (`workspaceMode: "o8"`) keeps the generic phone vocabulary and never receives the
 Code authoring instructions.
 
+### Fleet briefing block (v1)
+
+Ahead of the workspace-context JSON — and behind the persona, so it lands inside
+the cached instruction prefix — the mint prepends a bounded fleet briefing
+between the frozen `[[O8_PHONE_BRIEFING_V1_START]]` /
+`[[O8_PHONE_BRIEFING_V1_END]]` markers. Without it a phone session starts blind:
+it knows the route it was launched from and nothing about what needs the
+operator, so every "what's going on" costs a tool round-trip the mini model often
+declines to make.
+
+The block is rendered by `buildPhoneBriefingBlock`
+(`src/lib/mobile/symon-briefing.ts`), a pure snapshot-in / string-out function
+over the mobile inbox snapshot — the SAME server-side state the phone's Home
+briefing renders, so the two surfaces cannot disagree. It carries five sections,
+one item per line:
+
+- `APPROVALS PENDING (n)` — pending approval titles with their repository.
+- `LANES RUNNING (n)` — running and huddling lanes, with repository and branch.
+- `LANES BLOCKED (n)` — blocked and failed lanes, same shape.
+- `NEEDS YOU (n)` — the attention items the Home screen surfaces, minus the
+  approvals already listed above.
+- `MERGED RECENTLY` — recently merged lanes grouped per tracked repository.
+
+An empty section renders as `SECTION: none` rather than disappearing, so absence
+is evidence instead of silence. Both tool packs receive the block; a Code mint
+additionally scopes `MERGED RECENTLY` to the granted repository path, so a
+repository-scoped session never hears about another repository's merges.
+
+Every free-text value — approval and lane titles, repository names, branch names
+— passes through `safeDisplayLabel` (`src/lib/mobile/symon-prompt-filter.ts`),
+the same prompt-injection filter the workspace-context block applies. Characters
+outside the display grammar are flattened to spaces, the value is clipped to its
+field bound, and a value carrying instruction-override phrasing is dropped
+outright rather than escaped; an item whose only repository label is dropped is
+dropped with it.
+
+Sections keep at most six items each, and the whole block, markers included, is
+capped at 3000 characters. Because each item occupies one line, the cap always
+falls on an item boundary: the block is closed with the visible marker
+`- (briefing truncated at the character cap; ask for the rest)` and never a half
+item. The briefing is best-effort — the snapshot is raced against a 1.5-second
+budget and any failure logs `briefing_skipped` and mints with no block at all, so
+a slow or broken inbox costs the briefing and never the voice session. The mint
+log line reports the rendered size as `briefing=<chars>`.
+
 ### Phone tool packs (v1)
 
 Every phone mint filters Mac-executed tools. `workspaceMode: "code"` and the
