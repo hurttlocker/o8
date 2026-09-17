@@ -1,5 +1,6 @@
 import type { ApprovalRisk } from '@/lib/approvals/types';
 import { buildPolicyContext } from '@/lib/approvals/policies';
+import { startApprovalReferee } from '@/lib/approvals/referee';
 import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
@@ -206,6 +207,15 @@ export async function createLaneActionApproval(
       expectedHeadSha: input.expectedHeadSha,
       strategy: input.strategy,
     },
+  });
+  // Advisory referee read of the diff (#2435): detached, never awaited here,
+  // and a no-op when judgment.provider is off.
+  startApprovalReferee({
+    approvalId: approval.id,
+    packetId: lane.packetId ?? null,
+    laneId: lane.id,
+    files: files.map((file) => ({ path: file.path })),
+    diffText: rawDiff,
   });
   await recordReviewLessonsForApproval(approval.id, lane, input.reviewSummary, files);
   setLaneStatus(

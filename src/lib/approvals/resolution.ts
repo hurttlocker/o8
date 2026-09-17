@@ -11,6 +11,7 @@ import type {
   ApprovalAuditEvent,
   ApprovalRecord,
 } from '@/lib/approvals/types';
+import { parseApprovalMetadataJson } from '@/lib/approvals/referee-metadata';
 
 type ApprovalRow = typeof approvalsTable.$inferSelect;
 type ApprovalDb = NonNullable<ReturnType<typeof getDb>>;
@@ -49,7 +50,7 @@ function readApproval(id: string): ApprovalRecord | null {
     gateResult: parseJson<ApprovalRecord['gateResult']>(row.gateResultJson, undefined),
     conflictReport: parseJson<ApprovalRecord['conflictReport']>(row.conflictReportJson, undefined),
     risk: row.risk,
-    metadata: parseJson<ApprovalRecord['metadata']>(row.metadataJson, undefined),
+    ...parseApprovalMetadataJson(row.metadataJson),
     policyRuleId: row.policyRuleId ?? undefined,
     status: row.status,
     createdAt: row.createdAt,

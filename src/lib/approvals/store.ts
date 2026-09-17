@@ -8,6 +8,7 @@ import {
 import { stableApprovalJson } from '@/lib/approvals/fingerprint';
 import { expireStaleApprovals } from '@/lib/approvals/expiry';
 import { belongsInOperatorInbox } from '@/lib/approvals/inbox-visibility';
+import { parseApprovalMetadataJson, serializeApprovalMetadata } from '@/lib/approvals/referee-metadata';
 import {
   allFindingsResolved,
   buildOrchestratorReviewApprovalInput,
@@ -85,7 +86,7 @@ function mapApprovalRow(row: ApprovalRow | undefined): ApprovalRecord | null {
     gateResult: parseJson<ApprovalRecord['gateResult']>(row.gateResultJson, undefined),
     conflictReport: parseJson<ApprovalRecord['conflictReport']>(row.conflictReportJson, undefined),
     risk: row.risk,
-    metadata: parseJson<ApprovalRecord['metadata']>(row.metadataJson, undefined),
+    ...parseApprovalMetadataJson(row.metadataJson),
     policyRuleId: row.policyRuleId ?? undefined,
     status: row.status,
     createdAt: row.createdAt,
@@ -119,7 +120,7 @@ function toApprovalValues(approval: ApprovalRecord): ApprovalInsert {
     gateResultJson: serializeJson(approval.gateResult),
     conflictReportJson: serializeJson(approval.conflictReport),
     risk: approval.risk,
-    metadataJson: serializeJson(approval.metadata),
+    metadataJson: serializeApprovalMetadata(approval.metadata, approval.referee),
     packetId,
     laneId,
     policyRuleId: approval.policyRuleId ?? null,
@@ -442,6 +443,8 @@ export function createApproval(input: CreateApprovalInput) {
       conflictReport: input.conflictReport ?? existing.conflictReport,
       risk: input.risk,
       metadata: input.metadata,
+      // The referee read the replaced diff; a fresh read attaches after this update.
+      referee: undefined,
       continuation: input.continuation ?? existing.continuation,
       updatedAt: Date.now(),
       audit: [...existing.audit, auditEvent('updated', 'system', 'Pending approval reused for matching request.')],
