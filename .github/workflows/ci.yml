@@ -100,7 +100,7 @@ jobs:
   # PR lane (#2391): runs exactly the resource-owning test files the branch
   # touches, diffed from the merge-base with the base branch. No touched files
   # means the test steps skip and the check passes. No continue-on-error: a red
-  # file fails the check. workflow_dispatch with integration_base runs the same
+  # file fails the check unless it is in the exempted baseline described below. workflow_dispatch with integration_base runs the same
   # lane against that base.
   # Measured 2026-09-17, run 35178958985 (dispatch, integration_base=HEAD~40):
   # 18 touched files in 171.5s of gate time, 3m40s for the whole job including
@@ -130,6 +130,8 @@ jobs:
         run: npm ci --prefer-offline
       - if: steps.select.outputs.count != '0'
         run: npm run test:integration -- ${{ steps.select.outputs.files }}
+        env:
+          O8_INTEGRATION_BASELINE: tests/integration-linux-baseline.json
 
   # Weekly whole-suite lane, split into two halves of the manifest file list.
   # Unsharded, the suite does not fit 45 minutes: the 2026-09-13 scheduled run
@@ -137,8 +139,12 @@ jobs:
   # Measured 2026-09-17, run 35178955102 (dispatch, 444 files): shard 1 took
   # 222 files in 1248s of gate time and a 21m42s job; shard 2 took 222 files in
   # 1525s and a 26m17s job. That is 46m of test time unsharded. The 40-minute
-  # limit is about 1.5x the slower shard. Baseline on that run: 45 files red
-  # on Linux (20 + 25).
+  # limit is about 1.5x the slower shard.
+  # Exempted baseline: 45 files red on Linux in run 35178955102 (20 + 25),
+  # listed in tests/integration-linux-baseline.json. Both lanes set
+  # O8_INTEGRATION_BASELINE, so those files still run and report "baseline red"
+  # without failing the job. The list may only shrink and allows at most 45
+  # entries; any other red file fails the job.
   # A failed, timed-out, or cancelled Sunday run opens or updates the
   # "Weekly integration lane did not pass" issue; the Monday cron does the same
   # when no Sunday run passed, and closes the issue once one has.
@@ -160,6 +166,7 @@ jobs:
       - run: npm run test:integration
         env:
           O8_INTEGRATION_SHARD: 1/2
+          O8_INTEGRATION_BASELINE: tests/integration-linux-baseline.json
 
   integration-weekly-2:
     name: Weekly Integration Tests (shard 2/2)
@@ -178,6 +185,7 @@ jobs:
       - run: npm run test:integration
         env:
           O8_INTEGRATION_SHARD: 2/2
+          O8_INTEGRATION_BASELINE: tests/integration-linux-baseline.json
 
   integration-weekly-report:
     name: Weekly Integration Report
