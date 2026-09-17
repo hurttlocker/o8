@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { resolveChatGPTRealtimeCredential } from '@/lib/voice/chatgpt-realtime-credential';
 import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
 import {
@@ -16,6 +17,11 @@ import {
 } from '@/lib/mobile/symon-agent-registry';
 import { DEFAULT_SYMON_MACHINE } from '@/lib/symon/machine-registry';
 import { resolveRealtimeAccess } from '@/lib/voice/realtime-access';
+import {
+  readLastSymonPhoneBillingSource,
+  recordSymonPhoneBillingSource,
+  type SymonPhoneBillingSource,
+} from '@/lib/voice/symon-phone-billing';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import {
@@ -86,6 +92,11 @@ interface PhoneWorkspaceContext {
   controlTab?: 'fleet' | 'review' | 'changes' | 'activity';
   runStatus?: 'idle' | 'running' | 'review' | 'blocked' | 'failed' | 'done';
   activeSurface?: string;
+}
+
+interface PhoneSessionRequest {
+  context: PhoneWorkspaceContext;
+  acknowledgeBillingChange: boolean;
 }
 
 interface ResolvedPhoneScope {
@@ -169,64 +180,73 @@ function safeSurface(value: unknown): string | undefined {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(surface) ? surface : undefined;
 }
 
-async function readPhoneWorkspaceContext(request: NextRequest): Promise<PhoneWorkspaceContext> {
+async function readPhoneSessionRequest(request: NextRequest): Promise<PhoneSessionRequest> {
   const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > CONTEXT_BODY_MAX_CHARS) return {};
+  if (Number.isFinite(declaredLength) && declaredLength > CONTEXT_BODY_MAX_CHARS) {
+    return { context: {}, acknowledgeBillingChange: false };
+  }
 
   try {
     const text = await request.text();
-    if (!text || text.length > CONTEXT_BODY_MAX_CHARS) return {};
+    if (!text || text.length > CONTEXT_BODY_MAX_CHARS) {
+      return { context: {}, acknowledgeBillingChange: false };
+    }
     const body = JSON.parse(text) as unknown;
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return { context: {}, acknowledgeBillingChange: false };
+    }
     const record = body as Record<string, unknown>;
     const repoPath = safeRepoPath(record.repoPath);
     const threadId = safeIdentifier(record.threadId, 160);
     const agentId = safeIdentifier(record.agentId, 128);
     return {
-      workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code'
-        ? record.workspaceMode
-        : undefined,
-      launchKind:
-        record.launchKind === 'repository-catch-up'
-          ? record.launchKind
+      acknowledgeBillingChange: record.acknowledgeBillingChange === true,
+      context: {
+        workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code'
+          ? record.workspaceMode
           : undefined,
-      currentRoute: safeRoute(record.currentRoute),
-      sourceRoute: safeRoute(record.sourceRoute),
-      repoPath,
-      repoName: repoPath ? safeDisplayLabel(record.repoName, 96) : undefined,
-      branch: safeBranch(record.branch),
-      threadId,
-      sessionKey: safeIdentifier(record.sessionKey, 160),
-      threadTitle: threadId ? safeDisplayLabel(record.threadTitle, 160) : undefined,
-      backend:
-        record.backend === 'default' || record.backend === 'openclaw' || record.backend === 'hermes'
-          ? record.backend
-          : undefined,
-      agentId,
-      agentName: agentId ? safeDisplayLabel(record.agentName, 80) : undefined,
-      selectedFile: safeRelativePath(record.selectedFile),
-      controlTab:
-        record.controlTab === 'fleet' ||
-        record.controlTab === 'review' ||
-        record.controlTab === 'changes' ||
-        record.controlTab === 'activity'
-          ? record.controlTab
-          : undefined,
-      runStatus:
-        record.runStatus === 'idle' ||
-        record.runStatus === 'running' ||
-        record.runStatus === 'review' ||
-        record.runStatus === 'blocked' ||
-        record.runStatus === 'failed' ||
-        record.runStatus === 'done'
-          ? record.runStatus
-          : undefined,
-      activeSurface: safeSurface(record.activeSurface),
+        launchKind:
+          record.launchKind === 'repository-catch-up'
+            ? record.launchKind
+            : undefined,
+        currentRoute: safeRoute(record.currentRoute),
+        sourceRoute: safeRoute(record.sourceRoute),
+        repoPath,
+        repoName: repoPath ? safeDisplayLabel(record.repoName, 96) : undefined,
+        branch: safeBranch(record.branch),
+        threadId,
+        sessionKey: safeIdentifier(record.sessionKey, 160),
+        threadTitle: threadId ? safeDisplayLabel(record.threadTitle, 160) : undefined,
+        backend:
+          record.backend === 'default' || record.backend === 'openclaw' || record.backend === 'hermes'
+            ? record.backend
+            : undefined,
+        agentId,
+        agentName: agentId ? safeDisplayLabel(record.agentName, 80) : undefined,
+        selectedFile: safeRelativePath(record.selectedFile),
+        controlTab:
+          record.controlTab === 'fleet' ||
+          record.controlTab === 'review' ||
+          record.controlTab === 'changes' ||
+          record.controlTab === 'activity'
+            ? record.controlTab
+            : undefined,
+        runStatus:
+          record.runStatus === 'idle' ||
+          record.runStatus === 'running' ||
+          record.runStatus === 'review' ||
+          record.runStatus === 'blocked' ||
+          record.runStatus === 'failed' ||
+          record.runStatus === 'done'
+            ? record.runStatus
+            : undefined,
+        activeSurface: safeSurface(record.activeSurface),
+      },
     };
   } catch {
     // The body is optional and additive. Malformed input must not make a legacy
     // caller lose voice access, and no raw body text is ever echoed to the model.
-    return {};
+    return { context: {}, acknowledgeBillingChange: false };
   }
 }
 
@@ -377,8 +397,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const requestedContext = await readPhoneWorkspaceContext(request);
-  const resolvedScope = await resolvePhoneScope(requestedContext);
+  const sessionRequest = await readPhoneSessionRequest(request);
+  const resolvedScope = await resolvePhoneScope(sessionRequest.context);
   if (!resolvedScope) {
     return NextResponse.json(
       { ok: false, error: 'invalid_repo', detail: 'Code mode requires an exact registered repository.' },
@@ -420,11 +440,23 @@ export async function POST(request: NextRequest) {
   const requiresSubscription =
     workspaceContext.launchKind === 'repository-catch-up';
   let realtimeBearer: string;
-  let billingSource: 'chatgpt-subscription' | 'openai-api-key';
+  let billingSource: SymonPhoneBillingSource;
   if (chatgptCredential) {
     realtimeBearer = chatgptCredential.accessToken;
     billingSource = 'chatgpt-subscription';
   } else {
+    if (getOperatorDefaultsSync().values.symonVoiceSubscriptionOnly) {
+      console.warn(`${LOG} subscription_only_blocked: ChatGPT OAuth credential unavailable`);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'subscription_unavailable',
+          detail:
+            'Symon voice is set to subscription only, but no current ChatGPT OAuth login is available. Run `codex login` on the Mac and choose ChatGPT.',
+        },
+        { status: 501 },
+      );
+    }
     if (requiresSubscription) {
       return NextResponse.json(
         {
@@ -448,6 +480,25 @@ export async function POST(request: NextRequest) {
     }
     realtimeBearer = byokKey;
     billingSource = 'openai-api-key';
+  }
+
+  const previousBillingSource = await readLastSymonPhoneBillingSource();
+  if (
+    billingSource === 'openai-api-key' &&
+    previousBillingSource === 'chatgpt-subscription' &&
+    !sessionRequest.acknowledgeBillingChange
+  ) {
+    console.warn(`${LOG} billing_changed: previous=chatgpt-subscription next=openai-api-key`);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'billing_changed',
+        detail: 'Symon voice would move from ChatGPT subscription billing to the metered OpenAI API key.',
+        previous: 'chatgpt-subscription',
+        next: 'openai-api-key',
+      },
+      { status: 409 },
+    );
   }
 
   // Reach the webview: preempt a live desk session + pull the tool schemas.
@@ -526,6 +577,13 @@ export async function POST(request: NextRequest) {
       const detail = data?.error?.message || `OpenAI returned ${mint.status}`;
       console.warn(`${LOG} mint_failed: ${detail}`);
       return NextResponse.json({ ok: false, error: 'mint_failed', detail }, { status: 502 });
+    }
+
+    try {
+      await recordSymonPhoneBillingSource(billingSource);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'billing source persistence failed';
+      console.error(`${LOG} billing_state_failed: ${detail}`);
     }
 
     // OpenAI reports expires_at in unix SECONDS; the contract wants epoch millis.
