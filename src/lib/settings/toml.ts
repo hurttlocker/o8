@@ -25,6 +25,7 @@ import {
   isWorkspaceManifestPolicy,
   sanitizeBranchPrefix,
 } from '@/lib/operator/defaults-env';
+import { isJudgmentProvider } from '@/lib/operator/judgment-default';
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { isTargetingTier } from '@/lib/operator/targeting-tier';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
@@ -278,6 +279,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   symonVoiceSubscriptionOnly: booleanField('symon', 'voice', 'subscriptionOnly'),
   brainUseClaudeCli: booleanField('brain', 'use_claude_cli'),
   workersUseBrain: enumField('brain', 'workers_use_brain', 'one of "off", "auto", or "all"', isWorkersUseBrain),
+  judgmentProvider: enumField('judgment', 'provider', '"off" or "typesafe"', isJudgmentProvider),
   workspaceManifestPolicy: enumField('operator', 'workspace_manifest_policy', 'one of "disabled", "one-approval", or "auto"', isWorkspaceManifestPolicy),
   crossHouseWorkerFallback: booleanField('models', 'cross_house_worker_fallback'),
   orchestratorBackend: enumField('orchestrator', 'backend', 'a supported orchestrator backend', isOrchestratorBackendSetting),

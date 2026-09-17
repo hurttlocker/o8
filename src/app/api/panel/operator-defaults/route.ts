@@ -28,6 +28,7 @@ import {
   isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
 import { isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
+import { isJudgmentProvider } from '@/lib/operator/judgment-default';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -469,6 +470,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('workersUseBrain must be one of "off", "auto", "all".');
     }
     update.workersUseBrain = raw;
+  }
+
+  if (body.judgmentProvider !== undefined) {
+    if (!isJudgmentProvider(body.judgmentProvider)) {
+      throw new Error('judgmentProvider must be "off" or "typesafe".');
+    }
+    update.judgmentProvider = body.judgmentProvider;
   }
 
   if (body.workspaceManifestPolicy !== undefined) {
