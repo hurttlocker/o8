@@ -1853,6 +1853,14 @@
       ]
     },
     {
+      "path": "tests/judgment-receipts-migration-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/judgment-replay-real-path.test.ts",
       "reasons": [
         "child-process",

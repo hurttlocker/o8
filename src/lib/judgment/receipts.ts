@@ -55,6 +55,28 @@ function insertReceiptRow(receipt: JudgmentReceipt): void {
   );
 }
 
+let receiptWriteFailureReported = false;
+
+/**
+ * Report a failed receipt insert once per process, with the columns the table
+ * actually has (#2459). A per-call warning says the same thing forever and
+ * still leaves the next report guessing; the column list names the drift.
+ */
+function reportReceiptWriteFailureOnce(error: unknown): void {
+  if (receiptWriteFailureReported) return;
+  receiptWriteFailureReported = true;
+  let columns = 'unreadable';
+  try {
+    columns = (getSqlite().prepare('PRAGMA table_info(judgment_receipts)').all() as Array<{ name: string }>)
+      .map((entry) => entry.name).join(', ') || 'none';
+  } catch { /* the column list is a diagnostic; never let reading it mask the failure */ }
+  console.error(
+    '[judgment] receipt write failed, silenced for the rest of this process:',
+    error instanceof Error ? error.message : error,
+    `| judgment_receipts columns: ${columns}`,
+  );
+}
+
 /**
  * Persist one call's receipt: a `judgment` lane event when a lane is in
  * context, otherwise (or if the lane write fails) a `judgment_receipts` row.
@@ -75,7 +97,7 @@ export function recordJudgmentReceipt(input: JudgmentReceiptInput): string | nul
     insertReceiptRow(receipt);
     return receipt.id;
   } catch (error) {
-    console.error('[judgment] receipt write failed:', error instanceof Error ? error.message : error);
+    reportReceiptWriteFailureOnce(error);
     return null;
   }
 }
