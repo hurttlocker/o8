@@ -45,7 +45,7 @@ import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/op
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
 import { noteBrainQuotaError } from './brain-quota-alert';
-import { classifyWithReferee } from './referee';
+import { classifyWithReferee, isBrainRefereeEnabled } from './referee';
 
 export type QuestionClass = 'A' | 'B';
 
@@ -88,6 +88,9 @@ function getCachedClassification(question: string): ClassifierResult | null {
     classifierCache.delete(classifierCacheKey(question));
     return null;
   }
+  // A referee answer cached while `judgment.provider` was on must not outlive
+  // the setting: treat it as a miss so the model tiers run.
+  if (entry.result.classifier === 'referee' && !isBrainRefereeEnabled()) return null;
   return entry.result;
 }
 

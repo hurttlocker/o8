@@ -18,6 +18,7 @@ import {
   thresholdAnswer,
   type AskJudgmentOptions,
 } from '@/lib/judgment';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 
 /**
  * Minimum referee confidence for the classification to be used. Provisional:
@@ -32,6 +33,15 @@ export interface RefereeClassification {
   bm25Variants: string[];
   classifier: 'referee';
   receiptId: string | null;
+}
+
+/** Whether the referee may run: the same `judgment.provider` check `askJudgment` makes. */
+export function isBrainRefereeEnabled(): boolean {
+  try {
+    return getOperatorDefaultsSync().values.judgmentProvider === 'typesafe';
+  } catch {
+    return false;
+  }
 }
 
 let transportOverride: AskJudgmentOptions = {};

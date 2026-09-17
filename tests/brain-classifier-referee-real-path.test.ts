@@ -185,6 +185,34 @@ describe('Brain classifier referee tier through the ask pipeline', () => {
     expect(refereeReceipts).toHaveLength(1);
   });
 
+  it('ignores a cached referee classification once the setting is switched off within the TTL', async () => {
+    const question = 'Explain how the lane retry counter resets';
+    const frames: Array<{ name: string; payload: Record<string, unknown> }> = [];
+    const collect = (name: string, payload: unknown) => { frames.push({ name, payload: payload as Record<string, unknown> }); };
+
+    fixture.replies.push(refereeReply('classB', 0.9));
+    await runAskPipeline(question, undefined, collect, true);
+    expect(fixture.seen).toHaveLength(1);
+    expect(frames.find((frame) => frame.name === 'sources')!.payload.classifier).toBe('referee');
+    expect(h.order).not.toContain('openrouter:classify');
+
+    await updateOperatorDefaults({ judgmentProvider: 'off' });
+    fixture.reset();
+    frames.length = 0;
+    h.order.length = 0;
+    h.composed.length = 0;
+    h.openRouterClass = 'A';
+
+    await runAskPipeline(question, undefined, collect, true);
+
+    expect(fixture.seen).toHaveLength(0);
+    expect(h.order).toContain('openrouter:classify');
+    expect(h.composed).toEqual(['A']);
+    const sources = frames.find((frame) => frame.name === 'sources')!.payload;
+    expect(sources).not.toHaveProperty('classifier');
+    expect(sources).not.toHaveProperty('classificationReceiptId');
+  });
+
   it('leaves tier order and outputs unchanged with the setting off', async () => {
     await updateOperatorDefaults({ judgmentProvider: 'off' });
     fixture.replies.push(refereeReply('classB', 0.99));
