@@ -685,6 +685,67 @@ operator was away. A watch body may hold a single step, so the ledger's plan
 position check accepts a step count of one through five rather than two through
 five — without that, a one-step body failed its first checkpoint and never ran.
 
+### The phone's watch surface
+
+The tools' own routes (`/api/symon/watches` and `/api/symon/watches/[id]`) carry
+the operator bearer and are not on the device allowlist, so a paired phone could
+only learn about a standing intent by opening a voice session and asking Symon to
+call `symon_watch_list`. Two device-token routes make the same state readable and
+one watch clearable without a session:
+
+| Route | Method | Answer |
+|---|---|---|
+| `/api/mobile/symon/watches` | `GET` | `{ ok: true, watches: [...] }` |
+| `/api/mobile/symon/watches/[id]` | `DELETE` | `{ ok: true, watch }`, or `404 { ok: false, error: "not_found" }` |
+
+Each listed watch is the phone's narrower projection of `symonWatchRecord`
+(`src/lib/mobile/symon-watch-view.ts`), one object per standing intent:
+
+```jsonc
+{
+  "id": "watch_...",
+  "condition": "tell me when the release checks finish", // the operator's words
+  "then": "report",                                      // "report" | "plan" | null
+  "summary": "The release checks are done.",             // a plan appends "Then: <tool>, <tool>."
+  "deadline": 1757980000000,                             // epoch ms, or null
+  "state": "active",                                     // active|parked|fired|expired|cancelled
+  "parked": false,
+  "nudgedAt": null,                                      // epoch ms the park was announced
+  "lastLedgerEvent": { "phase": "watch_registered", "outcome": "watching", "summary": "…", "createdAt": 1757900000 }
+}
+```
+
+`state` is the operator's word for the row, not the engine's flags:
+`symonWatchRecord` collapses every settled watch to `closed`, and the ledger tail
+is what separates a watch that fired from one that was cancelled. Settled watches
+stay in the list, because a phone that was away when one fired needs the ledger
+entry to see what happened to it.
+
+The phone polls this list, so it is **bounded**: every live watch (active or
+parked) plus the **20 most recently created settled ones**
+(`SYMON_WATCH_SETTLED_LIMIT`). Nothing prunes a settled row, so an uncapped list
+would grow forever on a repeated request. The ledger tails come from one batched
+query per list rather than one per row. Watches are **install-wide** — not per
+device and not per session — so a second paired phone sees the same list and may
+cancel anything on it.
+
+The list is read-only — registering a watch stays inside a turn, where it cards —
+and the cancel runs `cancelSymonWatch`, the same call `symon_watch_cancel` makes:
+pending fires cleared, row closed, one `watch_cancelled` ledger entry, and a saved
+plan body never run. Cancelling an already-**settled** watch changes nothing and
+writes nothing: it answers 200 with the row as it stands, so a phone retrying a
+dropped request is neither told its watch vanished nor allowed to restamp a watch
+that fired as cancelled. The ledger is append-only, so that guard lives in
+`cancelSymonWatch` rather than in the route. A **parked** watch is still live and
+still cancels.
+
+Both accept the operator bearer or a paired device token and refuse a dispatched
+worker with 403. The device allowlist in `src/middleware.ts` grants exactly `GET`
+on the list and `DELETE` on one id; every other method on either path is 403.
+Real-path coverage: `src/app/api/mobile/symon/watches/route.test.ts` (both
+handlers against fixture watches with a registry-minted device token) and the
+device-capability cases in `tests/middleware-gate.test.ts`.
+
 ### Cut from the first version
 
 - **Pull request mergeability.** Nothing emits an event when a PR becomes

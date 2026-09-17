@@ -538,6 +538,29 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     expect(deviceRequest('/api/panel/approvals', 'POST').status).toBe(200);
   });
 
+  it('allows a paired phone to read and cancel its Symon watches, and nothing else', () => {
+    // Read + cancel only. Registering a watch stays inside a voice turn, where
+    // it cards, so no method beyond these two reaches the phone's watch surface.
+    expect(deviceRequest('/api/mobile/symon/watches', 'GET').status).toBe(200);
+    expect(deviceRequest('/api/mobile/symon/watches/watch_abc123', 'DELETE').status).toBe(200);
+    expect(deviceRequest('/api/mobile/symon/watches', 'POST').status).toBe(403);
+    expect(deviceRequest('/api/mobile/symon/watches', 'DELETE').status).toBe(403);
+    expect(deviceRequest('/api/mobile/symon/watches/watch_abc123', 'POST').status).toBe(403);
+    expect(deviceRequest('/api/mobile/symon/watches/watch_abc123', 'GET').status).toBe(403);
+  });
+
+  it('refuses an unauthenticated caller on both Symon watch paths', () => {
+    for (const [pathname, method] of [
+      ['/api/mobile/symon/watches', 'GET'],
+      ['/api/mobile/symon/watches/watch_abc123', 'DELETE'],
+    ] as const) {
+      expect(panelGateMiddleware(gatedRequest(`http://192.168.1.50:3001${pathname}`, {
+        method,
+        headers: { host: '192.168.1.50:3001' },
+      })).status).toBe(401);
+    }
+  });
+
   it.each([
     ['/api/mobile/terminal-sessions', 'GET'],
     ['/api/mobile/terminal-input', 'POST'],
