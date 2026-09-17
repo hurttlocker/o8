@@ -19,7 +19,7 @@ const RECOVERABLE_MERGE_FAILURE_POLICIES = new Set([
   'fast_forward_failure_escalation',
 ]);
 
-async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
+export async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
   const cwd = lane.worktreePath || lane.repoPath;
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');

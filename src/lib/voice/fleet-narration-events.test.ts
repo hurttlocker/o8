@@ -50,6 +50,31 @@ describe('fleet narration event normalization', () => {
     expect(event.rawRef.source).toBe('lane-event');
   });
 
+  it('labels a gate-failure warning plainly instead of reading it as a failure', () => {
+    const event = normalizeFleetNarrationEvent({
+      source: 'lane-event',
+      event: laneEvent('evt-gate-warning', 'gate_failure_warning', { risk: 2.7, confidence: 0.8 }),
+      lane: {
+        id: 'lane-auth',
+        label: 'Auth packet',
+        packetId: 'pkt-auth',
+        runtime: 'codex',
+        sessionKey: null,
+        status: 'reviewing',
+        lastEventLabel: 'post_rebase_typecheck_failed',
+        outcome: null,
+      },
+      packet: null,
+      agent: null,
+    });
+
+    expect(event).toMatchObject({
+      kind: 'other',
+      summary: 'Gate-failure warning recorded',
+      transitionState: 'gate-failure-warning',
+    });
+  });
+
   it('maps the exact worker-events row shape and turn-summary rollup', () => {
     const worker = normalizeFleetNarrationEvent({
       source: 'worker-event',

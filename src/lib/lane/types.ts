@@ -303,6 +303,11 @@ export type LaneEventVerb =
   // typecheck_escalation — layer 2 promoted the lane to awaiting_orchestrator
   | 'typecheck_auto_retry'
   | 'typecheck_escalation'
+  // Advisory referee gate-failure risk for the packet's diff, recorded just
+  // before a layer-1 auto-rerun when judgment.provider is on (#2437). Nothing
+  // reads it; the rerun fires the same either way.
+  // Payload: { receiptId, packetId, risk, legend, confidence, abstain, truncated, hiddenText, diffFingerprint }
+  | 'gate_failure_warning'
   // A repo publication action exhausted its bounded resource-lease wait.
   // Payload: { resource, waitedMs, holder, retryCount, willRetry }
   | 'lease_wait_timeout'
