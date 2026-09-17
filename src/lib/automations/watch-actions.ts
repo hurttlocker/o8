@@ -3,6 +3,7 @@ import { createApproval } from '@/lib/approvals/store';
 import { appendBroadcastEvent } from '@/lib/broadcast/post';
 import { dispatch } from '@/lib/lane/commands';
 import { runAutomation, type RunAutomationResult } from './runner';
+import { runSymonWatchAction } from './symon-watch';
 import type { AutomationFire } from './fire-store';
 
 function watchMessage(row: typeof automations.$inferSelect, fire: AutomationFire): string {
@@ -27,6 +28,11 @@ export async function runWatchAutomationAction(
   row: typeof automations.$inferSelect,
   fire: AutomationFire,
 ): Promise<RunAutomationResult> {
+  // Symon watches never open a lane: their whole action is a spoken report or
+  // a plan body that still has to pass the native confirm card.
+  if (fire.actionKind === 'symon_report' || fire.actionKind === 'symon_plan') {
+    return runSymonWatchAction(row, fire);
+  }
   const message = watchMessage(row, fire);
   if (fire.actionKind === 'dispatch') {
     return runAutomation(row, message);

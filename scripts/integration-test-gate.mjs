@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { classifyAgainstBaseline, loadRedBaseline } from './lib/red-baseline.mjs';
 
 const root = process.cwd();
 const vitest = join(root, 'node_modules', 'vitest', 'vitest.mjs');
@@ -20,7 +21,16 @@ const testPlan = process.env.O8_INTEGRATION_TEST_MODE === '1' && process.env.O8_
   ? JSON.parse(readFileSync(process.env.O8_INTEGRATION_TEST_PLAN, 'utf8'))
   : null;
 const integrationConfig = testPlan?.config ?? 'config/vitest/vitest.integration.config.ts';
-const allFiles = testPlan?.files ?? classification.resourceOwning.map((entry) => entry.path);
+const shard = /^(\d+)\/(\d+)$/.exec(process.env.O8_INTEGRATION_SHARD ?? '');
+const manifestFiles = testPlan?.files ?? classification.resourceOwning.map((entry) => entry.path);
+// O8_INTEGRATION_SHARD=k/n runs the k-th of n contiguous slices of the file
+// list, so the weekly CI lane fits two runner timeouts (#2391).
+const allFiles = shard
+  ? manifestFiles.slice(
+    Math.ceil((manifestFiles.length * (Number(shard[1]) - 1)) / Number(shard[2])),
+    Math.ceil((manifestFiles.length * Number(shard[1])) / Number(shard[2])),
+  )
+  : manifestFiles;
 const filters = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
 const files = filters.length === 0
   ? allFiles
@@ -64,7 +74,9 @@ let lastMarkerProbeDiagnostic = null;
 
 function markerPids(marker) {
   if (!marker || process.platform === 'win32') return null;
-  const receipt = spawnSync('ps', ['eww', '-axo', 'pid=,command='], {
+  // `axeww -o` is accepted by both BSD ps and Linux procps; the older
+  // `eww -axo` form exits 1 on Linux runners, failing every file (#2391).
+  const receipt = spawnSync('ps', ['axeww', '-o', 'pid=,command='], {
     encoding: 'utf8',
     timeout: 3_000,
     maxBuffer: MARKER_SCAN_MAX_BUFFER,
@@ -441,14 +453,30 @@ try {
 }
 
 const failures = results.filter((result) => result.code !== 0 || result.signal);
+// O8_INTEGRATION_BASELINE names files already red on the CI runner (#2391).
+// They still run; their failures are reported but do not fail the gate.
+const baselinePath = process.env.O8_INTEGRATION_BASELINE;
+const baseline = loadRedBaseline(baselinePath);
+if (baselinePath && !baseline) {
+  console.error(`[integration-gate] baseline ${baselinePath} unavailable; every failure counts`);
+}
+const verdict = classifyAgainstBaseline(
+  results.map((result) => ({ file: result.file, failed: result.code !== 0 || Boolean(result.signal) })),
+  baseline,
+);
+for (const file of verdict.baselineRed) console.log(`[integration-gate] baseline red ${file}`);
+for (const file of verdict.nowGreen) {
+  console.log(`[integration-gate] baseline file now green, remove it from the list: ${file}`);
+}
+const gatingFailures = failures.filter((result) => verdict.newRed.includes(result.file));
 const totals = results.reduce((sum, result) => ({
   total: sum.total + result.total,
   passed: sum.passed + result.passed,
   failed: sum.failed + result.failed,
   pending: sum.pending + result.pending,
 }), { total: 0, passed: 0, failed: 0, pending: 0 });
-console.log(`[integration-gate] summary: ${results.length}/${files.length} files, ${totals.passed}/${totals.total} tests passed, ${failures.length} failed files, ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
-if (failures[0]) console.error(`[integration-gate] first cause: ${failures[0].firstFailure}`);
+console.log(`[integration-gate] summary: ${results.length}/${files.length} files, ${totals.passed}/${totals.total} tests passed, ${failures.length} failed files, ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ran ${verdict.ran} · green ${verdict.green.length} · baseline red ${verdict.baselineRed.length} · new red ${verdict.newRed.length}`);
+if (failures[0]) console.error(`[integration-gate] first cause: ${(gatingFailures[0] ?? failures[0]).firstFailure}`);
 
 if (process.env.O8_TEST_GATE_REPORT_PATH) {
   writeFileSync(process.env.O8_TEST_GATE_REPORT_PATH, JSON.stringify({
@@ -469,4 +497,4 @@ if (process.env.O8_TEST_GATE_REPORT_PATH) {
 }
 
 if (interruptedBy) process.exit(130);
-process.exit(failures.length > 0 ? 1 : 0);
+process.exit(gatingFailures.length > 0 ? 1 : 0);

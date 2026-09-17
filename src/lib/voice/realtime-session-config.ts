@@ -94,6 +94,34 @@ export function assertRealtimeCapableModel(model: string): RealtimeModelCheck {
 export type PhoneCodeModelVariant = 'mini' | 'flagship' | 'live';
 export type PhoneCodeModelExperiment = PhoneCodeModelVariant | 'ab';
 
+/**
+ * The brain a phone session runs on (#2423). `realtime` is the standard path
+ * every plan gets; `live` is the delegated voice layer a paid plan may choose
+ * per session. This is the operator's choice, not a cohort assignment — the
+ * caller resolves the plan before asking for it.
+ */
+export type SymonBrain = 'realtime' | 'live';
+
+interface PhoneRealtimeModelSelection {
+  model: string;
+  variant: PhoneCodeModelVariant;
+  backendModel?: string;
+}
+
+/**
+ * The delegated `live` pair: the voice layer's id plus the backend Responses
+ * model that actually reasons. Shared by the operator's brain choice and the
+ * developer experiment so the two can never name different backends.
+ */
+function liveModelSelection(liveBackendModel?: string | null): PhoneRealtimeModelSelection {
+  const configuredBackend = typeof liveBackendModel === 'string' ? liveBackendModel.trim() : '';
+  return {
+    variant: 'live',
+    model: REALTIME_LIVE_MODEL,
+    backendModel: configuredBackend || DEFAULT_LIVE_BACKEND_MODEL,
+  };
+}
+
 const PHONE_CODE_MODEL_VARIANTS: readonly PhoneCodeModelVariant[] = ['mini', 'flagship', 'live'];
 
 /** Narrow an env string / operator header to a known variant, else null. */
@@ -113,9 +141,18 @@ function stableBucket(value: string): number {
   return hash >>> 0;
 }
 
-/** Ordinary Life uses mini; catch-up uses flagship; Code can run an experiment. */
+/**
+ * An explicit live brain wins outright; otherwise ordinary Life uses mini,
+ * catch-up uses flagship, and Code can run an experiment.
+ */
 export function selectPhoneRealtimeModel(input: {
   workspaceMode: 'o8' | 'code';
+  /**
+   * The plan-resolved brain for this session (#2423). `live` outranks workspace
+   * mode, the catch-up experience, and the experiment, because it is the thing
+   * the operator explicitly asked this session to run on.
+   */
+  brain?: SymonBrain | null;
   experiment?: string | null;
   bucketKey: string;
   operatorOverride?: string | null;
@@ -126,7 +163,8 @@ export function selectPhoneRealtimeModel(input: {
    * module is isomorphic and the browser realtime client imports it too.
    */
   liveBackendModel?: string | null;
-}): { model: string; variant: PhoneCodeModelVariant; backendModel?: string } {
+}): PhoneRealtimeModelSelection {
+  if (input.brain === 'live') return liveModelSelection(input.liveBackendModel);
   if (input.experience === 'repository-catch-up') {
     return { model: REALTIME_FLAGSHIP_MODEL, variant: 'flagship' };
   }
@@ -142,14 +180,7 @@ export function selectPhoneRealtimeModel(input: {
     ?? (configured === 'ab'
       ? (stableBucket(input.bucketKey) % 2 === 0 ? 'mini' : 'flagship')
       : configured);
-  if (variant === 'live') {
-    const configuredBackend = typeof input.liveBackendModel === 'string' ? input.liveBackendModel.trim() : '';
-    return {
-      variant,
-      model: REALTIME_LIVE_MODEL,
-      backendModel: configuredBackend || DEFAULT_LIVE_BACKEND_MODEL,
-    };
-  }
+  if (variant === 'live') return liveModelSelection(input.liveBackendModel);
   return {
     variant,
     model: variant === 'flagship' ? REALTIME_FLAGSHIP_MODEL : REALTIME_MODEL,
@@ -256,6 +287,10 @@ export const PHONE_CODE_TOOL_NAMES = [
   'repo_commit_diff',
   'symon_ledger_recent',
   'symon_ledger_undo',
+  'symon_watch',
+  'symon_watch_list',
+  'symon_watch_cancel',
+  'symon_watch_run',
 ] as const;
 
 /**
@@ -296,6 +331,10 @@ export const PHONE_O8_TOOL_NAMES = [
   'gh_triage',
   'symon_ledger_recent',
   'symon_ledger_undo',
+  'symon_watch',
+  'symon_watch_list',
+  'symon_watch_cancel',
+  'symon_watch_run',
 ] as const;
 
 export interface PhoneToolSelection {

@@ -112,9 +112,15 @@ Request body (all fields optional; legacy `{}` remains valid):
   "selectedFile": "src/app/symon.tsx",
   "controlTab": "changes",
   "runStatus": "review",
-  "activeSurface": "symon"
+  "activeSurface": "symon",
+  "brain": "live"
 }
 ```
+
+`brain` accepts only `"realtime"` and `"live"`. Absent or unrecognized means
+`"realtime"`, which mints exactly what every plan gets today. `"live"` is the
+delegated voice brain below, and it is honored only on a paid plan; see the plan
+rule after the model contract.
 
 `launchKind` accepts only `"repository-catch-up"`. It is a server-owned routing
 discriminator for the Home briefing, not model evidence; the phone sends the
@@ -288,6 +294,8 @@ Success `200`:
     "expiresAt": 1783490000000,
     "model": "gpt-realtime-2.1-mini",
     "modelVariant": "mini",
+    "brain": "realtime",
+    "brains": ["realtime"],
     "billingSource": "chatgpt-subscription",
     "voice": "<same voice>",
     "baseUrl": "https://api.openai.com/v1/realtime",
@@ -358,6 +366,32 @@ operator-only test may override one Code mint with
 `gpt-realtime-2.1`; the response exposes `modelVariant` so eval reports cannot
 confuse the cohorts.
 
+#### Which brain a session runs on (#2423)
+
+The brain is the operator's per-session choice, resolved from the plan before any
+credential is read or any token is minted:
+
+| Plan | `brains` in the response | `brain: "live"` in the request |
+|---|---|---|
+| free | `["realtime"]` | `403 brain_locked`, nothing minted |
+| pro, team, founder | `["realtime","live"]` | honored — mints the delegated session |
+
+`session.brain` names what was minted and `session.brains` names what this plan
+may choose, so the phone shows a brain switch only when there is something to
+switch to. With no `brain` in the request every plan mints the standard model
+exactly as before, byte for byte. The gate has one name,
+`voice.liveBrain` in `src/lib/entitlement/flags.ts`, equal to `isPaidPlan`; it is
+a cost lever, not a capability gate, because the live layer bills per voice
+minute on top of its backend model's tokens. An explicit `brain` outranks the
+workspace mode, the catch-up experience, and the experiment switch. The mint log
+line records it: `[symon-agent] minted sym-… (model=… brain=live billing=… )`.
+
+`O8_SYMON_CODE_REALTIME_EXPERIMENT` and the operator-only
+`x-o8-symon-code-model` header remain developer overrides, and neither widens
+what the plan allows. On a free plan a `live` override is dropped, the mint
+continues on the standard model, and the Mac logs
+`[symon-agent] live_override_ignored: …`.
+
 #### The `live` variant (delegated voice, #2411 — TRIAL, unproven)
 
 `gpt-live-1` is a full-duplex voice layer that does not reason. It delegates
@@ -369,7 +403,7 @@ product wants for Symon, which is why the id was admitted to
 
 | Env | Default | Effect |
 |---|---|---|
-| `O8_SYMON_CODE_REALTIME_EXPERIMENT=live` | unset | Code mints `gpt-live-1` instead of a realtime model |
+| `O8_SYMON_CODE_REALTIME_EXPERIMENT=live` | unset | Code mints `gpt-live-1` instead of a realtime model, on a paid plan only |
 | `O8_SYMON_LIVE_BACKEND_MODEL` | `gpt-5.6-terra` | the backend Responses model that reasons and calls tools |
 
 Because the voice layer holds no brain, the `live` mint moves the persona and
@@ -428,6 +462,7 @@ Errors (typed, structured, never thrown):
 |---|---|---|
 | 401 | `unauthorized` | missing/bad Bearer (middleware) |
 | 403 | `locked` | entitlement does not include S2S (same rule as the desk mint) |
+| 403 | `brain_locked` | the request asked for `brain:"live"` on a plan that does not include it; nothing is minted and no credential is read |
 | 409 | `billing_changed` | previous mint used ChatGPT subscription billing and this mint would use the metered API key; body includes `previous` and `next` |
 | 501 | `no_key` | BYOK OpenAI key absent (same rule as the desk mint — managed proxy does not carry realtime in v1) |
 | 501 | `subscription_unavailable` | repository catch-up or `symon.voice.subscriptionOnly` requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
@@ -537,6 +572,192 @@ file writes, and newly created Reminders, Calendar events, and Notes. File and
 resource inverses compare the current post-state before changing it; a later
 edit, symlink replacement, resource mutation, consumed token, or app restart
 for an in-memory edit makes the undo fail closed.
+
+## Watches — standing intents that outlive the turn
+
+Symon can act inside a turn and can run a short ordered plan, but until watches
+neither survived the conversation ending. A watch is a durable standing intent:
+"tell me when the checks on that pull request finish", "when that packet merges,
+take these steps". It survives the turn, the session, the phone locking, and a
+desktop restart.
+
+A watch is **not a second engine**. It is an ordinary row in o8's `automations`
+table with `triggerKind: 'watch'` and a Symon action kind, so it inherits the
+existing source-event checkpointing, fan-out rate limiting, and deadline
+handling in `src/lib/automations/`. Schema v62 adds three columns plus the park
+pointer: `symon_session_id`, `symon_then_json`, `symon_parked_at`, and
+`symon_parked_fire_id`.
+
+### The four tools
+
+| Tool | Class | What it does |
+|---|---|---|
+| `symon_watch(condition, then, deadline_minutes)` | Reversible | Registers one watch. `condition` names an observable o8 already tracks; `then` is `{kind:"report", say}` or `{kind:"plan", say, steps}`. |
+| `symon_watch_list` | ReadOnly | What Symon is still waiting on, for this session. |
+| `symon_watch_cancel(id)` | Reversible | Clears one watch. Never runs its saved plan. |
+| `symon_watch_run(id)` | Reversible | Runs the plan a fired watch saved, through the native plan executor. |
+
+All four are plan-control tools, so a plan can never nest one. Registering and
+cancelling both card, and the card reads the whole standing intent back: the
+condition in the operator's words, what will happen, the saved steps through the
+same read-back `execute_plan` uses, and when the watch gives up. A plan body that
+cannot be read back is refused at registration rather than at three in the
+morning.
+
+### The two action kinds
+
+`watch_action_kind` gains `symon_report` and `symon_plan` beside the existing
+`dispatch` / `notify` / `steer` / `approval`. Neither opens a lane:
+
+- **`symon_report`** pushes a spoken report through the same loopback bridge the
+  background brain uses — `POST /symon-task-complete` on the WS port, fanned out
+  as a `symon-task-complete` frame on the `symon` channel. `taskId` is the watch
+  id, `intentText` is the operator's own wording of the condition, `resultText`
+  is the model's `say` plus the observed event.
+- **`symon_plan`** pushes the same frame, naming the watch id and telling the
+  model to call `symon_watch_run`. The steps themselves never run from the fire.
+
+A Symon watch is **one-shot**: the question is answered once and the row closes.
+"Keep going until this is true" ends when the condition first holds. One-shot is
+enforced twice, because a loose condition can match several events at once: the
+row carries `watchMaxFiresPerTick: 1`, and the action closes the row *before* it
+delivers, so a second fire finds nothing to report.
+
+### Park and drain — the offline confirm rule
+
+`confirm_with_receipt` needs a live session and expires in 120 seconds, so a fire
+that lands while the phone is away cannot raise a card. When the push returns
+`delivered: 0`, the watch **parks**: `symon_parked_at` is stamped, the row is
+disabled so the shared materializer cannot fan out a second fire, and nothing
+else happens.
+
+The park drains when a Symon session **registers** — a new owner for the session,
+not every `connecting`/`live`/`acting` frame a phone sends inside one — and, as a
+safety net, once per scheduler tick after the ordinary automations have had
+theirs. Draining re-pushes the frame.
+
+A parked watch is announced **exactly once**. `symon_nudged_at` is both the
+record that the operator has been told and the claim that decides which of two
+overlapping drains speaks: the stamp is taken with a conditional UPDATE and only
+the writer that changed the row delivers. It is cleared by running or cancelling
+the watch, by nothing else. A failed delivery releases the claim so the next
+registration retries.
+
+A report is complete once it is spoken. A plan body stays parked until the model
+calls `symon_watch_run`, which takes the body with a second conditional UPDATE
+(so two calls cannot raise two cards for one body, and a claim older than fifteen
+minutes is reclaimable), then enters `plan::execute_plan` on the
+`PlanSurface::WatchRun` surface and shows the ordinary confirmation card carrying
+the condition that fired. The decision is written back to the watch row and to
+the ledger.
+
+**There is no new approval transport and nothing auto-approves.** A watch grants
+no execution authority; it only decides *when* to ask.
+
+A watch body may hold a single step, unlike a live plan's two-step floor: the
+operator already approved the standing intent, and the run still cards. The
+catalog is the narrower `enabled_tools()` set, so a Destructive tool can never
+appear in a saved body.
+
+### Deadline
+
+Every watch carries a deadline (default one day, maximum one week). A watch past
+its deadline is disabled with a `watch_expired` ledger entry and no fire. A
+**parked** watch expires too: a deadline the operator set is a deadline, and a
+watch that nobody came back for must not wait forever. Expiry runs before the
+shared materializer in a tick, because that engine also disables an expired row
+but cannot reach Symon's ledger.
+
+### Ledger
+
+Watch lifecycle events land in the same append-only `agent_plan_events` table as
+plan lifecycle events, with `source = 'symon_watch'` and `plan_id = task_id =` the
+watch id. Phases: `watch_registered`, `watch_fired`, `watch_parked`,
+`watch_drained`, `watch_ran`, `watch_cancelled`, `watch_expired`. The Node
+scheduler writes these directly because a watch fires long after the native turn
+that registered it ended; both sides create the table with identical
+`CREATE TABLE IF NOT EXISTS` DDL and only ever INSERT.
+
+Two surfaces read them. `symon_watch_list` carries each watch's latest ledger
+event, and `symon_ledger_recent` merges watch events with the action ledger, so
+"what did you just do?" cannot silently omit everything a watch did while the
+operator was away. A watch body may hold a single step, so the ledger's plan
+position check accepts a step count of one through five rather than two through
+five — without that, a one-step body failed its first checkpoint and never ran.
+
+### The phone's watch surface
+
+The tools' own routes (`/api/symon/watches` and `/api/symon/watches/[id]`) carry
+the operator bearer and are not on the device allowlist, so a paired phone could
+only learn about a standing intent by opening a voice session and asking Symon to
+call `symon_watch_list`. Two device-token routes make the same state readable and
+one watch clearable without a session:
+
+| Route | Method | Answer |
+|---|---|---|
+| `/api/mobile/symon/watches` | `GET` | `{ ok: true, watches: [...] }` |
+| `/api/mobile/symon/watches/[id]` | `DELETE` | `{ ok: true, watch }`, or `404 { ok: false, error: "not_found" }` |
+
+Each listed watch is the phone's narrower projection of `symonWatchRecord`
+(`src/lib/mobile/symon-watch-view.ts`), one object per standing intent:
+
+```jsonc
+{
+  "id": "watch_...",
+  "condition": "tell me when the release checks finish", // the operator's words
+  "then": "report",                                      // "report" | "plan" | null
+  "summary": "The release checks are done.",             // a plan appends "Then: <tool>, <tool>."
+  "deadline": 1757980000000,                             // epoch ms, or null
+  "state": "active",                                     // active|parked|fired|expired|cancelled
+  "parked": false,
+  "nudgedAt": null,                                      // epoch ms the park was announced
+  "lastLedgerEvent": { "phase": "watch_registered", "outcome": "watching", "summary": "…", "createdAt": 1757900000 }
+}
+```
+
+`state` is the operator's word for the row, not the engine's flags:
+`symonWatchRecord` collapses every settled watch to `closed`, and the ledger tail
+is what separates a watch that fired from one that was cancelled. Settled watches
+stay in the list, because a phone that was away when one fired needs the ledger
+entry to see what happened to it.
+
+The phone polls this list, so it is **bounded**: every live watch (active or
+parked) plus the **20 most recently created settled ones**
+(`SYMON_WATCH_SETTLED_LIMIT`). Nothing prunes a settled row, so an uncapped list
+would grow forever on a repeated request. The ledger tails come from one batched
+query per list rather than one per row. Watches are **install-wide** — not per
+device and not per session — so a second paired phone sees the same list and may
+cancel anything on it.
+
+The list is read-only — registering a watch stays inside a turn, where it cards —
+and the cancel runs `cancelSymonWatch`, the same call `symon_watch_cancel` makes:
+pending fires cleared, row closed, one `watch_cancelled` ledger entry, and a saved
+plan body never run. Cancelling an already-**settled** watch changes nothing and
+writes nothing: it answers 200 with the row as it stands, so a phone retrying a
+dropped request is neither told its watch vanished nor allowed to restamp a watch
+that fired as cancelled. The ledger is append-only, so that guard lives in
+`cancelSymonWatch` rather than in the route. A **parked** watch is still live and
+still cancels.
+
+Both accept the operator bearer or a paired device token and refuse a dispatched
+worker with 403. The device allowlist in `src/middleware.ts` grants exactly `GET`
+on the list and `DELETE` on one id; every other method on either path is 403.
+Real-path coverage: `src/app/api/mobile/symon/watches/route.test.ts` (both
+handlers against fixture watches with a registry-minted device token) and the
+device-capability cases in `tests/middleware-gate.test.ts`.
+
+### Cut from the first version
+
+- **Pull request mergeability.** Nothing emits an event when a PR becomes
+  mergeable, so there is no observable to checkpoint. Watching it would mean
+  polling GitHub, which is a separate decision.
+- **An approval appearing.** Approvals have no source-event producer feeding
+  `automation_source_events`.
+
+Both are additive: they need a producer, not a change to this design. What is
+observable today is packet state and lane/agent finish (`sourceKind: 'packet'`,
+from `ingestLaneAutomationSourceEvents`) and check runs, workflow runs, pull
+request state, and commits (`sourceKind: 'repository'`, from the GitHub webhook).
 
 ## Mutual exclusion — LAST-START-WINS (symmetric)
 

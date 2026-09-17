@@ -56,6 +56,10 @@ mod planner_seat_tests;
 #[path = "front_brain_tests.rs"]
 mod front_brain_tests;
 
+#[cfg(test)]
+#[path = "watch_run_tests.rs"]
+mod watch_run_tests;
+
 pub(crate) use execution::{
     execute_cascaded_tool_call, execute_realtime_tool_call, execute_text_tool_call,
 };
@@ -1382,9 +1386,91 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
             .map(|summary| format!("Undo the action that {summary}"))
             .unwrap_or_else(|| format!("Undo action {}", s("action_id"))),
         "symon_execute_plan" => s("_symonPlanSummary"),
+        // A standing intent is approved once and acts later, so the card has to
+        // read back the whole thing: what Symon waits for, what it will do, and
+        // when it gives up.
+        "symon_watch" => {
+            let condition = args
+                .get("condition")
+                .and_then(|value| value.get("text"))
+                .and_then(Value::as_str)
+                .unwrap_or("something you asked about");
+            let then = args.get("then");
+            let say = then
+                .and_then(|value| value.get("say"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let deadline = args
+                .get("deadline_minutes")
+                .and_then(Value::as_i64)
+                .unwrap_or(24 * 60);
+            let action = match then.and_then(|value| value.get("kind")).and_then(Value::as_str) {
+                Some("plan") => {
+                    let steps = then
+                        .and_then(|value| value.get("steps"))
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    match plan::watch_body_readback(&steps) {
+                        Ok(readback) => format!(
+                            "offer this plan, which still asks before it runs: {readback}"
+                        ),
+                        Err(error) => format!("run a plan that cannot be read back: {error}"),
+                    }
+                }
+                _ => format!("tell you: \u{201c}{say}\u{201d}"),
+            };
+            format!(
+                "Watch for \u{201c}{condition}\u{201d}, then {action}. Stops watching after {deadline} minutes."
+            )
+        }
+        "symon_watch_cancel" => watch_condition(&s("id"))
+            .map(|condition| format!("Stop watching for \u{201c}{condition}\u{201d}"))
+            .unwrap_or_else(|| format!("Stop watch {}", s("id"))),
+        // Reached only if a watch run is ever carded outside the plan executor;
+        // the governed path cards through `symon_execute_plan` with the same
+        // read-back plus the condition that fired.
+        "symon_watch_run" => watch_condition(&s("id"))
+            .map(|condition| format!("Run the plan saved for \u{201c}{condition}\u{201d}"))
+            .unwrap_or_else(|| format!("Run the plan saved for watch {}", s("id"))),
         other => format!("Run {other}"),
     }
 }
+
+/// The operator's own wording for one watch, cached by `symon_watch_list` so
+/// the cancel and run cards can name it. An unknown id degrades to the raw id
+/// rather than blocking the card on a network read.
+fn watch_condition(watch_id: &str) -> Option<String> {
+    if watch_id.is_empty() {
+        return None;
+    }
+    let cache = WATCH_CONDITIONS.lock().ok()?;
+    cache.as_ref()?.get(watch_id).cloned()
+}
+
+/// Remember the conditions returned by a watch listing. Called by the tool so
+/// the next card can speak the operator's words instead of an opaque id.
+pub fn remember_watch_conditions(watches: &[Value]) {
+    let Ok(mut guard) = WATCH_CONDITIONS.lock() else {
+        return;
+    };
+    let cache = guard.get_or_insert_with(std::collections::HashMap::new);
+    if cache.len() > 128 {
+        cache.clear();
+    }
+    for watch in watches {
+        let (Some(id), Some(condition)) = (
+            watch.get("id").and_then(Value::as_str),
+            watch.get("condition").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        cache.insert(id.to_string(), condition.to_string());
+    }
+}
+
+static WATCH_CONDITIONS: Mutex<Option<std::collections::HashMap<String, String>>> =
+    Mutex::new(None);
 
 /// Terminal titles carry "cwd — task — proc — 117×56"; the first two segments
 /// identify the window by ear without the noise.

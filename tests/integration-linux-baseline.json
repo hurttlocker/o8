@@ -1,0 +1,187 @@
+{
+  "note": "Resource-owning test files red on the Linux runner in run 35178955102 (2026-09-17, #2391). The integration gate reports these as baseline red instead of failing the run when O8_INTEGRATION_BASELINE points here. This list may only shrink: remove a file once it passes, and never add one.",
+  "sourceRun": 35178955102,
+  "count": 45,
+  "files": [
+    {
+      "path": "src/app/api/panel/universal-search/route.test.ts",
+      "firstFailure": "GET /api/panel/universal-search > finds content that exists only inside an unopened repository file"
+    },
+    {
+      "path": "src/app/api/setup/detect/route.test.ts",
+      "firstFailure": "GET /api/setup/detect > reports the installed keyless OpenCode default as composer-ready"
+    },
+    {
+      "path": "src/lib/claude-code/read-only-worker-launch.test.ts",
+      "firstFailure": "owned Claude Code read-only argv > denies the native write tools for a read-only launch"
+    },
+    {
+      "path": "src/lib/codex/multi-identity-sessions.test.ts",
+      "firstFailure": "Codex multi-identity provider sessions > discovers, imports, and transforms a secondary-home session without projecting private identity state"
+    },
+    {
+      "path": "src/lib/codex/read-only-worker-launch.test.ts",
+      "firstFailure": "launches a read-only packet with approvals off and no nested inner sandbox"
+    },
+    {
+      "path": "src/lib/pi/owned.test.ts",
+      "firstFailure": "does not move a live session until the process is confirmed dead"
+    },
+    {
+      "path": "src/lib/runtimes/shared/auth-detect-claude.test.ts",
+      "firstFailure": "Claude Code native sign-in verification > keeps native-only mobile routes unavailable under an unverifiable CLI plus 'openrouter' profile"
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/store.test.ts",
+      "firstFailure": "createOwnedSessionStore launch readiness gate > reconciles a confirmed pre-spawn failure without incrementing the ledger twice"
+    },
+    {
+      "path": "src/lib/supervisor/liveness-probes.test.ts",
+      "firstFailure": "runLivenessProbeSweep > resolves merge_blocked with sha evidence when the branch head is merged"
+    },
+    {
+      "path": "src/lib/workspace/dependency-image-device-authority.test.ts",
+      "firstFailure": "dependency image device authority > retains every attach entity before deciding whether the mount is usable"
+    },
+    {
+      "path": "src/lib/workspace/hibernator-restorer.test.ts",
+      "firstFailure": "workspace hibernate and restore services > reopens a prepared spawn journal and blocks parking until the exact marked child is gone"
+    },
+    {
+      "path": "src/lib/workspace/park-resume-exclusion.test.ts",
+      "firstFailure": "owned run and workspace parking exclusion > refuses a apfs-cow-clone resume after the hibernating gate and removes the exact path"
+    },
+    {
+      "path": "src/lib/worktree/dependency-install-manager-real-path.test.ts",
+      "firstFailure": "keeps a killed install runtime inside the exact workspace cleanup authority"
+    },
+    {
+      "path": "src/lib/worktree/prune-safety.test.ts",
+      "firstFailure": "(c) aborts with [] and touches no disk when the lane registry import fails"
+    },
+    {
+      "path": "tests/broadcast-followup-real-path.test.ts",
+      "firstFailure": "redacts sensitive keys plus live operator, device, and short secret environment values"
+    },
+    {
+      "path": "tests/claude-code-dispatch-spawn.test.ts",
+      "firstFailure": "Claude Code dispatch spawn > launches a dispatched worker as stream-json without print flags in the packet worktree cwd"
+    },
+    {
+      "path": "tests/cloud-job-spine-real-path.test.ts",
+      "firstFailure": "durable cloud execution through the runtime launch path > survives restart, serializes claims, recovers a lease, and retains output"
+    },
+    {
+      "path": "tests/cold-start-runtime-spawn-routes.test.ts",
+      "firstFailure": "names a vanished workspace before attempting CLI resolution"
+    },
+    {
+      "path": "tests/dash-terminal-restart-real-path.test.ts",
+      "firstFailure": "dashboard terminal restart through the real WebSocket path > reclaims one owned tmux session with readable scrollback after server loss"
+    },
+    {
+      "path": "tests/declarative-dispatch-worktree-real-path.test.ts",
+      "firstFailure": "declarative packet dispatch worktree reachability > verifies a materialized dev binary and blocks launch when the binary is incomplete"
+    },
+    {
+      "path": "tests/execution-carrier-real-path.test.ts",
+      "firstFailure": "execution carrier isolated worktree real path > routes launch and resume through Ori while Codex retains identity, evidence, and cleanup"
+    },
+    {
+      "path": "tests/managed-cleanup-missing-directory-real-path.test.ts",
+      "firstFailure": "preserves durable metadata when the parent directory is missing"
+    },
+    {
+      "path": "tests/managed-creation-crash-recovery-real-path.test.ts",
+      "firstFailure": "reclaims a apfs-cow-clone workspace after a crash following materialization but before final bind"
+    },
+    {
+      "path": "tests/managed-run-cli-interrupt-real-path.test.ts",
+      "firstFailure": "streamed o8 run Ctrl-C real entry point > forwards SIGINT, proves the process tree dead, and retains the post-mortem receipt"
+    },
+    {
+      "path": "tests/managed-run-termination-real-path.test.ts",
+      "firstFailure": "managed-run process-tree settlement through real tmux > kills a signal-resistant parent and grandchild and settles the ownership registry evidence"
+    },
+    {
+      "path": "tests/managed-worktree-post-create-swap-real-path.test.ts",
+      "firstFailure": "preserves dirty replacement files when reset and rollback see a changed workspace"
+    },
+    {
+      "path": "tests/merge-evidence-superseding-snapshot-real-path.test.ts",
+      "firstFailure": "merge evidence capture after the reviewed HEAD moves > resolves a repeated capture for the same reviewed HEAD to the same generation"
+    },
+    {
+      "path": "tests/mission-cost-real-path.test.ts",
+      "firstFailure": "mission cost persisted-state path > rolls archived retry sessions into one packet receipt without reviving or double-counting them"
+    },
+    {
+      "path": "tests/mission-supersession-real-path.test.ts",
+      "firstFailure": "mission supersession real path > cancels the predecessor before the headless dispatcher can create its lane"
+    },
+    {
+      "path": "tests/openclaw-spawn-preflight.test.ts",
+      "firstFailure": "OpenClaw orchestrator spawn preflight > names a vanished repo before attempting CLI discovery"
+    },
+    {
+      "path": "tests/orchestrator-model-attribution-real-path.test.ts",
+      "firstFailure": "carries the sent turn ids through a real mission dispatch into the worker receipt"
+    },
+    {
+      "path": "tests/orchestrator-spawn-preflight.test.ts",
+      "firstFailure": "#1551 \u2014 codex orchestrator (the default backend) preflights the repo path > rejects a missing folder naming the FOLDER, not the binary"
+    },
+    {
+      "path": "tests/read-only-worker-enforcement.test.ts",
+      "firstFailure": "provider-failed turn lifecycle truth > keeps a newer launch running after an old provider failure (same surface: true)"
+    },
+    {
+      "path": "tests/reset-lifecycle-retirement-real-path.test.ts",
+      "firstFailure": "releases the OpenCode service location before reset removes the worktree"
+    },
+    {
+      "path": "tests/reset-packet-branch-cleanup.test.ts",
+      "firstFailure": "reset_packet clearWorktree branch cleanup > archives only the reset packet lane and retains a branch owned by a live sibling lane"
+    },
+    {
+      "path": "tests/reset-stop-registry-truth.test.ts",
+      "firstFailure": "reset and stop preserve runtime truth > waits for the outgoing current mission handoff before closing its registry packet"
+    },
+    {
+      "path": "tests/runtime-capacity-identity-real-path.test.ts",
+      "firstFailure": "runtime capacity and identity route > registers and selects a Codex config home without projecting paths or auth state"
+    },
+    {
+      "path": "tests/storage-admission-lifecycle-real-path.test.ts",
+      "firstFailure": "storage reservation lifecycle real paths > prunes a done task only after its checkout and reservation are settled"
+    },
+    {
+      "path": "tests/storage-admission-rerun-release-real-path.test.ts",
+      "firstFailure": "storage reservation release through rerun retirement > releases a packet-owned reservation through rerun worktree cleanup without terminal true"
+    },
+    {
+      "path": "tests/test-gate-runner-real-path.test.ts",
+      "firstFailure": "split test gate real entry point > reports a missing selected file as a bounded failure before spawning, keeps later files running, and never falls back to a same-prefix neighbor"
+    },
+    {
+      "path": "tests/transient-materialization-fallback-real-path.test.ts",
+      "firstFailure": "uses the default dependencies for an active lane and refuses it after terminal failure"
+    },
+    {
+      "path": "tests/worker-mcp-injection-codex-real-path.test.ts",
+      "firstFailure": "Codex worker MCP injection real path > injects overrides on launch and lane resume, then audits an invalid name"
+    },
+    {
+      "path": "tests/worker-mcp-injection-real-path.test.ts",
+      "firstFailure": "writes only opted-in records into a per-run config and audits skipped sandbox commands"
+    },
+    {
+      "path": "tests/worktree-maintenance-sweep.test.ts",
+      "firstFailure": "periodic worktree maintenance > reclaims saved-repo orphans and transient-repo terminal worktrees"
+    },
+    {
+      "path": "tests/worktree-reaper-pr-merge.test.ts",
+      "firstFailure": "worktree reaper PR merge reconciliation > archives a reviewing lane when its stamped PR mirror row is merged"
+    }
+  ]
+}

@@ -17,12 +17,29 @@ use super::{
 };
 
 pub(super) const PLAN_TOOL_NAME: &str = "symon_execute_plan";
+pub(super) const WATCH_RUN_TOOL_NAME: &str = "symon_watch_run";
+
+/// Read one saved watch body back exactly the way `execute_plan` reads a live
+/// plan, so the registration card shows the operator the same thing the run
+/// card will. `Err` means the body could never run, which the card says plainly.
+pub(super) fn watch_body_readback(steps: &[Value]) -> Result<String, String> {
+    let plan = validate_plan(json!({ "steps": steps }), PlanSurface::WatchRun)?;
+    Ok(plan
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(offset, step)| format!("{}. {}", offset + 1, step.summary))
+        .collect::<Vec<_>>()
+        .join("; "))
+}
 const PLAN_GRANT_TTL_MS: u64 = 15 * 60 * 1_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PlanSurface {
     Cascaded,
     Realtime,
+    /// A watch running the plan body it saved in an earlier turn.
+    WatchRun,
 }
 
 /// Opaque native authority created only after the exact plan card is approved.
@@ -104,6 +121,80 @@ impl PlanGrant {
     }
 }
 
+/// Run the plan body one watch saved, now that its condition holds.
+///
+/// The watch is the standing intent; it never carries execution authority. The
+/// saved steps enter the SAME immutable plan executor a live plan uses, so the
+/// operator still sees the exact read-back and still approves it before any
+/// step runs. Whatever they decide is written back to the durable watch row.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn execute_watch_run(
+    ctx: &TaskCtx,
+    args: Value,
+    speak: bool,
+    correlation: Option<ConfirmCorrelation>,
+    source: &str,
+    utterance: Option<&str>,
+    spoke_filler: Option<&mut bool>,
+) -> Value {
+    let id = args
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    if id.is_empty() {
+        return json!({
+            "ok": false,
+            "error": "invalid_watch",
+            "detail": "symon_watch_run needs the exact watch id from symon_watch_list",
+        });
+    }
+    let (condition, steps) = match super::tools::symon_watch::plan_body(&id).await {
+        Ok(body) => body,
+        Err(detail) => {
+            return json!({
+                "ok": false,
+                "error": "watch_unavailable",
+                "detail": detail,
+                "watchId": id,
+            })
+        }
+    };
+    let intro = format!("Your watch \u{201c}{condition}\u{201d} fired.");
+    let mut result = execute_plan(
+        ctx,
+        json!({ "steps": steps }),
+        PlanSurface::WatchRun,
+        speak,
+        correlation,
+        source,
+        utterance,
+        spoke_filler,
+        Some(&intro),
+    )
+    .await;
+    let outcome = if result.get("ok") == Some(&Value::Bool(true)) {
+        "approved"
+    } else if result.get("declined_by_user") == Some(&Value::Bool(true)) {
+        "denied"
+    } else {
+        "failed"
+    };
+    let detail = result
+        .get("detail")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    super::tools::symon_watch::settle_run(&id, outcome, &detail).await;
+    if let Some(object) = result.as_object_mut() {
+        object.insert("watchId".to_string(), json!(id));
+        object.insert("watchCondition".to_string(), json!(condition));
+        object.insert("watchOutcome".to_string(), json!(outcome));
+    }
+    result
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_plan(
     ctx: &TaskCtx,
@@ -114,6 +205,9 @@ pub(super) async fn execute_plan(
     source: &str,
     utterance: Option<&str>,
     mut spoke_filler: Option<&mut bool>,
+    // `intro` is trusted, caller-authored context shown ahead of the plan
+    // read-back. A watch run uses it to name the standing intent that fired.
+    intro: Option<&str>,
 ) -> Value {
     let plan = match validate_plan(args, surface) {
         Ok(plan) => plan,
@@ -127,8 +221,9 @@ pub(super) async fn execute_plan(
         }
     };
     let step_count = plan.steps.len();
+    let lead = intro.map(|text| format!("{text} ")).unwrap_or_default();
     let plan_summary = format!(
-        "Run this {step_count}-step plan: {}",
+        "{lead}Run this {step_count}-step plan: {}",
         plan.steps
             .iter()
             .enumerate()
@@ -136,7 +231,7 @@ pub(super) async fn execute_plan(
             .collect::<Vec<_>>()
             .join("; ")
     );
-    let spoken_readback = spoken_plan_readback(&plan.steps);
+    let spoken_readback = format!("{lead}{}", spoken_plan_readback(&plan.steps));
     let plan_steps = plan
         .steps
         .iter()

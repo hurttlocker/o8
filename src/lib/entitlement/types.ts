@@ -28,6 +28,12 @@ export interface EntitlementFlags {
   'cloud.runners': boolean;
   /** Shared team governance (team plan only). */
   'team.shared': boolean;
+  /**
+   * The delegated live voice brain for Symon — a metered voice layer billed per
+   * minute on top of its backend model's tokens. A cost lever, not a capability:
+   * every plan keeps the standard realtime brain.
+   */
+  'voice.liveBrain': boolean;
 }
 
 export type EntitlementSource = 'env' | 'file' | 'default';
