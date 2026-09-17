@@ -2,9 +2,31 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+
+// Records every git subprocess the route spawns while delegating to the real
+// execFile, so the restore fast path can prove it never shells out.
+const gitSpawns = vi.hoisted(() => ({ calls: [] as string[][] }));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  const { promisify } = await import('node:util');
+  const promisifiedExecFile = promisify(actual.execFile);
+  const execFile = Object.assign(
+    (...args: Parameters<typeof actual.execFile>) => {
+      if (args[0] === 'git') gitSpawns.calls.push((args[1] as string[] | undefined) ?? []);
+      return actual.execFile(...args);
+    },
+    {
+      [promisify.custom]: (file: string, args?: readonly string[], options?: object) => {
+        if (file === 'git') gitSpawns.calls.push([...(args ?? [])]);
+        return promisifiedExecFile(file, args, options);
+      },
+    },
+  );
+  return { ...actual, default: { ...actual, execFile }, execFile };
+});
 
 const previousHome = process.env.HOME;
 const previousDataDir = process.env.CORTEX_IDE_DATA_DIR;
@@ -95,6 +117,10 @@ async function getRepos(query = '') {
 }
 
 describe('GET /api/panel/repos readiness scope', () => {
+  beforeEach(() => {
+    gitSpawns.calls = [];
+  });
+
   it('keeps fleet discovery cheap and leaves uncached readiness unprobed', async () => {
     const { response, data } = await getRepos();
 
@@ -159,5 +185,39 @@ describe('GET /api/panel/repos readiness scope', () => {
         canonicalPath: realpathSync(externalWorktreePath),
       },
     ]);
+  });
+
+  it('validates a registered root through the registry fast path without spawning git', async () => {
+    const query = new URLSearchParams({ restoreValidationOnly: '1' });
+    query.append('restorePath', existingPath);
+
+    const { response, data } = await getRepos(`?${query.toString()}`);
+
+    expect(response.status).toBe(200);
+    expect(data.validatedRestorePaths).toEqual([
+      { requestedPath: existingPath, canonicalPath: realpathSync(existingPath) },
+    ]);
+    expect(gitSpawns.calls).toEqual([]);
+  });
+
+  it('still resolves an external worktree through the worktree list and rejects a path that is neither', async () => {
+    const worktreeQuery = new URLSearchParams({ restoreValidationOnly: '1' });
+    worktreeQuery.append('restorePath', externalWorktreePath);
+    const worktree = await getRepos(`?${worktreeQuery.toString()}`);
+
+    expect(worktree.data.validatedRestorePaths).toEqual([
+      { requestedPath: externalWorktreePath, canonicalPath: realpathSync(externalWorktreePath) },
+    ]);
+    expect(gitSpawns.calls.some((args) => args.includes('worktree') && args.includes('list'))).toBe(true);
+
+    gitSpawns.calls = [];
+    const outsideQuery = new URLSearchParams({ restoreValidationOnly: '1' });
+    outsideQuery.append('restorePath', outsidePath);
+    outsideQuery.append('restorePath', escapedSymlinkPath);
+    const outside = await getRepos(`?${outsideQuery.toString()}`);
+
+    expect(outside.response.status).toBe(200);
+    expect(outside.data.validatedRestorePaths).toEqual([]);
+    expect(gitSpawns.calls.some((args) => args.includes('worktree') && args.includes('list'))).toBe(true);
   });
 });
