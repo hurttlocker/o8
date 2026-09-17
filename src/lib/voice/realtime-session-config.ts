@@ -25,6 +25,33 @@ export const REALTIME_MODEL = 'gpt-realtime-2.1-mini';
 export const REALTIME_FLAGSHIP_MODEL = 'gpt-realtime-2.1';
 
 /**
+ * gpt-live-1 (#2411) — OpenAI's full-duplex voice layer, TRIAL ONLY. Unlike the
+ * realtime models it does not reason: it delegates reasoning AND tool calls to a
+ * backend Responses model named at session creation, billing $0.05/min for the
+ * voice layer plus that backend's tokens. A cheap voice front with a bigger brain
+ * behind it is exactly the split this product wants for Symon.
+ *
+ * CAUTION — the published docs and the observed mint disagree. The model page
+ * lists `v1/realtime` as "Not supported" for this id and sends it to
+ * `POST /v1/live/sessions` with a server-side SDP exchange instead of a
+ * `client_secrets` ephemeral token. A client-secrets mint for it nonetheless
+ * returned 200 (2026-09-16, mint only, no session opened) — which is precisely
+ * the trap {@link REALTIME_CAPABLE_MODELS} exists to document: the mint succeeds
+ * and the refusal only lands later at the transport. One operator session
+ * settles it; until that reports back the `live` variant stays unproven and the
+ * experiment switch stays unset.
+ */
+export const REALTIME_LIVE_MODEL = 'gpt-live-1';
+
+/**
+ * Backend Responses model for the delegated `live` variant. The delegation docs
+ * make `delegation.responses.model` REQUIRED at creation and name no default, so
+ * this carries the documented recommended starting point. Override it with
+ * `O8_SYMON_LIVE_BACKEND_MODEL` to re-aim the brain without a rebuild.
+ */
+export const DEFAULT_LIVE_BACKEND_MODEL = 'gpt-5.6-terra';
+
+/**
  * Model ids the OpenAI realtime endpoint actually accepts.
  *
  * `POST /v1/realtime/client_secrets` mints a token for ids the realtime
@@ -41,6 +68,7 @@ export const REALTIME_CAPABLE_MODELS = [
   REALTIME_MODEL,
   'gpt-realtime-2',
   'gpt-realtime',
+  REALTIME_LIVE_MODEL,
 ] as const;
 
 export type RealtimeModelCheck =
@@ -63,8 +91,17 @@ export function assertRealtimeCapableModel(model: string): RealtimeModelCheck {
     allowed,
   };
 }
-export type PhoneCodeModelVariant = 'mini' | 'flagship';
+export type PhoneCodeModelVariant = 'mini' | 'flagship' | 'live';
 export type PhoneCodeModelExperiment = PhoneCodeModelVariant | 'ab';
+
+const PHONE_CODE_MODEL_VARIANTS: readonly PhoneCodeModelVariant[] = ['mini', 'flagship', 'live'];
+
+/** Narrow an env string / operator header to a known variant, else null. */
+function asPhoneCodeModelVariant(value: unknown): PhoneCodeModelVariant | null {
+  return typeof value === 'string' && (PHONE_CODE_MODEL_VARIANTS as readonly string[]).includes(value)
+    ? (value as PhoneCodeModelVariant)
+    : null;
+}
 export type PhoneRealtimeExperience = 'repository-catch-up';
 
 function stableBucket(value: string): number {
@@ -83,23 +120,36 @@ export function selectPhoneRealtimeModel(input: {
   bucketKey: string;
   operatorOverride?: string | null;
   experience?: PhoneRealtimeExperience | null;
-}): { model: string; variant: PhoneCodeModelVariant } {
+  /**
+   * Backend Responses model for the `live` variant, supplied by the caller from
+   * `O8_SYMON_LIVE_BACKEND_MODEL`. Kept an INPUT, not a `process.env` read: this
+   * module is isomorphic and the browser realtime client imports it too.
+   */
+  liveBackendModel?: string | null;
+}): { model: string; variant: PhoneCodeModelVariant; backendModel?: string } {
   if (input.experience === 'repository-catch-up') {
     return { model: REALTIME_FLAGSHIP_MODEL, variant: 'flagship' };
   }
   if (input.workspaceMode !== 'code') {
     return { model: REALTIME_MODEL, variant: 'mini' };
   }
-  const override = input.operatorOverride === 'mini' || input.operatorOverride === 'flagship'
-    ? input.operatorOverride
-    : null;
-  const configured: PhoneCodeModelExperiment = input.experiment === 'flagship' || input.experiment === 'ab'
-    ? input.experiment
-    : 'mini';
+  const override = asPhoneCodeModelVariant(input.operatorOverride);
+  const configured: PhoneCodeModelExperiment =
+    asPhoneCodeModelVariant(input.experiment) ?? (input.experiment === 'ab' ? 'ab' : 'mini');
+  // The A/B bucket stays a two-way mini/flagship split: `live` is an explicit
+  // opt-in, never something a hash can hand an unsuspecting session.
   const variant: PhoneCodeModelVariant = override
     ?? (configured === 'ab'
       ? (stableBucket(input.bucketKey) % 2 === 0 ? 'mini' : 'flagship')
       : configured);
+  if (variant === 'live') {
+    const configuredBackend = typeof input.liveBackendModel === 'string' ? input.liveBackendModel.trim() : '';
+    return {
+      variant,
+      model: REALTIME_LIVE_MODEL,
+      backendModel: configuredBackend || DEFAULT_LIVE_BACKEND_MODEL,
+    };
+  }
   return {
     variant,
     model: variant === 'flagship' ? REALTIME_FLAGSHIP_MODEL : REALTIME_MODEL,
@@ -485,6 +535,13 @@ export interface RealtimeMintInputs {
    * on ambient noise, 2026-07-11).
    */
   micProfile?: RealtimeMicProfile;
+  /**
+   * Backend Responses model for a delegating voice model ({@link REALTIME_LIVE_MODEL}).
+   * When set, the persona and tool schemas move into `delegation.responses` —
+   * that backend is what reasons and calls tools, so a brain left at the top
+   * level would reach nothing. OMIT for every realtime model.
+   */
+  backendModel?: string;
 }
 
 /**
@@ -536,7 +593,7 @@ export const MIC_PROFILE_AUDIO_INPUT: Record<
  * `micProfile: 'near_field'` (the phone noise gate, 2026-07-11).
  */
 export function buildRealtimeMintSession(inputs: RealtimeMintInputs): Record<string, unknown> {
-  const { model, voice, instructions, tools, inputTranscriptionModel } = inputs;
+  const { model, voice, instructions, tools, inputTranscriptionModel, backendModel } = inputs;
 
   // The noise gate ships ONLY when a micProfile is passed (the phone mint);
   // desk mints omit it and stay byte-identical to the pre-gate shape.
@@ -552,6 +609,24 @@ export function buildRealtimeMintSession(inputs: RealtimeMintInputs): Record<str
   }
 
   const session: Record<string, unknown> = { type: 'realtime', model, audio };
+
+  // A delegating voice model carries no brain of its own. The docs put the
+  // backend model, its prompt, and its tool schemas under `delegation.responses`
+  // and name no top-level `tools` for such a session, so the whole payload moves
+  // there together — split across both places it would half-arrive.
+  if (backendModel) {
+    const responses: Record<string, unknown> = { model: backendModel };
+    if (instructions) {
+      responses.instructions = instructions;
+    }
+    if (Array.isArray(tools) && tools.length > 0) {
+      responses.tools = tools;
+      responses.tool_choice = 'auto';
+    }
+    session.delegation = { type: 'responses', responses };
+    return session;
+  }
+
   if (instructions) {
     session.instructions = instructions;
   }

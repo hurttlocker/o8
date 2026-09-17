@@ -12,6 +12,8 @@ import {
   CODEX_REALTIME_VERSION,
   REALTIME_MODEL,
   REALTIME_FLAGSHIP_MODEL,
+  REALTIME_LIVE_MODEL,
+  DEFAULT_LIVE_BACKEND_MODEL,
   DEFAULT_VOICE,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
   REALTIME_TOKEN_TTL_SECONDS,
@@ -255,6 +257,131 @@ describe('realtime-session-config — shared assembler', () => {
   });
 });
 
+describe('the delegated live variant (#2411)', () => {
+  const mintInputs = {
+    voice: DEFAULT_VOICE,
+    instructions: DEFAULT_INSTRUCTIONS,
+    tools: [{ type: 'function', name: 'o8_status' }],
+    inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
+    micProfile: 'near_field' as const,
+  };
+
+  it('selects gpt-live-1 with the documented default backend when the switch says live', () => {
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'code',
+      experiment: 'live',
+      bucketKey: 'device-1:repo-1',
+    })).toEqual({
+      model: REALTIME_LIVE_MODEL,
+      variant: 'live',
+      backendModel: DEFAULT_LIVE_BACKEND_MODEL,
+    });
+  });
+
+  it('lets the env name the backend brain, and ignores a blank one', () => {
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'code',
+      experiment: 'live',
+      bucketKey: 'device-1:repo-1',
+      liveBackendModel: '  gpt-5.6-sol  ',
+    }).backendModel).toBe('gpt-5.6-sol');
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'code',
+      experiment: 'live',
+      bucketKey: 'device-1:repo-1',
+      liveBackendModel: '   ',
+    }).backendModel).toBe(DEFAULT_LIVE_BACKEND_MODEL);
+  });
+
+  it('honours an operator override to live, and keeps Life off it entirely', () => {
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'code',
+      bucketKey: 'device-1',
+      operatorOverride: 'live',
+    }).model).toBe(REALTIME_LIVE_MODEL);
+    // Ordinary Life never delegates: no live model, no backend brain to bill.
+    const life = selectPhoneRealtimeModel({
+      workspaceMode: 'o8',
+      experiment: 'live',
+      bucketKey: 'device-1',
+    });
+    expect(life).toEqual({ model: REALTIME_MODEL, variant: 'mini' });
+    expect(life.backendModel).toBeUndefined();
+  });
+
+  it('never hands live to an A/B session — the bucket stays mini/flagship', () => {
+    for (const bucketKey of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+      const picked = selectPhoneRealtimeModel({ workspaceMode: 'code', experiment: 'ab', bucketKey });
+      expect(picked.variant).not.toBe('live');
+      expect(picked.backendModel).toBeUndefined();
+    }
+  });
+
+  it('carries model gpt-live-1 and the required backend field in the client_secrets body', () => {
+    const body = buildClientSecretsBody(
+      { ...mintInputs, model: REALTIME_LIVE_MODEL, backendModel: DEFAULT_LIVE_BACKEND_MODEL },
+      REALTIME_TOKEN_TTL_SECONDS,
+    );
+    const session = body.session as Record<string, unknown>;
+    expect(session.model).toBe('gpt-live-1');
+    // delegation.responses.model is REQUIRED at creation per the delegation docs.
+    expect(session.delegation).toEqual({
+      type: 'responses',
+      responses: {
+        model: DEFAULT_LIVE_BACKEND_MODEL,
+        instructions: DEFAULT_INSTRUCTIONS,
+        tools: mintInputs.tools,
+        tool_choice: 'auto',
+      },
+    });
+  });
+
+  it('moves the persona and tools to the backend that actually reasons — not the voice layer', () => {
+    const session = buildRealtimeMintSession({
+      ...mintInputs,
+      model: REALTIME_LIVE_MODEL,
+      backendModel: DEFAULT_LIVE_BACKEND_MODEL,
+    });
+    // Left at the top level they would reach nothing: gpt-live-1 delegates every
+    // tool call, and the docs name no top-level tools for a delegated session.
+    expect(session.instructions).toBeUndefined();
+    expect(session.tools).toBeUndefined();
+    expect(session.tool_choice).toBeUndefined();
+    // The voice layer still owns audio: the gate and the voice stay put.
+    expect(session.audio).toEqual({
+      output: { voice: DEFAULT_VOICE },
+      input: {
+        ...MIC_PROFILE_AUDIO_INPUT.near_field,
+        transcription: { model: REALTIME_INPUT_TRANSCRIPTION_MODEL },
+      },
+    });
+  });
+
+  it('leaves every realtime model undelegated — no stray delegation key', () => {
+    for (const model of [REALTIME_MODEL, REALTIME_FLAGSHIP_MODEL]) {
+      const session = buildRealtimeMintSession({ ...mintInputs, model });
+      expect(session.delegation).toBeUndefined();
+      expect(session.instructions).toBe(DEFAULT_INSTRUCTIONS);
+      expect(session.tools).toEqual(mintInputs.tools);
+      expect(session.tool_choice).toBe('auto');
+    }
+  });
+
+  it('keeps mini, flagship, and catch-up selection unchanged', () => {
+    expect(selectPhoneRealtimeModel({ workspaceMode: 'code', bucketKey: 'k' }))
+      .toEqual({ model: REALTIME_MODEL, variant: 'mini' });
+    expect(selectPhoneRealtimeModel({ workspaceMode: 'code', experiment: 'flagship', bucketKey: 'k' }))
+      .toEqual({ model: REALTIME_FLAGSHIP_MODEL, variant: 'flagship' });
+    expect(selectPhoneRealtimeModel({ workspaceMode: 'o8', bucketKey: 'k' }))
+      .toEqual({ model: REALTIME_MODEL, variant: 'mini' });
+    expect(selectPhoneRealtimeModel({
+      workspaceMode: 'o8',
+      experience: 'repository-catch-up',
+      bucketKey: 'k',
+    })).toEqual({ model: REALTIME_FLAGSHIP_MODEL, variant: 'flagship' });
+  });
+});
+
 describe('assertRealtimeCapableModel — the mint-time model gate (#2165)', () => {
   it('accepts every allow-listed id', () => {
     for (const model of REALTIME_CAPABLE_MODELS) {
@@ -267,11 +394,18 @@ describe('assertRealtimeCapableModel — the mint-time model gate (#2165)', () =
     expect(REALTIME_CAPABLE_MODELS).toContain(REALTIME_FLAGSHIP_MODEL);
   });
 
-  it('rejects a chat-only model id, naming it and the accepted set', () => {
-    const result = assertRealtimeCapableModel('gpt-live-1');
+  it('admits gpt-live-1 while still rejecting a made-up id (#2411)', () => {
+    // Flipped from a rejection: gpt-live-1 shipped 2026-09-10 and a client-secret
+    // mint for it succeeded through the phone credential path. The guard still has
+    // to refuse an id nobody ships, which is the whole reason it exists.
+    expect(REALTIME_LIVE_MODEL).toBe('gpt-live-1');
+    expect(assertRealtimeCapableModel(REALTIME_LIVE_MODEL)).toEqual({ ok: true });
+
+    const invented = 'gpt-realtime-omega-9';
+    const result = assertRealtimeCapableModel(invented);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected a rejection');
-    expect(result.reason).toContain('gpt-live-1');
+    expect(result.reason).toContain(invented);
     expect(result.reason).toContain(REALTIME_MODEL);
     expect(result.reason).toContain(REALTIME_FLAGSHIP_MODEL);
     expect(result.allowed).toEqual([...REALTIME_CAPABLE_MODELS]);

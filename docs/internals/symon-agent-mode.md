@@ -281,11 +281,75 @@ subscriptionOnly = true
 
 Ordinary Life uses `gpt-realtime-2.1-mini`; repository catch-up uses
 `gpt-realtime-2.1`. Code reads
-`O8_SYMON_CODE_REALTIME_EXPERIMENT=mini|flagship|ab`; `ab` assigns a stable
-subject-and-repo bucket. An authenticated operator-only test may override one
-Code mint with `x-o8-symon-code-model: mini|flagship`. The flagship is
+`O8_SYMON_CODE_REALTIME_EXPERIMENT=mini|flagship|ab|live`; `ab` assigns a stable
+subject-and-repo bucket across mini and flagship only. An authenticated
+operator-only test may override one Code mint with
+`x-o8-symon-code-model: mini|flagship|live`. The flagship is
 `gpt-realtime-2.1`; the response exposes `modelVariant` so eval reports cannot
-confuse the two cohorts.
+confuse the cohorts.
+
+#### The `live` variant (delegated voice, #2411 — TRIAL, unproven)
+
+`gpt-live-1` is a full-duplex voice layer that does not reason. It delegates
+reasoning and tool calls to a backend Responses model named at session creation,
+and bills $0.05 per minute for the voice layer plus that backend's tokens. That
+split — a cheap voice front, a bigger brain behind it — is the shape this
+product wants for Symon, which is why the id was admitted to
+`REALTIME_CAPABLE_MODELS`.
+
+| Env | Default | Effect |
+|---|---|---|
+| `O8_SYMON_CODE_REALTIME_EXPERIMENT=live` | unset | Code mints `gpt-live-1` instead of a realtime model |
+| `O8_SYMON_LIVE_BACKEND_MODEL` | `gpt-5.6-terra` | the backend Responses model that reasons and calls tools |
+
+Because the voice layer holds no brain, the `live` mint moves the persona and
+the whole tool pack into the delegation object rather than leaving them at the
+session top level, where a delegated session would never read them:
+
+```json
+{
+  "type": "realtime",
+  "model": "gpt-live-1",
+  "audio": { "output": { "voice": "cedar" }, "input": { "…": "near_field gate" } },
+  "delegation": {
+    "type": "responses",
+    "responses": {
+      "model": "gpt-5.6-terra",
+      "instructions": "You are Symon, …",
+      "tools": [ "…the phone pack + render_surface…" ],
+      "tool_choice": "auto"
+    }
+  }
+}
+```
+
+`delegation.responses.model` is required at creation and the docs name no
+default, so the constant above supplies the documented recommended starting
+point. When a backend model is set, the mint log line carries it:
+`[symon-agent] minted sym-… (model=gpt-live-1 backend=gpt-5.6-terra billing=… )`.
+
+**Leave the switch unset until the operator trial reports back.** Two things are
+unresolved, and only a real session answers them:
+
+1. **Which backend model the session actually used.** We send
+   `delegation.responses.model`, but nothing has yet confirmed the session honours
+   it rather than substituting its own default. The mint log records what we
+   asked for, not what answered.
+2. **Whether the backend's tokens billed to the subscription credential or
+   needed a metered key.** The voice minutes and the backend tokens are priced
+   separately. The phone mint prefers the ChatGPT OAuth credential, and it is
+   unknown whether that credential covers delegated Responses usage or whether
+   the delegated half falls through to a metered key.
+
+There is also a documented contradiction the trial settles. The model reference
+lists `v1/realtime` as **not supported** for `gpt-live-1` and points instead at
+`POST /v1/live/sessions` with a server-side SDP exchange, not a
+`client_secrets` ephemeral token. A client-secrets mint for the id nonetheless
+returned 200 on 2026-09-16 (mint only, no session opened) — which is exactly the
+failure mode `REALTIME_CAPABLE_MODELS` documents: the mint succeeds and the
+refusal lands later at the transport as `invalid_model`. If the trial session
+fails to connect, the fix is a separate Live-session transport path, not a
+change to this allowlist.
 
 Side effect: if a desk-mic session is live, it is **stopped cleanly before minting** (see mutual exclusion) and `preempted: "desk"` is set.
 
