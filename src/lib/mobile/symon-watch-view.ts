@@ -7,8 +7,8 @@
  * to what that row shows and names the states an operator reads rather than the
  * engine's internal enabled/parked flags.
  *
- * Nothing here queries — the caller hands in records from `listSymonWatches` or
- * `cancelSymonWatch`, which keeps one source for what a watch IS.
+ * Nothing here queries — the caller hands in records from `listRecentSymonWatches`
+ * or `cancelSymonWatch`, which keeps one source for what a watch IS.
  */
 import type { SymonWatchRecord } from '@/lib/automations/symon-watch';
 

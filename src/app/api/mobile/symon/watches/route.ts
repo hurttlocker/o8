@@ -9,11 +9,15 @@
  * `symon_watch_list`. This is the same data, readable without a session.
  *
  * Read only. Registering a watch stays inside a turn, where it cards.
+ *
+ * The phone polls this, so the answer is bounded: every live watch plus the 20
+ * most recently created settled ones, with the ledger tails read in one query.
+ * Watches are install-wide — every paired phone sees the same list.
  */
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
-import { listSymonWatches } from '@/lib/automations/symon-watch';
+import { listRecentSymonWatches } from '@/lib/automations/symon-watch';
 import { mobileSymonWatch } from '@/lib/mobile/symon-watch-view';
 
 export const dynamic = 'force-dynamic';
@@ -37,10 +41,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Every watch on this install, settled ones included: a phone that was away
-  // when one fired needs the ledger tail to see what happened to it.
+  // Settled watches are included, capped: a phone that was away when one fired
+  // needs the ledger tail to see what happened to it, but not forever.
   return NextResponse.json(
-    { ok: true, watches: listSymonWatches().map(mobileSymonWatch) },
+    { ok: true, watches: listRecentSymonWatches().map(mobileSymonWatch) },
     { headers: { 'Cache-Control': 'no-store, max-age=0' } },
   );
 }

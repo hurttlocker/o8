@@ -686,11 +686,23 @@ is what separates a watch that fired from one that was cancelled. Settled watche
 stay in the list, because a phone that was away when one fired needs the ledger
 entry to see what happened to it.
 
+The phone polls this list, so it is **bounded**: every live watch (active or
+parked) plus the **20 most recently created settled ones**
+(`SYMON_WATCH_SETTLED_LIMIT`). Nothing prunes a settled row, so an uncapped list
+would grow forever on a repeated request. The ledger tails come from one batched
+query per list rather than one per row. Watches are **install-wide** — not per
+device and not per session — so a second paired phone sees the same list and may
+cancel anything on it.
+
 The list is read-only — registering a watch stays inside a turn, where it cards —
 and the cancel runs `cancelSymonWatch`, the same call `symon_watch_cancel` makes:
 pending fires cleared, row closed, one `watch_cancelled` ledger entry, and a saved
-plan body never run. Cancelling an already-closed watch answers 200, so a phone
-retrying a dropped request is never told its watch vanished.
+plan body never run. Cancelling an already-**settled** watch changes nothing and
+writes nothing: it answers 200 with the row as it stands, so a phone retrying a
+dropped request is neither told its watch vanished nor allowed to restamp a watch
+that fired as cancelled. The ledger is append-only, so that guard lives in
+`cancelSymonWatch` rather than in the route. A **parked** watch is still live and
+still cancels.
 
 Both accept the operator bearer or a paired device token and refuse a dispatched
 worker with 403. The device allowlist in `src/middleware.ts` grants exactly `GET`

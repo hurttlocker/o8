@@ -30,6 +30,7 @@ const { getSqlite, closeDb } = await import('@/lib/db');
 const { enrollDevice } = await import('@/lib/mobile/device-registry');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { readSymonWatchLedger, closeSymonWatchLedger } = await import('@/lib/automations/symon-watch-ledger');
+const { SYMON_WATCH_SETTLED_LIMIT } = await import('@/lib/automations/symon-watch');
 
 const { deviceToken } = enrollDevice({
   identityPublicKey: 'mobile-watches-fixture-identity-key',
@@ -114,7 +115,7 @@ afterAll(() => {
 });
 
 describe('GET /api/mobile/symon/watches', () => {
-  it('returns every standing intent with the fields the phone row renders', async () => {
+  it('returns each standing intent with the fields the phone row renders', async () => {
     const report = await createWatch({
       text: 'tell me when the checks on the release branch finish',
       sourceId: 'repo-checks-1',
@@ -165,6 +166,54 @@ describe('GET /api/mobile/symon/watches', () => {
     expect(watches.map((entry) => entry.id)).toEqual([watch.id]);
   });
 
+  it('caps the settled watches it carries and keeps every live one', async () => {
+    // Nothing prunes a settled row, so an uncapped list grows forever on a
+    // request the phone repeats.
+    const settled: string[] = [];
+    for (let index = 0; index < SYMON_WATCH_SETTLED_LIMIT + 2; index += 1) {
+      const watch = await createWatch({
+        text: `tell me when workflow ${index} finishes`,
+        sourceId: `repo-capped-${index}`,
+        then: { kind: 'report', say: `Workflow ${index} finished.` },
+      });
+      expect((await cancelWatch(watch.id, deviceToken)).status).toBe(200);
+      settled.push(watch.id);
+    }
+    const live = await createWatch({
+      text: 'tell me when the last workflow finishes',
+      sourceId: 'repo-capped-live',
+      then: { kind: 'report', say: 'The last workflow finished.' },
+    });
+
+    const ids = (await readWatches(deviceToken)).map((watch) => watch.id);
+    expect(ids).toContain(live.id);
+    expect(ids.filter((id) => settled.includes(id))).toHaveLength(SYMON_WATCH_SETTLED_LIMIT);
+    expect(ids).not.toContain(settled[0]);
+    expect(ids).not.toContain(settled[1]);
+    expect(ids).toContain(settled[settled.length - 1]);
+  });
+
+  it('reads one ledger tail per watch without a query per row', async () => {
+    const first = await createWatch({
+      text: 'tell me when the first workflow finishes',
+      sourceId: 'repo-batched-1',
+      then: { kind: 'report', say: 'The first workflow finished.' },
+    });
+    const second = await createWatch({
+      text: 'tell me when the second workflow finishes',
+      sourceId: 'repo-batched-2',
+      then: { kind: 'report', say: 'The second workflow finished.' },
+    });
+    expect((await cancelWatch(second.id, deviceToken)).status).toBe(200);
+
+    // The batched read must still hand each row ITS own latest event.
+    const watches = await readWatches(deviceToken);
+    expect(watches.find((watch) => watch.id === first.id)?.lastLedgerEvent)
+      .toMatchObject({ phase: 'watch_registered' });
+    expect(watches.find((watch) => watch.id === second.id)?.lastLedgerEvent)
+      .toMatchObject({ phase: 'watch_cancelled' });
+  });
+
   it('refuses a caller with no credential and a dispatched worker', async () => {
     expect((await listWatches(null)).status).toBe(401);
     expect((await listWatches('not-a-real-token')).status).toBe(401);
@@ -210,6 +259,12 @@ describe('DELETE /api/mobile/symon/watches/[id]', () => {
     const second = await cancelWatch(watch.id, deviceToken);
     expect(second.status).toBe(200);
     expect((await second.json() as { watch: MobileWatch }).watch.state).toBe('cancelled');
+
+    // The ledger is append-only, so a retried DELETE must add nothing: a second
+    // watch_cancelled row would rewrite how the watch ended.
+    const cancelledEntries = readSymonWatchLedger(watch.id, 50)
+      .filter((entry) => entry.phase === 'watch_cancelled');
+    expect(cancelledEntries).toHaveLength(1);
 
     const unknown = await cancelWatch('watch_does_not_exist', deviceToken);
     expect(unknown.status).toBe(404);
