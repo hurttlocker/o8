@@ -360,7 +360,9 @@ async function retryBaseAdvancedAfterRebase(
       logPrefix: 'lane-merge',
     });
     if (!verify.ok) {
-      return handlePostRebaseVerifyFailure(input, verify);
+      // Awaited, not returned bare: the enclosing finally deletes the
+      // integration worktree, and the handler reads that tree (#2437).
+      return await handlePostRebaseVerifyFailure({ ...input, verifiedWorktreePath: opts.worktreePath }, verify);
     }
 
     const { stdout: rebasedShaOutput } = await git(opts.worktreePath, ['rev-parse', 'HEAD']);
@@ -608,7 +610,9 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       // awaiting_orchestrator so o8_status surfaces the blocker. Layers 3-5
       // (steer warm session / fresh redispatch / human approval) are owned
       // by the orchestrator and not handled in this file.
-      return handlePostRebaseVerifyFailure(input, verify);
+      // Awaited, not returned bare: the enclosing finally deletes the
+      // integration worktree, and the handler reads that tree (#2437).
+      return await handlePostRebaseVerifyFailure({ ...input, verifiedWorktreePath: mergeWorktreePath }, verify);
     }
     const mergeChecks = buildCheckList(input.gateResult, verify.checks);
 

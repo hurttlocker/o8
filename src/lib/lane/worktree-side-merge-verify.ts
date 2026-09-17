@@ -1,5 +1,6 @@
 import type { ApprovalGateResult } from '@/lib/approvals/types';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
+import { assessGateFailureRisk } from '@/lib/lane/gate-failure-warning';
 import { buildCheckList } from '@/lib/lane/preview-merge';
 import {
   appendEvent,
@@ -20,6 +21,12 @@ interface PostRebaseVerifyFailureInput {
   command: MergeCommand;
   actor: LaneEventActor;
   gateResult: ApprovalGateResult;
+  /**
+   * The detached integration worktree the rebase and verification ran in. The
+   * lane's own worktree still holds the pre-rebase tree, so the advisory
+   * referee read must use this one (#2437).
+   */
+  verifiedWorktreePath?: string | null;
 }
 
 export function mergePacketResultFromLaneCommand(result: LaneCommandResult): MergePacketResult {
@@ -184,6 +191,10 @@ export async function handlePostRebaseVerifyFailure(
     return { ok: false, laneId: command.laneId, note: blockedReason, checks, blockers };
   }
 
+  // Advisory gate-failure risk for the verified tree (#2437), asked before the
+  // lock so the bounded referee call never holds it. Null records nothing.
+  const gateFailureWarning = await assessGateFailureRisk(lane, input.verifiedWorktreePath);
+
   // Initial retry. The stop check, lane status, review supersede, and retry
   // budget all run under the same control-plane lock the Stop path takes, so a
   // concurrent Stop either wins before this block or overwrites it after.
@@ -196,6 +207,9 @@ export async function handlePostRebaseVerifyFailure(
       if (stop !== 'clear') return stop;
     }
 
+    if (gateFailureWarning) {
+      appendEvent(command.laneId, 'gate_failure_warning', 'system', { ...gateFailureWarning });
+    }
     appendEvent(command.laneId, 'typecheck_auto_retry', 'system', {
       kind: failure.kind,
       branch: lane.branch,
