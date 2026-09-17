@@ -1248,6 +1248,38 @@ describe('POST /api/mobile/symon/session — fleet briefing block (#2410)', () =
     expect(block).not.toContain('Merged in an unrelated repository');
   });
 
+  it('200: a delegated live mint carries the briefing under delegation.responses (#2411 seam)', async () => {
+    vi.stubEnv('O8_SYMON_CODE_REALTIME_EXPERIMENT', 'live');
+    vi.stubEnv('O8_SYMON_LIVE_BACKEND_MODEL', 'gpt-5.6-sol');
+    codeBridgeReady();
+    h.inboxSnapshot.value = inboxFixture({
+      approvals: [approvalFixture('Merge the pairing recovery lane', 'o8-mobile')],
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchMock = mintOk();
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'code',
+      repoPath: '/Users/operator/o8-mobile',
+    })));
+
+    expect(res.status).toBe(200);
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    // The whole instructions string moves, persona and briefing together —
+    // a delegating voice model reasons with neither if either is left behind.
+    const delegated = sentBody.session.delegation.responses.instructions as string;
+    expect(delegated).toContain('You are Symon');
+    const block = briefingBlock(delegated);
+    expect(block).toContain('APPROVALS PENDING (1)');
+    expect(block).toContain('- Merge the pairing recovery lane (o8-mobile)');
+    expect(sentBody.session.instructions).toBeUndefined();
+
+    const minted = logSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes('minted'));
+    expect(minted).toContain('backend=gpt-5.6-sol');
+    expect(minted).toContain(`briefing=${block.length + 2}`);
+    logSpy.mockRestore();
+  });
+
   it('200: a failed inbox snapshot costs the briefing, never the voice session', async () => {
     h.inboxSnapshot.value = null;
     const fetchMock = mintOk();
