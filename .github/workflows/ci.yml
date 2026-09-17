@@ -102,12 +102,15 @@ jobs:
   # means the test steps skip and the check passes. No continue-on-error: a red
   # file fails the check. workflow_dispatch with integration_base runs the same
   # lane against that base.
-  # Measured: <PR_LANE_MEASUREMENT>
+  # Measured 2026-09-17, run 35178958985 (dispatch, integration_base=HEAD~40):
+  # 18 touched files in 171.5s of gate time, 3m40s for the whole job including
+  # npm ci. Whole-suite files average 6.2s each, so the 20-minute limit covers
+  # a PR touching roughly 150 resource-owning files.
   integration-changed:
     name: Integration Tests (changed files)
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != '')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,7 +134,11 @@ jobs:
   # Weekly whole-suite lane, split into two halves of the manifest file list.
   # Unsharded, the suite does not fit 45 minutes: the 2026-09-13 scheduled run
   # reached file 310/425 when the 45-minute limit cancelled it.
-  # Measured: <WEEKLY_MEASUREMENT>
+  # Measured 2026-09-17, run 35178955102 (dispatch, 444 files): shard 1 took
+  # 222 files in 1248s of gate time and a 21m42s job; shard 2 took 222 files in
+  # 1525s and a 26m17s job. That is 46m of test time unsharded. The 40-minute
+  # limit is about 1.5x the slower shard. Baseline on that run: 45 files red
+  # on Linux (20 + 25).
   # A failed, timed-out, or cancelled Sunday run opens or updates the
   # "Weekly integration lane did not pass" issue; the Monday cron does the same
   # when no Sunday run passed, and closes the issue once one has.
@@ -140,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')
-    timeout-minutes: 75
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -159,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')
-    timeout-minutes: 75
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
