@@ -721,6 +721,9 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('mints the delegated live variant end-to-end when the experiment switch says live (#2411)', async () => {
+    // The switch is a developer override on a plan that already includes the
+    // live brain (#2423); it cannot widen a free plan.
+    vi.stubEnv('O8_PLAN', 'founder');
     vi.stubEnv('O8_SYMON_CODE_REALTIME_EXPERIMENT', 'live');
     vi.stubEnv('O8_SYMON_LIVE_BACKEND_MODEL', 'gpt-5.6-sol');
     codeBridgeReady();
@@ -766,6 +769,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('falls back to the documented backend brain when only the switch is set (#2411)', async () => {
+    vi.stubEnv('O8_PLAN', 'founder');
     vi.stubEnv('O8_SYMON_CODE_REALTIME_EXPERIMENT', 'live');
     codeBridgeReady();
     const fetchMock = vi.fn().mockResolvedValue({
@@ -1371,6 +1375,7 @@ describe('POST /api/mobile/symon/session — fleet briefing block (#2410)', () =
   });
 
   it('200: a delegated live mint carries the briefing under delegation.responses (#2411 seam)', async () => {
+    vi.stubEnv('O8_PLAN', 'founder');
     vi.stubEnv('O8_SYMON_CODE_REALTIME_EXPERIMENT', 'live');
     vi.stubEnv('O8_SYMON_LIVE_BACKEND_MODEL', 'gpt-5.6-sol');
     codeBridgeReady();
@@ -1441,6 +1446,159 @@ describe('POST /api/mobile/symon/session — fleet briefing block (#2410)', () =
     expect(mintedInstructions(fetchMock)).not.toContain(PHONE_BRIEFING_START);
     const skipped = warnSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes('briefing_skipped'));
     expect(skipped).toContain('exceeded 1500ms');
+    warnSpy.mockRestore();
+  });
+});
+
+describe('POST /api/mobile/symon/session — the per-session brain choice (#2423)', () => {
+  function mintOk() {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek_brain', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function upstreamBody(fetchMock: ReturnType<typeof vi.fn>, call = 0): string {
+    return fetchMock.mock.calls[call][1].body as string;
+  }
+
+  function mintLine(logSpy: { mock: { calls: unknown[][] } }): string {
+    const line = logSpy.mock.calls.map((call) => String(call[0])).find((text) => text.includes('minted'));
+    expect(line).toBeDefined();
+    return line as string;
+  }
+
+  it('free plan without a brain mints the standard session and offers no second choice', async () => {
+    const fetchMock = mintOk();
+
+    const res = await POST(req('{}'));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.brain).toBe('realtime');
+    expect(json.session.brains).toEqual(['realtime']);
+    expect(json.session.model).toBe('gpt-realtime-2.1-mini');
+    expect(json.session.modelVariant).toBe('mini');
+    const sent = JSON.parse(upstreamBody(fetchMock));
+    expect(sent.session.delegation).toBeUndefined();
+    expect(sent.session.brain).toBeUndefined();
+
+    // Naming the default brain changes nothing the Mac sends upstream: the two
+    // request bodies produce byte-identical mints.
+    const second = await POST(req(JSON.stringify({ brain: 'realtime' })));
+    expect(second.status).toBe(200);
+    expect(upstreamBody(fetchMock, 1)).toBe(upstreamBody(fetchMock));
+  });
+
+  it('free plan asking for the live brain is refused before a credential or a mint', async () => {
+    const fetchMock = mintOk();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await POST(req(JSON.stringify({ brain: 'live' })));
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.error).toBe('brain_locked');
+    expect(json.detail).toContain('paid-plan');
+    // Nothing was spent and no session exists: no key read, no desk preemption,
+    // no upstream mint, no scope grant.
+    expect(h.resolveOpenAIKey).not.toHaveBeenCalled();
+    expect(h.evalJs).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(h.persistSymonScopeGrant).not.toHaveBeenCalled();
+    expect(warnSpy.mock.calls.map((call) => String(call[0])).join('\n')).toContain('brain_locked: plan=free');
+    warnSpy.mockRestore();
+  });
+
+  it('paid plan asking for the live brain mints the delegated session and records it', async () => {
+    vi.stubEnv('O8_PLAN', 'founder');
+    vi.stubEnv('O8_SYMON_LIVE_BACKEND_MODEL', 'gpt-5.6-sol');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchMock = mintOk();
+
+    const res = await POST(req(JSON.stringify({ brain: 'live' })));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.brain).toBe('live');
+    expect(json.session.brains).toEqual(['realtime', 'live']);
+    expect(json.session.model).toBe('gpt-live-1');
+    expect(json.session.modelVariant).toBe('live');
+
+    const sent = JSON.parse(upstreamBody(fetchMock));
+    expect(sent.session.model).toBe('gpt-live-1');
+    expect(sent.session.delegation.type).toBe('responses');
+    expect(sent.session.delegation.responses.model).toBe('gpt-5.6-sol');
+    expect(sent.session.delegation.responses.instructions).toContain('You are Symon');
+    // The voice layer holds no brain, so nothing is left at the top level.
+    expect(sent.session.instructions).toBeUndefined();
+    expect(mintLine(logSpy)).toContain('brain=live');
+    logSpy.mockRestore();
+  });
+
+  it('paid plan without a brain still mints the standard session', async () => {
+    vi.stubEnv('O8_PLAN', 'founder');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchMock = mintOk();
+
+    const res = await POST(req('{}'));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.brain).toBe('realtime');
+    expect(json.session.brains).toEqual(['realtime', 'live']);
+    expect(json.session.model).toBe('gpt-realtime-2.1-mini');
+    expect(json.session.modelVariant).toBe('mini');
+    expect(JSON.parse(upstreamBody(fetchMock)).session.delegation).toBeUndefined();
+    expect(mintLine(logSpy)).toContain('brain=realtime');
+    logSpy.mockRestore();
+  });
+
+  it('free plan ignores the developer experiment switch and says so', async () => {
+    vi.stubEnv('O8_SYMON_CODE_REALTIME_EXPERIMENT', 'live');
+    codeBridgeReady();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = mintOk();
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'code',
+      repoPath: '/repos/o8-mobile',
+    })));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.model).toBe('gpt-realtime-2.1-mini');
+    expect(json.session.brain).toBe('realtime');
+    expect(json.session.brains).toEqual(['realtime']);
+    expect(JSON.parse(upstreamBody(fetchMock)).session.delegation).toBeUndefined();
+    const ignored = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((line) => line.includes('live_override_ignored'));
+    expect(ignored).toContain('experiment switch');
+    warnSpy.mockRestore();
+  });
+
+  it('free plan ignores the operator model header the same way', async () => {
+    codeBridgeReady();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = mintOk();
+
+    const res = await POST(req(
+      JSON.stringify({ workspaceMode: 'code', repoPath: '/repos/o8-mobile' }),
+      undefined,
+      { 'x-o8-symon-code-model': 'live' },
+    ));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).session.model).toBe('gpt-realtime-2.1-mini');
+    expect(JSON.parse(upstreamBody(fetchMock)).session.delegation).toBeUndefined();
+    const ignored = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((line) => line.includes('live_override_ignored'));
+    expect(ignored).toContain('operator model header');
     warnSpy.mockRestore();
   });
 });
