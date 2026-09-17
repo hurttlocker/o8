@@ -55,6 +55,7 @@ function recordBrainConsulted(
       topTitles: result.citations.slice(0, 3).map((c) => c.title ?? c.excerpt?.slice(0, 80) ?? c.kind),
       tokens: estimateBrainTokenCount(question, result.answer),
       latencyMs,
+      ...(result.classifier ? { classifier: result.classifier, classificationReceiptId: result.classificationReceiptId ?? null } : {}),
     });
   } catch (err) {
     // The audit trail must never fail the ask itself.
@@ -129,6 +130,7 @@ export async function POST(request: NextRequest) {
       sourcesConsidered: result.sourcesConsidered,
       consideredChars: result.consideredChars ?? null,
       cacheHit: result.cacheHit ?? null,
+      ...(result.classifier ? { classifier: result.classifier, classificationReceiptId: result.classificationReceiptId ?? null } : {}),
     }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (err) {
     return NextResponse.json(

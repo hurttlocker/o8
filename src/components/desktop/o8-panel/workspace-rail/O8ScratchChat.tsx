@@ -79,6 +79,8 @@ interface ScratchCitation {
 interface ScratchSources {
   count: number;
   top: Array<{ kind: string; title: string }>;
+  /** 'referee' when the judgment referee classified the question (#2436). */
+  classifier?: string;
 }
 
 interface ScratchMessage {
@@ -675,6 +677,7 @@ export function O8ScratchChat({
           const sources: ScratchSources = {
             count: typeof payload.count === 'number' ? payload.count : 0,
             top: Array.isArray(payload.top) ? (payload.top as ScratchSources['top']) : [],
+            ...(typeof payload.classifier === 'string' ? { classifier: payload.classifier } : {}),
           };
           setMessages((current) => current.map((message) => (
             message.id === assistantId ? { ...message, sources } : message
@@ -839,7 +842,7 @@ export function O8ScratchChat({
                             <>
                               {message.sources ? (
                                 <div style={{ marginTop: 8, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>
-                                  {message.citations.length} cited · {message.sources.count} sources considered
+                                  {message.citations.length} cited · {message.sources.count} sources considered{message.sources.classifier ? ` · classified by ${message.sources.classifier}` : ''}
                                 </div>
                               ) : null}
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: message.sources ? 4 : 8 }}>

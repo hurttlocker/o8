@@ -3,7 +3,9 @@
  * provider chain rewired in path-to-70 phase 1.7 v2,
  * fast-path + cache shipped in #1115).
  *
- * Five-tier provider chain — all return the same { class, bm25Variants } shape:
+ * Five-tier provider chain — all return the same { class, bm25Variants } shape.
+ * When `judgment.provider` is on, a typed referee choice (`./referee.ts`,
+ * #2436) runs first and falls through to this chain unless confident:
  *   1. OpenRouter (flash-lite + gpt-5.4-nano + grok-4.3 fallback) — paid HTTP, ~500ms
  *   2. Gemini Flash JSON-mode (free-tier HTTP, ~0.5-1.5s — promoted above the
  *      CLI tiers 2026-06-11: HTTP beats a 6-8s process bootstrap)
@@ -43,12 +45,17 @@ import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/op
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
 import { noteBrainQuotaError } from './brain-quota-alert';
+import { classifyWithReferee } from './referee';
 
 export type QuestionClass = 'A' | 'B';
 
 export interface ClassifierResult {
   class: QuestionClass;
   bm25Variants: string[];
+  /** Set only when the judgment referee tier classified the question (#2436). */
+  classifier?: 'referee';
+  /** Judgment receipt id for the referee classification. */
+  receiptId?: string | null;
 }
 
 // ── In-process classifier cache ──────────────────────────────────────────────
@@ -128,6 +135,16 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
   const cached = getCachedClassification(question);
   if (cached) {
     return cached;
+  }
+
+  // Referee tier (#2436): a typed choice question when `judgment.provider` is
+  // on. Returns null when off, failed, abstained, or under the confidence
+  // threshold, and the tiers below run exactly as before.
+  const refereeResult = await classifyWithReferee(question);
+  if (refereeResult) {
+    console.info('[qa][classifier] resolved via referee (tier 0)');
+    setCachedClassification(question, refereeResult);
+    return refereeResult;
   }
 
   const prompt = `${CLASSIFIER_PROMPT}\n\nQuestion: ${question}`;

@@ -7,12 +7,12 @@
  * and receipts are read back from the persisted table and lane events.
  */
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { startJudgmentEndpointFixture, type FixtureReply, type SeenRequest } from './fixtures/judgment-endpoint';
 
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { askJudgment, thresholdAnswer } = await import('@/lib/judgment/client');
@@ -26,12 +26,9 @@ const { getSqlite } = await import('@/lib/db');
 const KEY = 'ts-fixture-key-7d1c0b5e9a';
 const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-judgment-repo-'));
 
-interface FixtureReply { status: number; body: unknown; delayMs?: number }
-interface SeenRequest { method?: string; url?: string; authorization?: string; body: Record<string, unknown> }
-
-const replies: FixtureReply[] = [];
-const seen: SeenRequest[] = [];
-let server: Server;
+let replies: FixtureReply[] = [];
+let seen: SeenRequest[] = [];
+let closeFixture: () => Promise<void>;
 let endpoint = '';
 
 const QUESTIONS = {
@@ -61,32 +58,12 @@ const SUCCESS_BODY = {
   usage: { input_tokens: 6253, output_tokens: 193 },
 };
 
-function readBody(request: IncomingMessage): Promise<string> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-  });
-}
-
 const consoleLines: string[] = [];
 
 beforeAll(async () => {
-  server = createServer(async (request, response) => {
-    const raw = await readBody(request);
-    seen.push({
-      method: request.method,
-      url: request.url,
-      authorization: request.headers.authorization,
-      body: JSON.parse(raw) as Record<string, unknown>,
-    });
-    const reply = replies.shift() ?? { status: 500, body: { detail: { error_type: 'fixture_exhausted' } } };
-    if (reply.delayMs) await new Promise((resolve) => setTimeout(resolve, reply.delayMs));
-    response.writeHead(reply.status, { 'content-type': 'application/json' });
-    response.end(JSON.stringify(reply.body));
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/systemone`;
+  const fixture = await startJudgmentEndpointFixture();
+  ({ replies, seen, endpoint } = fixture);
+  closeFixture = fixture.close;
 
   await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
   writeFileSync(judgmentKeyPath(), `${KEY}\n`);
@@ -103,7 +80,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   vi.restoreAllMocks();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeFixture();
   rmSync(repoPath, { recursive: true, force: true });
 });
 

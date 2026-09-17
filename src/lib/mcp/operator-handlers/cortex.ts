@@ -115,6 +115,8 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       sourcesConsidered?: number;
       consideredChars?: number | null;
       cacheHit?: string | null;
+      classifier?: string;
+      classificationReceiptId?: string | null;
       error?: string;
     };
 
@@ -132,6 +134,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       sourcesConsidered: result.sourcesConsidered ?? null,
       consideredChars: result.consideredChars ?? null,
       cacheHit: result.cacheHit ?? null,
+      ...(result.classifier ? { classifier: result.classifier, classificationReceiptId: result.classificationReceiptId ?? null } : {}),
     });
   } catch (error) {
     return jsonResult({ ok: false, error: errorText(error) });
