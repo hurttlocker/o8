@@ -291,6 +291,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('POST /api/mobile/symon/session — mint assembly + error table', () => {
@@ -710,6 +711,97 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(json.session.modelVariant).toBe('mini');
   });
 
+  it('mints the delegated live variant end-to-end when the experiment switch says live (#2411)', async () => {
+    vi.stubEnv('O8_SYMON_CODE_REALTIME_EXPERIMENT', 'live');
+    vi.stubEnv('O8_SYMON_LIVE_BACKEND_MODEL', 'gpt-5.6-sol');
+    codeBridgeReady();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'code',
+      repoPath: '/Users/operator/o8-mobile',
+    })));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.model).toBe('gpt-live-1');
+    expect(json.session.modelVariant).toBe('live');
+
+    // The voice layer carries the id; the backend Responses model carries the brain.
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(sentBody.session.model).toBe('gpt-live-1');
+    expect(sentBody.session.delegation.type).toBe('responses');
+    expect(sentBody.session.delegation.responses.model).toBe('gpt-5.6-sol');
+    expect(sentBody.session.delegation.responses.instructions).toContain('You are Symon');
+    expect(sentBody.session.delegation.responses.tool_choice).toBe('auto');
+    expect(
+      sentBody.session.delegation.responses.tools.map((t: { name?: string }) => t.name),
+    ).toContain('render_surface');
+    // Nothing is left behind at the top level for a model that never reasons.
+    expect(sentBody.session.instructions).toBeUndefined();
+    expect(sentBody.session.tools).toBeUndefined();
+    // Audio still belongs to the voice layer.
+    expect(sentBody.session.audio.output.voice).toBe('marin');
+    expect(sentBody.session.audio.input.transcription.model).toBe('whisper-1');
+
+    // The trial has to say which brain answered it, so the mint line names it.
+    const minted = logSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes('minted'));
+    expect(minted).toContain('model=gpt-live-1');
+    expect(minted).toContain('backend=gpt-5.6-sol');
+    logSpy.mockRestore();
+  });
+
+  it('falls back to the documented backend brain when only the switch is set (#2411)', async () => {
+    vi.stubEnv('O8_SYMON_CODE_REALTIME_EXPERIMENT', 'live');
+    codeBridgeReady();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'code',
+      repoPath: '/Users/operator/o8-mobile',
+    })));
+
+    expect(res.status).toBe(200);
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(sentBody.session.delegation.responses.model).toBe('gpt-5.6-terra');
+  });
+
+  it('leaves the unswitched Code mint on mini with no delegation at all (#2411)', async () => {
+    codeBridgeReady();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'code',
+      repoPath: '/Users/operator/o8-mobile',
+    })));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.session.model).toBe('gpt-realtime-2.1-mini');
+    expect(json.session.modelVariant).toBe('mini');
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(sentBody.session.delegation).toBeUndefined();
+    expect(sentBody.session.instructions).toContain('You are Symon');
+    expect(sentBody.session.tool_choice).toBe('auto');
+    const minted = logSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes('minted'));
+    expect(minted).not.toContain('backend=');
+    logSpy.mockRestore();
+  });
+
   it('200: keeps Life on the generic surface vocabulary and omits the Code authoring pack', async () => {
     bridgeReady(false, fullDesktopBridgeTools());
     const fetchMock = vi.fn().mockResolvedValue({
@@ -950,7 +1042,9 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('400: refuses a model the realtime endpoint will not accept, before OpenAI', async () => {
-    h.phoneModel.value = 'gpt-live-1';
+    // Was gpt-live-1 until #2411 admitted it. The gate needs a subject nobody
+    // ships, so the check is still proven and not merely asserted.
+    h.phoneModel.value = 'gpt-realtime-omega-9';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -960,7 +1054,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     const json = await res.json();
     expect(json.ok).toBe(false);
     expect(json.error).toBe('unsupported_realtime_model');
-    expect(json.detail).toContain('gpt-live-1');
+    expect(json.detail).toContain('gpt-realtime-omega-9');
     expect(json.detail).toContain('gpt-realtime-2.1-mini');
     expect(fetchMock).not.toHaveBeenCalled();
   });

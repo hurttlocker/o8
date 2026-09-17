@@ -459,8 +459,13 @@ export async function POST(request: NextRequest) {
     bucketKey: `${subject.subject}:${subject.deviceId ?? 'operator'}:${resolvedScope.repoId ?? 'life'}`,
     operatorOverride: requestedModelVariant,
     experience: workspaceContext.launchKind,
+    liveBackendModel: process.env.O8_SYMON_LIVE_BACKEND_MODEL,
   });
   const model = modelSelection.model;
+  // Set only by the delegating `live` variant (#2411): the voice model does not
+  // reason, so this names the Responses model that does the thinking and the
+  // tool calls. Every realtime variant leaves it undefined.
+  const backendModel = modelSelection.backendModel;
 
   // Resolved BEFORE the webview bridge and the mint: a model the realtime
   // endpoint will not accept must not preempt a live desk session or burn a
@@ -611,6 +616,7 @@ export async function POST(request: NextRequest) {
             tools: mintedPhoneTools,
             inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
             micProfile: 'near_field',
+            backendModel,
           },
           REALTIME_TOKEN_TTL_SECONDS,
         ),
@@ -666,7 +672,8 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(
-      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
+      `${LOG} minted ${sessionId} (model=${model}${backendModel ? ` backend=${backendModel}` : ''}` +
+        ` billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
         ` briefing=${briefing.length}${bridge.deskWasLive ? ' preempted=desk' : ''})`,
     );
 
