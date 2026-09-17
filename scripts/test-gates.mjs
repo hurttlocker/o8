@@ -25,7 +25,8 @@ function sleep(ms) {
 function markerPids(marker) {
   if (process.platform === 'win32') return null;
   try {
-    const result = runSync('ps', ['eww', '-axo', 'pid=,command=']);
+    // `axeww -o` works on BSD ps and Linux procps; `eww -axo` exits 1 on Linux.
+    const result = runSync('ps', ['axeww', '-o', 'pid=,command=']);
     if (result.status !== 0) return null;
     const needle = `O8_TEST_GATE_MARKER=${marker}`;
     return result.stdout.split('\n').flatMap((line) => {

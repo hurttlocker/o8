@@ -20,7 +20,16 @@ const testPlan = process.env.O8_INTEGRATION_TEST_MODE === '1' && process.env.O8_
   ? JSON.parse(readFileSync(process.env.O8_INTEGRATION_TEST_PLAN, 'utf8'))
   : null;
 const integrationConfig = testPlan?.config ?? 'config/vitest/vitest.integration.config.ts';
-const allFiles = testPlan?.files ?? classification.resourceOwning.map((entry) => entry.path);
+const shard = /^(\d+)\/(\d+)$/.exec(process.env.O8_INTEGRATION_SHARD ?? '');
+const manifestFiles = testPlan?.files ?? classification.resourceOwning.map((entry) => entry.path);
+// O8_INTEGRATION_SHARD=k/n runs the k-th of n contiguous slices of the file
+// list, so the weekly CI lane fits two runner timeouts (#2391).
+const allFiles = shard
+  ? manifestFiles.slice(
+    Math.ceil((manifestFiles.length * (Number(shard[1]) - 1)) / Number(shard[2])),
+    Math.ceil((manifestFiles.length * Number(shard[1])) / Number(shard[2])),
+  )
+  : manifestFiles;
 const filters = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
 const files = filters.length === 0
   ? allFiles
@@ -64,7 +73,9 @@ let lastMarkerProbeDiagnostic = null;
 
 function markerPids(marker) {
   if (!marker || process.platform === 'win32') return null;
-  const receipt = spawnSync('ps', ['eww', '-axo', 'pid=,command='], {
+  // `axeww -o` is accepted by both BSD ps and Linux procps; the older
+  // `eww -axo` form exits 1 on Linux runners, failing every file (#2391).
+  const receipt = spawnSync('ps', ['axeww', '-o', 'pid=,command='], {
     encoding: 'utf8',
     timeout: 3_000,
     maxBuffer: MARKER_SCAN_MAX_BUFFER,
