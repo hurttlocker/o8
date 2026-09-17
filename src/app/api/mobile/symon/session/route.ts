@@ -302,10 +302,13 @@ function workspaceContextInstructions(context: PhoneWorkspaceContext): string {
  * an empty briefing.
  */
 async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<string> {
+  let budget: ReturnType<typeof setTimeout> | undefined;
   try {
     const snapshot = await Promise.race([
       getMobileInboxSnapshot(),
-      new Promise<null>((resolveTimeout) => setTimeout(() => resolveTimeout(null), BRIEFING_BUDGET_MS)),
+      new Promise<null>((resolveTimeout) => {
+        budget = setTimeout(() => resolveTimeout(null), BRIEFING_BUDGET_MS);
+      }),
     ]);
     if (!snapshot) {
       console.warn(`${LOG} briefing_skipped: inbox snapshot exceeded ${BRIEFING_BUDGET_MS}ms`);
@@ -320,6 +323,10 @@ async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<string> {
     const detail = error instanceof Error ? error.message : 'inbox snapshot failed';
     console.warn(`${LOG} briefing_skipped: ${detail}`);
     return '';
+  } finally {
+    // The snapshot usually wins the race; leaving its loser pending would hold a
+    // timer on the event loop for no reason.
+    if (budget) clearTimeout(budget);
   }
 }
 
