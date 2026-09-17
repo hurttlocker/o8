@@ -108,7 +108,12 @@ describe('mobile activity route', () => {
     }));
     expect(gitArgs).not.toContain('fetch');
     expect(gitArgs).not.toContain('pull');
-    expect(execFile).toHaveBeenCalledTimes(1);
+    // One capped receipts query plus one dated day-count query (#2407).
+    expect(execFile).toHaveBeenCalledTimes(2);
+    const countArgs = execFile.mock.calls[1]?.[1] as string[];
+    expect(countArgs).toEqual(expect.arrayContaining(['-C', '/tmp/o8', 'log', '--all', '--format=%cI']));
+    expect(countArgs.some((arg) => arg.startsWith('--since='))).toBe(true);
+    expect(countArgs.some((arg) => arg.startsWith('--max-count'))).toBe(false);
     expect(payload.events).toEqual([
       expect.objectContaining({
         id: `commit:${featureSha}`,
@@ -225,7 +230,8 @@ describe('mobile activity route', () => {
     const response = await GET(new Request('http://localhost:3001/api/mobile/activity'));
     const payload = await response.json();
 
-    expect(execFile).toHaveBeenCalledTimes(6);
+    // Receipts + day-count query per repo, still four repos at a time.
+    expect(execFile).toHaveBeenCalledTimes(12);
     expect(maxActiveGitCalls).toBe(4);
     expect(payload.events).toHaveLength(5);
     expect(payload.events.map((event: { repoId?: string }) => event.repoId)).not.toContain('repo-2');
