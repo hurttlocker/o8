@@ -1828,6 +1828,14 @@
       ]
     },
     {
+      "path": "tests/judgment-replay-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-branch-binding-diff.test.ts",
       "reasons": [
         "child-process",
