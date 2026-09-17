@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
@@ -33,13 +34,34 @@ const lockReleases: Array<() => void> = [];
 // this file: a packet created via the API could be erased seconds later when the
 // other process persisted a snapshot read before the create (queued tasks
 // "evaporating" between o8_task_create and o8_task_dispatch). mkdir is atomic on
-// POSIX, so the lock dir is the mutex; a holder writes its pid+timestamp inside,
-// and a lock older than LOCK_STALE_MS is broken (crashed holder).
+// POSIX, so the lock dir is the mutex; a holder writes its pid, timestamp, and a
+// unique token inside.
+//
+// #2399 — The wait is bounded by the holder's liveness, not a flat budget. A
+// dead holder's lock is broken at once. A live holder is waited on, past
+// LOCK_WAIT_BUDGET_MS (recorded as a slow-holder event), up to
+// LOCK_HARD_CEILING_MS; only then is its lock broken. A broken live lock means
+// two writers may overlap, so both sides re-read the persisted state before
+// writing and merge instead of replacing (see persistMissionUnderLock), and the
+// bypass is recorded in the control-plane lock event log.
 const LOCK_DIR = `${ORCHESTRATOR_PATH}.lock`;
 const LOCK_META = join(LOCK_DIR, 'holder.json');
-const LOCK_STALE_MS = 10_000;
+const LOCK_EVENTS_PATH = join(ORCHESTRATOR_DIR, 'control-plane-lock-events.jsonl');
 const LOCK_RETRY_MS = 25;
-const LOCK_WAIT_BUDGET_MS = 8_000;
+// mkdir and the holder.json write are two steps; a lock dir younger than this
+// with no metadata belongs to a holder between them, not a crashed one.
+const LOCK_META_GRACE_MS = 2_000;
+
+function lockTiming() {
+  const envMs = (name: string, fallback: number) => {
+    const value = Number(process.env[name]);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  };
+  return {
+    waitBudgetMs: envMs('O8_CONTROL_PLANE_LOCK_WAIT_BUDGET_MS', 8_000),
+    hardCeilingMs: envMs('O8_CONTROL_PLANE_LOCK_HARD_CEILING_MS', 60_000),
+  };
+}
 
 export class ControlPlaneLockTimeoutError extends Error {
   constructor(public readonly waitTimeoutMs: number) {
@@ -52,44 +74,148 @@ interface ControlPlaneLockOptions {
   waitTimeoutMs?: number;
 }
 
-function lockIsStale(): boolean {
+interface LockHolderMeta {
+  pid?: number;
+  at?: number;
+  token?: string;
+}
+
+export interface ControlPlaneLockEvent {
+  at: string;
+  pid: number;
+  kind: 'slow_holder_waited' | 'dead_holder_broken' | 'hard_ceiling_bypassed' | 'bypass_merged' | 'bypass_unmerged';
+  holderPid?: number | null;
+  holderAgeMs?: number | null;
+  waitedMs?: number;
+  preservedPacketIds?: string[];
+}
+
+function recordLockEvent(event: Omit<ControlPlaneLockEvent, 'at' | 'pid'>): void {
+  const entry: ControlPlaneLockEvent = { at: new Date().toISOString(), pid: process.pid, ...event };
+  console.error(`[control-plane] lock ${event.kind}`, JSON.stringify(entry));
   try {
-    const meta = JSON.parse(readFileSync(LOCK_META, 'utf8')) as { at?: number };
-    return typeof meta.at !== 'number' || Date.now() - meta.at > LOCK_STALE_MS;
-  } catch {
-    // Unreadable/missing metadata: judge by the dir's own age via a fresh stat-less
-    // heuristic — treat as stale so a crashed holder can't wedge both processes.
-    return true;
+    ensureControlPlaneDir();
+    appendFileSync(LOCK_EVENTS_PATH, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (error) {
+    console.error('[control-plane] failed to record lock event:', error);
   }
 }
 
+export function readControlPlaneLockEvents(): ControlPlaneLockEvent[] {
+  try {
+    return readFileSync(LOCK_EVENTS_PATH, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as ControlPlaneLockEvent);
+  } catch {
+    return [];
+  }
+}
+
+function readLockMeta(): LockHolderMeta | null {
+  try {
+    return JSON.parse(readFileSync(LOCK_META, 'utf8')) as LockHolderMeta;
+  } catch {
+    return null;
+  }
+}
+
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: the process exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+type LockHolderVerdict =
+  | { kind: 'gone' }
+  | { kind: 'live'; meta: LockHolderMeta | null; ageMs: number }
+  | { kind: 'dead'; meta: LockHolderMeta | null; ageMs: number };
+
+function judgeLockHolder(): LockHolderVerdict {
+  const meta = readLockMeta();
+  if (meta && typeof meta.pid === 'number' && typeof meta.at === 'number') {
+    const ageMs = Date.now() - meta.at;
+    return pidIsAlive(meta.pid) ? { kind: 'live', meta, ageMs } : { kind: 'dead', meta, ageMs };
+  }
+  let dirAgeMs: number;
+  try {
+    dirAgeMs = Date.now() - statSync(LOCK_DIR).mtimeMs;
+  } catch {
+    return { kind: 'gone' };
+  }
+  // No usable metadata: a holder between mkdir and its metadata write, or one
+  // that crashed there. Only the second outlives the grace window.
+  return dirAgeMs < LOCK_META_GRACE_MS
+    ? { kind: 'live', meta, ageMs: dirAgeMs }
+    : { kind: 'dead', meta, ageMs: dirAgeMs };
+}
+
+function breakLock(judged: LockHolderMeta | null): void {
+  // Narrow the break race: skip if another waiter already broke this lock and
+  // a new holder took it since we judged it.
+  const current = readLockMeta();
+  if (judged?.token && current?.token && current.token !== judged.token) return;
+  try {
+    rmSync(LOCK_DIR, { recursive: true, force: true });
+  } catch { /* another process may have broken it first */ }
+}
+
+// The token of the FS lock this process holds, and whether it was taken by
+// breaking a live holder. Guarded by the in-process chain, so one slot suffices.
+let heldLockToken: string | null = null;
+let heldLockBypassed = false;
+
 async function acquireFsLock(): Promise<void> {
-  const deadline = Date.now() + LOCK_WAIT_BUDGET_MS;
+  const { waitBudgetMs, hardCeilingMs } = lockTiming();
+  const startedAt = Date.now();
+  let slowHolderRecorded = false;
   for (;;) {
+    const token = randomUUID();
     try {
       mkdirSync(LOCK_DIR);
-      writeFileSync(LOCK_META, JSON.stringify({ pid: process.pid, at: Date.now() }), 'utf8');
+      writeFileSync(LOCK_META, JSON.stringify({ pid: process.pid, at: Date.now(), token }), 'utf8');
+      heldLockToken = token;
       return;
     } catch {
-      if (lockIsStale()) {
-        try {
-          rmSync(LOCK_DIR, { recursive: true, force: true });
-        } catch { /* another process may have broken it first */ }
+      const holder = judgeLockHolder();
+      if (holder.kind === 'gone') continue;
+      if (holder.kind === 'dead') {
+        recordLockEvent({ kind: 'dead_holder_broken', holderPid: holder.meta?.pid ?? null, holderAgeMs: holder.ageMs });
+        breakLock(holder.meta);
         continue;
       }
-      if (Date.now() > deadline) {
-        // Fail open with a loud log rather than deadlocking state writes: a lost
-        // update is recoverable by the ancestry reconciler; a wedged control
-        // plane is not.
-        console.error('[control-plane] cross-process lock wait exceeded budget — proceeding without lock');
-        return;
+      const waitedMs = Date.now() - startedAt;
+      if (holder.ageMs > hardCeilingMs) {
+        recordLockEvent({ kind: 'hard_ceiling_bypassed', holderPid: holder.meta?.pid ?? null, holderAgeMs: holder.ageMs, waitedMs });
+        breakLock(holder.meta);
+        heldLockBypassed = true;
+        continue;
+      }
+      if (!slowHolderRecorded && waitedMs > waitBudgetMs) {
+        slowHolderRecorded = true;
+        recordLockEvent({ kind: 'slow_holder_waited', holderPid: holder.meta?.pid ?? null, holderAgeMs: holder.ageMs, waitedMs });
       }
       await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
     }
   }
 }
 
+/** True when this writer may overlap another: it broke a live holder's lock,
+ * or its own lock was broken by a waiter that hit the hard ceiling. */
+function heldLockCompromised(): boolean {
+  return heldLockBypassed || !heldLockToken || readLockMeta()?.token !== heldLockToken;
+}
+
 function releaseFsLock(): void {
+  const token = heldLockToken;
+  heldLockToken = null;
+  heldLockBypassed = false;
+  // Never remove a lock another writer took after breaking ours.
+  if (!token || readLockMeta()?.token !== token) return;
   try {
     rmSync(LOCK_DIR, { recursive: true, force: true });
   } catch (error) {
@@ -265,14 +391,89 @@ export function reconcileOrchestratorControlPlaneState(
   });
 }
 
+const sameValue = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+
+/**
+ * #2399 — Three-way merge for a writer whose lock was bypassed. `base` is what
+ * this writer read, `ours` is what it wants to persist, `theirs` is what is on
+ * disk now. A field or packet this writer did not change takes the persisted
+ * value; one it changed keeps its value. A packet the other writer added or
+ * changed survives even if this writer's snapshot omits it.
+ */
+function mergeBypassedMission(
+  base: OrchestratorMissionState,
+  ours: OrchestratorMissionState,
+  theirs: OrchestratorMissionState,
+): { mission: OrchestratorMissionState; preservedPacketIds: string[] } {
+  // A different mission on disk cannot be merged packet by packet.
+  if ((theirs.missionId ?? '') !== (base.missionId ?? '')) return { mission: ours, preservedPacketIds: [] };
+  const baseById = new Map(base.packets.map((packet) => [packet.id, packet]));
+  const theirsById = new Map(theirs.packets.map((packet) => [packet.id, packet]));
+  const oursIds = new Set(ours.packets.map((packet) => packet.id));
+  const preservedPacketIds: string[] = [];
+  const packets: OrchestratorMissionState['packets'] = [];
+  for (const packet of ours.packets) {
+    const before = baseById.get(packet.id);
+    const persisted = theirsById.get(packet.id);
+    if (!before) {
+      packets.push(packet);
+    } else if (sameValue(packet, before)) {
+      // Unchanged here: the persisted copy wins, including its deletion.
+      if (persisted) {
+        packets.push(persisted);
+        if (!sameValue(persisted, before)) preservedPacketIds.push(packet.id);
+      }
+    } else {
+      packets.push(packet);
+    }
+  }
+  for (const packet of theirs.packets) {
+    if (oursIds.has(packet.id)) continue;
+    const before = baseById.get(packet.id);
+    // Added by the other writer, or changed by it after this writer removed it.
+    if (!before || !sameValue(packet, before)) {
+      packets.push(packet);
+      preservedPacketIds.push(packet.id);
+    }
+  }
+  const merged = { ...ours } as unknown as Record<string, unknown>;
+  const baseRecord = base as unknown as Record<string, unknown>;
+  const theirsRecord = theirs as unknown as Record<string, unknown>;
+  for (const key of Object.keys(merged)) {
+    if (key === 'packets') continue;
+    if (sameValue(merged[key], baseRecord[key])) merged[key] = theirsRecord[key];
+  }
+  return {
+    mission: normalizeOrchestratorMissionState({ ...merged, packets }),
+    preservedPacketIds,
+  };
+}
+
+/**
+ * Reconcile and persist `mission` (derived from `base`, the state read under
+ * the lock). If the lock was bypassed, re-read the persisted state and merge
+ * rather than replace, so an overlapping writer's changes are not lost.
+ */
+async function persistMissionUnderLock(
+  base: OrchestratorMissionState,
+  mission: OrchestratorMissionState,
+): Promise<OrchestratorMissionState> {
+  const domainLanes = buildDomainLaneSummaries(new Set(mission.packets.map((packet) => packet.id)));
+  const runtimeTruth = await buildRuntimeTruthSummaries(domainLanes).catch(() => []);
+  if (!heldLockCompromised()) {
+    return writeOrchestratorControlPlaneState(reconcileOrchestratorControlPlaneState(mission, runtimeTruth, domainLanes));
+  }
+  const { mission: merged, preservedPacketIds } = mergeBypassedMission(base, mission, readPersistedControlPlaneState());
+  recordLockEvent({ kind: 'bypass_merged', preservedPacketIds });
+  return writeOrchestratorControlPlaneState(reconcileOrchestratorControlPlaneState(merged, runtimeTruth));
+}
+
 export async function syncOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
   await acquireLock();
   try {
-    const current = normalizeOrchestratorMissionState(state ?? readOrchestratorControlPlaneState());
-    const domainLanes = buildDomainLaneSummaries(new Set(current.packets.map((packet) => packet.id)));
-    const runtimeTruth = await buildRuntimeTruthSummaries(domainLanes).catch(() => []);
-    const reconciled = reconcileOrchestratorControlPlaneState(current, runtimeTruth, domainLanes);
-    return writeOrchestratorControlPlaneState(reconciled);
+    const base = state ? readPersistedControlPlaneState() : readOrchestratorControlPlaneState();
+    const current = normalizeOrchestratorMissionState(state ?? structuredClone(base));
+    return await persistMissionUnderLock(base, current);
   } finally {
     releaseLock();
   }
@@ -300,7 +501,11 @@ export async function withControlPlaneLock<T>(
 ): Promise<T> {
   await acquireLock(options);
   try {
-    return await fn();
+    const result = await fn();
+    // These callers write for themselves, so there is nothing to merge; the
+    // overlap is recorded for diagnosis.
+    if (heldLockCompromised()) recordLockEvent({ kind: 'bypass_unmerged' });
+    return result;
   } finally {
     releaseLock();
   }
@@ -313,6 +518,7 @@ export async function withLockedState<T>(
   await acquireLock(options);
   try {
     const current = readOrchestratorControlPlaneState();
+    const base = structuredClone(current);
     const result = await fn(current);
     // If the callback returned a mission state, reconcile from that (post-operation
     // snapshot). Otherwise fall back to the mutated `current` object as before.
@@ -324,10 +530,7 @@ export async function withLockedState<T>(
         ? (result as unknown as OrchestratorMissionState)
         : current;
     const mission = normalizeOrchestratorMissionState(basisForReconcile);
-    const domainLanes = buildDomainLaneSummaries(new Set(mission.packets.map((packet) => packet.id)));
-    const runtimeTruth = await buildRuntimeTruthSummaries(domainLanes).catch(() => []);
-    const reconciled = reconcileOrchestratorControlPlaneState(mission, runtimeTruth, domainLanes);
-    const state = writeOrchestratorControlPlaneState(reconciled);
+    const state = await persistMissionUnderLock(base, mission);
     return { result, state };
   } finally {
     releaseLock();

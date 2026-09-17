@@ -1436,6 +1436,14 @@
       ]
     },
     {
+      "path": "tests/control-plane-lock-slow-holder-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-launch-agent-readonly-real-path.test.ts",
       "reasons": [
         "child-process",
