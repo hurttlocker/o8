@@ -119,13 +119,18 @@ export function recordSymonWatchLedgerEvent(event: SymonWatchLedgerEvent): boole
   }
 }
 
-/** Read this watch's ledger trail, newest first. Feeds `symonWatchRecord`. */
-export function readSymonWatchLedger(watchId: string, limit: number = 10): Array<{
+export interface SymonWatchLedgerTailEvent {
   phase: string;
   outcome: string;
   summary: string;
   createdAt: number;
-}> {
+}
+
+/** Read this watch's ledger trail, newest first. Feeds `symonWatchRecord`. */
+export function readSymonWatchLedger(
+  watchId: string,
+  limit: number = 10,
+): SymonWatchLedgerTailEvent[] {
   const db = ledgerDb();
   if (!db) return [];
   try {
@@ -134,13 +139,52 @@ export function readSymonWatchLedger(watchId: string, limit: number = 10): Array
       FROM agent_plan_events
       WHERE plan_id = ? AND source = 'symon_watch'
       ORDER BY seq DESC LIMIT ?
-    `).all(watchId, Math.min(50, Math.max(1, Math.floor(limit)))) as Array<{
-      phase: string;
-      outcome: string;
-      summary: string;
-      createdAt: number;
-    }>;
+    `).all(watchId, Math.min(50, Math.max(1, Math.floor(limit)))) as SymonWatchLedgerTailEvent[];
   } catch {
     return [];
   }
+}
+
+/** SQLite's variable limit is 999; stay well inside it on a long id list. */
+const LEDGER_TAIL_CHUNK = 400;
+
+/**
+ * The latest event for MANY watches in one query per chunk. A list surface that
+ * called `readSymonWatchLedger` per row issued one query per watch, which is the
+ * cost a phone pays on every poll.
+ *
+ * `MAX(seq)` with bare columns is SQLite's documented group-wise maximum: the
+ * bare columns come from the row that holds the maximum.
+ */
+export function readLatestSymonWatchLedgerEvents(
+  watchIds: string[],
+): Map<string, SymonWatchLedgerTailEvent> {
+  const latest = new Map<string, SymonWatchLedgerTailEvent>();
+  const ids = [...new Set(watchIds.filter(Boolean))];
+  if (ids.length === 0) return latest;
+  const db = ledgerDb();
+  if (!db) return latest;
+  try {
+    for (let offset = 0; offset < ids.length; offset += LEDGER_TAIL_CHUNK) {
+      const chunk = ids.slice(offset, offset + LEDGER_TAIL_CHUNK);
+      const rows = db.prepare(`
+        SELECT plan_id AS watchId, phase, outcome, redacted_summary AS summary,
+               created_at AS createdAt, MAX(seq) AS seq
+        FROM agent_plan_events
+        WHERE source = 'symon_watch' AND plan_id IN (${chunk.map(() => '?').join(', ')})
+        GROUP BY plan_id
+      `).all(...chunk) as Array<SymonWatchLedgerTailEvent & { watchId: string }>;
+      for (const row of rows) {
+        latest.set(row.watchId, {
+          phase: row.phase,
+          outcome: row.outcome,
+          summary: row.summary,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+  } catch {
+    return latest;
+  }
+  return latest;
 }
