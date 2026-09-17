@@ -5,7 +5,12 @@ export const dynamic = 'force-dynamic';
  * GET /api/mobile/activity — a chronological feed of recent fleet activity for
  * the o8-mobile native iOS app.
  *
- * Returns `{ events: MobileActivityEvent[] }`, newest-first, capped at ~40.
+ * Returns `{ events: MobileActivityEvent[], commitCounts: MobileCommitDayCounts }`.
+ * `events` is newest-first, capped at ~40. `commitCounts` holds per-day commit
+ * counts for today plus the seven preceding days, from a separate dated
+ * `git log --all --since` per repo, so the counts never depend on the event
+ * cap. Days are bucketed at the `utcOffsetMinutes` query param (minutes east of
+ * UTC), defaulting to UTC days.
  *
  * Primary data source: recent git commits across every repo in o8's registry
  * (`~/.o8/repos.json`, via `listRepos()`). One bounded, read-only
@@ -35,7 +40,14 @@ import { promisify } from 'node:util';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { listRepos } from '@/lib/repos/registry';
 import { findLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
-import type { MobileActivityEvent } from '@/lib/mobile/types';
+import {
+  bucketCommitDays,
+  buildCommitDayWindow,
+  collectRepoCommitTimes,
+  parseUtcOffsetMinutes,
+  type CommitDayWindow,
+} from '@/lib/mobile/commit-day-counts';
+import type { MobileActivityEvent, MobileActivityResponse } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -246,13 +258,19 @@ async function collectRepoCommits(
     .filter((event): event is MobileActivityEvent => event !== null);
 }
 
+interface RepoActivity {
+  events: MobileActivityEvent[];
+  commitTimes: number[];
+}
+
 async function collectRepoEvents(
   repos: RepoTarget[],
   previewContext: PreviewContext,
-): Promise<MobileActivityEvent[][]> {
+  dayWindow: CommitDayWindow,
+): Promise<RepoActivity[]> {
   const results = Array.from(
     { length: repos.length },
-    () => [] as MobileActivityEvent[],
+    (): RepoActivity => ({ events: [], commitTimes: [] }),
   );
   let nextIndex = 0;
 
@@ -263,9 +281,11 @@ async function collectRepoEvents(
         const index = nextIndex;
         nextIndex += 1;
         const repo = repos[index];
-        results[index] = repo
-          ? await collectRepoCommits(repo, previewContext)
-          : [];
+        if (!repo) continue;
+        results[index] = {
+          events: await collectRepoCommits(repo, previewContext),
+          commitTimes: await collectRepoCommitTimes(repo.localPath, dayWindow),
+        };
       }
     },
   );
@@ -368,26 +388,34 @@ export async function GET(request: Request) {
   try {
     const repos = await resolveRepoTargets();
     const previewContext = previewContextFromRequest(request);
+    const dayWindow = buildCommitDayWindow(
+      Date.now(),
+      parseUtcOffsetMinutes(new URL(request.url).searchParams.get('utcOffsetMinutes')),
+    );
 
     // Git work is four-way bounded; one failing repo cannot sink the feed
     // because collectRepoCommits degrades that repo to an empty result.
     const [commitResults, packetEvents] = await Promise.all([
-      collectRepoEvents(repos, previewContext),
+      collectRepoEvents(repos, previewContext, dayWindow),
       collectPacketEvents(previewContext),
     ]);
 
     const events: MobileActivityEvent[] = [];
     for (const result of commitResults) {
-      events.push(...result);
+      events.push(...result.events);
     }
     events.push(...packetEvents);
 
     events.sort((a, b) => b.timestamp - a.timestamp);
 
-    return NextResponse.json(
-      { events: events.slice(0, MAX_EVENTS) },
-      { headers: NO_STORE },
-    );
+    const body: MobileActivityResponse = {
+      events: events.slice(0, MAX_EVENTS),
+      commitCounts: bucketCommitDays(
+        dayWindow,
+        commitResults.flatMap((result) => result.commitTimes),
+      ),
+    };
+    return NextResponse.json(body, { headers: NO_STORE });
   } catch (error) {
     console.error('[mobile/activity] Failed to build activity feed', error);
     return NextResponse.json(

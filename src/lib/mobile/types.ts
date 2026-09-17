@@ -579,6 +579,33 @@ export interface MobileActivityEvent {
   timestamp: number;
 }
 
+/**
+ * Per-day commit counts returned by /api/mobile/activity as `commitCounts`.
+ * Computed from a dated `git log --all --since` query per tracked repo, so the
+ * counts cover the whole window regardless of the capped `events` list.
+ */
+export interface MobileCommitDayCounts {
+  /**
+   * Day boundary used for bucketing, in minutes east of UTC. Echoes the
+   * `utcOffsetMinutes` query param; 0 (UTC days) when absent or invalid.
+   */
+  utcOffsetMinutes: number;
+  /**
+   * Today plus the seven preceding days, oldest first. Every day is present;
+   * a day without commits has `count: 0`. Commits are deduplicated per repo
+   * and summed across tracked repos, dated by committer date.
+   */
+  days: Array<{ /** Local calendar date, `YYYY-MM-DD`. */ date: string; count: number }>;
+}
+
+/** Response body of GET /api/mobile/activity. */
+export interface MobileActivityResponse {
+  /** Newest-first receipts, capped at 40. */
+  events: MobileActivityEvent[];
+  /** Additive field; older clients ignore it. */
+  commitCounts: MobileCommitDayCounts;
+}
+
 export type MobileOrchestratorTranscriptRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export interface MobileOrchestratorTranscriptEntry {
