@@ -91,6 +91,8 @@ export interface ApprovalReferee {
   filesAddedFromDiff: number;
   /** o8's own path check, shown beside the referee's `touchesMiddlewareOrAuth`. */
   pathTouchesMiddlewareOrAuth: boolean;
+  /** sha256 of the diff text and sorted file paths the referee read; a write is skipped when the row's diff no longer matches. */
+  diffFingerprint: string;
   askedAt: number;
 }
 

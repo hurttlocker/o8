@@ -14,7 +14,7 @@ import os from 'node:os';
 import { join } from 'node:path';
 
 import { NextRequest } from 'next/server';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   startJudgmentEndpointFixture,
@@ -38,7 +38,7 @@ const { createLaneActionApproval } = await import('@/lib/lane/commands-approval'
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
 const { getApproval } = await import('@/lib/approvals/store');
 const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
-const { setApprovalRefereeOptionsForTests, waitForApprovalReferee } = await import('@/lib/approvals/referee');
+const { approvalDiffFingerprint, setApprovalRefereeOptionsForTests, waitForApprovalReferee } = await import('@/lib/approvals/referee');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { judgmentKeyPath } = await import('@/lib/judgment/key');
 const { DIFF_QUESTIONS } = await import('@/lib/judgment/questions');
@@ -211,6 +211,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   fixture.reset();
   await updateOperatorDefaults({ judgmentProvider: 'off' });
 });
@@ -339,5 +340,46 @@ describe('approval card referee through the merge-card creation path', () => {
 
     const receipt = getLaneEvents(lane.id).find((event) => event.verb === 'judgment') as { payload?: Record<string, unknown> } | undefined;
     expect(receipt?.payload).toMatchObject({ ok: false, attempts: 3, approvalId: result.approvalId, error: { kind: 'http', status: 529 } });
+  }, 60_000);
+  it('keeps the fresh referee when a reused approval\'s earlier call answers late', async () => {
+    await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
+    const lane = makeDirectLane('o8-referee-reuse');
+    const staleHold = deferred();
+    fixture.replies.push({ status: 200, body: REFEREE_BODY, hold: staleHold.promise });
+
+    const first = await createMergeCard(lane);
+    await waitFor(() => fixture.seen.length === 1);
+    const firstDiff = JSON.parse(String(approvalRow(first.approvalId!).diff_json)) as { after: string; files: Array<{ path: string }> };
+
+    // The worker moves on: a new commit changes the diff, and the same card is reused.
+    mkdirSync(join(lane.worktreePath!, 'src'), { recursive: true });
+    writeFileSync(join(lane.worktreePath!, 'src', 'auth-guard.ts'), 'export const allow = false;\n');
+    commitAll(lane.worktreePath!, 'worker follow-up');
+    const freshBody = { ...REFEREE_BODY, model: 'jev-1.13.1', answers: { ...REFEREE_BODY.answers, docsOnly: { type: 'noul', noul: 0.5 } } };
+    fixture.replies.push({ status: 200, body: freshBody });
+    const sqlite = getSqlite();
+    const prepare = vi.spyOn(sqlite, 'prepare');
+    const info = vi.spyOn(console, 'info');
+    const refereeWrites = () => prepare.mock.calls.filter(([sql]) => String(sql).startsWith('UPDATE approvals SET metadata_json')).length;
+
+    const second = await createMergeCard(lane);
+    expect(second.approvalId).toBe(first.approvalId);
+    const reusedRow = approvalRow(second.approvalId!);
+    const secondDiff = JSON.parse(String(reusedRow.diff_json)) as { after: string; files: Array<{ path: string }> };
+    const secondFingerprint = approvalDiffFingerprint(secondDiff.after, secondDiff.files.map((file) => file.path));
+    expect(secondFingerprint).not.toBe(approvalDiffFingerprint(firstDiff.after, firstDiff.files.map((file) => file.path)));
+
+    const fresh = await waitForApprovalReferee(second.approvalId!);
+    expect(fresh).toMatchObject({ model: 'jev-1.13.1', diffFingerprint: secondFingerprint });
+    const freshMetadata = approvalRow(second.approvalId!).metadata_json;
+
+    staleHold.release();
+    await waitFor(() => fixture.responded() === 2);
+    await waitFor(() => info.mock.calls.some(([line]) => String(line).startsWith('[approval-referee] skipped')));
+
+    const stored = getApproval(second.approvalId!)!;
+    expect(stored.referee).toMatchObject({ model: 'jev-1.13.1', diffFingerprint: secondFingerprint, answers: { docsOnly: { noul: 0.5 } } });
+    expect(approvalRow(second.approvalId!).metadata_json).toBe(freshMetadata);
+    expect(refereeWrites()).toBe(1);
   }, 60_000);
 });

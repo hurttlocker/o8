@@ -22,6 +22,7 @@ const referee: ApprovalReferee = {
   hiddenText: false,
   filesAddedFromDiff: 2,
   pathTouchesMiddlewareOrAuth: true,
+  diffFingerprint: 'fp-card',
   askedAt: 1,
 };
 
