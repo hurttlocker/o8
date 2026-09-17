@@ -19,6 +19,7 @@ import {
 } from '@/lib/orchestrator/runtime-capabilities';
 import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { AgentRoleRoute } from '@/lib/operator/role-routing';
+import type { JudgmentProvider } from '@/lib/operator/judgment-default';
 import type { RoleRoutingReceipt } from '@/lib/operator/role-routing-ledger';
 import {
   APP_FONT_STACK,
@@ -102,6 +103,8 @@ export interface OperatorDefaults {
   inAppOrchestratorEnabled: boolean;
   brainUseClaudeCli: boolean;
   workersUseBrain: WorkersUseBrain;
+  /** Typed judgment provider (#2434). 'off' sends nothing anywhere. */
+  judgmentProvider: JudgmentProvider;
   workspaceManifestPolicy: WorkspaceManifestPolicy;
   crossHouseWorkerFallback: boolean;
   orchestratorBackend: OrchestratorBackendSetting;

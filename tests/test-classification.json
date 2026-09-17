@@ -1820,6 +1820,14 @@
       ]
     },
     {
+      "path": "tests/judgment-client-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-branch-binding-diff.test.ts",
       "reasons": [
         "child-process",

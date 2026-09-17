@@ -68,6 +68,7 @@ const NON_DEFAULT_UPDATE = {
   symonVoiceSubscriptionOnly: true,
   brainUseClaudeCli: false,
   workersUseBrain: 'off',
+  judgmentProvider: 'typesafe',
   uiLoopMaxIterations: 6,
   uiLoopMaxMinutes: 24,
   uiLoopMaxDiffBytes: 48_000,

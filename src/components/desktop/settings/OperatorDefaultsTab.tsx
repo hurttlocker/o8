@@ -21,6 +21,7 @@ import {
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import { ApfsDependencyImagesRow } from './ApfsDependencyImagesRow';
+import { JudgmentProviderRow } from './JudgmentProviderRow';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { WorktreeRetentionSection } from './WorktreeRetentionSection';
@@ -583,6 +584,12 @@ export function OperatorDefaultsTab() {
             disabled={envLocked('buyinDocEnabled') || busyField === 'buyinDocEnabled'}
             onToggle={(next) => { updateField('buyinDocEnabled', next); }}
             divider
+          />
+          <JudgmentProviderRow
+            icon={<MergeIcon />}
+            value={values.judgmentProvider}
+            busy={busyField === 'judgmentProvider'}
+            onChange={(next) => { updateField('judgmentProvider', next); }}
           />
           <SettingsRow
             icon={<CpuIcon />}

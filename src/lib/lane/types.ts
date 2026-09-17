@@ -309,6 +309,10 @@ export type LaneEventVerb =
   // Worker consulted the Engineering Brain via `o8 ask` (2026-06-11).
   // Payload: { question, class, cacheHit, sourcesConsidered, citedCount, topTitles }
   | 'brain_consulted'
+  // A typed judgment call ran with this lane in context (#2434). Payload is the
+  // receipt: { receiptId, provider, model, ok, questions, answers, inputTokens,
+  // outputTokens, latencyMs, attempts, truncated, error, packetId, approvalId, surface }
+  | 'judgment'
   // Reserved Broadcast event kind for future agent-to-agent communication.
   // No producer exists yet; this keeps the ledger schema forward-compatible.
   | 'message'
