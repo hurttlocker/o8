@@ -61,13 +61,15 @@ describe('POST /api/voice/realtime/session — model gate', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await session.POST(req('/api/voice/realtime/session', { model: 'gpt-live-1' }));
+    // Was gpt-live-1 until #2411 admitted it to the allowlist. The gate needs a
+    // subject nobody ships, or it proves nothing.
+    const res = await session.POST(req('/api/voice/realtime/session', { model: 'gpt-realtime-omega-9' }));
 
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.ok).toBe(false);
     expect(json.error).toBe('unsupported_realtime_model');
-    expect(json.detail).toContain('gpt-live-1');
+    expect(json.detail).toContain('gpt-realtime-omega-9');
     expect(json.detail).toContain(REALTIME_MODEL);
     // The desk client reads `reason` for the message it shows the operator.
     expect(json.reason).toBe(json.detail);
@@ -97,12 +99,12 @@ describe('POST /api/voice/realtime/sdp — model gate', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await sdp.POST(req('/api/voice/realtime/sdp', { sdp: OFFER_SDP, model: 'gpt-live-1' }));
+    const res = await sdp.POST(req('/api/voice/realtime/sdp', { sdp: OFFER_SDP, model: 'gpt-realtime-omega-9' }));
 
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe('unsupported_realtime_model');
-    expect(json.detail).toContain('gpt-live-1');
+    expect(json.detail).toContain('gpt-realtime-omega-9');
     expect(json.reason).toBe(json.detail);
     expect(fetchMock).not.toHaveBeenCalled();
   });
