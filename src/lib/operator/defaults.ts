@@ -84,6 +84,7 @@ import { applyBroadcastCommentaryUpdate, BROADCAST_COMMENTARY_FALLBACK, broadcas
 import { applyPresentationUpdate, PRESENTATION_FALLBACK, presentationSettingSources, resolvePresentationDefaults, resolveStoredPresentation, type PresentationDefaults } from './presentation-defaults';
 import { applyReviewContinuationUpdate, REVIEW_CONTINUATION_FALLBACK, resolveStoredReviewContinuation, type ReviewContinuationDefault } from './review-continuation-default';
 import { applyWorkspaceManifestPolicyUpdate, resolveStoredWorkspaceManifestPolicy, resolveWorkspaceManifestPolicySettings, WORKSPACE_MANIFEST_POLICY_FALLBACK, type WorkspaceManifestPolicyDefault } from './workspace-manifest-policy-default';
+import { applySymonVoiceUpdate, resolveStoredSymonVoice, resolveSymonVoiceSettings, SYMON_VOICE_FALLBACK, type SymonVoiceDefault } from './symon-voice-default';
 import {
   applyOperatorDefaultsTomlWithLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
@@ -112,10 +113,9 @@ export {
  * Override root with CORTEX_IDE_DATA_DIR. `~/.cortex-ide/` is not read. */
 export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
-
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -382,9 +382,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   prLinkDestination: 'in-app',
   worktreeMaxCount: 20,
   worktreeMaxTotalGb: 20,
-  ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK,
+  ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -607,7 +607,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.worktreeMaxTotalGb === 'number' && Number.isFinite(stored.worktreeMaxTotalGb) && stored.worktreeMaxTotalGb >= 0) {
     result.worktreeMaxTotalGb = stored.worktreeMaxTotalGb;
   }
-  Object.assign(result, resolveStoredStorageReserve(stored), resolveStoredWorkspaceParking(stored), resolveStoredMeteredPacketCap(stored));
+  Object.assign(result, resolveStoredStorageReserve(stored), resolveStoredWorkspaceParking(stored), resolveStoredMeteredPacketCap(stored), resolveStoredSymonVoice(stored));
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -618,7 +618,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
 // ── Resolution ──
 
 function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWithSources {
-  const meteredPacketCap = resolveMeteredPacketCapSettings(fileValues); const uiLoop = resolveUiLoopSettings(fileValues);
+  const meteredPacketCap = resolveMeteredPacketCapSettings(fileValues); const uiLoop = resolveUiLoopSettings(fileValues); const symonVoice = resolveSymonVoiceSettings(fileValues);
   const envProfile = envSubscriptionProfile();
   const envCap = envParallelCap();
   const envGate = envOverlapGate();
@@ -750,7 +750,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize ?? fileValues.worktreeMaxTotalGb ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxTotalGb,
     ...storageReserve.values,
     ...workspaceParking.values,
-    ...meteredPacketCap.values, ...uiLoop.values,
+    ...meteredPacketCap.values, ...uiLoop.values, ...symonVoice.values,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -820,7 +820,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize !== null ? 'env' : fileValues.worktreeMaxTotalGb !== undefined ? 'file' : 'default',
     ...storageReserve.sources,
     ...workspaceParking.sources,
-    ...meteredPacketCap.sources, ...uiLoop.sources,
+    ...meteredPacketCap.sources, ...uiLoop.sources, ...symonVoice.sources,
   };
 
   return { values: resolved, sources };
@@ -1103,7 +1103,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   }
   applyStorageReserveUpdate(stored, update);
   applyWorkspaceParkingUpdate(stored, update);
-  applyMeteredPacketCapUpdate(stored, update); applyUiLoopUpdate(stored, update);
+  applyMeteredPacketCapUpdate(stored, update); applyUiLoopUpdate(stored, update); applySymonVoiceUpdate(stored, update);
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');

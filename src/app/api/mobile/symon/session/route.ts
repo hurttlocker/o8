@@ -6,16 +6,23 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveOpenAIKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { resolveChatGPTRealtimeCredential } from '@/lib/voice/chatgpt-realtime-credential';
 import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
 import {
   persistSymonScopeGrant,
   SYMON_SCOPE_VERSION,
   type SymonClientSubject,
+  type SymonToolPack,
   type SymonWorkspaceMode,
 } from '@/lib/mobile/symon-agent-registry';
 import { DEFAULT_SYMON_MACHINE } from '@/lib/symon/machine-registry';
 import { resolveRealtimeAccess } from '@/lib/voice/realtime-access';
+import {
+  readLastSymonPhoneBillingSource,
+  recordSymonPhoneBillingSource,
+  type SymonPhoneBillingSource,
+} from '@/lib/voice/symon-phone-billing';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import {
@@ -25,6 +32,7 @@ import {
   PHONE_CODE_SURFACE_INSTRUCTIONS,
   PHONE_CODE_TOOL_INSTRUCTIONS,
   selectPhoneCodeTools,
+  selectPhoneO8Tools,
   selectPhoneRealtimeModel,
   RENDER_SURFACE_TOOL,
   REALTIME_INPUT_TRANSCRIPTION_MODEL,
@@ -88,9 +96,15 @@ interface PhoneWorkspaceContext {
   activeSurface?: string;
 }
 
+interface PhoneSessionRequest {
+  context: PhoneWorkspaceContext;
+  acknowledgeBillingChange: boolean;
+}
+
 interface ResolvedPhoneScope {
   context: PhoneWorkspaceContext;
   workspaceMode: SymonWorkspaceMode;
+  toolPack: SymonToolPack;
   repoId: string | null;
   repoPath: string | null;
 }
@@ -169,73 +183,90 @@ function safeSurface(value: unknown): string | undefined {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(surface) ? surface : undefined;
 }
 
-async function readPhoneWorkspaceContext(request: NextRequest): Promise<PhoneWorkspaceContext> {
+async function readPhoneSessionRequest(request: NextRequest): Promise<PhoneSessionRequest> {
   const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > CONTEXT_BODY_MAX_CHARS) return {};
+  if (Number.isFinite(declaredLength) && declaredLength > CONTEXT_BODY_MAX_CHARS) {
+    return { context: {}, acknowledgeBillingChange: false };
+  }
 
   try {
     const text = await request.text();
-    if (!text || text.length > CONTEXT_BODY_MAX_CHARS) return {};
+    if (!text || text.length > CONTEXT_BODY_MAX_CHARS) {
+      return { context: {}, acknowledgeBillingChange: false };
+    }
     const body = JSON.parse(text) as unknown;
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return { context: {}, acknowledgeBillingChange: false };
+    }
     const record = body as Record<string, unknown>;
     const repoPath = safeRepoPath(record.repoPath);
     const threadId = safeIdentifier(record.threadId, 160);
     const agentId = safeIdentifier(record.agentId, 128);
     return {
-      workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code'
-        ? record.workspaceMode
-        : undefined,
-      launchKind:
-        record.launchKind === 'repository-catch-up'
-          ? record.launchKind
+      acknowledgeBillingChange: record.acknowledgeBillingChange === true,
+      context: {
+        workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code'
+          ? record.workspaceMode
           : undefined,
-      currentRoute: safeRoute(record.currentRoute),
-      sourceRoute: safeRoute(record.sourceRoute),
-      repoPath,
-      repoName: repoPath ? safeDisplayLabel(record.repoName, 96) : undefined,
-      branch: safeBranch(record.branch),
-      threadId,
-      sessionKey: safeIdentifier(record.sessionKey, 160),
-      threadTitle: threadId ? safeDisplayLabel(record.threadTitle, 160) : undefined,
-      backend:
-        record.backend === 'default' || record.backend === 'openclaw' || record.backend === 'hermes'
-          ? record.backend
-          : undefined,
-      agentId,
-      agentName: agentId ? safeDisplayLabel(record.agentName, 80) : undefined,
-      selectedFile: safeRelativePath(record.selectedFile),
-      controlTab:
-        record.controlTab === 'fleet' ||
-        record.controlTab === 'review' ||
-        record.controlTab === 'changes' ||
-        record.controlTab === 'activity'
-          ? record.controlTab
-          : undefined,
-      runStatus:
-        record.runStatus === 'idle' ||
-        record.runStatus === 'running' ||
-        record.runStatus === 'review' ||
-        record.runStatus === 'blocked' ||
-        record.runStatus === 'failed' ||
-        record.runStatus === 'done'
-          ? record.runStatus
-          : undefined,
-      activeSurface: safeSurface(record.activeSurface),
+        launchKind:
+          record.launchKind === 'repository-catch-up'
+            ? record.launchKind
+            : undefined,
+        currentRoute: safeRoute(record.currentRoute),
+        sourceRoute: safeRoute(record.sourceRoute),
+        repoPath,
+        repoName: repoPath ? safeDisplayLabel(record.repoName, 96) : undefined,
+        branch: safeBranch(record.branch),
+        threadId,
+        sessionKey: safeIdentifier(record.sessionKey, 160),
+        threadTitle: threadId ? safeDisplayLabel(record.threadTitle, 160) : undefined,
+        backend:
+          record.backend === 'default' || record.backend === 'openclaw' || record.backend === 'hermes'
+            ? record.backend
+            : undefined,
+        agentId,
+        agentName: agentId ? safeDisplayLabel(record.agentName, 80) : undefined,
+        selectedFile: safeRelativePath(record.selectedFile),
+        controlTab:
+          record.controlTab === 'fleet' ||
+          record.controlTab === 'review' ||
+          record.controlTab === 'changes' ||
+          record.controlTab === 'activity'
+            ? record.controlTab
+            : undefined,
+        runStatus:
+          record.runStatus === 'idle' ||
+          record.runStatus === 'running' ||
+          record.runStatus === 'review' ||
+          record.runStatus === 'blocked' ||
+          record.runStatus === 'failed' ||
+          record.runStatus === 'done'
+            ? record.runStatus
+            : undefined,
+        activeSurface: safeSurface(record.activeSurface),
+      },
     };
   } catch {
     // The body is optional and additive. Malformed input must not make a legacy
     // caller lose voice access, and no raw body text is ever echoed to the model.
-    return {};
+    return { context: {}, acknowledgeBillingChange: false };
   }
 }
 
 async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<ResolvedPhoneScope | null> {
   const workspaceMode: SymonWorkspaceMode = context.workspaceMode === 'code' ? 'code' : 'o8';
-  if (workspaceMode !== 'code') {
-    return { context, workspaceMode, repoId: null, repoPath: null };
+  const toolPack: SymonToolPack =
+    workspaceMode === 'code' || context.launchKind === 'repository-catch-up'
+      ? 'code'
+      : 'o8';
+  if (toolPack !== 'code') {
+    return { context, workspaceMode, toolPack, repoId: null, repoPath: null };
   }
-  if (!context.repoPath) return null;
+  if (!context.repoPath) {
+    return workspaceMode === 'code'
+      ? null
+      : { context, workspaceMode, toolPack, repoId: null, repoPath: null };
+  }
 
   const repo = await findRepoByLocalPath(context.repoPath);
   if (!repo) return null;
@@ -247,6 +278,7 @@ async function resolvePhoneScope(context: PhoneWorkspaceContext): Promise<Resolv
       repoName: safeDisplayLabel(repo.name, 96),
     },
     workspaceMode,
+    toolPack,
     repoId: repo.id,
     repoPath,
   };
@@ -377,11 +409,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const requestedContext = await readPhoneWorkspaceContext(request);
-  const resolvedScope = await resolvePhoneScope(requestedContext);
+  const sessionRequest = await readPhoneSessionRequest(request);
+  const resolvedScope = await resolvePhoneScope(sessionRequest.context);
   if (!resolvedScope) {
     return NextResponse.json(
-      { ok: false, error: 'invalid_repo', detail: 'Code mode requires an exact registered repository.' },
+      {
+        ok: false,
+        error: 'invalid_repo',
+        detail: 'Code mode requires an exact registered repository.',
+      },
       { status: 400 },
     );
   }
@@ -420,11 +456,23 @@ export async function POST(request: NextRequest) {
   const requiresSubscription =
     workspaceContext.launchKind === 'repository-catch-up';
   let realtimeBearer: string;
-  let billingSource: 'chatgpt-subscription' | 'openai-api-key';
+  let billingSource: SymonPhoneBillingSource;
   if (chatgptCredential) {
     realtimeBearer = chatgptCredential.accessToken;
     billingSource = 'chatgpt-subscription';
   } else {
+    if (getOperatorDefaultsSync().values.symonVoiceSubscriptionOnly) {
+      console.warn(`${LOG} subscription_only_blocked: ChatGPT OAuth credential unavailable`);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'subscription_unavailable',
+          detail:
+            'Symon voice is set to subscription only, but no current ChatGPT OAuth login is available. Run `codex login` on the Mac and choose ChatGPT.',
+        },
+        { status: 501 },
+      );
+    }
     if (requiresSubscription) {
       return NextResponse.json(
         {
@@ -450,6 +498,25 @@ export async function POST(request: NextRequest) {
     billingSource = 'openai-api-key';
   }
 
+  const previousBillingSource = await readLastSymonPhoneBillingSource();
+  if (
+    billingSource === 'openai-api-key' &&
+    previousBillingSource === 'chatgpt-subscription' &&
+    !sessionRequest.acknowledgeBillingChange
+  ) {
+    console.warn(`${LOG} billing_changed: previous=chatgpt-subscription next=openai-api-key`);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'billing_changed',
+        detail: 'Symon voice would move from ChatGPT subscription billing to the metered OpenAI API key.',
+        previous: 'chatgpt-subscription',
+        next: 'openai-api-key',
+      },
+      { status: 409 },
+    );
+  }
+
   // Reach the webview: preempt a live desk session + pull the tool schemas.
   let bridge: BridgeResult;
   try {
@@ -470,23 +537,24 @@ export async function POST(request: NextRequest) {
 
   const sessionId = `sym-${randomUUID()}`;
   const voice = bridge.voice;
-  let phoneBridgeTools = bridge.tools;
-  if (workspaceContext.workspaceMode === 'code') {
-    const selection = selectPhoneCodeTools(bridge.tools);
-    if (selection.missing.length > 0) {
-      const detail = `Code tool catalog incomplete; missing: ${selection.missing.join(', ')}`;
-      console.error(`${LOG} code_tools_incomplete: ${detail}`);
-      return NextResponse.json(
-        { ok: false, error: 'desktop_unavailable', detail },
-        { status: 503 },
-      );
-    }
-    phoneBridgeTools = selection.tools;
+  const usesCodePack = resolvedScope.toolPack === 'code';
+  const phonePack = usesCodePack
+    ? { label: 'Code', logKey: 'code_tools_incomplete', ...selectPhoneCodeTools(bridge.tools) }
+    : { label: 'o8', logKey: 'o8_tools_incomplete', ...selectPhoneO8Tools(bridge.tools) };
+  if (phonePack.missing.length > 0) {
+    const detail = `${phonePack.label} tool catalog incomplete; missing: ${phonePack.missing.join(', ')}`;
+    console.error(`${LOG} ${phonePack.logKey}: ${detail}`);
+    return NextResponse.json(
+      { ok: false, error: 'desktop_unavailable', detail },
+      { status: 503 },
+    );
   }
+  const phoneBridgeTools = phonePack.tools;
+  const mintedPhoneTools = [...phoneBridgeTools, RENDER_SURFACE_TOOL];
 
-  // Mint the ephemeral token carrying the shared brain/config. Code gets its
-  // bounded phone pack; Life keeps the complete live bridge catalog. The raw
-  // subscription bearer or BYOK key never leaves the Mac.
+  // Mint the ephemeral token carrying the shared brain/config. Code and
+  // repository catch-up use the Code pack; default o8 uses its bounded pack.
+  // The raw subscription bearer or BYOK key never leaves the Mac.
   try {
     const mint = await fetch(CLIENT_SECRETS_URL, {
       method: 'POST',
@@ -505,11 +573,11 @@ export async function POST(request: NextRequest) {
             instructions:
               DEFAULT_INSTRUCTIONS +
               PHONE_SURFACE_INSTRUCTIONS +
-              (workspaceContext.workspaceMode === 'code'
+              (usesCodePack
                 ? PHONE_CODE_TOOL_INSTRUCTIONS + PHONE_CODE_SURFACE_INSTRUCTIONS
                 : '') +
               workspaceContextInstructions(workspaceContext),
-            tools: [...phoneBridgeTools, RENDER_SURFACE_TOOL],
+            tools: mintedPhoneTools,
             inputTranscriptionModel: REALTIME_INPUT_TRANSCRIPTION_MODEL,
             micProfile: 'near_field',
           },
@@ -528,6 +596,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'mint_failed', detail }, { status: 502 });
     }
 
+    try {
+      await recordSymonPhoneBillingSource(billingSource);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'billing source persistence failed';
+      console.error(`${LOG} billing_state_failed: ${detail}`);
+    }
+
     // OpenAI reports expires_at in unix SECONDS; the contract wants epoch millis.
     const expiresAt = typeof data.expires_at === 'number'
       ? data.expires_at * 1000
@@ -543,6 +618,7 @@ export async function POST(request: NextRequest) {
         sessionId,
         ...subject,
         workspaceMode: resolvedScope.workspaceMode,
+        toolPack: resolvedScope.toolPack,
         repoId: resolvedScope.repoId,
         repoPath: resolvedScope.repoPath,
         allowedTools,
@@ -559,7 +635,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(
-      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${phoneBridgeTools.length}` +
+      `${LOG} minted ${sessionId} (model=${model} billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
         `${bridge.deskWasLive ? ' preempted=desk' : ''})`,
     );
 

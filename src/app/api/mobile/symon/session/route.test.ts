@@ -8,15 +8,60 @@
  * preempted, and the full structured error table (403/501/502/503) fires — the
  * route never throws.
  */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { PHONE_CODE_TOOL_NAMES } from '@/lib/voice/realtime-session-config';
+import {
+  PHONE_CODE_TOOL_NAMES,
+  PHONE_O8_TOOL_NAMES,
+} from '@/lib/voice/realtime-session-config';
+
+const EXPECTED_PHONE_O8_TOOL_NAMES = [
+  'symon_machine_list',
+  'symon_machine_switch',
+  'symon_execute_plan',
+  'o8_status',
+  'o8_team_inbox',
+  'o8_ask',
+  'o8_needs_me',
+  'o8_attention_why',
+  'o8_review_diff',
+  'o8_packet_wait',
+  'o8_recap',
+  'o8_usage',
+  'o8_panel_read',
+  'o8_dispatch',
+  'o8_delegate',
+  'escalate',
+  'agent_turn',
+  'terminal_list',
+  'terminal_send',
+  'gh_issue_create',
+  'gh_comment',
+  'gh_pr_list',
+  'gh_issue_list',
+  'gh_issue_view',
+  'gh_pr_view',
+  'gh_triage',
+  'symon_ledger_recent',
+  'symon_ledger_undo',
+] as const;
+
+const MCP_TOOL_NAMES = ['mcp__fixture__search', 'mcp__fixture__lookup'] as const;
+
+const dataDir = mkdtempSync(join(tmpdir(), 'o8-symon-session-'));
+const authPath = join(dataDir, 'auth.json');
+const billingStatePath = join(dataDir, 'symon-phone-billing.json');
+const settingsPath = join(dataDir, 'settings.toml');
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
+process.env.CODEX_HOME = dataDir;
 
 const h = vi.hoisted(() => ({
   evalJs: vi.fn<(code: string) => Promise<{ result: string }>>(),
   resolveRequestPrincipal: vi.fn(),
   resolveDeviceByToken: vi.fn(),
-  resolveChatGPTRealtimeCredential: vi.fn(),
   resolveOpenAIKey: vi.fn(),
   resolveRealtimeAccess: vi.fn(),
   findRepoByLocalPath: vi.fn(),
@@ -33,11 +78,9 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
   },
 }));
 vi.mock('@/lib/cortex/qa/llm/byok-keys', () => ({ resolveOpenAIKey: h.resolveOpenAIKey }));
-vi.mock('@/lib/voice/chatgpt-realtime-credential', () => ({
-  resolveChatGPTRealtimeCredential: h.resolveChatGPTRealtimeCredential,
-}));
 vi.mock('@/lib/voice/realtime-access', () => ({ resolveRealtimeAccess: h.resolveRealtimeAccess }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: h.resolveRequestPrincipal }));
+vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
 vi.mock('@/lib/mobile/device-registry', () => ({ resolveDeviceByToken: h.resolveDeviceByToken }));
 vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: h.findRepoByLocalPath }));
 vi.mock('@/lib/voice/realtime-session-config', async (importOriginal) => {
@@ -56,6 +99,7 @@ vi.mock('@/lib/mobile/symon-agent-registry', async (importOriginal) => {
 });
 
 const { POST } = await import('./route');
+const { POST: POST_TOOL } = await import('../tool/route');
 
 function req(body = '{}', bearer?: string, extraHeaders: Record<string, string> = {}) {
   return new NextRequest('http://localhost:3001/api/mobile/symon/session', {
@@ -78,10 +122,31 @@ function toolSchemas(names: readonly string[]) {
   }));
 }
 
-/** Default bridge: desk NOT live, one tool published, voice=marin. */
+function fullDesktopBridgeTools() {
+  const desktopLifeTools = [
+    'send_email',
+    'calendar_list',
+    'browser_open',
+    'shell_execute',
+    'file_read',
+    'mac_weather',
+    'mac_music_play',
+    'read_screen',
+    ...Array.from({ length: 53 }, (_, index) => `desktop_life_fixture_${index + 1}`),
+  ];
+  const names = Array.from(new Set([
+    ...EXPECTED_PHONE_O8_TOOL_NAMES,
+    ...PHONE_CODE_TOOL_NAMES,
+    ...desktopLifeTools,
+    ...MCP_TOOL_NAMES,
+  ]));
+  return toolSchemas(names);
+}
+
+/** Default bridge: desk NOT live, 101-tool desktop catalog, voice=marin. */
 function bridgeReady(
   deskWasLive = false,
-  tools: Array<Record<string, unknown>> = toolSchemas(['o8_status']),
+  tools: Array<Record<string, unknown>> = fullDesktopBridgeTools(),
 ) {
   h.evalJs.mockImplementation(async (code: string) => {
     if (code.includes('deskWasLive')) return { result: JSON.stringify({ deskWasLive }) };
@@ -93,21 +158,41 @@ function codeBridgeReady(extras: readonly string[] = []) {
   bridgeReady(false, toolSchemas([...PHONE_CODE_TOOL_NAMES, ...extras]));
 }
 
+function writeChatGptAuth(expiresAt: number) {
+  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(expiresAt / 1_000) })).toString('base64url');
+  writeFileSync(authPath, JSON.stringify({
+    auth_mode: 'chatgpt',
+    tokens: {
+      access_token: `header.${payload}.fixture-signature-long-enough`,
+      account_id: 'acct-fixture',
+    },
+  }));
+}
+
+function writePreviousBillingSource(billingSource: 'chatgpt-subscription' | 'openai-api-key') {
+  writeFileSync(billingStatePath, JSON.stringify({
+    version: 1,
+    billingSource,
+    updatedAt: Date.now() - 1_000,
+  }));
+}
+
 beforeEach(() => {
   // Reset ONLY these fns — not vi.clearAllMocks(), which would also wipe the
   // O8WebviewClient constructor's `() => ({ evalJs })` implementation.
   h.evalJs.mockReset();
   h.resolveRequestPrincipal.mockReset();
   h.resolveDeviceByToken.mockReset();
-  h.resolveChatGPTRealtimeCredential.mockReset();
   h.resolveOpenAIKey.mockReset();
   h.resolveRealtimeAccess.mockReset();
   h.findRepoByLocalPath.mockReset();
   h.persistSymonScopeGrant.mockReset();
   h.phoneModel.value = null;
+  rmSync(authPath, { force: true });
+  rmSync(billingStatePath, { force: true });
+  rmSync(settingsPath, { force: true });
   delete (globalThis as { __o8BrowserAgentClient?: unknown }).__o8BrowserAgentClient;
   h.resolveRequestPrincipal.mockReturnValue('operator');
-  h.resolveChatGPTRealtimeCredential.mockResolvedValue(null);
   h.resolveOpenAIKey.mockResolvedValue('sk-test-key');
   h.resolveRealtimeAccess.mockResolvedValue({ mode: 'byok', available: true, reason: 'byok' });
   h.resolveDeviceByToken.mockReturnValue(null);
@@ -124,7 +209,11 @@ afterEach(() => {
 });
 
 describe('POST /api/mobile/symon/session — mint assembly + error table', () => {
-  it('200: mints, and the token body carries the SAME config the desk session uses', async () => {
+  it('fixture catalog mirrors the desktop 101-tool count', () => {
+    expect(fullDesktopBridgeTools()).toHaveLength(101);
+  });
+
+  it('200: without a previous source, mints with BYOK and records the billing source', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek_test_secret', expires_at: 1_783_490_000 }),
@@ -157,36 +246,34 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       subject: 'operator',
       deviceId: null,
       workspaceMode: 'o8',
+      toolPack: 'o8',
       repoId: null,
       repoPath: null,
-      allowedTools: ['o8_status'],
+      allowedTools: [...EXPECTED_PHONE_O8_TOOL_NAMES, ...MCP_TOOL_NAMES],
       scopeVersion: 1,
     }));
 
     // Config parity: instructions + tools (+auto) + input transcription baked in.
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(sentBody.session.instructions).toContain('You are Symon');
-    // Phone-only superset: the desk tool set PLUS the client-rendered surface
-    // tool, and the persona carries the surface-authoring guidance.
+    // Phone-only bounded pack plus the client-rendered surface tool. The persona
+    // carries the surface-authoring guidance.
     expect(sentBody.session.instructions).toContain('render_surface');
     expect(sentBody.session.instructions).toContain('Never send a root-only shell');
     expect(sentBody.session.instructions).toContain('Named arguments such as `title:`');
     expect(sentBody.session.instructions).toContain('dotState is exactly idle|running|review|rejected|failed|merged');
-    expect(sentBody.session.tools).toHaveLength(2);
+    expect(sentBody.session.tools).toHaveLength(31);
     expect(
       sentBody.session.tools.map((t: { name?: string }) => t.name),
     ).toContain('render_surface');
     expect(sentBody.session.tool_choice).toBe('auto');
     expect(sentBody.session.audio.input.transcription.model).toBe('whisper-1');
     expect(sentBody.session.audio.output.voice).toBe('marin');
+    expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
   });
 
   it('200: prefers ChatGPT subscription OAuth and never resolves a metered API key', async () => {
-    h.resolveChatGPTRealtimeCredential.mockResolvedValue({
-      accessToken: 'oauth-subscription-token',
-      accountId: 'acct-founder',
-      expiresAt: Date.now() + 60_000,
-    });
+    writeChatGptAuth(Date.now() + 5 * 60_000);
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek_subscription', expires_at: 1 }),
@@ -200,17 +287,16 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(json.session.billingSource).toBe('chatgpt-subscription');
     expect(json.session.model).toBe('gpt-realtime-2.1-mini');
     expect(h.resolveOpenAIKey).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
-      Authorization: 'Bearer oauth-subscription-token',
-    });
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toMatch(/^Bearer header\./);
   });
 
   it('200: repository catch-up uses subscription OAuth and the flagship voice model', async () => {
-    h.resolveChatGPTRealtimeCredential.mockResolvedValue({
-      accessToken: 'oauth-subscription-token',
-      accountId: 'acct-founder',
-      expiresAt: Date.now() + 60_000,
-    });
+    bridgeReady(false, fullDesktopBridgeTools());
+    const registry = await vi.importActual<typeof import('@/lib/mobile/symon-agent-registry')>(
+      '@/lib/mobile/symon-agent-registry',
+    );
+    h.persistSymonScopeGrant.mockImplementation(registry.persistSymonScopeGrant);
+    writeChatGptAuth(Date.now() + 5 * 60_000);
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek_subscription', expires_at: 1 }),
@@ -232,10 +318,65 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(sentBody.session.instructions).toContain(
       '"launchKind":"repository-catch-up"',
     );
+    expect(sentBody.session.instructions).toContain('CODE TOOL ROUTING');
+    expect(sentBody.session.instructions).toContain('Never ask for spoken confirmation');
+    expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).toEqual([
+      ...PHONE_CODE_TOOL_NAMES,
+      'render_surface',
+    ]);
+    expect(sentBody.session.tools).toHaveLength(22);
+    expect(h.persistSymonScopeGrant).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceMode: 'o8',
+      toolPack: 'code',
+      repoId: null,
+      repoPath: null,
+    }));
+
+    try {
+      const mismatch = await POST_TOOL(new NextRequest(
+        'http://localhost:3001/api/mobile/symon/tool',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: json.session.sessionId,
+            callId: 'catch-up-mismatch',
+            tool: 'o8_approve_item',
+            args: { packetId: 'pkt-repo-b', repoId: 'repo-b' },
+            dryRun: true,
+          }),
+        },
+      ));
+      expect(await mismatch.json()).toMatchObject({
+        ok: false,
+        result: { error: 'repo_scope_mismatch' },
+      });
+
+      const unscopedDispatch = await POST_TOOL(new NextRequest(
+        'http://localhost:3001/api/mobile/symon/tool',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: json.session.sessionId,
+            callId: 'catch-up-injection',
+            tool: 'o8_dispatch',
+            args: { task: 'Fix the bug' },
+            dryRun: true,
+          }),
+        },
+      ));
+      expect(await unscopedDispatch.json()).toMatchObject({
+        ok: false,
+        result: { error: 'repo_scope_mismatch' },
+      });
+    } finally {
+      registry.clearSymonScopeGrant(json.session.sessionId);
+    }
   });
 
   it('501: repository catch-up never falls through to metered BYOK credits', async () => {
-    h.resolveChatGPTRealtimeCredential.mockResolvedValue(null);
+    writeChatGptAuth(Date.now() - 60_000);
     h.resolveOpenAIKey.mockResolvedValue('sk-must-not-be-used');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -244,6 +385,74 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       workspaceMode: 'o8',
       launchKind: 'repository-catch-up',
     })));
+
+    expect(res.status).toBe(501);
+    expect((await res.json()).error).toBe('subscription_unavailable');
+    expect(h.resolveOpenAIKey).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('409: blocks a subscription-to-BYOK billing change before client_secrets mint', async () => {
+    writePreviousBillingSource('chatgpt-subscription');
+    writeChatGptAuth(Date.now() - 60_000);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ workspaceMode: 'o8' })));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: 'billing_changed',
+      previous: 'chatgpt-subscription',
+      next: 'openai-api-key',
+    });
+    expect(h.resolveOpenAIKey).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('200: acknowledges a subscription-to-BYOK change and records the new source', async () => {
+    writePreviousBillingSource('chatgpt-subscription');
+    writeChatGptAuth(Date.now() - 60_000);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek_acknowledged', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'o8',
+      acknowledgeBillingChange: true,
+    })));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).session.billingSource).toBe('openai-api-key');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
+  });
+
+  it('200: an acknowledgement without a billing change mints normally', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek_no_change', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ acknowledgeBillingChange: true })));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).session.billingSource).toBe('openai-api-key');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('501: subscription-only setting blocks fallback without resolving BYOK', async () => {
+    writeChatGptAuth(Date.now() - 60_000);
+    writeFileSync(settingsPath, '[symon.voice]\nsubscriptionOnly = true\n');
+    h.resolveOpenAIKey.mockResolvedValue('sk-must-not-be-used');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ workspaceMode: 'o8' })));
 
     expect(res.status).toBe(501);
     expect((await res.json()).error).toBe('subscription_unavailable');
@@ -289,7 +498,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('200: appends rich bounded Code context, frozen markers, and the Code authoring pack', async () => {
-    codeBridgeReady(['send_email', 'spotify_play']);
+    bridgeReady(false, fullDesktopBridgeTools());
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek', expires_at: 1 }),
@@ -352,6 +561,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       ...PHONE_CODE_TOOL_NAMES,
       'render_surface',
     ]);
+    expect(sentBody.session.tools).toHaveLength(22);
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('send_email');
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).not.toContain('spotify_play');
     for (const tool of sentBody.session.tools.filter((tool: { name?: string }) => tool.name !== 'render_surface')) {
@@ -370,6 +580,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(h.persistSymonScopeGrant).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: json.session.sessionId,
       workspaceMode: 'code',
+      toolPack: 'code',
       repoId: 'repo-o8-mobile',
       repoPath: '/Users/operator/o8-mobile',
       allowedTools: [...PHONE_CODE_TOOL_NAMES],
@@ -415,8 +626,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('200: keeps Life on the generic surface vocabulary and omits the Code authoring pack', async () => {
-    const lifeTools = ['o8_status', 'send_email', 'spotify_play', 'browser_open'];
-    bridgeReady(false, toolSchemas(lifeTools));
+    bridgeReady(false, fullDesktopBridgeTools());
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek', expires_at: 1 }),
@@ -438,11 +648,15 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(instructions).toContain('"workspaceMode":"o8"');
     expect(instructions).toContain('"sourceRoute":"/ask"');
     expect(instructions).not.toContain('CODE WORKSPACE SURFACES');
+    expect(instructions).not.toContain('CODE TOOL ROUTING');
     expect(instructions).not.toContain('RepoState(targetId');
+    expect(PHONE_O8_TOOL_NAMES).toEqual(EXPECTED_PHONE_O8_TOOL_NAMES);
     expect(sentBody.session.tools.map((tool: { name?: string }) => tool.name)).toEqual([
-      ...lifeTools,
+      ...EXPECTED_PHONE_O8_TOOL_NAMES,
+      ...MCP_TOOL_NAMES,
       'render_surface',
     ]);
+    expect(sentBody.session.tools).toHaveLength(31);
   });
 
   it('200: ignores unknown, malformed, overlong, and prompt-shaped context fields', async () => {
@@ -517,6 +731,23 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('503: fails loud when the live Mac catalog cannot supply the complete o8 pack', async () => {
+    const tools = fullDesktopBridgeTools().filter((tool) => tool.name !== 'o8_needs_me');
+    bridgeReady(false, tools);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ workspaceMode: 'o8' })));
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe('desktop_unavailable');
+    expect(body.detail).toContain('o8 tool catalog incomplete');
+    expect(body.detail).toContain('o8_needs_me');
+    expect(body.detail).not.toContain('o8_status');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('400: rejects Code mode unless the selected repo resolves exactly in the registry', async () => {
     h.findRepoByLocalPath.mockResolvedValue(null);
 
@@ -545,6 +776,27 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     const body = await res.json();
     expect(body.error).toBe('desktop_unavailable');
     expect(JSON.stringify(body)).not.toContain('ek-never-returned');
+    expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
+  });
+
+  it('200: returns the minted session when billing state persistence fails', async () => {
+    mkdirSync(billingStatePath);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek-persistence-failed', expires_at: 1 }),
+    }));
+
+    try {
+      const res = await POST(req());
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).session.clientSecret).toBe('ek-persistence-failed');
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('billing_state_failed:'));
+    } finally {
+      errorSpy.mockRestore();
+      rmSync(billingStatePath, { recursive: true, force: true });
+    }
   });
 
   it('200: malformed JSON remains compatible with the old body-optional caller', async () => {

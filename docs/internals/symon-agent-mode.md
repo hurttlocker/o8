@@ -148,26 +148,43 @@ and truncated results say so. The `continue-run`, `steer-run`, `approve`, and
 (`workspaceMode: "o8"`) keeps the generic phone vocabulary and never receives the
 Code authoring instructions.
 
-### Phone Code tool pack (v1)
+### Phone tool packs (v1)
 
-Only `workspaceMode: "code"` filters Mac-executed tools. Its exact catalog is:
+Every phone mint filters Mac-executed tools. `workspaceMode: "code"` and the
+`repository-catch-up` launch use the 21-entry Code pack:
 
-`o8_status`, `o8_needs_me`, `o8_review_diff`, `o8_dispatch`, `o8_delegate`,
-`o8_packet_wait`, `o8_packet_steer`, `o8_agent_task`, `o8_packet_rerun`,
-`o8_packet_reset`, `o8_stop_agent`, `o8_approve_item`, `o8_reject_item`,
-`git_status`, `git_log`, `repo_commit_diff`, `symon_ledger_recent`, and `symon_ledger_undo`.
+`symon_execute_plan`, `symon_machine_list`, `symon_machine_switch`, `o8_status`,
+`o8_needs_me`, `o8_review_diff`, `o8_dispatch`, `o8_delegate`, `o8_packet_wait`,
+`o8_packet_steer`, `o8_agent_task`, `o8_packet_rerun`, `o8_packet_reset`,
+`o8_stop_agent`, `o8_approve_item`, `o8_reject_item`, `git_status`, `git_log`,
+`repo_commit_diff`, `symon_ledger_recent`, and `symon_ledger_undo`.
 
-The phone-local `render_surface` tool is appended after that pack and never
-relayed to the Mac. Mail, media, browser, shell, file, and every other desktop or
-Life tool are excluded from Code even when the live Mac catalog contains them.
-The phone-minted schemas omit `repo`, `repoId`, and `repoPath` and reject unknown
-arguments. Repository identity belongs exclusively to the immutable Mac grant;
-the relay injects the canonical values after the model chooses a tool.
-The filter preserves the live schemas and emits them in the canonical order
-above. If any required Code tool is absent or is not a function schema, the mint
-fails as `503 desktop_unavailable` with the missing names instead of silently
-creating a partial Code agent. This strict failure applies only to Code; Life,
-legacy `{}`, and desktop continue using their full catalogs.
+The default `workspaceMode: "o8"` launch uses a separate 28-entry pack:
+
+`symon_machine_list`, `symon_machine_switch`, `symon_execute_plan`, `o8_status`,
+`o8_team_inbox`, `o8_ask`, `o8_needs_me`, `o8_attention_why`, `o8_review_diff`,
+`o8_packet_wait`, `o8_recap`, `o8_usage`, `o8_panel_read`, `o8_dispatch`,
+`o8_delegate`, `escalate`, `agent_turn`, `terminal_list`, `terminal_send`,
+`gh_issue_create`, `gh_comment`, `gh_pr_list`, `gh_issue_list`, `gh_issue_view`,
+`gh_pr_view`, `gh_triage`, `symon_ledger_recent`, and `symon_ledger_undo`.
+
+The o8 pack also retains every live `mcp__*` tool because attaching that MCP
+server to Symon is an explicit operator opt-in. The phone-local `render_surface`
+tool is appended after each pack and never relayed to the Mac. A default o8 mint
+therefore carries 29 tools before optional MCP schemas, while Code and repository
+catch-up mints carry 22. Mail, media, browser, shell, file, screen, `mac_*`, and
+other desktop Life tools stay excluded even when the live Mac catalog contains
+them.
+
+The Code and repository catch-up schemas omit `repo`, `repoId`, and `repoPath`
+and reject unknown arguments. Repository identity belongs exclusively to the
+immutable Mac grant; the relay injects the canonical values after the model
+chooses a tool. Each selector emits its required tools in the canonical order
+above, and the o8 selector appends MCP schemas in bridge order. If any required
+tool for the selected pack is absent or is not a function schema, the mint fails
+as `503 desktop_unavailable` with the missing names instead of silently creating
+a partial phone agent. Desktop Symon does not pass through these phone selectors
+and keeps its full catalog.
 
 ### Spoken packet review
 
@@ -218,18 +235,49 @@ Success `200`:
 
 Code requires an exact registered `repoPath`. The Mac resolves that path to its
 canonical registry pair and persists an immutable session grant containing the
-subject/device identity, workspace mode, `repoId`, `repoPath`, allowed tools,
-issue time, and scope version. The phone refuses to open WebRTC unless a Code
-mint returns version 1 and the exact requested path. Repo changes therefore
-tear down and remint the session instead of editing instructions in place.
+subject/device identity, workspace mode, selected tool pack, `repoId`,
+`repoPath`, allowed tools, issue time, and scope version. The registry applies
+the same immutable repository scope whenever the grant's selected tool pack is
+Code, including a repository-bound catch-up launch whose workspace mode remains
+o8. The cross-repository catch-up launch keeps its null repository identity so
+read tools can summarize every tracked repository; repository-mutating Code
+tools fail closed until a repository is selected. The phone refuses to open
+WebRTC unless a Code-workspace mint returns version 1 and the exact requested
+path. Repo changes therefore tear down and remint the session instead of editing
+instructions in place.
 
 The mint first reads the standard Codex ChatGPT-OAuth credential and uses its
 access token to request the short-lived Realtime client secret. This path is
 reported as `billingSource:"chatgpt-subscription"` and does not resolve or send a
 Platform API key. Ordinary sessions retain the existing BYOK fallback, reported
-as `billingSource:"openai-api-key"`, for users without ChatGPT OAuth. Repository
-catch-up fails closed when OAuth is unavailable so it can never spend Platform
-credits.
+as `billingSource:"openai-api-key"`, for users without ChatGPT OAuth. After each
+successful phone mint, the Mac records the billing source in the o8 data
+directory. If the previous mint used the subscription and the next mint would
+use BYOK, the route returns `billing_changed` without minting. The phone can
+retry once with `acknowledgeBillingChange:true`; that successful mint records
+the new source. Setting `symon.voice.subscriptionOnly = true` makes missing or
+expired ChatGPT OAuth fail with `subscription_unavailable` before the route
+reads the BYOK key. The setting defaults to `false`. Repository catch-up also
+fails closed when OAuth is unavailable so it can never spend Platform credits.
+
+The transition response is:
+
+```json
+{
+  "ok": false,
+  "error": "billing_changed",
+  "detail": "Symon voice would move from ChatGPT subscription billing to the metered OpenAI API key.",
+  "previous": "chatgpt-subscription",
+  "next": "openai-api-key"
+}
+```
+
+The setting is stored in `settings.toml`:
+
+```toml
+[symon.voice]
+subscriptionOnly = true
+```
 
 Ordinary Life uses `gpt-realtime-2.1-mini`; repository catch-up uses
 `gpt-realtime-2.1`. Code reads
@@ -246,8 +294,9 @@ Errors (typed, structured, never thrown):
 |---|---|---|
 | 401 | `unauthorized` | missing/bad Bearer (middleware) |
 | 403 | `locked` | entitlement does not include S2S (same rule as the desk mint) |
+| 409 | `billing_changed` | previous mint used ChatGPT subscription billing and this mint would use the metered API key; body includes `previous` and `next` |
 | 501 | `no_key` | BYOK OpenAI key absent (same rule as the desk mint — managed proxy does not carry realtime in v1) |
-| 501 | `subscription_unavailable` | repository catch-up requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
+| 501 | `subscription_unavailable` | repository catch-up or `symon.voice.subscriptionOnly` requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
 | 502 | `mint_failed` | upstream OpenAI session-mint failure (body includes `detail`) |
 | 503 | `desktop_unavailable` | webview/eval bridge unreachable, or the live catalog is missing a required Code tool |
 

@@ -35,7 +35,7 @@ import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 type TomlRecord = Record<string, unknown>;
 
 interface TomlField<T> {
-  path: readonly [string, string];
+  path: readonly [string, ...string[]];
   parse: (value: unknown, key: string) => T;
   /**
    * How the value is written back to TOML, when that differs from `parse`.
@@ -50,9 +50,9 @@ function invalid(key: string, expected: string): never {
   throw new SettingsTomlValidationError(key, expected);
 }
 
-function booleanField(section: string, key: string): TomlField<boolean> {
+function booleanField(...path: [string, ...string[]]): TomlField<boolean> {
   return {
-    path: [section, key],
+    path,
     parse: (value, tomlKey) => typeof value === 'boolean' ? value : invalid(tomlKey, 'a boolean'),
   };
 }
@@ -275,6 +275,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   nativeBrowserView: booleanField('experimental', 'native_browser_view'),
   classAComposer: enumField('brain', 'class_a_composer', 'one of "auto", "haiku-cli", "sonnet-cli", or "fastest"', isClassAComposer),
   inAppOrchestratorEnabled: booleanField('orchestrator', 'legacy_claude_enabled'),
+  symonVoiceSubscriptionOnly: booleanField('symon', 'voice', 'subscriptionOnly'),
   brainUseClaudeCli: booleanField('brain', 'use_claude_cli'),
   workersUseBrain: enumField('brain', 'workers_use_brain', 'one of "off", "auto", or "all"', isWorkersUseBrain),
   workspaceManifestPolicy: enumField('operator', 'workspace_manifest_policy', 'one of "disabled", "one-approval", or "auto"', isWorkspaceManifestPolicy),
@@ -364,23 +365,32 @@ function parseDocument(raw: string): TomlRecord {
 }
 
 function readPath(document: TomlRecord, field: TomlField<unknown>): unknown {
-  const [section, key] = field.path;
-  const table = document[section];
-  if (table === undefined) return undefined;
-  if (!isRecord(table)) invalid(section, 'a table');
-  return table[key];
+  let value: unknown = document;
+  for (let index = 0; index < field.path.length; index += 1) {
+    if (!isRecord(value)) invalid(field.path.slice(0, index).join('.'), 'a table');
+    value = value[field.path[index]];
+    if (value === undefined) return undefined;
+  }
+  return value;
 }
 
 function writePath(document: TomlRecord, field: TomlField<unknown>, value: unknown): void {
-  const [section, key] = field.path;
-  const current = document[section];
-  if (current !== undefined && !isRecord(current)) invalid(section, 'a table');
-  const table = current ?? {};
-  const existingValue = (table as TomlRecord)[key];
-  (table as TomlRecord)[key] = isRecord(existingValue) && isRecord(value)
+  let table = document;
+  for (let index = 0; index < field.path.length - 1; index += 1) {
+    const segment = field.path[index];
+    const current = table[segment];
+    if (current !== undefined && !isRecord(current)) {
+      invalid(field.path.slice(0, index + 1).join('.'), 'a table');
+    }
+    const child = current ?? {};
+    table[segment] = child;
+    table = child as TomlRecord;
+  }
+  const key = field.path[field.path.length - 1];
+  const existingValue = table[key];
+  table[key] = isRecord(existingValue) && isRecord(value)
     ? { ...existingValue, ...value }
     : value;
-  document[section] = table;
 }
 
 export function parseOperatorDefaultsToml(raw: string): Partial<OperatorDefaults> {
