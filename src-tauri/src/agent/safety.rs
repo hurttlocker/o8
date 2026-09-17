@@ -226,6 +226,15 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "symon_ledger_undo" => SafetyClass::Reversible,
         "symon_machine_list" => SafetyClass::ReadOnly,
         "symon_machine_switch" => SafetyClass::Reversible,
+        // Listing standing watches only reads them. Registering or cancelling
+        // one commits durable state that outlives the turn, so both card. The
+        // watch's own plan body still passes the ordinary confirmation card
+        // when it runs — a watch never grants execution authority by itself.
+        "symon_watch_list" => SafetyClass::ReadOnly,
+        "symon_watch" | "symon_watch_cancel" => SafetyClass::Reversible,
+        // Running a waiting watch enters the native plan executor, which reads
+        // the exact steps back and asks before any of them run.
+        "symon_watch_run" => SafetyClass::Reversible,
         // The pseudo-tool only proposes a native-validated, immutable plan.
         // Its one card grants exact read-only/reversible steps; destructive
         // steps still receive their own confirmation during execution.
@@ -248,6 +257,10 @@ pub fn is_plan_control_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
         "symon_execute_plan"
+            | "symon_watch"
+            | "symon_watch_list"
+            | "symon_watch_cancel"
+            | "symon_watch_run"
             | "symon_machine_switch"
             | "symon_ledger_undo"
             | "escalate"
@@ -315,6 +328,14 @@ mod tests {
     #[test]
     fn plan_control_tools_are_explicit_and_actions_remain_composable() {
         assert!(is_plan_control_tool("symon_execute_plan"));
+        assert!(is_plan_control_tool("symon_watch"));
+        assert!(is_plan_control_tool("symon_watch_list"));
+        assert!(is_plan_control_tool("symon_watch_cancel"));
+        assert!(is_plan_control_tool("symon_watch_run"));
+        assert_eq!(tool_safety_class("symon_watch_list"), SafetyClass::ReadOnly);
+        assert_eq!(tool_safety_class("symon_watch"), SafetyClass::Reversible);
+        assert_eq!(tool_safety_class("symon_watch_cancel"), SafetyClass::Reversible);
+        assert_eq!(tool_safety_class("symon_watch_run"), SafetyClass::Reversible);
         assert!(is_plan_control_tool("o8_approve_item"));
         assert!(is_plan_control_tool("o8_packet_reset"));
         assert!(!is_plan_control_tool("mac_reminders_create"));

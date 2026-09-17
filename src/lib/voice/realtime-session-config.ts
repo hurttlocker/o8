@@ -256,6 +256,10 @@ export const PHONE_CODE_TOOL_NAMES = [
   'repo_commit_diff',
   'symon_ledger_recent',
   'symon_ledger_undo',
+  'symon_watch',
+  'symon_watch_list',
+  'symon_watch_cancel',
+  'symon_watch_run',
 ] as const;
 
 /**
@@ -296,6 +300,10 @@ export const PHONE_O8_TOOL_NAMES = [
   'gh_triage',
   'symon_ledger_recent',
   'symon_ledger_undo',
+  'symon_watch',
+  'symon_watch_list',
+  'symon_watch_cancel',
+  'symon_watch_run',
 ] as const;
 
 export interface PhoneToolSelection {

@@ -325,6 +325,19 @@ pub(crate) async fn execute_cascaded_tool_call(
             "cascaded",
             Some(&ctx.utterance),
             Some(spoke_filler),
+            None,
+        )
+        .await;
+    }
+    if tool_name == plan::WATCH_RUN_TOOL_NAME {
+        return plan::execute_watch_run(
+            ctx,
+            args,
+            true,
+            None,
+            "cascaded",
+            Some(&ctx.utterance),
+            Some(spoke_filler),
         )
         .await;
     }
@@ -364,6 +377,19 @@ pub(crate) async fn execute_realtime_tool_call(
             source,
             Some(&ctx.utterance),
             None,
+            None,
+        )
+        .await;
+    }
+    if tool_name == plan::WATCH_RUN_TOOL_NAME {
+        return plan::execute_watch_run(
+            ctx,
+            args,
+            false,
+            correlation,
+            source,
+            Some(&ctx.utterance),
+            None,
         )
         .await;
     }
@@ -394,6 +420,19 @@ pub(crate) async fn execute_text_tool_call(
             ctx,
             args,
             plan::PlanSurface::Realtime,
+            false,
+            Some(correlation),
+            "phone_text",
+            Some(&ctx.utterance),
+            None,
+            None,
+        )
+        .await;
+    }
+    if tool_name == plan::WATCH_RUN_TOOL_NAME {
+        return plan::execute_watch_run(
+            ctx,
+            args,
             false,
             Some(correlation),
             "phone_text",
