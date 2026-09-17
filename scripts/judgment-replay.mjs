@@ -209,6 +209,12 @@ export function collapseDiffs(approvals, labels, buildDiffState) {
 
 const fmt = (value, digits = 3) => (value === null || value === undefined ? 'n/a' : value.toFixed(digits));
 
+/**
+ * A dedup group whose approvals span several packets is folded under its
+ * first packet on purpose: identical sanitized states are one observation, so
+ * the group must sit in exactly one leave-one-packet-out fold, never in both
+ * the training set and the held-out set.
+ */
 function renderLabel(label, predictor, groups, lines) {
   const labeled = groups.filter((group) => group.labels[label] !== undefined && group.answers);
   const rows = [];
@@ -246,11 +252,6 @@ export function renderReport({ groups, approvalsRead, withoutDiffText, notes, ca
     const answered = groups.filter((group) => group.labels[label] !== undefined && group.answers);
     const positives = answered.filter((group) => group.labels[label] === 1).length;
     const negatives = answered.length - positives;
-    if (label === 'mergedClean' && positives === 0) {
-      lines.push(`mergedClean: no negatives, skipped (n=${answered.length} labeled distinct diffs)`, '');
-      results[label] = { skipped: 'no negatives', n: answered.length };
-      continue;
-    }
     if (positives === 0 || negatives === 0) {
       lines.push(`${label}: ${positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${answered.length} labeled distinct diffs)`, '');
       results[label] = { skipped: positives === 0 ? 'no positives' : 'no negatives', n: answered.length };

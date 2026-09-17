@@ -274,7 +274,7 @@ describe('judgment replay against a fixture database and a local systemone fixtu
     // operatorRejected: every diff was resolved on desktop or mobile; C and D rejected.
     expect(out).toContain('operatorRejected by risk/4: n=5 distinct diffs (positives 2, negatives 3, abstained 0)');
     expect(out).toContain('operatorRejected by 1-docsOnly: n=5 distinct diffs');
-    expect(out).toContain('mergedClean: no negatives, skipped (n=2 labeled distinct diffs)');
+    expect(out).toContain('mergedClean: no positives, skipped (n=2 labeled distinct diffs)');
 
     expect(out).toContain('diff chars per input token:');
     expect(out).toContain('over 5000 input tokens, n=5 calls)');
