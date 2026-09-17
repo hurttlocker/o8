@@ -67,6 +67,21 @@ backend = "codex"
     expect((await getOperatorDefaults()).values.orchestratorBackend).toBe('codex');
   });
 
+  it('persists the subscription-only Symon voice setting at its documented path', async () => {
+    const response = await POST(postDefaults({
+      settingsToml: `
+[symon.voice]
+subscriptionOnly = true
+`,
+      settingsTomlRevision: await currentRevision(),
+    }));
+
+    expect(response.status).toBe(200);
+    expect((await getOperatorDefaults()).values.symonVoiceSubscriptionOnly).toBe(true);
+    expect(parseOperatorDefaultsToml(readFileSync(tomlPath, 'utf8')).symonVoiceSubscriptionOnly)
+      .toBe(true);
+  });
+
   it('persists the Astra orchestrator model through settings.toml and the route consumer', async () => {
     const response = await POST(postDefaults({
       settingsToml: `

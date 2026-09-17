@@ -8,6 +8,9 @@
  * preempted, and the full structured error table (403/501/502/503) fires — the
  * route never throws.
  */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import {
@@ -48,11 +51,17 @@ const EXPECTED_PHONE_O8_TOOL_NAMES = [
 
 const MCP_TOOL_NAMES = ['mcp__fixture__search', 'mcp__fixture__lookup'] as const;
 
+const dataDir = mkdtempSync(join(tmpdir(), 'o8-symon-session-'));
+const authPath = join(dataDir, 'auth.json');
+const billingStatePath = join(dataDir, 'symon-phone-billing.json');
+const settingsPath = join(dataDir, 'settings.toml');
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
+process.env.CODEX_HOME = dataDir;
+
 const h = vi.hoisted(() => ({
   evalJs: vi.fn<(code: string) => Promise<{ result: string }>>(),
   resolveRequestPrincipal: vi.fn(),
   resolveDeviceByToken: vi.fn(),
-  resolveChatGPTRealtimeCredential: vi.fn(),
   resolveOpenAIKey: vi.fn(),
   resolveRealtimeAccess: vi.fn(),
   findRepoByLocalPath: vi.fn(),
@@ -69,9 +78,6 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
   },
 }));
 vi.mock('@/lib/cortex/qa/llm/byok-keys', () => ({ resolveOpenAIKey: h.resolveOpenAIKey }));
-vi.mock('@/lib/voice/chatgpt-realtime-credential', () => ({
-  resolveChatGPTRealtimeCredential: h.resolveChatGPTRealtimeCredential,
-}));
 vi.mock('@/lib/voice/realtime-access', () => ({ resolveRealtimeAccess: h.resolveRealtimeAccess }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: h.resolveRequestPrincipal }));
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
@@ -152,21 +158,41 @@ function codeBridgeReady(extras: readonly string[] = []) {
   bridgeReady(false, toolSchemas([...PHONE_CODE_TOOL_NAMES, ...extras]));
 }
 
+function writeChatGptAuth(expiresAt: number) {
+  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(expiresAt / 1_000) })).toString('base64url');
+  writeFileSync(authPath, JSON.stringify({
+    auth_mode: 'chatgpt',
+    tokens: {
+      access_token: `header.${payload}.fixture-signature-long-enough`,
+      account_id: 'acct-fixture',
+    },
+  }));
+}
+
+function writePreviousBillingSource(billingSource: 'chatgpt-subscription' | 'openai-api-key') {
+  writeFileSync(billingStatePath, JSON.stringify({
+    version: 1,
+    billingSource,
+    updatedAt: Date.now() - 1_000,
+  }));
+}
+
 beforeEach(() => {
   // Reset ONLY these fns — not vi.clearAllMocks(), which would also wipe the
   // O8WebviewClient constructor's `() => ({ evalJs })` implementation.
   h.evalJs.mockReset();
   h.resolveRequestPrincipal.mockReset();
   h.resolveDeviceByToken.mockReset();
-  h.resolveChatGPTRealtimeCredential.mockReset();
   h.resolveOpenAIKey.mockReset();
   h.resolveRealtimeAccess.mockReset();
   h.findRepoByLocalPath.mockReset();
   h.persistSymonScopeGrant.mockReset();
   h.phoneModel.value = null;
+  rmSync(authPath, { force: true });
+  rmSync(billingStatePath, { force: true });
+  rmSync(settingsPath, { force: true });
   delete (globalThis as { __o8BrowserAgentClient?: unknown }).__o8BrowserAgentClient;
   h.resolveRequestPrincipal.mockReturnValue('operator');
-  h.resolveChatGPTRealtimeCredential.mockResolvedValue(null);
   h.resolveOpenAIKey.mockResolvedValue('sk-test-key');
   h.resolveRealtimeAccess.mockResolvedValue({ mode: 'byok', available: true, reason: 'byok' });
   h.resolveDeviceByToken.mockReturnValue(null);
@@ -187,7 +213,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(fullDesktopBridgeTools()).toHaveLength(101);
   });
 
-  it('200: mints, and the token body carries the SAME config the desk session uses', async () => {
+  it('200: without a previous source, mints with BYOK and records the billing source', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek_test_secret', expires_at: 1_783_490_000 }),
@@ -243,14 +269,11 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(sentBody.session.tool_choice).toBe('auto');
     expect(sentBody.session.audio.input.transcription.model).toBe('whisper-1');
     expect(sentBody.session.audio.output.voice).toBe('marin');
+    expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
   });
 
   it('200: prefers ChatGPT subscription OAuth and never resolves a metered API key', async () => {
-    h.resolveChatGPTRealtimeCredential.mockResolvedValue({
-      accessToken: 'oauth-subscription-token',
-      accountId: 'acct-founder',
-      expiresAt: Date.now() + 60_000,
-    });
+    writeChatGptAuth(Date.now() + 5 * 60_000);
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek_subscription', expires_at: 1 }),
@@ -264,9 +287,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(json.session.billingSource).toBe('chatgpt-subscription');
     expect(json.session.model).toBe('gpt-realtime-2.1-mini');
     expect(h.resolveOpenAIKey).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
-      Authorization: 'Bearer oauth-subscription-token',
-    });
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toMatch(/^Bearer header\./);
   });
 
   it('200: repository catch-up uses subscription OAuth and the flagship voice model', async () => {
@@ -275,11 +296,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       '@/lib/mobile/symon-agent-registry',
     );
     h.persistSymonScopeGrant.mockImplementation(registry.persistSymonScopeGrant);
-    h.resolveChatGPTRealtimeCredential.mockResolvedValue({
-      accessToken: 'oauth-subscription-token',
-      accountId: 'acct-founder',
-      expiresAt: Date.now() + 60_000,
-    });
+    writeChatGptAuth(Date.now() + 5 * 60_000);
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ value: 'ek_subscription', expires_at: 1 }),
@@ -359,7 +376,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
   });
 
   it('501: repository catch-up never falls through to metered BYOK credits', async () => {
-    h.resolveChatGPTRealtimeCredential.mockResolvedValue(null);
+    writeChatGptAuth(Date.now() - 60_000);
     h.resolveOpenAIKey.mockResolvedValue('sk-must-not-be-used');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -368,6 +385,74 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
       workspaceMode: 'o8',
       launchKind: 'repository-catch-up',
     })));
+
+    expect(res.status).toBe(501);
+    expect((await res.json()).error).toBe('subscription_unavailable');
+    expect(h.resolveOpenAIKey).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('409: blocks a subscription-to-BYOK billing change before client_secrets mint', async () => {
+    writePreviousBillingSource('chatgpt-subscription');
+    writeChatGptAuth(Date.now() - 60_000);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ workspaceMode: 'o8' })));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: 'billing_changed',
+      previous: 'chatgpt-subscription',
+      next: 'openai-api-key',
+    });
+    expect(h.resolveOpenAIKey).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('200: acknowledges a subscription-to-BYOK change and records the new source', async () => {
+    writePreviousBillingSource('chatgpt-subscription');
+    writeChatGptAuth(Date.now() - 60_000);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek_acknowledged', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({
+      workspaceMode: 'o8',
+      acknowledgeBillingChange: true,
+    })));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).session.billingSource).toBe('openai-api-key');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
+  });
+
+  it('200: an acknowledgement without a billing change mints normally', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek_no_change', expires_at: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ acknowledgeBillingChange: true })));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).session.billingSource).toBe('openai-api-key');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('501: subscription-only setting blocks fallback without resolving BYOK', async () => {
+    writeChatGptAuth(Date.now() - 60_000);
+    writeFileSync(settingsPath, '[symon.voice]\nsubscriptionOnly = true\n');
+    h.resolveOpenAIKey.mockResolvedValue('sk-must-not-be-used');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(req(JSON.stringify({ workspaceMode: 'o8' })));
 
     expect(res.status).toBe(501);
     expect((await res.json()).error).toBe('subscription_unavailable');
@@ -691,6 +776,27 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     const body = await res.json();
     expect(body.error).toBe('desktop_unavailable');
     expect(JSON.stringify(body)).not.toContain('ek-never-returned');
+    expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
+  });
+
+  it('200: returns the minted session when billing state persistence fails', async () => {
+    mkdirSync(billingStatePath);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ value: 'ek-persistence-failed', expires_at: 1 }),
+    }));
+
+    try {
+      const res = await POST(req());
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).session.clientSecret).toBe('ek-persistence-failed');
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('billing_state_failed:'));
+    } finally {
+      errorSpy.mockRestore();
+      rmSync(billingStatePath, { recursive: true, force: true });
+    }
   });
 
   it('200: malformed JSON remains compatible with the old body-optional caller', async () => {
