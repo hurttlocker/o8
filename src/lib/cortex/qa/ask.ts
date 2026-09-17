@@ -197,6 +197,19 @@ export interface AskCortexResult {
    *  (metered-orchestrator transparency card). Absent on cache hits — the
    *  Brain read nothing this time, so no offload is derivable. */
   consideredChars?: number;
+  /** Set to 'referee' when the judgment referee tier classified the question (#2436). */
+  classifier?: 'referee';
+  /** Judgment receipt id for that classification. */
+  classificationReceiptId?: string | null;
+}
+
+type ClassifierMeta = Pick<AskCortexResult, 'classifier' | 'classificationReceiptId'>;
+
+/** Classifier metadata for results and the sources line; empty unless the referee answered. */
+function classifierMeta(classification: { classifier?: 'referee'; receiptId?: string | null }): ClassifierMeta {
+  return classification.classifier === 'referee'
+    ? { classifier: 'referee', classificationReceiptId: classification.receiptId ?? null }
+    : {};
 }
 
 /**
@@ -205,11 +218,11 @@ export interface AskCortexResult {
  * sources" live while the model is still writing, with the top titles as
  * the minimal preview ("what is he looking at").
  */
-function buildSourcesPayload(topRows: TypedRow[], retrievalMs: number): {
+function buildSourcesPayload(topRows: TypedRow[], retrievalMs: number, meta: ClassifierMeta = {}): {
   count: number;
   retrievalMs: number;
   top: Array<{ kind: string; title: string }>;
-} {
+} & ClassifierMeta {
   return {
     count: topRows.length,
     retrievalMs,
@@ -217,6 +230,7 @@ function buildSourcesPayload(topRows: TypedRow[], retrievalMs: number): {
       kind: row.citation.kind,
       title: rowDisplayTitle(row),
     })),
+    ...meta,
   };
 }
 
@@ -330,7 +344,7 @@ async function runAskCortexUncached(
   const speculativeRetrieval = grepRows
     ? null
     : retrieveAll({ question, repoPath, projectId, bm25Variants: [question] }).catch(() => null);
-  const classification = grepRows
+  const classification: Awaited<ReturnType<typeof classifyQuestion>> = grepRows
     ? { class: 'A' as const, bm25Variants: [question] }
     : await classifyQuestion(question);
   const classifyMs = grepRows ? 0 : Date.now() - classifyStart;
@@ -408,6 +422,7 @@ async function runAskCortexUncached(
     classifyMs,
     sourcesConsidered: topRows.length,
     consideredChars: topRows.reduce((sum, row) => sum + rowFullText(row).length, 0),
+    ...classifierMeta(classification),
   };
 
   if (!bypassCache) {
@@ -509,7 +524,7 @@ export async function runAskPipeline(
     }
     // Surface what retrieval found BEFORE composition starts — the live
     // "found N sources" signal every UI renders while the model writes.
-    emit('sources', buildSourcesPayload(topRows, Date.now() - retrievalStart));
+    emit('sources', buildSourcesPayload(topRows, Date.now() - retrievalStart, classifierMeta(classification)));
   } else {
     emit('sources', buildSourcesPayload(topRows, 0));
   }
