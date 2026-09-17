@@ -23,7 +23,12 @@ import {
   type AutomationFire,
   type AutomationWatchActionKind,
 } from './fire-store';
-import { readSymonWatchLedger, recordSymonWatchLedgerEvent } from './symon-watch-ledger';
+import {
+  readLatestSymonWatchLedgerEvents,
+  readSymonWatchLedger,
+  recordSymonWatchLedgerEvent,
+  type SymonWatchLedgerTailEvent,
+} from './symon-watch-ledger';
 import type { RunAutomationResult } from './runner';
 
 export const SYMON_WATCH_ACTION_KINDS = ['symon_report', 'symon_plan'] as const;
@@ -85,8 +90,17 @@ export function symonWatchThen(row: AutomationRow): SymonWatchThen | null {
   }
 }
 
-/** The public shape both the Symon tools and the phone list read. */
-export function symonWatchRecord(row: AutomationRow) {
+/**
+ * The public shape both the Symon tools and the phone list read.
+ *
+ * `lastLedgerEvent` is read per row unless the caller passes one. A list
+ * surface preloads them in a single query (see `listRecentSymonWatches`);
+ * omitting the argument keeps the single-row callers unchanged.
+ */
+export function symonWatchRecord(
+  row: AutomationRow,
+  lastLedgerEvent?: SymonWatchLedgerTailEvent | null,
+) {
   const then = symonWatchThen(row);
   return {
     id: row.id,
@@ -118,19 +132,29 @@ export function symonWatchRecord(row: AutomationRow) {
     lastErrorMessage: row.lastErrorMessage,
     // The durable Symon ledger tail, so `symon_watch_list` can answer "what
     // happened to it?" from the record rather than from a second call.
-    lastLedgerEvent: readSymonWatchLedger(row.id, 1)[0] ?? null,
+    lastLedgerEvent: lastLedgerEvent !== undefined
+      ? lastLedgerEvent
+      : readSymonWatchLedger(row.id, 1)[0] ?? null,
   };
 }
 
 export type SymonWatchRecord = ReturnType<typeof symonWatchRecord>;
 
-function symonWatchRows(where: string, values: unknown[] = [], limit?: number): AutomationRow[] {
+function symonWatchRows(
+  where: string,
+  values: unknown[] = [],
+  limit?: number,
+  order: 'oldest' | 'newest' = 'oldest',
+): AutomationRow[] {
   const db = getDb();
   if (!db) return [];
   const ids = getSqlite().prepare(`
     SELECT id FROM automations
     WHERE trigger_kind = 'watch' AND watch_action_kind IN ('symon_report', 'symon_plan') AND ${where}
-    ORDER BY created_at ASC
+    -- created_at is second-resolution text, so several watches registered in one
+    -- second tie. rowid breaks the tie by insertion order, which is what makes a
+    -- LIMIT on "the most recent" deterministic rather than arbitrary.
+    ORDER BY created_at ${order === 'newest' ? 'DESC' : 'ASC'}, rowid ${order === 'newest' ? 'DESC' : 'ASC'}
     ${limit == null ? '' : `LIMIT ${Math.max(1, Math.floor(limit))}`}
   `).all(...(values as never[])) as Array<{ id: string }>;
   return ids
@@ -150,15 +174,49 @@ export function listSymonWatches(sessionId?: string | null): SymonWatchRecord[] 
   const rows = sessionId
     ? symonWatchRows('symon_session_id = ?', [sessionId])
     : symonWatchRows('1 = 1');
-  return rows.map(symonWatchRecord);
+  return rows.map((row) => symonWatchRecord(row));
 }
 
-/** Clear one watch. Cancelling an already-closed watch is not an error. */
+/** How many settled watches a polled list carries. Live ones are never cut. */
+export const SYMON_WATCH_SETTLED_LIMIT = 20;
+
+/** A settled watch is disabled and not parked — it fired, expired, or was cancelled. */
+const LIVE_WATCH_WHERE = '(enabled = 1 OR symon_parked_at IS NOT NULL)';
+
+/**
+ * The list a surface POLLS: every live watch, oldest first, then the most
+ * recently created settled ones. An install accumulates settled rows forever
+ * and nothing prunes them, so an uncapped list would grow without bound on a
+ * request the phone repeats. The ledger tails are preloaded in one query
+ * rather than one per row.
+ *
+ * Watches are install-wide, not per device or per session: every paired phone
+ * sees the same list and may cancel anything on it.
+ */
+export function listRecentSymonWatches(
+  settledLimit: number = SYMON_WATCH_SETTLED_LIMIT,
+): SymonWatchRecord[] {
+  const rows = [
+    ...symonWatchRows(LIVE_WATCH_WHERE),
+    ...symonWatchRows(`NOT ${LIVE_WATCH_WHERE}`, [], settledLimit, 'newest'),
+  ];
+  const ledgerTails = readLatestSymonWatchLedgerEvents(rows.map((row) => row.id));
+  return rows.map((row) => symonWatchRecord(row, ledgerTails.get(row.id) ?? null));
+}
+
+/**
+ * Clear one watch. Cancelling an already-settled watch is not an error and is
+ * not a second event: the ledger is append-only, so an unguarded repeat would
+ * stamp another `watch_cancelled` row and rewrite how the watch ended — a phone
+ * retrying a dropped DELETE would turn a watch that FIRED into a cancelled one.
+ * A parked watch is still live (it fired and is waiting), so it still cancels.
+ */
 export function cancelSymonWatch(id: string, nowMs: number = Date.now()): SymonWatchRecord | null {
   const row = getSymonWatch(id);
   if (!row) return null;
   const db = getDb();
   if (!db) return null;
+  if (!row.enabled && row.symonParkedAt == null) return symonWatchRecord(row);
   cancelAutomationFires(id, 'Watch cancelled by the operator.', nowMs);
   closeWatch(id, 'Watch cancelled by the operator.');
   recordSymonWatchLedgerEvent({
