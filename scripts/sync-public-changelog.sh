@@ -10,6 +10,7 @@ ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
 PUBLIC_REPO="hurttlocker/o8-releases"
 SOURCE_REF="${O8_CHANGELOG_SOURCE_REF:-origin/main}"
 DRY_RUN=0
+SCRUB_ONLY=0
 LATEST_SHIP=""
 OUT_DIR="${PUBLIC_CHANGELOG_OUT_DIR:-${TMPDIR:-/tmp}/o8-public-changelog-out}"
 
@@ -17,6 +18,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --scrub-only)
+      SCRUB_ONLY=1
       shift
       ;;
     --latest-ship)
@@ -33,6 +38,75 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+# The name scrubs, as one function so the sync and its test drive the same
+# pipeline rather than two copies that drift. Reads the raw commit subject,
+# prints the published one.
+scrub_subject() {
+  local msg="$1"
+  # --- Path + infra + arch-detail scrubs ---
+  # Internal paths reveal our data-dir layout. Architecture-detail phrases
+  # reveal our internal system design at a level a competitor could copy.
+  msg=$(echo "$msg" | sed -E \
+    -e 's#~/\.o8[a-zA-Z0-9._-]*#the user data dir#g' \
+    -e 's#~/\.cortex[a-zA-Z0-9._-]*#the user data dir#g' \
+    -e 's/lane (governance|review transition|lifecycle|reconcile)/workflow transition/gi' \
+    -e 's/verb=merge/workflow action/gi' \
+    -e 's/approve_and_merge/workflow action/gi' \
+    -e 's/rule-check/governance check/gi' \
+    -e 's/supervisor (watch|fleet|completion)/workflow watcher/gi')
+
+  # Every replacement below takes the whole token. A pattern that matches only
+  # part of a name leaves the rest glued to the replacement, which is how
+  # `ChatGPT` once published as `ChatAI model` and `gpt-live-1` as
+  # `AI modellive-1`. The public changelog is the source for the weekly
+  # digest, so a broken word ships as marketing copy.
+  #
+  # The model-name pattern trades one error for the other deliberately. A
+  # hyphenated suffix is taken, because `GPT-realtime` and `gpt-live-1` are
+  # names and no rule separates those from an English compound like
+  # `GPT-backed`. So `ChatGPT-subscription users` publishes as
+  # `AI model users`, losing a word. That reads; a glued half-name does not.
+  msg=$(echo "$msg" | sed -E \
+    -e 's/Cortex IDE/o8/gi' \
+    -e 's/Cortex-aware/context-aware/gi' \
+    -e 's/CortexClient/client/gi' \
+    -e 's/\.cortexrules/project rules/gi' \
+    -e 's/Cortex ?[Mm]emory/memory/gi' \
+    -e 's/Cortex/o8/gi' \
+    -e 's/Rainwater/o8/gi' \
+    -e 's/Symon/voice agent/gi' \
+    -e 's/Hurttlocker/design system/gi' \
+    -e 's/aqua-color/the voice stack/gi' \
+    -e 's/OpenClaw/agent runtime/gi' \
+    -e 's/NemoClaw/agent runtime/gi' \
+    -e 's/PicoClaw/bundled runtime/gi' \
+    -e 's/Codex/agent runtime/gi' \
+    -e 's/Claude Code/agent runtime/gi' \
+    -e 's/opencode/agent runtime/gi' \
+    -e 's/Tauri/native shell/gi' \
+    -e 's/Drizzle/ORM/gi' \
+    -e 's/better-sqlite3?/database/gi' \
+    -e 's/Gemini/AI provider/gi' \
+    -e 's/OpenAI/AI provider/gi' \
+    -e 's/CLAUDE\.md/project rules/g' \
+    -e 's/Claude/AI provider/gi' \
+    -e 's/Anthropic/AI provider/gi' \
+    -e 's/[A-Za-z]*GPT([0-9][A-Za-z0-9]*)?(-[A-Za-z0-9]+)*(\.[0-9]+)?/AI model/gi' \
+    -e 's/Cursor/competing product/gi' \
+    -e 's/Conductor/competing product/gi' \
+    -e 's/API [Kk]ey[s]?/configuration/gi' \
+    -e 's/BYOK/bring-your-own/gi' \
+    -e 's/tmux/terminal/gi')
+  printf '%s\n' "$msg"
+}
+
+# --scrub-only: read subjects on stdin, print the scrubbed form, touch no
+# network and no clone. This is the seam the scrub test drives.
+if [ "$SCRUB_ONLY" = "1" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do scrub_subject "$line"; done
+  exit 0
+fi
 
 if ! git -C "$ROOT" rev-parse --verify "$SOURCE_REF^{commit}" >/dev/null 2>&1; then
   echo "[sync] source ref does not exist: $SOURCE_REF" >&2
@@ -96,49 +170,7 @@ while IFS='|' read -r date hash msg; do
   if echo "$msg" | grep -qiE 'model rate|pricing table'; then continue; fi
   if echo "$msg" | grep -qiE 'dogfood|dogfed'; then continue; fi
 
-  # --- Path + infra + arch-detail scrubs ---
-  # Internal paths reveal our data-dir layout. Architecture-detail phrases
-  # reveal our internal system design at a level a competitor could copy.
-  msg=$(echo "$msg" | sed -E \
-    -e 's#~/\.o8[a-zA-Z0-9._-]*#the user data dir#g' \
-    -e 's#~/\.cortex[a-zA-Z0-9._-]*#the user data dir#g' \
-    -e 's/lane (governance|review transition|lifecycle|reconcile)/workflow transition/gi' \
-    -e 's/verb=merge/workflow action/gi' \
-    -e 's/approve_and_merge/workflow action/gi' \
-    -e 's/rule-check/governance check/gi' \
-    -e 's/supervisor (watch|fleet|completion)/workflow watcher/gi')
-
-  msg=$(echo "$msg" | sed -E \
-    -e 's/Cortex IDE/o8/gi' \
-    -e 's/Cortex-aware/context-aware/gi' \
-    -e 's/CortexClient/client/gi' \
-    -e 's/\.cortexrules/project rules/gi' \
-    -e 's/Cortex ?[Mm]emory/memory/gi' \
-    -e 's/Cortex/o8/gi' \
-    -e 's/Rainwater/o8/gi' \
-    -e 's/Symon/voice agent/gi' \
-    -e 's/Hurttlocker/design system/gi' \
-    -e 's/aqua-color/the voice stack/gi' \
-    -e 's/OpenClaw/agent runtime/gi' \
-    -e 's/NemoClaw/agent runtime/gi' \
-    -e 's/PicoClaw/bundled runtime/gi' \
-    -e 's/Codex/agent runtime/gi' \
-    -e 's/Claude Code/agent runtime/gi' \
-    -e 's/opencode/agent runtime/gi' \
-    -e 's/Tauri/native shell/gi' \
-    -e 's/Drizzle/ORM/gi' \
-    -e 's/better-sqlite3?/database/gi' \
-    -e 's/Gemini/AI provider/gi' \
-    -e 's/OpenAI/AI provider/gi' \
-    -e 's/CLAUDE\.md/project rules/g' \
-    -e 's/Claude/AI provider/gi' \
-    -e 's/Anthropic/AI provider/gi' \
-    -e 's/GPT-?[0-9.]*/AI model/gi' \
-    -e 's/Cursor/competing product/gi' \
-    -e 's/Conductor/competing product/gi' \
-    -e 's/API [Kk]ey[s]?/configuration/gi' \
-    -e 's/BYOK/bring-your-own/gi' \
-    -e 's/tmux/terminal/gi')
+  msg=$(scrub_subject "$msg")
 
   # [via-o8] attribution: preserve an existing marker through the scrubs, and
   # backfill unmarked PR squash merges whose head branch was a packet branch
