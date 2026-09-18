@@ -12,6 +12,7 @@ import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileFleetAction, MobileFleetRuntime, MobileFleetSession, MobileFleetStatus, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
 import { applyInboxUrgency } from '@/lib/mobile/inbox-urgency';
+import { applyInboxRefereeChips } from '@/lib/mobile/inbox-referee-chips';
 import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 import { getMobileSessionTranscript } from '@/lib/mobile/history';
 import { buildMobileReviewUnits, shouldExposeWorkspaceReviewSnapshot, summarizeMobileReviewUnits } from '@/lib/mobile/review-units';
@@ -276,9 +277,11 @@ function limitMobileInboxSessions(snapshot: MobileInboxSnapshot, limit?: number)
  * limit, then order the items by the referee's urgency score (#2440). Urgency
  * is applied outside the snapshot cache so a score that lands in the
  * background shows up on the very next poll instead of after the cache TTL.
+ * Referee chips (#2439) are attached here for the same reason: the referee
+ * stores its facts after the card is created.
  */
 function finalizeMobileInboxSnapshot(snapshot: MobileInboxSnapshot, limit?: number): MobileInboxSnapshot {
-  return applyInboxUrgency(limitMobileInboxSessions(snapshot, limit));
+  return applyInboxUrgency(applyInboxRefereeChips(limitMobileInboxSessions(snapshot, limit)));
 }
 
 export function invalidateInboxCache() {

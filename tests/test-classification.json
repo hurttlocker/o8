@@ -2237,6 +2237,14 @@
       ]
     },
     {
+      "path": "tests/mobile-inbox-referee-chips-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-inbox-urgency-real-path.test.ts",
       "reasons": [
         "real-path"

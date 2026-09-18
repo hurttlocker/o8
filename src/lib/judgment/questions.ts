@@ -84,6 +84,12 @@ export const DIFF_QUESTION_USE = {
 } as const satisfies Record<keyof typeof DIFF_QUESTIONS, 'threshold' | 'advisory' | 'record-only'>;
 
 /**
+ * Minimum `docsOnly` answer for the phone inbox "Docs only" chip (#2439).
+ * Calibrated 2026-09-17 on 118 diffs: every path-docs-only diff scored 0.97-0.98, every other diff 0.01 or lower; under a lying-title attack (titles now excluded from state) docs diffs fell to 0.79-0.85. 0.9 sits inside that gap. Recalibrate with the replay before changing.
+ */
+export const DOCS_ONLY_CHIP_THRESHOLD = 0.9;
+
+/**
  * Mobile inbox ordering (#2440). One urgency question is asked per inbox item,
  * over o8-computed facts only — the state carries no card title, summary, or
  * any other worker-written text, and question ids are hashes of the item id.

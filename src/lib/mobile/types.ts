@@ -68,6 +68,20 @@ export interface MobileInboxItem {
   actions: MobileControlAction[];
   /** Absent when the setting is off, the call failed, or no score is cached yet. */
   urgency?: MobileInboxUrgency;
+  /**
+   * ADVISORY referee chips (#2439), computed on the desktop from the stored
+   * merge-card referee facts. Nothing decides on them. Absent when the setting
+   * is off, the approval has no stored facts, or no chip clears its threshold.
+   */
+  refereeChips?: MobileInboxRefereeChip[];
+}
+
+/** One calibrated referee fact shown on an inbox card. Only `docs-only` is calibrated today. */
+export interface MobileInboxRefereeChip {
+  kind: 'docs-only';
+  /** The referee's answer, 0..1. */
+  probability: number;
+  receiptId: string | null;
 }
 
 export interface MobileInboxSummary {
