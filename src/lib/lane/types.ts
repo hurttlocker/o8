@@ -320,6 +320,14 @@ export type LaneEventVerb =
   // Record-only push gate answer for an outgoing push (#2441). The push is sent
   // either way; nothing reads this. Payload: { receiptId, kind, p, wouldSuppress, operatorGated }
   | 'push_gate'
+  // Loop check on the supervisor tick (#2448), recorded every time the
+  // detached call answers with judgment.provider on. Record-only.
+  // Payload: { receiptId, packetId, p, window, counts }
+  | 'loop_check'
+  // Advisory: two consecutive loop checks at or above the PROVISIONAL band
+  // (0.6). Raised once per run; nothing is stopped. Payload: { receiptId,
+  // receiptIds, packetId, sessionKey, p, band, advisory, pattern: { toolName, argsHash, count, resultHead, failed } }
+  | 'possible_loop'
   // A repo publication action exhausted its bounded resource-lease wait.
   // Payload: { resource, waitedMs, holder, retryCount, willRetry }
   | 'lease_wait_timeout'

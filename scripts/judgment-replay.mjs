@@ -23,7 +23,10 @@
  * from each entry (see scripts/lib/judgment-replay-compaction.mjs). `pushGate`
  * (#2441) also sends nothing: it reads recorded `push_gate` lane events,
  * labeled by whether the operator acted on the lane within 30 minutes (see
- * scripts/lib/judgment-replay-push-gate.mjs).
+ * scripts/lib/judgment-replay-push-gate.mjs). `loop` (#2448) likewise sends
+ * nothing: it scores the recorded `loop_check` answers against later operator
+ * or orchestrator intervention on the lane (see
+ * scripts/lib/judgment-replay-loop.mjs).
  *
  * --dry-run prints each request body and sends nothing; it works with
  * judgment.provider off. Without it the script refuses to run while the
@@ -40,6 +43,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { summarize } from './lib/judgment-replay-metrics.mjs';
 import { labelCompaction, loadCompactionHistory } from './lib/judgment-replay-compaction.mjs';
 import { labelPushGate, loadPushGateHistory, PUSH_GATE_PROVISIONAL_BAND, PUSH_GATE_WINDOW_MS } from './lib/judgment-replay-push-gate.mjs';
+import { labelLoopChecks, loadLoopHistory } from './lib/judgment-replay-loop.mjs';
 
 const SURFACE = 'calibration-replay';
 const USD_PER_BILLION_INPUT_TOKENS = 42;
@@ -48,7 +52,8 @@ const GATE_FAILURE_VERBS = ['typecheck_auto_retry', 'typecheck_escalation'];
 const LABELS = ['gateFailed', 'operatorRejected', 'mergedClean'];
 const COMPACTION_LABEL = 'compaction';
 const PUSH_GATE_LABEL = 'pushGate';
-const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate]';
+const LOOP_LABEL = 'loop';
+const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate|loop]';
 const TSX_MARKER = 'O8_JUDGMENT_REPLAY_TSX_LOADER';
 
 /**
@@ -72,7 +77,7 @@ export function parseReplayArgs(argv) {
       index += 1;
       if (arg === '--out') options.out = value;
       else if (arg === '--label') {
-        if (value !== COMPACTION_LABEL && value !== PUSH_GATE_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
+        if (value !== COMPACTION_LABEL && value !== PUSH_GATE_LABEL && value !== LOOP_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
         options.label = value;
       }
       else {
@@ -293,6 +298,19 @@ export function renderPushGateReport({ rows, notes }) {
   return { text: lines.join('\n'), result: { ...summary, wouldSuppress: suppressed.length, falseSuppressions } };
 }
 
+/** The loop label report: recorded p(loop) against later intervention on the lane. */
+export function renderLoopReport({ rows, notes }) {
+  const lines = [`loop checks read: ${notes.checksRead}; unlabeled (no intervention and no merge): ${notes.unlabeled}`];
+  const summary = summarize(rows);
+  if (summary.positives === 0 || summary.negatives === 0) {
+    lines.push(`${LOOP_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} labeled checks)`);
+    return { text: lines.join('\n'), result: { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n } };
+  }
+  lines.push(`${LOOP_LABEL} by p(loop): n=${summary.n} labeled checks (positives ${summary.positives}, negatives ${summary.negatives})`);
+  lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
+  return { text: lines.join('\n'), result: summary };
+}
+
 export function renderReport({ groups, approvalsRead, withoutDiffText, notes, calls, only = null }) {
   const lines = [];
   const duplicates = groups.reduce((sum, group) => sum + group.approvalIds.length - 1, 0);
@@ -360,6 +378,24 @@ export async function runReplay(argv, io = {}) {
     out(report.text);
     if (options.out) {
       writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: PUSH_GATE_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
+      out(`wrote ${options.out}`);
+    }
+    return 0;
+  }
+
+  if (options.label === LOOP_LABEL) {
+    let history;
+    try {
+      history = await loadLoopHistory(dataPaths().dbPath);
+    } catch (error) {
+      err(`[judgment-replay] cannot open the database read-only: ${error instanceof Error ? error.message : 'error'}`);
+      return 1;
+    }
+    const labeled = labelLoopChecks(history.events, history.outcomes);
+    const report = renderLoopReport(labeled);
+    out(report.text);
+    if (options.out) {
+      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: LOOP_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
       out(`wrote ${options.out}`);
     }
     return 0;
