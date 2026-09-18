@@ -25,14 +25,15 @@ interface ReceiptRow {
   approval_id: string | null;
   surface: string | null;
   created_at: string;
+  route: string | null;
 }
 
 function insertReceiptRow(receipt: JudgmentReceipt): void {
   getSqlite().prepare(`
     INSERT INTO judgment_receipts (
       id, provider, model, ok, questions_json, answers_json, input_tokens, output_tokens,
-      latency_ms, attempts, truncated, hidden_text, error_json, packet_id, lane_id, approval_id, surface, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      latency_ms, attempts, truncated, hidden_text, error_json, packet_id, lane_id, approval_id, surface, created_at, route
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     receipt.id,
     receipt.provider,
@@ -52,6 +53,7 @@ function insertReceiptRow(receipt: JudgmentReceipt): void {
     receipt.approvalId,
     receipt.surface,
     receipt.createdAt,
+    receipt.route,
   );
 }
 
@@ -121,6 +123,7 @@ function fromRow(row: ReceiptRow): JudgmentReceipt {
     laneId: row.lane_id,
     approvalId: row.approval_id,
     surface: row.surface,
+    route: row.route === 'direct' || row.route === 'managed' ? row.route : null,
     createdAt: row.created_at,
   };
 }

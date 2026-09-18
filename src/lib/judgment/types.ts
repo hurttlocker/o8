@@ -103,6 +103,9 @@ export interface JudgmentError {
   message?: string;
 }
 
+/** The path that carried a call: the operator's own key (`direct`) or the managed proxy. Null on rows written before #2483. */
+export type JudgmentRoute = 'direct' | 'managed';
+
 export interface JudgmentReceipt {
   id: string;
   provider: string;
@@ -121,5 +124,6 @@ export interface JudgmentReceipt {
   laneId: string | null;
   approvalId: string | null;
   surface: string | null;
+  route: JudgmentRoute | null;
   createdAt: string;
 }

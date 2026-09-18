@@ -58,6 +58,55 @@ const SUCCESS_BODY = {
   usage: { input_tokens: 6253, output_tokens: 193 },
 };
 
+/** Receipt columns and fields as they stood before #2483; route is the only addition. */
+const PRE_ROUTE_COLUMNS = [
+  'id', 'provider', 'model', 'ok', 'questions_json', 'answers_json', 'input_tokens', 'output_tokens',
+  'latency_ms', 'attempts', 'truncated', 'hidden_text', 'error_json', 'packet_id', 'lane_id', 'approval_id',
+  'surface', 'created_at',
+];
+const PRE_ROUTE_FIELDS = [
+  'id', 'provider', 'model', 'ok', 'questions', 'answers', 'inputTokens', 'outputTokens', 'latencyMs',
+  'attempts', 'truncated', 'hiddenText', 'error', 'packetId', 'laneId', 'approvalId', 'surface', 'createdAt',
+];
+
+/**
+ * The persisted row and the listed receipt carry route 'direct', and with
+ * route removed they are exactly the pre-#2483 shape: same columns, and every
+ * column value is what the listed receipt serializes back to.
+ */
+function expectDirectRouteOnly(packetId: string) {
+  const row = getSqlite().prepare('SELECT * FROM judgment_receipts WHERE packet_id = ?').get(packetId) as Record<string, unknown>;
+  const { route: rowRoute, ...rowRest } = row;
+  expect(rowRoute).toBe('direct');
+  expect(Object.keys(rowRest)).toEqual(PRE_ROUTE_COLUMNS);
+
+  const [receipt] = listJudgmentReceipts({ packetId });
+  const { route, ...rest } = receipt;
+  expect(route).toBe('direct');
+  expect(Object.keys(rest)).toEqual(PRE_ROUTE_FIELDS);
+  expect(rowRest).toEqual({
+    id: rest.id,
+    provider: rest.provider,
+    model: rest.model,
+    ok: rest.ok ? 1 : 0,
+    questions_json: JSON.stringify(rest.questions),
+    answers_json: rest.answers ? JSON.stringify(rest.answers) : null,
+    input_tokens: rest.inputTokens,
+    output_tokens: rest.outputTokens,
+    latency_ms: rest.latencyMs,
+    attempts: rest.attempts,
+    truncated: rest.truncated ? 1 : 0,
+    hidden_text: rest.hiddenText ? 1 : 0,
+    error_json: rest.error ? JSON.stringify(rest.error) : null,
+    packet_id: rest.packetId,
+    lane_id: rest.laneId,
+    approval_id: rest.approvalId,
+    surface: rest.surface,
+    created_at: rest.createdAt,
+  });
+  return rest;
+}
+
 const consoleLines: string[] = [];
 
 beforeAll(async () => {
@@ -129,6 +178,7 @@ describe('askJudgment against a local systemone fixture', () => {
     expect(receipt.truncated).toBe(false);
     expect(receipt.hiddenText).toBe(false);
     expect(receipt.answers).toMatchObject({ recommendedAction: { choice: 'operatorCard' } });
+    expectDirectRouteOnly('pkt-typed');
   });
 
   it('marks choice and score answers under 0.4 confidence as abstain, which thresholds read as null', async () => {
@@ -186,6 +236,7 @@ describe('askJudgment against a local systemone fixture', () => {
       error: { kind: 'http', status: 529, errorType: 'overloaded' },
     });
     expect(receipt.questions).toEqual(QUESTIONS);
+    expectDirectRouteOnly('pkt-5xx');
   });
 
   it('does not retry an oversized request and records the provider error type', async () => {
@@ -195,6 +246,7 @@ describe('askJudgment against a local systemone fixture', () => {
     expect(seen).toHaveLength(1);
     const [receipt] = listJudgmentReceipts({ packetId: 'pkt-400' });
     expect(receipt).toMatchObject({ ok: false, attempts: 1, truncated: true, error: { status: 400, errorType: 'max_tokens_exceeded' } });
+    expectDirectRouteOnly('pkt-400');
   });
 
   it('returns null when an answer does not match its question type', async () => {
@@ -224,6 +276,9 @@ describe('askJudgment against a local systemone fixture', () => {
     const payload = JSON.parse(rows[0].payload_json) as Record<string, unknown>;
     expect(payload).toMatchObject({ receiptId: result!.receiptId, ok: true, model: 'jev-1.13.0', inputTokens: 6253, packetId: 'pkt-lane' });
     expect(payload.questions).toEqual(QUESTIONS);
+    const { route, ...payloadRest } = payload;
+    expect(route).toBe('direct');
+    expect(Object.keys(payloadRest).sort()).toEqual(['receiptId', ...PRE_ROUTE_FIELDS.filter((field) => field !== 'id' && field !== 'laneId')].sort());
     expect(listJudgmentReceipts({ packetId: 'pkt-lane' })).toEqual([]);
   });
 
