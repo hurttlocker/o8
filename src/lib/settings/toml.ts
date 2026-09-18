@@ -26,6 +26,7 @@ import {
   sanitizeBranchPrefix,
 } from '@/lib/operator/defaults-env';
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
+import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { isTargetingTier } from '@/lib/operator/targeting-tier';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
@@ -167,6 +168,22 @@ function numberField(
   };
 }
 
+/** A nullable field whose null is written as "" (TOML has no null). */
+function nullableField<T>(
+  section: string,
+  key: string,
+  expected: string,
+  predicate: (value: unknown) => value is T,
+): TomlField<T | null> {
+  return {
+    path: [section, key],
+    serialize: (value) => value ?? '',
+    parse: (value, tomlKey) => value === '' || value === null
+      ? null
+      : predicate(value) ? value : invalid(tomlKey, `${expected} (write "" for null)`),
+  };
+}
+
 function enumField<T>(
   section: string,
   key: string,
@@ -280,6 +297,8 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   brainUseClaudeCli: booleanField('brain', 'use_claude_cli'),
   workersUseBrain: enumField('brain', 'workers_use_brain', 'one of "off", "auto", or "all"', isWorkersUseBrain),
   judgmentProvider: enumField('judgment', 'provider', JUDGMENT_PROVIDER_VALUES_MESSAGE, isJudgmentProvider),
+  judgmentManagedDailyAllowance: nullableField('judgment', 'managed_daily_allowance', JUDGMENT_ALLOWANCE_EXPECTED, isJudgmentAllowance),
+  judgmentBetaEndDate: nullableField('judgment', 'beta_end_date', JUDGMENT_BETA_END_DATE_EXPECTED, isJudgmentBetaEndDate),
   workspaceManifestPolicy: enumField('operator', 'workspace_manifest_policy', 'one of "disabled", "one-approval", or "auto"', isWorkspaceManifestPolicy),
   crossHouseWorkerFallback: booleanField('models', 'cross_house_worker_fallback'),
   orchestratorBackend: enumField('orchestrator', 'backend', 'a supported orchestrator backend', isOrchestratorBackendSetting),

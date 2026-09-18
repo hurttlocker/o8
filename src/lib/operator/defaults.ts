@@ -86,6 +86,7 @@ import { applyReviewContinuationUpdate, REVIEW_CONTINUATION_FALLBACK, resolveSto
 import { applyWorkspaceManifestPolicyUpdate, resolveStoredWorkspaceManifestPolicy, resolveWorkspaceManifestPolicySettings, WORKSPACE_MANIFEST_POLICY_FALLBACK, type WorkspaceManifestPolicyDefault } from './workspace-manifest-policy-default';
 import { applySymonVoiceUpdate, resolveStoredSymonVoice, resolveSymonVoiceSettings, SYMON_VOICE_FALLBACK, type SymonVoiceDefault } from './symon-voice-default';
 import { applyJudgmentProviderUpdate, JUDGMENT_PROVIDER_FALLBACK, resolveJudgmentProviderSettings, resolveStoredJudgmentProvider, type JudgmentProviderDefault } from './judgment-default';
+import { applyJudgmentAllowanceUpdate, JUDGMENT_ALLOWANCE_FALLBACK, resolveJudgmentAllowanceSettings, resolveStoredJudgmentAllowance, type JudgmentAllowanceDefaults } from './judgment-allowance-default';
 import {
   applyOperatorDefaultsTomlWithLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
@@ -116,7 +117,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -383,9 +384,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   prLinkDestination: 'in-app',
   worktreeMaxCount: 20,
   worktreeMaxTotalGb: 20,
-  ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK,
+  ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK, ...JUDGMENT_ALLOWANCE_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault>, Partial<JudgmentAllowanceDefaults> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -608,7 +609,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.worktreeMaxTotalGb === 'number' && Number.isFinite(stored.worktreeMaxTotalGb) && stored.worktreeMaxTotalGb >= 0) {
     result.worktreeMaxTotalGb = stored.worktreeMaxTotalGb;
   }
-  Object.assign(result, resolveStoredStorageReserve(stored), resolveStoredWorkspaceParking(stored), resolveStoredMeteredPacketCap(stored), resolveStoredSymonVoice(stored), resolveStoredJudgmentProvider(stored));
+  Object.assign(result, resolveStoredStorageReserve(stored), resolveStoredWorkspaceParking(stored), resolveStoredMeteredPacketCap(stored), resolveStoredSymonVoice(stored), resolveStoredJudgmentProvider(stored), resolveStoredJudgmentAllowance(stored));
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -619,7 +620,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
 // ── Resolution ──
 
 function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWithSources {
-  const meteredPacketCap = resolveMeteredPacketCapSettings(fileValues); const uiLoop = resolveUiLoopSettings(fileValues); const symonVoice = resolveSymonVoiceSettings(fileValues); const judgment = resolveJudgmentProviderSettings(fileValues);
+  const meteredPacketCap = resolveMeteredPacketCapSettings(fileValues); const uiLoop = resolveUiLoopSettings(fileValues); const symonVoice = resolveSymonVoiceSettings(fileValues); const judgment = resolveJudgmentProviderSettings(fileValues); const judgmentAllowance = resolveJudgmentAllowanceSettings(fileValues);
   const envProfile = envSubscriptionProfile();
   const envCap = envParallelCap();
   const envGate = envOverlapGate();
@@ -751,7 +752,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize ?? fileValues.worktreeMaxTotalGb ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxTotalGb,
     ...storageReserve.values,
     ...workspaceParking.values,
-    ...meteredPacketCap.values, ...uiLoop.values, ...symonVoice.values, ...judgment.values,
+    ...meteredPacketCap.values, ...uiLoop.values, ...symonVoice.values, ...judgment.values, ...judgmentAllowance.values,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -821,7 +822,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize !== null ? 'env' : fileValues.worktreeMaxTotalGb !== undefined ? 'file' : 'default',
     ...storageReserve.sources,
     ...workspaceParking.sources,
-    ...meteredPacketCap.sources, ...uiLoop.sources, ...symonVoice.sources, ...judgment.sources,
+    ...meteredPacketCap.sources, ...uiLoop.sources, ...symonVoice.sources, ...judgment.sources, ...judgmentAllowance.sources,
   };
 
   return { values: resolved, sources };
@@ -1104,7 +1105,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   }
   applyStorageReserveUpdate(stored, update);
   applyWorkspaceParkingUpdate(stored, update);
-  applyMeteredPacketCapUpdate(stored, update); applyUiLoopUpdate(stored, update); applySymonVoiceUpdate(stored, update); applyJudgmentProviderUpdate(stored, update);
+  applyMeteredPacketCapUpdate(stored, update); applyUiLoopUpdate(stored, update); applySymonVoiceUpdate(stored, update); applyJudgmentProviderUpdate(stored, update); applyJudgmentAllowanceUpdate(stored, update);
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');
