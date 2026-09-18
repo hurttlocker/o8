@@ -960,6 +960,12 @@
       ]
     },
     {
+      "path": "tests/acp-orchestrator-turn-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/activity-local-commits.test.ts",
       "reasons": [
         "child-process",
@@ -2227,6 +2233,12 @@
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mobile-inbox-urgency-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
