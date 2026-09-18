@@ -2551,6 +2551,13 @@
       ]
     },
     {
+      "path": "tests/push-gate-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/quiet-mode-settings-real-path.test.ts",
       "reasons": [
         "real-path"

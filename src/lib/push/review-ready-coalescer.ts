@@ -112,7 +112,7 @@ function deliverViaPush(notification: ReviewReadyNotification, flips: ReviewRead
       packetId: first.packetId ?? undefined,
       repoPath: first.repoPath,
     },
-  });
+  }, { kind: 'review_ready', laneId: first.laneId, packetId: first.packetId });
 }
 
 /**

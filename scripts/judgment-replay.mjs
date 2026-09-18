@@ -20,7 +20,10 @@
  * --label picks one label. `compaction` (#2465) is different in kind: it sends
  * nothing and reads the scores auto-compaction already recorded in the
  * orchestrator archives, labeled by whether later turns reused an identifier
- * from each entry (see scripts/lib/judgment-replay-compaction.mjs).
+ * from each entry (see scripts/lib/judgment-replay-compaction.mjs). `pushGate`
+ * (#2441) also sends nothing: it reads recorded `push_gate` lane events,
+ * labeled by whether the operator acted on the lane within 30 minutes (see
+ * scripts/lib/judgment-replay-push-gate.mjs).
  *
  * --dry-run prints each request body and sends nothing; it works with
  * judgment.provider off. Without it the script refuses to run while the
@@ -36,6 +39,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { summarize } from './lib/judgment-replay-metrics.mjs';
 import { labelCompaction, loadCompactionHistory } from './lib/judgment-replay-compaction.mjs';
+import { labelPushGate, loadPushGateHistory, PUSH_GATE_PROVISIONAL_BAND, PUSH_GATE_WINDOW_MS } from './lib/judgment-replay-push-gate.mjs';
 
 const SURFACE = 'calibration-replay';
 const USD_PER_BILLION_INPUT_TOKENS = 42;
@@ -43,7 +47,8 @@ const OPERATOR_ACTORS = new Set(['desktop', 'mobile']);
 const GATE_FAILURE_VERBS = ['typecheck_auto_retry', 'typecheck_escalation'];
 const LABELS = ['gateFailed', 'operatorRejected', 'mergedClean'];
 const COMPACTION_LABEL = 'compaction';
-const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction]';
+const PUSH_GATE_LABEL = 'pushGate';
+const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate]';
 const TSX_MARKER = 'O8_JUDGMENT_REPLAY_TSX_LOADER';
 
 /**
@@ -67,7 +72,7 @@ export function parseReplayArgs(argv) {
       index += 1;
       if (arg === '--out') options.out = value;
       else if (arg === '--label') {
-        if (value !== COMPACTION_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
+        if (value !== COMPACTION_LABEL && value !== PUSH_GATE_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
         options.label = value;
       }
       else {
@@ -271,6 +276,23 @@ export function renderCompactionReport({ rows, notes }) {
   return { text: lines.join('\n'), result: summary };
 }
 
+/** The push gate label report: recorded p(attention now) against operator action within the window. */
+export function renderPushGateReport({ rows, notes }) {
+  const lines = [];
+  lines.push(`push_gate events read: ${notes.gatesRead}; without p: ${notes.withoutP}; window ${PUSH_GATE_WINDOW_MS / 60_000} min`);
+  const summary = summarize(rows);
+  const suppressed = rows.filter((row) => !row.operatorGated && row.p <= PUSH_GATE_PROVISIONAL_BAND);
+  const falseSuppressions = suppressed.filter((row) => row.y === 1).length;
+  if (summary.positives === 0 || summary.negatives === 0) {
+    lines.push(`${PUSH_GATE_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped AUC (n=${summary.n} recorded pushes)`);
+  } else {
+    lines.push(`${PUSH_GATE_LABEL} by p(attention now): n=${summary.n} recorded pushes (positives ${summary.positives}, negatives ${summary.negatives})`);
+    lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
+  }
+  lines.push(`  PROVISIONAL band p <= ${PUSH_GATE_PROVISIONAL_BAND}, not operator-gated: would suppress ${suppressed.length} of ${summary.n}, false suppressions (operator acted) ${falseSuppressions}`);
+  return { text: lines.join('\n'), result: { ...summary, wouldSuppress: suppressed.length, falseSuppressions } };
+}
+
 export function renderReport({ groups, approvalsRead, withoutDiffText, notes, calls, only = null }) {
   const lines = [];
   const duplicates = groups.reduce((sum, group) => sum + group.approvalIds.length - 1, 0);
@@ -327,6 +349,17 @@ export async function runReplay(argv, io = {}) {
     out(report.text);
     if (options.out) {
       writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: COMPACTION_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
+      out(`wrote ${options.out}`);
+    }
+    return 0;
+  }
+
+  if (options.label === PUSH_GATE_LABEL) {
+    const labeled = labelPushGate(await loadPushGateHistory(dataPaths().dbPath));
+    const report = renderPushGateReport(labeled);
+    out(report.text);
+    if (options.out) {
+      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: PUSH_GATE_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
       out(`wrote ${options.out}`);
     }
     return 0;
