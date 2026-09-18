@@ -22,6 +22,27 @@ const launchRuntimeSurface = vi.hoisted(() => vi.fn(async (input: {
 
 vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface }));
 
+// #2498 — null passes through to the real capacity service; a number makes the
+// snapshot take that long, standing in for the per-runtime shell-outs.
+const capacityStub = vi.hoisted(() => ({ delayMs: null as number | null }));
+vi.mock('@/lib/runtime/capacity-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/runtime/capacity-service')>();
+  return {
+    ...actual,
+    getRuntimeCapacityControlSnapshot: async (options?: { fresh?: boolean }) => {
+      if (capacityStub.delayMs === null) return actual.getRuntimeCapacityControlSnapshot(options);
+      await new Promise((resolve) => setTimeout(resolve, capacityStub.delayMs ?? 0));
+      return {
+        schema: 'o8/runtime-capacity-control/v1' as const,
+        generatedAt: Date.now(),
+        capacities: [],
+        identities: [],
+        runtimes: [],
+      };
+    },
+  };
+});
+
 const cacheRoot = join(process.cwd(), 'node_modules', '.cache');
 mkdirSync(cacheRoot, { recursive: true });
 const dataDir = mkdtempSync(join(cacheRoot, 'o8-cost-ledger-real-path-'));
@@ -182,9 +203,11 @@ describe('cost ledger persisted real path', () => {
       globalThis.fetch = originalFetch;
     }
 
-    const startEvent = getLaneEvents(lane.id, 100).find((event) => (
+    const findStartEvent = () => getLaneEvents(lane.id, 100).find((event) => (
       event.verb === 'capacity_snapshot' && event.payload.phase === 'start'
     ));
+    await vi.waitFor(() => expect(findStartEvent()).toBeDefined());
+    const startEvent = findStartEvent();
     expect(startEvent?.payload).toMatchObject({
       phase: 'start',
       packetId,
@@ -235,6 +258,64 @@ describe('cost ledger persisted real path', () => {
       testRuntime.getCapacity = async () => capacityObservation;
     }
   });
+
+  it('returns the launch result without waiting on a slow start capacity snapshot (#2498)', async () => {
+    capacityStub.delayMs = 3_000;
+    try {
+      const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
+      const mission = await createMission({
+        issues: [{
+          number: 2_498_001,
+          title: 'inline: launch without waiting on the start snapshot',
+          body: 'Launch one packet while the capacity snapshot is slow.',
+          url: '',
+        }],
+        repoPath,
+        runtime: 'codex',
+        constraints: 'Real-path detached start snapshot regression.',
+        taskContract: 'off',
+      });
+      const packetId = mission.packets[0]!.id;
+      const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+      const lane = createLane({
+        repoPath,
+        worktreePath: repoPath,
+        branch: 'fix/slow-start-capacity-snapshot',
+        runtime: 'codex',
+        packetId,
+      });
+      const startSnapshots = () => getLaneEvents(lane.id, 10_000).filter((event) => (
+        event.verb === 'capacity_snapshot' && event.payload.phase === 'start'
+      ));
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as typeof fetch;
+      let elapsedMs: number;
+      try {
+        const { dispatch } = await import('@/lib/lane/commands');
+        const startedAt = Date.now();
+        const result = await dispatch({
+          verb: 'launch_session',
+          laneId: lane.id,
+          prompt: 'Launch while capacity is slow.',
+          actor: 'orchestrator',
+        });
+        elapsedMs = Date.now() - startedAt;
+        expect(result).toMatchObject({ ok: true });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      expect(elapsedMs, 'launch result waited on the start capacity snapshot').toBeLessThan(1_000);
+      expect(startSnapshots()).toHaveLength(0);
+      await vi.waitFor(() => {
+        expect(startSnapshots(), 'start capacity snapshot never landed').toHaveLength(1);
+      }, { timeout: 10_000, interval: 50 });
+      expect(startSnapshots()[0]?.payload).toMatchObject({ phase: 'start', packetId, runtime: 'codex' });
+    } finally {
+      capacityStub.delayMs = null;
+    }
+  }, 20_000);
 
   it('keeps retry attempts distinct and carries the same totals through outcomes and status', async () => {
     const { getSqlite } = await import('@/lib/db');
