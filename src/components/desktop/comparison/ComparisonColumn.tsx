@@ -6,6 +6,7 @@ import { ReviewFileRow } from '@/components/desktop/review/panel/ReviewFileRow';
 import type { ComparisonCandidate } from './useComparisonGroups';
 import { useComparisonDiff } from './useComparisonDiff';
 import { useMergePreview } from './useMergePreview';
+import { DirectiveCitationsRow } from './DirectiveCitationsRow';
 import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 
 // Best-of-N candidates branch from the repo's default branch; the compare shows
@@ -152,6 +153,7 @@ export function ComparisonColumn({
             )}
           </div>
         ) : null}
+        {candidate.complete ? <DirectiveCitationsRow preview={preview.directiveCitations} /> : null}
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
         {changes.error ? (
