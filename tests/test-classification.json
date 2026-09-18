@@ -1259,6 +1259,12 @@
       ]
     },
     {
+      "path": "tests/catch-up-ranking-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/chat-history-merge.integration.test.ts",
       "reasons": [
         "child-process"

@@ -30,6 +30,7 @@
  *    falls on an item boundary and the block ends with a visible marker.
  */
 
+import type { MobileApprovalCard } from '@/lib/approvals/types';
 import type { MobileFleetSession, MobileInboxItem, MobileInboxSnapshot } from '@/lib/mobile/types';
 import { safeDisplayLabel } from '@/lib/mobile/symon-prompt-filter';
 
@@ -67,7 +68,27 @@ export interface PhoneBriefingInput {
   toolPack: 'o8' | 'code';
   /** The granted repository path — Code scopes merged changes to it. */
   repoPath?: string | null;
+  /**
+   * Advisory catch-up order (#2444): briefing item ids, highest attention
+   * first. Each section is sorted by it before its item limit applies; an id
+   * missing from it keeps event order after the ranked ones. Absent: event order.
+   */
+  order?: readonly string[] | null;
 }
+
+/** The unsliced section lists, in event order: what the briefing reads from. */
+export interface PhoneBriefingSections {
+  approvals: MobileApprovalCard[];
+  running: MobileFleetSession[];
+  blocked: MobileFleetSession[];
+  needsYou: MobileInboxItem[];
+  merged: MobileFleetSession[];
+}
+
+/** Stable briefing item ids, shared by the ranking state and the section sort. */
+export const briefingApprovalId = (approval: MobileApprovalCard) => `approval:${approval.approvalId ?? approval.id}`;
+export const briefingLaneId = (session: MobileFleetSession) => `lane:${session.sessionKey}`;
+export const briefingNeedsYouId = (item: MobileInboxItem) => `item:${item.id}`;
 
 /**
  * Flatten an arbitrary display string into the trusted label grammar, clip it to
@@ -132,13 +153,53 @@ function sectionLines(heading: string, items: string[]): string[] {
   return [heading, ...items];
 }
 
-function briefingLines(input: PhoneBriefingInput): string[] {
+/**
+ * Split the snapshot into the briefing's sections, in event order and before
+ * any item limit. Code scopes merged changes to its grant; approvals, lanes and
+ * needs-me stay fleet-wide even on Code, because the operator still has to hear
+ * about work that is waiting elsewhere. Null when there is no snapshot.
+ */
+export function phoneBriefingSections(input: PhoneBriefingInput): PhoneBriefingSections | null {
   const snapshot = input.snapshot;
-  if (!snapshot) return [];
+  if (!snapshot) return null;
+  const fleetSessions = snapshot.fleetSessions ?? [];
+  const grantedPath = input.repoPath ?? null;
+  return {
+    approvals: snapshot.approvals ?? [],
+    running: fleetSessions.filter((session) => session.status === 'running' || session.status === 'huddling'),
+    blocked: fleetSessions.filter((session) => session.status === 'blocked' || session.status === 'failed'),
+    // Needs-me: the attention items the Home screen surfaces, minus the pending
+    // approvals already listed above.
+    needsYou: (snapshot.items ?? []).filter((item) => {
+      if (item.kind === 'approval' || item.approvalId) return false;
+      return item.kind === 'review' || item.severity === 'warning' || item.severity === 'critical';
+    }),
+    merged: fleetSessions.filter((session) => {
+      if (session.status !== 'merged') return false;
+      if (input.toolPack !== 'code') return true;
+      return Boolean(grantedPath) && session.repoPath === grantedPath;
+    }),
+  };
+}
+
+/** Sort by the advisory order; ids it does not name follow in event order. Stable. */
+function inOrder<T>(list: T[], idOf: (item: T) => string, order: readonly string[] | null | undefined): T[] {
+  if (!order || order.length === 0) return list;
+  const position = new Map(order.map((id, index) => [id, index]));
+  return list
+    .map((item, index) => ({ item, index, rank: position.get(idOf(item)) ?? Number.POSITIVE_INFINITY }))
+    .sort((left, right) => (left.rank - right.rank) || (left.index - right.index))
+    .map((entry) => entry.item);
+}
+
+function briefingLines(input: PhoneBriefingInput): string[] {
+  const sections = phoneBriefingSections(input);
+  if (!sections) return [];
+  const order = input.order;
   const lines: string[] = [];
 
-  const approvals = snapshot.approvals ?? [];
-  const approvalLines = approvals.slice(0, SECTION_ITEM_LIMIT).flatMap((approval) => {
+  const approvals = sections.approvals;
+  const approvalLines = inOrder(approvals, briefingApprovalId, order).slice(0, SECTION_ITEM_LIMIT).flatMap((approval) => {
     const title = briefingLabel(approval.title, TITLE_MAX_CHARS);
     if (!title) return [];
     return [
@@ -150,31 +211,20 @@ function briefingLines(input: PhoneBriefingInput): string[] {
   });
   lines.push(...sectionLines(`APPROVALS PENDING (${approvals.length})`, approvalLines));
 
-  const fleetSessions = snapshot.fleetSessions ?? [];
-  const running = fleetSessions.filter(
-    (session) => session.status === 'running' || session.status === 'huddling',
-  );
-  const blocked = fleetSessions.filter(
-    (session) => session.status === 'blocked' || session.status === 'failed',
-  );
+  const { running, blocked } = sections;
   lines.push(...sectionLines(
     `LANES RUNNING (${running.length})`,
-    running.slice(0, SECTION_ITEM_LIMIT).flatMap((session) => laneLine(session, 'lane') ?? []),
+    inOrder(running, briefingLaneId, order).slice(0, SECTION_ITEM_LIMIT).flatMap((session) => laneLine(session, 'lane') ?? []),
   ));
   lines.push(...sectionLines(
     `LANES BLOCKED (${blocked.length})`,
-    blocked.slice(0, SECTION_ITEM_LIMIT).flatMap((session) => laneLine(session, 'lane') ?? []),
+    inOrder(blocked, briefingLaneId, order).slice(0, SECTION_ITEM_LIMIT).flatMap((session) => laneLine(session, 'lane') ?? []),
   ));
 
-  // Needs-me: the attention items the Home screen surfaces, minus the pending
-  // approvals already listed above.
-  const needsYou = (snapshot.items ?? []).filter((item) => {
-    if (item.kind === 'approval' || item.approvalId) return false;
-    return item.kind === 'review' || item.severity === 'warning' || item.severity === 'critical';
-  });
+  const needsYou = sections.needsYou;
   lines.push(...sectionLines(
     `NEEDS YOU (${needsYou.length})`,
-    needsYou.slice(0, SECTION_ITEM_LIMIT).flatMap((item) => {
+    inOrder(needsYou, briefingNeedsYouId, order).slice(0, SECTION_ITEM_LIMIT).flatMap((item) => {
       const title = briefingLabel(item.title, TITLE_MAX_CHARS);
       if (!title) return [];
       return [
@@ -186,17 +236,9 @@ function briefingLines(input: PhoneBriefingInput): string[] {
     }),
   ));
 
-  // Merged recently, grouped per tracked repository. Code sees only its grant;
-  // approvals, lanes and needs-me stay fleet-wide even on Code, because the
-  // operator still has to hear about work that is waiting elsewhere.
-  const grantedPath = input.repoPath ?? null;
-  const merged = fleetSessions.filter((session) => {
-    if (session.status !== 'merged') return false;
-    if (input.toolPack !== 'code') return true;
-    return Boolean(grantedPath) && session.repoPath === grantedPath;
-  });
+  // Merged recently, grouped per tracked repository.
   const perRepo = new Map<string, string[]>();
-  for (const session of merged) {
+  for (const session of inOrder(sections.merged, briefingLaneId, order)) {
     const repo = briefingLabel(session.repo, REPO_MAX_CHARS);
     if (!repo) continue;
     const title = briefingLabel(session.title, TITLE_MAX_CHARS);
