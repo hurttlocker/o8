@@ -12,6 +12,7 @@ import {
 import { runClaimedAutomationFire } from './fire-runner';
 import { materializeWatchAutomationFires } from './watch-store';
 import { drainParkedSymonWatches, expireSymonWatches } from './symon-watch';
+import { evaluateFuzzyWatches } from './fuzzy-watch';
 
 const TICK_MS = 30_000;
 const DEFAULT_LEASE_MS = 60 * 60 * 1000;
@@ -97,6 +98,16 @@ export async function runAutomationSchedulerTick(input: {
     symonDrained = (await drainParkedSymonWatches(nowMs)).length;
   } catch (error) {
     console.warn('[automations-scheduler] Symon watch drain failed:', error);
+  }
+
+  // Fuzzy watches (#2443) ask the judgment referee, a bounded network call, so
+  // they also run LAST and inside their own guard. A fire this pass persists is
+  // claimed from the queue on the following tick: for a watch that is a 30 s
+  // delay and costs nothing. With the referee off this returns before any read.
+  try {
+    await evaluateFuzzyWatches(nowMs);
+  } catch (error) {
+    console.warn('[automations-scheduler] fuzzy watch evaluation failed:', error);
   }
 
   writeHeartbeat(Date.now(), {

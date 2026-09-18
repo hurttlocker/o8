@@ -23,6 +23,8 @@ import {
   recordSymonWatchRegistered,
   symonWatchRecord,
 } from '@/lib/automations/symon-watch';
+import { FUZZY_CONDITION_MAX_CHARS, FUZZY_WATCH_REFUSAL, sanitizeFuzzyCondition } from '@/lib/automations/fuzzy-watch';
+import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -38,6 +40,8 @@ interface CreateBody {
     id?: string | null;
     events?: string[];
     repoPath?: string | null;
+    /** #2443: `text` is a natural-language condition the judgment referee answers each tick. */
+    fuzzy?: boolean;
   };
   then?: unknown;
   deadlineMs?: number;
@@ -64,8 +68,16 @@ export async function POST(request: Request) {
   const repoPath = condition.repoPath?.trim() || '';
   const sessionId = body.sessionId?.trim() || null;
 
+  const fuzzy = condition.fuzzy === true;
+  if (fuzzy && !isJudgmentRefereeEnabled()) {
+    return NextResponse.json({ error: FUZZY_WATCH_REFUSAL }, { status: 409 });
+  }
+  const fuzzyCondition = fuzzy ? sanitizeFuzzyCondition(condition.text) : null;
   if (!text) return NextResponse.json({ error: 'condition.text required' }, { status: 400 });
-  if (text.length > 200) return NextResponse.json({ error: 'condition.text must be 200 characters or fewer' }, { status: 400 });
+  if (fuzzy && !fuzzyCondition) {
+    return NextResponse.json({ error: `condition.text must be ${FUZZY_CONDITION_MAX_CHARS} characters or fewer` }, { status: 400 });
+  }
+  if (!fuzzy && text.length > 200) return NextResponse.json({ error: 'condition.text must be 200 characters or fewer' }, { status: 400 });
   if (!source || !SOURCE_KINDS.includes(source)) {
     return NextResponse.json({ error: `condition.source must be one of ${SOURCE_KINDS.join(', ')}` }, { status: 400 });
   }
@@ -97,7 +109,7 @@ export async function POST(request: Request) {
   const id = `watch_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   db.insert(automations).values({
     id,
-    name: text,
+    name: fuzzyCondition ?? text,
     owner: 'symon',
     repoPath,
     branch: 'main',
@@ -119,6 +131,7 @@ export async function POST(request: Request) {
     watchCheckpoint,
     symonSessionId: sessionId,
     symonThenJson: JSON.stringify(then),
+    symonFuzzyCondition: fuzzyCondition,
     lastRunStatus: 'idle',
   }).run();
 
