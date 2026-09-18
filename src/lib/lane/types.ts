@@ -308,6 +308,11 @@ export type LaneEventVerb =
   // reads it; the rerun fires the same either way.
   // Payload: { receiptId, packetId, risk, legend, confidence, abstain, truncated, hiddenText, diffFingerprint }
   | 'gate_failure_warning'
+  // Advisory claim-versus-evidence check on the worker's final report (#2447),
+  // recorded after a completion writes its outcome row when judgment.provider
+  // is on and a claim is unbacked. Record-only: nothing reads it.
+  // Payload: { receiptId, packetId, claims: ('tests' | 'files')[], answers, verificationOutputPresent, reportFlags, outputFlags, reportTruncated, outputTruncated, changedFileCount, diffFingerprint, reportFingerprint }
+  | 'claim_unbacked'
   // A repo publication action exhausted its bounded resource-lease wait.
   // Payload: { resource, waitedMs, holder, retryCount, willRetry }
   | 'lease_wait_timeout'

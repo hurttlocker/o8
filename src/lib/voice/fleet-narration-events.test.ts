@@ -75,6 +75,31 @@ describe('fleet narration event normalization', () => {
     });
   });
 
+  it('labels an unbacked report claim plainly as advisory', () => {
+    const event = normalizeFleetNarrationEvent({
+      source: 'lane-event',
+      event: laneEvent('evt-claim-unbacked', 'claim_unbacked', { claims: ['tests'], receiptId: 'jdg_claim' }),
+      lane: {
+        id: 'lane-claim',
+        label: 'Claim packet',
+        packetId: 'pkt-claim',
+        runtime: 'codex',
+        sessionKey: null,
+        status: 'reviewing',
+        lastEventLabel: 'agent_completed',
+        outcome: null,
+      },
+      packet: null,
+      agent: null,
+    });
+
+    expect(event).toMatchObject({
+      kind: 'other',
+      summary: 'Report claim not backed by evidence',
+      transitionState: 'claim-unbacked',
+    });
+  });
+
   it('maps the exact worker-events row shape and turn-summary rollup', () => {
     const worker = normalizeFleetNarrationEvent({
       source: 'worker-event',

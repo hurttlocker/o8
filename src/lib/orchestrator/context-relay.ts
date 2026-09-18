@@ -504,11 +504,14 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     console.warn('[transcript-search-write] failed for', normalizedPacketId, error);
   }
 
-  // #1108 — Persist to the session_outcomes ledger. Without this, the implicit
-  // brain (Recent Outcomes context, the auto-directive proposer, and the runtime
-  // routing recommender) all silently no-op because the table is empty. Fire-
-  // and-forget — never block the capture flow.
-  void persistSessionOutcome(context, lane, runtimeId).catch((err) => {
+  // #1108 — Persist to the session_outcomes ledger; the implicit brain reads it.
+  // Fire-and-forget. #2447: a NEW row starts the detached, record-only report
+  // claim check; it runs after the outcome is written and never blocks it.
+  void persistSessionOutcome(context, lane, runtimeId).then(async (inserted) => {
+    if (!inserted || !lane) return;
+    const { startReportClaimCheck } = await import('@/lib/lane/report-claim-check');
+    startReportClaimCheck({ lane, packetId: normalizedPacketId, transcript });
+  }).catch((err) => {
     console.warn('[session-outcome-write] failed for', normalizedPacketId, err);
   });
 
@@ -516,14 +519,11 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
 }
 
 /**
- * Insert one row into `session_outcomes` for a freshly-captured packet
- * completion. `mergedClean` is left NULL — the actual merge handler stamps
- * it later. Idempotent: id is derived from packetId + sessionKey + completedAt
- * so re-captures within the same second collapse via onConflictDoNothing.
+ * Insert one `session_outcomes` row per captured completion (mergedClean NULL
+ * until merge). Idempotent: id = packetId + sessionKey + completedAt, so
+ * same-second re-captures collapse via onConflictDoNothing. True on a new row.
  */
-// Runtimes the session_outcomes table tracks (subset of the broader RuntimeId
-// union — RuntimeId also includes things like 'remote-customer' that the
-// dispatch routing recommender doesn't score).
+// Runtimes the ledger tracks: a subset of RuntimeId ('remote-customer' etc. are not scored).
 type LedgerRuntime = OrchestratorRuntime;
 const LANE_START_STATUSES: ReadonlySet<string> = new Set(['launching', 'running']);
 
@@ -616,15 +616,15 @@ async function persistSessionOutcome(
   context: PacketContext,
   lane: Lane | null,
   runtimeId: RuntimeId | null,
-): Promise<void> {
+): Promise<boolean> {
   // We need a ledger-tracked runtime + a repoPath to write a useful row. Skip
   // silently if either is missing — captures that lack them (ad-hoc scratch
   // runs, customer runtimes) weren't going to feed any downstream brain
   // consumer anyway.
-  if (!isLedgerRuntime(runtimeId) || !lane?.repoPath) return;
+  if (!isLedgerRuntime(runtimeId) || !lane?.repoPath) return false;
   await capturePacketCapacitySnapshot(lane, 'end');
   const db = getDb();
-  if (!db) return;
+  if (!db) return false;
 
   // Deterministic id keyed on the unique-per-second tuple — re-captures of the
   // exact same completion (auto-review re-pulling context) collapse cleanly.
@@ -653,7 +653,7 @@ async function persistSessionOutcome(
   const latestReview = readLatestPersistedReview(context, lane) ?? context.review;
 
   try {
-    await db.insert(sessionOutcomes).values({
+    const insert = await db.insert(sessionOutcomes).values({
       id,
       projectId: context.projectId ?? null,
       repoPath: lane.repoPath,
@@ -674,20 +674,20 @@ async function persistSessionOutcome(
       attempts,
       reviewApproved: latestReview?.approved ?? false,
       reviewFindingsCount: latestReview?.findings.length ?? 0,
-      // mergedClean stays NULL until the merge handler stamps it via
-      // markOutcomeMerged() below when the packet branch lands on main.
+      // mergedClean stays NULL until markOutcomeMerged() stamps it at merge.
     }).onConflictDoNothing();
-    // New ledger row — cached "what shipped"-style Q&A answers are now stale.
-    // Lazy import keeps the qa module out of this file's cold-start graph.
+    // Cached "what shipped" Q&A answers are now stale (lazy import: cold-start graph).
     try {
       const { invalidateAnswerCache } = await import('@/lib/cortex/qa/ask');
       invalidateAnswerCache();
     } catch {
       // Best-effort — never let cache invalidation break the capture flow.
     }
+    return insert.changes > 0;
   } catch (err) {
     // Swallow — never let a ledger write break the capture flow.
     console.warn('[session-outcome-write] insert failed:', err);
+    return false;
   }
 }
 
