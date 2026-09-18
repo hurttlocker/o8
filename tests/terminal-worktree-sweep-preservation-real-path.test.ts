@@ -87,8 +87,7 @@ describe('terminal worktree sweep preservation', () => {
     const second = await sweepTerminalCortexWorktrees(fixture.repoPath);
 
     expect(first).toMatchObject({ scanned: 1, removed: 0, failed: 1 });
-    // #2474 — same lane, same status: the failed directory is not retried.
-    expect(second).toMatchObject({ scanned: 1, removed: 0, failed: 0, skippedUnrecoverable: 1 });
+    expect(second).toMatchObject({ scanned: 1, removed: 0, failed: 1 });
     const preservedEvents = getLaneEvents(fixture.laneId, 100).filter((event) => (
       event.payload.event === 'recoverable_work_preserved'
       && event.payload.reason === 'terminal_worktree_cleanup'

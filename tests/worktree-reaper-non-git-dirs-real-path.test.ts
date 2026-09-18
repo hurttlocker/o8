@@ -129,8 +129,8 @@ describe('worktree reaper terminal sweep — non-git packet directories (#2474)'
     30_000,
   );
 
-  it('skips a directory whose removal failed for a non-git reason on the next tick without new warnings', async () => {
-    const fixture = createRepoFixture('pkt-non-git-refused', 'clone');
+  it('skips a non-git directory whose removal failed on the next tick without new warnings', async () => {
+    const fixture = createRepoFixture('pkt-non-git-refused', 'dangling-gitfile');
     allowRemoval = false;
     const lines = captureLogs();
 
@@ -141,5 +141,24 @@ describe('worktree reaper terminal sweep — non-git packet directories (#2474)'
     const second = await tick(fixture.repoPath, lines);
     expect(second).toEqual([]);
     expect(existsSync(fixture.worktreePath)).toBe(true);
+  }, 30_000);
+
+  it('keeps retrying a valid clone refused by the live-process guard until the worker exits', async () => {
+    const fixture = createRepoFixture('pkt-live-guard-refused', 'clone');
+    allowRemoval = false;
+    const lines = captureLogs();
+
+    const first = await tick(fixture.repoPath, lines);
+    expect(existsSync(fixture.worktreePath)).toBe(true);
+    expect(first.some((line) => /terminal sweep .*removed=0 .*failed=1 skippedUnrecoverable=0/.test(line))).toBe(true);
+
+    const second = await tick(fixture.repoPath, lines);
+    expect(existsSync(fixture.worktreePath)).toBe(true);
+    expect(second.some((line) => /terminal sweep .*removed=0 .*failed=1 skippedUnrecoverable=0/.test(line))).toBe(true);
+
+    allowRemoval = true;
+    const third = await tick(fixture.repoPath, lines);
+    expect(existsSync(fixture.worktreePath)).toBe(false);
+    expect(third.some((line) => /terminal sweep .*removed=1 .*failed=0/.test(line))).toBe(true);
   }, 30_000);
 });

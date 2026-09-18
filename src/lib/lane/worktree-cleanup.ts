@@ -39,7 +39,7 @@ function settleRemovedWorktreeReservation(lane: CleanupLane, removed: boolean): 
  * repository" on every preserve attempt, or walks up and answers for the
  * parent checkout instead.
  */
-async function worktreeIsNotGitRepository(worktreePath: string): Promise<boolean> {
+export async function worktreeIsNotGitRepository(worktreePath: string): Promise<boolean> {
   if (!existsSync(join(worktreePath, '.git'))) return true;
   try {
     await execFileAsync('git', ['-C', worktreePath, 'rev-parse', '--git-dir'], {

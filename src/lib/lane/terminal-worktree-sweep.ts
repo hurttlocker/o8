@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { listLanes } from './registry';
 import type { Lane } from './types';
-import { cleanupLaneWorktree } from './worktree-cleanup';
+import { cleanupLaneWorktree, worktreeIsNotGitRepository } from './worktree-cleanup';
 import { removeCortexWorktreePath } from './worktree-clone-removal';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 
@@ -16,13 +17,14 @@ export interface TerminalWorktreeSweepResult {
   removed: number;
   skippedActive: number;
   failed: number;
-  /** Directories that already failed removal in this process and were not retried. */
+  /** Non-git directories that already failed removal in this process and were not retried. */
   skippedUnrecoverable: number;
 }
 
-// #2474 — a directory whose removal failed once is not retried (or re-logged)
-// by later ticks in this process while its owning lane keeps the same status.
-// A status change (e.g. completed -> archived) or a restart retries it.
+// #2474 — a non-git directory whose removal failed is not retried (or
+// re-logged) by later ticks in this process while its owning lane keeps the
+// same status. Every other failure (e.g. a live-process refusal, which clears
+// when the worker exits) keeps retrying each tick.
 const unrecoverableWorktreeDirs = new Set<string>();
 
 function unrecoverableKey(dirPath: string, lane: Lane | null) {
@@ -124,7 +126,9 @@ export async function sweepTerminalCortexWorktrees(
         result.removed += 1;
       } else {
         result.failed += 1;
-        unrecoverableWorktreeDirs.add(unrecoverableKey(dirPath, lane));
+        if (existsSync(dirPath) && await worktreeIsNotGitRepository(dirPath)) {
+          unrecoverableWorktreeDirs.add(unrecoverableKey(dirPath, lane));
+        }
       }
     }
   }
