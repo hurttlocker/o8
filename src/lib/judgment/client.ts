@@ -6,13 +6,15 @@
  * returns null without touching the network when `judgment.provider` is off,
  * and null when no credential exists or the call fails after bounded retries.
  * It never throws. Every call that reaches the credential check writes a
- * receipt (success or failure).
+ * receipt (success or failure). When the managed proxy answers its cap
+ * response (#2486), the call records a `managed_cap` receipt and, if a local
+ * key exists, retries once on the direct route.
  */
 import { performance } from 'node:perf_hooks';
 
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { recordJudgmentReceipt } from './receipts';
-import { resolveJudgmentRoute, TYPESAFE_SYSTEMONE_URL } from './route';
+import { resolveDirectJudgmentRoute, resolveJudgmentRoute, TYPESAFE_SYSTEMONE_URL, type ResolvedJudgmentRoute } from './route';
 import {
   ABSTAIN_CONFIDENCE,
   type ChoiceAnswer,
@@ -129,22 +131,30 @@ function retryAfterMs(headers: Headers): number | null {
   return null;
 }
 
-async function providerErrorType(response: Response): Promise<string | undefined> {
+/** The managed proxy's cap response body (#2486): `{ error: 'daily cap reached', kind }`. */
+const MANAGED_CAP_MESSAGE = 'daily cap reached';
+const MANAGED_CAP_KINDS = new Set(['judgment', 'judgment_beta_ended']);
+
+async function providerError(response: Response, managed: boolean): Promise<JudgmentError> {
+  const status = response.status;
   try {
-    const body = await response.json() as { detail?: { error_type?: unknown }; error_type?: unknown };
+    const body = await response.json() as { detail?: { error_type?: unknown }; error_type?: unknown; error?: unknown; kind?: unknown };
+    if (managed && status === 402 && body?.error === MANAGED_CAP_MESSAGE && typeof body.kind === 'string' && MANAGED_CAP_KINDS.has(body.kind)) {
+      return { kind: 'managed_cap', status, errorType: body.kind, message: MANAGED_CAP_MESSAGE };
+    }
     const type = body?.detail?.error_type ?? body?.error_type;
-    return typeof type === 'string' ? type.slice(0, 80) : undefined;
+    return { kind: 'http', status, errorType: typeof type === 'string' ? type.slice(0, 80) : undefined };
   } catch {
-    return undefined;
+    return { kind: 'http', status, errorType: undefined };
   }
 }
 
-async function attempt(endpoint: string, key: string, payload: string, timeoutMs: number): Promise<AttemptOutcome> {
+async function attempt(resolved: ResolvedJudgmentRoute, payload: string, timeoutMs: number): Promise<AttemptOutcome> {
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetch(resolved.url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { Authorization: `Bearer ${resolved.bearer}`, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: payload,
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -171,7 +181,7 @@ async function attempt(endpoint: string, key: string, payload: string, timeoutMs
     ok: false,
     retryable,
     retryAfterMs: retryAfterMs(response.headers),
-    error: { kind: 'http', status, errorType: await providerErrorType(response) },
+    error: await providerError(response, resolved.route === 'managed'),
   };
 }
 
@@ -233,37 +243,49 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
     if (invalid) return fail({ kind: 'invalid_questions', message: invalid }, 0);
     const resolved = resolveJudgmentRoute(provider, options.endpoint);
     if (!resolved) return fail({ kind: provider === 'typesafe' ? 'missing_key' : 'missing_credential' }, 0);
-    route = resolved.route;
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
     const retryBaseMs = options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS;
     const payload = JSON.stringify({ model: TYPESAFE_MODEL, state: request.state, questions: request.questions });
 
-    for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
-      const outcome = await attempt(resolved.url, resolved.bearer, payload, timeoutMs);
-      if (outcome.ok) {
-        const parsed = parseResponse(request.questions, outcome.body);
-        if (!parsed) return fail({ kind: 'malformed', message: 'answers do not match the question types' }, attemptNumber);
-        const latencyMs = Math.round(performance.now() - startedAt);
-        const receiptId = recordJudgmentReceipt({
-          ...base,
-          route,
-          model: parsed.model,
-          ok: true,
-          answers: parsed.answers as Record<string, unknown>,
-          inputTokens: parsed.usage.inputTokens,
-          outputTokens: parsed.usage.outputTokens,
-          latencyMs,
-          attempts: attemptNumber,
-          error: null,
-        });
-        return { ...parsed, latencyMs, attempts: attemptNumber, receiptId };
+    const run = async (target: ResolvedJudgmentRoute): Promise<JudgmentResult<Q> | null | 'managed_cap'> => {
+      route = target.route;
+      for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
+        const outcome = await attempt(target, payload, timeoutMs);
+        if (outcome.ok) {
+          const parsed = parseResponse(request.questions, outcome.body);
+          if (!parsed) return fail({ kind: 'malformed', message: 'answers do not match the question types' }, attemptNumber);
+          const latencyMs = Math.round(performance.now() - startedAt);
+          const receiptId = recordJudgmentReceipt({
+            ...base,
+            route,
+            model: parsed.model,
+            ok: true,
+            answers: parsed.answers as Record<string, unknown>,
+            inputTokens: parsed.usage.inputTokens,
+            outputTokens: parsed.usage.outputTokens,
+            latencyMs,
+            attempts: attemptNumber,
+            error: null,
+          });
+          return { ...parsed, latencyMs, attempts: attemptNumber, receiptId };
+        }
+        if (!outcome.retryable || attemptNumber === maxAttempts) {
+          fail(outcome.error, attemptNumber);
+          return outcome.error.kind === 'managed_cap' ? 'managed_cap' : null;
+        }
+        const backoff = retryBaseMs * 2 ** (attemptNumber - 1);
+        await sleep(Math.min(outcome.retryAfterMs ?? backoff, MAX_RETRY_DELAY_MS));
       }
-      if (!outcome.retryable || attemptNumber === maxAttempts) return fail(outcome.error, attemptNumber);
-      const backoff = retryBaseMs * 2 ** (attemptNumber - 1);
-      await sleep(Math.min(outcome.retryAfterMs ?? backoff, MAX_RETRY_DELAY_MS));
-    }
-    return null;
+      return null;
+    };
+
+    const result = await run(resolved);
+    if (result !== 'managed_cap') return result;
+    const direct = resolveDirectJudgmentRoute(options.endpoint);
+    if (!direct) return null;
+    const fallback = await run(direct);
+    return fallback === 'managed_cap' ? null : fallback;
   } catch (error) {
     console.error('[judgment] unexpected failure:', error instanceof Error ? error.name : 'error');
     return null;

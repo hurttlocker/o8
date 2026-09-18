@@ -29,6 +29,7 @@ import {
 } from '@/lib/operator/broadcast-commentary-defaults';
 import { isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
+import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -477,6 +478,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error(`judgmentProvider must be ${JUDGMENT_PROVIDER_VALUES_MESSAGE}.`);
     }
     update.judgmentProvider = body.judgmentProvider;
+  }
+
+  if (body.judgmentManagedDailyAllowance !== undefined) {
+    if (body.judgmentManagedDailyAllowance !== null && !isJudgmentAllowance(body.judgmentManagedDailyAllowance)) {
+      throw new Error(`judgmentManagedDailyAllowance must be ${JUDGMENT_ALLOWANCE_EXPECTED}.`);
+    }
+    update.judgmentManagedDailyAllowance = body.judgmentManagedDailyAllowance;
+  }
+
+  if (body.judgmentBetaEndDate !== undefined) {
+    if (body.judgmentBetaEndDate !== null && !isJudgmentBetaEndDate(body.judgmentBetaEndDate)) {
+      throw new Error(`judgmentBetaEndDate must be ${JUDGMENT_BETA_END_DATE_EXPECTED}.`);
+    }
+    update.judgmentBetaEndDate = body.judgmentBetaEndDate;
   }
 
   if (body.workspaceManifestPolicy !== undefined) {

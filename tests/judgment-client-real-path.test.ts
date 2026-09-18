@@ -391,3 +391,119 @@ describe('askJudgment route resolution (#2484)', () => {
     });
   });
 });
+
+/** The proxy's managed-cap response (#2486): 402 JSON naming the cap. */
+const capReply = (kind: 'judgment' | 'judgment_beta_ended'): FixtureReply => ({
+  status: 402,
+  body: { error: 'daily cap reached', kind },
+});
+
+describe('managed allowance cap and beta end date (#2486)', () => {
+  beforeAll(() => {
+    process.env.O8_PROXY_URL = new URL(endpoint).origin;
+  });
+
+  afterEach(async () => {
+    rmSync(getEntitlementPath(), { force: true });
+    writeFileSync(judgmentKeyPath(), `${KEY}\n`);
+    chmodSync(judgmentKeyPath(), 0o600);
+    await updateOperatorDefaults({ judgmentProvider: 'typesafe', judgmentBetaEndDate: null });
+  });
+
+  afterAll(() => {
+    delete process.env.O8_PROXY_URL;
+  });
+
+  it('a cap response with no local key returns null and a cap-named managed receipt, without throwing', async () => {
+    writeEntitlement('free');
+    unlinkSync(judgmentKeyPath());
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    replies.push(capReply('judgment'));
+
+    const result = await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-cap-nokey' } }, fast());
+
+    expect(result).toBeNull();
+    expect(seen.map((request) => request.url)).toEqual(['/v1/judgment']);
+    const receipts = listJudgmentReceipts({ packetId: 'pkt-cap-nokey' });
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({
+      ok: false,
+      provider: 'managed',
+      route: 'managed',
+      attempts: 1,
+      error: { kind: 'managed_cap', status: 402, errorType: 'judgment', message: 'daily cap reached' },
+    });
+  });
+
+  it('a beta-ended cap response names that cap too', async () => {
+    writeEntitlement('free');
+    unlinkSync(judgmentKeyPath());
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    replies.push(capReply('judgment_beta_ended'));
+
+    expect(await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-cap-ended' } }, fast())).toBeNull();
+    expect(listJudgmentReceipts({ packetId: 'pkt-cap-ended' })[0].error).toMatchObject({ kind: 'managed_cap', errorType: 'judgment_beta_ended' });
+  });
+
+  it('a cap response with a local key retries once on the direct route and records a direct receipt', async () => {
+    writeEntitlement('free');
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    replies.push(capReply('judgment'), { status: 200, body: SUCCESS_BODY });
+
+    const result = await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-cap-key' } }, fast());
+
+    expect(result).not.toBeNull();
+    expect(seen.map((request) => request.url)).toEqual(['/v1/judgment', '/v1/systemone']);
+    expect(seen[0].authorization).toBe(`Bearer ${PLAN_TOKEN}`);
+    expect(seen[1].authorization).toBe(`Bearer ${KEY}`);
+    expect(seen[1].body).toEqual(seen[0].body);
+    const receipts = listJudgmentReceipts({ packetId: 'pkt-cap-key' });
+    expect(receipts).toHaveLength(2);
+    const direct = receipts.find((receipt) => receipt.route === 'direct');
+    const managed = receipts.find((receipt) => receipt.route === 'managed');
+    expect(direct).toMatchObject({ ok: true, id: result!.receiptId, attempts: 1 });
+    expect(managed).toMatchObject({ ok: false, error: { kind: 'managed_cap', errorType: 'judgment' } });
+  });
+
+  it('past the beta end date a free install goes straight to the direct key and never calls the proxy', async () => {
+    writeEntitlement('free');
+    await updateOperatorDefaults({ judgmentProvider: 'managed', judgmentBetaEndDate: '2020-01-01' });
+    replies.push({ status: 200, body: SUCCESS_BODY });
+
+    const result = await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-beta-ended' } }, fast());
+
+    expect(result).not.toBeNull();
+    expect(seen.map((request) => request.url)).toEqual(['/v1/systemone']);
+    expect(seen[0].authorization).toBe(`Bearer ${KEY}`);
+    expect(listJudgmentReceipts({ packetId: 'pkt-beta-ended' })).toMatchObject([{ ok: true, route: 'direct' }]);
+  });
+
+  it('before the beta end date a free install still rides the proxy, and a plan install rides it after', async () => {
+    writeEntitlement('free');
+    await updateOperatorDefaults({ judgmentProvider: 'managed', judgmentBetaEndDate: '2999-12-31' });
+    replies.push({ status: 200, body: SUCCESS_BODY });
+    await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-beta-open' } }, fast());
+    expect(seen.map((request) => request.url)).toEqual(['/v1/judgment']);
+
+    seen.length = 0;
+    writeEntitlement('founder');
+    await updateOperatorDefaults({ judgmentBetaEndDate: '2020-01-01' });
+    replies.push({ status: 200, body: SUCCESS_BODY });
+    await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-beta-plan' } }, fast());
+    expect(seen.map((request) => request.url)).toEqual(['/v1/judgment']);
+  });
+
+  it('typesafe is unchanged: a cap-shaped 402 is a plain http failure with no retry', async () => {
+    writeEntitlement('free');
+    await updateOperatorDefaults({ judgmentBetaEndDate: '2020-01-01' });
+    replies.push(capReply('judgment'), { status: 200, body: SUCCESS_BODY });
+
+    const result = await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-typesafe-cap' } }, fast());
+
+    expect(result).toBeNull();
+    expect(seen.map((request) => request.url)).toEqual(['/v1/systemone']);
+    const [receipt] = listJudgmentReceipts({ packetId: 'pkt-typesafe-cap' });
+    expect(receipt.error).toEqual({ kind: 'http', status: 402 });
+    expectDirectRouteOnly('pkt-typesafe-cap');
+  });
+});

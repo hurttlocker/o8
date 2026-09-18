@@ -95,6 +95,8 @@ const NON_DEFAULT_UPDATE = {
   storageReserveRatio: 0.15,
   storageReserveFloorGb: 12,
   workspaceParkingMode: 'pressure',
+  judgmentManagedDailyAllowance: 25,
+  judgmentBetaEndDate: '2026-11-30',
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {

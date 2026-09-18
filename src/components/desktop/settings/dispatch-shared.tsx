@@ -105,6 +105,10 @@ export interface OperatorDefaults {
   workersUseBrain: WorkersUseBrain;
   /** Typed judgment provider (#2434). 'off' sends nothing anywhere. */
   judgmentProvider: JudgmentProvider;
+  /** Managed judgment calls per install per day (#2486). Null = not configured. */
+  judgmentManagedDailyAllowance: number | null;
+  /** Last day of the managed judgment public beta, YYYY-MM-DD (#2486). Null = no expiry. */
+  judgmentBetaEndDate: string | null;
   workspaceManifestPolicy: WorkspaceManifestPolicy;
   crossHouseWorkerFallback: boolean;
   orchestratorBackend: OrchestratorBackendSetting;
