@@ -399,6 +399,8 @@ export function renderDirectiveCitationReport({ rows, notes }) {
     lines.push(`${DIRECTIVE_CITATION_LABEL} by p(breaks rule): n=${summary.n} labeled scores (positives ${summary.positives}, negatives ${summary.negatives})`);
     lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
   }
+  // Printed even when the AUC is skipped: the per-rule positives below rest on the same labels.
+  lines.push('  caveat: the AUC, the Brier score and every per-rule positives count use labels assigned per diff, not per rule, so each rule\'s positives count is an UPPER bound and the AUC and Brier error has NO FIXED DIRECTION: neither is a clean measure of the rule-level score');
   const byRule = citationsByRule(rows);
   const falseCitations = byRule.reduce((sum, entry) => sum + entry.falseCitations, 0);
   lines.push(`  false citations at p >= ${DIRECTIVE_CITATION_REPLAY_THRESHOLD}: ${falseCitations} of ${summary.negatives} y=0 scores`);

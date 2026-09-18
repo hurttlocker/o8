@@ -179,6 +179,8 @@ describe('recorded-answer replay labels', () => {
     expect(text).toMatch(/^ {4}false citations are a LOWER bound and citation precision is OVERSTATED: /m);
     expect(text).toMatch(/^ {4}misses \(positives minus cited positives\) are an UPPER bound: /m);
     expect(text).not.toContain('bound the error rate from above');
+    expect(text).toMatch(/^ {2}AUC [^\n]*\n {2}caveat: the AUC, the Brier score and every per-rule positives count use labels assigned per diff, not per rule, /m);
+    expect(text).toContain("each rule's positives count is an UPPER bound and the AUC and Brier error has NO FIXED DIRECTION");
     expect(text).toContain('rule css-classes: n=2, positives 1, cited positives 1, false citations 1 of 1 y=0');
     expect(text).toContain('rule css-shorthand (held back): n=1, positives 0, cited positives 0, false citations 1 of 1 y=0');
     expect(text).toContain('rule rgba-surfaces: n=1, positives 0, cited positives 0, false citations 0 of 1 y=0');
