@@ -29,6 +29,7 @@ import {
   recordSymonWatchLedgerEvent,
   type SymonWatchLedgerTailEvent,
 } from './symon-watch-ledger';
+import { parseFuzzyWatchEvaluation } from './fuzzy-watch';
 import type { RunAutomationResult } from './runner';
 
 export const SYMON_WATCH_ACTION_KINDS = ['symon_report', 'symon_plan'] as const;
@@ -130,6 +131,9 @@ export function symonWatchRecord(
         : 'watching',
     lastFireAt: row.watchLastFireAt,
     lastErrorMessage: row.lastErrorMessage,
+    // A fuzzy watch (#2443): the operator's condition and the last answer to it.
+    fuzzyCondition: row.symonFuzzyCondition ? { text: row.symonFuzzyCondition } : null,
+    evaluation: parseFuzzyWatchEvaluation(row.symonFuzzyEvaluationJson),
     // The durable Symon ledger tail, so `symon_watch_list` can answer "what
     // happened to it?" from the record rather than from a second call.
     lastLedgerEvent: lastLedgerEvent !== undefined

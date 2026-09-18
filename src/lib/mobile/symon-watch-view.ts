@@ -28,6 +28,8 @@ export interface MobileSymonWatch {
   /** Epoch ms the parked watch was announced, or null while it is still quiet. */
   nudgedAt: number | null;
   lastLedgerEvent: SymonWatchRecord['lastLedgerEvent'];
+  /** A fuzzy watch's last answer (probability the condition holds, epoch ms). Absent until one exists. */
+  lastAnswer?: { p: number; at: number };
 }
 
 const SUMMARY_LIMIT = 240;
@@ -69,5 +71,6 @@ export function mobileSymonWatch(record: SymonWatchRecord): MobileSymonWatch {
     parked: record.parkedAt != null,
     nudgedAt: record.announcedAt ?? null,
     lastLedgerEvent: record.lastLedgerEvent,
+    ...(record.evaluation ? { lastAnswer: { p: record.evaluation.lastP, at: record.evaluation.lastAt } } : {}),
   };
 }

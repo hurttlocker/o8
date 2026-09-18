@@ -130,6 +130,8 @@ function watchRows(): WatchRow[] {
            watch_last_fire_at
     FROM automations
     WHERE enabled = 1 AND trigger_kind = 'watch' AND watch_source_kind IS NOT NULL
+      -- A fuzzy watch (#2443) fires from its condition's evaluation, not from events.
+      AND symon_fuzzy_condition IS NULL
     ORDER BY created_at ASC
   `).all() as WatchRow[];
 }

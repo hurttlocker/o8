@@ -12,6 +12,7 @@ import {
 import { runClaimedAutomationFire } from './fire-runner';
 import { materializeWatchAutomationFires } from './watch-store';
 import { drainParkedSymonWatches, expireSymonWatches } from './symon-watch';
+import { evaluateFuzzyWatches } from './fuzzy-watch';
 
 const TICK_MS = 30_000;
 const DEFAULT_LEASE_MS = 60 * 60 * 1000;
@@ -64,9 +65,18 @@ export async function runAutomationSchedulerTick(input: {
   } catch (error) {
     console.warn('[automations-scheduler] Symon watch expiry failed:', error);
   }
+  // Fuzzy watches (#2443) are asked beside the exact-watch pass. With the
+  // judgment referee off this returns before any read, so the tick is unchanged.
+  let fuzzyFires: AutomationFire[] = [];
+  try {
+    fuzzyFires = await evaluateFuzzyWatches(nowMs);
+  } catch (error) {
+    console.warn('[automations-scheduler] fuzzy watch evaluation failed:', error);
+  }
   const materialized = [
     ...materializeDueAutomationFires(nowMs),
     ...materializeWatchAutomationFires(nowMs),
+    ...fuzzyFires,
   ];
   const completed: AutomationFire[] = [];
 

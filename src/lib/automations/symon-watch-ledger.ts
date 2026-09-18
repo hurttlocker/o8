@@ -20,6 +20,7 @@ export type SymonWatchLedgerPhase =
   | 'watch_parked'
   | 'watch_drained'
   | 'watch_ran'
+  | 'watch_evaluated'
   | 'watch_cancelled'
   | 'watch_expired';
 
