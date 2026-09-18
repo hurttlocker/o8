@@ -174,6 +174,7 @@ describe('recorded-answer replay labels', () => {
     expect(text).toContain('directiveCitation by p(breaks rule): n=7 labeled scores (positives 3, negatives 4)');
     expect(text).toMatch(/^ {2}AUC \d\.\d{3} \(n=7\)/m);
     expect(text).toContain('false citations at p >= 0.6: 2 of 4 y=0 scores');
+    expect(text).toContain('caveat: a rejection or rerun marks every rule scored on that diff as a real violation');
     expect(text).toContain('rule css-classes: n=2, positives 1, cited positives 1, false citations 1 of 1 y=0');
     expect(text).toContain('rule css-shorthand (held back): n=1, positives 0, cited positives 0, false citations 1 of 1 y=0');
     expect(text).toContain('rule rgba-surfaces: n=1, positives 0, cited positives 0, false citations 0 of 1 y=0');

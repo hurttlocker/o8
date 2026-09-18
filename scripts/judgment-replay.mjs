@@ -402,6 +402,7 @@ export function renderDirectiveCitationReport({ rows, notes }) {
   const byRule = citationsByRule(rows);
   const falseCitations = byRule.reduce((sum, entry) => sum + entry.falseCitations, 0);
   lines.push(`  false citations at p >= ${DIRECTIVE_CITATION_REPLAY_THRESHOLD}: ${falseCitations} of ${summary.negatives} y=0 scores`);
+  lines.push('  caveat: a rejection or rerun marks every rule scored on that diff as a real violation, even rules that were not the reason, so the per-rule figures below bound the error rate from above and do not say which rule caused the outcome');
   for (const entry of byRule) {
     lines.push(`  rule ${entry.rule}${entry.heldBack ? ' (held back)' : ''}: n=${entry.n}, positives ${entry.positives}, cited positives ${entry.cited}, false citations ${entry.falseCitations} of ${entry.n - entry.positives} y=0`);
   }

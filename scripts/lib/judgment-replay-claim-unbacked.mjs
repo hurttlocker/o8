@@ -1,10 +1,13 @@
 /**
  * The `claimUnbacked` label for the calibration replay (#2447, #2438).
  *
- * Rows are the recorded report-claim answers. Every call carries a laneId, so
- * its receipt is a `judgment` lane event with surface `report-claim-check`
- * (payload: packetId, receiptId, answers); the `claim_unbacked` event is
- * written only when a claim looked unbacked, so it is not the row source.
+ * Rows are the recorded report-claim answers. Every call passes a laneId, so
+ * its receipt is normally a `judgment` lane event with surface
+ * `report-claim-check` (payload: packetId, receiptId, answers). When that lane
+ * write fails, `recordJudgmentReceipt` falls back to a `judgment_receipts`
+ * row, which this reader does not read, so those calls are missing from the
+ * rows. The `claim_unbacked` event is written only when a claim looked
+ * unbacked, so it is not the row source.
  * Two predictors are scored separately: p = the recorded `claimsTestsRun`
  * answer, and p = the recorded `claimsFilesNotInDiff` answer.
  *
