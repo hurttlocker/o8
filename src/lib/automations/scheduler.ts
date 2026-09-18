@@ -65,18 +65,9 @@ export async function runAutomationSchedulerTick(input: {
   } catch (error) {
     console.warn('[automations-scheduler] Symon watch expiry failed:', error);
   }
-  // Fuzzy watches (#2443) are asked beside the exact-watch pass. With the
-  // judgment referee off this returns before any read, so the tick is unchanged.
-  let fuzzyFires: AutomationFire[] = [];
-  try {
-    fuzzyFires = await evaluateFuzzyWatches(nowMs);
-  } catch (error) {
-    console.warn('[automations-scheduler] fuzzy watch evaluation failed:', error);
-  }
   const materialized = [
     ...materializeDueAutomationFires(nowMs),
     ...materializeWatchAutomationFires(nowMs),
-    ...fuzzyFires,
   ];
   const completed: AutomationFire[] = [];
 
@@ -107,6 +98,16 @@ export async function runAutomationSchedulerTick(input: {
     symonDrained = (await drainParkedSymonWatches(nowMs)).length;
   } catch (error) {
     console.warn('[automations-scheduler] Symon watch drain failed:', error);
+  }
+
+  // Fuzzy watches (#2443) ask the judgment referee, a bounded network call, so
+  // they also run LAST and inside their own guard. A fire this pass persists is
+  // claimed from the queue on the following tick: for a watch that is a 30 s
+  // delay and costs nothing. With the referee off this returns before any read.
+  try {
+    await evaluateFuzzyWatches(nowMs);
+  } catch (error) {
+    console.warn('[automations-scheduler] fuzzy watch evaluation failed:', error);
   }
 
   writeHeartbeat(Date.now(), {

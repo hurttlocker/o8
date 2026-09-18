@@ -150,9 +150,11 @@ describe('fuzzy Symon watches through the real route and scheduler tick', () => 
     expect(fired(watchId)).toBe(false);
     await tick();
     expect(fired(watchId), 'not fired after tick 2').toBe(false);
-    const third = await tick();
+    await tick();
     expect(fired(watchId), 'fired after tick 3').toBe(true);
-    expect(third.completed[0]).toMatchObject({ source: 'watch', actionKind: 'symon_report', sourceEventType: 'condition_met' });
+    // The fire is persisted at the end of tick 3 and claimed from the queue on the next tick.
+    const fourth = await tick();
+    expect(fourth.completed[0]).toMatchObject({ source: 'watch', actionKind: 'symon_report', sourceEventType: 'condition_met' });
 
     const evaluated = evaluations(watchId);
     expect(evaluated).toHaveLength(3);
@@ -160,6 +162,39 @@ describe('fuzzy Symon watches through the real route and scheduler tick', () => 
     expect(evaluated[0].outcome).toBe('condition_met');
     const receipts = getSqlite().prepare("SELECT payload_json FROM lane_events WHERE verb = 'judgment'").all() as Array<{ payload_json: string }>;
     expect(receipts.map((row) => JSON.parse(row.payload_json).surface)).toEqual(['fuzzy-watch', 'fuzzy-watch', 'fuzzy-watch']);
+  }, 30_000);
+
+  it('runs an exact watch due on the same tick while the referee hangs', async () => {
+    seedPacket('pkt-hang');
+    await createFuzzyWatch('pkt-hang');
+    const exact = await createWatch({ packetId: 'pkt-due', fuzzy: false, text: 'tell me when pkt-due asks for review', events: ['review_requested'] });
+    expect(exact.status).toBe(200);
+    const exactId = (await exact.json() as { watch: { id: string } }).watch.id;
+    seedPacket('pkt-due');
+
+    let release: () => void = () => undefined;
+    fixture.replies.push({ ...noul(0.9), hold: new Promise<void>((resolve) => { release = resolve; }) });
+    setFuzzyWatchTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 4_000, maxAttempts: 1 });
+    try {
+      const running = tick();
+      const deadline = Date.now() + 2_000;
+      let exactFiredWhileHung = false;
+      while (Date.now() < deadline) {
+        if (readSymonWatchLedger(exactId, 10).some((event) => event.phase === 'watch_parked')) {
+          exactFiredWhileHung = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(fixture.responded()).toBe(0);
+      expect(exactFiredWhileHung, 'exact watch ran in the tick while the referee was still hung').toBe(true);
+      release();
+      const result = await running;
+      expect(result.completed.map((fire) => fire.automationId)).toEqual([exactId]);
+    } finally {
+      release();
+      setFuzzyWatchTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 2_000, maxAttempts: 1 });
+    }
   }, 30_000);
 
   it('never fires on a flickering answer', async () => {
