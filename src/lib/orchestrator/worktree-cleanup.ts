@@ -26,9 +26,9 @@
 import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { appendEvent, findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
-import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
+import { checkWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -38,7 +38,11 @@ export type RemoveMergedWorktreeReason =
   | 'already-removed'
   | 'dirty'
   | 'remove-failed'
-  | 'status-failed';
+  | 'status-failed'
+  // The live-process guard refused removal (#2493): a process is inside, or
+  // the probe could not tell. The worktree stays for the reconcile sweep.
+  | 'live-process'
+  | 'inconclusive';
 
 export interface RemoveMergedWorktreeResult {
   removed: boolean;
@@ -141,8 +145,9 @@ export async function removeMergedWorktree(
 
   // Force-remove the worktree. Branch may already be deleted by the merge
   // path — `git worktree remove --force` tolerates a missing branch.
-  if (!(await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cleanup' }))) {
-    return { removed: false, reason: 'remove-failed' };
+  const removal = await checkWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cleanup' });
+  if (!removal.allowed) {
+    return { removed: false, reason: removal.refusal === 'live' ? 'live-process' : 'inconclusive' };
   }
   try {
     await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
@@ -196,6 +201,36 @@ export async function removeMergedWorktree(
 }
 
 /**
+ * Record a post-merge cleanup that kept the worktree (#2493). The merge has
+ * already succeeded; this only leaves an audit row with the reason so the
+ * skipped removal is visible on the lane, and the reconcile sweep removes the
+ * worktree later. Never throws.
+ */
+export function recordSkippedMergeCleanup(
+  lane: Pick<Lane, 'id' | 'worktreePath'>,
+  packetId: string,
+  cleanup: RemoveMergedWorktreeResult,
+): void {
+  const reason = cleanup.reason ?? 'unknown';
+  console.log(
+    '[worktree-cleanup]',
+    `Post-merge cleanup skipped for lane ${lane.id} (packet ${packetId}): reason=${reason}. Reconcile sweep will handle it.`,
+  );
+  try {
+    appendEvent(lane.id, 'update', 'system', {
+      phase: 'merge_cleanup_skipped',
+      reason,
+      worktreePath: lane.worktreePath ?? null,
+    });
+  } catch (error) {
+    console.log(
+      '[worktree-cleanup]',
+      `Failed to record skipped cleanup for lane ${lane.id}: ${formatError(error)}`,
+    );
+  }
+}
+
+/**
  * Run an async merge function with a guaranteed synchronous worktree
  * cleanup at the tail. The lane is captured BEFORE the merge so the
  * cleanup call still sees the worktreePath — the merge transaction
@@ -213,12 +248,7 @@ export async function withSynchronousWorktreeCleanup<T>(
   const mergedFlag = (result as { merged?: unknown } | null | undefined)?.merged;
   if (mergedFlag === true && preMergeLane) {
     const cleanup = await removeMergedWorktree(preMergeLane);
-    if (!cleanup.removed) {
-      console.log(
-        '[worktree-cleanup]',
-        `Post-merge cleanup skipped for lane ${preMergeLane.id} (packet ${packetId}): reason=${cleanup.reason ?? 'unknown'}.`,
-      );
-    }
+    if (!cleanup.removed) recordSkippedMergeCleanup(preMergeLane, packetId, cleanup);
   }
   return result;
 }
