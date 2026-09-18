@@ -22,6 +22,34 @@ vi.mock('@/lib/search/transcripts', () => ({ syncTranscriptSearchDocument: () =>
 vi.mock('@/lib/lane/lane-diff-facts', () => ({ getLaneSpokenDiffFacts: () => undefined }));
 vi.mock('@/lib/cortex/qa/ask', () => ({ invalidateAnswerCache: () => undefined }));
 
+// #2492 — null passes through to the real capacity service; a number makes the
+// snapshot take that long, standing in for the per-runtime shell-outs.
+const capacityStub = vi.hoisted(() => ({ delayMs: null as number | null }));
+vi.mock('@/lib/runtime/capacity-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/runtime/capacity-service')>();
+  return {
+    ...actual,
+    getRuntimeCapacityControlSnapshot: async (options?: { fresh?: boolean }) => {
+      if (capacityStub.delayMs === null) return actual.getRuntimeCapacityControlSnapshot(options);
+      await new Promise((resolve) => setTimeout(resolve, capacityStub.delayMs ?? 0));
+      return {
+        schema: 'o8/runtime-capacity-control/v1' as const,
+        generatedAt: Date.now(),
+        capacities: [],
+        identities: [],
+        runtimes: [],
+      };
+    },
+  };
+});
+
+function outcomeRow(packetId: string): { model: string | null } | undefined {
+  return getSqliteRef!().prepare('SELECT model FROM session_outcomes WHERE packet_id = ?')
+    .get(packetId) as { model: string | null } | undefined;
+}
+
+let getSqliteRef: (typeof import('@/lib/db'))['getSqlite'] | null = null;
+
 function makeRepo(): string {
   const repoPath = mkdtempSync(join(dataDir, 'repo-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repoPath, stdio: 'pipe' });
@@ -64,6 +92,7 @@ beforeAll(async () => {
   };
   const { registerRuntime } = await import('@/lib/runtimes/registry');
   registerRuntime(runtime);
+  getSqliteRef = (await import('@/lib/db')).getSqlite;
 });
 
 afterAll(() => {
@@ -86,11 +115,11 @@ describe('completion ledger resolved model real path', () => {
     const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
     await capturePacketCompletionContext('lane-model-ledger', 'codex-owned:lane-model-ledger');
 
-    const { getSqlite } = await import('@/lib/db');
     await vi.waitFor(() => {
-      expect(getSqlite().prepare('SELECT model FROM session_outcomes WHERE packet_id = ?')
-        .get('lane-model-ledger')).toEqual({ model: 'gpt-5.6-sol' });
+      expect(outcomeRow('lane-model-ledger'), 'session_outcomes row for lane-model-ledger was never written')
+        .toBeDefined();
     });
+    expect(outcomeRow('lane-model-ledger')).toEqual({ model: 'gpt-5.6-sol' });
   });
 
   it('records unknown instead of a runtime id when no model resolves', async () => {
@@ -107,12 +136,46 @@ describe('completion ledger resolved model real path', () => {
     const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
     await capturePacketCompletionContext('unknown-model-ledger', 'codex-owned:unknown-model-ledger');
 
-    const { getSqlite } = await import('@/lib/db');
     await vi.waitFor(() => {
-      const row = getSqlite().prepare('SELECT model FROM session_outcomes WHERE packet_id = ?')
-        .get('unknown-model-ledger');
-      expect(row).toEqual({ model: 'unknown' });
-      expect(row).not.toEqual({ model: 'codex' });
+      expect(outcomeRow('unknown-model-ledger'), 'session_outcomes row for unknown-model-ledger was never written')
+        .toBeDefined();
     });
+    const row = outcomeRow('unknown-model-ledger');
+    expect(row).toEqual({ model: 'unknown' });
+    expect(row).not.toEqual({ model: 'codex' });
   });
+
+  it('writes the ledger row without waiting on a slow end capacity snapshot (#2492)', async () => {
+    capacityStub.delayMs = 3_000;
+    try {
+      const repoPath = makeRepo();
+      const { createLane } = await import('@/lib/lane/registry');
+      const lane = createLane({
+        repoPath,
+        branch: 'inline/slow-capacity-ledger',
+        runtime: 'codex',
+        packetId: 'slow-capacity-ledger',
+        sessionKey: 'codex-owned:slow-capacity-ledger',
+      });
+
+      const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+      await capturePacketCompletionContext('slow-capacity-ledger', 'codex-owned:slow-capacity-ledger');
+
+      await vi.waitFor(() => {
+        expect(outcomeRow('slow-capacity-ledger'), 'session_outcomes row waited on the capacity snapshot')
+          .toBeDefined();
+      }, { timeout: 500, interval: 20 });
+
+      const { getLaneEvents } = await import('@/lib/lane/registry');
+      const endSnapshots = () => getLaneEvents(lane.id, 10_000).filter((event) => (
+        event.verb === 'capacity_snapshot' && event.payload.phase === 'end'
+      ));
+      expect(endSnapshots()).toHaveLength(0);
+      await vi.waitFor(() => {
+        expect(endSnapshots(), 'end capacity snapshot never landed').toHaveLength(1);
+      }, { timeout: 10_000, interval: 50 });
+    } finally {
+      capacityStub.delayMs = null;
+    }
+  }, 20_000);
 });
