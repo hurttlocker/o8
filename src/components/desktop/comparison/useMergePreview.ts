@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
+import type { DirectiveCitationsPreview } from '@/lib/judgment/directive-citations-format';
+
 /**
  * useMergePreview — dry-run the merge gate for one comparison candidate so its
  * column can show a GATE VERDICT (passes / blocked-by) before the operator picks.
@@ -14,6 +16,8 @@ export interface MergePreviewState {
   wouldMerge: boolean | null;
   /** Names of the failing gate checks when blocked. */
   blockers: string[];
+  /** Advisory rule citations (#2446); absent when judgment is off. */
+  directiveCitations?: DirectiveCitationsPreview;
   error: string | null;
 }
 
@@ -28,11 +32,14 @@ export function useMergePreview(packetId: string | null, enabled: boolean): Merg
   useEffect(() => {
     if (!requestKey) return;
     let cancelled = false;
-    fetch(`/api/orchestrator/merge-preview?packetId=${encodeURIComponent(requestKey)}`)
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Rule citations run detached; re-read a few times while they are pending.
+    const load = (pendingRetries: number) => fetch(`/api/orchestrator/merge-preview?packetId=${encodeURIComponent(requestKey)}`)
       .then(async (res) => {
         const data = (await res.json().catch(() => ({}))) as {
           wouldMerge?: boolean;
           blockers?: unknown;
+          directiveCitations?: DirectiveCitationsPreview;
           error?: string;
         };
         if (cancelled) return;
@@ -46,16 +53,22 @@ export function useMergePreview(packetId: string | null, enabled: boolean): Merg
             loading: false,
             wouldMerge: data.wouldMerge === true,
             blockers: Array.isArray(data.blockers) ? data.blockers.map((b) => String(b)) : [],
+            ...(data.directiveCitations ? { directiveCitations: data.directiveCitations } : {}),
             error: null,
           },
         });
+        if (data.directiveCitations?.status === 'pending' && pendingRetries > 0) {
+          timer = setTimeout(() => { void load(pendingRetries - 1); }, 4_000);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
         setResult({ key: requestKey, state: { loading: false, wouldMerge: null, blockers: [], error: err instanceof Error ? err.message : 'preview failed' } });
       });
+    void load(3);
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [requestKey]);
 

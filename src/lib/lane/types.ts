@@ -313,6 +313,10 @@ export type LaneEventVerb =
   // is on and a claim is unbacked. Record-only: nothing reads it.
   // Payload: { receiptId, packetId, claims: ('tests' | 'files')[], answers, verificationOutputPresent, reportFlags, outputFlags, reportTruncated, outputTruncated, changedFileCount, diffFingerprint, reportFingerprint }
   | 'claim_unbacked'
+  // Advisory rule citations for the merge preview (#2446), recorded when the
+  // detached per-file calls settle with judgment.provider on. The merge gate
+  // never reads it. Payload: { diffFingerprint, recipe, rulesFound, rulesMissing, files, citations, receiptIds }
+  | 'directive_citations'
   // A repo publication action exhausted its bounded resource-lease wait.
   // Payload: { resource, waitedMs, holder, retryCount, willRetry }
   | 'lease_wait_timeout'

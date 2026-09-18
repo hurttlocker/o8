@@ -18,6 +18,7 @@ import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
+import type { DirectiveCitationsPreview } from '@/lib/judgment/directive-citations-format';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
 import { runLaneRebaseLint, type LaneRebaseLintResult } from './rebase-lint';
 import { immutableSnapshotDiffBase, resolveLaneReviewSource } from './review-source';
@@ -57,10 +58,14 @@ export interface MergePreviewResult {
   mergeUnavailableReason?: string;
   /** Populated when no lane is bound so the gate could not run. */
   unwired?: boolean;
+  /** Advisory rule citations (#2446). Absent when judgment is off; the gate never reads it. */
+  directiveCitations?: DirectiveCitationsPreview;
 }
 
 interface MergePreviewOptions {
   orchestratorApproved?: boolean;
+  /** Compute the advisory rule citations (#2446). Only surfaces that show them ask; default off, no git, no import. */
+  directiveCitations?: boolean;
 }
 
 // ── Check-name mapping ──
@@ -214,11 +219,12 @@ export async function buildPreviewForLane(
     : { ...lane, worktreePath: reviewSource.cwd };
   const orchestratorApproved = options.orchestratorApproved ?? hasApprovedOrchestratorReview(packetId);
   const gateResult = await runMergeGate(resolvedLane, undefined, orchestratorApproved);
+  const baseRef = gateResult.diffBase?.mergeBase
+    ?? gateResult.diffBase?.comparisonRef
+    ?? lane.baseBranch;
   const lint = await runLaneRebaseLint({
     cwd: reviewSource.cwd,
-    baseRef: gateResult.diffBase?.mergeBase
-      ?? gateResult.diffBase?.comparisonRef
-      ?? lane.baseBranch,
+    baseRef,
     actualBranch: lane.branch ?? 'packet branch',
     logPrefix: 'merge-preview',
   });
@@ -241,6 +247,9 @@ export async function buildPreviewForLane(
     }
     if (!blockers.includes('clean-worktree')) blockers.unshift('clean-worktree');
   }
+  const directiveCitations = options.directiveCitations
+    ? await (await import('@/lib/judgment/directive-citations')).directiveCitationsForPreview(lane, packetId, reviewSource.cwd, baseRef)
+    : undefined;
   return {
     packetId,
     wouldMerge: gateResult.passed && lint.ok && !dirtyDetail,
@@ -249,6 +258,7 @@ export async function buildPreviewForLane(
     branch: lane.branch ?? null,
     diffBase: gateResult.diffBase,
     reviewSource: reviewSource.kind,
+    ...(directiveCitations ? { directiveCitations } : {}),
   };
 }
 
@@ -269,5 +279,5 @@ export async function previewPacketMerge(packetId: string): Promise<MergePreview
       unwired: true,
     };
   }
-  return buildPreviewForLane(lane, packetId);
+  return buildPreviewForLane(lane, packetId, { directiveCitations: true });
 }
