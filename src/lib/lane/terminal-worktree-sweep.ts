@@ -16,6 +16,17 @@ export interface TerminalWorktreeSweepResult {
   removed: number;
   skippedActive: number;
   failed: number;
+  /** Directories that already failed removal in this process and were not retried. */
+  skippedUnrecoverable: number;
+}
+
+// #2474 — a directory whose removal failed once is not retried (or re-logged)
+// by later ticks in this process while its owning lane keeps the same status.
+// A status change (e.g. completed -> archived) or a restart retries it.
+const unrecoverableWorktreeDirs = new Set<string>();
+
+function unrecoverableKey(dirPath: string, lane: Lane | null) {
+  return `${normalizePath(dirPath)}\0${lane ? `${lane.id}:${lane.status}` : ''}`;
 }
 
 function normalizePath(value: string) {
@@ -78,6 +89,7 @@ export async function sweepTerminalCortexWorktrees(
     removed: 0,
     skippedActive: 0,
     failed: 0,
+    skippedUnrecoverable: 0,
   };
 
   for (const worktreeRoot of worktreeRoots) {
@@ -95,6 +107,10 @@ export async function sweepTerminalCortexWorktrees(
         result.skippedActive += 1;
         continue;
       }
+      if (unrecoverableWorktreeDirs.has(unrecoverableKey(dirPath, lane))) {
+        result.skippedUnrecoverable += 1;
+        continue;
+      }
 
       const removed = lane
         ? await cleanupLaneWorktree({ ...lane, worktreePath: dirPath }, { terminal: true })
@@ -108,6 +124,7 @@ export async function sweepTerminalCortexWorktrees(
         result.removed += 1;
       } else {
         result.failed += 1;
+        unrecoverableWorktreeDirs.add(unrecoverableKey(dirPath, lane));
       }
     }
   }
@@ -141,6 +158,7 @@ export async function sweepKnownTerminalCortexWorktrees(
     removed: 0,
     skippedActive: 0,
     failed: 0,
+    skippedUnrecoverable: 0,
   };
   for (const repoPath of repoPaths) {
     const result = await sweepTerminalCortexWorktrees(repoPath, knownLanes);
@@ -149,6 +167,7 @@ export async function sweepKnownTerminalCortexWorktrees(
     aggregate.removed += result.removed;
     aggregate.skippedActive += result.skippedActive;
     aggregate.failed += result.failed;
+    aggregate.skippedUnrecoverable += result.skippedUnrecoverable;
   }
   return aggregate;
 }
