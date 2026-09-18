@@ -299,6 +299,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   judgmentProvider: enumField('judgment', 'provider', JUDGMENT_PROVIDER_VALUES_MESSAGE, isJudgmentProvider),
   judgmentManagedDailyAllowance: nullableField('judgment', 'managed_daily_allowance', JUDGMENT_ALLOWANCE_EXPECTED, isJudgmentAllowance),
   judgmentBetaEndDate: nullableField('judgment', 'beta_end_date', JUDGMENT_BETA_END_DATE_EXPECTED, isJudgmentBetaEndDate),
+  judgmentManagedOptionVisible: booleanField('judgment', 'managed_option_visible'),
   workspaceManifestPolicy: enumField('operator', 'workspace_manifest_policy', 'one of "disabled", "one-approval", or "auto"', isWorkspaceManifestPolicy),
   crossHouseWorkerFallback: booleanField('models', 'cross_house_worker_fallback'),
   orchestratorBackend: enumField('orchestrator', 'backend', 'a supported orchestrator backend', isOrchestratorBackendSetting),

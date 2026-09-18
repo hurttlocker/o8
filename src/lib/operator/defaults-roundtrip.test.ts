@@ -69,6 +69,7 @@ const NON_DEFAULT_UPDATE = {
   brainUseClaudeCli: false,
   workersUseBrain: 'off',
   judgmentProvider: 'typesafe',
+  judgmentManagedOptionVisible: true,
   uiLoopMaxIterations: 6,
   uiLoopMaxMinutes: 24,
   uiLoopMaxDiffBytes: 48_000,

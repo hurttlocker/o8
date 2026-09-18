@@ -588,6 +588,8 @@ export function OperatorDefaultsTab() {
           <JudgmentProviderRow
             icon={<MergeIcon />}
             value={values.judgmentProvider}
+            path={data?.judgmentPath}
+            managedVisible={values.judgmentManagedOptionVisible}
             busy={busyField === 'judgmentProvider'}
             onChange={(next) => { updateField('judgmentProvider', next); }}
           />

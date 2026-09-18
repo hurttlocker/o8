@@ -20,6 +20,7 @@ import {
 import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { AgentRoleRoute } from '@/lib/operator/role-routing';
 import type { JudgmentProvider } from '@/lib/operator/judgment-default';
+import type { JudgmentPath } from '@/lib/judgment/route';
 import type { RoleRoutingReceipt } from '@/lib/operator/role-routing-ledger';
 import {
   APP_FONT_STACK,
@@ -109,6 +110,8 @@ export interface OperatorDefaults {
   judgmentManagedDailyAllowance: number | null;
   /** Last day of the managed judgment public beta, YYYY-MM-DD (#2486). Null = no expiry. */
   judgmentBetaEndDate: string | null;
+  /** Shows Managed in the judgment row (#2485). Off until the hosted endpoint exists. */
+  judgmentManagedOptionVisible: boolean;
   workspaceManifestPolicy: WorkspaceManifestPolicy;
   crossHouseWorkerFallback: boolean;
   orchestratorBackend: OrchestratorBackendSetting;
@@ -144,6 +147,8 @@ export type OperatorDefaultSources = {
 export interface OperatorDefaultsResponse {
   values: OperatorDefaults;
   sources: OperatorDefaultSources;
+  /** The path a judgment call takes right now, from the route resolver (#2485). */
+  judgmentPath?: JudgmentPath;
   effectiveOverride: {
     apfsDependencyImages: boolean | null;
   };

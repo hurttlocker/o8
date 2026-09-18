@@ -21,7 +21,12 @@ export interface ResolvedJudgmentRoute {
   url: string;
   bearer: string;
   route: JudgmentRoute;
+  /** Which credential carries the call: the plan token, the free allowance token, or the local key. */
+  credential: 'plan' | 'allowance' | 'key';
 }
+
+/** The path a judgment call takes right now: off, a credential, or `none` when enabled with no credential. */
+export type JudgmentPath = 'off' | ResolvedJudgmentRoute['credential'] | 'none';
 
 /** The judgment route for an enabled provider, or null when no credential exists. */
 export function resolveJudgmentRoute(
@@ -30,8 +35,9 @@ export function resolveJudgmentRoute(
 ): ResolvedJudgmentRoute | null {
   if (provider === 'managed') {
     const betaEnded = isJudgmentBetaEnded(getOperatorDefaultsSync().values.judgmentBetaEndDate);
-    const token = planToken() ?? (betaEnded ? null : freeAllowanceToken());
-    if (token) return { url: `${proxyBaseUrl()}/v1/judgment`, bearer: token, route: 'managed' };
+    const plan = planToken();
+    const token = plan ?? (betaEnded ? null : freeAllowanceToken());
+    if (token) return { url: `${proxyBaseUrl()}/v1/judgment`, bearer: token, route: 'managed', credential: plan ? 'plan' : 'allowance' };
   }
   return resolveDirectJudgmentRoute(directUrl);
 }
@@ -39,7 +45,13 @@ export function resolveJudgmentRoute(
 /** The operator's own key on the direct route, or null when no key exists. */
 export function resolveDirectJudgmentRoute(directUrl: string = TYPESAFE_SYSTEMONE_URL): ResolvedJudgmentRoute | null {
   const key = readJudgmentApiKey();
-  return key ? { url: directUrl, bearer: key, route: 'direct' } : null;
+  return key ? { url: directUrl, bearer: key, route: 'direct', credential: 'key' } : null;
+}
+
+/** The judgment path for the Settings subtitle, read from the same resolver the client calls. */
+export function resolveJudgmentPath(provider: JudgmentProvider): JudgmentPath {
+  if (provider === 'off') return 'off';
+  return resolveJudgmentRoute(provider)?.credential ?? 'none';
 }
 
 /** Whether any judgment referee may run: true for `typesafe` and `managed`, false for `off` or an unreadable setting. */
