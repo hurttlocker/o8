@@ -33,8 +33,13 @@ export const CATCH_UP_RANKING_SURFACE = 'catch-up-ranking';
 
 /** Items asked in one call; past it the rest keep event order and the call is marked truncated. */
 export const CATCH_UP_MAX_ITEMS = 120;
-/** One bounded attempt: the voice mint waits on this call. */
-const PRODUCTION_TRANSPORT: AskJudgmentOptions = { timeoutMs: 8_000, maxAttempts: 1 };
+/**
+ * One attempt, never longer than the caller's remaining budget: the operator is
+ * holding the phone waiting on the voice mint, typical referee latency is
+ * around 260 ms, and event order is a perfectly good answer when the referee
+ * is slower than that. 1.2 s is the ceiling when no budget is passed.
+ */
+const PRODUCTION_TRANSPORT: AskJudgmentOptions = { timeoutMs: 1_200, maxAttempts: 1 };
 
 export type CatchUpItemKind = 'approval_created' | 'lane_state_change' | 'failure' | 'merge' | 'watch_fired';
 
@@ -67,6 +72,13 @@ export function setCatchUpRankingTransportForTests(options: AskJudgmentOptions |
   transportOverride = options;
 }
 
+/** The transport, its timeout cut to the caller's remaining budget. */
+function transportWithin(budgetMs: number | undefined): AskJudgmentOptions {
+  const transport = transportOverride ?? PRODUCTION_TRANSPORT;
+  if (budgetMs === undefined) return transport;
+  return { ...transport, timeoutMs: Math.max(1, Math.min(transport.timeoutMs ?? budgetMs, Math.floor(budgetMs))) };
+}
+
 /** The question id an item is asked under: a hash, so no item text reaches the provider. */
 export function catchUpQuestionId(itemId: string): string {
   return `c_${createHash('sha256').update(itemId).digest('hex').slice(0, 12)}`;
@@ -77,7 +89,7 @@ export function catchUpQuestionId(itemId: string): string {
  * call for all items. Never throws: any failure returns the input order with
  * no scores, and `askJudgment` has already recorded the failure receipt.
  */
-export async function rankCatchUpItems(items: readonly CatchUpItem[]): Promise<CatchUpRanking> {
+export async function rankCatchUpItems(items: readonly CatchUpItem[], budgetMs?: number): Promise<CatchUpRanking> {
   const eventOrder: CatchUpRanking = {
     order: items.map((item) => item.id),
     scores: {},
@@ -87,19 +99,21 @@ export async function rankCatchUpItems(items: readonly CatchUpItem[]): Promise<C
   try {
     if (items.length === 0 || !isJudgmentRefereeEnabled()) return eventOrder;
     const asked = items.slice(0, CATCH_UP_MAX_ITEMS);
-    const stateItems = asked.map((item) => ({ question: catchUpQuestionId(item.id), ...item }));
+    // The raw item id stays here: the provider sees only its hash, and
+    // `asked[index]` maps each state item back to the id it was asked about.
+    const stateItems = asked.map(({ id, ...facts }) => ({ question: catchUpQuestionId(id), ...facts }));
     const result = await askJudgment({
       state: { items: stateItems },
       questions: catchUpQuestions(stateItems.map((item) => item.question)),
       context: { surface: CATCH_UP_RANKING_SURFACE, truncated: eventOrder.truncated },
-    }, transportOverride ?? PRODUCTION_TRANSPORT);
+    }, transportWithin(budgetMs));
     if (!result) return eventOrder;
 
     const scores: Record<string, number> = {};
-    for (const item of stateItems) {
+    for (const [index, item] of stateItems.entries()) {
       const score = result.answers[item.question]?.noul;
       if (typeof score !== 'number') return eventOrder;
-      scores[item.id] = score;
+      scores[asked[index].id] = score;
     }
     const ranked = asked
       .map((item, index) => ({ id: item.id, index, score: scores[item.id] }))
@@ -191,12 +205,12 @@ export async function briefingCatchUpItems(input: PhoneBriefingInput, now: numbe
  * is off or there is nothing to rank; the caller then builds the event-order
  * briefing exactly as before.
  */
-export async function rankPhoneBriefing(input: PhoneBriefingInput): Promise<CatchUpRanking | null> {
+export async function rankPhoneBriefing(input: PhoneBriefingInput, budgetMs?: number): Promise<CatchUpRanking | null> {
   try {
     if (!input.snapshot || !isJudgmentRefereeEnabled()) return null;
     const items = await briefingCatchUpItems(input);
     if (items.length === 0) return null;
-    return await rankCatchUpItems(items);
+    return await rankCatchUpItems(items, budgetMs);
   } catch (error) {
     console.warn(`[${CATCH_UP_RANKING_SURFACE}] skipped:`, error instanceof Error ? error.message : 'error');
     return null;

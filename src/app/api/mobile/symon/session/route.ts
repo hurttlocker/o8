@@ -331,8 +331,9 @@ function workspaceContextInstructions(context: PhoneWorkspaceContext): string {
  * an empty briefing.
  *
  * With `judgment.provider` on, the catch-up ranking (#2444) orders each
- * section by attention and the scores ride back as `advisory`. Off, or on any
- * ranking failure, the block is the event-order block and `advisory` is null.
+ * section by attention (scores ride back as `advisory`) within whatever the
+ * snapshot left of the block's ONE deadline, so the block never exceeds
+ * BRIEFING_BUDGET_MS. Off, failed, or out of time: event order, no advisory.
  */
 interface PhoneBriefing {
   block: string;
@@ -340,12 +341,14 @@ interface PhoneBriefing {
 }
 
 async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<PhoneBriefing> {
+  const deadline = Date.now() + BRIEFING_BUDGET_MS;
   let budget: ReturnType<typeof setTimeout> | undefined;
+  let rankingBudget: ReturnType<typeof setTimeout> | undefined;
   try {
     const snapshot = await Promise.race([
       getMobileInboxSnapshot(),
       new Promise<null>((resolveTimeout) => {
-        budget = setTimeout(() => resolveTimeout(null), BRIEFING_BUDGET_MS);
+        budget = setTimeout(() => resolveTimeout(null), Math.max(0, deadline - Date.now()));
       }),
     ]);
     if (!snapshot) {
@@ -353,8 +356,15 @@ async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<PhoneBrief
       return { block: '', advisory: null };
     }
     const input = { snapshot, toolPack: scope.toolPack, repoPath: scope.repoPath };
-    const ranking = await rankPhoneBriefing(input);
-    const ranked = ranking && Object.keys(ranking.scores).length > 0 ? ranking : null;
+    const remainingMs = deadline - Date.now();
+    const ranking = remainingMs <= 0 ? 'timeout' : await Promise.race([
+      rankPhoneBriefing(input, remainingMs),
+      new Promise<'timeout'>((resolveTimeout) => {
+        rankingBudget = setTimeout(() => resolveTimeout('timeout'), remainingMs);
+      }),
+    ]);
+    if (ranking === 'timeout') console.warn(`${LOG} catch_up_ranking_skipped: briefing budget of ${BRIEFING_BUDGET_MS}ms exhausted`);
+    const ranked = ranking && ranking !== 'timeout' && Object.keys(ranking.scores).length > 0 ? ranking : null;
     return {
       block: buildPhoneBriefingBlock(ranked ? { ...input, order: ranked.order } : input),
       advisory: ranked ? { scores: ranked.scores, receiptId: ranked.receiptId, truncated: ranked.truncated } : null,
@@ -367,6 +377,7 @@ async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<PhoneBrief
     // The snapshot usually wins the race; leaving its loser pending would hold a
     // timer on the event loop for no reason.
     if (budget) clearTimeout(budget);
+    if (rankingBudget) clearTimeout(rankingBudget);
   }
 }
 

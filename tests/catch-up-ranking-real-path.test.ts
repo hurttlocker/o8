@@ -12,6 +12,7 @@
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
+import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
 
 import { NextRequest } from 'next/server';
@@ -42,7 +43,13 @@ const h = vi.hoisted(() => ({
   withoutRanking: false,
 }));
 
-vi.mock('@/lib/mobile/inbox', () => ({ getMobileInboxSnapshot: async () => h.inboxSnapshot.value }));
+// A thunk stands in for a slow desktop; a plain value is the ordinary case.
+vi.mock('@/lib/mobile/inbox', () => ({
+  getMobileInboxSnapshot: async () => {
+    const source = h.inboxSnapshot.value;
+    return typeof source === 'function' ? (source as () => unknown)() : source;
+  },
+}));
 vi.mock('@/lib/mcp/o8-webview-client', () => ({ O8WebviewClient: class { evalJs = h.evalJs; } }));
 vi.mock('@/lib/cortex/qa/llm/byok-keys', () => ({ resolveOpenAIKey: async () => 'sk-test-key' }));
 vi.mock('@/lib/voice/realtime-access', () => ({
@@ -73,8 +80,10 @@ const { CATCH_UP_QUESTION } = await import('@/lib/judgment/questions');
 const { PHONE_O8_TOOL_NAMES } = await import('@/lib/voice/realtime-session-config');
 const { PHONE_BRIEFING_END, PHONE_BRIEFING_START } = await import('@/lib/mobile/symon-briefing');
 const {
+  CATCH_UP_MAX_ITEMS,
   CATCH_UP_RANKING_SURFACE,
   catchUpQuestionId,
+  rankCatchUpItems,
   setCatchUpRankingTransportForTests,
 } = await import('@/lib/mobile/catch-up-ranking');
 const { POST } = await import('@/app/api/mobile/symon/session/route');
@@ -86,6 +95,10 @@ const OPENAI_MINT = 'api.openai.com';
 const FIXTURE_SCORES = [0.2, 0.9, 0.5, 0.9, 0.1];
 const APPROVAL_IDS = ['apr-1', 'apr-2', 'apr-3', 'apr-4', 'apr-5'];
 const ITEM_IDS = APPROVAL_IDS.map((id) => `approval:${id}`);
+/** BRIEFING_BUDGET_MS in the session route; route modules may not export constants. */
+const BRIEFING_BUDGET_MS = 1_500;
+/** Mint work outside the briefing block (bridge eval, stubbed upstream, scope grant). */
+const MINT_MARGIN_MS = 300;
 
 let fixture: JudgmentEndpointFixture;
 const realFetch = globalThis.fetch;
@@ -235,6 +248,7 @@ describe('catch-up ranking through the real phone Symon mint', () => {
     const sent = JSON.stringify(body);
     expect(sent).not.toContain(TITLE_TEXT);
     expect(sent).not.toContain(REPO_TEXT);
+    for (const id of [...ITEM_IDS, ...APPROVAL_IDS]) expect(sent).not.toContain(id);
   });
 
   it('keeps event order on a provider failure, records the failure receipt, and still mints', async () => {
@@ -261,5 +275,69 @@ describe('catch-up ranking through the real phone Symon mint', () => {
     expect(briefingApprovalOrder(off.instructions)).toEqual(APPROVAL_IDS);
     expect(fixture.seen).toHaveLength(0);
     expect(listJudgmentReceipts({ limit: 10 })).toHaveLength(0);
+  });
+
+  it('a referee slower than the mint budget leaves event order, no advisory, and the mint on time', async () => {
+    // The fixture transport allows 5 s and the referee answers in 4 s, so only the
+    // briefing block's budget can cut the call short. The snapshot spends 1 s of
+    // that budget first: a ranking with a fresh budget of its own would overrun it.
+    fixture.replies.push({ ...scoreReply(FIXTURE_SCORES), delayMs: 4_000 });
+    h.inboxSnapshot.value = () => new Promise((resolve) => { setTimeout(() => resolve(snapshot()), 1_000); });
+    await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
+
+    const startedAt = performance.now();
+    const { json, instructions } = await mint();
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(3_000);
+    expect(elapsedMs).toBeLessThan(BRIEFING_BUDGET_MS + MINT_MARGIN_MS);
+    expect(briefingApprovalOrder(instructions)).toEqual(APPROVAL_IDS);
+    expect(json.briefing).toBeUndefined();
+    expect(json.ok).toBe(true);
+
+    // Let the abandoned call finish so its receipt cannot land in a later test.
+    const deadline = Date.now() + 5_000;
+    while (listJudgmentReceipts({ limit: 10 }).length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => { setTimeout(resolve, 50); });
+    }
+  });
+
+  it('past the item cap, asks about the first 120 only, keeps the overflow in event order at the end, and marks the call truncated', async () => {
+    const total = CATCH_UP_MAX_ITEMS + 5;
+    const items = Array.from({ length: total }, (_, index) => ({
+      id: `lane:cap-${index}`,
+      kind: 'lane_state_change' as const,
+      laneState: 'running',
+      ageMs: index * 1_000,
+      gatePassed: null,
+      referee: null,
+      operatorGated: false,
+      repoIndex: 0,
+    }));
+    // Scores rise with the index, so the asked items come back reversed.
+    fixture.replies.push({
+      status: 200,
+      body: {
+        model: 'jev-1.13.0',
+        answers: Object.fromEntries(items.slice(0, CATCH_UP_MAX_ITEMS).map((item, index) => [
+          catchUpQuestionId(item.id),
+          { type: 'noul', noul: index / CATCH_UP_MAX_ITEMS },
+        ])),
+        usage: { input_tokens: 2_000, output_tokens: 200 },
+      },
+    });
+    await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
+
+    const ranking = await rankCatchUpItems(items);
+
+    const asked = items.slice(0, CATCH_UP_MAX_ITEMS).map((item) => item.id).reverse();
+    const overflow = items.slice(CATCH_UP_MAX_ITEMS).map((item) => item.id);
+    expect(ranking.order).toEqual([...asked, ...overflow]);
+    expect(ranking.truncated).toBe(true);
+    expect(Object.keys(ranking.scores)).toHaveLength(CATCH_UP_MAX_ITEMS);
+    expect(fixture.seen).toHaveLength(1);
+    const body = fixture.seen[0].body as { questions: Record<string, unknown> };
+    expect(Object.keys(body.questions)).toHaveLength(CATCH_UP_MAX_ITEMS);
+    expect(listJudgmentReceipts({ limit: 10 })[0]).toMatchObject({ ok: true, truncated: true, surface: CATCH_UP_RANKING_SURFACE });
   });
 });
