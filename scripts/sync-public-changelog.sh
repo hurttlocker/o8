@@ -58,8 +58,15 @@ scrub_subject() {
 
   # Every replacement below takes the whole token. A pattern that matches only
   # part of a name leaves the rest glued to the replacement, which is how
-  # `ChatGPT` once published as `ChatAI model`. The public changelog is the
-  # source for the weekly digest, so a broken word ships as marketing copy.
+  # `ChatGPT` once published as `ChatAI model` and `gpt-live-1` as
+  # `AI modellive-1`. The public changelog is the source for the weekly
+  # digest, so a broken word ships as marketing copy.
+  #
+  # The model-name pattern trades one error for the other deliberately. A
+  # hyphenated suffix is taken, because `GPT-realtime` and `gpt-live-1` are
+  # names and no rule separates those from an English compound like
+  # `GPT-backed`. So `ChatGPT-subscription users` publishes as
+  # `AI model users`, losing a word. That reads; a glued half-name does not.
   msg=$(echo "$msg" | sed -E \
     -e 's/Cortex IDE/o8/gi' \
     -e 's/Cortex-aware/context-aware/gi' \
@@ -85,7 +92,7 @@ scrub_subject() {
     -e 's/CLAUDE\.md/project rules/g' \
     -e 's/Claude/AI provider/gi' \
     -e 's/Anthropic/AI provider/gi' \
-    -e 's/[A-Za-z]*GPT(-[A-Za-z0-9]+)*(\.[0-9]+)?/AI model/gi' \
+    -e 's/[A-Za-z]*GPT([0-9][A-Za-z0-9]*)?(-[A-Za-z0-9]+)*(\.[0-9]+)?/AI model/gi' \
     -e 's/Cursor/competing product/gi' \
     -e 's/Conductor/competing product/gi' \
     -e 's/API [Kk]ey[s]?/configuration/gi' \
@@ -97,7 +104,7 @@ scrub_subject() {
 # --scrub-only: read subjects on stdin, print the scrubbed form, touch no
 # network and no clone. This is the seam the scrub test drives.
 if [ "$SCRUB_ONLY" = "1" ]; then
-  while IFS= read -r line; do scrub_subject "$line"; done
+  while IFS= read -r line || [ -n "$line" ]; do scrub_subject "$line"; done
   exit 0
 fi
 

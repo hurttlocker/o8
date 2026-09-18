@@ -28,16 +28,19 @@ function scrub(subjects: readonly string[]): string[] {
 
 describe('public changelog scrub', () => {
   it('replaces a model name whole, whatever its prefix or suffix', () => {
-    const [live, chat, realtime, numbered] = scrub([
+    const [live, chat, realtime, numbered, unhyphenated] = scrub([
       'feat: admit gpt-live-1 behind a delegated phone Code variant',
       'feat(voice): "Voice via your ChatGPT plan" settings row',
       'feat(voice): expose all 10 GPT-realtime voices',
       'feat: pin GPT-5.6 for the worker seat',
+      'feat: pin gpt4o for the cheap seat',
     ]);
     expect(live).toBe('feat: admit AI model behind a delegated phone Code variant');
     expect(chat).toBe('feat(voice): "Voice via your AI model plan" settings row');
     expect(realtime).toBe('feat(voice): expose all 10 AI model voices');
     expect(numbered).toBe('feat: pin AI model for the worker seat');
+    // A suffix with no hyphen glued too, and is the case the first fix missed.
+    expect(unhyphenated).toBe('feat: pin AI model for the cheap seat');
   });
 
   it('leaves no glued word behind for any replacement it makes', () => {
@@ -45,6 +48,7 @@ describe('public changelog scrub', () => {
     const scrubbed = scrub([
       'feat: admit gpt-live-1 behind a delegated phone Code variant',
       'feat(voice): "Voice via your ChatGPT plan" settings row',
+      'feat: pin gpt4o for the cheap seat',
       'feat: Claude Code sessions resume after a reload',
       'feat: Symon hears the fleet at session start',
     ]);
