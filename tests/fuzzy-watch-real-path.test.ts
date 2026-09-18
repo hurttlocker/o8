@@ -223,6 +223,31 @@ describe('fuzzy Symon watches through the real route and scheduler tick', () => 
     expect(fixture.seen).toHaveLength(2);
   }, 30_000);
 
+  it('keeps an existing watch intact while the setting is off and resumes its streak when it is back on', async () => {
+    seedPacket('pkt-toggle');
+    const watchId = await createFuzzyWatch('pkt-toggle');
+    fixture.replies.push(noul(0.9));
+    await tick();
+    const rowState = () => getSqlite().prepare('SELECT enabled, symon_fuzzy_condition AS condition, symon_fuzzy_evaluation_json AS evaluation FROM automations WHERE id = ?').get(watchId) as { enabled: number; condition: string; evaluation: string };
+    const armed = rowState();
+    expect(JSON.parse(armed.evaluation)).toMatchObject({ lastP: 0.9, streak: 1 });
+    const ledgerBefore = readSymonWatchLedger(watchId, 50);
+
+    await updateOperatorDefaults({ judgmentProvider: 'off' });
+    await tick();
+    await tick();
+    expect(fixture.seen, 'no referee call while the setting is off').toHaveLength(1);
+    expect(fired(watchId)).toBe(false);
+    expect(readSymonWatchLedger(watchId, 50)).toEqual(ledgerBefore);
+    expect(rowState(), 'row and stored evaluation left intact').toEqual(armed);
+
+    await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
+    fixture.replies.push(noul(0.9));
+    await tick();
+    expect(JSON.parse(rowState().evaluation), 'streak resumes from the stored value').toMatchObject({ streak: 2 });
+    expect(fired(watchId), 'fires on the first tick back, completing the stored streak').toBe(true);
+  }, 30_000);
+
   it('never fires on a flickering answer', async () => {
     seedPacket('pkt-flicker');
     const watchId = await createFuzzyWatch('pkt-flicker');

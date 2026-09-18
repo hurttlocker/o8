@@ -17,7 +17,9 @@
  * has run yet.
  *
  * Setting off: the tick returns before any database read, git, or network, and
- * the creation route refuses fuzzy watches, so none can exist.
+ * the creation route refuses new fuzzy watches. A watch created while the
+ * setting was on stays as it is, with its stored evaluation, and resumes from
+ * that streak when the setting is turned back on.
  */
 import { getSqlite } from '@/lib/db';
 import { askJudgment, type AskJudgmentOptions } from '@/lib/judgment/client';
