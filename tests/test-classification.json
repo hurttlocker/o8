@@ -3341,6 +3341,17 @@
       ]
     },
     {
+      "path": "tests/worktree-reaper-non-git-dirs-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "terminal-tool",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/worktree-reaper-pr-merge.test.ts",
       "reasons": [
         "child-process",

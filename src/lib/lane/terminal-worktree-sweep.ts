@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { listLanes } from './registry';
 import type { Lane } from './types';
-import { cleanupLaneWorktree } from './worktree-cleanup';
+import { cleanupLaneWorktree, worktreeIsNotGitRepository } from './worktree-cleanup';
 import { removeCortexWorktreePath } from './worktree-clone-removal';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 
@@ -16,6 +17,18 @@ export interface TerminalWorktreeSweepResult {
   removed: number;
   skippedActive: number;
   failed: number;
+  /** Non-git directories that already failed removal in this process and were not retried. */
+  skippedUnrecoverable: number;
+}
+
+// #2474 — a non-git directory whose removal failed is not retried (or
+// re-logged) by later ticks in this process while its owning lane keeps the
+// same status. Every other failure (e.g. a live-process refusal, which clears
+// when the worker exits) keeps retrying each tick.
+const unrecoverableWorktreeDirs = new Set<string>();
+
+function unrecoverableKey(dirPath: string, lane: Lane | null) {
+  return `${normalizePath(dirPath)}\0${lane ? `${lane.id}:${lane.status}` : ''}`;
 }
 
 function normalizePath(value: string) {
@@ -78,6 +91,7 @@ export async function sweepTerminalCortexWorktrees(
     removed: 0,
     skippedActive: 0,
     failed: 0,
+    skippedUnrecoverable: 0,
   };
 
   for (const worktreeRoot of worktreeRoots) {
@@ -95,6 +109,10 @@ export async function sweepTerminalCortexWorktrees(
         result.skippedActive += 1;
         continue;
       }
+      if (unrecoverableWorktreeDirs.has(unrecoverableKey(dirPath, lane))) {
+        result.skippedUnrecoverable += 1;
+        continue;
+      }
 
       const removed = lane
         ? await cleanupLaneWorktree({ ...lane, worktreePath: dirPath }, { terminal: true })
@@ -108,6 +126,9 @@ export async function sweepTerminalCortexWorktrees(
         result.removed += 1;
       } else {
         result.failed += 1;
+        if (existsSync(dirPath) && await worktreeIsNotGitRepository(dirPath)) {
+          unrecoverableWorktreeDirs.add(unrecoverableKey(dirPath, lane));
+        }
       }
     }
   }
@@ -141,6 +162,7 @@ export async function sweepKnownTerminalCortexWorktrees(
     removed: 0,
     skippedActive: 0,
     failed: 0,
+    skippedUnrecoverable: 0,
   };
   for (const repoPath of repoPaths) {
     const result = await sweepTerminalCortexWorktrees(repoPath, knownLanes);
@@ -149,6 +171,7 @@ export async function sweepKnownTerminalCortexWorktrees(
     aggregate.removed += result.removed;
     aggregate.skippedActive += result.skippedActive;
     aggregate.failed += result.failed;
+    aggregate.skippedUnrecoverable += result.skippedUnrecoverable;
   }
   return aggregate;
 }

@@ -1,10 +1,18 @@
+import { execFile } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+
 import { getWorktreeManager } from '@/lib/worktree/launch';
+import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 import { preserveAndRecordLaneRecovery } from './merge-recovery';
 import { removeCortexWorktreePath } from './worktree-clone-removal';
 import { checkPruneGate } from './prune-gate';
 import type { Lane } from './types';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 import { worktreeIsConfirmedAbsent } from './lane-storage-release';
+
+const execFileAsync = promisify(execFile);
 
 type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>
   & Partial<Pick<Lane, 'baseBranch' | 'packetId'>>
@@ -23,6 +31,45 @@ function settleRemovedWorktreeReservation(lane: CleanupLane, removed: boolean): 
     });
   }
   return removed;
+}
+
+/**
+ * #2474 — a packet directory whose `.git` entry is gone (or points nowhere) has
+ * no head to bank. Without this check git either answers "not a git
+ * repository" on every preserve attempt, or walks up and answers for the
+ * parent checkout instead.
+ */
+export async function worktreeIsNotGitRepository(worktreePath: string): Promise<boolean> {
+  if (!existsSync(join(worktreePath, '.git'))) return true;
+  try {
+    await execFileAsync('git', ['-C', worktreePath, 'rev-parse', '--git-dir'], {
+      windowsHide: true,
+      timeout: 5_000,
+    });
+    return false;
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    return /not a git repository/i.test(typeof stderr === 'string' ? stderr : formatError(error));
+  }
+}
+
+async function removeNonGitWorktreeDir(
+  lane: CleanupLane,
+  worktreePath: string,
+  overrideLiveGuard?: true,
+): Promise<boolean> {
+  if (!(await allowWorktreeRemoval(worktreePath, { logPrefix: 'lane-worktree', overrideLiveGuard }))) {
+    return false;
+  }
+  try {
+    rmSync(worktreePath, { recursive: true, force: true });
+  } catch (error) {
+    console.warn(`[lane-worktree] Failed to remove non-git directory ${worktreePath} for ${lane.id}: ${formatError(error)}`);
+    return false;
+  }
+  if (existsSync(worktreePath)) return false;
+  console.log(`[lane-worktree] Removed ${worktreePath} for ${lane.id}: not a git repository, nothing to preserve.`);
+  return true;
 }
 
 /**
@@ -95,6 +142,12 @@ export async function cleanupLaneWorktree(
   // work internally; this covers the commit history. Fail closed if the ref
   // cannot be confirmed.
   if (terminal || force) {
+    if (await worktreeIsNotGitRepository(worktreePath)) {
+      return settleRemovedWorktreeReservation(
+        lane,
+        await removeNonGitWorktreeDir(lane, worktreePath, opts.overrideLiveGuard),
+      );
+    }
     if (!(await preserveHeadBeforeRemoval(lane, worktreePath))) return false;
   }
 

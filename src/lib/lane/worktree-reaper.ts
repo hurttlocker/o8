@@ -429,7 +429,8 @@ export async function runWorktreeMaintenanceTick(): Promise<void> {
     if (result.removed > 0 || result.failed > 0) {
       console.log(
         `[worktree-reaper] terminal sweep repos=${result.reposScanned} scanned=${result.scanned} `
-        + `removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed}`,
+        + `removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed} `
+        + `skippedUnrecoverable=${result.skippedUnrecoverable}`,
       );
     }
   } catch (error) {
