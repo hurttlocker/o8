@@ -13,6 +13,7 @@
 
 import 'server-only';
 import { listPushSubscriptions } from './store';
+import { recordPushGate, type PushGateEvent } from './push-gate';
 import { sendPushToSubscription, type PushPayload, type SendResult } from './send';
 
 const ENABLED = process.env.O8_PUSH_NOTIFICATIONS_ENABLED !== '0';
@@ -39,10 +40,12 @@ export async function notifyAll(payload: PushPayload): Promise<SendResult[]> {
  * Fire-and-forget wrapper. Use from non-async call sites where we want to
  * trigger the fan-out without blocking the originating event handler.
  */
-export function notifyAllInBackground(payload: PushPayload): void {
+export function notifyAllInBackground(payload: PushPayload, gate?: PushGateEvent): void {
   void notifyAll(payload).catch((error) => {
     console.warn('[push-notify] background notify failed', error);
   });
+  // Record-only push gate (#2441): the push above is already on its way.
+  if (gate && ENABLED) recordPushGate(gate);
 }
 
 // ── Pre-baked payload helpers for the four trigger points (issue spec) ──
@@ -58,7 +61,7 @@ export function notifyApprovalCreated(opts: {
     tag: `approval-${opts.approvalId}`,
     url: '/mobile?view=approvals',
     data: { approvalId: opts.approvalId, risk: opts.risk, kind: 'approval' },
-  });
+  }, { kind: 'approval_created', approvalId: opts.approvalId });
 }
 
 export function notifyAgentFinished(opts: {
@@ -78,7 +81,7 @@ export function notifyAgentFinished(opts: {
     tag: `agent-${opts.sessionName}`,
     url: '/mobile?view=agents',
     data: { sessionName: opts.sessionName, state: opts.state, kind: 'agent' },
-  });
+  }, { kind: 'agent_finished', sessionKey: opts.sessionName, terminalState: opts.state });
 }
 
 export function notifyMergeConflict(opts: {
@@ -91,7 +94,7 @@ export function notifyMergeConflict(opts: {
     tag: `conflict-${opts.repo}`,
     url: '/mobile?view=approvals',
     data: { repo: opts.repo, fileCount: opts.fileCount, kind: 'conflict' },
-  });
+  }, { kind: 'merge_conflict' });
 }
 
 export function notifyOrchestratorReady(opts: {
@@ -104,7 +107,7 @@ export function notifyOrchestratorReady(opts: {
     tag: opts.threadId ? `orchestrator-${opts.threadId}` : 'orchestrator',
     url: '/mobile?view=orchestrator',
     data: { threadId: opts.threadId, kind: 'orchestrator' },
-  });
+  }, { kind: 'orchestrator_ready' });
 }
 
 /**
@@ -131,5 +134,5 @@ export function notifyReviewReady(opts: {
     tag: `review-ready-${opts.laneId}`,
     url: '/mobile?view=agents',
     data: { laneId: opts.laneId, packetId: opts.packetId ?? undefined, repoPath: opts.repoPath, kind: 'review-ready' },
-  });
+  }, { kind: 'review_ready', laneId: opts.laneId, packetId: opts.packetId });
 }

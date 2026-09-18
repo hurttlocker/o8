@@ -317,6 +317,9 @@ export type LaneEventVerb =
   // detached per-file calls settle with judgment.provider on. The merge gate
   // never reads it. Payload: { diffFingerprint, recipe, rulesFound, rulesMissing, files, citations, receiptIds }
   | 'directive_citations'
+  // Record-only push gate answer for an outgoing push (#2441). The push is sent
+  // either way; nothing reads this. Payload: { receiptId, kind, p, wouldSuppress, operatorGated }
+  | 'push_gate'
   // A repo publication action exhausted its bounded resource-lease wait.
   // Payload: { resource, waitedMs, holder, retryCount, willRetry }
   | 'lease_wait_timeout'
