@@ -3,6 +3,7 @@ export { buildDiffState, DEFAULT_DIFF_BUDGET_TOKENS, DIFF_CHARS_PER_TOKEN, norma
 export { judgmentKeyPath, JUDGMENT_KEY_ENV, readJudgmentApiKey } from './key';
 export { BRAIN_CLASS_QUESTIONS, DIFF_QUESTION_USE, DIFF_QUESTIONS, INBOX_QUESTIONS } from './questions';
 export { listJudgmentReceipts, recordJudgmentReceipt } from './receipts';
+export { isJudgmentRefereeEnabled, resolveJudgmentRoute, type ResolvedJudgmentRoute } from './route';
 export type * from './types';
 export { anyTextFlag, normalizeForJudgment, scanText, type TextScanFlags } from './text-scan';
 export { ABSTAIN_CONFIDENCE } from './types';

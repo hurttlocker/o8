@@ -5,10 +5,12 @@
  * turn it on is an explicit operator write (Settings, the TOML file, or the
  * gated operator-defaults route).
  */
-export type JudgmentProvider = 'off' | 'typesafe';
+export type JudgmentProvider = 'off' | 'typesafe' | 'managed';
+
+export const JUDGMENT_PROVIDER_VALUES_MESSAGE = 'one of "off", "typesafe", or "managed"';
 
 export function isJudgmentProvider(value: unknown): value is JudgmentProvider {
-  return value === 'off' || value === 'typesafe';
+  return value === 'off' || value === 'typesafe' || value === 'managed';
 }
 
 export interface JudgmentProviderDefault {
@@ -44,7 +46,7 @@ export function applyJudgmentProviderUpdate(
 ): void {
   if (update.judgmentProvider === undefined) return;
   if (!isJudgmentProvider(update.judgmentProvider)) {
-    throw new Error('judgmentProvider must be "off" or "typesafe".');
+    throw new Error(`judgmentProvider must be ${JUDGMENT_PROVIDER_VALUES_MESSAGE}.`);
   }
   stored.judgmentProvider = update.judgmentProvider;
 }

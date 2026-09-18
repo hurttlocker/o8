@@ -29,7 +29,7 @@ import type { ScoreAnswer, ScoreQuestion } from '@/lib/judgment/types';
 import { findLaneBySession, getLane } from '@/lib/lane/registry';
 import type { Lane, LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxItem, MobileInboxSnapshot, MobileInboxUrgency } from '@/lib/mobile/types';
-import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
 
 export const INBOX_URGENCY_SURFACE = 'mobile-inbox';
 
@@ -103,11 +103,7 @@ export async function waitForInboxUrgency(): Promise<void> {
 
 /** Whether the referee may run: the same `judgment.provider` check `askJudgment` makes. */
 export function isInboxUrgencyEnabled(): boolean {
-  try {
-    return getOperatorDefaultsSync().values.judgmentProvider === 'typesafe';
-  } catch {
-    return false;
-  }
+  return isJudgmentRefereeEnabled();
 }
 
 /** The question id an item is asked under: a hash, so no item text reaches the provider. */

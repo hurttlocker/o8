@@ -28,7 +28,7 @@ import {
   isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
 import { isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
-import { isJudgmentProvider } from '@/lib/operator/judgment-default';
+import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -474,7 +474,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
   if (body.judgmentProvider !== undefined) {
     if (!isJudgmentProvider(body.judgmentProvider)) {
-      throw new Error('judgmentProvider must be "off" or "typesafe".');
+      throw new Error(`judgmentProvider must be ${JUDGMENT_PROVIDER_VALUES_MESSAGE}.`);
     }
     update.judgmentProvider = body.judgmentProvider;
   }

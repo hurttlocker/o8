@@ -14,7 +14,7 @@ import { getSqlite } from '@/lib/db';
 import { askJudgment, type AskJudgmentOptions } from '@/lib/judgment/client';
 import { buildDiffState, type DiffStateFileInput } from '@/lib/judgment/diff-state';
 import { DIFF_QUESTIONS } from '@/lib/judgment/questions';
-import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
 import type { ApprovalReferee } from '@/lib/approvals/types';
 import { parseApprovalMetadataJson, serializeApprovalMetadata } from './referee-metadata';
 
@@ -137,7 +137,7 @@ async function runApprovalReferee(input: ApprovalRefereeInput, generation: numbe
  */
 export function startApprovalReferee(input: ApprovalRefereeInput): void {
   try {
-    if (getOperatorDefaultsSync().values.judgmentProvider === 'off') return;
+    if (!isJudgmentRefereeEnabled()) return;
     if (!input.diffText.trim() && input.files.length === 0) return;
   } catch {
     return;
