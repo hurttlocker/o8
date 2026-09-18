@@ -27,6 +27,7 @@ import {
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { getMobileInboxSnapshot } from '@/lib/mobile/inbox';
 import { buildPhoneBriefingBlock } from '@/lib/mobile/symon-briefing';
+import { rankPhoneBriefing } from '@/lib/mobile/catch-up-ranking';
 import { safeDisplayLabel } from '@/lib/mobile/symon-prompt-filter';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import {
@@ -328,8 +329,17 @@ function workspaceContextInstructions(context: PhoneWorkspaceContext): string {
  * lane, but a cold build must never hold the mint open, and a failed build must
  * never cost the operator their voice session. Either way the mint proceeds with
  * an empty briefing.
+ *
+ * With `judgment.provider` on, the catch-up ranking (#2444) orders each
+ * section by attention and the scores ride back as `advisory`. Off, or on any
+ * ranking failure, the block is the event-order block and `advisory` is null.
  */
-async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<string> {
+interface PhoneBriefing {
+  block: string;
+  advisory: { scores: Record<string, number>; receiptId: string | null; truncated: boolean } | null;
+}
+
+async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<PhoneBriefing> {
   let budget: ReturnType<typeof setTimeout> | undefined;
   try {
     const snapshot = await Promise.race([
@@ -340,17 +350,19 @@ async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<string> {
     ]);
     if (!snapshot) {
       console.warn(`${LOG} briefing_skipped: inbox snapshot exceeded ${BRIEFING_BUDGET_MS}ms`);
-      return '';
+      return { block: '', advisory: null };
     }
-    return buildPhoneBriefingBlock({
-      snapshot,
-      toolPack: scope.toolPack,
-      repoPath: scope.repoPath,
-    });
+    const input = { snapshot, toolPack: scope.toolPack, repoPath: scope.repoPath };
+    const ranking = await rankPhoneBriefing(input);
+    const ranked = ranking && Object.keys(ranking.scores).length > 0 ? ranking : null;
+    return {
+      block: buildPhoneBriefingBlock(ranked ? { ...input, order: ranked.order } : input),
+      advisory: ranked ? { scores: ranked.scores, receiptId: ranked.receiptId, truncated: ranked.truncated } : null,
+    };
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'inbox snapshot failed';
     console.warn(`${LOG} briefing_skipped: ${detail}`);
-    return '';
+    return { block: '', advisory: null };
   } finally {
     // The snapshot usually wins the race; leaving its loser pending would hold a
     // timer on the event loop for no reason.
@@ -648,7 +660,7 @@ export async function POST(request: NextRequest) {
   const mintedPhoneTools = [...phoneBridgeTools, RENDER_SURFACE_TOOL];
 
   // Ahead of the workspace-context JSON, inside the cached prefix.
-  const briefing = await phoneBriefingBlock(resolvedScope);
+  const { block: briefing, advisory: briefingAdvisory } = await phoneBriefingBlock(resolvedScope);
 
   // Mint the ephemeral token carrying the shared brain/config. Code and
   // repository catch-up use the Code pack; default o8 uses its bounded pack.
@@ -766,6 +778,8 @@ export async function POST(request: NextRequest) {
         workspaceMode: resolvedScope.workspaceMode,
       },
       preempted: bridge.deskWasLive ? 'desk' : null,
+      // Advisory catch-up order (#2444); the phone may ignore it. Absent when off.
+      ...(briefingAdvisory ? { briefing: { advisory: briefingAdvisory } } : {}),
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'realtime session mint failed';
