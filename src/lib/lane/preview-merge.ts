@@ -64,6 +64,8 @@ export interface MergePreviewResult {
 
 interface MergePreviewOptions {
   orchestratorApproved?: boolean;
+  /** Compute the advisory rule citations (#2446). Only surfaces that show them ask; default off, no git, no import. */
+  directiveCitations?: boolean;
 }
 
 // ── Check-name mapping ──
@@ -245,8 +247,9 @@ export async function buildPreviewForLane(
     }
     if (!blockers.includes('clean-worktree')) blockers.unshift('clean-worktree');
   }
-  const { directiveCitationsForPreview } = await import('@/lib/judgment/directive-citations');
-  const directiveCitations = await directiveCitationsForPreview(lane, packetId, reviewSource.cwd, baseRef);
+  const directiveCitations = options.directiveCitations
+    ? await (await import('@/lib/judgment/directive-citations')).directiveCitationsForPreview(lane, packetId, reviewSource.cwd, baseRef)
+    : undefined;
   return {
     packetId,
     wouldMerge: gateResult.passed && lint.ok && !dirtyDetail,
@@ -276,5 +279,5 @@ export async function previewPacketMerge(packetId: string): Promise<MergePreview
       unwired: true,
     };
   }
-  return buildPreviewForLane(lane, packetId);
+  return buildPreviewForLane(lane, packetId, { directiveCitations: true });
 }

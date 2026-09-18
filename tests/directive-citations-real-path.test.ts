@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { startJudgmentEndpointFixture, type JudgmentEndpointFixture } from './fixtures/judgment-endpoint';
@@ -36,6 +37,8 @@ const originalEnv = { CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, O8_D
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-directive-citations-data-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
+const OPERATOR_TOKEN = 'operator-ws-token-directive-citations-2446-abcdef';
+writeFileSync(join(dataDir, 'ws-token'), `${OPERATOR_TOKEN}\n`, 'utf-8');
 
 const { getSqlite } = await import('@/lib/db');
 const { createLane } = await import('@/lib/lane/registry');
@@ -49,6 +52,7 @@ const {
 } = await import('@/lib/judgment/directive-citations');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
 
 const KEY = 'ts-fixture-key-directive-citations-2446';
 const PACKET_TITLE = 'Polish the settings card';
@@ -288,6 +292,30 @@ describe('advisory rule citations on the merge preview', () => {
     expect(fixture.seen).toHaveLength(0);
     expect(laneEvents(lane.id, 'judgment')).toHaveLength(0);
     expect(laneEvents(lane.id, 'directive_citations')).toHaveLength(0);
+  }, 60_000);
+
+  it('spends nothing on the review-state banner, which never shows citations; the merge preview still asks', async () => {
+    const { lane, repoPath } = await setupPacket('pkt-cite-banner', {
+      'src/components/Foo.tsx': 'export function Foo() {\n  return <div className="x">foo</div>;\n}\n',
+    });
+    const response = await reviewStateRoute.GET(new NextRequest(
+      'http://localhost:3001/api/orchestrator/review-state?packetId=pkt-cite-banner',
+      { headers: { host: 'localhost:3001', authorization: `Bearer ${OPERATOR_TOKEN}` } },
+    ));
+    expect(response.status).toBe(200);
+    const text = JSON.stringify(await response.json());
+    await waitForDirectiveCitations(lane.id);
+
+    expect(text).toContain('pkt-cite-banner');
+    expect(fixture.seen).toHaveLength(0);
+    expect(laneEvents(lane.id, 'directive_citations')).toHaveLength(0);
+    expect(text).not.toContain('directiveCitations');
+
+    const row = ingestedRulesRow(repoPath);
+    const ids = ['css-classes', 'rgba-surfaces', 'css-shorthand', 'hardcoded-ports', 'users-paths'].map((key) => ruleId(row.id, key));
+    fixture.replies.push(reply(Object.fromEntries(ids.map((id) => [id, 0.05]))));
+    await previewSettled('pkt-cite-banner', lane.id);
+    expect(fixture.seen).toHaveLength(1);
   }, 60_000);
 
   it('asks at most five rules per file under the path recipe', () => {
