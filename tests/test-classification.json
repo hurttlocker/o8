@@ -3265,6 +3265,16 @@
       ]
     },
     {
+      "path": "tests/wake-triage-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/worker-login-cli-real-path.test.ts",
       "reasons": [
         "child-process",

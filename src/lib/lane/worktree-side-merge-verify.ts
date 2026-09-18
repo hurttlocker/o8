@@ -2,6 +2,7 @@ import type { ApprovalGateResult } from '@/lib/approvals/types';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import { assessGateFailureRisk } from '@/lib/lane/gate-failure-warning';
 import { buildCheckList } from '@/lib/lane/preview-merge';
+import { startWakeTriage } from '@/lib/orchestrator/wake-triage';
 import {
   appendEvent,
   countLaneEventsByVerbSinceLastLaunch,
@@ -180,6 +181,7 @@ export async function handlePostRebaseVerifyFailure(
         packetId: lane.packetId,
         output: truncatedOutput,
       });
+      startWakeTriage({ source: 'typecheck-escalation', laneId: command.laneId });
       setLaneStatus(command.laneId, 'awaiting_orchestrator', 'system', `typecheck_escalated:${escalationReason}`);
       return 'applied';
     });
