@@ -174,7 +174,11 @@ describe('recorded-answer replay labels', () => {
     expect(text).toContain('directiveCitation by p(breaks rule): n=7 labeled scores (positives 3, negatives 4)');
     expect(text).toMatch(/^ {2}AUC \d\.\d{3} \(n=7\)/m);
     expect(text).toContain('false citations at p >= 0.6: 2 of 4 y=0 scores');
-    expect(text).toContain('caveat: a rejection or rerun marks every rule scored on that diff as a real violation');
+    // The direction of each error is the point of the caveat; dropping it must fail here.
+    expect(text).toContain('caveat: a rejection or rerun marks every rule scored on that diff y=1, including rules that were not the reason');
+    expect(text).toMatch(/^ {4}false citations are a LOWER bound and citation precision is OVERSTATED: /m);
+    expect(text).toMatch(/^ {4}misses \(positives minus cited positives\) are an UPPER bound: /m);
+    expect(text).not.toContain('bound the error rate from above');
     expect(text).toContain('rule css-classes: n=2, positives 1, cited positives 1, false citations 1 of 1 y=0');
     expect(text).toContain('rule css-shorthand (held back): n=1, positives 0, cited positives 0, false citations 1 of 1 y=0');
     expect(text).toContain('rule rgba-surfaces: n=1, positives 0, cited positives 0, false citations 0 of 1 y=0');

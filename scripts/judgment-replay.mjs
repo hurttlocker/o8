@@ -402,7 +402,9 @@ export function renderDirectiveCitationReport({ rows, notes }) {
   const byRule = citationsByRule(rows);
   const falseCitations = byRule.reduce((sum, entry) => sum + entry.falseCitations, 0);
   lines.push(`  false citations at p >= ${DIRECTIVE_CITATION_REPLAY_THRESHOLD}: ${falseCitations} of ${summary.negatives} y=0 scores`);
-  lines.push('  caveat: a rejection or rerun marks every rule scored on that diff as a real violation, even rules that were not the reason, so the per-rule figures below bound the error rate from above and do not say which rule caused the outcome');
+  lines.push('  caveat: a rejection or rerun marks every rule scored on that diff y=1, including rules that were not the reason, so the two error counts are wrong in opposite directions:');
+  lines.push('    false citations are a LOWER bound and citation precision is OVERSTATED: a wrongly high score on a rejected diff counts as a cited positive and leaves the y=0 pool');
+  lines.push('    misses (positives minus cited positives) are an UPPER bound: rules that were not the reason count as violations the score missed');
   for (const entry of byRule) {
     lines.push(`  rule ${entry.rule}${entry.heldBack ? ' (held back)' : ''}: n=${entry.n}, positives ${entry.positives}, cited positives ${entry.cited}, false citations ${entry.falseCitations} of ${entry.n - entry.positives} y=0`);
   }
@@ -415,6 +417,7 @@ export function renderDirectiveCitationReport({ rows, notes }) {
  */
 const RECORDED_LABELS = {
   [COMPACTION_LABEL]: {
+    source: ({ dataDir }) => dataDir,
     load: ({ dataDir }) => loadCompactionHistory(dataDir),
     label: (history) => labelCompaction(history.archives, history.threads),
     render: renderCompactionReport,
@@ -438,7 +441,9 @@ async function runRecordedLabel(name, paths) {
   try {
     history = await entry.load(paths);
   } catch (error) {
-    return { error: `cannot open ${paths.dbPath} read-only: ${error instanceof Error ? error.message : 'open failed'}` };
+    // Name the path this loader read: the database for most labels, the data dir for compaction.
+    const source = entry.source ? entry.source(paths) : paths.dbPath;
+    return { error: `cannot open ${source} read-only: ${error instanceof Error ? error.message : 'open failed'}` };
   }
   const labeled = entry.label(history);
   return { labeled, report: entry.render(labeled) };
