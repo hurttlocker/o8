@@ -34,6 +34,13 @@
  * per-item attention scores in the ranking receipts against whether the
  * operator acted on the item within 30 minutes of the briefing (see
  * scripts/lib/judgment-replay-catch-up.mjs, including the ordering confound).
+ * `claimUnbacked` (#2447) and `directiveCitation` (#2446) send nothing: they
+ * score the recorded report-claim receipts and `directive_citations` scores
+ * against a later rerun or operator rejection of the packet, versus a merge
+ * (see scripts/lib/judgment-replay-claim-unbacked.mjs and
+ * scripts/lib/judgment-replay-directive-citation.mjs). `all-recorded` runs
+ * every label that sends nothing in one pass; it never runs gateFailed,
+ * operatorRejected, or mergedClean.
  *
  * --dry-run prints each request body and sends nothing; it works with
  * judgment.provider off. Without it the script refuses to run while the
@@ -53,6 +60,8 @@ import { labelPushGate, loadPushGateHistory, PUSH_GATE_PROVISIONAL_BAND, PUSH_GA
 import { labelLoopChecks, loadLoopHistory } from './lib/judgment-replay-loop.mjs';
 import { labelWakeTriage, loadWakeTriageHistory, OUTCOME_TO_OPTION, WAKE_TRIAGE_OPTIONS, WAKE_TRIAGE_WINDOW } from './lib/judgment-replay-wake-triage.mjs';
 import { CATCH_UP_WINDOW_MS, labelCatchUp, loadCatchUpHistory } from './lib/judgment-replay-catch-up.mjs';
+import { CLAIM_PREDICTORS, labelClaimUnbacked, loadClaimUnbackedHistory } from './lib/judgment-replay-claim-unbacked.mjs';
+import { citationsByRule, DIRECTIVE_CITATION_REPLAY_THRESHOLD, labelDirectiveCitations } from './lib/judgment-replay-directive-citation.mjs';
 
 const SURFACE = 'calibration-replay';
 const USD_PER_BILLION_INPUT_TOKENS = 42;
@@ -64,7 +73,11 @@ const PUSH_GATE_LABEL = 'pushGate';
 const LOOP_LABEL = 'loop';
 const WAKE_TRIAGE_LABEL = 'wakeTriage';
 const CATCH_UP_LABEL = 'catchUp';
-const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate|loop|wakeTriage|catchUp]';
+const CLAIM_UNBACKED_LABEL = 'claimUnbacked';
+const DIRECTIVE_CITATION_LABEL = 'directiveCitation';
+/** Runs every recorded-answer label below in one pass; never the three labels above, which send calls. */
+const ALL_RECORDED_LABEL = 'all-recorded';
+const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate|loop|wakeTriage|claimUnbacked|directiveCitation|catchUp|all-recorded]';
 const TSX_MARKER = 'O8_JUDGMENT_REPLAY_TSX_LOADER';
 
 /**
@@ -88,7 +101,7 @@ export function parseReplayArgs(argv) {
       index += 1;
       if (arg === '--out') options.out = value;
       else if (arg === '--label') {
-        if (value !== COMPACTION_LABEL && value !== PUSH_GATE_LABEL && value !== LOOP_LABEL && value !== WAKE_TRIAGE_LABEL && value !== CATCH_UP_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
+        if (!Object.hasOwn(RECORDED_LABELS, value) && value !== ALL_RECORDED_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
         options.label = value;
       }
       else {
@@ -359,6 +372,85 @@ export function renderCatchUpReport({ rows, notes }) {
   return { text: lines.join('\n'), result: summary };
 }
 
+/** The claimUnbacked label report: each recorded claim answer against a later rerun or rejection. */
+export function renderClaimUnbackedReport({ rows, notes }) {
+  const lines = [`report-claim receipts: ${notes.receiptsRead} (failed calls ${notes.failedCalls}, unlabeled ${notes.unlabeled}); labeled reports: rerun after ${notes.rerun}, rejected after ${notes.rejected}, merged without either ${notes.merged}`];
+  const result = {};
+  for (const predictor of CLAIM_PREDICTORS) {
+    const summary = summarize(rows.filter((row) => row.predictor === predictor));
+    if (summary.positives === 0 || summary.negatives === 0) {
+      lines.push(`${CLAIM_UNBACKED_LABEL} by ${predictor}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} labeled reports)`);
+      result[predictor] = { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n };
+      continue;
+    }
+    lines.push(`${CLAIM_UNBACKED_LABEL} by ${predictor}: n=${summary.n} labeled reports (positives ${summary.positives}, negatives ${summary.negatives})  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
+    result[predictor] = summary;
+  }
+  return { text: lines.join('\n'), result };
+}
+
+/** The directiveCitation label report: per-(file, rule) scores against the diff's outcome, with false citations per rule. */
+export function renderDirectiveCitationReport({ rows, notes }) {
+  const lines = [`directive_citations events: ${notes.eventsRead} (unlabeled ${notes.unlabeledEvents}, approval matched by diff fingerprint ${notes.matchedByFingerprint}); scores read: ${notes.scoresRead}`];
+  const summary = summarize(rows);
+  if (summary.positives === 0 || summary.negatives === 0) {
+    lines.push(`${DIRECTIVE_CITATION_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped AUC (n=${summary.n} labeled scores)`);
+  } else {
+    lines.push(`${DIRECTIVE_CITATION_LABEL} by p(breaks rule): n=${summary.n} labeled scores (positives ${summary.positives}, negatives ${summary.negatives})`);
+    lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
+  }
+  // Printed even when the AUC is skipped: the per-rule positives below rest on the same labels.
+  lines.push('  caveat: the AUC, the Brier score and every per-rule positives count use labels assigned per diff, not per rule, so each rule\'s positives count is an UPPER bound and the AUC and Brier error has NO FIXED DIRECTION: neither is a clean measure of the rule-level score');
+  const byRule = citationsByRule(rows);
+  const falseCitations = byRule.reduce((sum, entry) => sum + entry.falseCitations, 0);
+  lines.push(`  false citations at p >= ${DIRECTIVE_CITATION_REPLAY_THRESHOLD}: ${falseCitations} of ${summary.negatives} y=0 scores`);
+  lines.push('  caveat: a rejection or rerun marks every rule scored on that diff y=1, including rules that were not the reason, so the two error counts are wrong in opposite directions:');
+  lines.push('    false citations are a LOWER bound and citation precision is OVERSTATED: a wrongly high score on a rejected diff counts as a cited positive and leaves the y=0 pool');
+  lines.push('    misses (positives minus cited positives) are an UPPER bound: rules that were not the reason count as violations the score missed');
+  for (const entry of byRule) {
+    lines.push(`  rule ${entry.rule}${entry.heldBack ? ' (held back)' : ''}: n=${entry.n}, positives ${entry.positives}, cited positives ${entry.cited}, false citations ${entry.falseCitations} of ${entry.n - entry.positives} y=0`);
+  }
+  return { text: lines.join('\n'), result: { ...summary, falseCitations, byRule } };
+}
+
+/**
+ * Labels that score answers already recorded; none sends a call. Each loads
+ * its history read-only, labels it, and renders its report.
+ */
+const RECORDED_LABELS = {
+  [COMPACTION_LABEL]: {
+    source: ({ dataDir }) => dataDir,
+    load: ({ dataDir }) => loadCompactionHistory(dataDir),
+    label: (history) => labelCompaction(history.archives, history.threads),
+    render: renderCompactionReport,
+  },
+  [PUSH_GATE_LABEL]: { load: ({ dbPath }) => loadPushGateHistory(dbPath), label: labelPushGate, render: renderPushGateReport },
+  [LOOP_LABEL]: {
+    load: ({ dbPath }) => loadLoopHistory(dbPath),
+    label: (history) => labelLoopChecks(history.events, history.outcomes),
+    render: renderLoopReport,
+  },
+  [WAKE_TRIAGE_LABEL]: { load: ({ dbPath }) => loadWakeTriageHistory(dbPath), label: (events) => labelWakeTriage(events), render: renderWakeTriageReport },
+  [CLAIM_UNBACKED_LABEL]: { load: ({ dbPath }) => loadClaimUnbackedHistory(dbPath), label: labelClaimUnbacked, render: renderClaimUnbackedReport },
+  [DIRECTIVE_CITATION_LABEL]: { load: ({ dbPath }) => loadClaimUnbackedHistory(dbPath), label: labelDirectiveCitations, render: renderDirectiveCitationReport },
+  [CATCH_UP_LABEL]: { load: ({ dbPath }) => loadCatchUpHistory(dbPath), label: labelCatchUp, render: renderCatchUpReport },
+};
+
+/** Run one recorded label; `error` is set when its history could not be opened. */
+async function runRecordedLabel(name, paths) {
+  const entry = RECORDED_LABELS[name];
+  let history;
+  try {
+    history = await entry.load(paths);
+  } catch (error) {
+    // Name the path this loader read: the database for most labels, the data dir for compaction.
+    const source = entry.source ? entry.source(paths) : paths.dbPath;
+    return { error: `cannot open ${source} read-only: ${error instanceof Error ? error.message : 'open failed'}` };
+  }
+  const labeled = entry.label(history);
+  return { labeled, report: entry.render(labeled) };
+}
+
 export function renderReport({ groups, approvalsRead, withoutDiffText, notes, calls, only = null }) {
   const lines = [];
   const duplicates = groups.reduce((sum, group) => sum + group.approvalIds.length - 1, 0);
@@ -409,82 +501,36 @@ export async function runReplay(argv, io = {}) {
   const { options } = parsed;
   if (options.help) { out(USAGE); return 0; }
 
-  if (options.label === COMPACTION_LABEL) {
-    const labeled = labelCompaction(...Object.values(loadCompactionHistory(dataPaths().dataDir)));
-    const report = renderCompactionReport(labeled);
-    out(report.text);
+  if (options.label && Object.hasOwn(RECORDED_LABELS, options.label)) {
+    const run = await runRecordedLabel(options.label, dataPaths());
+    if (run.error) { err(`[judgment-replay] ${run.error}`); return 1; }
+    out(run.report.text);
     if (options.out) {
-      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: COMPACTION_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
+      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: options.label, notes: run.labeled.notes, result: run.report.result, rows: run.labeled.rows }, null, 2)}\n`);
       out(`wrote ${options.out}`);
     }
     return 0;
   }
 
-  if (options.label === PUSH_GATE_LABEL) {
-    const labeled = labelPushGate(await loadPushGateHistory(dataPaths().dbPath));
-    const report = renderPushGateReport(labeled);
-    out(report.text);
+  if (options.label === ALL_RECORDED_LABEL) {
+    const paths = dataPaths();
+    const labels = {};
+    let failed = false;
+    for (const name of Object.keys(RECORDED_LABELS)) {
+      const run = await runRecordedLabel(name, paths);
+      out(`== ${name} ==`);
+      if (run.error) { err(`[judgment-replay] ${name}: ${run.error}`); failed = true; continue; }
+      out(run.report.text);
+      out('');
+      labels[name] = { notes: run.labeled.notes, result: run.report.result, rows: run.labeled.rows };
+    }
+    out(`recorded labels: ${Object.entries(labels).map(([name, entry]) => `${name} ${entry.rows.length} rows`).join(', ')}`);
+    out('total spend: $0.000000, no provider calls');
     if (options.out) {
-      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: PUSH_GATE_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
+      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: ALL_RECORDED_LABEL, spendUsd: 0, labels }, null, 2)}\n`);
       out(`wrote ${options.out}`);
     }
-    return 0;
-  }
-
-  if (options.label === LOOP_LABEL) {
-    let history;
-    try {
-      history = await loadLoopHistory(dataPaths().dbPath);
-    } catch (error) {
-      err(`[judgment-replay] cannot open the database read-only: ${error instanceof Error ? error.message : 'error'}`);
-      return 1;
-    }
-    const labeled = labelLoopChecks(history.events, history.outcomes);
-    const report = renderLoopReport(labeled);
-    out(report.text);
-    if (options.out) {
-      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: LOOP_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
-      out(`wrote ${options.out}`);
-    }
-    return 0;
-  }
-
-  if (options.label === WAKE_TRIAGE_LABEL) {
-    const { dbPath } = dataPaths();
-    let events;
-    try {
-      events = await loadWakeTriageHistory(dbPath);
-    } catch (error) {
-      err(`[judgment-replay] cannot open ${dbPath} read-only: ${error instanceof Error ? error.message : 'open failed'}`);
-      return 1;
-    }
-    const labeled = labelWakeTriage(events);
-    const report = renderWakeTriageReport(labeled);
-    out(report.text);
-    if (options.out) {
-      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: WAKE_TRIAGE_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
-      out(`wrote ${options.out}`);
-    }
-    return 0;
-  }
-
-  if (options.label === CATCH_UP_LABEL) {
-    const { dbPath } = dataPaths();
-    let history;
-    try {
-      history = await loadCatchUpHistory(dbPath);
-    } catch (error) {
-      err(`[judgment-replay] cannot open ${dbPath} read-only: ${error instanceof Error ? error.message : 'open failed'}`);
-      return 1;
-    }
-    const labeled = labelCatchUp(history);
-    const report = renderCatchUpReport(labeled);
-    out(report.text);
-    if (options.out) {
-      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: CATCH_UP_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
-      out(`wrote ${options.out}`);
-    }
-    return 0;
+    return failed ? 1 : 0;
   }
 
   const [{ buildDiffState }, { DIFF_QUESTIONS }, { TYPESAFE_MODEL }] = await Promise.all([
