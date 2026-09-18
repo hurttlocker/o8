@@ -11,6 +11,7 @@ import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileFleetAction, MobileFleetRuntime, MobileFleetSession, MobileFleetStatus, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
+import { applyInboxUrgency } from '@/lib/mobile/inbox-urgency';
 import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 import { getMobileSessionTranscript } from '@/lib/mobile/history';
 import { buildMobileReviewUnits, shouldExposeWorkspaceReviewSnapshot, summarizeMobileReviewUnits } from '@/lib/mobile/review-units';
@@ -270,6 +271,16 @@ function limitMobileInboxSessions(snapshot: MobileInboxSnapshot, limit?: number)
   };
 }
 
+/**
+ * Last step before the phone sees a snapshot: trim sessions to the requested
+ * limit, then order the items by the referee's urgency score (#2440). Urgency
+ * is applied outside the snapshot cache so a score that lands in the
+ * background shows up on the very next poll instead of after the cache TTL.
+ */
+function finalizeMobileInboxSnapshot(snapshot: MobileInboxSnapshot, limit?: number): MobileInboxSnapshot {
+  return applyInboxUrgency(limitMobileInboxSessions(snapshot, limit));
+}
+
 export function invalidateInboxCache() {
   inboxGeneration += 1;
   inboxCache.clear();
@@ -288,13 +299,13 @@ export async function getMobileInboxSnapshot(options: {
   const generation = inboxGeneration;
   const cached = inboxCache.get(cacheLane);
   if (!fresh && cached && Date.now() - cached.timestamp < INBOX_CACHE_TTL) {
-    return limitMobileInboxSessions(cached.snapshot, options.limit);
+    return finalizeMobileInboxSnapshot(cached.snapshot, options.limit);
   }
 
   const inflight = inboxInflight.get(cacheLane);
   if (!fresh && inflight && inflight.generation === generation) {
     const snapshot = await inflight.promise;
-    return limitMobileInboxSessions(snapshot, options.limit);
+    return finalizeMobileInboxSnapshot(snapshot, options.limit);
   }
 
   const promise = buildMobileInboxSnapshot({ fresh, includeWorkspaceReview }).then((snapshot) => {
@@ -313,7 +324,7 @@ export async function getMobileInboxSnapshot(options: {
     },
   );
   const snapshot = await promise;
-  return limitMobileInboxSessions(snapshot, options.limit);
+  return finalizeMobileInboxSnapshot(snapshot, options.limit);
 }
 
 async function buildMobileInboxSnapshot(options: {

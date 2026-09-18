@@ -42,6 +42,18 @@ export interface MobileControlAction {
   reasonUnavailable?: string;
 }
 
+/**
+ * Advisory referee read of how urgently an item needs the operator (#2440).
+ * Ordering only: no threshold, gate, or auto-decision reads it. `abstain` marks
+ * a confidence under the abstain floor, which keeps the item in today's order.
+ */
+export interface MobileInboxUrgency {
+  score: number;
+  confidence: number;
+  abstain: boolean;
+  receiptId: string | null;
+}
+
 export interface MobileInboxItem {
   id: string;
   kind: MobileInboxItemKind;
@@ -54,6 +66,8 @@ export interface MobileInboxItem {
   sessionKey?: string;
   timestampLabel?: string;
   actions: MobileControlAction[];
+  /** Absent when the setting is off, the call failed, or no score is cached yet. */
+  urgency?: MobileInboxUrgency;
 }
 
 export interface MobileInboxSummary {
