@@ -48,8 +48,33 @@ const OLD_SHAPE_SQL = `
 const CURRENT_COLUMNS = [
   'id', 'provider', 'model', 'ok', 'questions_json', 'answers_json', 'input_tokens', 'output_tokens',
   'latency_ms', 'attempts', 'truncated', 'hidden_text', 'error_json', 'packet_id', 'lane_id', 'approval_id',
-  'surface', 'created_at',
+  'surface', 'created_at', 'route',
 ];
+
+/** The shape #2459 left every install at: the current columns except `route` (#2483). */
+const PRE_ROUTE_SHAPE_SQL = `
+  DROP TABLE IF EXISTS judgment_receipts;
+  CREATE TABLE judgment_receipts (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    model TEXT,
+    ok INTEGER NOT NULL,
+    questions_json TEXT NOT NULL,
+    answers_json TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    latency_ms INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    truncated INTEGER NOT NULL DEFAULT 0,
+    hidden_text INTEGER NOT NULL DEFAULT 0,
+    error_json TEXT,
+    packet_id TEXT,
+    lane_id TEXT,
+    approval_id TEXT,
+    surface TEXT,
+    created_at TEXT NOT NULL
+  );
+`;
 
 const QUESTIONS = {
   docsOnly: { type: 'noul' as const, instructions: 'The diff only changes documentation.' },
@@ -95,14 +120,14 @@ async function bootAt(dataDir: string) {
   return { db, receipts };
 }
 
-/** A booted database whose `judgment_receipts` was then rolled back to the old shape. */
-function seedOldShapeDataDir(label: string): Promise<string> {
+/** A booted database whose `judgment_receipts` was then rolled back to an earlier shape. */
+function seedOldShapeDataDir(label: string, shapeSql = OLD_SHAPE_SQL): Promise<string> {
   const dataDir = disposableDataDir(label);
   return bootAt(dataDir).then(({ db }) => {
     db.closeDb();
     const sqlite = new Database(dbPathOf(dataDir));
     try {
-      sqlite.exec(OLD_SHAPE_SQL);
+      sqlite.exec(shapeSql);
     } finally {
       sqlite.close();
     }
@@ -127,6 +152,7 @@ const receiptInput = (packetId: string) => ({
   laneId: null,
   approvalId: `apr-${packetId}`,
   surface: 'approval-card',
+  route: 'direct' as const,
 });
 
 /** Write and read one receipt through the real writer and reader. */
@@ -140,6 +166,7 @@ async function writeAndReadBack(dataDir: string, packetId: string) {
   expect(stored.hiddenText).toBe(true);
   expect(stored.truncated).toBe(false);
   expect(stored.questions).toEqual(QUESTIONS);
+  expect(stored.route).toBe('direct');
   return stored;
 }
 
@@ -205,6 +232,29 @@ describe('judgment receipts boot migration across database shapes', () => {
     expect(receiptWriteWarnings()).toEqual([]);
   });
 
+  it('adds route to a pre-existing table that predates it (#2483) and the next insert succeeds', async () => {
+    const dataDir = await seedOldShapeDataDir('pre-route', PRE_ROUTE_SHAPE_SQL);
+    expect(columnNames(dataDir)).not.toContain('route');
+    // A row written before the column existed reads back with route null.
+    const seeded = new Database(dbPathOf(dataDir));
+    try {
+      seeded.prepare(`
+        INSERT INTO judgment_receipts (id, provider, ok, questions_json, latency_ms, attempts, packet_id, created_at)
+        VALUES ('jdg_legacy', 'typesafe', 1, ?, 10, 1, 'pkt-pre-route-legacy', '2026-09-01T00:00:00.000Z')
+      `).run(JSON.stringify(QUESTIONS));
+    } finally {
+      seeded.close();
+    }
+
+    const { receipts } = await bootAt(dataDir);
+
+    expect(columnNames(dataDir)).toEqual(CURRENT_COLUMNS);
+    expect(columnRows(dataDir).find((row) => row.name === 'route')).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null });
+    expect(receipts.listJudgmentReceipts({ packetId: 'pkt-pre-route-legacy' })[0].route).toBeNull();
+    await writeAndReadBack(dataDir, 'pkt-pre-route');
+    expect(receiptWriteWarnings()).toEqual([]);
+  });
+
   it('leaves a database already at the current shape untouched', async () => {
     const dataDir = disposableDataDir('current');
     const { db } = await bootAt(dataDir);
@@ -259,6 +309,7 @@ describe('judgment receipts boot migration across database shapes', () => {
     expect(receipt.id).toBe(result!.receiptId);
     expect(receipt.ok).toBe(true);
     expect(receipt.hiddenText).toBe(true);
+    expect(receipt.route).toBe('direct');
     expect(receiptWriteWarnings()).toEqual([]);
   });
 

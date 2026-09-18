@@ -207,6 +207,7 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
       laneId: context.laneId ?? null,
       approvalId: context.approvalId ?? null,
       surface: context.surface ?? null,
+      route: 'direct' as const,
     };
     const fail = (error: JudgmentError, attempts: number): null => {
       recordJudgmentReceipt({

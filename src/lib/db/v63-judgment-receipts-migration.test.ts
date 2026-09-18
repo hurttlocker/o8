@@ -12,7 +12,7 @@ describe('judgment receipts migration', () => {
         .map((column) => column.name);
       expect(columns).toEqual([
         'id', 'provider', 'model', 'ok', 'questions_json', 'answers_json', 'input_tokens', 'output_tokens',
-        'latency_ms', 'attempts', 'truncated', 'hidden_text', 'error_json', 'packet_id', 'lane_id', 'approval_id', 'surface', 'created_at',
+        'latency_ms', 'attempts', 'truncated', 'hidden_text', 'error_json', 'packet_id', 'lane_id', 'approval_id', 'surface', 'created_at', 'route',
       ]);
     } finally {
       sqlite.close();
