@@ -14,7 +14,6 @@ import {
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { selectMobileReviewApprovalId } from '@/lib/mobile/action-approval';
-import { approvedFromCardFact } from '@/lib/mobile/inbox-referee-chips';
 import {
   bindMobileActionIdempotency, mobileActionInProgressPayload,
   MobileActionUncacheableResponseError,
@@ -472,7 +471,7 @@ async function handleMobileActionPost(request: NextRequest) {
         approvalId,
         action === 'approve' ? 'approve' : 'reject',
         'mobile', payload.message?.trim(),
-        currentApproval.updatedAt, action === 'approve' ? approvedFromCardFact(payload.via, currentApproval) : undefined,
+        currentApproval.updatedAt,
       );
       const approval = resolutionClaim.approval;
       if (!approval) return actionErrorResponse('Approval not found.', 404);

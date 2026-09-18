@@ -3,7 +3,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { approveFromChipCard } from '@/components/mobile/InboxRefereeChips';
 import { useTheme } from '@/lib/theme/context';
 import { ThemeProvider as MobileThemeProvider } from '@/components/mobile/ThemeContext';
 import { compactLine as mobileCompactLine } from '@/components/mobile/utils';
@@ -324,12 +323,13 @@ export function MobileApprovalsClient({
     return () => { if (detach) detach(); };
   }, []);
 
-  const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject', strategy?: string) => {
+  const handleResolve = useCallback(async (id: string, action: 'approve' | 'reject', strategy?: string, via?: 'chip') => {
     setResolving({ id, action });
     triggerHaptic(action === 'approve' ? 'success' : 'warn');
     try {
       const payload: Record<string, string> = { action, id };
       if (strategy) payload.strategy = strategy;
+      if (via) payload.via = via;
       const response = await fetch('/api/panel/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -450,9 +450,9 @@ export function MobileApprovalsClient({
   const openSearchSheet = useCallback(() => setSearchSheetOpen(true), []);
   useMobileSearchHotkey(openSearchSheet);
 
-  const handleSnapshotApprove = useCallback((approvalId?: string) => {
+  const handleSnapshotApprove = useCallback((approvalId?: string, via?: 'chip') => {
     if (!approvalId) return;
-    void handleResolve(approvalId, 'approve');
+    void handleResolve(approvalId, 'approve', undefined, via);
   }, [handleResolve]);
 
   const handleSnapshotDeny = useCallback((approvalId?: string) => {
@@ -806,9 +806,7 @@ export function MobileApprovalsClient({
                     onAgentSelect={() => {
                       handleBackToChats();
                     }}
-                    onApprove={(item) => (item.refereeChips?.length
-                      ? void approveFromChipCard(item).then((failure) => { setError(failure); void loadInboxSnapshot(); })
-                      : handleSnapshotApprove(item.approvalId))}
+                    onApprove={(item) => handleSnapshotApprove(item.approvalId, item.refereeChips?.length ? 'chip' : undefined)}
                     onDeny={(item) => handleSnapshotDeny(item.approvalId)}
                     onRefresh={loadInboxSnapshot}
                     hideHeader

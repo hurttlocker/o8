@@ -3,9 +3,9 @@
  *
  * The desktop reads the merge-card referee facts already stored on an approval
  * (#2435) and attaches a chip when a calibrated fact clears its threshold. The
- * phone never calls the referee. Nothing decides on a chip: approving from a
- * card with chips goes through the same approve action as any other card, and
- * only records that the chips were shown.
+ * phone never calls the referee. Nothing decides on a chip: a card with chips
+ * approves through the same `/api/panel/approvals` call as every other card,
+ * adding only `via: 'chip'`, which records that the chips were shown.
  *
  * One chip is calibrated today: "Docs only". It needs BOTH o8's own
  * path-derived docsOnly (the rule in `judgment/diff-state.ts`, over the same
@@ -19,7 +19,7 @@ import { thresholdAnswer } from '@/lib/judgment/client';
 import { buildDiffState } from '@/lib/judgment/diff-state';
 import { DOCS_ONLY_CHIP_THRESHOLD } from '@/lib/judgment/questions';
 import { isInboxUrgencyEnabled } from '@/lib/mobile/inbox-urgency';
-import type { MobileActionRequest, MobileInboxRefereeChip, MobileInboxSnapshot } from '@/lib/mobile/types';
+import type { MobileInboxRefereeChip, MobileInboxSnapshot } from '@/lib/mobile/types';
 
 /** o8's path-derived docsOnly over the approval's diff, by the same rule the referee state uses. */
 function pathDocsOnly(approval: ApprovalRecord): boolean {
@@ -67,6 +67,6 @@ export function approvedFromCardFact(
   via: unknown,
   approval: ApprovalRecord,
 ): ApprovalAuditEvent['approvedFromCard'] {
-  if (via !== ('chip' satisfies MobileActionRequest['via'])) return undefined;
+  if (via !== 'chip') return undefined;
   return { via: 'chip', chipsShown: refereeChipsForApproval(approval).map((chip) => chip.kind) };
 }

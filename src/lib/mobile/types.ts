@@ -466,8 +466,6 @@ export interface MobileActionRequest {
   attachments?: MobileActionAttachment[];
   runId?: string;
   cwd?: string;
-  /** `'chip'`: approved from an inbox card that showed referee chips (#2439). Other values are ignored. */
-  via?: 'chip';
 }
 
 export interface MobileActionResponse {

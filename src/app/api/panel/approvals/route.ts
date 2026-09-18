@@ -27,6 +27,7 @@ import { launchRuntimeSurface } from '@/lib/runtime/actions';
 import type { RuntimeId } from '@/lib/runtimes';
 import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
+import { approvedFromCardFact } from '@/lib/mobile/inbox-referee-chips';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { findLaneBySession, getLane } from '@/lib/lane/registry';
 
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
  *
  * Create: { action: 'create', approval: CreateApprovalInput }
  * Create test: { action: 'test', sessionKey?: string }
- * Resolve: { action: 'approve' | 'reject', id: string, editedCommand?: string }
+ * Resolve: { action: 'approve' | 'reject', id: string, editedCommand?: string, via?: 'chip' }
  */
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -279,6 +280,7 @@ export async function POST(request: NextRequest) {
       'desktop',
       rejectReason,
       current.updatedAt,
+      action === 'approve' ? approvedFromCardFact(body.via, current) : undefined,
     );
     const approval = resolutionClaim.approval;
     if (!approval) {

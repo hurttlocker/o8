@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, type CSSProperties } from 'react';
-import type { MobileInboxItem, MobileInboxRefereeChip } from '@/lib/mobile/types';
+import type { MobileInboxRefereeChip } from '@/lib/mobile/types';
 
 const SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif';
 const LONG_PRESS_MS = 450;
@@ -12,27 +12,6 @@ interface ChipPalette {
   cardBorder: string;
   textSecondary: string;
   textTertiary: string;
-}
-
-/**
- * Approve an inbox card that showed referee chips (#2439). Same approve action
- * the inbox item carries, marked `via: 'chip'` so the approval event records
- * that the chips were shown. Returns an error message, or null on success.
- */
-export async function approveFromChipCard(item: MobileInboxItem): Promise<string | null> {
-  if (!item.approvalId || !item.sessionKey) return 'Approval is missing its id.';
-  try {
-    const response = await fetch('/api/mobile/action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'approve', sessionKey: item.sessionKey, approvalId: item.approvalId, via: 'chip' }),
-    });
-    if (response.ok) return null;
-    const data = await response.json().catch(() => ({})) as { error?: string };
-    return data.error ?? 'Failed to resolve approval';
-  } catch {
-    return 'Unable to reach server';
-  }
 }
 
 function RefereeChip({ chip, palette }: { chip: MobileInboxRefereeChip; palette: ChipPalette }) {
