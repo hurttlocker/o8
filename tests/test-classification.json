@@ -960,6 +960,12 @@
       ]
     },
     {
+      "path": "tests/acp-orchestrator-turn-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/activity-local-commits.test.ts",
       "reasons": [
         "child-process",
@@ -3338,6 +3344,17 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-reaper-non-git-dirs-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "terminal-tool",
         "worktree",
         "worktree-api"
       ]

@@ -168,6 +168,8 @@ export interface AcpBackendConfig {
   label: string;
   /** Resolve the launch command; null when the agent isn't available/configured. */
   resolveLaunch: (repoPath: string) => AcpLaunch | null;
+  /** Handshake/config request bound; tests shrink it. Defaults to AcpClient's. */
+  requestTimeoutMs?: number;
 }
 
 export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
@@ -193,6 +195,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         cwd: repoPath,
         env: launch.env,
         onEvent: (event) => session.onEvent?.(event),
+        requestTimeoutMs: config.requestTimeoutMs,
       }),
     };
     sessions.set(key, session);
@@ -308,7 +311,10 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
           leadModel: session.appliedModel ?? defaultModelFor(id) ?? id,
           effort: options?.thinkingEffort ?? 'adaptive',
         });
-        const stopReason = await session.client.prompt(sessionId, message);
+        // session/prompt resolves only at end of turn, so the per-request RPC
+        // default would bound the whole turn (#2472). The watchdog and abort
+        // are the real bounds.
+        const stopReason = await session.client.prompt(sessionId, message, ACP_PROCESS_TIMEOUT_MS);
         const doneOrError = produced === 0 && stopReason === 'end_turn'
           ? ({
             type: 'error',
