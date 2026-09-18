@@ -1,9 +1,10 @@
 /**
  * #2467 — record-only event triage before an orchestrator wake.
  *
- * Real-path doctrine: the review-continuation chokepoint is the real
- * `queueReviewContinuation` the ws-server delegates to (the wiring is
- * asserted against the ws-server source); the layer-2 chokepoint is reached
+ * Real-path doctrine: the review-continuation and supervisor-escalation
+ * chokepoints are the real `queueReviewContinuation` and
+ * `queueOrchestratorEscalation` the ws-server delegates to (only which enqueue
+ * it passes is asserted against the ws-server source); the layer-2 chokepoint is reached
  * through the real merge entry point (`performWorktreeSideMerge`) on a real
  * git repo and worktree. The provider setting lives in the real
  * operator-defaults store, the key in the data-dir key file, and the call goes
@@ -46,7 +47,8 @@ const { __resetIdempotencyStoreForTests } = await import('@/lib/orchestrator/ide
 const { getSqlite } = await import('@/lib/db');
 const { judgmentKeyPath } = await import('@/lib/judgment/key');
 const { queueReviewContinuation } = await import('@/lib/orchestrator/review-continuation');
-const { setWakeTriageTransportForTests, waitForWakeTriage, escalationSessionKey } = await import('@/lib/orchestrator/wake-triage');
+const { queueOrchestratorEscalation } = await import('@/lib/orchestrator/supervisor-escalation');
+const { setWakeTriageTransportForTests, waitForWakeTriage } = await import('@/lib/orchestrator/wake-triage');
 const { runReplay } = await import('../scripts/judgment-replay.mjs');
 
 const KEY = 'ts-fixture-key-wake-triage-2467';
@@ -182,7 +184,7 @@ beforeEach(async () => {
   fixture.reset();
   h.verify.mockReset();
   h.verify.mockResolvedValue({ ok: false, kind: 'typecheck', output: FAILURE_OUTPUT, checks: [] });
-  await updateOperatorDefaults({ judgmentProvider: 'typesafe', reviewContinuation: true });
+  await updateOperatorDefaults({ judgmentProvider: 'typesafe', reviewContinuation: true, supervisorAutoEscalate: false });
 });
 
 afterEach(() => {
@@ -255,15 +257,84 @@ describe('wake triage at the review-continuation chokepoint', () => {
     for (const line of message.split('\n')) expect(serialized).not.toContain(line);
   });
 
-  it('is wired into the ws-server wake chokepoints', () => {
+  it('is wired into the ws-server: each wake function delegates with the real enqueue', () => {
+    // The only part execution cannot reach: which enqueue the ws-server passes.
+    // Both bodies run for real in the tests above and below.
     const source = readFileSync(join(process.cwd(), 'src/ws-server.ts'), 'utf8');
-    const review = source.slice(source.indexOf('function queueReviewContinuation('), source.indexOf('async function drainOrchestratorAutoQueue'));
-    expect(review).toContain('queueReviewContinuationTurn(lane, enqueueOrchestratorAutoMessage)');
-    const escalation = source.slice(source.indexOf('function queueOrchestratorEscalation('), source.indexOf('function queueReviewContinuation('));
-    const hook = escalation.indexOf("startWakeTriage({ source: 'supervisor-escalation', sessionKey: escalationSessionKey(message) })");
-    expect(hook).toBeGreaterThan(escalation.indexOf('resolveSupervisorAutoEscalateSync()'));
-    expect(hook).toBeLessThan(escalation.indexOf("enqueueOrchestratorAutoMessage(repoPath, message, 'escalation')"));
-    expect(escalationSessionKey('[SUPERVISOR] Agent "x (y)" (codex-owned:abc) — STUCK for 5m')).toBe('codex-owned:abc');
+    expect(source).toContain('queueReviewContinuationTurn(lane, enqueueOrchestratorAutoMessage);');
+    expect(source).toContain('queueSupervisorEscalationTurn(repoPath, message, enqueueOrchestratorAutoMessage);');
+  });
+});
+
+describe('wake triage at the supervisor-escalation chokepoint', () => {
+  const escalationMessage = (sessionKey: string) => [
+    `[SUPERVISOR] Agent "${PACKET_TITLE}" (${sessionKey}) — FAILED after 2 attempts (4m)`,
+    '',
+    `Last transcript:\n[10:00] assistant: ${WORKER_TEXT}`,
+    '',
+    'Auto-retry exhausted. Diagnose the failure and decide: relaunch with a different approach, or report to the user.',
+  ].join('\n');
+
+  function supervisedLane(packetId: string) {
+    const sessionKey = `codex-owned:${packetId}`;
+    const lane = createLane({
+      repoPath: dataDir, worktreePath: dataDir, branch: `inline/${packetId}`, baseBranch: 'main',
+      runtime: 'codex', label: PACKET_TITLE, packetId, sessionKey,
+    });
+    return { lane, sessionKey };
+  }
+
+  it('records wake_triage for the escalated lane and enqueues the message unchanged', async () => {
+    await updateOperatorDefaults({ supervisorAutoEscalate: true });
+    const { lane, sessionKey } = supervisedLane('pkt-sup-on');
+    fixture.replies.push(triageReply('wake', { handleInPlace: 0.1, queue: 0.15, wake: 0.75 }));
+    const message = escalationMessage(sessionKey);
+    const queued: unknown[][] = [];
+
+    queueOrchestratorEscalation(dataDir, message, (...args) => queued.push(args));
+    expect(queued).toEqual([[dataDir, message, 'escalation']]);
+    await waitForWakeTriage(lane.id);
+
+    const events = orderedEvents(lane.id);
+    const triage = events.filter((event) => event.verb === 'wake_triage');
+    expect(triage).toHaveLength(1);
+    const receipt = events.find((event) => event.verb === 'judgment')!.payload;
+    expect(receipt).toMatchObject({ ok: true, surface: 'orchestrator-wake-triage', packetId: 'pkt-sup-on' });
+    expect(triage[0].payload).toMatchObject({ receiptId: receipt.receiptId, source: 'supervisor-escalation', choice: 'wake' });
+    expect(fixture.seen).toHaveLength(1);
+    const serialized = JSON.stringify(fixture.seen[0].body);
+    expect(serialized).not.toContain(PACKET_TITLE);
+    expect(serialized).not.toContain('WORKER-2467');
+    expect(serialized).not.toContain('Auto-retry exhausted');
+    expect((fixture.seen[0].body as { state: unknown }).state).toMatchObject({ source: 'supervisor-escalation', lane: { status: 'idle' } });
+  });
+
+  it('with judgment off: enqueues the same message, records nothing, sends nothing', async () => {
+    await updateOperatorDefaults({ supervisorAutoEscalate: true, judgmentProvider: 'off' });
+    const { lane, sessionKey } = supervisedLane('pkt-sup-off');
+    const before = JSON.stringify(orderedEvents(lane.id));
+    const message = escalationMessage(sessionKey);
+    const queued: unknown[][] = [];
+
+    queueOrchestratorEscalation(dataDir, message, (...args) => queued.push(args));
+    await waitForWakeTriage(lane.id);
+
+    expect(queued).toEqual([[dataDir, message, 'escalation']]);
+    expect(JSON.stringify(orderedEvents(lane.id))).toBe(before);
+    expect(fixture.seen).toHaveLength(0);
+  });
+
+  it('with auto-escalate off: no wake, so no triage', async () => {
+    await updateOperatorDefaults({ supervisorAutoEscalate: false });
+    const { lane, sessionKey } = supervisedLane('pkt-sup-suppressed');
+    const queued: unknown[][] = [];
+
+    queueOrchestratorEscalation(dataDir, escalationMessage(sessionKey), (...args) => queued.push(args));
+    await waitForWakeTriage(lane.id);
+
+    expect(queued).toHaveLength(0);
+    expect(orderedEvents(lane.id).some((event) => event.verb === 'wake_triage' || event.verb === 'judgment')).toBe(false);
+    expect(fixture.seen).toHaveLength(0);
   });
 });
 

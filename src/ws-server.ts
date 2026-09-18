@@ -217,10 +217,9 @@ import {
   getOperatorDefaultsSync,
   resolveHealBotEnabledSync,
   resolveInAppOrchestratorEnabledSync,
-  resolveSupervisorAutoEscalateSync,
 } from './lib/operator/defaults';
 import { queueReviewContinuation as queueReviewContinuationTurn, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
-import { escalationSessionKey, startWakeTriage } from './lib/orchestrator/wake-triage';
+import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
@@ -1332,18 +1331,7 @@ function enqueueOrchestratorAutoMessage(
 }
 
 function queueOrchestratorEscalation(repoPath: string, message: string): void {
-  // Supervisor escalations spawn fresh orchestrator turns into the user's
-  // chat — that's how codex agent narrative + bash runs end up bleeding into
-  // the orchestrator transcript. Default OFF: supervisor failures surface via
-  // lane status + activity feed instead, leaving the chat clean.
-  // Set O8_SUPERVISOR_AUTO_ESCALATE=1 (or flip Settings → Dispatch &
-  // Supervision → Auto-escalate) to restore the old auto-investigation.
-  if (!resolveSupervisorAutoEscalateSync()) {
-    console.log(`[supervisor] Escalation suppressed (auto-escalate disabled): ${repoPath} — ${message.slice(0, 80)}`);
-    return;
-  }
-  startWakeTriage({ source: 'supervisor-escalation', sessionKey: escalationSessionKey(message) });
-  enqueueOrchestratorAutoMessage(repoPath, message, 'escalation');
+  queueSupervisorEscalationTurn(repoPath, message, enqueueOrchestratorAutoMessage);
 }
 
 function queueReviewContinuation(lane: ReviewContinuationLane): void {
