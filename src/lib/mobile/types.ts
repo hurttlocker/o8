@@ -404,6 +404,8 @@ export interface MobileTranscriptEntry {
     };
     /** Stable archive basename; the full turns remain retrievable through /recall. */
     archiveRef?: string;
+    /** Record-only judgment scores per compacted entry (#2465); nothing reads them. */
+    scorer?: import('@/lib/orchestrator/compaction-scorer').CompactionScorerRecord;
   };
   /** Structured orchestrator status event (mission complete / merge / heal) — rendered as OrchestratorStatusCard. */
   statusEvent?: import('@/lib/orchestrator/status-events').OrchestratorStatusEventData;

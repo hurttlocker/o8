@@ -9,6 +9,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 import { logUsage } from '@/lib/db/usage';
+import { scoreCompactionSegment } from '@/lib/orchestrator/compaction-scorer';
 const HISTORY_DIR = path.join(getDataDir(), 'chat-history');
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
@@ -372,6 +373,8 @@ export async function autoCompactOrchestratorThread(input: {
     }
     const compactedAt = new Date();
     const compactedStamp = fmtStamp(compactedAt);
+    // Record-only judgment scores (#2465), asked beside the summarizer; nothing reads them.
+    const scorerJob = scoreCompactionSegment(compactedTurns);
     const summaryResult = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
     const summary = summaryResult.text;
     recordCompactionUsage(repoPath, thread?.tabId ?? input.threadId?.trim() ?? null, summaryResult, compactedAt);
@@ -397,6 +400,8 @@ export async function autoCompactOrchestratorThread(input: {
     const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
     const tokensAfter = approxTokens(resumePrelude);
     compactionEntry.compaction!.tokensAfter = tokensAfter;
+    const scorer = await scorerJob;
+    if (scorer) compactionEntry.compaction!.scorer = scorer;
     await mkdir(ARCHIVE_DIR, { recursive: true });
     const archiveRef = `${thread?.tabId ?? 'thoughts'}-${compactionEntry.id}.json`;
     compactionEntry.compaction!.archiveRef = archiveRef;
@@ -408,6 +413,7 @@ export async function autoCompactOrchestratorThread(input: {
       turns: compactedTurns.map(toStoredMessage),
       summary,
       compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
+      ...(scorer ? { scorer } : {}),
     }));
     if (thread) {
       persistCanonicalChatHistoryRecord(thread.tabId, {

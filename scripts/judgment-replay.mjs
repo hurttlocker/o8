@@ -15,7 +15,12 @@
  * printed with it.
  *
  * Run with:
- *   node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json]
+ *   node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label NAME]
+ *
+ * --label picks one label. `compaction` (#2465) is different in kind: it sends
+ * nothing and reads the scores auto-compaction already recorded in the
+ * orchestrator archives, labeled by whether later turns reused an identifier
+ * from each entry (see scripts/lib/judgment-replay-compaction.mjs).
  *
  * --dry-run prints each request body and sends nothing; it works with
  * judgment.provider off. Without it the script refuses to run while the
@@ -30,12 +35,15 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { summarize } from './lib/judgment-replay-metrics.mjs';
+import { labelCompaction, loadCompactionHistory } from './lib/judgment-replay-compaction.mjs';
 
 const SURFACE = 'calibration-replay';
 const USD_PER_BILLION_INPUT_TOKENS = 42;
 const OPERATOR_ACTORS = new Set(['desktop', 'mobile']);
 const GATE_FAILURE_VERBS = ['typecheck_auto_retry', 'typecheck_escalation'];
 const LABELS = ['gateFailed', 'operatorRejected', 'mergedClean'];
+const COMPACTION_LABEL = 'compaction';
+const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction]';
 const TSX_MARKER = 'O8_JUDGMENT_REPLAY_TSX_LOADER';
 
 /**
@@ -49,15 +57,19 @@ const PREDICTORS = {
 };
 
 export function parseReplayArgs(argv) {
-  const options = { dryRun: false, limit: null, out: null };
+  const options = { dryRun: false, limit: null, out: null, label: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--dry-run') options.dryRun = true;
-    else if (arg === '--limit' || arg === '--out') {
+    else if (arg === '--limit' || arg === '--out' || arg === '--label') {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) return { error: `${arg} needs a value` };
       index += 1;
       if (arg === '--out') options.out = value;
+      else if (arg === '--label') {
+        if (value !== COMPACTION_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
+        options.label = value;
+      }
       else {
         const limit = Number(value);
         if (!Number.isInteger(limit) || limit < 1) return { error: '--limit must be a positive integer' };
@@ -237,7 +249,29 @@ function renderLabel(label, predictor, groups, lines) {
   return { predictor, abstained, ...summary };
 }
 
-export function renderReport({ groups, approvalsRead, withoutDiffText, notes, calls }) {
+/** The compaction label report: recorded p(needed) against later-turn reuse, one fold per compaction. */
+export function renderCompactionReport({ rows, notes }) {
+  const lines = [];
+  lines.push(`archives read: ${notes.archivesRead}; with scorer and later turns: ${notes.scored}; without scorer: ${notes.withoutScorer}; without later turns: ${notes.withoutLaterTurns}`);
+  lines.push(`entries without any identifier (counted not needed): ${notes.entriesWithoutIdentifiers}`);
+  const summary = summarize(rows);
+  if (summary.positives === 0 || summary.negatives === 0) {
+    lines.push(`${COMPACTION_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} scored entries)`);
+    return { text: lines.join('\n'), result: { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n } };
+  }
+  lines.push(`${COMPACTION_LABEL} by p(needed): n=${summary.n} scored entries (positives ${summary.positives}, negatives ${summary.negatives})`);
+  lines.push(`  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
+  lines.push('  reliability   bin        n  mean_p  observed');
+  for (const bin of summary.reliability) {
+    const range = `${bin.low.toFixed(1)}-${bin.high.toFixed(1)}`;
+    lines.push(`                ${range.padEnd(9)} ${String(bin.n).padStart(3)}  ${fmt(bin.meanPredicted, 2).padStart(6)}  ${fmt(bin.observedRate, 2).padStart(8)}`);
+  }
+  const lopo = summary.leaveOnePacketOut;
+  lines.push(`  keep-every-needed threshold, leave-one-compaction-out (${lopo.scoredFolds} of ${lopo.folds} compactions scored): kept but unneeded ${lopo.falseAlarms} of ${lopo.negativesEvaluated}, dropped but needed ${lopo.misses} of ${lopo.positivesEvaluated}`);
+  return { text: lines.join('\n'), result: summary };
+}
+
+export function renderReport({ groups, approvalsRead, withoutDiffText, notes, calls, only = null }) {
   const lines = [];
   const duplicates = groups.reduce((sum, group) => sum + group.approvalIds.length - 1, 0);
   lines.push(`approvals with diff_json: ${approvalsRead}; without diff text: ${withoutDiffText}`);
@@ -248,7 +282,7 @@ export function renderReport({ groups, approvalsRead, withoutDiffText, notes, ca
   for (const note of notes) lines.push(`note: ${note}`);
   lines.push('');
   const results = {};
-  for (const label of LABELS) {
+  for (const label of only ? [only] : LABELS) {
     const answered = groups.filter((group) => group.labels[label] !== undefined && group.answers);
     const positives = answered.filter((group) => group.labels[label] === 1).length;
     const negatives = answered.length - positives;
@@ -285,7 +319,18 @@ export async function runReplay(argv, io = {}) {
   const parsed = parseReplayArgs(argv);
   if (parsed.error) { err(`[judgment-replay] ${parsed.error}`); return 1; }
   const { options } = parsed;
-  if (options.help) { out('usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json]'); return 0; }
+  if (options.help) { out(USAGE); return 0; }
+
+  if (options.label === COMPACTION_LABEL) {
+    const labeled = labelCompaction(...Object.values(loadCompactionHistory(dataPaths().dataDir)));
+    const report = renderCompactionReport(labeled);
+    out(report.text);
+    if (options.out) {
+      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: COMPACTION_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
+      out(`wrote ${options.out}`);
+    }
+    return 0;
+  }
 
   const [{ buildDiffState }, { DIFF_QUESTIONS }, { TYPESAFE_MODEL }] = await Promise.all([
     import('../src/lib/judgment/diff-state.ts'),
@@ -356,6 +401,7 @@ export async function runReplay(argv, io = {}) {
     withoutDiffText: collapsed.withoutDiffText,
     notes: history.notes,
     calls,
+    only: options.label,
   });
   out(report.text);
 
