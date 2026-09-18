@@ -622,7 +622,11 @@ async function persistSessionOutcome(
   // runs, customer runtimes) weren't going to feed any downstream brain
   // consumer anyway.
   if (!isLedgerRuntime(runtimeId) || !lane?.repoPath) return false;
-  await capturePacketCapacitySnapshot(lane, 'end');
+  // #2492 — the end capacity snapshot shells out per runtime (seconds). Detach
+  // it so the ledger insert, and the #2447 chain on its result, never wait on it.
+  void capturePacketCapacitySnapshot(lane, 'end').catch((err) => {
+    console.warn('[capacity-snapshot] end snapshot failed for', context.packetId, err);
+  });
   const db = getDb();
   if (!db) return false;
 
