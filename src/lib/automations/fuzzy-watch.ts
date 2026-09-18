@@ -12,7 +12,9 @@
  * report: the condition is the one piece of free text, because it is the
  * question's object. Every call writes a judgment receipt, and every answered
  * call is recorded on the watch's ledger with its receipt id. A failed or
- * skipped call changes nothing.
+ * skipped call changes nothing. A watch fires at most once: once it has a fire
+ * row, the pass neither asks nor fires for it again, whether or not that fire
+ * has run yet.
  *
  * Setting off: the tick returns before any database read, git, or network, and
  * the creation route refuses fuzzy watches, so none can exist.
@@ -233,17 +235,24 @@ export async function evaluateFuzzyWatch(
   if (!met) return null;
 
   const fingerprint = `fuzzy-watch:${watch.id}:${result.receiptId ?? nowMs}`;
-  const fire = persistWatchAutomationFire(watch.id, {
-    sequence: 0,
-    sourceKind: watch.watch_source_kind,
-    sourceId: watch.watch_source_id ?? watch.id,
-    repoPath: watch.repo_path || null,
-    eventType: 'condition_met',
-    fingerprint,
-    payload: { p, streak, receiptId: result.receiptId },
-    occurredAt: nowMs,
-    persistedAt: nowMs,
-  }, nowMs);
+  const fire = sqlite.transaction(() => {
+    // The pass owns its one-shot guard: the fire row is the marker, checked and
+    // written in one transaction. Disabling or parking the row here would not
+    // work: the Symon action skips a disabled, unparked row as settled, and
+    // the drain would announce a parked one a second time.
+    if (sqlite.prepare('SELECT 1 FROM automation_fires WHERE automation_id = ? LIMIT 1').get(watch.id)) return undefined;
+    return persistWatchAutomationFire(watch.id, {
+      sequence: 0,
+      sourceKind: watch.watch_source_kind,
+      sourceId: watch.watch_source_id ?? watch.id,
+      repoPath: watch.repo_path || null,
+      eventType: 'condition_met',
+      fingerprint,
+      payload: { p, streak, receiptId: result.receiptId },
+      occurredAt: nowMs,
+      persistedAt: nowMs,
+    }, nowMs);
+  }).immediate();
   if (fire) {
     sqlite.prepare(`
       UPDATE automations SET watch_last_fire_at = ?, updated_at = datetime('now') WHERE id = ?
@@ -267,6 +276,9 @@ export async function evaluateFuzzyWatches(nowMs: number = Date.now()): Promise<
     WHERE enabled = 1 AND trigger_kind = 'watch' AND symon_fuzzy_condition IS NOT NULL
       AND watch_source_kind IS NOT NULL
       AND (watch_expires_at IS NULL OR watch_expires_at > ?)
+      -- A Symon watch is one-shot, so a fire row means it has fired. The row
+      -- stays enabled until the Symon action runs, which can be ticks later.
+      AND NOT EXISTS (SELECT 1 FROM automation_fires f WHERE f.automation_id = automations.id)
     ORDER BY created_at ASC, rowid ASC
   `).all(nowMs) as FuzzyWatchRow[];
   if (rows.length === 0) return [];

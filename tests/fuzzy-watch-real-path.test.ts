@@ -45,7 +45,8 @@ const mobileWatchesRoute = await import('@/app/api/mobile/symon/watches/route');
 const { getSqlite, closeDb } = await import('@/lib/db');
 const { createLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
-const { listAutomationFires } = await import('@/lib/automations/fire-store');
+const { listAutomationFires, claimNextAutomationFire, settleAutomationFire } = await import('@/lib/automations/fire-store');
+const { materializeWatchAutomationFires } = await import('@/lib/automations/watch-store');
 const { runAutomationSchedulerTick } = await import('@/lib/automations/scheduler');
 const { setFuzzyWatchTransportForTests, FUZZY_WATCH_REFUSAL } = await import('@/lib/automations/fuzzy-watch');
 const { readSymonWatchLedger, closeSymonWatchLedger } = await import('@/lib/automations/symon-watch-ledger');
@@ -195,6 +196,31 @@ describe('fuzzy Symon watches through the real route and scheduler tick', () => 
       release();
       setFuzzyWatchTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 2_000, maxAttempts: 1 });
     }
+  }, 30_000);
+
+  it('fires once while the condition stays true, even when its fire waits in the queue', async () => {
+    // Another scheduler holds the only automation slot, so the fuzzy fire waits
+    // pending, unrun, with the watch row still enabled, for several ticks.
+    const blocker = await createWatch({ packetId: 'pkt-block', fuzzy: false, text: 'tell me when pkt-block asks for review', events: ['review_requested'] });
+    expect(blocker.status).toBe(200);
+    seedPacket('pkt-block');
+    materializeWatchAutomationFires(clock);
+    const held = claimNextAutomationFire({ workerId: 'other-scheduler', leaseMs: 60 * 60 * 1_000, concurrencyCap: 1, nowMs: clock });
+    expect(held).not.toBeNull();
+
+    seedPacket('pkt-steady');
+    const watchId = await createFuzzyWatch('pkt-steady');
+    for (let index = 0; index < 8; index += 1) fixture.replies.push(noul(0.9));
+    for (let index = 0; index < 5; index += 1) await tick();
+
+    settleAutomationFire({ fireId: held!.id, workerId: 'other-scheduler', leaseToken: held!.leaseToken!, ok: true, nowMs: clock });
+    for (let index = 0; index < 3; index += 1) await tick();
+
+    const symonActions = readSymonWatchLedger(watchId, 50).filter((event) => ['watch_fired', 'watch_parked'].includes(event.phase));
+    expect(listAutomationFires(watchId), 'exactly one fire row for the fuzzy watch').toHaveLength(1);
+    expect(symonActions, 'exactly one Symon action for the fuzzy watch').toHaveLength(1);
+    // Asked on ticks 1 and 2, fired, then never asked again.
+    expect(fixture.seen).toHaveLength(2);
   }, 30_000);
 
   it('never fires on a flickering answer', async () => {
