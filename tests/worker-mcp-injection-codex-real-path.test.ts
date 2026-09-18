@@ -84,6 +84,17 @@ function packet(packetId: string, branch: string): OrchestratorPacket {
 }
 
 async function createManagedLane(packetId: string, branch: string) {
+  const {
+    readOrchestratorControlPlaneState,
+    writeOrchestratorControlPlaneState,
+  } = await import('@/lib/orchestrator/control-plane');
+  const currentState = readOrchestratorControlPlaneState();
+  if (!currentState.packets.some((candidate) => candidate.id === packetId)) {
+    writeOrchestratorControlPlaneState({
+      ...currentState,
+      packets: [...currentState.packets, packet(packetId, branch)],
+    });
+  }
   const { captureWorktreeMaterializationIdentity } = await import(
     '@/lib/worktree/materialization-identity'
   );
@@ -261,7 +272,7 @@ describe.sequential('Codex worker MCP injection real path', () => {
       prompt: launchPrompt,
       actor: 'orchestrator',
     });
-    expect(launchResult.ok).toBe(true);
+    expect(launchResult.ok, launchResult.note || 'launch refused').toBe(true);
     const launchArgs = spawnedArgs(launchCall);
     const expectedOverrides = [
       `mcp_servers.packet-observer.command=${JSON.stringify(process.execPath)}`,
