@@ -157,8 +157,13 @@ function ageBucket(ageMinutes: number | null): string {
   return '240+';
 }
 
+/** The merge-card referee lands after creation (#2435); a score asked without its facts is re-asked once they exist. */
+function refereeFingerprint(referee: InboxItemFacts['mergeCardReferee']): string {
+  return referee ? `${referee.docsOnly.toFixed(2)}:${referee.risk.toFixed(2)}` : 'none';
+}
+
 function urgencyFingerprint(itemId: string, facts: InboxItemFacts): string {
-  return [itemId, facts.laneState, ageBucket(facts.ageMinutes)].join('\u0000');
+  return [itemId, facts.laneState, ageBucket(facts.ageMinutes), refereeFingerprint(facts.mergeCardReferee)].join('\u0000');
 }
 
 function rememberScore(fingerprint: string, value: CachedUrgency): void {
