@@ -9,13 +9,15 @@
  * and the call goes over HTTP to the local systemone fixture. Stubbed: the
  * completion typecheck, the liveness probe, the cost write, the machine
  * capacity snapshot, and the runtime transcript (a registered runtime returns
- * a fixed transcript).
+ * a fixed transcript), except in the Codex adapter case, which reads a real
+ * Codex rollout JSONL through the real codex runtime's readTranscript.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
+import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -53,10 +55,17 @@ vi.mock('@/lib/lane/report-claim-check', async (importOriginal) => {
 const originalEnv = {
   CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR,
   O8_DATA_DIR: process.env.O8_DATA_DIR,
+  CODEX_HOME: process.env.CODEX_HOME,
 };
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-report-claim-check-data-'));
+const codexHome = join(dataDir, 'codex-home');
+const WORKER_TOKEN = 'local-worker-token-report-claim-2447-0123456789';
+const WS_TOKEN = 'operator-ws-token-report-claim-2447-abcdef';
+writeFileSync(join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
+writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf-8');
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
+process.env.CODEX_HOME = codexHome;
 
 const { getSqlite } = await import('@/lib/db');
 const { createLane } = await import('@/lib/lane/registry');
@@ -67,6 +76,8 @@ const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { judgmentKeyPath } = await import('@/lib/judgment/key');
 const { registerRuntime } = await import('@/lib/runtimes/registry');
 const { setReportClaimCheckTransportForTests, waitForReportClaimCheck } = await import('@/lib/lane/report-claim-check');
+const { codexRuntime } = await import('@/lib/runtimes/codex');
+const claimRoute = await import('@/app/api/orchestrator/claim-unbacked/route');
 
 const KEY = 'ts-fixture-key-report-claim-2447';
 const PACKET_TITLE = 'Rewrite the billing reconciler';
@@ -118,7 +129,7 @@ function packetFixture(id: string, repoPath: string): OrchestratorPacket {
 }
 
 /** A real repo whose packet branch changes src/feature.ts against main, and a running lane on it. */
-function setupPacket(packetId: string, withTestOutput: boolean) {
+function setupPacket(packetId: string, withTestOutput: boolean, sessionKey = `codex-owned:${packetId}`) {
   const root = mkdtempSync(join(os.tmpdir(), `${packetId}-`));
   gitDirs.push(root);
   git(root, ['init', '--initial-branch=main']);
@@ -135,13 +146,65 @@ function setupPacket(packetId: string, withTestOutput: boolean) {
   const repoPath = realpathSync(root);
 
   writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath, packets: [packetFixture(packetId, repoPath)] });
-  const sessionKey = `codex-owned:${packetId}`;
   h.transcripts.set(sessionKey, transcriptFor(packetId, withTestOutput));
   const lane = createLane({
     repoPath, worktreePath: repoPath, branch: `inline/${packetId}`, baseBranch: 'main',
     runtime: 'codex', label: PACKET_TITLE, packetId, sessionKey,
   });
   return { lane, sessionKey, repoPath };
+}
+
+const BRIEF_TEXT = `BRIEF-2447 Packet: ${PACKET_TITLE}. Implement the feature and keep this brief private.`;
+const PROGRESS_TEXT = 'Reading the module before editing.';
+const FINAL_REPORT = 'Updated src/feature.ts. Ran npm test: all 42 tests pass.';
+const STEER_TEXT = 'STEER-2447 from the orchestrator: also run lint before you stop.';
+
+function sqlString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * A real Codex home: `state_5.sqlite` with the thread row and the rollout
+ * JSONL the codex runtime parses. The window ends on an orchestrator steer
+ * (a user message) AFTER the worker's final assistant message.
+ */
+function writeCodexSession(threadId: string, cwd: string): void {
+  const rolloutDir = join(codexHome, 'sessions', '2026', '09', '18');
+  mkdirSync(rolloutDir, { recursive: true });
+  const rolloutPath = join(rolloutDir, `rollout-${threadId}.jsonl`);
+  const at = (second: number) => `2026-09-18T10:00:${String(second).padStart(2, '0')}.000Z`;
+  const message = (role: 'user' | 'assistant', text: string, second: number) => ({
+    timestamp: at(second),
+    type: 'response_item',
+    payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] },
+  });
+  const lines = [
+    { timestamp: at(0), type: 'session_meta', payload: { id: threadId, cwd } },
+    message('user', BRIEF_TEXT, 1),
+    message('assistant', PROGRESS_TEXT, 2),
+    { timestamp: at(3), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{"cmd":"npm test"}', call_id: 'call-1' } },
+    { timestamp: at(4), type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: TEST_OUTPUT } },
+    message('assistant', FINAL_REPORT, 5),
+    message('user', STEER_TEXT, 6),
+  ];
+  writeFileSync(rolloutPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf8');
+  const db = join(codexHome, 'state_5.sqlite');
+  execFileSync('sqlite3', [db, [
+    'create table if not exists threads (',
+    'id text primary key, title text, cwd text, updated_at integer, rollout_path text,',
+    'git_branch text, git_sha text, git_origin_url text, first_user_message text, model text, archived integer',
+    ');',
+    'create table if not exists logs (thread_id text, process_uuid text, ts integer);',
+    `insert into threads values (${sqlString(threadId)}, 'fixture', ${sqlString(cwd)}, ${Math.floor(Date.now() / 1_000)}, ${sqlString(rolloutPath)}, 'main', 'abc123', '', 'fixture task', 'fixture-model', 0);`,
+  ].join(' ')]);
+}
+
+function routeRequest(laneId: string | null, principal: 'operator' | 'worker'): NextRequest {
+  const query = laneId === null ? '' : `?laneId=${encodeURIComponent(laneId)}`;
+  return new NextRequest(`http://localhost:3001/api/orchestrator/claim-unbacked${query}`, {
+    method: 'GET',
+    headers: { host: 'localhost:3001', authorization: `Bearer ${principal === 'worker' ? WORKER_TOKEN : WS_TOKEN}` },
+  });
 }
 
 async function complete(packetId: string, sessionKey: string) {
@@ -308,4 +371,53 @@ describe('claim-versus-evidence check at packet completion', () => {
     expect(fixture.seen).toHaveLength(0);
     expect(judgmentEvents(off.lane.id)).toHaveLength(0);
   }, 30_000);
+
+  it('reads the report through the real Codex adapter: a trailing orchestrator steer is never sent as the report', async () => {
+    const threadId = 'thread-report-claim-2447';
+    const setup = setupPacket('pkt-claim-codex', false, `codex:${threadId}`);
+    writeCodexSession(threadId, setup.repoPath);
+    registerRuntime(codexRuntime);
+    fixture.replies.push(reportReply({ claimsTestsRun: 0.93, evidenceShowsTestsRun: 0.91, claimsFilesNotInDiff: 0.05, claimsVerifiedRealPath: 0.2 }));
+
+    await complete('pkt-claim-codex', setup.sessionKey);
+    await settleCheck(setup.lane.id, 'pkt-claim-codex');
+
+    expect(fixture.seen).toHaveLength(1);
+    const body = fixture.seen[0].body as { state: { report: { text: string }; verification: { outputPresent: boolean; tail: string | null } } };
+    expect(body.state.report.text).toBe(FINAL_REPORT);
+    expect(body.state.verification.outputPresent).toBe(true);
+    // The codex parser collapses whitespace in tool output.
+    expect(body.state.verification.tail).toContain('Tests 42 passed (42)');
+    const sent = JSON.stringify(fixture.seen[0].body);
+    expect(sent).not.toContain('STEER-2447');
+    expect(sent).not.toContain('BRIEF-2447');
+    expect(sent).not.toContain(PACKET_TITLE);
+  }, 30_000);
+
+  it('serves the latest unbacked claim to the operator only, through the real route handler', async () => {
+    const unbacked = setupPacket('pkt-claim-route-unbacked', false);
+    fixture.replies.push(reportReply({ claimsTestsRun: 0.94, evidenceShowsTestsRun: 0.03, claimsFilesNotInDiff: 0.06, claimsVerifiedRealPath: 0.2 }));
+    await complete('pkt-claim-route-unbacked', unbacked.sessionKey);
+    await settleCheck(unbacked.lane.id, 'pkt-claim-route-unbacked');
+    const clean = setupPacket('pkt-claim-route-clean', true);
+    fixture.replies.push(reportReply({ claimsTestsRun: 0.95, evidenceShowsTestsRun: 0.92, claimsFilesNotInDiff: 0.04, claimsVerifiedRealPath: 0.3 }));
+    await complete('pkt-claim-route-clean', clean.sessionKey);
+    await settleCheck(clean.lane.id, 'pkt-claim-route-clean');
+
+    const worker = await claimRoute.GET(routeRequest(unbacked.lane.id, 'worker'));
+    expect(worker.status).toBe(403);
+    expect(await worker.json()).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+
+    const operator = await claimRoute.GET(routeRequest(unbacked.lane.id, 'operator'));
+    expect(operator.status).toBe(200);
+    const recorded = claimEvents(unbacked.lane.id)[0].payload;
+    expect((await operator.json()).result.claim).toEqual(recorded);
+
+    const operatorClean = await claimRoute.GET(routeRequest(clean.lane.id, 'operator'));
+    expect(operatorClean.status).toBe(200);
+    expect((await operatorClean.json()).result.claim).toBeNull();
+
+    const missing = await claimRoute.GET(routeRequest(null, 'operator'));
+    expect(missing.status).toBe(400);
+  }, 60_000);
 });
