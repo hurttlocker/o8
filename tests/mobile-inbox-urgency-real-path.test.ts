@@ -34,9 +34,10 @@ process.env.O8_DATA_DIR = dataDir;
 // the temp dir so the inbox under test holds exactly the seeded approvals.
 process.env.HOME = dataDir;
 
-const { createApproval } = await import('@/lib/approvals/store');
+const { createApproval, getApproval } = await import('@/lib/approvals/store');
+const { setApprovalRefereeOptionsForTests, startApprovalReferee, waitForApprovalReferee } = await import('@/lib/approvals/referee');
 const { closeDb, getSqlite } = await import('@/lib/db');
-const { INBOX_QUESTIONS } = await import('@/lib/judgment/questions');
+const { DIFF_QUESTIONS, INBOX_QUESTIONS } = await import('@/lib/judgment/questions');
 const { judgmentKeyPath } = await import('@/lib/judgment/key');
 const { listJudgmentReceipts } = await import('@/lib/judgment/receipts');
 const { invalidateInboxCache } = await import('@/lib/mobile/inbox');
@@ -122,6 +123,29 @@ function scoreReply(answers: Array<{ itemId: string; score: number; confidence?:
   };
 }
 
+const RISK_LEGEND = Object.fromEntries(DIFF_QUESTIONS.risk.criteria.map((text, index) => [String(index), text]));
+
+/** The merge-card referee's reply (#2435), stored on the approval by the real referee. */
+function mergeCardRefereeReply(docsOnly: number, risk: number) {
+  return {
+    status: 200,
+    body: {
+      model: 'jev-1.13.0',
+      answers: {
+        docsOnly: { type: 'noul', noul: docsOnly },
+        touchesMiddlewareOrAuth: { type: 'noul', noul: 0.02 },
+        containsPlaceholderOrMockData: { type: 'noul', noul: 0.01 },
+        addsTests: { type: 'noul', noul: 0.03 },
+        scopeCreepBeyondTitle: { type: 'noul', noul: 0.1 },
+        testsReachRealEntryPoint: { type: 'noul', noul: 0.02 },
+        risk: { type: 'score', score: risk, confidence: 0.9, legend: RISK_LEGEND, probabilities: { 0: 0.8, 1: 0.2, 2: 0, 3: 0, 4: 0 } },
+        recommendedAction: { type: 'choice', choice: 'operatorCard', confidence: 0.7, probabilities: { autoApprove: 0.2, operatorCard: 0.7, reject: 0.1 } },
+      },
+      usage: { input_tokens: 300, output_tokens: 90 },
+    },
+  };
+}
+
 /** The snapshot's build clock is the one value two runs may legitimately disagree on. */
 const withoutBuildClock = (text: string) => text.replace(/"generatedAt":"[^"]*"/, '"generatedAt":"<clock>"');
 
@@ -140,11 +164,13 @@ beforeEach(async () => {
   invalidateInboxCache();
   fixture.reset();
   setInboxUrgencyTransportForTests({ endpoint: fixture.endpoint, retryBaseMs: 1, maxAttempts: 1, timeoutMs: 5_000 });
+  setApprovalRefereeOptionsForTests({ endpoint: fixture.endpoint, retryBaseMs: 1, maxAttempts: 1, timeoutMs: 5_000 });
   await updateOperatorDefaults({ judgmentProvider: 'off' });
 });
 
 afterAll(async () => {
   setInboxUrgencyTransportForTests(undefined);
+  setApprovalRefereeOptionsForTests(undefined);
   await fixture.close();
   closeDb();
   for (const [key, value] of Object.entries(originalEnv)) {
@@ -313,5 +339,57 @@ describe('referee-ordered mobile inbox through the real route', () => {
 
     held.release();
     await waitForInboxUrgency();
+  }, 60_000);
+  it('re-asks a card scored before its merge-card referee facts once they arrive (#2475)', async () => {
+    const path = 'docs/guide.md';
+    const diffText = [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, '@@ -1 +1 @@', '-old line', '+new line'].join('\n');
+    const approval = createApproval({
+      source: 'test',
+      runtime: 'codex',
+      agent: 'Codex',
+      sessionKey: 'codex:urgency-referee',
+      title: `${WORKER_TEXT} merge`,
+      description: `${WORKER_TEXT} description`,
+      summary: `${WORKER_TEXT} summary`,
+      diff: { path: 'multi-file', after: diffText, files: [{ path, status: 'M' as const, patch: '' }] },
+      risk: 'low',
+    });
+    const baseline = await readInbox();
+    const [itemId] = baseline.items.map((item) => item.id);
+    expect(baseline.items).toHaveLength(1);
+
+    // First poll lands before the referee has answered: the score is asked without its facts.
+    fixture.replies.push(scoreReply([{ itemId, score: 1 }]));
+    await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
+    await readInbox();
+    await waitForInboxUrgency();
+    expect((await readInbox()).items[0].urgency?.score).toBe(1);
+    expect(fixture.seen).toHaveLength(1);
+    expect((fixture.seen[0].body as unknown as SentBody).state.items[0]).not.toHaveProperty('mergeCardReferee');
+
+    // The real merge-card referee stores its facts on the approval.
+    fixture.replies.push(mergeCardRefereeReply(0.97, 0.2));
+    startApprovalReferee({ approvalId: approval.id, files: [{ path }], diffText });
+    expect((await waitForApprovalReferee(approval.id))?.answers.docsOnly.noul).toBe(0.97);
+    expect(getApproval(approval.id)?.referee).toBeDefined();
+    expect(fixture.seen).toHaveLength(2);
+
+    // The next poll re-asks that card, now carrying the facts; the one after shows the new score.
+    fixture.replies.push(scoreReply([{ itemId, score: 3.5 }]));
+    await readInbox();
+    await waitForInboxUrgency();
+    expect(fixture.seen).toHaveLength(3);
+    const reasked = (fixture.seen[2].body as unknown as SentBody).state.items;
+    expect(reasked).toHaveLength(1);
+    expect(reasked[0].mergeCardReferee).toEqual({ docsOnly: 0.97, risk: 0.2 });
+    expect(JSON.stringify(fixture.seen[2].body)).not.toContain(WORKER_TEXT);
+    expect((await readInbox()).items[0].urgency?.score).toBe(3.5);
+    expect(fixture.seen).toHaveLength(3);
+
+    // Setting off: the baseline bytes, no further request.
+    await updateOperatorDefaults({ judgmentProvider: 'off' });
+    const off = await readInbox();
+    expect(withoutBuildClock(off.text)).toBe(withoutBuildClock(baseline.text));
+    expect(fixture.seen).toHaveLength(3);
   }, 60_000);
 });
