@@ -22,6 +22,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { toDataURL } from 'qrcode';
 import { Smartphone } from '../lucide-shims';
 import { OPEN_SETTINGS_TAB_EVENT, type OpenSettingsTabDetail } from '@/lib/desktop/events';
+import { openExternalUrl } from '@/lib/desktop/open-external';
+import { IPHONE_APP_INSTALL_URL } from './mobile-app-link';
 
 const APP_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -330,6 +332,49 @@ export function MobilePairingView() {
               <span style={{ opacity: 0.5 }}>·</span>
               <span>WS {state.wsPort}</span>
             </div>
+
+            {/*
+              An operator looking at this QR with no app on their phone has
+              nowhere to go, so the offer belongs here rather than in a menu.
+              The href stays real (readable, copyable), but the click goes
+              through the shell helper: following it inside the webview would
+              strand the operator on a store page with no way back to the QR,
+              and window.open is a no-op in Tauri anyway.
+            */}
+            <a
+              href={IPHONE_APP_INSTALL_URL}
+              rel="noreferrer"
+              onClick={(e) => {
+                e.preventDefault();
+                openExternalUrl(IPHONE_APP_INSTALL_URL);
+              }}
+              style={{
+                marginTop: 14,
+                color: 'var(--t-text-secondary)',
+                fontFamily: APP_FONT,
+                fontSize: 12.5,
+                fontWeight: 600,
+                textDecoration: 'none',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+            >
+              Get the iPhone app
+            </a>
+            <p
+              style={{
+                margin: 0,
+                marginTop: 4,
+                fontSize: 11.5,
+                fontWeight: 300,
+                lineHeight: 1.5,
+                color: 'var(--t-text-muted)',
+                maxWidth: 320,
+              }}
+            >
+              Install TestFlight, join the beta, then scan this code.
+            </p>
 
             <button
               type="button"

@@ -70,9 +70,13 @@ Use the returned mission and packet IDs with `mission dispatch`, `mission wait`,
 
 `npm run tauri:dev` builds the native shell (a much longer first build). After a hard kill, `node scripts/dev.mjs cleanup` recovers the ports. Bring at least one agent CLI you already use (`claude`, `codex`, `grok`, `opencode`, `gemini`); no API keys are needed to start, and [`.env.example`](./.env.example) documents every optional one.
 
-- **Phone:** pair by QR. The iOS app is in beta via [o8.run](https://o8.run); the mobile web surface ships in this repo and works from any phone on your network.
+- **Phone:** pair by QR. The mobile web surface ships in this repo and works from any phone on your network; the iPhone app is below.
 - **Headless:** `o8 serve` runs the control plane on a machine with no screen, same gates. Pair a phone or attach the desktop later.
 - **MCP:** Settings → MCP → Install exposes the operator tools (`create_mission`, `submit_review`, `approve_and_merge`, `cortex_ask`, and the webview controls) to Claude Desktop, Claude Code, or any MCP client.
+
+### iPhone app
+
+The iPhone app is a remote control for the desktop: approve work, steer an agent, watch the fleet, and talk to Symon. It is in open beta on [TestFlight](https://testflight.apple.com/join/kp4RQG5Q). Install it, then pair it from the desktop: the phone button in the status bar opens a QR code, and the app scans it.
 
 ## Your data
 
