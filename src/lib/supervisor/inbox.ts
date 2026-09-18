@@ -41,7 +41,10 @@ export type SupervisorInboxKind =
   // `src/lib/supervisor/silent-exit-detector.ts` for the triage flow.
   | 'silent_exit_verification_failed'
   | 'silent_exit_no_work'
-  | 'silent_exit_but_work_present';
+  | 'silent_exit_but_work_present'
+  // #2448 — advisory: two consecutive loop checks at or above the
+  // PROVISIONAL band. Quotes the repeated call and the receipt id.
+  | 'possible_loop';
 
 export type SupervisorInboxStatus =
   | 'pending'
@@ -139,6 +142,7 @@ export const RETENTION_POLICY: Partial<Record<SupervisorInboxKind, {
   packet_no_changes: { defaultStatus: 'pending', autoDismissAfterMs: 7 * 24 * HOUR_MS },
   worker_quota_exhausted: { defaultStatus: 'human_required' },
   outside_human_waiting: { defaultStatus: 'human_required' },
+  possible_loop: { defaultStatus: 'pending', autoDismissAfterMs: 24 * HOUR_MS },
 };
 
 function ensureSupervisorInboxTable() {

@@ -2,6 +2,7 @@ import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
+import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
 import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
 import { settledCompletionStatus, watchedAgentOutcome } from './fleet-outcome';
 import { retryWatchedAgent } from './retry-watched-agent';
@@ -405,6 +406,10 @@ async function supervisorTick(): Promise<void> {
 
   const fleetMap = new Map(fleet.map((agent) => [agent.sessionKey, agent]));
   const transcriptStatusMap = await readTranscriptBatchStatuses(dueAgents);
+  if (isJudgmentRefereeEnabled()) {
+    const { startLoopChecks } = await import('./loop-detector'); // #2448, advisory
+    startLoopChecks(dueAgents, callbacks.fetchTranscript);
+  }
 
   for (const watched of dueAgents) {
     if (!watchedAgents.has(watched.surfaceId)) continue;
@@ -417,6 +422,9 @@ async function supervisorTick(): Promise<void> {
 
   checkAllDone();
 }
+
+/** Test-only: run one supervisor tick with the callbacks from `startSupervisorLoop`. */
+export const runSupervisorTickForTesting = () => supervisorTick();
 
 async function pollWatchedAgent(
   watched: WatchedAgent,

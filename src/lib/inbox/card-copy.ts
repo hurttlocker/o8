@@ -132,6 +132,11 @@ export function composeSupervisorInboxCardCopy(item: SupervisorInboxItem): Inbox
           item.errorExcerpt,
         ]),
       };
+    case 'possible_loop':
+      return {
+        headline: 'Advisory: the worker may be repeating the same tool call without progress. Nothing was stopped.',
+        subline: supervisorMetadata(item, [item.errorExcerpt]),
+      };
     default:
       return {
         headline: itemPacketLabel(item) ?? item.errorExcerpt,
