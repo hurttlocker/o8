@@ -7,6 +7,7 @@ import { formatMobileActivityTime } from '@/lib/mobile/activity-time';
 import { FONTS, usePretextTruncation } from '@/lib/pretext';
 import { useTheme } from './ThemeContext';
 import { PullToRefresh } from './PullToRefresh';
+import { InboxRefereeChips } from './InboxRefereeChips';
 
 interface ActivityFeedProps {
   snapshot: MobileInboxSnapshot;
@@ -360,6 +361,7 @@ function ApprovalCard({
         <p style={{ ...bodyTextStyle(palette), marginTop: 10 }}>
           {renderInlineCodeText(detailText, palette.cardBg)}
         </p>
+        <InboxRefereeChips chips={item.refereeChips} palette={palette} />
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button
             type="button"

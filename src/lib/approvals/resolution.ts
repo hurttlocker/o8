@@ -83,7 +83,7 @@ function insertResolutionEvent(
     eventType: event.type,
     actor: event.actor,
     note: event.note ?? null,
-    detailsJson: '{}',
+    detailsJson: event.approvedFromCard ? JSON.stringify({ approvedFromCard: event.approvedFromCard }) : '{}',
     timestamp: event.timestamp,
   }).run();
 }
@@ -101,6 +101,7 @@ export function claimApprovalResolution(
   actor: ApprovalActor,
   note?: string,
   expectedUpdatedAt?: number,
+  approvedFromCard?: ApprovalAuditEvent['approvedFromCard'],
 ): ApprovalResolutionClaim {
   const existing = readApproval(id);
   if (!existing || existing.status !== 'pending') {
@@ -121,6 +122,7 @@ export function claimApprovalResolution(
     note,
     resolvedAt,
   );
+  if (approvedFromCard && action === 'approve') event.approvedFromCard = approvedFromCard;
   const resolution: NonNullable<ApprovalRecord['resolution']> = {
     action: nextStatus,
     actor,

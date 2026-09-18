@@ -111,6 +111,8 @@ export interface ApprovalAuditEvent {
   rawText?: string;
   patterns?: string[];
   conflictZones?: string[];
+  /** Approved from a phone inbox card with referee chips shown (#2439); the chip kinds that were shown. */
+  approvedFromCard?: { via: 'chip'; chipsShown: string[] };
 }
 
 export interface LlmApprovalContinuation {

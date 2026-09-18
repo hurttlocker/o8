@@ -3,6 +3,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import { approveFromChipCard } from '@/components/mobile/InboxRefereeChips';
 import { useTheme } from '@/lib/theme/context';
 import { ThemeProvider as MobileThemeProvider } from '@/components/mobile/ThemeContext';
 import { compactLine as mobileCompactLine } from '@/components/mobile/utils';
@@ -805,7 +806,9 @@ export function MobileApprovalsClient({
                     onAgentSelect={() => {
                       handleBackToChats();
                     }}
-                    onApprove={(item) => handleSnapshotApprove(item.approvalId)}
+                    onApprove={(item) => (item.refereeChips?.length
+                      ? void approveFromChipCard(item).then((failure) => { setError(failure); void loadInboxSnapshot(); })
+                      : handleSnapshotApprove(item.approvalId))}
                     onDeny={(item) => handleSnapshotDeny(item.approvalId)}
                     onRefresh={loadInboxSnapshot}
                     hideHeader
