@@ -328,6 +328,10 @@ export type LaneEventVerb =
   // (0.6). Raised once per run; nothing is stopped. Payload: { receiptId,
   // receiptIds, packetId, sessionKey, p, band, advisory, pattern: { toolName, argsHash, count, resultHead, failed } }
   | 'possible_loop'
+  // Record-only triage of an orchestrator wake (#2467), recorded when the
+  // detached call settles with judgment.provider on. The wake runs unchanged;
+  // nothing reads this. Payload: { receiptId, source, choice, probabilities, confidence, abstain, factsHash }
+  | 'wake_triage'
   // A repo publication action exhausted its bounded resource-lease wait.
   // Payload: { resource, waitedMs, holder, retryCount, willRetry }
   | 'lease_wait_timeout'

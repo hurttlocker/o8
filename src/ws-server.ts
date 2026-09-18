@@ -217,9 +217,10 @@ import {
   getOperatorDefaultsSync,
   resolveHealBotEnabledSync,
   resolveInAppOrchestratorEnabledSync,
-  resolveReviewContinuationSync,
   resolveSupervisorAutoEscalateSync,
 } from './lib/operator/defaults';
+import { queueReviewContinuation as queueReviewContinuationTurn, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import { escalationSessionKey, startWakeTriage } from './lib/orchestrator/wake-triage';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
@@ -1341,43 +1342,12 @@ function queueOrchestratorEscalation(repoPath: string, message: string): void {
     console.log(`[supervisor] Escalation suppressed (auto-escalate disabled): ${repoPath} — ${message.slice(0, 80)}`);
     return;
   }
+  startWakeTriage({ source: 'supervisor-escalation', sessionKey: escalationSessionKey(message) });
   enqueueOrchestratorAutoMessage(repoPath, message, 'escalation');
 }
 
-// #1481 — review-ready self-continuation. When a MISSION lane lands at
-// review, the fleet must not park until the operator re-prompts: queue one
-// bounded orchestrator turn ("review + merge per the standing instruction").
-// Gated on its own operator setting (reviewContinuation, default ON —
-// distinct from the noisy failure-investigation escalations above), scoped to
-// packet-bound lanes, and deduped per lane so a flapping transition can't
-// spam turns. The operator prompt arms the loop; it is not its clock.
-const REVIEW_CONTINUATION_DEDUPE_MS = 10 * 60 * 1000;
-const reviewContinuationQueuedAt = new Map<string, number>();
-
-function queueReviewContinuation(lane: { id: string; label: string; repoPath: string; packetId?: string | null; branch?: string | null }): void {
-  if (!lane.packetId) return; // ad-hoc lanes have no mission contract to continue
-  if (!resolveReviewContinuationSync()) return;
-  const last = reviewContinuationQueuedAt.get(lane.id);
-  const now = Date.now();
-  if (last && now - last < REVIEW_CONTINUATION_DEDUPE_MS) return;
-  reviewContinuationQueuedAt.set(lane.id, now);
-  if (reviewContinuationQueuedAt.size > 200) {
-    for (const [key, ts] of reviewContinuationQueuedAt) {
-      if (now - ts > REVIEW_CONTINUATION_DEDUPE_MS) reviewContinuationQueuedAt.delete(key);
-    }
-  }
-  enqueueOrchestratorAutoMessage(
-    lane.repoPath,
-    [
-      `[FLEET] Lane "${lane.label}" (${lane.id}, packet ${lane.packetId}) reached review-ready.`,
-      'Per the mission\'s standing instruction, continue the loop for THIS packet now:',
-      `1. o8_packet_diff / o8_merge_preview for packet ${lane.packetId}`,
-      '2. If the diff is clean, submit_review + approve_and_merge (rebase-before-merge discipline applies).',
-      '3. If it is not clean, record findings via submit_review(approved:false) or steer the worker — do not merge.',
-      'This is a bounded self-continuation turn (one per lane review transition; Settings → Dispatch & Supervision → Review continuation).',
-    ].join('\n'),
-    'review continuation',
-  );
+function queueReviewContinuation(lane: ReviewContinuationLane): void {
+  queueReviewContinuationTurn(lane, enqueueOrchestratorAutoMessage);
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {
