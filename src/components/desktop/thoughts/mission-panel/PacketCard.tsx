@@ -23,6 +23,7 @@ import { LivingAgentPanel } from '@/components/desktop/orchestrator/LivingAgentP
 import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
 import { packetVisualState } from '@/components/desktop/repo-focus/utils';
 import { PacketSpendLine } from './PacketSpendLine';
+import { PacketClaimUnbackedRow } from './PacketClaimUnbackedRow';
 
 interface PacketCardProps {
   packet: OrchestratorPacket;
@@ -647,11 +648,9 @@ export function PacketCard({
             </div>
           ) : null}
 
+          <PacketClaimUnbackedRow laneId={packet.lane?.laneId} />
           {showHeroReviewCard ? (
-            <PacketReviewCard
-              packet={packet}
-              reviewState={reviewState}
-            />
+            <PacketReviewCard packet={packet} reviewState={reviewState} />
           ) : showReviewSection ? (
             <PacketReviewPanel
               packet={packet}

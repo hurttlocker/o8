@@ -2681,6 +2681,15 @@
       ]
     },
     {
+      "path": "tests/report-claim-check-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/require-approval-merge-real-path.test.ts",
       "reasons": [
         "child-process",
