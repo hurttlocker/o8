@@ -39,6 +39,7 @@ const REQUIRED_COLUMNS: Array<[column: string, definition: string]> = [
   ['surface', 'TEXT'],
   ['created_at', 'TEXT'],
   ['route', 'TEXT'],
+  ['selection_json', 'TEXT'],
 ];
 
 export function ensureV63JudgmentReceiptsSchema(sqlite: Database.Database): void {
@@ -62,7 +63,8 @@ export function ensureV63JudgmentReceiptsSchema(sqlite: Database.Database): void
       approval_id TEXT,
       surface TEXT,
       created_at TEXT NOT NULL,
-      route TEXT
+      route TEXT,
+      selection_json TEXT
     );
   `);
 

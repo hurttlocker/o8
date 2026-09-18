@@ -9,6 +9,7 @@ import {
   requiredString,
   textResult,
 } from './shared';
+import { formatDirectiveCitationsSection, type DirectiveCitationsPreview } from '@/lib/judgment/directive-citations-format';
 
 export const APPROVE_TOOLS: McpTool[] = [
   {
@@ -75,7 +76,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'o8_merge_preview',
     description:
-      'USE THIS BEFORE approve_and_merge — dry-runs the merge gate so you know which governance check (security patterns, diff budget, untracked imports, self-review integrity, lint) might block and can address it cleanly. The typecheck row is marked skipped because it runs after rebase during approval. Returns {packetId, wouldMerge, checks[], blockers[], branch}. Example: o8_merge_preview({packetId: "pkt-abc"}).',
+      'USE THIS BEFORE approve_and_merge — dry-runs the merge gate so you know which governance check (security patterns, diff budget, untracked imports, self-review integrity, lint) might block and can address it cleanly. The typecheck row is marked skipped because it runs after rebase during approval. Returns {packetId, wouldMerge, checks[], blockers[], branch}; with the judgment referee on, also an advisory directiveCitations field (rule citations; never part of the gate). Example: o8_merge_preview({packetId: "pkt-abc"}).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -177,9 +178,11 @@ export async function handleMergePreview(args: Record<string, unknown>): Promise
     });
     const structuredError = preview && typeof preview === 'object'
       && 'error' in (preview as Record<string, unknown>);
-    return structuredError
-      ? { ...jsonResult(preview), isError: true }
-      : jsonResult(preview);
+    if (structuredError) return { ...jsonResult(preview), isError: true };
+    // Advisory rule citations (#2446) as their own text section; absent when judgment is off.
+    const citations = formatDirectiveCitationsSection((preview as { directiveCitations?: DirectiveCitationsPreview } | null)?.directiveCitations);
+    const result = jsonResult(preview);
+    return citations ? { ...result, content: [...result.content, { type: 'text', text: citations }] } : result;
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_merge_preview failed: ${errorText(error)}`);
     return textResult(`Failed to preview merge: ${errorText(error)}`, true);
