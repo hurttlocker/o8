@@ -220,6 +220,7 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
       laneId: context.laneId ?? null,
       approvalId: context.approvalId ?? null,
       surface: context.surface ?? null,
+      ...(context.selection ? { selection: context.selection } : {}),
     };
     let route: JudgmentRoute | null = provider === 'typesafe' ? 'direct' : null;
     const fail = (error: JudgmentError, attempts: number): null => {

@@ -48,7 +48,7 @@ const OLD_SHAPE_SQL = `
 const CURRENT_COLUMNS = [
   'id', 'provider', 'model', 'ok', 'questions_json', 'answers_json', 'input_tokens', 'output_tokens',
   'latency_ms', 'attempts', 'truncated', 'hidden_text', 'error_json', 'packet_id', 'lane_id', 'approval_id',
-  'surface', 'created_at', 'route',
+  'surface', 'created_at', 'route', 'selection_json',
 ];
 
 /** The shape #2459 left every install at: the current columns except `route` (#2483). */

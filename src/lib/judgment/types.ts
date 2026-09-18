@@ -78,6 +78,8 @@ export interface JudgmentContext {
   truncated?: boolean;
   /** Set when the scan found zero-width, bidi, mixed-script, or mixed line-ending text. */
   hiddenText?: boolean;
+  /** How the caller chose what to ask (e.g. directive ids and the path recipe). Recorded on the receipt as given. */
+  selection?: Record<string, unknown> | null;
 }
 
 export interface JudgmentUsage {
@@ -125,5 +127,7 @@ export interface JudgmentReceipt {
   approvalId: string | null;
   surface: string | null;
   route: JudgmentRoute | null;
+  /** The caller's selection, when it passed one (#2446). Absent on receipts from callers that do not select. */
+  selection?: Record<string, unknown> | null;
   createdAt: string;
 }

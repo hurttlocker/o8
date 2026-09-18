@@ -77,8 +77,10 @@ const PRE_ROUTE_FIELDS = [
  */
 function expectDirectRouteOnly(packetId: string) {
   const row = getSqlite().prepare('SELECT * FROM judgment_receipts WHERE packet_id = ?').get(packetId) as Record<string, unknown>;
-  const { route: rowRoute, ...rowRest } = row;
+  const { route: rowRoute, selection_json: rowSelection, ...rowRest } = row;
   expect(rowRoute).toBe('direct');
+  // A caller that selects nothing leaves the selection column (#2446) empty.
+  expect(rowSelection).toBeNull();
   expect(Object.keys(rowRest)).toEqual(PRE_ROUTE_COLUMNS);
 
   const [receipt] = listJudgmentReceipts({ packetId });
