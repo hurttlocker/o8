@@ -30,6 +30,10 @@
  * `wakeTriage` (#2467) also sends nothing: it scores the recorded
  * `wake_triage` lane events against what happened next on the same lane (see
  * scripts/lib/judgment-replay-wake-triage.mjs for the outcome mapping).
+ * `catchUp` (#2444, #2511) also sends nothing: it scores the recorded
+ * per-item attention scores in the ranking receipts against whether the
+ * operator acted on the item within 30 minutes of the briefing (see
+ * scripts/lib/judgment-replay-catch-up.mjs, including the ordering confound).
  *
  * --dry-run prints each request body and sends nothing; it works with
  * judgment.provider off. Without it the script refuses to run while the
@@ -48,6 +52,7 @@ import { labelCompaction, loadCompactionHistory } from './lib/judgment-replay-co
 import { labelPushGate, loadPushGateHistory, PUSH_GATE_PROVISIONAL_BAND, PUSH_GATE_WINDOW_MS } from './lib/judgment-replay-push-gate.mjs';
 import { labelLoopChecks, loadLoopHistory } from './lib/judgment-replay-loop.mjs';
 import { labelWakeTriage, loadWakeTriageHistory, OUTCOME_TO_OPTION, WAKE_TRIAGE_OPTIONS, WAKE_TRIAGE_WINDOW } from './lib/judgment-replay-wake-triage.mjs';
+import { CATCH_UP_WINDOW_MS, labelCatchUp, loadCatchUpHistory } from './lib/judgment-replay-catch-up.mjs';
 
 const SURFACE = 'calibration-replay';
 const USD_PER_BILLION_INPUT_TOKENS = 42;
@@ -58,7 +63,8 @@ const COMPACTION_LABEL = 'compaction';
 const PUSH_GATE_LABEL = 'pushGate';
 const LOOP_LABEL = 'loop';
 const WAKE_TRIAGE_LABEL = 'wakeTriage';
-const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate|loop|wakeTriage]';
+const CATCH_UP_LABEL = 'catchUp';
+const USAGE = 'usage: node scripts/judgment-replay.mjs [--dry-run] [--limit N] [--out results.json] [--label gateFailed|operatorRejected|mergedClean|compaction|pushGate|loop|wakeTriage|catchUp]';
 const TSX_MARKER = 'O8_JUDGMENT_REPLAY_TSX_LOADER';
 
 /**
@@ -82,7 +88,7 @@ export function parseReplayArgs(argv) {
       index += 1;
       if (arg === '--out') options.out = value;
       else if (arg === '--label') {
-        if (value !== COMPACTION_LABEL && value !== PUSH_GATE_LABEL && value !== LOOP_LABEL && value !== WAKE_TRIAGE_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
+        if (value !== COMPACTION_LABEL && value !== PUSH_GATE_LABEL && value !== LOOP_LABEL && value !== WAKE_TRIAGE_LABEL && value !== CATCH_UP_LABEL && !LABELS.includes(value)) return { error: `unknown label: ${value}` };
         options.label = value;
       }
       else {
@@ -336,6 +342,23 @@ export function renderWakeTriageReport({ rows, notes }) {
   return { text: lines.join('\n'), result };
 }
 
+/** The catchUp label report: recorded per-item attention scores against operator action after the briefing. */
+export function renderCatchUpReport({ rows, notes }) {
+  const lines = [`catch-up receipts: ${notes.receiptsRead} (failed ${notes.failed}, without selection ${notes.withoutSelection}); unlabeled items ${notes.unlabeledItems}; window ${CATCH_UP_WINDOW_MS / 60_000} min`];
+  const summary = summarize(rows);
+  if (summary.n === 0) {
+    lines.push(`${CATCH_UP_LABEL}: no rows`);
+    return { text: lines.join('\n'), result: { skipped: 'no rows', n: 0 } };
+  }
+  if (summary.positives === 0 || summary.negatives === 0) {
+    lines.push(`${CATCH_UP_LABEL}: ${summary.positives === 0 ? 'no positives' : 'no negatives'}, skipped (n=${summary.n} scored items)`);
+    return { text: lines.join('\n'), result: { skipped: summary.positives === 0 ? 'no positives' : 'no negatives', n: summary.n } };
+  }
+  lines.push(`${CATCH_UP_LABEL} by p(attention): n=${summary.n} scored items (positives ${summary.positives}, negatives ${summary.negatives})  AUC ${fmt(summary.auc)} (n=${summary.n})  Brier ${fmt(summary.brier)} (n=${summary.n})`);
+  lines.push('  confound: the score also set the spoken order, so operator action is partly caused by it; read this AUC as an upper bound');
+  return { text: lines.join('\n'), result: summary };
+}
+
 export function renderReport({ groups, approvalsRead, withoutDiffText, notes, calls, only = null }) {
   const lines = [];
   const duplicates = groups.reduce((sum, group) => sum + group.approvalIds.length - 1, 0);
@@ -440,6 +463,25 @@ export async function runReplay(argv, io = {}) {
     out(report.text);
     if (options.out) {
       writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: WAKE_TRIAGE_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
+      out(`wrote ${options.out}`);
+    }
+    return 0;
+  }
+
+  if (options.label === CATCH_UP_LABEL) {
+    const { dbPath } = dataPaths();
+    let history;
+    try {
+      history = await loadCatchUpHistory(dbPath);
+    } catch (error) {
+      err(`[judgment-replay] cannot open ${dbPath} read-only: ${error instanceof Error ? error.message : 'open failed'}`);
+      return 1;
+    }
+    const labeled = labelCatchUp(history);
+    const report = renderCatchUpReport(labeled);
+    out(report.text);
+    if (options.out) {
+      writeFileSync(options.out, `${JSON.stringify({ generatedAt: new Date().toISOString(), label: CATCH_UP_LABEL, notes: labeled.notes, result: report.result, rows: labeled.rows }, null, 2)}\n`);
       out(`wrote ${options.out}`);
     }
     return 0;

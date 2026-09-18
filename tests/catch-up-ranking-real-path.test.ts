@@ -249,6 +249,10 @@ describe('catch-up ranking through the real phone Symon mint', () => {
     expect(sent).not.toContain(TITLE_TEXT);
     expect(sent).not.toContain(REPO_TEXT);
     for (const id of [...ITEM_IDS, ...APPROVAL_IDS]) expect(sent).not.toContain(id);
+    // #2511: the mapping lives only in the local receipt's selection.
+    expect(listJudgmentReceipts({ limit: 10 })[0].selection).toEqual({
+      items: ITEM_IDS.map((id) => ({ question: catchUpQuestionId(id), itemId: id, kind: 'approval_created' })),
+    });
   });
 
   it('keeps event order on a provider failure, records the failure receipt, and still mints', async () => {
