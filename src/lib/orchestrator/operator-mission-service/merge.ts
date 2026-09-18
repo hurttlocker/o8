@@ -382,17 +382,12 @@ async function dispatchPacketMerge(
       console.warn(`[session-outcome-merge] mergedClean backfill failed for packet ${packet.id}:`, err);
     });
 
-    const [{ removeMergedWorktree }, { appendDirectiveTrailer }] = await Promise.all([
+    const [{ removeMergedWorktree, recordSkippedMergeCleanup }, { appendDirectiveTrailer }] = await Promise.all([
       loadWorktreeCleanup(),
       loadDirectiveMerges(),
     ]);
     const cleanup = await removeMergedWorktree(lane);
-    if (!cleanup.removed) {
-      console.log(
-        '[worktree-cleanup]',
-        `Post-merge cleanup skipped for lane ${lane.id} (packet ${packet.id}): reason=${cleanup.reason ?? 'unknown'}. Reconcile sweep will handle it.`,
-      );
-    }
+    if (!cleanup.removed) recordSkippedMergeCleanup(lane, packet.id, cleanup);
     void postMergeCleanup(cleanupTarget).catch((error) => {
       console.warn(`[merge-cleanup] Unexpected cleanup failure for lane ${lane.id}:`, error);
     });

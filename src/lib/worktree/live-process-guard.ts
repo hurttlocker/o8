@@ -79,9 +79,20 @@ export async function allowWorktreeRemoval(
   dirPath: string,
   options: { logPrefix: string; overrideLiveGuard?: true },
 ): Promise<boolean> {
+  return (await checkWorktreeRemoval(dirPath, options)).allowed;
+}
+
+/**
+ * Same decision as `allowWorktreeRemoval`, plus which kind of refusal it was,
+ * so a caller can record why a worktree was kept (#2493).
+ */
+export async function checkWorktreeRemoval(
+  dirPath: string,
+  options: { logPrefix: string; overrideLiveGuard?: true },
+): Promise<{ allowed: true } | { allowed: false; refusal: 'live' | 'inconclusive' }> {
   if (options.overrideLiveGuard === true) {
     console.warn(`[${options.logPrefix}] LIVE-PROCESS GUARD OVERRIDDEN for ${dirPath} — caller confirmed the session process exited`);
-    return true;
+    return { allowed: true };
   }
 
   // The machine cwd snapshot is cached for up to 15s so high-frequency callers
@@ -92,11 +103,11 @@ export async function allowWorktreeRemoval(
   const probe = await probeLiveProcessInside(dirPath, {
     readSnapshot: () => readProcessCwdSnapshot({ forceRefresh: true }),
   });
-  if (probe.status === 'clear') return true;
+  if (probe.status === 'clear') return { allowed: true };
   if (probe.status === 'live') {
     console.error(`[${options.logPrefix}] REFUSED worktree removal for ${dirPath} — live process found (pid ${probe.pids.join(', ')})`);
-  } else {
-    console.error(`[${options.logPrefix}] REFUSED worktree removal for ${dirPath} — live-process probe inconclusive: ${probe.reason}`);
+    return { allowed: false, refusal: 'live' };
   }
-  return false;
+  console.error(`[${options.logPrefix}] REFUSED worktree removal for ${dirPath} — live-process probe inconclusive: ${probe.reason}`);
+  return { allowed: false, refusal: 'inconclusive' };
 }
