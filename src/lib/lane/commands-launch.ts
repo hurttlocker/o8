@@ -112,7 +112,13 @@ export async function launchSession(
       attachSession(command.laneId, recovered.surfaceId, actor);
       setLaneStatus(command.laneId, 'running', actor, 'session_launch_recovered');
       const recoveredLane = getLane(command.laneId);
-      if (recoveredLane) await capturePacketCapacitySnapshot(recoveredLane, 'start');
+      // #2498 — the start snapshot shells out per runtime (seconds); detach it
+      // so the launch result never waits on it.
+      if (recoveredLane) {
+        void capturePacketCapacitySnapshot(recoveredLane, 'start').catch((err) => {
+          console.warn('[capacity-snapshot] start snapshot failed for lane', command.laneId, err);
+        });
+      }
       return {
         ok: true,
         laneId: command.laneId,
@@ -275,7 +281,13 @@ export async function launchSession(
     }
 
     const launchedLane = getLane(command.laneId);
-    if (launchedLane) await capturePacketCapacitySnapshot(launchedLane, 'start');
+    // #2498 — same as the recovered path: the launch result never waits on
+    // the per-runtime capacity shell-outs.
+    if (launchedLane) {
+      void capturePacketCapacitySnapshot(launchedLane, 'start').catch((err) => {
+        console.warn('[capacity-snapshot] start snapshot failed for lane', command.laneId, err);
+      });
+    }
     const updated = getLane(command.laneId);
     return {
       ok: true,
