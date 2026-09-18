@@ -202,6 +202,21 @@ describe('referee-ordered mobile inbox through the real route', () => {
     expect(sent.state.items.map((item) => item.riskWord)).toEqual(expect.arrayContaining(['high', 'low']));
   }, 60_000);
 
+  it('scores the inbox under the managed provider value (#2484)', async () => {
+    await seedApprovals(2);
+    const ids = (await readInbox()).items.map((item) => item.id);
+    fixture.replies.push(scoreReply(ids.map((itemId, index) => ({ itemId, score: index }))));
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+
+    await readInbox();
+    await waitForInboxUrgency();
+    const scored = await readInbox();
+
+    expect(fixture.seen).toHaveLength(1);
+    expect(scored.items.every((item) => typeof item.urgency?.score === 'number')).toBe(true);
+    expect(listJudgmentReceipts({ limit: 100 })[0]).toMatchObject({ ok: true, provider: 'managed', surface: INBOX_URGENCY_SURFACE });
+  }, 60_000);
+
   it('asks the locked question text from the questions file, once per item', async () => {
     await seedApprovals(2);
     const baseline = await readInbox();

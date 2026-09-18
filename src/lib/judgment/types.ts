@@ -95,7 +95,7 @@ export interface JudgmentResult<Q extends JudgmentQuestionSet> {
 }
 
 export interface JudgmentError {
-  /** `http` (non-2xx), `timeout`, `network`, `malformed`, `missing_key`, `invalid_questions`. */
+  /** `http` (non-2xx), `timeout`, `network`, `malformed`, `missing_key`, `missing_credential` (`managed` with no token and no key), `invalid_questions`. */
   kind: string;
   status?: number;
   /** Provider error type from the body, e.g. `max_tokens_exceeded`. */

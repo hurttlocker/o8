@@ -286,6 +286,16 @@ describe('docs-only chip on phone inbox cards through the real inbox route', () 
     expect(byApproval.get(noFacts.id)).not.toHaveProperty('refereeChips');
   }, 60_000);
 
+  it('serialises the chip under the managed provider value (#2484)', async () => {
+    const docs = await seedCard('docs', ['README.md'], 0.97);
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+
+    const { items } = await readInbox();
+    await waitForInboxUrgency();
+
+    expect(items.find((item) => item.approvalId === docs.id)?.refereeChips?.map((chip) => chip.kind)).toEqual(['docs-only']);
+  }, 60_000);
+
   it('with the setting off returns the payload byte for byte, the chip step adding nothing', async () => {
     await seedCard('mixed', ['src/app.ts'], 0.97);
     await seedCard('docs', ['README.md'], 0.98);

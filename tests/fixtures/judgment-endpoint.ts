@@ -18,7 +18,7 @@ export interface FixtureReply {
   /** The response is not sent until this settles. */
   hold?: Promise<void>;
 }
-export interface SeenRequest { method?: string; url?: string; authorization?: string; body: Record<string, unknown> }
+export interface SeenRequest { method?: string; url?: string; authorization?: string; headers: IncomingMessage['headers']; body: Record<string, unknown> }
 
 export type JudgmentFixtureReply = FixtureReply;
 export type JudgmentFixtureRequest = SeenRequest;
@@ -65,6 +65,7 @@ export async function startJudgmentEndpointFixture(): Promise<JudgmentEndpointFi
       method: request.method,
       url: request.url,
       authorization: request.headers.authorization,
+      headers: request.headers,
       body: JSON.parse(raw) as Record<string, unknown>,
     });
     const reply = fixture.replies.shift() ?? { status: 500, body: { detail: { error_type: 'fixture_exhausted' } } };

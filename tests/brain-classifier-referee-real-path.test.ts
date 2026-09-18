@@ -166,6 +166,17 @@ describe('Brain classifier referee tier through the ask pipeline', () => {
     expect(receipt!.answers).toMatchObject({ questionClass: { choice: 'classB' } });
   });
 
+  it('runs the referee under the managed provider value (#2484)', async () => {
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    fixture.replies.push(refereeReply('classA', 0.93));
+    const result = await askCortex('Who merged the managed route change?', undefined, { bypassCache: true });
+
+    expect(fixture.seen).toHaveLength(1);
+    expect(result.classifier).toBe('referee');
+    expect(h.order).not.toContain('openrouter:classify');
+    expect(receiptById(result.classificationReceiptId)).toMatchObject({ ok: true, provider: 'managed', surface: 'brain-classifier' });
+  });
+
   it('falls through to the existing tier when the referee is under the confidence threshold', async () => {
     const lowConfidence = BRAIN_CLASS_CONFIDENCE_MIN - 0.1;
     expect(lowConfidence).toBeGreaterThanOrEqual(0.4); // not an abstain: the threshold itself decides

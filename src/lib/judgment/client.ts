@@ -1,17 +1,18 @@
 /**
  * Typed judgment client (#2434, tracker #2433).
  *
- * `askJudgment` posts typed questions to the configured provider with a direct
- * fetch and returns typed answers, or null. It returns null without touching
- * the network when `judgment.provider` is off, and null when the key is
- * missing or the call fails after bounded retries. It never throws. Every call
- * that reaches the key check writes a receipt (success or failure).
+ * `askJudgment` posts typed questions to the route `resolveJudgmentRoute`
+ * picks (#2484) with a direct fetch and returns typed answers, or null. It
+ * returns null without touching the network when `judgment.provider` is off,
+ * and null when no credential exists or the call fails after bounded retries.
+ * It never throws. Every call that reaches the credential check writes a
+ * receipt (success or failure).
  */
 import { performance } from 'node:perf_hooks';
 
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
-import { readJudgmentApiKey } from './key';
 import { recordJudgmentReceipt } from './receipts';
+import { resolveJudgmentRoute, TYPESAFE_SYSTEMONE_URL } from './route';
 import {
   ABSTAIN_CONFIDENCE,
   type ChoiceAnswer,
@@ -21,12 +22,13 @@ import {
   type JudgmentQuestion,
   type JudgmentQuestionSet,
   type JudgmentResult,
+  type JudgmentRoute,
   type JudgmentUsage,
   type NoulAnswer,
   type ScoreAnswer,
 } from './types';
 
-export const TYPESAFE_SYSTEMONE_URL = 'https://api.typesafe.ai/v1/systemone';
+export { TYPESAFE_SYSTEMONE_URL };
 export const TYPESAFE_MODEL = 'jev-latest';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -42,6 +44,7 @@ export interface AskJudgmentRequest<Q extends JudgmentQuestionSet> {
 
 /** Transport knobs. Production callers pass nothing; tests point at a fixture. */
 export interface AskJudgmentOptions {
+  /** Replaces the provider URL on the direct route only; the managed route always uses the proxy. */
   endpoint?: string;
   timeoutMs?: number;
   maxAttempts?: number;
@@ -194,7 +197,7 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
 ): Promise<JudgmentResult<Q> | null> {
   try {
     const provider = getOperatorDefaultsSync().values.judgmentProvider;
-    if (provider !== 'typesafe') return null;
+    if (provider !== 'typesafe' && provider !== 'managed') return null;
 
     const context = request.context ?? {};
     const startedAt = performance.now();
@@ -207,11 +210,12 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
       laneId: context.laneId ?? null,
       approvalId: context.approvalId ?? null,
       surface: context.surface ?? null,
-      route: 'direct' as const,
     };
+    let route: JudgmentRoute | null = provider === 'typesafe' ? 'direct' : null;
     const fail = (error: JudgmentError, attempts: number): null => {
       recordJudgmentReceipt({
         ...base,
+        route,
         model: null,
         ok: false,
         answers: null,
@@ -227,23 +231,23 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
 
     const invalid = validateQuestions(request.questions);
     if (invalid) return fail({ kind: 'invalid_questions', message: invalid }, 0);
-    const key = readJudgmentApiKey();
-    if (!key) return fail({ kind: 'missing_key' }, 0);
-
-    const endpoint = options.endpoint ?? TYPESAFE_SYSTEMONE_URL;
+    const resolved = resolveJudgmentRoute(provider, options.endpoint);
+    if (!resolved) return fail({ kind: provider === 'typesafe' ? 'missing_key' : 'missing_credential' }, 0);
+    route = resolved.route;
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
     const retryBaseMs = options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS;
     const payload = JSON.stringify({ model: TYPESAFE_MODEL, state: request.state, questions: request.questions });
 
     for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
-      const outcome = await attempt(endpoint, key, payload, timeoutMs);
+      const outcome = await attempt(resolved.url, resolved.bearer, payload, timeoutMs);
       if (outcome.ok) {
         const parsed = parseResponse(request.questions, outcome.body);
         if (!parsed) return fail({ kind: 'malformed', message: 'answers do not match the question types' }, attemptNumber);
         const latencyMs = Math.round(performance.now() - startedAt);
         const receiptId = recordJudgmentReceipt({
           ...base,
+          route,
           model: parsed.model,
           ok: true,
           answers: parsed.answers as Record<string, unknown>,

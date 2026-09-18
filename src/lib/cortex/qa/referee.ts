@@ -18,7 +18,7 @@ import {
   thresholdAnswer,
   type AskJudgmentOptions,
 } from '@/lib/judgment';
-import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
 
 /**
  * Minimum referee confidence for the classification to be used. Provisional:
@@ -37,11 +37,7 @@ export interface RefereeClassification {
 
 /** Whether the referee may run: the same `judgment.provider` check `askJudgment` makes. */
 export function isBrainRefereeEnabled(): boolean {
-  try {
-    return getOperatorDefaultsSync().values.judgmentProvider === 'typesafe';
-  } catch {
-    return false;
-  }
+  return isJudgmentRefereeEnabled();
 }
 
 let transportOverride: AskJudgmentOptions = {};

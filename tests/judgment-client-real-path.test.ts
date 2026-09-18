@@ -6,11 +6,11 @@
  * call goes over HTTP to a local fixture that mimics the systemone endpoint,
  * and receipts are read back from the persisted table and lane events.
  */
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { startJudgmentEndpointFixture, type FixtureReply, type SeenRequest } from './fixtures/judgment-endpoint';
 
@@ -22,6 +22,7 @@ const { listJudgmentReceipts } = await import('@/lib/judgment/receipts');
 const { buildDiffState } = await import('@/lib/judgment/diff-state');
 const { createLane } = await import('@/lib/lane/registry');
 const { getSqlite } = await import('@/lib/db');
+const { getEntitlementPath } = await import('@/lib/entitlement/store');
 
 const KEY = 'ts-fixture-key-7d1c0b5e9a';
 const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-judgment-repo-'));
@@ -290,5 +291,103 @@ describe('askJudgment against a local systemone fixture', () => {
     expect(receipts).not.toContain(KEY);
     expect(events).not.toContain(KEY);
     for (const line of consoleLines) expect(line).not.toContain(KEY);
+  });
+});
+
+/** A compact-JWT-shaped plan token; the proxy, not the client, verifies it. */
+const PLAN_TOKEN = `header.${Buffer.from(JSON.stringify({ sub: 'user_judgment', plan: 'founder' })).toString('base64url')}.signature`;
+
+function writeEntitlement(plan: 'founder' | 'free'): void {
+  writeFileSync(getEntitlementPath(), `${JSON.stringify({ plan, status: 'active', licenseKey: PLAN_TOKEN })}\n`);
+}
+
+describe('askJudgment route resolution (#2484)', () => {
+  let proxyOrigin = '';
+
+  beforeAll(() => {
+    proxyOrigin = new URL(endpoint).origin;
+    process.env.O8_PROXY_URL = proxyOrigin;
+  });
+
+  afterEach(async () => {
+    rmSync(getEntitlementPath(), { force: true });
+    writeFileSync(judgmentKeyPath(), `${KEY}\n`);
+    chmodSync(judgmentKeyPath(), 0o600);
+    await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
+  });
+
+  afterAll(() => {
+    delete process.env.O8_PROXY_URL;
+  });
+
+  it('managed with a plan token posts to the proxy judgment URL with the plan bearer and no provider key', async () => {
+    writeEntitlement('founder');
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    replies.push({ status: 200, body: SUCCESS_BODY });
+
+    const result = await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-managed-plan' } }, fast());
+
+    expect(result).not.toBeNull();
+    expect(seen).toHaveLength(1);
+    expect(`${proxyOrigin}${seen[0].url}`).toBe(`${proxyOrigin}/v1/judgment`);
+    expect(seen[0].authorization).toBe(`Bearer ${PLAN_TOKEN}`);
+    expect(JSON.stringify(seen[0].headers)).not.toContain(KEY);
+    expect(seen[0].body).toEqual({ model: 'jev-latest', state: { diff: 'x' }, questions: QUESTIONS });
+    const [receipt] = listJudgmentReceipts({ packetId: 'pkt-managed-plan' });
+    expect(receipt).toMatchObject({ ok: true, provider: 'managed', route: 'managed' });
+    expect(JSON.stringify(receipt)).not.toContain(PLAN_TOKEN);
+  });
+
+  it('managed with a free allowance token also rides the proxy', async () => {
+    writeEntitlement('free');
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    replies.push({ status: 200, body: SUCCESS_BODY });
+
+    await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-managed-free' } }, fast());
+
+    expect(seen[0].url).toBe('/v1/judgment');
+    expect(seen[0].authorization).toBe(`Bearer ${PLAN_TOKEN}`);
+    expect(listJudgmentReceipts({ packetId: 'pkt-managed-free' })[0]).toMatchObject({ route: 'managed' });
+  });
+
+  it('managed with no token falls back to the local key on the direct route', async () => {
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    replies.push({ status: 200, body: SUCCESS_BODY });
+
+    await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-managed-direct' } }, fast());
+
+    expect(seen[0].url).toBe('/v1/systemone');
+    expect(seen[0].authorization).toBe(`Bearer ${KEY}`);
+    expect(listJudgmentReceipts({ packetId: 'pkt-managed-direct' })[0]).toMatchObject({ provider: 'managed', route: 'direct' });
+  });
+
+  it('typesafe goes direct with unchanged request bytes even when a plan token exists', async () => {
+    writeEntitlement('founder');
+    replies.push({ status: 200, body: SUCCESS_BODY });
+
+    await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-typesafe-plan' } }, fast());
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url).toBe('/v1/systemone');
+    expect(seen[0].authorization).toBe(`Bearer ${KEY}`);
+    expect(seen[0].body).toEqual({ model: 'jev-latest', state: { diff: 'x' }, questions: QUESTIONS });
+    expectDirectRouteOnly('pkt-typesafe-plan');
+  });
+
+  it('managed with no plan token, no allowance token, and no key returns null with a missing-credential receipt', async () => {
+    unlinkSync(judgmentKeyPath());
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+
+    const result = await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-managed-none' } }, fast());
+
+    expect(result).toBeNull();
+    expect(seen).toHaveLength(0);
+    expect(listJudgmentReceipts({ packetId: 'pkt-managed-none' })[0]).toMatchObject({
+      ok: false,
+      provider: 'managed',
+      route: null,
+      attempts: 0,
+      error: { kind: 'missing_credential' },
+    });
   });
 });

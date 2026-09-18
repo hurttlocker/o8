@@ -359,6 +359,19 @@ describe('gate-failure warning before the layer-1 automatic rerun', () => {
     expect(h.rerunWithFeedback).toHaveBeenCalledTimes(1);
   }, 60_000);
 
+  it('records the warning under the managed provider value (#2484)', async () => {
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    const { lane } = await setupPacket('pkt-gate-warning-managed');
+    fixture.replies.push(riskReply());
+
+    await mergeAndWaitForRerun(lane);
+
+    expect(fixture.seen).toHaveLength(1);
+    const events = orderedEvents(lane.id);
+    expect(events.some((event) => event.verb === 'gate_failure_warning')).toBe(true);
+    expect(events.find((event) => event.verb === 'judgment')!.payload).toMatchObject({ ok: true, provider: 'managed', surface: 'gate-failure-warning' });
+  }, 60_000);
+
   it('leaves the event sequence unchanged and sends nothing when judgment.provider is off', async () => {
     await updateOperatorDefaults({ judgmentProvider: 'off' });
     h.withoutWarning = true;

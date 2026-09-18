@@ -315,6 +315,21 @@ describe('approval card referee through the merge-card creation path', () => {
     expect(onRow.diff_json).toBe(offRow.diff_json);
   }, 60_000);
 
+  it('runs the referee on a new merge card under the managed provider value (#2484)', async () => {
+    await updateOperatorDefaults({ judgmentProvider: 'managed' });
+    const lane = makeDirectLane('o8-referee-managed');
+    fixture.replies.push({ status: 200, body: REFEREE_BODY });
+
+    const result = await createMergeCard(lane);
+    const referee = await waitForApprovalReferee(result.approvalId!);
+
+    expect(fixture.seen).toHaveLength(1);
+    expect(referee).not.toBeNull();
+    expect(getApproval(result.approvalId!)!.referee).toMatchObject({ model: 'jev-1.13.0' });
+    const receipt = getLaneEvents(lane.id).find((event) => event.verb === 'judgment') as { payload?: Record<string, unknown> } | undefined;
+    expect(receipt?.payload).toMatchObject({ ok: true, provider: 'managed', surface: 'approval-card', approvalId: result.approvalId });
+  }, 60_000);
+
   it('never holds approval creation on a failing referee and leaves the card as created', async () => {
     await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
     const lane = makeDirectLane('o8-referee-null');

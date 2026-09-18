@@ -20,7 +20,7 @@ import { approvalDiffFingerprint } from '@/lib/approvals/referee';
 import { askJudgment, thresholdAnswer, type AskJudgmentOptions } from '@/lib/judgment/client';
 import { buildDiffState } from '@/lib/judgment/diff-state';
 import { DIFF_QUESTIONS } from '@/lib/judgment/questions';
-import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
 import type { Lane } from '@/lib/lane/types';
 
 export const GATE_FAILURE_WARNING_SURFACE = 'gate-failure-warning';
@@ -59,7 +59,7 @@ export async function assessGateFailureRisk(
 ): Promise<GateFailureWarning | null> {
   try {
     if (!lane.packetId) return null;
-    if (getOperatorDefaultsSync().values.judgmentProvider === 'off') return null;
+    if (!isJudgmentRefereeEnabled()) return null;
     const { getDiffForLane } = await import('@/lib/lane/commands-approval');
     const { parseGitDiff } = await import('@/lib/worktree/diff-parser');
     const diffText = await getDiffForLane({

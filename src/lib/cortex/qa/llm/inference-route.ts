@@ -59,7 +59,7 @@ export interface ResolveOpenRouterRouteOptions {
  * Returns null unless it looks like a compact JWT (3 dot-separated segments);
  * the proxy makes the real validity call.
  */
-function planToken(): string | null {
+export function planToken(): string | null {
   const entitlement = readCachedEntitlement();
   const token = entitlement?.licenseKey?.trim();
   // Gate on the RESOLVED entitlement (getEntitlementSync applies the #1517
@@ -83,7 +83,7 @@ function planToken(): string | null {
  * plan, so using it would serve a "viewing as free" founder the paid path
  * (#1517).
  */
-function freeAllowanceToken(): string | null {
+export function freeAllowanceToken(): string | null {
   const resolved = getEntitlementSync();
   if (resolved.plan !== 'free' || resolved.overrideActive) return null;
   const token = readCachedEntitlement()?.licenseKey?.trim();
