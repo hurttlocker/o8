@@ -15,27 +15,39 @@ export function isJudgmentProvider(value: unknown): value is JudgmentProvider {
 
 export interface JudgmentProviderDefault {
   judgmentProvider: JudgmentProvider;
+  /**
+   * `judgment.managed_option_visible` (#2485): shows Managed in the Settings
+   * row. Off until the hosted endpoint exists, so the app never offers a
+   * choice that fails. It only hides the option; it never gates the value.
+   */
+  judgmentManagedOptionVisible: boolean;
 }
 
 export const JUDGMENT_PROVIDER_FALLBACK: JudgmentProviderDefault = {
   judgmentProvider: 'off',
+  judgmentManagedOptionVisible: false,
 };
 
 export function resolveStoredJudgmentProvider(
   stored: Partial<JudgmentProviderDefault>,
 ): Partial<JudgmentProviderDefault> {
-  return isJudgmentProvider(stored.judgmentProvider)
-    ? { judgmentProvider: stored.judgmentProvider }
-    : {};
+  const result: Partial<JudgmentProviderDefault> = {};
+  if (isJudgmentProvider(stored.judgmentProvider)) result.judgmentProvider = stored.judgmentProvider;
+  if (typeof stored.judgmentManagedOptionVisible === 'boolean') {
+    result.judgmentManagedOptionVisible = stored.judgmentManagedOptionVisible;
+  }
+  return result;
 }
 
 export function resolveJudgmentProviderSettings(file: Partial<JudgmentProviderDefault>) {
   return {
     values: {
       judgmentProvider: file.judgmentProvider ?? JUDGMENT_PROVIDER_FALLBACK.judgmentProvider,
+      judgmentManagedOptionVisible: file.judgmentManagedOptionVisible ?? JUDGMENT_PROVIDER_FALLBACK.judgmentManagedOptionVisible,
     },
     sources: {
       judgmentProvider: file.judgmentProvider !== undefined ? 'file' as const : 'default' as const,
+      judgmentManagedOptionVisible: file.judgmentManagedOptionVisible !== undefined ? 'file' as const : 'default' as const,
     },
   };
 }
@@ -44,6 +56,12 @@ export function applyJudgmentProviderUpdate(
   stored: Partial<JudgmentProviderDefault>,
   update: Partial<JudgmentProviderDefault>,
 ): void {
+  if (update.judgmentManagedOptionVisible !== undefined) {
+    if (typeof update.judgmentManagedOptionVisible !== 'boolean') {
+      throw new Error('judgmentManagedOptionVisible must be boolean.');
+    }
+    stored.judgmentManagedOptionVisible = update.judgmentManagedOptionVisible;
+  }
   if (update.judgmentProvider === undefined) return;
   if (!isJudgmentProvider(update.judgmentProvider)) {
     throw new Error(`judgmentProvider must be ${JUDGMENT_PROVIDER_VALUES_MESSAGE}.`);
