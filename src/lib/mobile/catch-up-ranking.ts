@@ -105,7 +105,15 @@ export async function rankCatchUpItems(items: readonly CatchUpItem[], budgetMs?:
     const result = await askJudgment({
       state: { items: stateItems },
       questions: catchUpQuestions(stateItems.map((item) => item.question)),
-      context: { surface: CATCH_UP_RANKING_SURFACE, truncated: eventOrder.truncated },
+      context: {
+        surface: CATCH_UP_RANKING_SURFACE,
+        truncated: eventOrder.truncated,
+        // Safe to carry the raw id here (#2511): selection is written only to
+        // the local receipt's `selection_json`; the request payload is
+        // `{ model, state, questions }`. It lets the replay tie each hashed
+        // answer back to its item.
+        selection: { items: stateItems.map((item, index) => ({ question: item.question, itemId: asked[index].id, kind: item.kind })) },
+      },
     }, transportWithin(budgetMs));
     if (!result) return eventOrder;
 
