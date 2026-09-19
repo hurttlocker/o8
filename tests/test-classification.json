@@ -1267,7 +1267,8 @@
     {
       "path": "tests/changelog-scrub.test.ts",
       "reasons": [
-        "child-process"
+        "child-process",
+        "terminal-tool"
       ]
     },
     {
