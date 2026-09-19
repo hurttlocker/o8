@@ -39,6 +39,18 @@ export function resolveBrainUseClaudeCliSync(): boolean {
     && values.brainUseClaudeCli;
 }
 
+/**
+ * Whether speculative Brain runtime warmup is allowed (#2521). Gates only the
+ * speculative pre-spawn: an explicit ask still launches its selected runtime
+ * when needed, and a managed-only route never reaches a subscription CLI
+ * regardless of this value. Read synchronously at the warmup execution
+ * boundary so a persisted flip applies without a restart, and re-read after
+ * asynchronous discovery so no in-flight call site can bypass it.
+ */
+export function resolveBrainWarmupEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.brainWarmupEnabled;
+}
+
 /** Whether the configured subscription profile permits Codex Brain calls. */
 export function resolveBrainUseCodexCliSync(): boolean {
   return resolveEffectiveBrainRouteSync() !== 'managed'

@@ -334,6 +334,10 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Allow Engineering Brain to use the Claude subscription when the subscription profile permits it.',
         },
+        brainWarmupEnabled: {
+          type: 'boolean',
+          description: 'Speculatively pre-spawn the selected Brain CLI before an ask needs it. Off disables only that pre-spawn; an explicit ask still launches its runtime when needed and may wait longer.',
+        },
         crossHouseWorkerFallback: {
           type: 'boolean',
           description: 'Automatically redispatch quota-capped workers on the equal-tier runtime from the other subscription house.',
@@ -406,6 +410,7 @@ const OPERATOR_DEFAULTS_KEYS = [
   'workersUseBrain',
   'workspaceManifestPolicy',
   'brainUseClaudeCli',
+  'brainWarmupEnabled',
   'crossHouseWorkerFallback',
   'healBotEnabled',
   'supervisorAutoEscalate',

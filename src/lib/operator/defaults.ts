@@ -639,7 +639,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envNative = envNativeBrowserView();
   const envComposer = envClassAComposer();
   const envBrainRouting = envBrainRoutingMode();
-  const brainRouting = resolveBrainRoutingModeSettings(envBrainRouting, fileValues.brainRoutingMode);
+  const brainRouting = resolveBrainRoutingModeSettings(envBrainRouting, fileValues);
   const envInApp = envInAppOrchestratorEnabled();
   const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();

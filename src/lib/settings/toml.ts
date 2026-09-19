@@ -297,6 +297,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   inAppOrchestratorEnabled: booleanField('orchestrator', 'legacy_claude_enabled'),
   symonVoiceSubscriptionOnly: booleanField('symon', 'voice', 'subscriptionOnly'),
   brainUseClaudeCli: booleanField('brain', 'use_claude_cli'),
+  brainWarmupEnabled: booleanField('brain', 'warmup_enabled'),
   workersUseBrain: enumField('brain', 'workers_use_brain', 'one of "off", "auto", or "all"', isWorkersUseBrain),
   judgmentProvider: enumField('judgment', 'provider', JUDGMENT_PROVIDER_VALUES_MESSAGE, isJudgmentProvider),
   judgmentManagedDailyAllowance: nullableField('judgment', 'managed_daily_allowance', JUDGMENT_ALLOWANCE_EXPECTED, isJudgmentAllowance),

@@ -402,6 +402,15 @@ export function DispatchFoundersSection({
           />
           <SettingsRow
             icon={<BrainRowIcon />}
+            label="Pre-warm Brain runtimes"
+            subtitle={lockedSub('brainWarmupEnabled', 'Start Brain runtimes early to reduce waiting. When off, a runtime starts only when needed, which may take longer.')}
+            checked={values.brainWarmupEnabled}
+            disabled={envLocked(sources, 'brainWarmupEnabled') || busyField === 'brainWarmupEnabled'}
+            onToggle={(next) => { updateField('brainWarmupEnabled', next); }}
+            divider
+          />
+          <SettingsRow
+            icon={<BrainRowIcon />}
             label="Workers use the Brain"
             subtitle={lockedSub('workersUseBrain', 'Teach dispatched workers o8 ask for cited repo answers')}
             accessory={

@@ -157,17 +157,24 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
 const HAIKU_MODEL = MODEL_IDS.claudeHaikuQaDefault;
 
 /**
- * Fire-and-forget: pre-spawn a warm Haiku REPL so the next `callHaiku` skips
- * the 6-9s CLI bootstrap. Called at brain-pipeline start (ask.ts). No-ops
- * when brainUseClaudeCli is off (the tier would throw anyway) or the binary
- * can't be resolved.
+ * Fire-and-forget: pre-spawn a warm Haiku REPL so a later `callHaiku` can
+ * reuse it. Called at brain-pipeline start (ask.ts). No-ops when
+ * brainUseClaudeCli is off (the tier would throw anyway), when the operator
+ * has disabled speculative warmup (#2521 — an explicit ask still launches
+ * its runtime when needed), or when the binary can't be resolved.
  */
 export async function prewarmHaiku(): Promise<void> {
   try {
-    const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/brain-routing');
-    if (!resolveBrainUseClaudeCliSync()) return;
+    const routing = await import('@/lib/operator/brain-routing');
+    if (!routing.resolveBrainUseClaudeCliSync()) return;
+    if (!routing.resolveBrainWarmupEnabledSync()) return;
     const claudeBin = await resolveClaudeBin();
-    if (claudeBin) prewarmClaudeRepl(claudeBin, HAIKU_MODEL);
+    if (!claudeBin) return;
+    // Re-check AFTER async discovery: a concurrent opt-out or a managed-only
+    // route flip must win over a warmup that started under the old policy.
+    if (!routing.resolveBrainUseClaudeCliSync()) return;
+    if (!routing.resolveBrainWarmupEnabledSync()) return;
+    prewarmClaudeRepl(claudeBin, HAIKU_MODEL);
   } catch {
     // Pre-warm is best-effort — never let it surface into the pipeline.
   }
