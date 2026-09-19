@@ -19,6 +19,7 @@ import {
   recordBrainGeminiSpend,
 } from '@/lib/cortex/qa/llm/brain-spend';
 import { resolveEmbedRoute } from '@/lib/cortex/qa/llm/inference-route';
+import { usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 
 // text-embedding-004 was RETIRED (404, verified live 2026-06-11) — same
 // model-rot failure mode as grok-4.1-fast. gemini-embedding-001 is the GA
@@ -47,16 +48,17 @@ export function dot(a: number[], b: number[]): number {
 }
 
 export function hasEmbeddingRoute(): boolean {
-  return resolveEmbedRoute(EMBED_MODEL) !== null;
+  return resolveEmbedRoute(EMBED_MODEL, { managedOnly: usesManagedBrainInferenceSync() }) !== null;
 }
 
 export async function embedQuestion(text: string): Promise<number[] | null> {
   if (!text.trim()) return null;
-  // Direct (local Gemini key) or proxy (plan token) — see inference-route.ts.
-  const route = resolveEmbedRoute(EMBED_MODEL);
+  // Managed Brain cache lookups use only the proxy; other embedding callers
+  // retain their existing direct-key/proxy ordering.
+  const route = resolveEmbedRoute(EMBED_MODEL, { managedOnly: usesManagedBrainInferenceSync() });
   if (!route) return null;
   try {
-    await assertUnderBrainDailyCap();
+    if (route.via === 'direct') await assertUnderBrainDailyCap();
     // The direct Gemini API takes the native `content.parts` shape; the proxy
     // takes a flat `{ text }` (and builds the Gemini body server-side). Both
     // return `{ embedding: { values } }`, so parsing below is identical.
@@ -74,7 +76,7 @@ export async function embedQuestion(text: string): Promise<number[] | null> {
     const json = await res.json() as { embedding?: { values?: number[] } };
     const values = json.embedding?.values;
     if (!Array.isArray(values) || values.length === 0) return null;
-    recordBrainGeminiSpend(EMBED_MODEL, text, '', 'embedding');
+    if (route.via === 'direct') recordBrainGeminiSpend(EMBED_MODEL, text, '', 'embedding');
     return unitNormalize(values);
   } catch {
     return null;

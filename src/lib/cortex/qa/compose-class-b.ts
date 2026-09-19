@@ -6,7 +6,7 @@ import {
   translateCitations,
   type CitationLookup,
 } from '@/lib/cortex/qa/citations';
-import { composeClassA, limitCitationMarkers, type SseEmit } from '@/lib/cortex/qa/compose-class-a';
+import { composeClassA, limitCitationMarkers, ManagedBrainUnavailableError, type SseEmit } from '@/lib/cortex/qa/compose-class-a';
 import {
   buildSonnetComposeSystem,
   buildSonnetComposeUser,
@@ -14,9 +14,12 @@ import {
 } from '@/lib/prompts/v1';
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import { callOpenRouter } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
-import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
+import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync, usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
+import { createRoleRouteChoice } from '@/lib/operator/role-routing';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import { isRuntimeQuotaLimitError } from '@/lib/orchestrator/cross-house-policy';
 import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
 
@@ -33,6 +36,11 @@ export async function composeClassB(
   // Eval doesn't care about TTFT — only final answer correctness. Production
   // path (Sonnet CLI streaming) is unchanged.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
+
+  if (usesManagedBrainInferenceSync()) {
+    return composeClassBViaManaged(question, repoPath, topRows, emit, lookup, options);
+  }
+
   const claudeCliAllowed = resolveBrainUseClaudeCliSync();
   const codexCliAllowed = resolveBrainUseCodexCliSync();
 
@@ -126,6 +134,73 @@ export async function composeClassB(
     }
     return composeClassA(question, repoPath, topRows, emit, options);
   }
+}
+
+/** Entitled auto mode has one payer: the managed inference route. */
+async function composeClassBViaManaged(
+  question: string,
+  repoPath: string | undefined,
+  topRows: TypedRow[],
+  emit: SseEmit,
+  lookup: CitationLookup,
+  options: ComposeOptions,
+): Promise<void> {
+  try {
+    const system = buildSonnetComposeSystem(options);
+    const user = buildSonnetComposeUser(question, repoPath, topRows);
+    const fullText = await callOpenRouter(`<system>\n${system}\n</system>\n\n${user}`, {
+      timeoutMs: 300_000,
+      managedOnly: true,
+    });
+    recordManagedBrainReceipt(repoPath, 'selected', 'Managed inference answered the Brain reasoning request.');
+    const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
+    const citationRows = options.terse ? verifiedRows.slice(0, 2) : verifiedRows;
+    const finalAnswer = options.terse ? limitCitationMarkers(translated, citationRows) : translated;
+    emit('token', { text: finalAnswer || 'I don\'t have that information yet.' });
+    for (const row of citationRows) {
+      emit('citation', {
+        kind: row.citation.kind,
+        rowId: `${row.citation.kind}-${row.citation.rowId}`,
+        table: row.citation.table,
+        title: rowDisplayTitle(row),
+        excerpt: row.citation.excerpt,
+        url: row.citation.url,
+      });
+    }
+    if (finalAnswer.trim()) {
+      const contradictions = await detectContradictions({ rows: topRows, answer: finalAnswer });
+      for (const contradiction of contradictions) emit('contradiction', contradiction);
+    }
+    emit('done', {});
+  } catch (err) {
+    console.warn('[qa][composer-B] managed inference failed:', err instanceof Error ? err.message : err);
+    recordManagedBrainReceipt(repoPath, 'failed', 'Managed inference was unavailable or its allowance was reached.');
+    throw new ManagedBrainUnavailableError();
+  }
+}
+
+function recordManagedBrainReceipt(
+  repoPath: string | undefined,
+  status: 'selected' | 'failed',
+  reason: string,
+): void {
+  recordRoleRoutingReceiptSafely({
+    role: 'brain',
+    repoPath: repoPath ?? null,
+    contextType: 'brain-compose',
+    requested: createRoleRouteChoice({ backend: 'auto', runtime: null, model: null, effort: null }),
+    effective: status === 'selected'
+      ? createRoleRouteChoice({ backend: 'managed-inference', runtime: null, model: null, effort: null })
+      : null,
+    sources: {
+      backend: 'derived',
+      runtime: 'request-time',
+      model: 'request-time',
+      effort: 'request-time',
+    },
+    reason,
+    status,
+  });
 }
 
 async function composeClassBViaCodex(

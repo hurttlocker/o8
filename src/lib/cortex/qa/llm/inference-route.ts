@@ -52,6 +52,8 @@ export interface ResolveOpenRouterRouteOptions {
    * managed model. Passive Brain/helpers leave this false and stay offline.
    */
   provisionInstallAllowance?: boolean;
+  /** Require the entitled managed proxy. Never fall through to local, BYOK, or free routes. */
+  managedOnly?: boolean;
 }
 
 /**
@@ -211,6 +213,8 @@ export async function resolveOpenRouterRoute(
     };
   }
 
+  if (options.managedOnly) return null;
+
   const localBaseUrl = normalizeLocalInferenceBaseUrl(resolveLocalInferenceBaseUrlSync());
   const localModel = resolveLocalChatModelSync().trim();
   if (localBaseUrl && localModel) {
@@ -262,11 +266,26 @@ export async function resolveOpenRouterRoute(
 
 /**
  * Gemini embeddings route for `embedContent`. Direct (local Gemini key, key in
- * the query string) → proxy (plan token, Bearer) → null. The request BODY
+ * the query string) → proxy (plan token, Bearer) → null. Managed Brain
+ * requests set `managedOnly` so query-time cache embeddings cannot switch
+ * payers. The request BODY
  * differs by path (the direct Gemini API wants `content.parts`, the proxy wants
  * `{ text }`), so the caller branches on `via` — see gemini-embed.ts.
  */
-export function resolveEmbedRoute(model: string): InferenceRoute | null {
+export function resolveEmbedRoute(
+  model: string,
+  options: { managedOnly?: boolean } = {},
+): InferenceRoute | null {
+  if (options.managedOnly) {
+    const token = planToken();
+    return token
+      ? {
+        url: `${proxyBaseUrl()}/v1/embeddings`,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        via: 'proxy',
+      }
+      : null;
+  }
   const localKey = resolveGeminiKey();
   if (localKey) {
     return {

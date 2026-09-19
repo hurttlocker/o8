@@ -19,6 +19,7 @@ import {
   type AskJudgmentOptions,
 } from '@/lib/judgment';
 import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
+import { usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 
 /**
  * Minimum referee confidence for the classification to be used. Provisional:
@@ -54,7 +55,12 @@ export async function classifyWithReferee(question: string): Promise<RefereeClas
       questions: BRAIN_CLASS_QUESTIONS,
       context: { surface: BRAIN_CLASSIFIER_SURFACE },
     },
-    transportOverride,
+    {
+      ...transportOverride,
+      // This applies only to the Brain referee call. Other judgment consumers
+      // retain their configured provider and fallback behavior.
+      managedOnly: usesManagedBrainInferenceSync(),
+    },
   );
   if (!result) return null;
   const answer = thresholdAnswer(result.answers.questionClass);

@@ -65,6 +65,8 @@ export interface CallOpenRouterOptions {
   /** HTTP timeout. Default 10s — Grok 4.1 Fast 5-fact p50 was 5.7s in the
    *  bake-off, so 8s would cut ~30% of long answers; 10s gives runway. */
   timeoutMs?: number;
+  /** Require the entitled managed route and fail closed when it is unavailable. */
+  managedOnly?: boolean;
 }
 
 /**
@@ -166,9 +168,11 @@ export async function callOpenRouter(
   // liveness-gated local for free users, then the user's own OpenRouter key.
   // Null = no route → the caller falls through to the next CLI tier, exactly
   // as a missing key did before.
-  const route = await resolveOpenRouterRoute();
+  const route = await resolveOpenRouterRoute({ managedOnly: opts.managedOnly });
   if (!route) {
-    throw new Error('[qa][openrouter] no route (no proxy token, local endpoint, or BYO key)');
+    throw new Error(opts.managedOnly
+      ? '[qa][managed] managed inference unavailable (no valid plan token)'
+      : '[qa][openrouter] no route (no proxy token, local endpoint, or BYO key)');
   }
 
   // Keep boot offline. Only a real request headed directly to OpenRouter pays
@@ -217,7 +221,8 @@ export async function callOpenRouter(
     if (route.via !== 'local' && isHardFailureStatus(res.status)) {
       recordHardFailure(res.status, errText);
     }
-    throw new Error(`[qa][openrouter] HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    const prefix = opts.managedOnly ? '[qa][managed]' : '[qa][openrouter]';
+    throw new Error(`${prefix} HTTP ${res.status}: ${errText.slice(0, 200)}`);
   }
 
   const json = await res.json() as {

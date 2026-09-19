@@ -11,6 +11,7 @@ import {
   getOperatorDefaults,
   getOperatorDefaultsTomlState,
   isCollideAggregator,
+  isBrainRoutingMode,
   isOrchestratorBackendSetting,
   isPrLinkDestination,
   isRequireApproval,
@@ -31,6 +32,7 @@ import { isReviewReadyNotifications } from '@/lib/operator/presentation-defaults
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
 import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { resolveJudgmentPath } from '@/lib/judgment/route';
+import { getEntitlementSync } from '@/lib/entitlement/store';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -86,6 +88,7 @@ function operatorDefaultsPayload(
       values: data.values,
       sources: data.sources,
       dispatchableRuntimes,
+      managedBrainEligible: getEntitlementSync().flags['proxy.inference'] === true,
     }),
   };
 }
@@ -386,6 +389,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('brainCodexEffort must be a valid effort level.');
     }
     update.brainCodexEffort = body.brainCodexEffort;
+  }
+
+  if (body.brainRoutingMode !== undefined) {
+    if (!isBrainRoutingMode(body.brainRoutingMode)) {
+      throw new Error('brainRoutingMode must be "auto" or "subscription".');
+    }
+    update.brainRoutingMode = body.brainRoutingMode;
   }
 
   if (body.defaultDispatchModel !== undefined) {

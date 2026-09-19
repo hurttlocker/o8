@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
 vi.mock('@/lib/cortex/qa/llm/codex-adapter', () => ({ callCodex: vi.fn() }));
+vi.mock('@/lib/cortex/qa/llm/openrouter-adapter', () => ({ callOpenRouter: vi.fn() }));
 vi.mock('@/lib/cortex/qa/llm/sonnet-adapter', () => ({ callSonnet: vi.fn() }));
 vi.mock('@/lib/cortex/qa/compose-class-a', () => ({
   composeClassA: vi.fn(),
@@ -16,12 +17,16 @@ vi.mock('@/lib/cortex/qa/brain-quota-alert', () => ({
 vi.mock('@/lib/operator/brain-routing', () => ({
   resolveBrainUseClaudeCliSync: vi.fn(),
   resolveBrainUseCodexCliSync: vi.fn(),
+  usesManagedBrainInferenceSync: vi.fn(),
 }));
+vi.mock('@/lib/operator/role-routing-ledger', () => ({ recordRoleRoutingReceiptSafely: vi.fn() }));
 
 import { composeClassB } from '@/lib/cortex/qa/compose-class-b';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import { callOpenRouter } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
-import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
+import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync, usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 
 const row: TypedRow = {
   citation: {
@@ -53,6 +58,7 @@ describe('Class B Brain subscription routing', () => {
     vi.clearAllMocks();
     vi.mocked(resolveBrainUseClaudeCliSync).mockReturnValue(false);
     vi.mocked(resolveBrainUseCodexCliSync).mockReturnValue(true);
+    vi.mocked(usesManagedBrainInferenceSync).mockReturnValue(false);
     vi.mocked(callCodex).mockResolvedValue('Codex answer. [D-subscription-routing]');
   });
 
@@ -84,5 +90,23 @@ describe('Class B Brain subscription routing', () => {
     const answer = events.find((event) => event.name === 'token')?.payload as { text: string };
     expect(answer.text).toContain('Codex answer.');
     expect(answer.text).not.toContain('disabled Claude subscription');
+  });
+
+  it('receipts a managed Class B answer and never launches a CLI', async () => {
+    vi.mocked(usesManagedBrainInferenceSync).mockReturnValue(true);
+    vi.mocked(callOpenRouter).mockResolvedValue('Managed answer. [D-subscription-routing]');
+    const { events, emit } = collectEvents();
+
+    await composeClassB('How is this routed?', '/repo/o8', [row], emit, { terse: true });
+
+    expect(callCodex).not.toHaveBeenCalled();
+    expect(callSonnet).not.toHaveBeenCalled();
+    expect(recordRoleRoutingReceiptSafely).toHaveBeenCalledWith(expect.objectContaining({
+      role: 'brain',
+      effective: expect.objectContaining({ backend: 'managed-inference' }),
+    }));
+    expect(events.find((event) => event.name === 'token')?.payload).toEqual({
+      text: 'Managed answer. [CITATION:directive-subscription-routing]',
+    });
   });
 });

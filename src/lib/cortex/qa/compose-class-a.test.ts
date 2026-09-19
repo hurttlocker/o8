@@ -41,15 +41,17 @@ vi.mock('@/lib/operator/role-routing-ledger', () => ({
 vi.mock('@/lib/operator/brain-routing', () => ({
   resolveBrainUseClaudeCliSync: vi.fn(),
   resolveBrainUseCodexCliSync: vi.fn(),
+  usesManagedBrainInferenceSync: vi.fn(),
 }));
 
 import { composeClassA } from '@/lib/cortex/qa/compose-class-a';
+import { isByokRequired } from '@/lib/cortex/qa/llm/byok-keys';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callOpenRouter } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { getEntitlementSync } from '@/lib/entitlement/store';
-import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
+import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync, usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 
@@ -84,11 +86,13 @@ describe('composeClassA provider order', () => {
     vi.mocked(callOpenRouter).mockReset();
     vi.mocked(callSonnet).mockReset();
     vi.mocked(recordRoleRoutingReceiptSafely).mockReset();
+    vi.mocked(isByokRequired).mockResolvedValue(false);
     vi.mocked(getOperatorDefaultsSync).mockReturnValue({
       values: { classAComposer: 'auto' },
     } as ReturnType<typeof getOperatorDefaultsSync>);
     vi.mocked(resolveBrainUseClaudeCliSync).mockReturnValue(false);
     vi.mocked(resolveBrainUseCodexCliSync).mockReturnValue(true);
+    vi.mocked(usesManagedBrainInferenceSync).mockReturnValue(false);
     vi.mocked(getEntitlementSync).mockReturnValue({
       flags: {},
     } as ReturnType<typeof getEntitlementSync>);
@@ -113,7 +117,8 @@ describe('composeClassA provider order', () => {
     expect(events).toContainEqual({ name: 'done', payload: {} });
   });
 
-  it('uses the managed fast tier before subscription CLIs without changing the cascade fallback', async () => {
+  it('uses the managed route without a subscription fallback', async () => {
+    vi.mocked(usesManagedBrainInferenceSync).mockReturnValue(true);
     vi.mocked(getEntitlementSync).mockReturnValue({
       flags: { 'proxy.inference': true },
     } as ReturnType<typeof getEntitlementSync>);
@@ -132,6 +137,32 @@ describe('composeClassA provider order', () => {
     expect(callOrder).toEqual(['openrouter']);
     expect(callCodex).not.toHaveBeenCalled();
     expect(events).toContainEqual({ name: 'done', payload: {} });
+  });
+
+  it('reports managed unavailability without launching a CLI', async () => {
+    vi.mocked(usesManagedBrainInferenceSync).mockReturnValue(true);
+    vi.mocked(callOpenRouter).mockRejectedValue(new Error('HTTP 402'));
+    const { events, emit } = makeEmit();
+
+    await expect(composeClassA('What is the Brain-first rule?', '/repo/o8', [directiveRow], emit))
+      .rejects.toMatchObject({ code: 'managed_brain_unavailable' });
+
+    expect(callCodex).not.toHaveBeenCalled();
+    expect(callHaiku).not.toHaveBeenCalled();
+    expect(callSonnet).not.toHaveBeenCalled();
+    expect(events.find((event) => event.name === 'token')).toBeUndefined();
+  });
+
+  it('uses the managed route when desktop BYOK is required', async () => {
+    vi.mocked(usesManagedBrainInferenceSync).mockReturnValue(true);
+    vi.mocked(isByokRequired).mockResolvedValue(true);
+    vi.mocked(callOpenRouter).mockResolvedValue('Managed answer. [D-brain-first]');
+
+    const { emit } = makeEmit();
+    await composeClassA('What is the Brain-first rule?', '/repo/o8', [directiveRow], emit);
+
+    expect(callOpenRouter).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ managedOnly: true }));
+    expect(callCodex).not.toHaveBeenCalled();
   });
 
   it('receipts a disabled pinned CLI as a fallback instead of a selected route', async () => {

@@ -36,6 +36,7 @@ import {
   isAvailable as embeddingsAvailable,
 } from '@/lib/cortex/embeddings';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
+import { usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 
 const DEFAULT_LIMIT = 8;
 const CONFIDENCE_FLOOR = 0.6;
@@ -222,7 +223,10 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
     // compute cosine similarity against the question embedding. When the
     // flag is off, we skip the embedding column entirely (no schema read
     // overhead for the common path).
-    const embeddingColSql = isHybridScorerEnabled() ? ', embedding' : '';
+    // Managed Brain has one payer. This optional scorer has its own
+    // OpenAI/local embedding route, so keep lexical retrieval for this query.
+    const useHybridScorer = isHybridScorerEnabled() && !usesManagedBrainInferenceSync();
+    const embeddingColSql = useHybridScorer ? ', embedding' : '';
     const records = sqlite
       .prepare(
         `SELECT id, kind, content, source_kind, source_id, source_excerpt,
@@ -239,7 +243,7 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
     // The question embedding is computed once and reused for all candidates.
     // Rows missing an embedding fall back to their BM25 rank (cosine = 0).
     let questionVec: Float32Array | null = null;
-    if (isHybridScorerEnabled() && embeddingsAvailable()) {
+    if (useHybridScorer && embeddingsAvailable()) {
       try {
         questionVec = await embedText(input.question);
       } catch (err) {

@@ -42,6 +42,17 @@ export function resolveJudgmentRoute(
   return resolveDirectJudgmentRoute(directUrl);
 }
 
+/**
+ * Managed Brain calls are entitled-only. Unlike the general judgment route,
+ * they must not use a local key when the managed allowance is unavailable.
+ */
+export function resolveManagedJudgmentRoute(): ResolvedJudgmentRoute | null {
+  const token = planToken();
+  return token
+    ? { url: `${proxyBaseUrl()}/v1/judgment`, bearer: token, route: 'managed', credential: 'plan' }
+    : null;
+}
+
 /** The operator's own key on the direct route, or null when no key exists. */
 export function resolveDirectJudgmentRoute(directUrl: string = TYPESAFE_SYSTEMONE_URL): ResolvedJudgmentRoute | null {
   const key = readJudgmentApiKey();

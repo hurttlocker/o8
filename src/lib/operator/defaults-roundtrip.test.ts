@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -58,6 +58,7 @@ const NON_DEFAULT_UPDATE = {
   claudeWorkerEffort: 'max',
   brainCodexModel: 'gpt-5.6-sol',
   brainCodexEffort: 'high',
+  brainRoutingMode: 'subscription',
   defaultDispatchModel: 'some-model',
   experimentalOpencode: true,
   experimentalGemini: true,
@@ -112,6 +113,15 @@ describe('updateOperatorDefaults round-trip', () => {
       autoApplyUpdates: 'when-idle',
     }));
     expect((await getOperatorDefaults()).values.updateAutoApply).toBe('idle');
+  });
+
+  it('migrates an explicit legacy Brain CLI selection to subscription mode but leaves a bare legacy default on auto', async () => {
+    rmSync(getOperatorDefaultsTomlPath(), { force: true });
+    writeFileSync(join(dataDir, 'operator-defaults.json'), JSON.stringify({ classAComposer: 'sonnet-cli' }));
+    expect((await getOperatorDefaults()).values.brainRoutingMode).toBe('subscription');
+
+    writeFileSync(join(dataDir, 'operator-defaults.json'), JSON.stringify({ brainUseClaudeCli: true }));
+    expect((await getOperatorDefaults()).values.brainRoutingMode).toBe('auto');
   });
 
   it('persists every settable field (no silent evaporation)', async () => {

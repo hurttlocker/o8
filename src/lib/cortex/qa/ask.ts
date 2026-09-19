@@ -41,6 +41,7 @@ import {
 } from '@/lib/cortex/qa/semantic-cache';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
+import { brainRouteCacheKeySync, usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 
 // ── In-process cache ──────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ interface CacheEntry {
 const answerCache = new Map<string, CacheEntry>();
 
 function scopeKey(repoPath: string | undefined, projectId: string | undefined, terse = false): string {
-  return `${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
+  return `${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
 }
 
 /**
@@ -135,7 +136,7 @@ function cacheKey(
   terse = false,
 ): string {
   return createHash('sha256')
-    .update(`${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
+    .update(`${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
     .digest('hex');
 }
 
@@ -330,7 +331,7 @@ async function runAskCortexUncached(
 
   // Pre-warm the Haiku REPL while classify + retrieve run — the composer's
   // CLI tier then finds a proc with its bootstrap already under way.
-  void prewarmHaiku();
+  if (!usesManagedBrainInferenceSync()) void prewarmHaiku();
 
   const grepStart = Date.now();
   const grepRows = await routeGrepArm(question, repoPath);
@@ -349,7 +350,7 @@ async function runAskCortexUncached(
     : await classifyQuestion(question);
   const classifyMs = grepRows ? 0 : Date.now() - classifyStart;
   // Class B composes via Sonnet CLI — start its bootstrap before retrieval.
-  if (classification.class === 'B') void prewarmSonnetCli();
+  if (classification.class === 'B' && !usesManagedBrainInferenceSync()) void prewarmSonnetCli();
 
   const retrievalStart = Date.now();
   let results: Awaited<ReturnType<typeof retrieveAll>> = [];
@@ -480,7 +481,7 @@ export async function runAskPipeline(
   }
 
   // Pre-warm the Haiku REPL while classify + retrieve run (see askCortex).
-  void prewarmHaiku();
+  if (!usesManagedBrainInferenceSync()) void prewarmHaiku();
 
   const grepRows = await routeGrepArm(question, repoPath);
   let classification: Awaited<ReturnType<typeof classifyQuestion>> = {
@@ -505,7 +506,7 @@ export async function runAskPipeline(
       classification = { class: 'B', bm25Variants: [question] };
     }
     // Class B composes via Sonnet CLI — start its bootstrap before retrieval.
-    if (classification.class === 'B') void prewarmSonnetCli();
+    if (classification.class === 'B' && !usesManagedBrainInferenceSync()) void prewarmSonnetCli();
 
     const retrievalStart = Date.now();
     try {

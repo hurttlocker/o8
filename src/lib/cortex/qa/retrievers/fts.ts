@@ -116,6 +116,7 @@ function ftsSearch(
 
 interface OutcomeRow {
   id: string;
+  outcome: string;
   summary: string;
   plan_text: string | null;
   repo_path: string;
@@ -387,7 +388,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         .map(([id]) => id);
       const records = sqlite
         .prepare(
-          `SELECT id, summary, COALESCE(plan_text, '') AS plan_text, repo_path, completed_at
+          `SELECT id, outcome, summary, COALESCE(plan_text, '') AS plan_text, repo_path, completed_at
            FROM session_outcomes
            WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
         )
@@ -409,6 +410,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           },
           fields: {
             id: record.id,
+            outcome: record.outcome,
             summary: record.summary,
             planText: record.plan_text,
             repoPath: record.repo_path,
@@ -559,8 +561,10 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         )
         .all(...sortedIds) as DirectiveRow[];
       const byId = new Map(records
-        .filter((record) => directiveInScope(record.directive_id, input, scope.directiveScope))
-        .map((r) => [r.directive_id, r]));
+        .map((record) => ({ record, directive: readDirective(record.directive_id) }))
+        .filter((entry) => entry.directive !== null
+          && directiveInScope(entry.record.directive_id, input, scope.directiveScope))
+        .map((entry) => [entry.record.directive_id, entry]));
       // #1228 health signal — if most directive candidates fall out of scope,
       // the repo likely has orphaned old-slug directives (a rename left them
       // stamped with the previous basename). Log loudly so it never silently
@@ -571,8 +575,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         );
       }
       sortedIds.forEach((id, idx) => {
-        const record = byId.get(id);
-        if (!record) return;
+        const entry = byId.get(id);
+        if (!entry?.directive) return;
+        const { record, directive } = entry;
         const hit = directivesHits.get(id)!;
         const score = 1 / (RRF_K + idx);
         // #1119 — surface the on-disk filename (which uses `__` for
@@ -591,6 +596,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
             id: record.directive_id,
             title: record.title,
             body: record.body,
+            priority: directive.priority,
           },
           score: 0,
         });

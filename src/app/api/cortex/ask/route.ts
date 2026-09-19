@@ -30,6 +30,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest } from 'next/server';
 
 import { runAskPipeline } from '@/lib/cortex/qa/ask';
+import { ManagedBrainUnavailableError } from '@/lib/cortex/qa/compose-class-a';
 import { withBrainRetrievalUsage } from '@/lib/cortex/qa/llm/brain-spend';
 
 interface AskBody {
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'pipeline error';
         console.error('[qa][ask-route] pipeline error:', message);
-        emit('error', { message });
+        emit('error', { message, ...(err instanceof ManagedBrainUnavailableError ? { code: err.code } : {}) });
         emit('done', {});
       } finally {
         try {
