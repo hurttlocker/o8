@@ -48,6 +48,12 @@ describe('public changelog scrub', () => {
       'feat: Tauri sidecar picks a free port before spawning the server',
       'feat: bring your own API key on every plan',
       'feat: the Cursor adapter discovers sessions read-only',
+      'feat: Gemini and OpenAI adapters share the discovery contract',
+      'feat(brain): Anthropic models answer the classifier tier first',
+      'feat(db): Drizzle schema gains the receipts table',
+      'feat: opencode sessions resume from the registry',
+      'feat: tmux panes survive a reload',
+      'feat: BYOK stays the free path on every plan',
     ];
     expect(scrub(subjects)).toEqual(subjects);
   });
@@ -69,6 +75,14 @@ describe('public changelog scrub', () => {
         expect(line).not.toMatch(new RegExp(`[\\w-]${replacement}|${replacement}[\\w-]`));
       }
     }
+  });
+
+  it('still replaces a rival product name', () => {
+    // Today's ruling covers the vendors o8 runs on. The separate rule against
+    // naming competitors in public copy is untouched, and a product o8 has no
+    // adapter for is not a vendor.
+    expect(scrub(['feat: Conductor-style workspaces land'])[0])
+      .toBe('feat: competing product-style workspaces land');
   });
 
   it('passes a subject with no internal name through byte-identical', () => {

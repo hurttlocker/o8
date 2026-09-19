@@ -65,9 +65,15 @@ scrub_subject() {
   # `ChatGPT` published as `ChatAI model` and `gpt-realtime-2.1-mini` as
   # `AI model-mini`. Deleting the pattern is what fixes that class for good.
   #
-  # Whatever remains must still replace a WHOLE token. A pattern that matches
-  # part of a name leaves the rest glued to the replacement, and the weekly
-  # digest builds its copy from this changelog, so a broken word ships.
+  # The patterns that remain are deliberately loose, and they can glue: a
+  # subject saying `useSymon` publishes as `usevoice agent`. That is the right
+  # trade for THESE names. A missed internal name is a leak we cannot take
+  # back; a glued word is ugly and fixable. Anchoring them to word boundaries
+  # would read better and would let `SymonWatch` through, so it stays loose.
+  #
+  # A rival product keeps its substitution too. Today's ruling covers the
+  # vendors o8 runs on, not the rule against naming competitors. A runtime o8
+  # ships an adapter for is a feature of ours and publishes by name.
   msg=$(echo "$msg" | sed -E \
     -e 's/Cortex IDE/o8/gi' \
     -e 's/Cortex-aware/context-aware/gi' \
@@ -81,7 +87,8 @@ scrub_subject() {
     -e 's/aqua-color/the voice stack/gi' \
     -e 's/OpenClaw/agent runtime/gi' \
     -e 's/NemoClaw/agent runtime/gi' \
-    -e 's/PicoClaw/bundled runtime/gi')
+    -e 's/PicoClaw/bundled runtime/gi' \
+    -e 's/Conductor/competing product/gi')
   printf '%s\n' "$msg"
 }
 
@@ -188,7 +195,7 @@ node "$SCRIPT_DIR/lib/merge-public-changelog.mjs" "$MIRROR_CHANGELOG" "$ADDITION
 # Internal names only. A vendor, framework or model name is not blocked:
 # the repository names them all openly, and the substitutions above no
 # longer rewrite them, so blocking them here would only fail the ship.
-BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Ginsu xhigh monetization "model rate" "pricing table" cortexrules CortexClient ".cortex" ".o8-ide")
+BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Ginsu Conductor xhigh monetization "model rate" "pricing table" cortexrules CortexClient ".cortex" ".o8-ide")
 LEAKED=""
 for term in "${BLOCKLIST[@]}"; do
   # Preserve byte-identical legacy entries while blocking any new occurrence.
