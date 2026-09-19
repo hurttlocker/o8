@@ -1,5 +1,5 @@
 import 'server-only';
-import { CODEX_MODEL_IDS, isCodexModelId, isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
+import { isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { isExecutionCarrierId, type ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -38,6 +38,7 @@ import {
   envCommitAttribution,
   envPrLinkDestination,
   envBrainUseClaudeCli,
+  envBrainRoutingMode,
   envBuyinDocEnabled,
   envClassAComposer,
   envClaudeWorkerEffort,
@@ -76,6 +77,13 @@ import {
   type ClassAComposer,
   type WorkersUseBrain,
 } from './defaults-env';
+import {
+  applyBrainDefaultsUpdate,
+  BRAIN_DEFAULTS,
+  resolveBrainRoutingModeSettings,
+  resolveStoredBrainDefaults,
+  type BrainDefaults,
+} from './brain-routing-default';
 import { applyStorageReserveUpdate, resolveStorageReserveSettings, resolveStoredStorageReserve, STORAGE_RESERVE_FALLBACK, type StorageReserveDefaults } from './storage-reserve-defaults';
 import { applyWorkspaceParkingUpdate, resolveStoredWorkspaceParking, resolveWorkspaceParkingSettings, WORKSPACE_PARKING_FALLBACK, type WorkspaceParkingDefaults } from './workspace-parking-defaults';
 import { applyMeteredPacketCapUpdate, METERED_PACKET_CAP_FALLBACK, resolveMeteredPacketCapSettings, resolveStoredMeteredPacketCap, type MeteredPacketCapDefaults } from './metered-packet-cap-defaults';
@@ -99,8 +107,8 @@ import {
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
-export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, isWorkspaceManifestPolicy } from './defaults-env';
-export type { OverlapGateMode, ClassAComposer, WorkersUseBrain, WorkspaceManifestPolicy, OrchestratorBackendSetting, ReviewerBackendSetting, CollideAggregator, PrLinkDestination } from './defaults-env';
+export { isBrainRoutingMode, isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, isWorkspaceManifestPolicy } from './defaults-env';
+export type { OverlapGateMode, BrainRoutingMode, ClassAComposer, WorkersUseBrain, WorkspaceManifestPolicy, OrchestratorBackendSetting, ReviewerBackendSetting, CollideAggregator, PrLinkDestination } from './defaults-env';
 export { coerceStoredTier, isTargetingTier, mergeTier } from './targeting-tier';
 export type { TargetingTier } from './targeting-tier';
 export {
@@ -117,7 +125,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -147,10 +155,6 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
   codexWorkerEffort: ThinkingEffort;
   /** Default Claude Code worker effort. 'adaptive' preserves runtime default behavior. */
   claudeWorkerEffort: ThinkingEffort;
-  /** Codex subscription model used by Engineering Brain classify and compose calls. */
-  brainCodexModel: string;
-  /** Codex subscription effort used by Engineering Brain classify and compose calls. */
-  brainCodexEffort: ThinkingEffort;
   /**
    * Default model for DISPATCHED workers. Empty = let the runtime pick its own
    * default (today: Codex's configured model). Set it to a LOCAL model with the
@@ -338,8 +342,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   workerRuntimes: ['codex'],
   codexWorkerEffort: 'adaptive',
   claudeWorkerEffort: 'adaptive',
-  brainCodexModel: MODEL_IDS.codexWorkerDefault,
-  brainCodexEffort: 'xhigh',
+  ...BRAIN_DEFAULTS,
   defaultDispatchModel: '',
   localInferenceBaseUrl: '',
   localEmbedModel: '',
@@ -386,7 +389,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK, ...JUDGMENT_ALLOWANCE_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault>, Partial<JudgmentAllowanceDefaults> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault>, Partial<JudgmentAllowanceDefaults>, Partial<BrainDefaults> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -406,8 +409,6 @@ interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partia
   workerRuntimes?: OrchestratorRuntime[];
   codexWorkerEffort?: ThinkingEffort;
   claudeWorkerEffort?: ThinkingEffort;
-  brainCodexModel?: string;
-  brainCodexEffort?: ThinkingEffort;
   defaultDispatchModel?: string;
   localInferenceBaseUrl?: string;
   localEmbedModel?: string;
@@ -510,12 +511,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (stored.claudeWorkerEffort && isThinkingEffort(stored.claudeWorkerEffort)) {
     result.claudeWorkerEffort = stored.claudeWorkerEffort;
   }
-  if (typeof stored.brainCodexModel === 'string' && isCodexModelId(stored.brainCodexModel.trim())) {
-    result.brainCodexModel = stored.brainCodexModel.trim();
-  }
-  if (stored.brainCodexEffort && isThinkingEffort(stored.brainCodexEffort)) {
-    result.brainCodexEffort = stored.brainCodexEffort;
-  }
+  Object.assign(result, resolveStoredBrainDefaults(stored));
   if (typeof stored.defaultDispatchModel === 'string') {
     // Empty string is meaningful here ("unset → runtime default"), so accept it.
     result.defaultDispatchModel = stored.defaultDispatchModel.trim();
@@ -642,6 +638,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envCanvas = envExperimentalCanvas();
   const envNative = envNativeBrowserView();
   const envComposer = envClassAComposer();
+  const envBrainRouting = envBrainRoutingMode();
+  const brainRouting = resolveBrainRoutingModeSettings(envBrainRouting, fileValues.brainRoutingMode);
   const envInApp = envInAppOrchestratorEnabled();
   const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();
@@ -711,6 +709,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envClaudeEffort ?? fileValues.claudeWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.claudeWorkerEffort,
     brainCodexModel: fileValues.brainCodexModel ?? OPERATOR_DEFAULTS_FALLBACK.brainCodexModel,
     brainCodexEffort: fileValues.brainCodexEffort ?? OPERATOR_DEFAULTS_FALLBACK.brainCodexEffort,
+    ...brainRouting.values,
     defaultDispatchModel: envDispatchModel ?? fileValues.defaultDispatchModel ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchModel,
     localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
@@ -784,6 +783,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envClaudeEffort !== null ? 'env' : fileValues.claudeWorkerEffort !== undefined ? 'file' : 'default',
     brainCodexModel: fileValues.brainCodexModel !== undefined ? 'file' : 'default',
     brainCodexEffort: fileValues.brainCodexEffort !== undefined ? 'file' : 'default',
+    ...brainRouting.sources,
     defaultDispatchModel: envDispatchModel !== null ? 'env' : fileValues.defaultDispatchModel !== undefined ? 'file' : 'default',
     localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
@@ -961,19 +961,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     }
     stored.claudeWorkerEffort = update.claudeWorkerEffort;
   }
-  if (update.brainCodexModel !== undefined) {
-    const trimmed = update.brainCodexModel.trim();
-    if (!isCodexModelId(trimmed)) {
-      throw new Error(`brainCodexModel ${JSON.stringify(trimmed)} is unsupported; valid values are ${CODEX_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}.`);
-    }
-    stored.brainCodexModel = trimmed;
-  }
-  if (update.brainCodexEffort !== undefined) {
-    if (!isThinkingEffort(update.brainCodexEffort)) {
-      throw new Error('brainCodexEffort must be a valid ThinkingEffort value.');
-    }
-    stored.brainCodexEffort = update.brainCodexEffort;
-  }
+  applyBrainDefaultsUpdate(stored, update);
   if (update.defaultDispatchModel !== undefined) {
     // Empty string clears it (back to the runtime default); any string is valid
     // (cloud name, or the `ollama:`/`lmstudio:` local convention).

@@ -21,13 +21,25 @@ import { isByokRequired } from '@/lib/cortex/qa/llm/byok-keys';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
-import { getEntitlementSync } from '@/lib/entitlement/store';
 import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/defaults';
+import { usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 import { createRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
 
 export type SseEmit = (name: string, payload: unknown) => void;
+
+export const MANAGED_BRAIN_UNAVAILABLE_MESSAGE = 'Managed Brain inference is unavailable or its allowance is reached. Select Subscription in Brain settings to use a connected CLI.';
+
+/** A managed-only request failed. Callers must surface it and never cache it. */
+export class ManagedBrainUnavailableError extends Error {
+  readonly code = 'managed_brain_unavailable';
+
+  constructor() {
+    super(MANAGED_BRAIN_UNAVAILABLE_MESSAGE);
+    this.name = 'ManagedBrainUnavailableError';
+  }
+}
 
 /**
  * Class A compose chain (rewired in #915 path-to-70 phase 1.7 v2):
@@ -110,17 +122,7 @@ export async function composeClassA(
   const configuredClassAMode: ClassAComposer = evalMode
     ? 'auto'
     : routingSnapshot?.values.classAComposer ?? 'auto';
-  let classAMode = configuredClassAMode;
-  // B-1 (2026-06-22): managed-inference users (founders / paid plan — `proxy.inference`)
-  // get the fast Brain tier automatically — the perk. 'fastest' leads with flash-lite
-  // via the capped proxy (~0.5s) instead of the 15-30s CLI bootstrap. Only overrides the
-  // DEFAULT 'auto' (an explicit 'fastest'/'sonnet-cli' choice is respected), never in eval
-  // mode, and never weakens the spend cap (still enforced server-side on the proxy,
-  // brain-spend.ts). On failure it still falls through the full subscription chain below,
-  // so availability is never reduced.
-  if (!evalMode && classAMode === 'auto' && managedInferenceEnabled()) {
-    classAMode = 'fastest';
-  }
+  const classAMode = configuredClassAMode;
   const sonnetCliFirst = classAMode === 'sonnet-cli' && brainCliOn;
   let triedSonnetCli = false;
   const attemptedRoutes: string[] = [];
@@ -133,6 +135,7 @@ export async function composeClassA(
     model: string | null;
     effort?: ReturnType<typeof getOperatorDefaultsSync>['values']['brainCodexEffort'] | null;
     label: string;
+    status?: 'selected' | 'fallback' | 'failed';
   }) => {
     if (evalMode) return;
     const earlierRoutes = attemptedRoutes.slice(0, -1);
@@ -147,12 +150,14 @@ export async function composeClassA(
         model: null,
         effort: null,
       }),
-      effective: createRoleRouteChoice({
-        backend: input.backend,
-        runtime: input.runtime,
-        model: input.model,
-        effort: input.effort ?? null,
-      }),
+      effective: input.status === 'failed'
+        ? null
+        : createRoleRouteChoice({
+          backend: input.backend,
+          runtime: input.runtime,
+          model: input.model,
+          effort: input.effort ?? null,
+        }),
       sources: {
         backend: composerSource,
         runtime: input.runtime ? 'derived' : 'request-time',
@@ -167,9 +172,30 @@ export async function composeClassA(
       fallbackReason: earlierRoutes.length > 0
         ? `Earlier routes were unavailable or failed: ${earlierRoutes.join(' → ')}.`
         : null,
-      status: earlierRoutes.length > 0 ? 'fallback' : 'selected',
+      status: input.status ?? (earlierRoutes.length > 0 ? 'fallback' : 'selected'),
     });
   };
+
+  // Entitled auto mode is deliberately fail-closed. It must not spend a CLI
+  // subscription, a BYOK key, or a local provider after the managed service
+  // returns a cap or availability error.
+  if (usesManagedBrainInferenceSync()) {
+    attemptedRoutes.push('managed-inference');
+    const managedAnswer = await tryComposeOpenRouter(composePrompt, undefined, true);
+    if (managedAnswer) {
+      recordBrainResolution({ backend: 'managed-inference', runtime: null, model: null, label: 'managed inference' });
+      emitClassAAnswer(managedAnswer, lookup, emit, options);
+      return;
+    }
+    recordBrainResolution({
+      backend: 'managed-inference',
+      runtime: null,
+      model: null,
+      label: 'managed inference unavailable',
+      status: 'failed',
+    });
+    throw new ManagedBrainUnavailableError();
+  }
 
   // Eval-mode tier 0: Sonnet 4.6 via the REPL adapter (subscription-billed,
   // #1124) — best reasoning + synthesis, never hedges when rows answer the
@@ -337,25 +363,6 @@ export async function composeClassA(
   emit('done', {});
 }
 
-/**
- * B-1: true when this install holds a managed-inference entitlement
- * (`proxy.inference` — founder / paid plan). Lets the Class A composer auto-lead
- * the fast Brain tier for those users. Sync + never throws (mirrors
- * resolveClassAComposerSetting); resolves env > entitlement.json > free default.
- */
-function managedInferenceEnabled(): boolean {
-  try {
-    return getEntitlementSync().flags['proxy.inference'] === true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Read the `classAComposer` operator default safely. Sync read off
- * `~/.cortex-ide/operator-defaults.json`; failures fall back to 'auto'
- * so a missing/corrupt prefs file never breaks Q&A.
- */
 /** Tier 1: Haiku CLI. Free for Claude Max users — primary tier. */
 async function tryComposeHaiku(prompt: string): Promise<string | null> {
   try {
@@ -397,9 +404,9 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
  * this tier is skipped so non-BYOK users don't accidentally burn the
  * founder's OpenRouter credits. Without the flag the existing behaviour is
  * preserved (smoke + dev env always resolve via process.env). */
-async function tryComposeOpenRouter(prompt: string, model?: string): Promise<string | null> {
+async function tryComposeOpenRouter(prompt: string, model?: string, managedOnly = false): Promise<string | null> {
   // O8_BYOK_REQUIRED=1 + no stored key → skip tier
-  if (await isByokRequired()) {
+  if (!managedOnly && await isByokRequired()) {
     console.info('[qa][composer-A] OpenRouter tier skipped (O8_BYOK_REQUIRED and no stored key)');
     return null;
   }
@@ -408,7 +415,7 @@ async function tryComposeOpenRouter(prompt: string, model?: string): Promise<str
     // with the full 30-row payload (post-slice-fix) and timed out at 10s
     // (caused 35% → 2% ownership crash). p95 for multi-row prompts is past
     // 10s; 25s gives headroom for worst case.
-    const text = await callOpenRouter(prompt, { timeoutMs: 25_000, model });
+    const text = await callOpenRouter(prompt, { timeoutMs: 25_000, model, managedOnly });
     return text.trim() ? text : null;
   } catch (err) {
     console.warn('[qa][composer-A] OpenRouter failed:', err instanceof Error ? err.message : err);

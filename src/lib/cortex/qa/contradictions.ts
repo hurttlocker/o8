@@ -21,6 +21,7 @@
 import 'server-only';
 
 import type { TypedRow } from '@/lib/cortex/qa/types';
+import { usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 
 export interface Contradiction {
   /** Citation handle of the directive row (e.g. 'seed-cortex-ide-800-line-ceiling'). */
@@ -206,6 +207,18 @@ export async function detectContradictions(input: {
   try {
     const pairs = buildCandidatePairs(input.rows);
     if (pairs.length === 0) return [];
+
+    if (usesManagedBrainInferenceSync()) {
+      // The optional pair pass normally calls Gemini with a local key. In
+      // managed auto mode, retain the deterministic structural signal rather
+      // than introducing a second payer for post-processing.
+      return pairs
+        .filter((pair) => {
+          const priority = (pair.directive.fields as Record<string, unknown>).priority;
+          return typeof priority === 'number' && priority >= 7;
+        })
+        .map((pair) => buildContradiction(pair, 'Directive priority >= 7 conflicts with a completed outcome on the same repo.'));
+    }
 
     const apiKey =
       process.env.GOOGLE_AI_API_KEY ??

@@ -411,6 +411,16 @@ describe('inference-route', () => {
       expect(route?.headers.Authorization).toBe('Bearer a.b.c');
     });
 
+    it('keeps managed Brain embeddings on the proxy even when a local Gemini key exists', () => {
+      process.env.GEMINI_API_KEY = 'direct-key-decoy';
+      setEnt({ plan: 'pro', licenseKey: 'a.b.c' });
+
+      const route = resolveEmbedRoute('gemini-embedding-001', { managedOnly: true });
+
+      expect(route).toMatchObject({ via: 'proxy', url: expect.stringContaining('/v1/embeddings') });
+      expect(route?.headers.Authorization).toBe('Bearer a.b.c');
+    });
+
     it('returns null when neither a Gemini key nor a token is present', () => {
       setEnt(null);
       expect(resolveEmbedRoute('gemini-embedding-001')).toBeNull();

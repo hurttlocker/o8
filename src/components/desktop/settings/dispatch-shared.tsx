@@ -38,6 +38,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type SubscriptionProfile = 'both' | 'claude-only' | 'codex-only';
 export type DispatchRuntime = OrchestratorRuntime;
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
+export type BrainRoutingMode = 'auto' | 'subscription';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
 export type WorkspaceManifestPolicy = 'disabled' | 'one-approval' | 'auto';
 // Was a hand-maintained copy that had drifted three backends behind
@@ -91,6 +92,7 @@ export interface OperatorDefaults {
   claudeWorkerEffort: ThinkingEffort;
   brainCodexModel: string;
   brainCodexEffort: ThinkingEffort;
+  brainRoutingMode: BrainRoutingMode;
   defaultDispatchModel: string;
   localInferenceBaseUrl: string;
   localEmbedModel: string;

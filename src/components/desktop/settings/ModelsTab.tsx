@@ -362,8 +362,27 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Engineering Brain"
-          footnote={`Your subscription profile decides which signed-in CLI o8 may use. When Codex is selected or Claude is unavailable, Brain answers run on this explicit route instead of silently inheriting a worker or orchestrator model. Current profile: ${values.subscriptionProfile}.`}
+          footnote="Auto uses your included managed Brain allowance when your plan has one. It never switches to a CLI, local model, or BYOK key when that allowance is unavailable. Subscription mode is an explicit choice and may use the quota of a connected CLI."
         >
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Answer routing"
+            subtitle={lockedSub('brainRoutingMode', values.brainRoutingMode === 'auto' ? 'Auto: managed inference for eligible plans' : 'Subscription: connected CLI quota may be used')}
+            accessory={
+              <PickerMenu<'auto' | 'subscription'>
+                value={values.brainRoutingMode}
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  { value: 'subscription', label: 'Subscription' },
+                ]}
+                onChange={(next) => { updateField('brainRoutingMode', next); }}
+                disabled={envLocked('brainRoutingMode') || busyField === 'brainRoutingMode'}
+                minWidth={140}
+              />
+            }
+            disabled={envLocked('brainRoutingMode') || busyField === 'brainRoutingMode'}
+            divider
+          />
           <SettingsRow
             icon={<CpuIcon />}
             label="Codex model"

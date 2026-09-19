@@ -16,6 +16,7 @@ import type { OperatorDefaults } from '@/lib/operator/defaults';
 import { isBroadcastVoiceClockTime } from '@/lib/operator/broadcast-commentary-defaults';
 import {
   isClassAComposer,
+  isBrainRoutingMode,
   isCollideAggregator,
   isDispatchRuntime,
   isOrchestratorBackendSetting,
@@ -292,6 +293,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   experimentalCanvas: booleanField('experimental', 'canvas_enabled'),
   nativeBrowserView: booleanField('experimental', 'native_browser_view'),
   classAComposer: enumField('brain', 'class_a_composer', 'one of "auto", "haiku-cli", "sonnet-cli", or "fastest"', isClassAComposer),
+  brainRoutingMode: enumField('brain', 'routing_mode', 'one of "auto" or "subscription"', isBrainRoutingMode),
   inAppOrchestratorEnabled: booleanField('orchestrator', 'legacy_claude_enabled'),
   symonVoiceSubscriptionOnly: booleanField('symon', 'voice', 'subscriptionOnly'),
   brainUseClaudeCli: booleanField('brain', 'use_claude_cli'),

@@ -22,6 +22,7 @@ const defaults: RoleRoutingDefaults = {
   codexWorkerEffort: 'adaptive',
   claudeWorkerEffort: 'adaptive',
   crossHouseWorkerFallback: false,
+  brainRoutingMode: 'auto',
   classAComposer: 'auto',
   brainUseClaudeCli: true,
   brainCodexModel: MODEL_IDS.codexWorkerDefault,
@@ -48,6 +49,7 @@ const sources: RoleRoutingSources = {
   codexWorkerEffort: 'default',
   claudeWorkerEffort: 'default',
   crossHouseWorkerFallback: 'default',
+  brainRoutingMode: 'default',
   classAComposer: 'default',
   brainUseClaudeCli: 'file',
   brainCodexModel: 'default',
@@ -79,11 +81,13 @@ const availability: RuntimeRouteAvailability[] = [
 function project(
   overrides: Partial<RoleRoutingDefaults> = {},
   routeAvailability = availability,
+  managedBrainEligible = false,
 ) {
   return projectAgentRoleRoutes({
     values: { ...defaults, ...overrides },
     sources,
     dispatchableRuntimes: routeAvailability,
+    managedBrainEligible,
   });
 }
 
@@ -196,7 +200,7 @@ describe('projectAgentRoleRoutes', () => {
 
   it('surfaces a pinned Brain CLI that cannot launch and names its fallback', () => {
     const routes = project(
-      { classAComposer: 'sonnet-cli' },
+      { brainRoutingMode: 'subscription', classAComposer: 'sonnet-cli' },
       availability.map((item) => item.id === 'claude-code'
         ? {
             ...item,
@@ -219,6 +223,16 @@ describe('projectAgentRoleRoutes', () => {
       fix: 'Sign in from the CLI.',
     });
     expect(brain.fallbacks.join(' ')).toContain('Codex');
+  });
+
+  it('projects managed Brain only for an entitled auto route', () => {
+    const freeBrain = project()[3];
+    const entitledBrain = project({}, availability, true)[3];
+
+    expect(freeBrain.effective.backend).toBe('auto-cascade');
+    expect(freeBrain.reason).toContain('free-plan');
+    expect(entitledBrain.effective).toMatchObject({ backend: 'managed-inference', model: 'managed' });
+    expect(entitledBrain.fallbacks.join(' ')).toContain('visible managed error');
   });
 
   it('reports an incompatible legacy worker model while projecting the safe adapter default', () => {

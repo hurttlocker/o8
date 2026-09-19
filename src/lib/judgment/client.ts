@@ -14,7 +14,7 @@ import { performance } from 'node:perf_hooks';
 
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { recordJudgmentReceipt } from './receipts';
-import { resolveDirectJudgmentRoute, resolveJudgmentRoute, TYPESAFE_SYSTEMONE_URL, type ResolvedJudgmentRoute } from './route';
+import { resolveDirectJudgmentRoute, resolveJudgmentRoute, resolveManagedJudgmentRoute, TYPESAFE_SYSTEMONE_URL, type ResolvedJudgmentRoute } from './route';
 import {
   ABSTAIN_CONFIDENCE,
   type ChoiceAnswer,
@@ -51,6 +51,8 @@ export interface AskJudgmentOptions {
   timeoutMs?: number;
   maxAttempts?: number;
   retryBaseMs?: number;
+  /** Require the entitled managed judgment route and never use a local key. */
+  managedOnly?: boolean;
 }
 
 type AttemptOutcome =
@@ -206,8 +208,9 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
   options: AskJudgmentOptions = {},
 ): Promise<JudgmentResult<Q> | null> {
   try {
-    const provider = getOperatorDefaultsSync().values.judgmentProvider;
-    if (provider !== 'typesafe' && provider !== 'managed') return null;
+    const configuredProvider = getOperatorDefaultsSync().values.judgmentProvider;
+    if (configuredProvider !== 'typesafe' && configuredProvider !== 'managed') return null;
+    const provider = options.managedOnly ? 'managed' : configuredProvider;
 
     const context = request.context ?? {};
     const startedAt = performance.now();
@@ -242,7 +245,9 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
 
     const invalid = validateQuestions(request.questions);
     if (invalid) return fail({ kind: 'invalid_questions', message: invalid }, 0);
-    const resolved = resolveJudgmentRoute(provider, options.endpoint);
+    const resolved = options.managedOnly
+      ? resolveManagedJudgmentRoute()
+      : resolveJudgmentRoute(provider, options.endpoint);
     if (!resolved) return fail({ kind: provider === 'typesafe' ? 'missing_key' : 'missing_credential' }, 0);
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
@@ -283,6 +288,7 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
 
     const result = await run(resolved);
     if (result !== 'managed_cap') return result;
+    if (options.managedOnly) return null;
     const direct = resolveDirectJudgmentRoute(options.endpoint);
     if (!direct) return null;
     const fallback = await run(direct);

@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { performance } from 'node:perf_hooks';
 
 import { askCortex, type AskCortexResult } from '@/lib/cortex/qa/ask';
+import { ManagedBrainUnavailableError } from '@/lib/cortex/qa/compose-class-a';
 import { estimateBrainTokenCount } from '@/lib/cortex/qa/llm/brain-spend';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
@@ -133,8 +134,13 @@ export async function POST(request: NextRequest) {
       ...(result.classifier ? { classifier: result.classifier, classificationReceiptId: result.classificationReceiptId ?? null } : {}),
     }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (err) {
+    const managedUnavailable = err instanceof ManagedBrainUnavailableError;
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        ...(managedUnavailable ? { code: err.code } : {}),
+      },
       { status: 500, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
     );
   }
