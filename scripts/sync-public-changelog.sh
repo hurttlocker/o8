@@ -56,17 +56,24 @@ scrub_subject() {
     -e 's/rule-check/governance check/gi' \
     -e 's/supervisor (watch|fleet|completion)/workflow watcher/gi')
 
-  # Every replacement below takes the whole token. A pattern that matches only
-  # part of a name leaves the rest glued to the replacement, which is how
-  # `ChatGPT` once published as `ChatAI model` and `gpt-live-1` as
-  # `AI modellive-1`. The public changelog is the source for the weekly
-  # digest, so a broken word ships as marketing copy.
+  # What still gets replaced: internal project and brand names that are not
+  # public. Vendor and technology names are NOT replaced (Q ruling
+  # 2026-09-18) — the repository, its README and its dependency manifests
+  # name every runtime, framework and model it uses, so rewriting them in the
+  # changelog hid nothing and cost readability. It also broke words: the
+  # model-name pattern matched part of a name and left the rest glued on, so
+  # `ChatGPT` published as `ChatAI model` and `gpt-realtime-2.1-mini` as
+  # `AI model-mini`. Deleting the pattern is what fixes that class for good.
   #
-  # The model-name pattern trades one error for the other deliberately. A
-  # hyphenated suffix is taken, because `GPT-realtime` and `gpt-live-1` are
-  # names and no rule separates those from an English compound like
-  # `GPT-backed`. So `ChatGPT-subscription users` publishes as
-  # `AI model users`, losing a word. That reads; a glued half-name does not.
+  # The patterns that remain are deliberately loose, and they can glue: a
+  # subject saying `useSymon` publishes as `usevoice agent`. That is the right
+  # trade for THESE names. A missed internal name is a leak we cannot take
+  # back; a glued word is ugly and fixable. Anchoring them to word boundaries
+  # would read better and would let `SymonWatch` through, so it stays loose.
+  #
+  # A rival product keeps its substitution too. Today's ruling covers the
+  # vendors o8 runs on, not the rule against naming competitors. A runtime o8
+  # ships an adapter for is a feature of ours and publishes by name.
   msg=$(echo "$msg" | sed -E \
     -e 's/Cortex IDE/o8/gi' \
     -e 's/Cortex-aware/context-aware/gi' \
@@ -81,23 +88,7 @@ scrub_subject() {
     -e 's/OpenClaw/agent runtime/gi' \
     -e 's/NemoClaw/agent runtime/gi' \
     -e 's/PicoClaw/bundled runtime/gi' \
-    -e 's/Codex/agent runtime/gi' \
-    -e 's/Claude Code/agent runtime/gi' \
-    -e 's/opencode/agent runtime/gi' \
-    -e 's/Tauri/native shell/gi' \
-    -e 's/Drizzle/ORM/gi' \
-    -e 's/better-sqlite3?/database/gi' \
-    -e 's/Gemini/AI provider/gi' \
-    -e 's/OpenAI/AI provider/gi' \
-    -e 's/CLAUDE\.md/project rules/g' \
-    -e 's/Claude/AI provider/gi' \
-    -e 's/Anthropic/AI provider/gi' \
-    -e 's/[A-Za-z]*GPT([0-9][A-Za-z0-9]*)?(-[A-Za-z0-9]+)*(\.[0-9]+)?/AI model/gi' \
-    -e 's/Cursor/competing product/gi' \
-    -e 's/Conductor/competing product/gi' \
-    -e 's/API [Kk]ey[s]?/configuration/gi' \
-    -e 's/BYOK/bring-your-own/gi' \
-    -e 's/tmux/terminal/gi')
+    -e 's/Conductor/competing product/gi')
   printf '%s\n' "$msg"
 }
 
@@ -165,7 +156,10 @@ while IFS='|' read -r date hash msg; do
   # reader too much of our playbook. Losing a handful of entries is fine —
   # the public changelog is for feature visibility, not architecture reveals.
   if echo "$msg" | grep -qiE 'monetization|monetiz|pricing|paywall|freemium|subscription|revenue|waitlist|gtm|go-to-market|moat'; then continue; fi
-  if echo "$msg" | grep -qiE '\bopus\b|\bsonnet\b|\bhaiku\b|\bgpt-?[0-9.]+\b|\bo[134]-preview\b|deepseek|qwen|ginsu|astra|xhigh|low.reason|high.reason|reasoning.effort|thinking.effort|chain.of.thought|thinking.x-?ray'; then continue; fi
+  # Model names no longer drop an entry (Q ruling 2026-09-18). What still
+  # drops is our own routing configuration: which effort level runs where
+  # is an operational choice, not a feature anyone outside needs.
+  if echo "$msg" | grep -qiE 'ginsu|xhigh|low.reason|high.reason|reasoning.effort|thinking.effort|chain.of.thought|thinking.x-?ray'; then continue; fi
   if echo "$msg" | grep -qiE '\b[0-9]{2,4}\s*ms\b.*budget|\b[0-9]+\s*mb\b.*budget|\b[0-9]+.line.ceiling|\b800.line|budget|ceiling|line.cap|file.size.limit|token.budget|context.budget'; then continue; fi
   if echo "$msg" | grep -qiE 'model rate|pricing table'; then continue; fi
   if echo "$msg" | grep -qiE 'dogfood|dogfed'; then continue; fi
@@ -198,7 +192,10 @@ done < <(git -C "$ROOT" log "$SOURCE_REF" --since="$LAST_SYNCED_DATE 00:00:00" -
 node "$SCRIPT_DIR/lib/merge-public-changelog.mjs" "$MIRROR_CHANGELOG" "$ADDITIONS" "$OUT_CHANGELOG"
 
 # Blocklist check
-BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Codex opencode Tauri Drizzle better-sqlite tmux Anthropic Claude Gemini GPT-4 GPT-5 Opus Sonnet Haiku DeepSeek Qwen Ginsu Astra xhigh BYOK Cursor Conductor monetization "model rate" "pricing table" "API key" cortexrules CortexClient ".cortex" ".o8-ide")
+# Internal names only. A vendor, framework or model name is not blocked:
+# the repository names them all openly, and the substitutions above no
+# longer rewrite them, so blocking them here would only fail the ship.
+BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Ginsu Conductor xhigh monetization "model rate" "pricing table" cortexrules CortexClient ".cortex" ".o8-ide")
 LEAKED=""
 for term in "${BLOCKLIST[@]}"; do
   # Preserve byte-identical legacy entries while blocking any new occurrence.

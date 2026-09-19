@@ -1,15 +1,18 @@
 /**
- * #2516 — the public changelog scrub, through the real script.
+ * The public changelog scrub, through the real script.
  *
  * Real-path doctrine: this drives `scripts/sync-public-changelog.sh` itself in
  * its `--scrub-only` mode, so the assertions run against the substitution list
  * the ship pipeline actually publishes with. Asserting a copy of the patterns
- * here would pass while the script kept publishing broken words.
+ * here would pass while the script kept publishing the wrong thing.
  *
- * The defect this pins: a pattern that matches only part of a name leaves the
- * rest glued to the replacement. `ChatGPT` published as `ChatAI model` and
- * `gpt-live-1` as `AI modellive-1`, and the weekly digest builds its copy from
- * this changelog, so the break reached a marketing email.
+ * Two properties are pinned. Vendor, framework and model names publish
+ * unchanged, because the repository names them all openly (#2516). Internal
+ * project names are still replaced, and replaced WHOLE: a pattern that matches
+ * part of a name leaves the rest glued to the replacement, which is how
+ * `ChatGPT` once published as `ChatAI model` and `gpt-realtime-2.1-mini` as
+ * `AI model-mini`. The weekly digest builds its copy from this changelog, so a
+ * broken word ships as marketing copy.
  */
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -26,43 +29,72 @@ function scrub(subjects: readonly string[]): string[] {
   return out.split('\n').slice(0, subjects.length);
 }
 
+// Every replacement the script can still emit. A replacement sitting next to a
+// word character or a hyphenated remainder means a name was cut in half.
+const REPLACEMENTS = ['o8', 'voice agent', 'design system', 'the voice stack', 'agent runtime', 'bundled runtime', 'context-aware', 'client', 'project rules', 'memory'];
+
 describe('public changelog scrub', () => {
-  it('replaces a model name whole, whatever its prefix or suffix', () => {
-    const [live, chat, realtime, numbered, unhyphenated] = scrub([
-      'feat: admit gpt-live-1 behind a delegated phone Code variant',
+  it('publishes vendor, framework and model names unchanged', () => {
+    // Every one of these is named openly in the repository. The model names in
+    // particular are the shapes that used to break: a prefix, a hyphenated
+    // suffix, a dotted version, and a dotted version followed by another
+    // segment, which published as "AI model-mini".
+    const subjects = [
+      'feat: pin gpt-realtime-2.1-mini for the voice seat',
+      'feat: pin GPT-5.6-sol for the worker seat',
       'feat(voice): "Voice via your ChatGPT plan" settings row',
-      'feat(voice): expose all 10 GPT-realtime voices',
-      'feat: pin GPT-5.6 for the worker seat',
-      'feat: pin gpt4o for the cheap seat',
-    ]);
-    expect(live).toBe('feat: admit AI model behind a delegated phone Code variant');
-    expect(chat).toBe('feat(voice): "Voice via your AI model plan" settings row');
-    expect(realtime).toBe('feat(voice): expose all 10 AI model voices');
-    expect(numbered).toBe('feat: pin AI model for the worker seat');
-    // A suffix with no hyphen glued too, and is the case the first fix missed.
-    expect(unhyphenated).toBe('feat: pin AI model for the cheap seat');
+      'feat(runtime): Claude Code sessions resume after a reload',
+      'feat: Codex workers report progress through the packet CLI',
+      'feat: Tauri sidecar picks a free port before spawning the server',
+      'feat: bring your own API key on every plan',
+      'feat: the Cursor adapter discovers sessions read-only',
+      'feat: Gemini and OpenAI adapters share the discovery contract',
+      'feat(brain): Anthropic models answer the classifier tier first',
+      'feat(db): Drizzle schema gains the receipts table',
+      'feat: opencode sessions resume from the registry',
+      'feat: tmux panes survive a reload',
+      'feat: BYOK stays the free path on every plan',
+    ];
+    expect(scrub(subjects)).toEqual(subjects);
   });
 
-  it('leaves no glued word behind for any replacement it makes', () => {
-    const replacements = ['AI model', 'AI provider', 'agent runtime', 'voice agent', 'competing product'];
-    const scrubbed = scrub([
-      'feat: admit gpt-live-1 behind a delegated phone Code variant',
-      'feat(voice): "Voice via your ChatGPT plan" settings row',
-      'feat: pin gpt4o for the cheap seat',
-      'feat: Claude Code sessions resume after a reload',
+  it('replaces an internal name whole, leaving nothing glued to it', () => {
+    const [symon, cortex, claw] = scrub([
       'feat: Symon hears the fleet at session start',
+      'feat: Cortex ingests the repo spec at connect',
+      'feat: OpenClaw dispatches through the operator surface',
     ]);
-    for (const line of scrubbed) {
-      for (const replacement of replacements) {
-        // A replacement must be preceded and followed by a boundary, never by
-        // the leftover half of the name it replaced.
-        expect(line).not.toMatch(new RegExp(`\\w${replacement}|${replacement}\\w`));
+    expect(symon).toBe('feat: voice agent hears the fleet at session start');
+    expect(cortex).toBe('feat: o8 ingests the repo spec at connect');
+    expect(claw).toBe('feat: agent runtime dispatches through the operator surface');
+
+    for (const line of [symon, cortex, claw]) {
+      for (const replacement of REPLACEMENTS) {
+        // A hyphen counts as glue too. `\w` alone misses `AI model-mini`,
+        // which is how that defect survived a green suite once already.
+        expect(line).not.toMatch(new RegExp(`[\\w-]${replacement}|${replacement}[\\w-]`));
       }
     }
+  });
+
+  it('still replaces a rival product name', () => {
+    // Today's ruling covers the vendors o8 runs on. The separate rule against
+    // naming competitors in public copy is untouched, and a product o8 has no
+    // adapter for is not a vendor.
+    expect(scrub(['feat: Conductor-style workspaces land'])[0])
+      .toBe('feat: competing product-style workspaces land');
   });
 
   it('passes a subject with no internal name through byte-identical', () => {
     const subject = 'feat: the merge preview lists every changed file with its review state';
     expect(scrub([subject])[0]).toBe(subject);
+  });
+
+  it('scrubs a final line that arrives without a trailing newline', () => {
+    const out = execFileSync('bash', [SCRIPT, '--scrub-only'], {
+      input: 'feat: Symon speaks the briefing',
+      encoding: 'utf8',
+    });
+    expect(out.trim()).toBe('feat: voice agent speaks the briefing');
   });
 });
