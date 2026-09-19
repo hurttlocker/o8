@@ -6,7 +6,8 @@ import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/li
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
-import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { resolveEffortAliases, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { resolveComparisonCandidateTarget } from '@/lib/orchestrator/comparison-fanout';
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import {
   isClaudeCodeModelSource,
@@ -159,10 +160,15 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'carrier must be one of: "native", "openrouter", "codex-subscription".', 400);
   }
   const claudeCodeModel = normalizeClaudeCodeGatewayModel(requestedModel);
-  const requestedEffortRaw = record.requestedEffort ?? record.thinkingEffort;
-  const requestedEffort = isThinkingEffort(requestedEffortRaw)
-    ? requestedEffortRaw
-    : null;
+  // An explicit effort is a pin, not a hint. Validate BOTH aliases independently
+  // (so a malformed value cannot hide behind the other) and reject conflicting
+  // explicit values rather than letting first-wins pick one.
+  const effortAliases = resolveEffortAliases(record.requestedEffort, record.thinkingEffort);
+  if (!effortAliases.ok) {
+    return operatorError(effortAliases.code, effortAliases.message, 400);
+  }
+  const requestedEffort = effortAliases.requestedEffort;
+  const requestedEffortRaw = requestedEffort;
   const explicitRuntimeRequested = !(requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === '');
   const requestedRuntime = !explicitRuntimeRequested
     ? resolveDefaultDispatchRuntimeSync()
@@ -253,6 +259,52 @@ export async function POST(request: NextRequest) {
   }
   if (hasClaudeCodePacket && requestedModelText && !claudeCodeModel) {
     return operatorError('invalid_request', 'model must be a valid claude-code worker model identifier.', 400);
+  }
+  // Every explicit effort pin is judged against the runtime + model it will
+  // actually launch on (mission-level, per-issue, and best-of-N candidates). An
+  // unsupported runtime, a dropped/incompatible model, or an adapter coercion
+  // fails here — before preflight, branch preparation, or any persisted mission.
+  const actualMissionModel = (routing: typeof workerRouting): string | null => (
+    routing.selectedModel
+    ?? (routing.selectedRuntime === 'claude-code' ? claudeCodeModel : null)
+    ?? getRuntimeCapability(routing.selectedRuntime).defaultModel
+    ?? null
+  );
+  const missionRoutingUsed = issues.some((issue) => !issue.runtime);
+  const missionAndIssueRoutings = missionRoutingUsed ? [workerRouting, ...issueRoutings] : issueRoutings;
+  const comparisonCandidates = normalizeComparisonModels(record.comparisonModels) ?? [];
+  const effortPinFailure = [
+    ...missionAndIssueRoutings.map((routing) => resolveEffortPin({
+      requestedEffort: requestedEffortRaw,
+      runtime: routing.selectedRuntime,
+      explicitModel: requestedModelText,
+      model: actualMissionModel(routing),
+      modelDisposition: routing.modelDisposition,
+    })),
+    // Each packet fans comparison candidates out on ITS runtime; judge every
+    // candidate against the runtime/model it will actually launch on.
+    ...missionAndIssueRoutings.flatMap((routing) => comparisonCandidates.map((candidate) => {
+      const target = resolveComparisonCandidateTarget(routing.selectedRuntime, candidate);
+      const candidateRouting = resolveWorkerRouting({
+        workerIntent: routing.workerIntent,
+        requestedProvider: routing.requestedProvider,
+        requestedRuntime: target.runtime,
+        requestedModel: target.model,
+        requestedEffort,
+        confidence: routing.confidence,
+        source: 'create-mission-api-comparison',
+      });
+      return resolveEffortPin({
+        requestedEffort: requestedEffortRaw,
+        runtime: candidateRouting.selectedRuntime,
+        explicitModel: target.explicitModel,
+        model: actualMissionModel(candidateRouting),
+        modelDisposition: candidateRouting.modelDisposition,
+      });
+    })),
+  ].find((result) => !result.ok);
+  if (effortPinFailure && !effortPinFailure.ok) {
+    return operatorError(effortPinFailure.code, effortPinFailure.message, 400);
   }
   const huddle = resolveWorkerHuddle({
     mode: defaults.workerStartMode,

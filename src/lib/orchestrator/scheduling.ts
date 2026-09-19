@@ -278,7 +278,7 @@ async function dispatchOrRecoverPacket(
     workerIntent: launchPacket.workerIntent,
     requestedProvider: launchPacket.workerRouting?.requestedProvider,
     requestedRuntime: launchPacket.workerRouting?.requestedRuntime ?? launchPacket.runtime,
-    requestedModel: launchPacket.workerRouting?.requestedModel ?? launchPacket.assignedModel,
+    requestedModel: launchPacket.workerRouting?.requestedModel ?? launchPacket.assignedModel, requestedEffort: launchPacket.workerRouting?.requestedEffort,
     source: 'scheduler-dispatch',
   });
   const launchResult = await launchPacketWithStorageAdmission({
@@ -488,7 +488,7 @@ export async function runDispatchTick(
         workerIntent: packet.workerIntent,
         requestedProvider: packet.workerRouting?.requestedProvider,
         requestedRuntime: packet.workerRouting?.requestedRuntime ?? packet.runtime,
-        requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel,
+        requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel, requestedEffort: packet.workerRouting?.requestedEffort,
         source: 'scheduler-enrichment',
       });
       const tier = resolveModelTier({ runtime: routing.selectedRuntime, assignedModel: routing.selectedModel });

@@ -8,7 +8,8 @@
  * binary. No business logic here — fetch + JSON shape, per the CLI charter.
  *
  *   o8 mission create   --title "…" [--body "…"] [--repo <path>] [--runtime r]
- *                       [--model m] [--constraints "…"] [--sequential]
+ *                       [--model m] [--effort adaptive|low|medium|high|max|xhigh|ultra]
+ *                       [--constraints "…"] [--sequential]
  *                       [--carrier native|openrouter|codex-subscription]
  *                       [--compare m1,m2] [--huddle] [--brain] [--number n]
  *                       [--read-only]
@@ -153,6 +154,63 @@ export function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy 
   throw new CliError('invalid_args', EXISTING_BRANCH_POLICY_ERROR, EXIT.INVALID_ARGS);
 }
 
+/**
+ * Concrete reasoning-effort pin. Mirrors THINKING_EFFORTS in
+ * src/lib/orchestrator/thinking-effort.ts — the CLI is a standalone bundle that
+ * cannot import from `@/lib`, so the vocabulary is duplicated like the other
+ * mission enums. `adaptive` is the explicit reset-to-runtime-default value.
+ */
+export const MISSION_EFFORTS = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh', 'ultra'] as const;
+export type MissionEffort = (typeof MISSION_EFFORTS)[number];
+export const MISSION_EFFORT_ERROR = `--effort must be one of: ${MISSION_EFFORTS.join(', ')}.`;
+
+export function parseMissionEffort(value: string | null | undefined): MissionEffort | undefined {
+  if (value === null || value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith('--')) {
+    throw new CliError(
+      'invalid_args',
+      '--effort requires a value.',
+      EXIT.INVALID_ARGS,
+      `Example: o8 mission create --title "…" --effort high (${MISSION_EFFORTS.join(', ')})`,
+    );
+  }
+  if (!MISSION_EFFORTS.includes(trimmed as MissionEffort)) {
+    throw new CliError('invalid_args', MISSION_EFFORT_ERROR, EXIT.INVALID_ARGS);
+  }
+  return trimmed as MissionEffort;
+}
+
+function missionEffortFlagValues(rest: string[]): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const tok = rest[i];
+    if (tok === '--effort') {
+      values.push(rest[i + 1] ?? '');
+      i += 1;
+    } else if (tok.startsWith('--effort=')) {
+      values.push(tok.slice('--effort='.length));
+    }
+  }
+  return values;
+}
+
+/** Parse ALL --effort occurrences; conflicting repeats are rejected (not first-wins). */
+export function parseMissionEffortArgs(rest: string[]): MissionEffort | undefined {
+  const values = missionEffortFlagValues(rest);
+  if (values.length === 0) return undefined;
+  const parsed = values.map((value) => parseMissionEffort(value));
+  const distinct = Array.from(new Set(parsed.filter((value): value is MissionEffort => Boolean(value))));
+  if (distinct.length > 1) {
+    throw new CliError(
+      'invalid_args',
+      `--effort was provided more than once with conflicting values (${distinct.join(', ')}).`,
+      EXIT.INVALID_ARGS,
+    );
+  }
+  return distinct[0];
+}
+
 export function parseMissionStopArgs(rest: string[]): { missionId: string; idempotencyKey?: string } {
   let missionId: string | null = null;
   let idempotencyKey: string | undefined;
@@ -247,6 +305,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
     ? compareRaw.split(',').map((m) => m.trim()).filter(Boolean)
     : undefined;
   const existingBranchPolicy = parseExistingBranchPolicy(flag(rest, 'existingBranchPolicy'));
+  const effort = parseMissionEffortArgs(rest);
   const qualitySearchContractPath = flag(rest, 'quality-search-contract')?.trim();
   if (qualitySearchContractPath && comparisonModels?.length) {
     throw new CliError('invalid_args', '--quality-search-contract cannot be combined with --compare.', EXIT.INVALID_ARGS);
@@ -282,6 +341,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   if (runtime) body.runtime = runtime;
   const model = flag(rest, 'model');
   if (model) body.model = model;
+  if (effort) body.requestedEffort = effort;
   const carrier = flag(rest, 'carrier');
   if (carrier) body.carrier = carrier;
   const constraints = flag(rest, 'constraints');
