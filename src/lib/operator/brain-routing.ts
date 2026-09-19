@@ -51,6 +51,16 @@ export function resolveBrainWarmupEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.brainWarmupEnabled;
 }
 
+/**
+ * Live policy for speculative Brain warmup: the subscription CLI tier must be
+ * permitted AND the operator must not have disabled warmup. The warm pool
+ * consults this predicate at the exact refill moment, so a call queued behind
+ * a turn observes a policy flip before it would pre-spawn a replacement.
+ */
+export function resolveBrainSpeculativeWarmupAllowedSync(): boolean {
+  return resolveBrainUseClaudeCliSync() && resolveBrainWarmupEnabledSync();
+}
+
 /** Whether the configured subscription profile permits Codex Brain calls. */
 export function resolveBrainUseCodexCliSync(): boolean {
   return resolveEffectiveBrainRouteSync() !== 'managed'

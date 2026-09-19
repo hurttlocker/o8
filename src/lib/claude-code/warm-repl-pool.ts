@@ -234,6 +234,15 @@ export interface AskClaudeWarmOptions {
   timeoutMs?: number;
   /** Streaming hook — called with each text delta as the model generates. */
   onDelta?: (text: string) => void;
+  /**
+   * Live policy consulted at the moment of the speculative replacement refill.
+   * The requested proc (warm hit or cold spawn) is always served — this only
+   * decides whether to pre-spawn the NEXT idle proc. Omitting it keeps the
+   * pre-#2521 "always refill" behavior for non-Brain callers; Brain adapters
+   * pass a predicate so an opt-out (or a managed-only route) landing while a
+   * call is queued suppresses the replacement.
+   */
+  refillPolicy?: () => boolean;
 }
 
 /**
@@ -268,7 +277,13 @@ export async function askClaudeWarm(prompt: string, opts: AskClaudeWarmOptions):
 
   // Replace the proc we just consumed so the NEXT question finds a warm one.
   // Done before the turn runs: the replacement bootstraps while we generate.
-  refill(opts.binary, opts.model, opts.effort);
+  // Only when the caller's live policy still permits speculative warmup — the
+  // predicate is evaluated HERE, after any queue wait, so an opt-out that lands
+  // while a call is queued wins (#2521). Non-Brain callers omit the policy and
+  // keep the pre-#2521 behavior.
+  if (!opts.refillPolicy || opts.refillPolicy()) {
+    refill(opts.binary, opts.model, opts.effort);
+  }
 
   try {
     return await runTurn(proc, prompt, timeoutMs, warm, opts.onDelta);
@@ -350,4 +365,9 @@ export function resetWarmReplPool(): void {
   liveProcCount = 0;
   activeTurns = 0;
   turnWaiters.length = 0;
+}
+
+/** Test-only queue snapshot for deterministic admission assertions. */
+export function getWarmReplPoolTestState(): { activeTurns: number; queuedTurns: number } {
+  return { activeTurns, queuedTurns: turnWaiters.length };
 }
