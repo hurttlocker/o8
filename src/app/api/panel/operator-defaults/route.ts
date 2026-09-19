@@ -477,6 +477,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.brainUseClaudeCli = body.brainUseClaudeCli;
   }
 
+  if (body.brainWarmupEnabled !== undefined) {
+    if (typeof body.brainWarmupEnabled !== 'boolean') {
+      throw new Error('brainWarmupEnabled must be boolean.');
+    }
+    update.brainWarmupEnabled = body.brainWarmupEnabled;
+  }
+
   if (body.workersUseBrain !== undefined) {
     const raw = body.workersUseBrain;
     if (raw !== 'off' && raw !== 'auto' && raw !== 'all') {

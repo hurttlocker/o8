@@ -105,6 +105,7 @@ export interface OperatorDefaults {
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
   brainUseClaudeCli: boolean;
+  brainWarmupEnabled: boolean;
   workersUseBrain: WorkersUseBrain;
   /** Typed judgment provider (#2434). 'off' sends nothing anywhere. */
   judgmentProvider: JudgmentProvider;

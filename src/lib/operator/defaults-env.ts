@@ -280,6 +280,13 @@ export function envBrainUseClaudeCli(): boolean | null {
   return null;
 }
 
+export function envBrainWarmupEnabled(): boolean | null {
+  const raw = process.env.O8_BRAIN_WARMUP;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 export function envWorkersUseBrain(): WorkersUseBrain | null {
   const raw = process.env.O8_WORKERS_USE_BRAIN?.trim();
   if (raw && isWorkersUseBrain(raw)) return raw;

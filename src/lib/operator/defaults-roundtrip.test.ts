@@ -68,6 +68,7 @@ const NON_DEFAULT_UPDATE = {
   inAppOrchestratorEnabled: false,
   symonVoiceSubscriptionOnly: true,
   brainUseClaudeCli: false,
+  brainWarmupEnabled: false,
   workersUseBrain: 'off',
   judgmentProvider: 'typesafe',
   judgmentManagedOptionVisible: true,
