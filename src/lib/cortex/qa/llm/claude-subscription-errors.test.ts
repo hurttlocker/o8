@@ -8,6 +8,7 @@ vi.mock('@/lib/claude-code/warm-repl-pool', () => ({
 }));
 vi.mock('@/lib/operator/brain-routing', () => ({
   resolveBrainUseClaudeCliSync: vi.fn(() => true),
+  resolveBrainSpeculativeWarmupAllowedSync: vi.fn(() => true),
 }));
 
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';

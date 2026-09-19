@@ -1236,6 +1236,13 @@
       ]
     },
     {
+      "path": "tests/brain-warmup-refill-guard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/broadcast-commentary-settings-real-path.test.ts",
       "reasons": [
         "real-path"

@@ -130,7 +130,7 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
   // Brain out of the Claude CLI tier (no Max sub, or Codex/OpenRouter only), so
   // we throw and let the cascade fall through. Dynamic import keeps the
   // server-only dependency graph one-way.
-  const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/brain-routing');
+  const { resolveBrainUseClaudeCliSync, resolveBrainSpeculativeWarmupAllowedSync } = await import('@/lib/operator/brain-routing');
   if (!resolveBrainUseClaudeCliSync()) {
     throw new Error('[qa][haiku] disabled by operator setting (brainUseClaudeCli=false)');
   }
@@ -144,6 +144,9 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
     binary: claudeBin,
     model: HAIKU_MODEL,
     timeoutMs,
+    // Serve the explicit ask, but only pre-spawn the replacement proc while the
+    // live Brain policy still permits speculative warmup (#2521).
+    refillPolicy: resolveBrainSpeculativeWarmupAllowedSync,
   });
   if (!text.trim()) {
     throw new Error('[qa][haiku] REPL returned empty result');

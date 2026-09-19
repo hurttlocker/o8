@@ -213,12 +213,18 @@ async function callSonnetCli(
 ): Promise<{ text: string; tier: SonnetTier } | { tokens: AsyncIterable<string>; tier: SonnetTier }> {
   const prompt = buildCliPrompt(opts.system, opts.messages);
   const timeoutMs = opts.timeoutMs ?? 300_000;
+  // Serve the explicit ask, but only pre-spawn the replacement proc while the
+  // live Brain policy still permits speculative warmup (#2521). Evaluated at
+  // the pool's refill moment, so a queued call sees the current opt-out.
+  const { resolveBrainSpeculativeWarmupAllowedSync } = await import('@/lib/operator/brain-routing');
+  const refillPolicy = resolveBrainSpeculativeWarmupAllowedSync;
 
   if (!opts.stream) {
     const text = await askClaudeWarm(prompt, {
       binary: claudeBin,
       model: SONNET_CLI_MODEL,
       timeoutMs,
+      refillPolicy,
     });
     if (isRuntimeQuotaLimitError(text)) {
       throw new Error(`[qa][sonnet] Claude subscription unavailable: ${text.trim()}`);
@@ -248,6 +254,7 @@ async function callSonnetCli(
     binary: claudeBin,
     model: SONNET_CLI_MODEL,
     timeoutMs,
+    refillPolicy,
     onDelta: (text) => {
       deltaLen += text.length;
       if (releasedDeltas) queue.push(text);
