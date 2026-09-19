@@ -16,7 +16,7 @@ JSON to stdout is the default; pass `--human` for ANSI-formatted output.
 | `o8 history <thoughts-thread-id> [--limit 200]` | Read one continuous orchestrator transcript with permanent, audited handoff seams |
 | `o8 worker spawn --title "..." [--repo <path>]` | Create and dispatch one governed worker from any local repo without adding it to Projects; the running app opens a dedicated worker pane |
 | `o8 worker login` | Connect a dedicated encrypted native worker token on macOS from an operator terminal; no source checkout is required and raw setup output is suppressed |
-| `o8 mission create --title "..." [--dispatch]` | Create a transient-repo mission; `--dispatch` starts it immediately |
+| `o8 mission create --title "..." [--dispatch] [--effort high]` | Create a transient-repo mission; `--dispatch` starts it immediately, `--effort` pins a reasoning tier (`adaptive` resets to the runtime default) |
 | `o8 repo list` | List every repository registered in the running app |
 | `o8 repo add <path>` | Register an existing local Git repository from any current directory |
 | `o8 repo remove <id\|name\|path>` | Remove the registration and project links while preserving the local folder and remote |

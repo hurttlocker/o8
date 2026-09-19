@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { resolveClaudeCodeWorkerSelection, selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
-import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { EffortPinRejectionError, isHonoredEffortPin, resolveAdapterEffort, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -93,9 +93,9 @@ function resolveLaunchWorkerRouting(workerRouting: WorkerRouting): WorkerRouting
     workerRouting.selectedEffort,
   );
   const concreteEffort = defaultEffort === 'adaptive' ? undefined : defaultEffort;
-  const selectedEffort = concreteEffort && workerRouting.selectedRuntime === 'codex'
-    ? resolveCodexReasoningEffort(concreteEffort, selectedModel) as typeof concreteEffort
-    : concreteEffort ?? null;
+  const selectedEffort = concreteEffort
+    ? resolveAdapterEffort(workerRouting.selectedRuntime, selectedModel, concreteEffort) as typeof concreteEffort
+    : null;
 
   return {
     ...workerRouting,
@@ -193,6 +193,23 @@ export async function launchPacketWithStorageAdmission(input: {
 }): Promise<LaunchPacketResult> {
   const { packet, allPackets, storageAdmission } = input;
   const workerRouting = resolveLaunchWorkerRouting(input.workerRouting);
+  // A concrete persisted pin that was actually honored at creation must still be
+  // honored at the launch boundary. If a runtime change since creation
+  // (recovery, a re-routed lane) would drop or coerce it, fail clearly BEFORE any
+  // worktree/lane/provider work. Deliberate no-op pins (runtime without a
+  // reasoning surface) keep their legacy behavior.
+  if (isHonoredEffortPin(packet.workerRouting)) {
+    const pin = resolveEffortPin({
+      requestedEffort: packet.workerRouting?.requestedEffort,
+      runtime: workerRouting.selectedRuntime,
+      explicitModel: input.workerRouting.requestedModel,
+      model: workerRouting.selectedModel,
+      modelDisposition: workerRouting.modelDisposition,
+    });
+    if (!pin.ok) {
+      throw new EffortPinRejectionError(pin.code, `Refusing to launch packet ${packet.id}: ${pin.message}`);
+    }
+  }
   const spendCap = resolvePacketSpendCap(packet, workerRouting.selectedRuntime);
   const launchContext = bindWorkerLaunchParent(packet.launchContext, {
     threadId: packet.orchestratorThreadId,
