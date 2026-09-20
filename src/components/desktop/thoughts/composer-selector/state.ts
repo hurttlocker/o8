@@ -1,5 +1,5 @@
 import { COMPOSER_MODE_DIRECTIVES } from '@/lib/orchestrator/composer-wire';
-import { isCodexUltraCapableModel } from '@/lib/codex/reasoning-effort';
+import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import {
   isThinkingEffort,
   THINKING_EFFORT_LABELS,
@@ -287,10 +287,11 @@ export function supportedEffortsForLead(
   if (backend === 'o8') return isFreePlan ? ['low'] : ['low', 'high'];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
-  const ultraCapable = backend === 'codex' && isCodexUltraCapableModel(modelId);
+  const supportsMax = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'max');
+  const supportsUltra = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'ultra');
   if (backend === 'codex') {
-    if (!ultraCapable) return base.filter((effort) => effort !== 'max');
-    return ultraEnabled ? [...base, 'ultra'] : base;
+    const withoutUnsupported = base.filter((effort) => effort !== 'max' || supportsMax);
+    return ultraEnabled && supportsUltra ? [...withoutUnsupported, 'ultra'] : withoutUnsupported;
   }
   return base;
 }

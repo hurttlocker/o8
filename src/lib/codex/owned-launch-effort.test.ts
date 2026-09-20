@@ -25,13 +25,14 @@ describe('codexReasoningEffortArgs', () => {
     expect(codexReasoningEffortArgs('ultra')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
   });
 
-  it('max/ultra pass through on Astra and Sol; terra/luna/5.5 clamp to xhigh', () => {
+  it('max/ultra pass through for catalog-verified models and clamp unknown pairs', () => {
     expect(codexReasoningEffortArgs('max', 'gpt-6-astra')).toEqual(['-c', 'model_reasoning_effort=max']);
     expect(codexReasoningEffortArgs('ultra', 'gpt-6-astra')).toEqual(['-c', 'model_reasoning_effort=ultra']);
     expect(codexReasoningEffortArgs('max', 'gpt-5.6-sol')).toEqual(['-c', 'model_reasoning_effort=max']);
     expect(codexReasoningEffortArgs('ultra', 'gpt-5.6-sol')).toEqual(['-c', 'model_reasoning_effort=ultra']);
-    // Non-Sol 5.6 tiers + prior gen clamp down (worker default is Terra).
-    expect(codexReasoningEffortArgs('max', 'gpt-5.6-terra')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
+    expect(codexReasoningEffortArgs('max', 'gpt-5.6-terra')).toEqual(['-c', 'model_reasoning_effort=max']);
+    expect(codexReasoningEffortArgs('ultra', 'gpt-5.6-terra')).toEqual(['-c', 'model_reasoning_effort=ultra']);
+    // Unverified models must not gain high-end effort through a name match.
     expect(codexReasoningEffortArgs('ultra', 'gpt-5.6-luna')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
     expect(codexReasoningEffortArgs('max', 'gpt-5.5')).toEqual(['-c', 'model_reasoning_effort=xhigh']);
     // A concrete sub-xhigh tier is unaffected by the model.
