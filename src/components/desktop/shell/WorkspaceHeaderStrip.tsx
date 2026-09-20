@@ -20,10 +20,9 @@ import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
 import { HeaderPlayButton } from './HeaderPlayButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
-import { IconColumns, IconTerminal } from '../title-bar/icons';
+import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
-import { TerminalModePill } from './TerminalModePill';
 import { SplitPaneCloseButton } from './SplitPaneCloseButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
@@ -50,7 +49,6 @@ export function WorkspaceHeaderStrip({
   onToggleSidebar,
   onSidebarHoverEnter,
   onSidebarHoverLeave,
-  onToggleBottomPanel,
   onSplitWorkspacePanel,
   rightPanelOpen = false,
   onToggleRightPanel,
@@ -59,7 +57,6 @@ export function WorkspaceHeaderStrip({
   headerLabel,
   headerTabs,
   workspaceId,
-  terminalModeActive = false,
   headerActiveTabId,
   finishedTabCount = 0,
   splitHeaderWorkspaces,
@@ -124,15 +121,6 @@ export function WorkspaceHeaderStrip({
         <>
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
-            ) : null}
-            {workspaceId ? <TerminalModePill active={terminalModeActive} workspaceId={workspaceId} /> : null}
-            {onToggleBottomPanel ? (
-              <HeaderIconPill
-                icon={<IconTerminal />}
-                label="Toggle terminal"
-                onClick={onToggleBottomPanel}
-                yNudge={1.3}
-              />
             ) : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
@@ -243,7 +231,6 @@ function SplitHeaderPillStrips({
               />
             </div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
-              <TerminalModePill active={workspace.terminalModeActive === true} workspaceId={workspace.workspaceId} paneLabel={paneLabel(index)} />
               {workspace.contextRailAvailable ? (
                 <HeaderIconPill
                   icon={<IconInfoCircle />}
