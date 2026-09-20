@@ -14,10 +14,11 @@ interface LeadResponse {
     repoPath: string;
     routing: { backend: string; model: string; effort: string };
     status: string;
-    result: { status: string; text: string | null; error: string | null } | null;
+    result: { turnId: string | null; status: string; text: string | null; error: string | null } | null;
     stopReason: string | null;
   };
   latestTurn: { id: string; ordinal: number; kind: string; status: string; error: string | null } | null;
+  requestedTurn: { id: string; ordinal: number; kind: string; status: string; error: string | null } | null;
   queueDepth: number;
   cursor: number;
   events: Array<{ cursor: number; kind: string; status: string; detail: string | null }>;
@@ -125,11 +126,43 @@ async function send(mode: OutputMode, args: string[]): Promise<number> {
   return 0;
 }
 
+async function report(mode: OutputMode, args: string[]): Promise<number> {
+  const leadId = positional(args)[0];
+  if (!leadId) {
+    throw new CliError('invalid_args', 'Usage: o8 lead report <lead-id> --turn <id> --repo <path> --thread-id <id> --kind <kind> --summary <text> --evidence <json-array>', EXIT.INVALID_ARGS);
+  }
+  let evidence: unknown;
+  try {
+    evidence = JSON.parse(required(args, 'evidence'));
+  } catch (error) {
+    throw new CliError(
+      'invalid_args',
+      `--evidence must be a JSON array: ${error instanceof Error ? error.message : String(error)}`,
+      EXIT.INVALID_ARGS,
+    );
+  }
+  const response = await apiFetch<LeadResponse>(resolveConfig(), '/api/orchestrator/lead', {
+    method: 'POST',
+    body: {
+      action: 'report',
+      leadId,
+      turnId: required(args, 'turn'),
+      repoPath: required(args, 'repo'),
+      threadId: required(args, 'thread-id'),
+      kind: required(args, 'kind'),
+      summary: required(args, 'summary'),
+      evidence,
+    },
+  });
+  printLead(mode, response.data as LeadResponse);
+  return 0;
+}
+
 async function status(mode: OutputMode, args: string[]): Promise<number> {
   const leadId = positional(args)[0];
   if (!leadId) throw new CliError('invalid_args', 'Usage: o8 lead status <lead-id> [--after <cursor>]', EXIT.INVALID_ARGS);
   const response = await apiFetch<LeadResponse>(resolveConfig(), '/api/orchestrator/lead', {
-    query: { leadId, afterCursor: value(args, 'after') },
+    query: { leadId, turnId: value(args, 'turn'), afterCursor: value(args, 'after') },
   });
   printLead(mode, response.data as LeadResponse);
   return 0;
@@ -146,15 +179,18 @@ async function wait(mode: OutputMode, args: string[]): Promise<number> {
   }
   const terminal = new Set(['completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
   let latest: LeadResponse | null = null;
+  let turnId = value(args, 'turn');
   while (Date.now() < deadline) {
     const waitMs = Math.min(30_000, Math.max(1, deadline - Date.now()));
     const response = await apiFetch<LeadResponse>(resolveConfig(), '/api/orchestrator/lead', {
-      query: { leadId, afterCursor: cursor, waitMs },
+      query: { leadId, turnId, afterCursor: cursor, waitMs },
       timeoutMs: waitMs + 5_000,
     });
     latest = response.data as LeadResponse;
+    turnId ??= latest.requestedTurn?.id;
     cursor = latest.cursor;
-    if (terminal.has(latest.lead.status)) {
+    const terminalStatus = latest.requestedTurn?.status ?? latest.lead.status;
+    if (terminal.has(terminalStatus) || terminalStatus === 'interrupted') {
       printLead(mode, latest);
       return 0;
     }
@@ -181,6 +217,7 @@ export async function runLead(
 ): Promise<number> {
   if (subcommand === 'start') return start(mode, args);
   if (subcommand === 'send') return send(mode, args);
+  if (subcommand === 'report') return report(mode, args);
   if (subcommand === 'status') return status(mode, args);
   if (subcommand === 'wait') return wait(mode, args);
   if (subcommand === 'stop') return stop(mode, args);

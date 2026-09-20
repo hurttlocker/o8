@@ -216,6 +216,7 @@ commands:
   history <thread-id>  continuous orchestrator transcript + audited handoff seams
   lead start           create a persistent lead (--repo --backend --model --effort --brief --idempotency-key)
   lead send            send a replay-safe turn to the same lead
+  lead report          record the active lead turn's structured outcome and evidence
   lead status          read a compact persisted receipt without calling the model
   lead wait            bounded wait for receipt updates or a terminal state
   lead stop            durably stop the lead; recovery cannot auto-resume it

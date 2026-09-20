@@ -41,16 +41,16 @@ o8 lead send <lead-id> \
   --idempotency-key issue-2541-review-1
 
 o8 lead status <lead-id> --after 0
-o8 lead wait <lead-id> --after 0 --timeout 10m
+o8 lead wait <lead-id> --turn <admitted-turn-id> --after 0 --timeout 10m
 ```
 
 Every send key is durable. Retrying the same key and message returns the admitted turn instead of launching twice. Different simultaneous sends queue in ordinal order. Omitted routing on follow-ups retains the original pins; explicit repo, thread, backend, model, or effort values must match the stored binding or the request fails before turn persistence or process launch.
 
-`status` and `wait` read SQLite receipts only. `wait` long-polls in bounded 30-second slices and can resume from its cursor. Full conversation content remains in the normal thoughts transcript; compact receipts return only a bounded result preview.
+`status` and `wait` read SQLite receipts only and never call the lead model. `wait --turn` follows the admitted turn, so a prior terminal receipt cannot hide a newer queued turn. It long-polls in bounded 30-second slices and can resume from its cursor. Full conversation content remains in the normal thoughts transcript; compact receipts return only a bounded result preview.
 
 ## Worker review and terminal states
 
-Workers dispatched by the lead carry the lead's thread and turn IDs. A review-ready worker wake is admitted as a new turn on the same lead with the same provider session and routing pins. Worker exit alone leaves the lead at `waiting_workers`; structural packet and lane evidence determines `completed`, `blocked`, `needs_approval`, or `failed` after lead review.
+Workers dispatched by the lead carry the lead's thread and turn IDs. Review, failure, and context-needed returns are admitted as deduplicated turns on the same lead with the same provider session and routing pins. The lead must record a structured outcome with `o8 lead report`; completion requires a `completed` outcome with evidence plus no authoritative pending worker, review, or approval obligation. Process success, freeform prose, and the absence of workers are never completion proof.
 
 Human approval remains separate. A lead can surface `needs_approval`, but it cannot approve a card, grant itself merge authority, or bypass the existing governance inbox.
 
@@ -60,7 +60,7 @@ Human approval remains separate. A lead can surface `needs_approval`, but it can
 o8 lead stop <lead-id> --reason "Operator stopped this bounded run."
 ```
 
-Stop is persisted before the live process is interrupted. Queued and running turns become `stopped`, new sends are refused, and restart recovery cannot relaunch the lead. If a process dies during a turn without a stop, o8 preserves that turn as `interrupted`, marks the lead `blocked`, and requires an explicit new `lead send` to recover; it never guesses whether the interrupted provider caused side effects.
+Stop is persisted before the live lead process is interrupted. Queued and running lead turns become `stopped`, new sends are refused, and restart recovery cannot relaunch the lead. Stop does not implicitly kill already dispatched child workers; their later returns are consumed without waking the stopped lead. If a process dies during a turn without a stop, o8 preserves that turn as `interrupted`, marks the lead `blocked`, and requires an explicit new `lead send` to recover; it never guesses whether the interrupted provider caused side effects.
 
 Only the operator principal can use this route. Worker, paired-device, spectator, and anonymous credentials are denied by the default-deny middleware.
 

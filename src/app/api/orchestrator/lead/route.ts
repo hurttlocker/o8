@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import {
   getLeadStatus,
   LeadLifecycleError,
+  reportLeadOutcome,
   sendLead,
   startLead,
   stopLead,
@@ -44,8 +45,13 @@ function bodyRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function optionalString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
+function optionalString(body: Record<string, unknown>, field: string): string | undefined {
+  if (!(field in body)) return undefined;
+  const value = body[field];
+  if (typeof value !== 'string') {
+    throw new LeadLifecycleError(`${field} must be a string when supplied.`, 'invalid_lead_request', 400);
+  }
+  return value;
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
@@ -55,34 +61,45 @@ export async function POST(request: NextRequest): Promise<Response> {
     const body = bodyRecord(await request.json().catch(() => null));
     if (body.action === 'start') {
       return json(startLead({
-        repoPath: optionalString(body.repoPath) ?? '',
+        repoPath: optionalString(body, 'repoPath') ?? '',
         backend: body.backend as 'codex' | 'claude',
-        model: optionalString(body.model) ?? '',
+        model: optionalString(body, 'model') ?? '',
         effort: body.effort as never,
-        idempotencyKey: optionalString(body.idempotencyKey) ?? '',
+        idempotencyKey: optionalString(body, 'idempotencyKey') ?? '',
         brief: validateLeadBrief(body.brief),
       }), 202);
     }
     if (body.action === 'send') {
       return json(sendLead({
-        leadId: optionalString(body.leadId) ?? '',
-        message: optionalString(body.message) ?? '',
-        idempotencyKey: optionalString(body.idempotencyKey) ?? '',
-        repoPath: optionalString(body.repoPath),
-        threadId: optionalString(body.threadId),
-        backend: optionalString(body.backend) as never,
-        model: optionalString(body.model),
-        effort: optionalString(body.effort),
+        leadId: optionalString(body, 'leadId') ?? '',
+        message: optionalString(body, 'message') ?? '',
+        idempotencyKey: optionalString(body, 'idempotencyKey') ?? '',
+        repoPath: optionalString(body, 'repoPath'),
+        threadId: optionalString(body, 'threadId'),
+        backend: optionalString(body, 'backend') as never,
+        model: optionalString(body, 'model'),
+        effort: optionalString(body, 'effort'),
       }), 202);
+    }
+    if (body.action === 'report') {
+      return json(reportLeadOutcome({
+        leadId: optionalString(body, 'leadId') ?? '',
+        turnId: optionalString(body, 'turnId') ?? '',
+        repoPath: optionalString(body, 'repoPath') ?? '',
+        threadId: optionalString(body, 'threadId') ?? '',
+        kind: body.kind as never,
+        summary: optionalString(body, 'summary') ?? '',
+        evidence: body.evidence as string[],
+      }));
     }
     if (body.action === 'stop') {
       return json(stopLead(
-        optionalString(body.leadId) ?? '',
-        optionalString(body.reason),
+        optionalString(body, 'leadId') ?? '',
+        optionalString(body, 'reason'),
       ));
     }
     throw new LeadLifecycleError(
-      'action must be start, send, or stop.',
+      'action must be start, send, report, or stop.',
       'invalid_lead_action',
       400,
     );
@@ -98,6 +115,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const leadId = request.nextUrl.searchParams.get('leadId') ?? '';
     const afterRaw = request.nextUrl.searchParams.get('afterCursor');
     const waitRaw = request.nextUrl.searchParams.get('waitMs');
+    const turnId = request.nextUrl.searchParams.get('turnId') ?? undefined;
     const afterCursor = afterRaw === null ? 0 : Number(afterRaw);
     const waitMs = waitRaw === null ? 0 : Number(waitRaw);
     if ((afterRaw !== null && !/^\d+$/.test(afterRaw))
@@ -112,8 +130,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       );
     }
     return json(waitMs > 0
-      ? await waitForLead({ leadId, afterCursor, waitMs })
-      : getLeadStatus(leadId, afterCursor));
+      ? await waitForLead({ leadId, turnId, afterCursor, waitMs })
+      : getLeadStatus(leadId, afterCursor, turnId));
   } catch (error) {
     return errorResponse(error);
   }

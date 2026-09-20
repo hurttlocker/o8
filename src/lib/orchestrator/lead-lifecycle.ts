@@ -1,14 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 
 import { getSqlite } from '@/lib/db';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
-import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
-import { modelBelongsToRuntime } from '@/lib/lane/orchestrator-model-guard';
-import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
-import { listLanes } from '@/lib/lane/registry';
+import { findLaneBySession, listLanes } from '@/lib/lane/registry';
 import {
   appendMobileOrchestratorUserMessage,
   markMobileOrchestratorThreadFailed,
@@ -16,212 +13,43 @@ import {
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
-import { resolveEffortPin, type ConcreteThinkingEffort } from '@/lib/orchestrator/effort-pin';
+import {
+  cleanLeadString,
+  digestLeadRequest,
+  LeadLifecycleError,
+  resolveLeadRepoPath,
+  type LeadBrief,
+  type LeadRow,
+  type LeadStatus,
+  type ReportLeadOutcomeInput,
+  type SendLeadInput,
+  type StartLeadInput,
+  type TurnRow,
+  validateLeadBrief,
+  validateLeadRouting,
+  validateLeadStringList,
+} from '@/lib/orchestrator/lead-contract';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { withSessionRules } from '@/lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
+import { escalationSessionKey } from '@/lib/orchestrator/wake-triage';
 import { sendOrchestratorBackendTurn } from '@/lib/lane/orchestrator-send-entry';
+import {
+  appendLeadEvent as event,
+  findLeadById as leadById,
+  findLeadTurnByKey as turnByKey,
+  getLeadStatus,
+} from '@/lib/orchestrator/lead-status';
+import { currentLeadOwnerIdentityJson } from '@/lib/orchestrator/lead-turn-owner';
 
-export type LeadStatus = 'queued' | 'running' | 'waiting_workers' | 'completed'
-  | 'blocked' | 'needs_approval' | 'failed' | 'stopped';
-
-export interface LeadBrief {
-  objective: string;
-  scope: string[];
-  doneTests: string[];
-  nonGoals: string[];
-  budgets: string[];
-  escalationCriteria: string[];
-}
-
-export interface LeadRouting {
-  backend: 'codex' | 'claude';
-  model: string;
-  effort: ConcreteThinkingEffort;
-}
-
-export interface StartLeadInput extends LeadRouting {
-  repoPath: string;
-  idempotencyKey: string;
-  brief: LeadBrief;
-}
-
-export interface SendLeadInput {
-  leadId: string;
-  message: string;
-  idempotencyKey: string;
-  repoPath?: string;
-  threadId?: string;
-  backend?: OrchestratorBackendId;
-  model?: string;
-  effort?: string;
-}
-
-export class LeadLifecycleError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = 'LeadLifecycleError';
-  }
-}
-
-interface LeadRow {
-  id: string;
-  start_key: string;
-  request_digest: string;
-  thread_id: string;
-  repo_path: string;
-  backend: 'codex' | 'claude';
-  model: string;
-  effort: ConcreteThinkingEffort;
-  status: LeadStatus;
-  current_turn_id: string | null;
-  result_status: string | null;
-  result_text: string | null;
-  error: string | null;
-  stop_reason: string | null;
-  created_at: number;
-  updated_at: number;
-}
-
-interface TurnRow {
-  id: string;
-  lead_id: string;
-  idempotency_key: string;
-  ordinal: number;
-  kind: 'operator' | 'review';
-  message: string;
-  brief_json: string | null;
-  status: LeadStatus | 'interrupted';
-  result_text: string | null;
-  error: string | null;
-  session_id: string | null;
-  created_at: number;
-  started_at: number | null;
-  finished_at: number | null;
-  owner_pid: number | null;
-}
+export { LeadLifecycleError, validateLeadBrief } from '@/lib/orchestrator/lead-contract';
+export { getLeadStatus, recoverInterruptedLeadTurns, waitForLead } from '@/lib/orchestrator/lead-status';
 
 const activeRuns = new Map<string, AbortController>();
 const drains = new Set<string>();
-const TERMINAL = new Set<LeadStatus>(['completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
-
-function clean(value: unknown, field: string, max = 4_000): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new LeadLifecycleError(`${field} is required.`, 'invalid_lead_request', 400);
-  }
-  const result = value.trim();
-  if (result.length > max) {
-    throw new LeadLifecycleError(`${field} must be ${max} characters or fewer.`, 'invalid_lead_request', 400);
-  }
-  return result;
-}
-
-function list(value: unknown, field: string, required = false): string[] {
-  if (!Array.isArray(value) || value.length > 50) {
-    throw new LeadLifecycleError(`${field} must be an array with at most 50 entries.`, 'invalid_lead_request', 400);
-  }
-  const items = value.map((item, index) => clean(item, `${field}[${index}]`, 2_000));
-  if (required && items.length === 0) {
-    throw new LeadLifecycleError(`${field} must contain at least one entry.`, 'invalid_lead_request', 400);
-  }
-  return items;
-}
-
-export function validateLeadBrief(value: unknown): LeadBrief {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new LeadLifecycleError('brief must be an object.', 'invalid_lead_request', 400);
-  }
-  const brief = value as Record<string, unknown>;
-  return {
-    objective: clean(brief.objective, 'brief.objective'),
-    scope: list(brief.scope, 'brief.scope', true),
-    doneTests: list(brief.doneTests, 'brief.doneTests', true),
-    nonGoals: list(brief.nonGoals, 'brief.nonGoals'),
-    budgets: list(brief.budgets, 'brief.budgets'),
-    escalationCriteria: list(brief.escalationCriteria, 'brief.escalationCriteria', true),
-  };
-}
-
-function validateRouting(input: { backend: unknown; model: unknown; effort: unknown }): LeadRouting {
-  if (input.backend !== 'codex' && input.backend !== 'claude') {
-    throw new LeadLifecycleError('backend must be codex or claude.', 'unsupported_lead_backend', 400);
-  }
-  const model = clean(input.model, 'model', 256);
-  const runtime = input.backend === 'codex' ? 'codex' : 'claude-code';
-  if (!modelBelongsToRuntime(model, runtime)) {
-    throw new LeadLifecycleError(
-      `Model "${model}" is incompatible with backend "${input.backend}".`,
-      'lead_model_incompatible',
-      400,
-    );
-  }
-  const effort = resolveEffortPin({
-    requestedEffort: input.effort,
-    runtime,
-    model,
-    explicitModel: model,
-  });
-  if (!effort.ok || !effort.selectedEffort || effort.selectedEffort === 'adaptive') {
-    throw new LeadLifecycleError(
-      effort.ok ? 'A concrete effort pin is required.' : effort.message,
-      effort.ok ? 'lead_effort_required' : effort.code,
-      400,
-    );
-  }
-  return { backend: input.backend, model, effort: effort.selectedEffort };
-}
-
-function digest(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
-function resolveRepoPath(value: string, field = 'repoPath'): string {
-  try {
-    assertOrchestratorRepoPath(value);
-    return realpathSync(value);
-  } catch (error) {
-    throw new LeadLifecycleError(
-      `${field} must name an existing Git repository: ${error instanceof Error ? error.message : String(error)}`,
-      'invalid_lead_repo',
-      400,
-    );
-  }
-}
-
-function pidIsAlive(pid: number | null): boolean {
-  if (!pid || pid < 1) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-function event(leadId: string, turnId: string | null, kind: string, status: string, detail?: string): void {
-  getSqlite().prepare(`
-    INSERT INTO orchestrator_lead_events (lead_id, turn_id, kind, status, detail, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(leadId, turnId, kind, status, detail?.slice(0, 1_000) ?? null, Date.now());
-}
-
-function leadById(id: string): LeadRow | null {
-  return getSqlite().prepare('SELECT * FROM orchestrator_leads WHERE id = ?').get(id) as LeadRow | undefined ?? null;
-}
-
-function turnByKey(leadId: string, key: string): TurnRow | null {
-  return getSqlite().prepare(
-    'SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND idempotency_key = ?',
-  ).get(leadId, key) as TurnRow | undefined ?? null;
-}
-
 function assertLeadBinding(lead: LeadRow, input: SendLeadInput): void {
   const checks: Array<[unknown, unknown, string]> = [
-    [input.repoPath ? resolveRepoPath(input.repoPath) : undefined, lead.repo_path, 'repoPath'],
+    [input.repoPath ? resolveLeadRepoPath(input.repoPath) : undefined, lead.repo_path, 'repoPath'],
     [input.threadId, lead.thread_id, 'threadId'],
     [input.backend, lead.backend, 'backend'],
     [input.model, lead.model, 'model'],
@@ -238,15 +66,18 @@ function assertLeadBinding(lead: LeadRow, input: SendLeadInput): void {
   }
 }
 
-function buildLeadPrompt(message: string, brief: LeadBrief | null, isReview: boolean): string {
+function buildLeadPrompt(lead: LeadRow, turn: TurnRow, brief: LeadBrief | null): string {
   const contract = [
     '<Persistent o8 lead contract>',
     'You are the durable execution lead for this bounded task. Use o8 operator tools to dispatch workers when needed.',
     'You own worker review, corrections, verification, and the final handback. Do not report completion merely because a worker exited.',
     'Preserve approval gates. Never approve or merge on the operator\'s behalf. Escalate only under the supplied criteria.',
-    isReview
+    turn.kind !== 'operator'
       ? 'A worker reached review. Inspect its persisted packet/diff/evidence, then review, correct, or surface the appropriate terminal outcome.'
       : 'Continue this same lead conversation and retain the task routing and scope.',
+    'Before ending this turn, report exactly one structured outcome through the operator-authenticated CLI:',
+    `o8 lead report ${lead.id} --turn ${turn.id} --repo ${JSON.stringify(lead.repo_path)} --thread-id ${lead.thread_id} --kind <completed|waiting_workers|needs_context|needs_approval|blocked> --summary <text> --evidence <json-array>`,
+    'Use completed only when the objective is actually complete, evidence is supplied, and no worker/review/approval obligation remains. This receipt, not freeform prose or process exit, determines terminal state.',
     '</Persistent o8 lead contract>',
   ];
   if (brief) {
@@ -262,7 +93,7 @@ function buildLeadPrompt(message: string, brief: LeadBrief | null, isReview: boo
       '</Task brief>',
     );
   }
-  return `${contract.join('\n')}\n\n${message}`;
+  return `${contract.join('\n')}\n\n${turn.message}`;
 }
 
 function threadPackets(threadId: string) {
@@ -279,19 +110,12 @@ function threadPackets(threadId: string) {
   return [...packets.values()];
 }
 
-async function classifyLead(lead: LeadRow): Promise<{ status: LeadStatus; detail: string }> {
+async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: LeadStatus; detail: string }> {
   const packets = threadPackets(lead.thread_id);
-  if (packets.length === 0) return { status: 'completed', detail: 'Lead turn completed without worker obligations.' };
   const packetIds = new Set(packets.map((packet) => packet.id));
   const lanes = listLanes().filter((lane) => lane.packetId && packetIds.has(lane.packetId));
-  if (lanes.some((lane) => lane.status === 'awaiting_human' || lane.status === 'awaiting_input')) {
-    return { status: 'needs_approval', detail: 'A bound worker requires operator input or approval.' };
-  }
-  if (lanes.some((lane) => lane.status === 'failed')) {
-    return { status: 'failed', detail: 'A bound worker failed.' };
-  }
-  if (lanes.some((lane) => lane.status === 'awaiting_orchestrator')) {
-    return { status: 'blocked', detail: 'A bound worker is blocked on lead review.' };
+  if (lanes.some((lane) => lane.status === 'awaiting_human')) {
+    return { status: 'needs_approval', detail: 'A bound worker requires a distinct human approval.' };
   }
   if (packets.some((packet) => packet.review?.approved === true && packet.releaseState !== 'released')) {
     return { status: 'needs_approval', detail: 'Lead review passed; operator-controlled release remains pending.' };
@@ -300,35 +124,69 @@ async function classifyLead(lead: LeadRow): Promise<{ status: LeadStatus; detail
   if (durableReviewStates.some(Boolean)) {
     return { status: 'needs_approval', detail: 'Lead review passed; operator-controlled release remains pending.' };
   }
-  const open = packets.some((packet) => packet.status !== 'archived'
+  const activeWorker = lanes.some((lane) => ['claimed', 'running', 'retrying'].includes(lane.status));
+  const openPacket = packets.some((packet) => packet.status !== 'archived'
     && packet.status !== 'failed'
     && packet.releaseState !== 'released');
-  if (open) return { status: 'waiting_workers', detail: 'Lead is waiting for bound worker completion or review.' };
-  return { status: 'completed', detail: 'All bound worker obligations are released.' };
+  if (activeWorker || (openPacket && lanes.length === 0)) {
+    return { status: 'waiting_workers', detail: 'Lead is waiting for a bound worker return.' };
+  }
+  const unresolvedReview = lanes.some((lane) => ['reviewing', 'awaiting_orchestrator', 'awaiting_input', 'failed'].includes(lane.status));
+  if (unresolvedReview) {
+    return { status: 'blocked', detail: 'A bound worker failure, context request, or review obligation remains unresolved.' };
+  }
+  if (!turn.outcome_kind) {
+    return { status: 'blocked', detail: 'The lead process exited without a structured terminal outcome.' };
+  }
+  if (turn.outcome_kind === 'completed') {
+    const evidence = turn.outcome_evidence_json
+      ? JSON.parse(turn.outcome_evidence_json) as unknown
+      : null;
+    if (!Array.isArray(evidence) || evidence.length === 0) {
+      return { status: 'blocked', detail: 'The lead claimed completion without structured evidence.' };
+    }
+    return { status: 'completed', detail: turn.outcome_summary ?? 'Lead reported completion with evidence.' };
+  }
+  if (turn.outcome_kind === 'needs_approval') {
+    return { status: 'needs_approval', detail: turn.outcome_summary ?? 'Lead requested human approval.' };
+  }
+  if (turn.outcome_kind === 'waiting_workers') {
+    return { status: 'blocked', detail: 'The lead reported waiting_workers but no authoritative worker remained active.' };
+  }
+  return { status: 'blocked', detail: turn.outcome_summary ?? 'Lead reported a blocked or context-required outcome.' };
 }
 
 function claimTurn(leadId: string): TurnRow | null {
   const sqlite = getSqlite();
+  const leaseToken = randomUUID();
+  const ownerIdentityJson = currentLeadOwnerIdentityJson();
   return sqlite.transaction(() => {
-    const lead = leadById(leadId);
-    if (!lead || lead.status === 'stopped') return null;
-    const running = sqlite.prepare(
-      `SELECT id FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'running' LIMIT 1`,
-    ).get(leadId);
-    if (running) return null;
-    const turn = sqlite.prepare(
-      `SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'queued' ORDER BY ordinal LIMIT 1`,
-    ).get(leadId) as TurnRow | undefined;
-    if (!turn) return null;
     const now = Date.now();
-    sqlite.prepare(
-      `UPDATE orchestrator_lead_turns SET status = 'running', started_at = ?, owner_pid = ? WHERE id = ? AND status = 'queued'`,
-    ).run(now, process.pid, turn.id);
+    const turn = sqlite.prepare(`
+      UPDATE orchestrator_lead_turns
+      SET status = 'running', started_at = ?, owner_pid = ?, owner_identity_json = ?,
+          lease_token = ?, lease_heartbeat_at = ?
+      WHERE id = (
+        SELECT id FROM orchestrator_lead_turns
+        WHERE lead_id = ? AND status = 'queued'
+        ORDER BY ordinal LIMIT 1
+      )
+        AND NOT EXISTS (
+          SELECT 1 FROM orchestrator_lead_turns
+          WHERE lead_id = ? AND status = 'running'
+        )
+        AND EXISTS (
+          SELECT 1 FROM orchestrator_leads
+          WHERE id = ? AND status != 'stopped'
+        )
+      RETURNING *
+    `).get(now, process.pid, ownerIdentityJson, leaseToken, now, leadId, leadId, leadId) as TurnRow | undefined;
+    if (!turn) return null;
     sqlite.prepare(
       `UPDATE orchestrator_leads SET status = 'running', current_turn_id = ?, updated_at = ? WHERE id = ? AND status != 'stopped'`,
     ).run(turn.id, now, leadId);
     event(leadId, turn.id, 'turn', 'running');
-    return { ...turn, status: 'running' as const, started_at: now, owner_pid: process.pid };
+    return turn;
   })();
 }
 
@@ -345,12 +203,20 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
   let text = '';
   let sessionId: string | null = null;
   let turnError: string | null = null;
+  const heartbeat = setInterval(() => {
+    getSqlite().prepare(`
+      UPDATE orchestrator_lead_turns SET lease_heartbeat_at = ?
+      WHERE id = ? AND status = 'running' AND lease_token = ?
+    `).run(Date.now(), turn.id, turn.lease_token);
+  }, 1_000);
+  heartbeat.unref();
   const stopPoll = setInterval(() => {
     if (leadById(lead.id)?.status === 'stopped') controller.abort();
   }, 200);
+  stopPoll.unref();
   try {
     const brief = turn.brief_json ? JSON.parse(turn.brief_json) as LeadBrief : null;
-    let prompt = buildLeadPrompt(turn.message, brief, turn.kind === 'review');
+    let prompt = buildLeadPrompt(lead, turn, brief);
     prompt = withSessionRules(prompt, lead.thread_id);
     prompt = withOrchestratorTurnReceiptContext({
       message: prompt,
@@ -379,15 +245,32 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
     const current = leadById(lead.id);
     if (!current || current.status === 'stopped') return;
     if (sessionId) writeOrchestratorBackendSessionId(lead.thread_id, lead.backend, sessionId);
-    const classification = await classifyLead(current);
+    const reportedTurn = getSqlite().prepare(
+      'SELECT * FROM orchestrator_lead_turns WHERE id = ?',
+    ).get(turn.id) as TurnRow | undefined;
+    if (!reportedTurn || reportedTurn.status !== 'running' || reportedTurn.lease_token !== turn.lease_token) return;
+    const classification = await classifyLead(current, reportedTurn);
     const now = Date.now();
     getSqlite().transaction(() => {
-      getSqlite().prepare(
-        `UPDATE orchestrator_lead_turns SET status = ?, result_text = ?, session_id = ?, finished_at = ? WHERE id = ? AND status = 'running'`,
-      ).run(classification.status, text || null, sessionId, now, turn.id);
-      getSqlite().prepare(
-        `UPDATE orchestrator_leads SET status = ?, current_turn_id = NULL, result_status = ?, result_text = ?, error = NULL, updated_at = ? WHERE id = ? AND status != 'stopped'`,
-      ).run(classification.status, classification.status, text || null, now, lead.id);
+      const settled = getSqlite().prepare(`
+        UPDATE orchestrator_lead_turns SET status = ?, result_text = ?, session_id = ?, finished_at = ?
+        WHERE id = ? AND status = 'running' AND lease_token = ?
+      `).run(classification.status, text || null, sessionId, now, turn.id, turn.lease_token);
+      if (settled.changes !== 1) return;
+      const queued = (getSqlite().prepare(`
+        SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'queued'
+      `).get(lead.id) as { count: number }).count;
+      getSqlite().prepare(`
+        UPDATE orchestrator_leads
+        SET status = ?, current_turn_id = NULL,
+            result_turn_id = CASE WHEN ? > 0 THEN NULL ELSE ? END,
+            result_status = CASE WHEN ? > 0 THEN NULL ELSE ? END,
+            result_text = CASE WHEN ? > 0 THEN NULL ELSE ? END,
+            error = NULL, updated_at = ?
+        WHERE id = ? AND status != 'stopped' AND current_turn_id = ?
+      `).run(queued > 0 ? 'queued' : classification.status,
+        queued, turn.id, queued, classification.status, queued, text || null,
+        now, lead.id, turn.id);
       event(lead.id, turn.id, 'turn', classification.status, classification.detail);
     })();
     upsertMobileOrchestratorAssistantMessage({
@@ -405,12 +288,25 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     const now = Date.now();
     getSqlite().transaction(() => {
-      getSqlite().prepare(
-        `UPDATE orchestrator_lead_turns SET status = 'failed', error = ?, finished_at = ? WHERE id = ? AND status = 'running'`,
-      ).run(message, now, turn.id);
-      getSqlite().prepare(
-        `UPDATE orchestrator_leads SET status = 'failed', current_turn_id = NULL, result_status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status != 'stopped'`,
-      ).run(message, now, lead.id);
+      const settled = getSqlite().prepare(`
+        UPDATE orchestrator_lead_turns SET status = 'failed', error = ?, finished_at = ?
+        WHERE id = ? AND status = 'running' AND lease_token = ?
+      `).run(message, now, turn.id, turn.lease_token);
+      if (settled.changes !== 1) return;
+      const queued = (getSqlite().prepare(`
+        SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'queued'
+      `).get(lead.id) as { count: number }).count;
+      getSqlite().prepare(`
+        UPDATE orchestrator_leads
+        SET status = ?, current_turn_id = NULL,
+            result_turn_id = CASE WHEN ? > 0 THEN NULL ELSE ? END,
+            result_status = CASE WHEN ? > 0 THEN NULL ELSE 'failed' END,
+            result_text = NULL,
+            error = CASE WHEN ? > 0 THEN NULL ELSE ? END,
+            updated_at = ?
+        WHERE id = ? AND status != 'stopped' AND current_turn_id = ?
+      `).run(queued > 0 ? 'queued' : 'failed', queued, turn.id, queued,
+        queued, message, now, lead.id, turn.id);
       event(lead.id, turn.id, 'turn', 'failed', message);
     })();
     markMobileOrchestratorThreadFailed({
@@ -420,6 +316,7 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
       backend: lead.backend,
     });
   } finally {
+    clearInterval(heartbeat);
     clearInterval(stopPoll);
     activeRuns.delete(lead.id);
   }
@@ -448,13 +345,14 @@ function kickLead(leadId: string): void {
   });
 }
 
-function insertTurn(input: {
+function admitTurn(input: {
   lead: LeadRow;
   key: string;
   kind: 'operator' | 'review';
   message: string;
   brief?: LeadBrief;
 }): TurnRow {
+  const sqlite = getSqlite();
   const existing = turnByKey(input.lead.id, input.key);
   if (existing) {
     if (existing.message !== input.message) {
@@ -466,83 +364,59 @@ function insertTurn(input: {
     }
     return existing;
   }
-  if (input.lead.status === 'stopped') {
+  const ordinal = (sqlite.prepare(
+    'SELECT COALESCE(MAX(ordinal), 0) + 1 AS ordinal FROM orchestrator_lead_turns WHERE lead_id = ?',
+  ).get(input.lead.id) as { ordinal: number }).ordinal;
+  const turnId = `lead-turn-${randomUUID()}`;
+  const now = Date.now();
+  const inserted = sqlite.prepare(`
+    INSERT INTO orchestrator_lead_turns
+      (id, lead_id, idempotency_key, ordinal, kind, message, brief_json, status, created_at)
+    SELECT ?, ?, ?, ?, ?, ?, ?, 'queued', ?
+    FROM orchestrator_leads WHERE id = ? AND status != 'stopped'
+  `).run(turnId, input.lead.id, input.key, ordinal, input.kind, input.message,
+    input.brief ? JSON.stringify(input.brief) : null, now, input.lead.id);
+  if (inserted.changes !== 1) {
     throw new LeadLifecycleError('A stopped lead cannot accept new turns.', 'lead_stopped', 409);
   }
+  sqlite.prepare(`
+    UPDATE orchestrator_leads
+    SET status = 'queued', result_turn_id = NULL, result_status = NULL,
+        result_text = NULL, error = NULL, updated_at = ?
+    WHERE id = ? AND status != 'stopped'
+  `).run(now, input.lead.id);
+  event(input.lead.id, turnId, 'turn', 'queued');
+  return sqlite.prepare('SELECT * FROM orchestrator_lead_turns WHERE id = ?').get(turnId) as TurnRow;
+}
+
+function insertTurn(input: Parameters<typeof admitTurn>[0]): TurnRow {
   const sqlite = getSqlite();
-  let turn: TurnRow | null = null;
-  for (let attempt = 0; attempt < 2 && !turn; attempt += 1) {
-    try {
-      turn = sqlite.transaction(() => {
-        const ordinal = (sqlite.prepare(
-          'SELECT COALESCE(MAX(ordinal), 0) + 1 AS ordinal FROM orchestrator_lead_turns WHERE lead_id = ?',
-        ).get(input.lead.id) as { ordinal: number }).ordinal;
-        const row: TurnRow = {
-          id: `lead-turn-${randomUUID()}`,
-          lead_id: input.lead.id,
-          idempotency_key: input.key,
-          ordinal,
-          kind: input.kind,
-          message: input.message,
-          brief_json: input.brief ? JSON.stringify(input.brief) : null,
-          status: 'queued',
-          result_text: null,
-          error: null,
-          session_id: null,
-          created_at: Date.now(),
-          started_at: null,
-          finished_at: null,
-          owner_pid: null,
-        };
-        sqlite.prepare(`
-          INSERT INTO orchestrator_lead_turns
-            (id, lead_id, idempotency_key, ordinal, kind, message, brief_json, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)
-        `).run(row.id, row.lead_id, row.idempotency_key, row.ordinal, row.kind, row.message, row.brief_json, row.created_at);
-        sqlite.prepare(
-          `UPDATE orchestrator_leads SET status = 'queued', result_status = NULL, error = NULL, updated_at = ? WHERE id = ? AND status != 'stopped'`,
-        ).run(row.created_at, input.lead.id);
-        event(input.lead.id, row.id, 'turn', 'queued');
-        return row;
-      })();
-    } catch (error) {
-      const admitted = turnByKey(input.lead.id, input.key);
-      if (admitted) {
-        if (admitted.message !== input.message) {
-          throw new LeadLifecycleError(
-            'The idempotency key is already bound to a different message.',
-            'lead_idempotency_conflict',
-            409,
-          );
-        }
-        return admitted;
-      }
-      if (attempt === 1) throw error;
+  let turn: TurnRow;
+  try {
+    turn = sqlite.transaction(() => admitTurn(input))();
+  } catch (error) {
+    const admitted = turnByKey(input.lead.id, input.key);
+    if (!admitted) throw error;
+    if (admitted.message !== input.message) {
+      throw new LeadLifecycleError(
+        'The idempotency key is already bound to a different message.',
+        'lead_idempotency_conflict',
+        409,
+      );
     }
+    turn = admitted;
   }
-  if (!turn) throw new Error('Lead turn admission did not produce a row.');
   kickLead(input.lead.id);
   return turn;
 }
 
 export function startLead(input: StartLeadInput) {
-  const routing = validateRouting(input);
+  const routing = validateLeadRouting(input);
   const brief = validateLeadBrief(input.brief);
-  const idempotencyKey = clean(input.idempotencyKey, 'idempotencyKey', 256);
-  const repoPath = resolveRepoPath(input.repoPath);
-  const requestDigest = digest({ repoPath, ...routing, brief });
+  const idempotencyKey = cleanLeadString(input.idempotencyKey, 'idempotencyKey', 256);
+  const repoPath = resolveLeadRepoPath(input.repoPath);
+  const requestDigest = digestLeadRequest({ repoPath, ...routing, brief });
   const sqlite = getSqlite();
-  const existing = sqlite.prepare('SELECT * FROM orchestrator_leads WHERE start_key = ?').get(idempotencyKey) as LeadRow | undefined;
-  if (existing) {
-    if (existing.request_digest !== requestDigest) {
-      throw new LeadLifecycleError(
-        'The start idempotency key is already bound to a different request.',
-        'lead_idempotency_conflict',
-        409,
-      );
-    }
-    return getLeadStatus(existing.id);
-  }
   const now = Date.now();
   const leadId = `lead-${randomUUID()}`;
   const lead: LeadRow = {
@@ -554,6 +428,7 @@ export function startLead(input: StartLeadInput) {
     ...routing,
     status: 'queued',
     current_turn_id: null,
+    result_turn_id: null,
     result_status: null,
     result_text: null,
     error: null,
@@ -561,8 +436,31 @@ export function startLead(input: StartLeadInput) {
     created_at: now,
     updated_at: now,
   };
+  let admittedLead: LeadRow;
+  let admittedTurn: TurnRow;
   try {
-    sqlite.transaction(() => {
+    ({ lead: admittedLead, turn: admittedTurn } = sqlite.transaction(() => {
+      const existing = sqlite.prepare(
+        'SELECT * FROM orchestrator_leads WHERE start_key = ?',
+      ).get(idempotencyKey) as LeadRow | undefined;
+      if (existing) {
+        if (existing.request_digest !== requestDigest) {
+          throw new LeadLifecycleError(
+            'The start idempotency key is already bound to a different request.',
+            'lead_idempotency_conflict',
+            409,
+          );
+        }
+        const existingTurn = turnByKey(existing.id, `start:${idempotencyKey}`)
+          ?? admitTurn({
+            lead: existing,
+            key: `start:${idempotencyKey}`,
+            kind: 'operator',
+            message: brief.objective,
+            brief,
+          });
+        return { lead: existing, turn: existingTurn };
+      }
       sqlite.prepare(`
         INSERT INTO orchestrator_leads
           (id, start_key, request_digest, thread_id, repo_path, backend, model, effort, status, created_at, updated_at)
@@ -570,7 +468,17 @@ export function startLead(input: StartLeadInput) {
       `).run(lead.id, lead.start_key, lead.request_digest, lead.thread_id, lead.repo_path,
         lead.backend, lead.model, lead.effort, now, now);
       event(lead.id, null, 'lead', 'queued', 'Persistent lead admitted.');
-    })();
+      return {
+        lead,
+        turn: admitTurn({
+          lead,
+          key: `start:${idempotencyKey}`,
+          kind: 'operator',
+          message: brief.objective,
+          brief,
+        }),
+      };
+    })());
   } catch (error) {
     const admitted = sqlite.prepare('SELECT * FROM orchestrator_leads WHERE start_key = ?').get(idempotencyKey) as LeadRow | undefined;
     if (!admitted) throw error;
@@ -581,39 +489,120 @@ export function startLead(input: StartLeadInput) {
         409,
       );
     }
-    return getLeadStatus(admitted.id);
+    const turn = turnByKey(admitted.id, `start:${idempotencyKey}`);
+    if (!turn) throw error;
+    admittedLead = admitted;
+    admittedTurn = turn;
   }
-  insertTurn({
-    lead,
-    key: `start:${idempotencyKey}`,
-    kind: 'operator',
-    message: brief.objective,
-    brief,
-  });
-  return getLeadStatus(lead.id);
+  kickLead(admittedLead.id);
+  return { ...getLeadStatus(admittedLead.id, 0, admittedTurn.id), admittedTurnId: admittedTurn.id };
 }
 
 export function sendLead(input: SendLeadInput) {
-  const leadId = clean(input.leadId, 'leadId', 128);
-  const message = clean(input.message, 'message', 20_000);
-  const key = clean(input.idempotencyKey, 'idempotencyKey', 256);
+  const leadId = cleanLeadString(input.leadId, 'leadId', 128);
+  const message = cleanLeadString(input.message, 'message', 20_000);
+  const key = cleanLeadString(input.idempotencyKey, 'idempotencyKey', 256);
   const lead = leadById(leadId);
   if (!lead) throw new LeadLifecycleError('Lead not found.', 'lead_not_found', 404);
   assertLeadBinding(lead, input);
+  const duplicate = Boolean(turnByKey(lead.id, key));
   const turn = insertTurn({ lead, key, kind: 'operator', message });
-  return { ...getLeadStatus(lead.id), admittedTurnId: turn.id };
+  return { ...getLeadStatus(lead.id), admittedTurnId: turn.id, duplicate };
+}
+
+export function sendLeadThreadMessage(input: {
+  threadId: string;
+  repoPath: string;
+  message: string;
+  idempotencyKey: string;
+  backend?: string;
+  model?: string;
+  effort?: string;
+}) {
+  const threadId = cleanLeadString(input.threadId, 'threadId', 256);
+  const lead = getSqlite().prepare(
+    'SELECT * FROM orchestrator_leads WHERE thread_id = ?',
+  ).get(threadId) as LeadRow | undefined;
+  if (!lead) return null;
+  return sendLead({
+    leadId: lead.id,
+    repoPath: input.repoPath,
+    threadId,
+    message: input.message,
+    idempotencyKey: input.idempotencyKey,
+    backend: input.backend as SendLeadInput['backend'],
+    model: input.model,
+    effort: input.effort,
+  });
+}
+
+export function reportLeadOutcome(input: ReportLeadOutcomeInput) {
+  const leadId = cleanLeadString(input.leadId, 'leadId', 128);
+  const turnId = cleanLeadString(input.turnId, 'turnId', 128);
+  const threadId = cleanLeadString(input.threadId, 'threadId', 256);
+  const kind = input.kind;
+  if (!['completed', 'waiting_workers', 'needs_context', 'needs_approval', 'blocked'].includes(kind)) {
+    throw new LeadLifecycleError('kind is not a supported lead outcome.', 'invalid_lead_outcome', 400);
+  }
+  const summary = cleanLeadString(input.summary, 'summary', 2_000);
+  const evidence = validateLeadStringList(input.evidence, 'evidence', kind === 'completed');
+  const lead = leadById(leadId);
+  if (!lead) throw new LeadLifecycleError('Lead not found.', 'lead_not_found', 404);
+  if (resolveLeadRepoPath(input.repoPath) !== lead.repo_path || threadId !== lead.thread_id) {
+    throw new LeadLifecycleError(
+      'The outcome does not match the lead repository/thread binding.',
+      'lead_binding_mismatch',
+      409,
+    );
+  }
+  const sqlite = getSqlite();
+  const turn = sqlite.prepare(
+    'SELECT * FROM orchestrator_lead_turns WHERE id = ? AND lead_id = ?',
+  ).get(turnId, leadId) as TurnRow | undefined;
+  if (!turn) throw new LeadLifecycleError('Lead turn not found.', 'lead_turn_not_found', 404);
+  const evidenceJson = JSON.stringify(evidence);
+  if (turn.outcome_kind) {
+    if (turn.outcome_kind === kind && turn.outcome_summary === summary
+      && turn.outcome_evidence_json === evidenceJson) {
+      return getLeadStatus(leadId, 0, turnId);
+    }
+    throw new LeadLifecycleError(
+      'This turn already has a different structured outcome.',
+      'lead_outcome_conflict',
+      409,
+    );
+  }
+  if (turn.status !== 'running' || !turn.lease_token || lead.status === 'stopped') {
+    throw new LeadLifecycleError(
+      'Only the active lead turn can report an outcome.',
+      'lead_turn_not_active',
+      409,
+    );
+  }
+  const now = Date.now();
+  const updated = sqlite.prepare(`
+    UPDATE orchestrator_lead_turns
+    SET outcome_kind = ?, outcome_summary = ?, outcome_evidence_json = ?, outcome_reported_at = ?
+    WHERE id = ? AND lead_id = ? AND status = 'running' AND lease_token = ? AND outcome_kind IS NULL
+  `).run(kind, summary, evidenceJson, now, turnId, leadId, turn.lease_token);
+  if (updated.changes !== 1) {
+    throw new LeadLifecycleError('The active turn changed before its outcome was recorded.', 'lead_outcome_race', 409);
+  }
+  event(leadId, turnId, 'outcome', kind, summary);
+  return getLeadStatus(leadId, 0, turnId);
 }
 
 export function stopLead(leadIdRaw: string, reasonRaw?: string) {
-  const leadId = clean(leadIdRaw, 'leadId', 128);
-  const reason = reasonRaw ? clean(reasonRaw, 'reason', 1_000) : 'Stopped by operator.';
+  const leadId = cleanLeadString(leadIdRaw, 'leadId', 128);
+  const reason = reasonRaw ? cleanLeadString(reasonRaw, 'reason', 1_000) : 'Stopped by operator.';
   const lead = leadById(leadId);
   if (!lead) throw new LeadLifecycleError('Lead not found.', 'lead_not_found', 404);
   const now = Date.now();
   getSqlite().transaction(() => {
     getSqlite().prepare(`
       UPDATE orchestrator_leads
-      SET status = 'stopped', result_status = 'stopped', stop_reason = ?, current_turn_id = NULL, updated_at = ?
+      SET status = 'stopped', result_turn_id = current_turn_id, result_status = 'stopped',
+          stop_reason = ?, current_turn_id = NULL, updated_at = ?
       WHERE id = ?
     `).run(reason, now, leadId);
     getSqlite().prepare(`
@@ -627,104 +616,26 @@ export function stopLead(leadIdRaw: string, reasonRaw?: string) {
   return getLeadStatus(leadId);
 }
 
-export function recoverInterruptedLeadTurns(): number {
-  const sqlite = getSqlite();
-  const stale = sqlite.prepare(`
-    SELECT * FROM orchestrator_lead_turns
-    WHERE status = 'running' AND (owner_pid IS NULL OR owner_pid != ?)
-  `).all(process.pid) as TurnRow[];
-  const interrupted = stale.filter((turn) => !pidIsAlive(turn.owner_pid));
-  for (const turn of interrupted) {
-    const now = Date.now();
-    sqlite.transaction(() => {
-      sqlite.prepare(`
-        UPDATE orchestrator_lead_turns
-        SET status = 'interrupted', error = 'Lead process exited during this turn.', finished_at = ?
-        WHERE id = ? AND status = 'running'
-      `).run(now, turn.id);
-      sqlite.prepare(`
-        UPDATE orchestrator_leads
-        SET status = 'blocked', result_status = 'blocked', current_turn_id = NULL,
-            error = 'Previous lead turn was interrupted; send a new turn to recover.', updated_at = ?
-        WHERE id = ? AND status != 'stopped'
-      `).run(now, turn.lead_id);
-      event(turn.lead_id, turn.id, 'recovery', 'blocked', 'Interrupted turn preserved; explicit send required.');
-    })();
-  }
-  return interrupted.length;
-}
-
-export function getLeadStatus(leadIdRaw: string, afterCursor = 0) {
-  const leadId = clean(leadIdRaw, 'leadId', 128);
-  recoverInterruptedLeadTurns();
-  const lead = leadById(leadId);
-  if (!lead) throw new LeadLifecycleError('Lead not found.', 'lead_not_found', 404);
-  if (lead.status === 'queued') kickLead(lead.id);
-  const sqlite = getSqlite();
-  const latestTurn = sqlite.prepare(
-    'SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? ORDER BY ordinal DESC LIMIT 1',
-  ).get(leadId) as TurnRow | undefined;
-  const queueDepth = (sqlite.prepare(
-    `SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'queued'`,
-  ).get(leadId) as { count: number }).count;
-  const events = sqlite.prepare(`
-    SELECT cursor, turn_id AS turnId, kind, status, detail, created_at AS createdAt
-    FROM orchestrator_lead_events WHERE lead_id = ? AND cursor > ? ORDER BY cursor LIMIT 100
-  `).all(leadId, Math.max(0, afterCursor)) as Array<Record<string, unknown>>;
-  const cursor = events.length > 0 ? Number(events[events.length - 1].cursor) : Math.max(0, afterCursor);
-  return {
-    schema: 'o8/orchestrator.lead/v1',
-    ok: true,
-    lead: {
-      id: lead.id,
-      threadId: lead.thread_id,
-      repoPath: lead.repo_path,
-      routing: { backend: lead.backend, model: lead.model, effort: lead.effort },
-      status: lead.status,
-      currentTurnId: lead.current_turn_id,
-      result: lead.result_status ? {
-        status: lead.result_status,
-        text: lead.result_text?.slice(0, 2_000) ?? null,
-        textTruncated: Boolean(lead.result_text && lead.result_text.length > 2_000),
-        error: lead.error?.slice(0, 2_000) ?? null,
-        errorTruncated: Boolean(lead.error && lead.error.length > 2_000),
-      } : null,
-      stopReason: lead.stop_reason,
-      createdAt: lead.created_at,
-      updatedAt: lead.updated_at,
-    },
-    latestTurn: latestTurn ? {
-      id: latestTurn.id,
-      ordinal: latestTurn.ordinal,
-      kind: latestTurn.kind,
-      status: latestTurn.status,
-      error: latestTurn.error?.slice(0, 2_000) ?? null,
-      errorTruncated: Boolean(latestTurn.error && latestTurn.error.length > 2_000),
-      createdAt: latestTurn.created_at,
-      finishedAt: latestTurn.finished_at,
-    } : null,
-    queueDepth,
-    cursor,
-    events,
-  };
-}
-
-export async function waitForLead(input: { leadId: string; afterCursor?: number; waitMs?: number }) {
-  const waitMs = Math.min(Math.max(input.waitMs ?? 0, 0), 30_000);
-  const deadline = Date.now() + waitMs;
-  let status = getLeadStatus(input.leadId, input.afterCursor ?? 0);
-  while (Date.now() < deadline && status.events.length === 0 && !TERMINAL.has(status.lead.status)) {
-    await new Promise((resolve) => setTimeout(resolve, Math.min(250, deadline - Date.now())));
-    status = getLeadStatus(input.leadId, input.afterCursor ?? 0);
-  }
-  return status;
-}
-
 export function queueLeadReviewContinuation(input: {
   repoPath: string;
   packetId: string;
   laneId: string;
   label: string;
+}): boolean {
+  return queueLeadWorkerReturn({
+    ...input,
+    returnKind: 'review',
+    detail: 'Inspect the packet diff, verification, and governance state. Review it, request corrections if needed, and only then produce the terminal handback.',
+  });
+}
+
+export function queueLeadWorkerReturn(input: {
+  repoPath: string;
+  packetId: string;
+  laneId: string;
+  label: string;
+  returnKind: 'review' | 'failed' | 'needs_context' | 'supervisor';
+  detail: string;
 }): boolean {
   const packet = threadPacketsForPacket(input.packetId);
   if (!packet?.orchestratorThreadId) return false;
@@ -746,14 +657,14 @@ export function queueLeadReviewContinuation(input: {
     return true;
   }
   const message = [
-    `[FLEET] Lane "${input.label}" (${input.laneId}, packet ${input.packetId}) reached review-ready.`,
-    'Inspect the packet diff, verification, and governance state. Review it, request corrections if needed, and only then produce the terminal handback.',
+    `[FLEET] Lane "${input.label}" (${input.laneId}, packet ${input.packetId}) returned ${input.returnKind}.`,
+    input.detail,
   ].join('\n');
   try {
     insertTurn({
       lead,
-      key: `review:${input.laneId}:${packet.status}:${packet.lastEventAt ?? packet.review?.recordedAt ?? 'ready'}`,
-      kind: 'review',
+      key: `worker-return:${input.laneId}`,
+      kind: input.returnKind === 'review' ? 'review' : 'operator',
       message,
     });
   } catch (error) {
@@ -766,6 +677,21 @@ export function queueLeadReviewContinuation(input: {
     event(lead.id, null, 'review', 'blocked', detail);
   }
   return true;
+}
+
+export function queueLeadSupervisorReturn(repoPath: string, message: string): boolean {
+  const sessionKey = escalationSessionKey(message);
+  if (!sessionKey) return false;
+  const lane = findLaneBySession(sessionKey);
+  if (!lane?.packetId) return false;
+  return queueLeadWorkerReturn({
+    repoPath,
+    packetId: lane.packetId,
+    laneId: lane.id,
+    label: lane.label,
+    returnKind: lane.status === 'awaiting_input' ? 'needs_context' : 'supervisor',
+    detail: message,
+  });
 }
 
 function threadPacketsForPacket(packetId: string) {

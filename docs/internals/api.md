@@ -253,8 +253,8 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | POST | `/api/orchestrator/delegate` | Create packet shell + open lane + launch Codex in one step. |
 | POST | `/api/orchestrator/dispatch` | Dispatch a created mission (spawns agent workers). |
 | POST | `/api/orchestrator/headless-tick` | Run one headless sprint tick (used by autonomous loop). |
-| GET | `/api/orchestrator/lead?leadId=...&afterCursor=...&waitMs=...` | Read or bounded-long-poll a compact persistent-lead receipt. Operator only. |
-| POST | `/api/orchestrator/lead` | Start, send to, or durably stop a persistent lead with replay-safe admission. Operator only. |
+| GET | `/api/orchestrator/lead?leadId=...&turnId=...&afterCursor=...&waitMs=...` | Read or bounded-long-poll a compact, turn-correlated persistent-lead receipt. Operator only. |
+| POST | `/api/orchestrator/lead` | Start, send, structurally report an outcome, or durably stop a persistent lead with replay-safe admission. Operator only. |
 | GET | `/api/orchestrator/lane-events?since=...` | Long-poll for orchestrator-relevant lane events. |
 | POST | `/api/orchestrator/merge` | Approve + merge a packet (`approveAndMergePacket`). |
 | GET | `/api/orchestrator/packet-spec?packetId=...` | Read the packet's structured spec. |

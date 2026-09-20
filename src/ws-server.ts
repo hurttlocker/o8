@@ -219,7 +219,12 @@ import {
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
 import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
-import { queueLeadReviewContinuation } from './lib/orchestrator/lead-lifecycle';
+import {
+  queueLeadReviewContinuation,
+  queueLeadSupervisorReturn,
+  queueLeadWorkerReturn,
+  sendLeadThreadMessage,
+} from './lib/orchestrator/lead-lifecycle';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
@@ -1332,6 +1337,7 @@ function enqueueOrchestratorAutoMessage(
 }
 
 function queueOrchestratorEscalation(repoPath: string, message: string): void {
+  if (queueLeadSupervisorReturn(repoPath, message)) return;
   queueSupervisorEscalationTurn(repoPath, message, enqueueOrchestratorAutoMessage);
 }
 
@@ -4975,6 +4981,63 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   if (!repoPath || !message) return;
 
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
+  const threadId = resolveMsgThreadId(msg);
+  if (threadId) {
+    try {
+      if (!correlationId) {
+        throw new Error('Persistent lead thread sends require a correlation id.');
+      }
+      for (const field of ['backend', 'model', 'thinkingEffort'] as const) {
+        if (field in msg && typeof msg[field] !== 'string') {
+          throw new Error(`${field} must be a string when supplied.`);
+        }
+      }
+      const leadReceipt = sendLeadThreadMessage({
+        threadId,
+        repoPath,
+        message: resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage }),
+        idempotencyKey: `ws:${correlationId}`,
+        backend: typeof msg.backend === 'string' ? msg.backend : undefined,
+        model: typeof msg.model === 'string' ? msg.model : undefined,
+        effort: typeof msg.thinkingEffort === 'string' ? msg.thinkingEffort : undefined,
+      });
+      if (leadReceipt) {
+        sendOrchestratorSendAck(client, {
+          repoPath,
+          threadId,
+          backend: leadReceipt.lead.routing.backend,
+          correlationId,
+          state: leadReceipt.duplicate ? 'replayed' : 'accepted',
+          duplicate: leadReceipt.duplicate,
+        });
+        send(client, {
+          channel: 'orchestrator',
+          event: 'status',
+          data: {
+            status: leadReceipt.lead.status,
+            repoPath,
+            threadId,
+            backend: leadReceipt.lead.routing.backend,
+            lead: leadReceipt.lead,
+            admittedTurnId: leadReceipt.admittedTurnId,
+          },
+        });
+        return;
+      }
+    } catch (error) {
+      send(client, {
+        channel: 'orchestrator',
+        event: 'error',
+        data: {
+          error: error instanceof Error ? error.message : 'Persistent lead send failed.',
+          repoPath,
+          threadId,
+          ...orchestratorCommandAckCorrelation(correlationId),
+        },
+      });
+      return;
+    }
+  }
   // Legacy clients did not send a correlation id. Preserve their exact
   // execution behavior; the one-shot handler still emits an uncorrelated
   // accepted ACK at the later, truthful acceptance point.
@@ -4986,7 +5049,6 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const requestedBackendId = resolveMsgBackendId(msg);
   const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
   const agentId = backendId === requestedBackendId ? resolveMsgAgentId(msg, backendId) : '';
-  const threadId = resolveMsgThreadId(msg);
   const scopeId = orchestratorSendIdempotencyScope({
     repoPath,
     backend: backendId,
@@ -9152,10 +9214,26 @@ async function bootstrapWsServer() {
       },
       async onAgentCompletion(surfaceId, outcome) {
         const { handleAgentCompletion } = await import('@/lib/supervisor/agent-completion');
-        return handleAgentCompletion(surfaceId, outcome, {
+        const decision = await handleAgentCompletion(surfaceId, outcome, {
           enqueueAutoReview, triggerHeadlessSprintTick,
           queueReviewContinuation, enqueueVerificationFailureInboxItem,
         });
+        const { findLaneBySession } = await import('@/lib/lane/registry');
+        const lane = findLaneBySession(surfaceId);
+        if (lane?.packetId && (outcome === 'failed'
+          || lane.status === 'failed'
+          || lane.status === 'awaiting_input'
+          || lane.status === 'awaiting_orchestrator')) {
+          queueLeadWorkerReturn({
+            repoPath: lane.repoPath,
+            packetId: lane.packetId,
+            laneId: lane.id,
+            label: lane.label,
+            returnKind: outcome === 'failed' || lane.status === 'failed' ? 'failed' : 'needs_context',
+            detail: decision?.detail ?? lane.lastEventLabel ?? `Worker ${outcome}.`,
+          });
+        }
+        return decision;
       },
       onAgentRetry(oldSurfaceId, newSurfaceId) {
         // Update the lane's session binding so the new agent is tracked

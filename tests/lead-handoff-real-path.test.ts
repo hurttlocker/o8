@@ -7,13 +7,12 @@ import path from 'node:path';
 
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-
+import WebSocket from 'ws';
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
 vi.mock('@/lib/claude-code/warm-repl-pool', () => ({
   askClaudeWarm: vi.fn(async () => ''),
   prewarmClaudeRepl: vi.fn(),
 }));
-
 interface CliResult { exitCode: number | null; stdout: string; stderr: string }
 interface LeadCliReceipt {
   lead: {
@@ -21,12 +20,12 @@ interface LeadCliReceipt {
     threadId: string;
     status: string;
     routing: { backend: string; model: string; effort: string };
+    result?: { turnId: string; status: string } | null;
   };
   admittedTurnId?: string;
   latestTurn: { id: string; status: string } | null;
   cursor: number;
 }
-
 const testHome = mkdtempSync(path.join(os.tmpdir(), 'o8-lead-handoff-home-'));
 const dataDir = path.join(testHome, '.o8');
 const repoPath = path.join(testHome, 'repo');
@@ -57,7 +56,6 @@ const originalEnv = {
   O8_TEST_SOURCE_ROOT: process.env.O8_TEST_SOURCE_ROOT,
   O8_TEST_TARGET_REPO: process.env.O8_TEST_TARGET_REPO,
 };
-
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(repoPath, { recursive: true });
 writeFileSync(path.join(dataDir, 'ws-token'), `${token}\n`, 'utf8');
@@ -71,12 +69,12 @@ process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
 process.env.O8_STORAGE_RESERVE_RATIO = '0.000001';
 process.env.O8_STORAGE_RESERVE_FLOOR_GB = '0.001';
 process.env.O8_CLAUDE_CODE_BIN = fakeCodex;
-
 const leadRoute = await import('@/app/api/orchestrator/lead/route');
 const { __resetLeadRuntimeForTests, getLeadStatus, queueLeadReviewContinuation } = await import('@/lib/orchestrator/lead-lifecycle');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { panelGateMiddleware } = await import('@/middleware');
 const { readOrchestratorBackendSessionId, readOrchestratorThreadMessages } = await import('@/lib/mobile/orchestrator-thread-history');
+const { probeMetadataLockProcessIdentitySync } = await import('@/lib/worktree/metadata-lock-process-identity');
 
 let apiServer: Server | null = null;
 let apiPort = 0;
@@ -170,6 +168,36 @@ async function waitForWsOutput(text: string, timeoutMs = 20_000): Promise<void> 
   throw new Error(`Timed out waiting for ${text}: ${wsOutput.slice(-2_000)}`);
 }
 
+async function startSecondRouteServer(): Promise<{ child: ChildProcess; port: number; output: () => string }> {
+  const port = await freePort();
+  const source = `
+    import { createServer } from 'node:http';
+    import { NextRequest } from 'next/server';
+    const route = (await import('./src/app/api/orchestrator/lead/route.ts')).default;
+    const server = createServer(async (request, response) => {
+      const url = new URL(request.url || '/', 'http://127.0.0.1');
+      const chunks = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = Buffer.concat(chunks).toString('utf8');
+      const next = new NextRequest('http://127.0.0.1' + url.pathname + url.search, {
+        method: request.method, headers: request.headers, body: body || undefined,
+      });
+      const result = request.method === 'GET' ? await route.GET(next) : await route.POST(next);
+      response.writeHead(result.status, { 'content-type': 'application/json' });
+      response.end(await result.text());
+    });
+    server.listen(Number(process.env.O8_TEST_SECOND_PORT), '127.0.0.1', () => console.log('ready'));
+  `;
+  const child = spawn(process.execPath, [
+    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--input-type=module', '--eval', source,
+  ], { cwd: process.cwd(), env: { ...process.env, O8_TEST_SECOND_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.on('data', (chunk) => { output += String(chunk); });
+  child.stderr.on('data', (chunk) => { output += String(chunk); });
+  await vi.waitFor(() => expect(output).toContain('ready'), { timeout: 10_000 });
+  return { child, port, output: () => output };
+}
+
 function readArgs(): string[][] {
   try {
     return readFileSync(argsPath, 'utf8').trim().split('\n').filter(Boolean)
@@ -188,7 +216,7 @@ async function writeRouteResponse(response: ServerResponse, routeResponse: Respo
   response.end(await routeResponse.text());
 }
 
-function runCli(args: string[]): Promise<CliResult> {
+function runCli(args: string[], port = apiPort): Promise<CliResult> {
   return new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [path.join(process.cwd(), 'cli/dist/o8.mjs'), ...args], {
       cwd: process.cwd(),
@@ -197,7 +225,7 @@ function runCli(args: string[]): Promise<CliResult> {
         HOME: testHome,
         O8_DATA_DIR: dataDir,
         CORTEX_IDE_DATA_DIR: dataDir,
-        O8_API_PORT: String(apiPort),
+        O8_API_PORT: String(port),
         O8_API_TOKEN: token,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -284,7 +312,7 @@ if (prompt.includes('[fixture:dispatch-worker]')) {
     process.exit(result.status || 1);
   }
 }
-if (prompt.includes('reached review-ready')) {
+if (prompt.includes('returned review')) {
   const packetId = prompt.match(/packet ([^)]+)\\)/)?.[1];
   const result = spawnSync(process.execPath, [
     '--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
@@ -297,7 +325,24 @@ if (prompt.includes('reached review-ready')) {
   if (result.status !== 0) { console.error(result.stderr || result.stdout); process.exit(result.status || 1); }
 }
 if (prompt.includes('[fixture:hang]')) await new Promise((resolve) => setTimeout(resolve, 5000));
-else if (prompt.includes('[fixture:slow-left-2541]') || prompt.includes('reached review-ready')) await new Promise((resolve) => setTimeout(resolve, 350));
+else if (prompt.includes('[fixture:slow-left-2541]') || prompt.includes('returned review')) await new Promise((resolve) => setTimeout(resolve, 350));
+if (prompt.includes('[fixture:event-error]')) {
+  console.log(JSON.stringify({ type: 'error', message: 'fixture orchestrator event failed' }));
+  process.exit(0);
+}
+const report = prompt.match(/o8 lead report ([^ ]+) --turn ([^ ]+) --repo ([^ ]+) --thread-id ([^ ]+)/);
+if (report && !prompt.includes('[fixture:no-outcome]')) {
+  const kind = prompt.includes('[fixture:dispatch-worker]')
+    ? 'waiting_workers'
+    : prompt.includes('returned review') ? 'needs_approval' : 'completed';
+  const reported = spawnSync(process.execPath, [
+    process.env.O8_TEST_SOURCE_ROOT + '/cli/dist/o8.mjs',
+    'lead', 'report', report[1], '--turn', report[2], '--repo', JSON.parse(report[3]),
+    '--thread-id', report[4], '--kind', kind, '--summary', 'fixture structured outcome',
+    '--evidence', kind === 'completed' ? '["fixture provider receipt"]' : '[]',
+  ], { env: process.env, encoding: 'utf8' });
+  if (reported.status !== 0) { console.error(reported.stderr || reported.stdout); process.exit(reported.status || 1); }
+}
 console.log(JSON.stringify({ type: 'item.completed', item: { id: 'reply', type: 'agent_message', text: 'offline lead reply' } }));
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
 `, 'utf8');
@@ -390,7 +435,7 @@ describe('persistent lead handoff real path', () => {
     expect(started.exitCode, started.stderr).toBe(0);
     const startReceipt = JSON.parse(started.stdout) as LeadCliReceipt;
     const first = await settled(startReceipt.lead.id);
-    expect(first.lead).toMatchObject({
+    expect(first.lead, JSON.stringify(first)).toMatchObject({
       id: startReceipt.lead.id,
       threadId: startReceipt.lead.threadId,
       status: 'completed',
@@ -452,7 +497,7 @@ describe('persistent lead handoff real path', () => {
     expect(readOrchestratorBackendSessionId(statusBeforeRestart.lead.threadId, 'codex'))
       .toBe('fixture-persistent-lead-thread');
     const callsBeforeRestart = readArgs().length;
-    execFileSync(process.execPath, [
+    const resumed = spawn(process.execPath, [
       '--import=./scripts/register-server-only-stub.mjs',
       '--import=tsx',
       '--input-type=module',
@@ -476,6 +521,8 @@ describe('persistent lead handoff real path', () => {
       stdio: 'pipe',
       timeout: 15_000,
     });
+    const [resumeCode] = await once(resumed, 'exit') as [number | null];
+    expect(resumeCode).toBe(0);
     expect(readArgs()).toHaveLength(callsBeforeRestart + 1);
     expect(readArgs().filter((args) => args[0] === 'exec').at(-1)?.slice(0, 3))
       .toEqual(['exec', 'resume', 'fixture-persistent-lead-thread']);
@@ -484,6 +531,58 @@ describe('persistent lead handoff real path', () => {
     expect(reattached.exitCode, reattached.stderr).toBe(0);
     expect((JSON.parse(reattached.stdout) as LeadCliReceipt).lead.status).toBe('completed');
   }, 20_000);
+
+  it('shares atomic admission across live route processes without stealing a live owner', async () => {
+    const second = await startSecondRouteServer();
+    try {
+      const [left, right] = await Promise.all([
+        runCli(startArgs('cross-process-start')),
+        runCli(startArgs('cross-process-start'), second.port),
+      ]);
+      expect(left.exitCode, left.stderr).toBe(0);
+      expect(right.exitCode, `${right.stderr}\n${second.output()}`).toBe(0);
+      const a = JSON.parse(left.stdout) as LeadCliReceipt;
+      const b = JSON.parse(right.stdout) as LeadCliReceipt;
+      expect(b.lead.id).toBe(a.lead.id);
+      expect(getSqlite().prepare(
+        'SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ?',
+      ).get(a.lead.id)).toEqual({ count: 1 });
+      await settled(a.lead.id);
+      getSqlite().prepare('DELETE FROM orchestrator_lead_turns WHERE lead_id = ?').run(a.lead.id);
+      const repaired = await runCli(startArgs('cross-process-start'), second.port);
+      expect(repaired.exitCode, repaired.stderr).toBe(0);
+      expect(getSqlite().prepare(
+        'SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ?',
+      ).get(a.lead.id)).toEqual({ count: 1 });
+      await settled(a.lead.id);
+      const callsBefore = readArgs().length;
+      const prior = await runCli([
+        'lead', 'send', a.lead.id, '--message', '[fixture:slow-left-2541] prior turn',
+        '--idempotency-key', 'cross-process-prior',
+      ]);
+      await vi.waitFor(() => expect(getLeadStatus(a.lead.id).lead.status).toBe('running'));
+      const slow = await runCli([
+        'lead', 'send', a.lead.id, '--message', '[fixture:hang] cross-process owner',
+        '--idempotency-key', 'cross-process-live-owner',
+      ]);
+      expect(slow.exitCode, slow.stderr).toBe(0);
+      const priorDone = await runCli(['lead', 'wait', a.lead.id, '--turn',
+        (JSON.parse(prior.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '10s']);
+      expect((JSON.parse(priorDone.stdout) as LeadCliReceipt).lead.status).not.toBe('completed');
+      expect((JSON.parse(priorDone.stdout) as LeadCliReceipt).lead.result).toBeNull();
+      await vi.waitFor(() => expect(readArgs()).toHaveLength(callsBefore + 2), { timeout: 5_000 });
+      const status = await fetch(`http://127.0.0.1:${second.port}/api/orchestrator/lead?leadId=${a.lead.id}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect((await status.json() as LeadCliReceipt).lead.status).toBe('running');
+      await runCli(['lead', 'stop', a.lead.id, '--reason', 'cross-process proof complete']);
+    } finally {
+      if (second.child.exitCode === null) {
+        second.child.kill('SIGTERM');
+        await once(second.child, 'exit');
+      }
+    }
+  }, 30_000);
 
   it('fails mismatched routing before admission or provider side effects', async () => {
     const lead = getSqlite().prepare(`SELECT id FROM orchestrator_leads WHERE start_key = 'lead-start-main'`).get() as { id: string };
@@ -508,9 +607,16 @@ describe('persistent lead handoff real path', () => {
     const latest = getSqlite().prepare(
       'SELECT id FROM orchestrator_lead_turns WHERE lead_id = ? ORDER BY ordinal DESC LIMIT 1',
     ).get(lead.id) as { id: string };
-    getSqlite().prepare(
-      `UPDATE orchestrator_lead_turns SET status = 'running', owner_pid = 99999999, finished_at = NULL WHERE id = ?`,
-    ).run(latest.id);
+    const deadOwner = spawn(process.execPath, ['--eval', 'setInterval(() => {}, 1000)']);
+    const probe = probeMetadataLockProcessIdentitySync(deadOwner.pid!);
+    expect(probe.state).toBe('live');
+    deadOwner.kill('SIGTERM');
+    await once(deadOwner, 'exit');
+    getSqlite().prepare(`
+      UPDATE orchestrator_lead_turns
+      SET status = 'running', owner_pid = ?, owner_identity_json = ?, lease_token = 'dead-owner', finished_at = NULL
+      WHERE id = ?
+    `).run(deadOwner.pid, probe.state === 'live' ? JSON.stringify(probe.identity) : null, latest.id);
     getSqlite().prepare(
       `UPDATE orchestrator_leads SET status = 'running', current_turn_id = ? WHERE id = ?`,
     ).run(latest.id, lead.id);
@@ -573,6 +679,43 @@ describe('persistent lead handoff real path', () => {
       .toEqual(['exec', 'resume', 'fixture-persistent-lead-thread']);
   }, 90_000);
 
+  it('requires structured outcomes, honors stream errors, and governs the real WS thoughts writer', async () => {
+    const started = await runCli(startArgs('outcome-and-ws'));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    await settled(lead.id);
+    const missing = await runCli([
+      'lead', 'send', lead.id, '--message', '[fixture:no-outcome]', '--idempotency-key', 'no-outcome',
+    ]);
+    expect(missing.exitCode, missing.stderr).toBe(0);
+    const missingDone = await runCli(['lead', 'wait', lead.id, '--turn',
+      (JSON.parse(missing.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '10s']);
+    expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('blocked');
+    const errored = await runCli([
+      'lead', 'send', lead.id, '--message', '[fixture:event-error]', '--idempotency-key', 'event-error',
+    ]);
+    expect(errored.exitCode, errored.stderr).toBe(0);
+    const errorTurn = (JSON.parse(errored.stdout) as LeadCliReceipt).admittedTurnId!;
+    expect((await runCli(['lead', 'wait', lead.id, '--turn', errorTurn, '--timeout', '10s'])).stdout)
+      .toContain('fixture orchestrator event failed');
+
+    const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+    await once(socket, 'open');
+    const payload = JSON.stringify({
+      type: 'orchestrator-send', repoPath, threadId: lead.threadId,
+      clientMessageId: 'persistent-ws-send', message: 'WS follows the persistent lead.',
+      displayMessage: 'WS follows the persistent lead.', backend: 'codex',
+      model: 'gpt-5.6-sol', thinkingEffort: 'high', permissionMode: 'full', orchestrationMode: 'fleet',
+    });
+    socket.send(payload);
+    socket.send(payload);
+    await vi.waitFor(() => expect(getSqlite().prepare(`
+      SELECT COUNT(*) AS count FROM orchestrator_lead_turns
+      WHERE lead_id = ? AND idempotency_key = 'ws:persistent-ws-send'
+    `).get(lead.id)).toEqual({ count: 1 }), { timeout: 5_000 });
+    await settled(lead.id);
+    socket.terminate();
+  }, 30_000);
+
   it('persists stop across runtime recovery and never relaunches', async () => {
     const lead = getSqlite().prepare(`SELECT id FROM orchestrator_leads WHERE start_key = 'lead-start-main'`).get() as { id: string };
     const callsBeforeSend = readArgs().length;
@@ -583,19 +726,27 @@ describe('persistent lead handoff real path', () => {
     await vi.waitFor(() => expect(getLeadStatus(lead.id).lead.status).toBe('running'), { timeout: 2_000 });
     await vi.waitFor(() => expect(readArgs()).toHaveLength(callsBeforeSend + 1), { timeout: 2_000 });
     const callsAtStop = readArgs().length;
-    const stopped = await runCli(['lead', 'stop', lead.id, '--reason', 'bounded stop proof']);
+    const [stopped, raced] = await Promise.all([
+      runCli(['lead', 'stop', lead.id, '--reason', 'bounded stop proof']),
+      runCli(['lead', 'send', lead.id, '--message', 'stop race', '--idempotency-key', 'stop-race']),
+    ]);
     expect(stopped.exitCode, stopped.stderr).toBe(0);
+    expect([0, 5]).toContain(raced.exitCode);
     expect((JSON.parse(stopped.stdout) as LeadCliReceipt).lead.status).toBe('stopped');
+    expect(getLeadStatus(lead.id).queueDepth).toBe(0);
     __resetLeadRuntimeForTests();
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(getLeadStatus(lead.id).lead.status).toBe('stopped');
     expect(readArgs()).toHaveLength(callsAtStop);
+    const stoppedWorker = JSON.parse(readFileSync(workerCapturePath, 'utf8')) as { packetId: string; laneId: string };
+    const turnsAtStop = getLeadStatus(lead.id).latestTurn?.ordinal;
     expect(queueLeadReviewContinuation({
       repoPath,
-      packetId: (JSON.parse(readFileSync(workerCapturePath, 'utf8')) as { packetId: string }).packetId,
-      laneId: 'lane-after-stop',
+      packetId: stoppedWorker.packetId,
+      laneId: stoppedWorker.laneId,
       label: 'stopped review return',
     })).toBe(true);
+    expect(getLeadStatus(lead.id).latestTurn?.ordinal).toBe(turnsAtStop);
     expect(readArgs()).toHaveLength(callsAtStop);
     const refused = await runCli([
       'lead', 'send', lead.id, '--message', 'must not auto-resume', '--idempotency-key', 'after-stop',
@@ -620,6 +771,15 @@ describe('persistent lead handoff real path', () => {
         (SELECT COUNT(*) FROM orchestrator_lead_turns) AS turns,
         (SELECT COUNT(*) FROM orchestrator_lead_events) AS events
     `).get();
+    const leadId = (getSqlite().prepare(
+      `SELECT id FROM orchestrator_leads WHERE start_key = 'outcome-and-ws'`,
+    ).get() as { id: string }).id;
+    const malformedSend = await fetch(`http://127.0.0.1:${apiPort}/api/orchestrator/lead`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'send', leadId, message: 'reject me', idempotencyKey: 'bad-type', model: 7 }),
+    });
+    expect(malformedSend.status).toBe(400);
     const malformed = await fetch(
       `http://127.0.0.1:${apiPort}/api/orchestrator/lead?leadId=unused&waitMs=1x`,
       { headers: { authorization: `Bearer ${token}` } },
