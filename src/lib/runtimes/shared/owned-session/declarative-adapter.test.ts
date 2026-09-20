@@ -1,12 +1,106 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { getDeclarativeOwnedRuntime, registerDeclarativeOwnedRuntime } from './declarative-adapter';
+import {
+  getDeclarativeOwnedRuntime,
+  registerDeclarativeOwnedRuntime,
+  type DeclarativeOwnedRuntimeConfig,
+} from './declarative-adapter';
+import { getOwnedSessionLifecycle } from '../owned-session-lifecycle';
 import type { OwnedRunRecord } from './types';
 
+function hmrConfig(overrides: Partial<DeclarativeOwnedRuntimeConfig> = {}): DeclarativeOwnedRuntimeConfig {
+  return {
+    runtimeId: 'test-hmr-cli',
+    surfaceIdPrefix: 'test-hmr-owned:',
+    rootEnvVar: 'O8_TEST_HMR_ROOT',
+    rootDefault: path.join(os.tmpdir(), 'o8-test-hmr-owned'),
+    binaryName: 'test-hmr-cli',
+    binaryEnvOverride: 'O8_TEST_HMR_BIN',
+    humanLabel: 'Owned HMR Test CLI',
+    squadShortName: 'HMR Test CLI',
+    launchArgs: ['run', '{{prompt}}'],
+    resumeArgs: ['resume', '{{threadId}}', '{{prompt}}'],
+    parseRunLog: { patterns: [{ linePattern: /^(.+)$/, completedTurn: true }] },
+    ...overrides,
+  };
+}
+
 describe('declarative owned runtime registry', () => {
+  it('reuses an equivalent registration after module re-evaluation and rebinds lifecycle state', () => {
+    const first = registerDeclarativeOwnedRuntime(hmrConfig());
+    const second = registerDeclarativeOwnedRuntime(hmrConfig());
+
+    expect(second).toBe(first);
+    expect(second.store).toBe(first.store);
+    expect(getDeclarativeOwnedRuntime('test-hmr-cli')).toBe(first);
+    expect(getOwnedSessionLifecycle('test-hmr-owned:session')).toBeDefined();
+  });
+
+  it('reuses the global registration across a real module reload and rebinds the fresh lifecycle module', async () => {
+    const config = hmrConfig({ runtimeId: 'test-hmr-reload-cli' });
+    const first = registerDeclarativeOwnedRuntime(config);
+
+    vi.resetModules();
+    const reloadedAdapter = await import('./declarative-adapter');
+    const reloadedLifecycle = await import('../owned-session-lifecycle');
+    const second = reloadedAdapter.registerDeclarativeOwnedRuntime(hmrConfig({ runtimeId: 'test-hmr-reload-cli' }));
+
+    expect(second).toBe(first);
+    expect(second.store).toBe(first.store);
+    expect(reloadedLifecycle.getOwnedSessionLifecycle('test-hmr-owned:session')).toBeDefined();
+  });
+
+  it('rejects an incompatible duplicate runtime definition', () => {
+    registerDeclarativeOwnedRuntime({ ...hmrConfig(), runtimeId: 'test-hmr-mismatch-cli' });
+
+    expect(() => registerDeclarativeOwnedRuntime({
+      ...hmrConfig(),
+      runtimeId: 'test-hmr-mismatch-cli',
+      binaryName: 'different-cli',
+    })).toThrow('incompatible config');
+  });
+
+  it('rejects same-source hook closures with different captured values', () => {
+    const firstValue = 'first';
+    registerDeclarativeOwnedRuntime({
+      ...hmrConfig(),
+      runtimeId: 'test-hmr-capture-cli',
+      extraSpawnEnv: () => ({ TEST_CAPTURE: firstValue }),
+    });
+    const secondValue = 'second';
+
+    expect(() => registerDeclarativeOwnedRuntime({
+      ...hmrConfig(),
+      runtimeId: 'test-hmr-capture-cli',
+      extraSpawnEnv: () => ({ TEST_CAPTURE: secondValue }),
+    })).toThrow('incompatible config');
+  });
+
+  it('never invokes dynamic hooks while comparing registration identity', () => {
+    const firstHook = vi.fn(() => ({ TOKEN: 'same' }));
+    const secondHook = vi.fn(() => ({ TOKEN: 'same' }));
+    const config = hmrConfig({ runtimeId: 'test-hmr-hook-cli', extraSpawnEnv: firstHook });
+    registerDeclarativeOwnedRuntime(config);
+    expect(() => registerDeclarativeOwnedRuntime({ ...config, extraSpawnEnv: secondHook }))
+      .toThrow('incompatible config');
+    expect(firstHook).not.toHaveBeenCalled();
+    expect(secondHook).not.toHaveBeenCalled();
+  });
+
+  it('reuses equivalent static spawn environment data', async () => {
+    const config = hmrConfig({ runtimeId: 'test-hmr-env-cli', staticSpawnEnv: { MODE: 'json' } });
+    const first = registerDeclarativeOwnedRuntime(config);
+    expect(registerDeclarativeOwnedRuntime({ ...config, staticSpawnEnv: { MODE: 'json' } }))
+      .toBe(first);
+    expect(await first.adapter.extraSpawnEnv?.({} as Parameters<NonNullable<typeof first.adapter.extraSpawnEnv>>[0]))
+      .toEqual({ MODE: 'json' });
+    expect(() => registerDeclarativeOwnedRuntime({ ...config, staticSpawnEnv: { MODE: 'text' } }))
+      .toThrow('incompatible config');
+  });
+
   it('turns one config entry into launch, resume, and log parsing behavior', () => {
     const registration = registerDeclarativeOwnedRuntime({
       runtimeId: 'test-declarative-cli',
