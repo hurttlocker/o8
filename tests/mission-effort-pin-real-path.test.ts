@@ -260,7 +260,7 @@ afterAll(() => {
 });
 
 describe('mission effort pin — launch boundary', () => {
-  it('route creation → persisted reload → dispatch → argv keeps explicit high over the operator default', async () => {
+  it.each(['max', 'ultra'] as const)('route creation → persisted reload → dispatch → argv keeps Terra %s exact', async (requestedEffort) => {
     const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
     await updateOperatorDefaults({ codexWorkerEffort: 'xhigh' });
     const repoPath = makeRepo();
@@ -269,8 +269,8 @@ describe('mission effort pin — launch boundary', () => {
       runtime: 'codex',
       requestedRuntime: 'codex',
       requestedModel: 'gpt-5.6-terra',
-      requestedEffort: 'high',
-      issues: [{ number: 900_101, title: 'effort pin high terra', body: 'touch src/lib/orchestrator/effort-pin.ts', url: '' }],
+      requestedEffort,
+      issues: [{ number: 900_101, title: `effort pin ${requestedEffort} terra`, body: 'touch src/lib/orchestrator/effort-pin.ts', url: '' }],
     });
     expect(response.status).toBe(201);
     const json = await response.json() as { result: { missionId: string; packets: Array<{ id: string }> } };
@@ -278,15 +278,15 @@ describe('mission effort pin — launch boundary', () => {
     // persisted reload (not the create return) proves the pin survived normalize.
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     const persisted = readOrchestratorControlPlaneState().packets.find((p) => p.id === json.result.packets[0]?.id);
-    expect(persisted?.workerRouting).toMatchObject({ requestedEffort: 'high', selectedEffort: 'high' });
+    expect(persisted?.workerRouting).toMatchObject({ requestedEffort, selectedEffort: requestedEffort });
 
     const { dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
     const before = readArgvCalls().length;
     await dispatchMission({ missionId: json.result.missionId });
-    const launch = await waitForLaunchContaining(before, 'effort pin high terra');
+    const launch = await waitForLaunchContaining(before, `effort pin ${requestedEffort} terra`);
     expect(launch[launch.indexOf('--model') + 1]).toBe('gpt-5.6-terra');
     // If the scheduler/enrichment dropped the pin, the operator default xhigh would win.
-    expect(launch).toContain('model_reasoning_effort=high');
+    expect(launch).toContain(`model_reasoning_effort=${requestedEffort}`);
     expect(launch).not.toContain('model_reasoning_effort=xhigh');
   }, 30_000);
 
@@ -412,13 +412,13 @@ describe('mission effort pin — public route', () => {
     expect(error.message).toContain('claude-opus-5');
   }, 30_000);
 
-  it('rejects a pin the codex adapter would coerce (max on a non-flagship model)', async () => {
+  it('rejects a pin the codex adapter would coerce for an unverified model', async () => {
     const repoPath = makeRepo();
     const error = await rejectEffortPin({
       repoPath,
       runtime: 'codex',
       requestedRuntime: 'codex',
-      requestedModel: 'gpt-5.6-terra',
+      requestedModel: 'gpt-5.5',
       requestedEffort: 'max',
       issues: [{ number: 900_110, title: 'coerced max', body: 'body', url: '' }],
     });
@@ -448,11 +448,11 @@ describe('mission effort pin — public route', () => {
       requestedRuntime: 'codex',
       requestedModel: 'gpt-5.6-sol',
       requestedEffort: 'max',
-      comparisonModels: ['gpt-5.6-terra'],
+      comparisonModels: ['gpt-5.5'],
       issues: [{ number: 900_112, title: 'comparison coercion', body: 'body', url: '' }],
     });
     expect(error.code).toBe('effort_coerced');
-    expect(error.message).toContain('gpt-5.6-terra');
+    expect(error.message).toContain('gpt-5.5');
   }, 30_000);
 
   it('rejects a foreign-runtime comparison candidate with a supported effort (not only max)', async () => {

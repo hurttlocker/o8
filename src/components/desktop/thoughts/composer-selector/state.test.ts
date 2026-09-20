@@ -91,7 +91,7 @@ describe('composer selector state', () => {
     expect(readComposerEffortMaps(null, 'model-b').global['model-b']).toBeUndefined();
   });
 
-  it('clamps unsupported high-end efforts to the runtime ceiling', () => {
+  it('shows catalog-verified Terra max and ultra without a client-only predicate', () => {
     const resolved = resolveComposerSelectorState({
       mode: 'solo',
       leadModelId: 'gpt-5.6-terra',
@@ -101,13 +101,13 @@ describe('composer selector state', () => {
       threadEffortByModel: {},
       operatorDefaultEffort: 'medium',
       adaptiveEnabled: true,
+      ultraEnabled: true,
       workerRuntimeLabel: 'Codex',
     });
 
-    expect(resolved.effort).toBe('xhigh');
-    expect(resolved.effortOptions).not.toContain('max');
-    expect(resolved.effortOptions).not.toContain('ultra');
-    expect(resolved.chipTitle).toContain('Ultra is unsupported for Terra; clamped to Extra');
+    expect(resolved.effort).toBe('ultra');
+    expect(resolved.effortOptions).toContain('max');
+    expect(resolved.effortOptions).toContain('ultra');
   });
 
   it('hides Ultra until enabled and clamps a stored Ultra effort to Max', () => {
