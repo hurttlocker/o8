@@ -24,7 +24,6 @@ import { LeadChip, WorkersChip } from './ComposerSelectorChips';
 import { EffortSlider } from './EffortSlider';
 import { ProviderMarkGlyph } from './provider-marks';
 import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
 import { WORKER_START_OPTIONS, type WorkerStartMode } from '@/lib/operator/worker-start-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 
@@ -135,7 +134,7 @@ export function ComposerPicker({
     const model = workerModelForDisplay(runtime, defaults);
     return `${capability.label} ${runtime} ${model}`.toLowerCase().includes(normalizedQuery);
   }), [defaults, normalizedQuery]);
-  const workersVisible = workersExpanded || (normalizedQuery.length > 0 && workerRows.length > 0);
+  const workersVisible = state.mode !== 'solo' && (workersExpanded || (normalizedQuery.length > 0 && workerRows.length > 0));
   const visiblePicks: VisiblePick[] = [
     ...providerRows.map((group) => ({ key: `lead-house:${group.key}`, kind: 'lead-house' as const, group })),
     ...shownLeadRows.map(({ group, option }) => ({ key: `lead:${option.value}`, kind: 'lead' as const, group, option })),
@@ -252,7 +251,6 @@ export function ComposerPicker({
   const runtime = defaults.defaultDispatchRuntime;
   const selectedWorkerSummary = composerRuntimeLabel(runtime);
   const leadHouseLabel = (group: ComposerModelGroup) => group.key === 'claude' ? 'Claude Code' : group.key === 'opencode' ? 'OpenCode' : group.label;
-  const leadSummary = `${leadHouseLabel(selectedLeadGroup)} · ${state.leadModelLabel} · ${THINKING_EFFORT_LABELS[state.effort].long}`;
   const scrollStyle: CSSProperties = { overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none' };
   const anchorRef = openTarget === 'workers' ? workerTriggerRef : leadTriggerRef;
 
@@ -283,8 +281,8 @@ export function ComposerPicker({
           onKeyDown={handleKeyDown}
           style={{
             width: 300,
-            maxWidth: 'min(300px, calc(100vw - 32px))',
-            maxHeight: 'calc(100vh - 56px)',
+            maxWidth: 'min(300px, calc(100vw * var(--zoom-inverse, 1) - 32px))',
+            maxHeight: 'calc(100vh * var(--zoom-inverse, 1) - 56px)',
             display: 'flex',
             flexDirection: 'column',
             overflowY: 'hidden',
@@ -330,7 +328,7 @@ export function ComposerPicker({
                   style={{ flex: 1, minWidth: 0, borderWidth: 0, outline: 'none', background: 'transparent', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12.5, fontWeight: 300 }}
                 />
               </div>
-              <SectionLabel text="Lead" hint={leadSummary} />
+              <SectionLabel text={leadView.kind === 'models' ? `${leadHouseLabel(activeLeadGroup!)} models` : leadView.kind === 'effort' ? 'Effort' : 'Models'} />
               <div data-testid="composer-selector-lead-scroll" style={{ ...scrollStyle, flex: '0 1 auto', minHeight: 0, maxHeight: 184 }}>
                 {!normalizedQuery && leadView.kind !== 'providers' ? (
                   <div style={{ display: 'flex', alignItems: 'center', minHeight: 26, paddingTop: 2, paddingRight: 8, paddingBottom: 2, paddingLeft: 8 }}>
@@ -338,7 +336,7 @@ export function ComposerPicker({
                       <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
                       Back
                     </button>
-                    <span data-testid="composer-selector-lead-step" style={{ marginLeft: 4, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300 }}>{leadView.kind === 'effort' ? `${state.leadModelLabel} · ${THINKING_EFFORT_LABELS[state.effort].long}` : leadHouseLabel(activeLeadGroup!)}</span>
+                    {leadView.kind === 'effort' ? <span data-testid="composer-selector-lead-step" style={{ marginLeft: 4, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300 }}>{state.leadModelLabel}</span> : null}
                   </div>
                 ) : null}
                 {providerRows.map((group) => {
@@ -353,7 +351,7 @@ export function ComposerPicker({
                       selected={selected}
                       highlighted={pickIndex === visibleActiveIndex}
                       label={leadHouseLabel(group)}
-                      meta={selected ? `${state.leadModelLabel} · ${THINKING_EFFORT_LABELS[state.effort].long}` : ''}
+                      meta=""
                       disabled={saving}
                       onClick={() => selectLeadHouse(group)}
                     />
@@ -371,7 +369,7 @@ export function ComposerPicker({
                       selected={selected}
                       highlighted={pickIndex === visibleActiveIndex}
                       label={option.label}
-                      meta={group.label.toLowerCase()}
+                      meta={normalizedQuery ? group.label.toLowerCase() : ''}
                       disabled={saving}
                       onClick={() => selectLead(group, option)}
                     />
@@ -399,6 +397,7 @@ export function ComposerPicker({
                   <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
                 ) : null}
               </div>
+              {state.mode !== 'solo' ? (
               <div ref={workerSectionRef} style={{ flexShrink: 0, marginTop: 4, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-border)', scrollMarginTop: 6 }}>
                 <button
                   data-testid="composer-selector-workers-section"
@@ -448,6 +447,7 @@ export function ComposerPicker({
                   </div>
                 ) : null}
               </div>
+              ) : null}
               <div style={{ display: 'flex', gap: 10, flexShrink: 0, paddingTop: 6, paddingRight: 8, paddingBottom: 2, paddingLeft: 8, marginTop: 4, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-border)', fontSize: 10, color: 'var(--t-text-faint)' }}>
                 <span>⌥T effort</span><span>⇧⇥ mode</span><span>↑↓ ↵ pick</span>
               </div>

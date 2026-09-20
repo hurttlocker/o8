@@ -135,9 +135,24 @@ describe('composer selector real-path precedence', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    const soloWorkersSection = document.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers-section"]')!;
+    expect(document.querySelector('[data-testid="composer-selector-workers-section"]')).toBeNull();
+    expect(document.querySelector('[data-testid^="worker-row-"]')).toBeNull();
     await act(async () => {
-      soloWorkersSection.click();
+      container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      [...document.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('Multitask'))!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const freshWorkersChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    await act(async () => {
+      freshWorkersChip.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(document.querySelector('[data-testid="worker-row-codex"]')?.getAttribute('aria-pressed')).toBe('true');

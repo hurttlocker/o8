@@ -19,7 +19,6 @@ import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
-import { WORKER_START_OPTIONS } from '@/lib/operator/worker-start-mode';
 import { MODEL_IDS } from '@/lib/models';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
@@ -232,6 +231,12 @@ describe('ComposerSelectorFooter', () => {
     act(() => container.querySelector<HTMLButtonElement>(`[data-testid="lead-row-${model}"]`)!.click());
   }
 
+  function selectMode(label: string) {
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes(label))!.click());
+  }
+
   it('orders mode, attach, lead, mic, and send with mic immediately before send', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     const footer = container.querySelector('[data-testid="composer-selector-footer"]');
@@ -259,6 +264,7 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
 
     openLeadEffort('codex', 'gpt-5.6-sol');
+    expect(container.querySelector('[data-testid="composer-selector-workers-section"]')).toBeNull();
     expect(container.querySelector('[data-testid="composer-selector-lead-step"]')?.textContent).toContain('GPT-5.6 Sol');
     const stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
     expect(stops).toHaveLength(expectedEfforts.length);
@@ -305,10 +311,13 @@ describe('ComposerSelectorFooter', () => {
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
     expect(container.querySelector('[data-testid="lead-row-gpt-6-astra"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="lead-row-claude-opus-5"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-lead-step"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-lead-scroll"]')?.previousElementSibling?.textContent).toBe('Codex models');
     expect(container.textContent).not.toContain('Fable-class');
     expect(container.textContent).not.toContain('Sonnet-class');
 
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-gpt-6-astra"]')!.click());
+    expect(container.querySelector('[data-testid="composer-selector-lead-scroll"]')?.previousElementSibling?.textContent).toBe('Effort');
     expect(container.querySelector('[data-testid="composer-selector-lead-step"]')?.textContent).toContain('GPT-6 Astra');
     expect(container.querySelectorAll('[data-testid="composer-selector-effort-stop"]')).toHaveLength(
       supportedEffortsForLead('codex', 'gpt-6-astra', true).length,
@@ -320,7 +329,7 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="lead-house-codex"]')).not.toBeNull();
   });
 
-  it('renders composer setting text from the shared label tables', async () => {
+  it('renders effort labels from the shared label table', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
     openLeadEffort('codex', 'gpt-5.6-sol');
@@ -328,10 +337,6 @@ describe('ComposerSelectorFooter', () => {
     for (const effort of supportedEffortsForLead('codex', 'gpt-5.6-sol', true)) {
       expect(pickerText).toContain(THINKING_EFFORT_LABELS[effort].long);
     }
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers-section"]')!.click());
-    const expandedPickerText = container.textContent ?? '';
-    for (const option of WORKER_START_OPTIONS) expect(expandedPickerText).toContain(option.long);
-
     act(() => lead.click());
     const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
     act(() => mode.click());
@@ -415,7 +420,7 @@ describe('ComposerSelectorFooter', () => {
       .toBe('ellipsis');
   });
 
-  it('marks every picker row and shows model-specific effort consequences', async () => {
+  it('keeps Solo focused on models and shows concise effort consequences', async () => {
     entitlementState.plan = 'founder';
     await act(async () => { root.render(createElement(Harness)); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
@@ -424,19 +429,17 @@ describe('ComposerSelectorFooter', () => {
 
     const leadRows = [...container.querySelectorAll<HTMLElement>('[data-testid^="lead-house-"]')];
     expect(leadRows.every((row) => row.querySelector('[data-provider-mark]'))).toBe(true);
-    const workersSection = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers-section"]')!;
-    expect(workersSection.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelector('[data-testid="composer-selector-workers-summary"]')?.textContent).toBe('Codex');
+    expect(container.querySelector('[data-testid="composer-selector-workers-section"]')).toBeNull();
     expect(container.querySelector('[data-testid^="worker-row-"]')).toBeNull();
-    act(() => workersSection.click());
-    const workerRows = [...container.querySelectorAll<HTMLElement>('[data-testid^="worker-row-"]')];
-    expect(workerRows.every((row) => row.querySelector('[data-provider-mark]'))).toBe(true);
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-o8"]')!.click());
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-o8-free"]')!.click());
     const o8Stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
     expect(o8Stops).toHaveLength(2);
     expect(o8Stops[0]?.textContent).toBe('Low');
     act(() => o8Stops[0]!.click());
+    expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('Low');
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"] > span > span:not([aria-hidden])')?.textContent).toBe('free');
+    expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')?.textContent).not.toContain('of 2');
     act(() => o8Stops[1]!.click());
   });
 
@@ -544,6 +547,7 @@ describe('ComposerSelectorFooter', () => {
 
   it('search narrows worker rows and expands Workers only for a matching runtime', async () => {
     await act(async () => { root.render(createElement(Harness)); });
+    selectMode('Multitask');
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     await act(async () => {
@@ -560,6 +564,7 @@ describe('ComposerSelectorFooter', () => {
 
   it('keeps Workers collapsed and keyboard picks within lead rows for a lead-only search', async () => {
     await act(async () => { root.render(createElement(Harness)); });
+    selectMode('Multitask');
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     await act(async () => {
@@ -616,6 +621,7 @@ describe('ComposerSelectorFooter', () => {
   it('uses arrow navigation and Enter across the lead and worker sections', async () => {
     const lastRuntime = listDispatchableRuntimes().at(-1)!;
     await act(async () => { root.render(createElement(Harness)); });
+    selectMode('Multitask');
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const workersSection = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers-section"]')!;
     expect(workersSection.getAttribute('aria-expanded')).toBe('false');
