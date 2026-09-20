@@ -107,6 +107,11 @@ The `o8` CLI is symlinked onto `$PATH` after o8.app runs once. Inside packet wor
 ```
 o8 status                                  # fleet snapshot: packets, lanes, merges, approvals
 o8 history <thoughts-thread-id> [--limit 200]  # continuous transcript + audited handoff seams
+o8 lead start --repo <path> --backend <id> --model <id> --effort <tier> --brief <json> --idempotency-key <key>  # create one durable lead
+o8 lead send <lead-id> --message "..." --idempotency-key <key>  # replay-safe follow-up on the same lead
+o8 lead status <lead-id> [--after <cursor>]     # compact persisted receipt; no model call
+o8 lead wait <lead-id> [--after <cursor>] [--timeout 10m]  # bounded reattachable wait
+o8 lead stop <lead-id> [--reason "..."]         # durable stop; restart cannot auto-resume
 o8 version                                 # CLI + connected server version
 o8 doctor [--reap] [--repair]              # diagnose server/config; reap zombies; repair CLI symlink
 o8 app restart [--if-update-pending]        # request a running-app restart

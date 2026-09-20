@@ -218,7 +218,8 @@ import {
   resolveHealBotEnabledSync,
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
-import { queueReviewContinuation as queueReviewContinuationTurn, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import { queueLeadReviewContinuation } from './lib/orchestrator/lead-lifecycle';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
@@ -1335,7 +1336,12 @@ function queueOrchestratorEscalation(repoPath: string, message: string): void {
 }
 
 function queueReviewContinuation(lane: ReviewContinuationLane): void {
-  queueReviewContinuationTurn(lane, enqueueOrchestratorAutoMessage);
+  routeReviewContinuation(lane, enqueueOrchestratorAutoMessage, (reviewLane) => queueLeadReviewContinuation({
+    repoPath: reviewLane.repoPath,
+    packetId: reviewLane.packetId,
+    laneId: reviewLane.id,
+    label: reviewLane.label,
+  }));
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {

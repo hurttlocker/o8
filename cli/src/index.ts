@@ -38,6 +38,7 @@ import {
 } from './commands/harness.js';
 import { runInbox } from './commands/inbox.js';
 import { runHistory } from './commands/history.js';
+import { runLead } from './commands/lead.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runArtifact } from './commands/artifact.js';
 import { runLease } from './commands/lease.js';
@@ -213,6 +214,11 @@ commands:
   doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
   status               snapshot: running packets, lanes, merges, approvals
   history <thread-id>  continuous orchestrator transcript + audited handoff seams
+  lead start           create a persistent lead (--repo --backend --model --effort --brief --idempotency-key)
+  lead send            send a replay-safe turn to the same lead
+  lead status          read a compact persisted receipt without calling the model
+  lead wait            bounded wait for receipt updates or a terminal state
+  lead stop            durably stop the lead; recovery cannot auto-resume it
   connect [--status]   register this signed-in machine, or list connected machines
   disconnect           remove this machine from the operator's connected devices
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
@@ -364,6 +370,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runStatus(args.mode);
     case 'history':
       return runHistory(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
+    case 'lead':
+      return runLead(args.mode, secondary, args.rest);
     case 'connect':
       return runConnect(args.mode, 'connect', secondary ? [secondary, ...args.rest] : args.rest);
     case 'disconnect':
