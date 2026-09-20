@@ -2,7 +2,7 @@
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactRef } from '../../artifacts/types';
 import { LaneReviewSummaryHeader } from './LaneReviewSummaryHeader';
 
@@ -37,6 +37,7 @@ describe('LaneReviewSummaryHeader visual proof', () => {
   afterEach(async () => {
     await act(async () => { root.unmount(); });
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('renders a real before/after packet pair and opens its lightbox', async () => {
@@ -64,5 +65,30 @@ describe('LaneReviewSummaryHeader visual proof', () => {
     expect(document.body.querySelector('button[aria-label="Close"]')).not.toBeNull();
     expect(document.body.textContent).toContain('Composer mode proof');
     expect(document.body.querySelectorAll('img[alt="Composer mode proof"]')).toHaveLength(4);
+  });
+
+  it('keeps the governed merge action in the reviewed packet surface', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, result: { merged: true } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(createElement(LaneReviewSummaryHeader, {
+        summary: 'Reviewed packet summary.',
+        files: [{ path: 'src/components/desktop/merge-beacon/MergeBeacon.tsx', status: 'modified', additions: 1, deletions: 1 }],
+        totalAdditions: 1,
+        totalDeletions: 1,
+        onSelectFile: () => undefined,
+        packetId: 'packet-reviewed',
+        laneStatus: 'reviewing',
+        artifacts: [],
+      }));
+    });
+
+    const mergeButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Approve & merge');
+    expect(mergeButton).toBeDefined();
+    await act(async () => { mergeButton?.click(); });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/orchestrator/merge', expect.objectContaining({ method: 'POST' }));
+    expect(container.textContent).toContain('Merged into main');
   });
 });

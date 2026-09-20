@@ -9,40 +9,22 @@
  * Two controls (Q ruling 2026-07-11):
  *   • View  — the counts pill. Click → the first needs-review lane's review
  *             surface, or the Inbox tab when everything left is awaiting merge.
- *   • Merge — the o8-native worktree merge. Enabled only when a lane is already
- *             approved and parked in `awaiting-merge`. Runs the governed
- *             approve_and_merge path (POST /api/orchestrator/merge → operator
- *             context merges directly; a worker-token context raises an
- *             approval card instead). No GitHub PR is required for o8-dispatched
- *             work — this is the daily merge, so it belongs on the bottom bar.
+ *   • Review merge — opens one exact approved lane in the review surface. The
+ *             review surface owns the explicit governed merge action, so this
+ *             status-bar control never mutates a worktree.
  *
  * Pure signal: returns null when nothing is parked, so it only appears when
  * there's genuinely something waiting.
  */
 
-import { memo, useEffect, useState } from 'react';
-import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
-import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useQuietMode } from '@/lib/presentation/quiet-mode-client';
 import { noticeIsVisible } from '@/lib/presentation/quiet-mode-policy';
+import { ComposerPopover } from '../thoughts/chat-panel/ComposerPopover';
 import type { ParkedLane } from './derive';
 
-function MergeGlyph({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="4" cy="3" r="1.4" />
-      <circle cx="11.5" cy="11.5" r="2.4" />
-      <path d="M4 4.4 V8.5 A2.6 2.6 0 0 0 6.6 11.1 H8.6" />
-    </svg>
-  );
-}
-
-function SpinnerGlyph({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" style={{ animation: 'spin 0.9s linear infinite' }} aria-hidden>
-      <path d="M8 1.6 A6.4 6.4 0 1 1 1.6 8" />
-    </svg>
-  );
+function laneDescription(lane: ParkedLane) {
+  return `${lane.label?.trim() || 'Untitled lane'} from ${lane.branch?.trim() || 'unknown branch'}`;
 }
 
 function MergeBeaconBase({
@@ -50,43 +32,33 @@ function MergeBeaconBase({
   compact,
   onOpenNeedsReviewLane,
   onOpenAwaitingMerge,
-  onMerged,
 }: {
   parked: ParkedLane[];
   compact?: boolean;
   onOpenNeedsReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
-  /** Fired after a merge attempt resolves so the parent can refresh if needed
-   *  (the route already fires a realtime refresh; this is an extra hook). */
-  onMerged?: (lane: ParkedLane, ok: boolean) => void;
 }) {
-  const [toast, setToast] = useState<{ tone: 'success' | 'fail'; message: string } | null>(null);
-
-  useEffect(() => {
-    if (!toast) return;
-    const handle = setTimeout(() => setToast(null), 3200);
-    return () => clearTimeout(handle);
-  }, [toast]);
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const reviewButtonRef = useRef<HTMLButtonElement | null>(null);
+  const chooserItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const escalated = parked.filter((lane) => lane.reviewState === 'escalated');
   const rejected = parked.filter((lane) => lane.reviewState === 'rejected');
   const needsReview = parked.filter((lane) => lane.reviewState === 'needs-review');
   const awaitingMerge = parked.filter((lane) => lane.reviewState === 'awaiting-merge');
-  const { busy, begin: beginMerge, settle: settleMerge } = useCorrelatedActionLatch<'merge'>();
-  const merging = busy === 'merge';
   // #2147 — the whole cluster is a count pill plus its action. It is the
   // "N escalated" badge the issue names, so quiet mode takes it down; the merge
   // it fronts is still reachable from the Inbox and the review surface.
   const quietMode = useQuietMode();
-  if (!noticeIsVisible('status-pill', quietMode)) return null;
-  if (compact || parked.length === 0) return null;
 
   const escalatedCount = escalated.length;
   const rejectedCount = rejected.length;
   const needsReviewCount = needsReview.length;
   const awaitingMergeCount = awaitingMerge.length;
   const urgent = escalatedCount > 0 || rejectedCount > 0 || needsReviewCount > 0;
-  const canMerge = awaitingMergeCount > 0 && !merging;
+  const selectedMergeLane = awaitingMerge[0] ?? null;
+  const chooserVisible = chooserOpen && awaitingMergeCount > 1;
+  const chooserMenuId = 'merge-beacon-approved-lanes';
   const title = `Escalated: ${escalatedCount}. Rejected: ${rejectedCount}. Needs review: ${needsReviewCount}. Approved awaiting merge: ${awaitingMergeCount}.`;
 
   // Non-zero attention segments only — a rejected packet reads as "rejected"
@@ -98,7 +70,6 @@ function MergeBeaconBase({
   if (rejectedCount > 0) segments.push({ key: 'rejected', text: `${rejectedCount} rejected` });
   if (needsReviewCount > 0) segments.push({ key: 'review', text: `${needsReviewCount} review` });
   if (awaitingMergeCount > 0) segments.push({ key: 'merge', text: `${awaitingMergeCount} merge`, faint: true });
-  if (segments.length === 0) return null;
 
   const focusLane = (lane: ParkedLane) => {
     if (typeof window === 'undefined') return;
@@ -114,66 +85,66 @@ function MergeBeaconBase({
     }
   };
 
+  const openReview = (lane: ParkedLane) => {
+    focusLane(lane);
+    onOpenNeedsReviewLane?.(lane);
+    setChooserOpen(false);
+  };
+
+  const closeChooser = () => {
+    setChooserOpen(false);
+    reviewButtonRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!chooserVisible) return;
+    const frame = requestAnimationFrame(() => chooserItemRefs.current[0]?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [chooserVisible]);
+
+  const handleChooserKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const currentIndex = chooserItemRefs.current.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeChooser();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    const lastIndex = awaitingMerge.length - 1;
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? lastIndex
+        : event.key === 'ArrowDown'
+          ? (currentIndex + 1 + awaitingMerge.length) % awaitingMerge.length
+          : (currentIndex - 1 + awaitingMerge.length) % awaitingMerge.length;
+    chooserItemRefs.current[nextIndex]?.focus();
+  };
+
   const handleView = () => {
     const lane = escalated[0] ?? rejected[0] ?? needsReview[0];
     if (lane) {
-      focusLane(lane);
-      onOpenNeedsReviewLane?.(lane);
+      openReview(lane);
+      return;
+    }
+    if (selectedMergeLane) {
+      openReview(selectedMergeLane);
       return;
     }
     onOpenAwaitingMerge?.();
   };
 
-  const runMerge = async () => {
-    const lane = awaitingMerge[0];
-    if (!lane || !beginMerge('merge')) return;
-    let inProgress = false;
-    try {
-      const { response: res, payload: body } = await fetchCorrelatedActionReceipt<{
-        ok?: boolean;
-        result?: { merged?: boolean; status?: string; note?: string; inProgress?: boolean } | null;
-        error?: { message?: string } | null;
-      }>('/api/orchestrator/merge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: lane.packetId, idempotencyKey: crypto.randomUUID() }),
-      });
-
-      if (!res.ok || !body?.ok) {
-        setToast({ tone: 'fail', message: body?.error?.message || 'Merge failed' });
-        onMerged?.(lane, false);
-        return;
-      }
-      const result = body.result ?? null;
-      if (actionReceiptIsInProgress(res.status, result)) {
-        inProgress = true;
-        setToast({ tone: 'success', message: result?.note || 'Merge is already in progress' });
-        return;
-      }
-      if (result?.status === 'pending_operator_approval') {
-        setToast({ tone: 'success', message: 'Approval raised' });
-        onMerged?.(lane, true);
-        return;
-      }
-      if (result?.merged) {
-        setToast({ tone: 'success', message: 'Merged' });
-        onMerged?.(lane, true);
-        return;
-      }
-      setToast({ tone: 'fail', message: result?.note || 'Merge blocked' });
-      onMerged?.(lane, false);
-    } catch (error) {
-      if (correlatedActionIsUnsettled(error)) {
-        inProgress = true;
-        setToast({ tone: 'success', message: error.message });
-      } else {
-        setToast({ tone: 'fail', message: error instanceof Error ? error.message : 'Merge failed' });
-        onMerged?.(awaitingMerge[0], false);
-      }
-    } finally {
-      settleMerge(inProgress);
+  const handleReviewMerge = () => {
+    if (!selectedMergeLane) return;
+    if (awaitingMergeCount > 1) {
+      setChooserOpen(true);
+      return;
     }
+    openReview(selectedMergeLane);
   };
+
+  if (!noticeIsVisible('status-pill', quietMode) || compact || parked.length === 0 || segments.length === 0) return null;
 
   return (
     <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -215,11 +186,22 @@ function MergeBeaconBase({
       </button>
 
       <button
+        ref={reviewButtonRef}
         type="button"
-        onClick={runMerge}
-        disabled={!canMerge}
-        aria-label={awaitingMergeCount > 0 ? `Merge ${awaitingMergeCount} approved` : 'No approved work to merge'}
-        title={awaitingMergeCount > 0 ? `Merge ${awaitingMergeCount} approved lane${awaitingMergeCount === 1 ? '' : 's'} into main` : 'Merge is available once a lane is approved'}
+        onClick={handleReviewMerge}
+        onKeyDown={(event) => {
+          if (awaitingMergeCount > 1 && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+            event.preventDefault();
+            if (chooserVisible) chooserItemRefs.current[0]?.focus();
+            else setChooserOpen(true);
+          }
+        }}
+        disabled={!selectedMergeLane}
+        aria-label={selectedMergeLane ? awaitingMergeCount > 1 ? `Review merge: choose from ${awaitingMergeCount} approved lanes` : `Review merge: ${laneDescription(selectedMergeLane)}` : 'No approved work to review'}
+        aria-haspopup={awaitingMergeCount > 1 ? 'menu' : undefined}
+        aria-expanded={awaitingMergeCount > 1 ? chooserVisible : undefined}
+        aria-controls={awaitingMergeCount > 1 ? chooserMenuId : undefined}
+        title={selectedMergeLane ? awaitingMergeCount > 1 ? `Choose one of ${awaitingMergeCount} approved lanes to review. Merging is a separate action in review.` : `Review merge for ${laneDescription(selectedMergeLane)}. Opens its exact diff; merging is a separate action in review.` : 'Merge review is available once a lane is approved'}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -230,10 +212,10 @@ function MergeBeaconBase({
           borderRadius: 7,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: canMerge ? 'var(--t-tone-success-border)' : 'var(--t-divider-subtle)',
-          background: canMerge ? 'var(--t-tone-success-bg)' : 'var(--t-input-bg)',
-          color: canMerge ? 'var(--t-tone-success)' : 'var(--t-text-faint)',
-          cursor: canMerge ? 'pointer' : 'default',
+          borderColor: selectedMergeLane ? 'var(--t-tone-success-border)' : 'var(--t-divider-subtle)',
+          background: selectedMergeLane ? 'var(--t-tone-success-bg)' : 'var(--t-input-bg)',
+          color: selectedMergeLane ? 'var(--t-tone-success)' : 'var(--t-text-faint)',
+          cursor: selectedMergeLane ? 'pointer' : 'default',
           opacity: awaitingMergeCount > 0 ? 1 : 0.55,
           fontFamily: 'var(--font-sans-system)',
           fontSize: 11.5,
@@ -242,27 +224,69 @@ function MergeBeaconBase({
           whiteSpace: 'nowrap',
         }}
       >
-        {merging ? (
-          <SpinnerGlyph size={12} color="var(--t-tone-success)" />
-        ) : (
-          <MergeGlyph size={12} color={canMerge ? 'var(--t-tone-success)' : 'var(--t-text-faint)'} />
-        )}
-        <span>Merge</span>
+        <span>Review merge</span>
       </button>
 
-      {toast ? (
-        <span
+      <ComposerPopover anchorRef={reviewButtonRef} open={chooserVisible} onClose={closeChooser} align="end">
+        <div
+          id={chooserMenuId}
+          role="menu"
+          aria-label="Approved lanes"
+          onKeyDown={handleChooserKeyDown}
           style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: toast.tone === 'success' ? 'var(--t-tone-success)' : 'var(--t-tone-fail)',
-            letterSpacing: 0,
-            whiteSpace: 'nowrap',
+            width: 'min(300px, calc(100vw * var(--zoom-inverse, 1) - 24px))',
+            maxHeight: 'min(320px, calc(100vh * var(--zoom-inverse, 1) - 72px))',
+            paddingTop: 6,
+            paddingRight: 6,
+            paddingBottom: 6,
+            paddingLeft: 6,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-input-border)',
+            borderRadius: 8,
+            background: 'var(--t-panel)',
+            boxShadow: 'var(--t-shadow-popover)',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
           }}
         >
-          {toast.message}
-        </span>
-      ) : null}
+              <div style={{ paddingTop: 2, paddingRight: 6, paddingBottom: 6, paddingLeft: 6, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 600 }}>
+                {awaitingMergeCount} approved lanes
+              </div>
+              {awaitingMerge.map((lane, index) => (
+                <button
+                  key={lane.packetId}
+                  ref={(node) => { chooserItemRefs.current[index] = node; }}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => openReview(lane)}
+                  aria-label={`Review ${lane.label?.trim() || 'untitled lane'}`}
+                  title={`Review ${laneDescription(lane)}. This does not merge the lane.`}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    paddingTop: 6,
+                    paddingRight: 8,
+                    paddingBottom: 6,
+                    paddingLeft: 8,
+                    borderWidth: 0,
+                    borderRadius: 5,
+                    background: 'transparent',
+                    color: 'var(--t-text)',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-sans-system)',
+                    fontSize: 11.5,
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lane.label?.trim() || 'Untitled lane'}</span>
+                  <span style={{ display: 'block', marginTop: 2, color: 'var(--t-text-faint)', fontFamily: 'var(--font-mono-system)', fontSize: 10 }}>{lane.branch?.trim() || 'unknown branch'}</span>
+                </button>
+              ))}
+        </div>
+      </ComposerPopover>
     </div>
   );
 }
