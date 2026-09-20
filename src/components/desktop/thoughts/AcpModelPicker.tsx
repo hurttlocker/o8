@@ -73,8 +73,37 @@ interface AcpModelPickerProps {
 }
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
+type CatalogueSort = 'most-popular' | 'newest';
 
 const ROW_TEXT = { fontFamily: 'var(--font-sans-system)', fontWeight: 300, letterSpacing: '0' } as const;
+
+function providerLabel(provider: string): string {
+  const known: Record<string, string> = {
+    openrouter: 'OpenRouter',
+    opencode: 'OpenCode',
+    xai: 'xAI',
+  };
+  return known[provider] ?? provider.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function filterButtonStyle(selected: boolean) {
+  return {
+    ...ROW_TEXT,
+    minHeight: 22,
+    paddingTop: 2,
+    paddingRight: 7,
+    paddingBottom: 2,
+    paddingLeft: 7,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: selected ? 'var(--t-accent)' : 'var(--t-border)',
+    borderRadius: 6,
+    background: selected ? 'var(--t-accent-soft)' : 'transparent',
+    color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)',
+    cursor: 'pointer',
+    fontSize: 10,
+  } as const;
+}
 
 export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320, catalogueUrl }: AcpModelPickerProps) {
   const [groups, setGroups] = useState<CatalogueGroup[]>([]);
@@ -83,18 +112,35 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
   const [state, setState] = useState<LoadState>('loading');
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<CatalogueSort>('most-popular');
+  const [rankingAvailable, setRankingAvailable] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [freeOnly, setFreeOnly] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [loadedCatalogueKey, setLoadedCatalogueKey] = useState<string | null>(null);
   // Bumped by Retry. The effect keys off it, so a refresh is a re-run rather
   // than an imperative fetch that has to manage its own loading state.
   const [reloadKey, setReloadKey] = useState(0);
   const [recents, setRecents] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
+  const catalogueKey = `${backend}\u0000${catalogueUrl ?? ''}\u0000${repoPath ?? ''}`;
+  const previousCatalogueKey = useRef(catalogueKey);
 
   // localStorage is client-only; read after mount, never during render.
   useEffect(() => { setRecents(readRecents(backend)); }, [backend]);
 
   useEffect(() => {
     let cancelled = false;
-    const params = new URLSearchParams(catalogueUrl ? {} : { backend });
+    const sourceChanged = previousCatalogueKey.current !== catalogueKey;
+    previousCatalogueKey.current = catalogueKey;
+    setState('loading');
+    setGroups([]);
+    if (sourceChanged) {
+      setSelectedProvider(null);
+      setFreeOnly(false);
+      setShowAll(false);
+    }
+    const params = new URLSearchParams(catalogueUrl ? {} : { backend, sort });
     if (repoPath) params.set('repoPath', repoPath);
     if (reloadKey > 0) params.set('refresh', '1');
     const baseUrl = catalogueUrl ?? '/api/orchestrator/backend-models';
@@ -106,6 +152,8 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
         if (data?.available === false) { setState('unavailable'); return; }
         if (data?.error) { setError(String(data.error)); setState('error'); return; }
         setGroups(Array.isArray(data?.groups) ? data.groups : []);
+        setRankingAvailable(data?.rankingAvailable === true);
+        setLoadedCatalogueKey(catalogueKey);
         setState('ready');
       })
       .catch((err) => {
@@ -114,7 +162,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
         setState('error');
       });
     return () => { cancelled = true; };
-  }, [backend, catalogueUrl, repoPath, reloadKey]);
+  }, [backend, catalogueKey, catalogueUrl, repoPath, reloadKey, sort]);
 
   const reload = useCallback(() => {
     setState('loading');
@@ -131,11 +179,31 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
 
   const filtered = useMemo(() => filterCatalogue(groups, query), [groups, query]);
   const total = useMemo(() => catalogueSize(groups), [groups]);
-  const shown = useMemo(() => catalogueSize(filtered), [filtered]);
   const active = useMemo(() => findCatalogueModel(groups, value), [groups, value]);
+  const recentModels = useMemo(() => recents
+    .map((id) => findCatalogueModel(groups, id))
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null), [groups, recents]);
+  const selectedGroup = useMemo(() => filtered.find((group) => group.provider === selectedProvider) ?? null, [filtered, selectedProvider]);
+  const defaultToCompatible = rankingAvailable && !showAll && selectedProvider === 'openrouter';
+  const visibleGroups = useMemo(() => {
+    const scoped = query.trim() || !selectedProvider ? filtered : selectedGroup ? [selectedGroup] : [];
+    return scoped.map((group) => ({
+      ...group,
+      models: group.models.filter((model) => {
+        if (freeOnly && model.metadata?.free !== true) return false;
+        if (defaultToCompatible && model.metadata?.compatible !== true) return false;
+        return true;
+      }),
+    })).filter((group) => group.models.length > 0);
+  }, [defaultToCompatible, filtered, freeOnly, query, selectedGroup, selectedProvider]);
+  const visibleTotal = useMemo(() => catalogueSize(visibleGroups), [visibleGroups]);
+  const showProviderDirectory = !query.trim() && selectedProvider === null;
+  const hasKnownFreeModels = useMemo(() => groups.some((group) => group.models.some((model) => model.metadata?.free === true)), [groups]);
+  const ready = state === 'ready' && loadedCatalogueKey === catalogueKey;
+  const loading = state === 'loading' || (state === 'ready' && !ready);
 
   return (
-    <div style={{ width, display: 'flex', flexDirection: 'column', maxHeight: 420, minWidth: 0 }}>
+    <div style={{ width: `min(${width}px, calc(100vw * var(--zoom-inverse, 1) - 24px))`, display: 'flex', flexDirection: 'column', maxHeight: 'min(420px, calc(100vh * var(--zoom-inverse, 1) - 72px))', minWidth: 0, overflowX: 'hidden' }}>
       <div style={{ paddingTop: 6, paddingRight: 8, paddingBottom: 6, paddingLeft: 8 }}>
         <input
           ref={searchRef}
@@ -165,7 +233,16 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
         />
       </div>
 
-      {state === 'loading' ? (
+      {ready && rankingAvailable ? (
+        <div aria-label="Catalogue filters" style={{ display: 'flex', alignItems: 'center', gap: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}>
+          <button type="button" aria-pressed={sort === 'most-popular'} onClick={() => setSort('most-popular')} style={filterButtonStyle(sort === 'most-popular')}>Popular</button>
+          <button type="button" aria-pressed={sort === 'newest'} onClick={() => setSort('newest')} style={filterButtonStyle(sort === 'newest')}>Newest</button>
+          {selectedProvider === 'openrouter' ? <><button type="button" aria-pressed={!showAll} onClick={() => setShowAll(false)} style={filterButtonStyle(!showAll)}>Coding</button><button type="button" aria-pressed={showAll} onClick={() => setShowAll(true)} style={filterButtonStyle(showAll)}>All</button></> : null}
+          {hasKnownFreeModels ? <button type="button" aria-pressed={freeOnly} onClick={() => setFreeOnly((current) => !current)} style={filterButtonStyle(freeOnly)}>Free</button> : null}
+        </div>
+      ) : null}
+
+      {loading ? (
         <StatusLine text="Reading the agent’s model list…" />
       ) : null}
       {state === 'unavailable' ? (
@@ -174,29 +251,30 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
       {state === 'error' ? (
         <StatusLine text={error ?? 'Could not read the model list.'} onRetry={reload} />
       ) : null}
-      {state === 'ready' && total === 0 ? (
+      {ready && total === 0 ? (
         <StatusLine text="The agent reported no models. Check its provider auth." onRetry={reload} />
       ) : null}
-      {state === 'ready' && total > 0 && shown === 0 ? (
-        <StatusLine text={`No model matches “${query}”.`} />
+      {ready && total > 0 && !showProviderDirectory && visibleTotal === 0 ? (
+        <StatusLine text={query.trim() ? `No model matches “${query}”.` : 'No compatible models match these filters.'} />
       ) : null}
 
       {/* Recents only when idle: while searching, the query IS the intent and a
           pinned strip on top just eats rows. */}
-      {state === 'ready' && !query.trim() && recents.length > 0 ? (
+      {ready && !query.trim() && recentModels.length > 0 ? (
         <div style={{ paddingRight: 6, paddingLeft: 6, paddingBottom: 4 }}>
           <div style={{ ...ROW_TEXT, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--t-text-faint)', paddingTop: 4, paddingBottom: 3, paddingLeft: 4 }}>
             Recent
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {recents.map((id) => {
-              const isActive = value === id;
+            {recentModels.map(({ model, effort }) => {
+              const selectedId = effort ? model.efforts.find((variant) => variant.effort === effort)?.id : model.id;
+              const isActive = value === selectedId;
               return (
                 <button
-                  key={id}
+                  key={selectedId}
                   type="button"
-                  onClick={() => { choose(id); }}
-                  title={id}
+                  onClick={() => { if (selectedId) choose(selectedId); }}
+                  title={selectedId}
                   style={{
                     ...ROW_TEXT,
                     fontSize: 11,
@@ -218,7 +296,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {shortModelLabel(id) ?? id}
+                  {shortModelLabel(selectedId) ?? selectedId}
                 </button>
               );
             })}
@@ -226,11 +304,29 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
         </div>
       ) : null}
 
-      {state === 'ready' && shown > 0 ? (
-        <div role="listbox" aria-label="Models" style={{ overflowY: 'auto', overflowX: 'hidden', paddingBottom: 6 }}>
-          {filtered.map((group) => (
+      {ready && showProviderDirectory ? (
+        <div role="list" aria-label="Providers" style={{ overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none', paddingRight: 6, paddingBottom: 6, paddingLeft: 6 }}>
+          {visibleGroups.map((group) => (
+            <div key={group.provider} role="listitem">
+              <button type="button" aria-label={`Provider ${providerLabel(group.provider)}`} onClick={() => setSelectedProvider(group.provider)} style={{ ...ROW_TEXT, display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minHeight: 32, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10, borderWidth: 0, borderRadius: 8, background: 'transparent', color: 'var(--t-text)', cursor: 'pointer', textAlign: 'left' }}>
+                <span>{providerLabel(group.provider)}</span>
+                <span style={{ color: 'var(--t-text-faint)', fontSize: 10 }}>{group.models.length}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {ready && !showProviderDirectory && visibleTotal > 0 ? (
+        <div role="listbox" aria-label="Models" style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none', paddingBottom: 6 }}>
+          {selectedProvider && !query.trim() ? (
+            <button type="button" onClick={() => { setSelectedProvider(null); setShowAll(false); setFreeOnly(false); }} style={{ ...ROW_TEXT, display: 'inline-flex', alignItems: 'center', minHeight: 24, marginTop: 2, marginRight: 8, marginBottom: 2, marginLeft: 8, paddingTop: 2, paddingRight: 4, paddingBottom: 2, paddingLeft: 4, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 10.5 }}>
+              Back to providers
+            </button>
+          ) : null}
+          {visibleGroups.map((group) => (
             <div key={group.provider}>
-              <div
+              {query.trim() ? <div
                 style={{
                   ...ROW_TEXT,
                   fontSize: 9,
@@ -243,8 +339,8 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
                   paddingLeft: 10,
                 }}
               >
-                {group.provider}
-              </div>
+                {providerLabel(group.provider)}
+              </div> : null}
               {group.models.map((model) => {
                 const isActive = active?.model.id === model.id;
                 return (
@@ -290,7 +386,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
                         siblings — never synthesized, so a model without them
                         simply shows no row. */}
                     {model.efforts.length ? (
-                      <div style={{ display: 'flex', gap: 4, paddingTop: 3, paddingBottom: 4, paddingLeft: 10 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, paddingTop: 3, paddingRight: 8, paddingBottom: 4, paddingLeft: 10 }}>
                         {model.efforts.map((variant) => {
                           const variantActive = value === variant.id;
                           return (

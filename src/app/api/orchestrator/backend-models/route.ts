@@ -15,6 +15,7 @@ import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { probeAcpModels } from '@/lib/orchestrator/acp-model-probe';
 import { buildModelCatalogue, catalogueSize } from '@/lib/orchestrator/acp-model-catalogue';
+import { getOpenRouterModelMetadata, type OpenRouterModelSort } from '@/lib/orchestrator/openrouter-model-metadata';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,17 +38,28 @@ export async function GET(request: NextRequest) {
   }
 
   const repoPath = params.get('repoPath')?.trim() || process.cwd();
+  const sortParam = params.get('sort');
+  if (sortParam && sortParam !== 'most-popular' && sortParam !== 'newest') {
+    return NextResponse.json({ error: 'unknown catalogue sort' }, { status: 400 });
+  }
+  const sort = (sortParam ?? 'most-popular') as OpenRouterModelSort;
 
   try {
-    const probe = await probeAcpModels(backend, launch, repoPath, {
+    const probePromise = probeAcpModels(backend, launch, repoPath, {
       force: params.get('refresh') === '1',
     });
-    const groups = buildModelCatalogue(probe.models);
+    const metadataPromise = backend === 'opencode'
+      ? getOpenRouterModelMetadata(sort)
+      : Promise.resolve(null);
+    const [probe, metadata] = await Promise.all([probePromise, metadataPromise]);
+    const groups = buildModelCatalogue(probe.models, metadata ?? undefined);
     return NextResponse.json({
       backend,
       available: true,
       groups,
       total: catalogueSize(groups),
+      rankingAvailable: metadata !== null,
+      sort: metadata ? sort : undefined,
       currentModel: probe.currentModel,
       probedAt: probe.probedAt,
       source: probe.source,

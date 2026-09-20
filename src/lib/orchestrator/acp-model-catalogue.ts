@@ -40,6 +40,18 @@ export interface CatalogueEffort {
   id: string;
 }
 
+/** Optional public catalogue hints matched to an exact runtime-reported id. */
+export interface CatalogueModelMetadata {
+  /** Server-provided order for the active catalogue sort; lower is earlier. */
+  rank: number;
+  /** A public, human-readable name. The runtime id stays authoritative. */
+  label?: string;
+  /** Free is present only when public pricing explicitly reports it. */
+  free?: boolean;
+  /** The metadata source already constrained this model to text and tools. */
+  compatible?: boolean;
+}
+
 export interface CatalogueModel {
   /** Base id, suffix stripped — what set_model receives at default effort. */
   id: string;
@@ -49,6 +61,8 @@ export interface CatalogueModel {
   provider: string;
   /** Effort variants, ordered minimal→max. Empty when the model has none. */
   efforts: CatalogueEffort[];
+  /** Public metadata is optional; unknown models remain selectable. */
+  metadata?: CatalogueModelMetadata;
 }
 
 export interface CatalogueGroup {
@@ -84,6 +98,7 @@ function labelOf(id: string, reported?: string): string {
  */
 export function buildModelCatalogue(
   options: ReadonlyArray<{ value: string; name?: string }>,
+  metadataByRuntimeId?: ReadonlyMap<string, CatalogueModelMetadata>,
 ): CatalogueGroup[] {
   const ids = new Set(options.map((o) => o.value));
   const labels = new Map(options.map((o) => [o.value, o.name]));
@@ -102,9 +117,10 @@ export function buildModelCatalogue(
     if (!models.has(value)) {
       models.set(value, {
         id: value,
-        label: labelOf(value, labels.get(value)),
+        label: metadataByRuntimeId?.get(value)?.label ?? labelOf(value, labels.get(value)),
         provider: providerOf(value),
         efforts: [],
+        metadata: metadataByRuntimeId?.get(value),
       });
     }
   }
@@ -127,7 +143,14 @@ export function buildModelCatalogue(
   return [...byProvider.entries()]
     .map(([provider, list]) => ({
       provider,
-      models: list.sort((a, b) => a.id.localeCompare(b.id)),
+      models: list.sort((a, b) => {
+        const aRank = a.metadata?.rank;
+        const bRank = b.metadata?.rank;
+        if (aRank !== undefined && bRank !== undefined) return aRank - bRank;
+        if (aRank !== undefined) return -1;
+        if (bRank !== undefined) return 1;
+        return a.id.localeCompare(b.id);
+      }),
     }))
     .sort((a, b) => a.provider.localeCompare(b.provider));
 }
