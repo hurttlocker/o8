@@ -3025,6 +3025,15 @@
       ]
     },
     {
+      "path": "tests/spawn-prompt-effort-pin-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/spawned-agent-model-status-real-path.test.ts",
       "reasons": [
         "child-process",
