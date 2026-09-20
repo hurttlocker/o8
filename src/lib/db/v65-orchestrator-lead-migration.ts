@@ -101,14 +101,14 @@ export function ensureV65OrchestratorLeadSchema(sqlite: Database.Database): void
 
     CREATE INDEX IF NOT EXISTS idx_orchestrator_lead_turns_queue
       ON orchestrator_lead_turns(lead_id, status, ordinal);
-    CREATE INDEX IF NOT EXISTS idx_orchestrator_lead_turns_root
-      ON orchestrator_lead_turns(lead_id, root_turn_id, ordinal);
     CREATE INDEX IF NOT EXISTS idx_orchestrator_lead_events_cursor
       ON orchestrator_lead_events(lead_id, cursor);
   `);
   ensureColumns(sqlite, 'orchestrator_leads', LEAD_COLUMNS);
   ensureColumns(sqlite, 'orchestrator_lead_turns', TURN_COLUMNS);
   sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_orchestrator_lead_turns_root
+      ON orchestrator_lead_turns(lead_id, root_turn_id, ordinal);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestrator_lead_one_running
       ON orchestrator_lead_turns(lead_id) WHERE status = 'running';
   `);
