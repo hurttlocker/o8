@@ -3324,6 +3324,12 @@
       ]
     },
     {
+      "path": "tests/v65-orchestrator-lead-legacy-schema-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/validate-qa-cases.test.ts",
       "reasons": [
         "child-process",
