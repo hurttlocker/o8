@@ -219,21 +219,21 @@ describe('mobile history runtime transcript parity', () => {
     ]);
   });
 
-  it('separates snapshot-only messages and replays the mutable Claude window for out-of-order tool completion', async () => {
+  it.each([true, false])('replays out-of-order tool completion with assistant snapshots: %s', async (withSnapshots) => {
     const sessionKey = 'claude-code-owned:mobile-history-claude-snapshots';
     const runOutput = [
-      JSON.stringify({ type: 'assistant', message: { id: 'snapshot-one', content: [{ type: 'text', text: 'First snapshot.' }] } }),
+      ...(withSnapshots ? [JSON.stringify({ type: 'assistant', message: { id: 'snapshot-one', content: [{ type: 'text', text: 'First snapshot.' }] } })] : []),
       JSON.stringify({ type: 'tool_use', id: 'tool-one', name: 'Read', input: { file_path: 'one.ts' } }),
       JSON.stringify({ type: 'tool_use', id: 'tool-two', name: 'Read', input: { file_path: 'two.ts' } }),
       JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-two', content: 'two complete' }] } }),
-      JSON.stringify({ type: 'assistant', message: { id: 'snapshot-two', content: [{ type: 'text', text: 'Second snapshot.' }] } }),
+      ...(withSnapshots ? [JSON.stringify({ type: 'assistant', message: { id: 'snapshot-two', content: [{ type: 'text', text: 'Second snapshot.' }] } })] : []),
     ].join('\n');
     writePersistedSession({ root: claudeRoot, sessionKey, prompt: 'Check snapshot boundaries', runOutput });
     const runtime = getRuntime('claude-code');
     if (!runtime) throw new Error('Claude Code runtime is not registered.');
     const first = await runtime.readTranscript(sessionKey, undefined, 100);
     expect(first.filter((entry) => entry.text.endsWith('snapshot.')).map((entry) => entry.text))
-      .toEqual(['First snapshot.', 'Second snapshot.']);
+      .toEqual(withSnapshots ? ['First snapshot.', 'Second snapshot.'] : []);
     const secondToolId = first.find((entry) => entry.toolCalls?.[0]?.id === 'tool-two')?.id;
     if (!secondToolId) throw new Error('Second tool row is missing.');
     const sessionId = sessionKey.slice(sessionKey.indexOf(':') + 1);
@@ -263,6 +263,21 @@ describe('mobile history runtime transcript parity', () => {
       expect.objectContaining({ role: 'assistant', text: 'Partial response.' }),
       expect.objectContaining({ role: 'system', text: 'Provider stopped.' }),
     ]));
+  });
+
+  it('renders a streamed terminal error only once when the result repeats it', async () => {
+    const sessionKey = 'claude-code-owned:mobile-history-claude-repeated-error';
+    writePersistedSession({
+      root: claudeRoot, sessionKey, prompt: 'Check repeated terminal error',
+      runOutput: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Provider stopped.' } } }),
+        JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution', result: 'Provider stopped.' }),
+      ].join('\n'),
+    });
+    const runtime = getRuntime('claude-code');
+    if (!runtime) throw new Error('Claude Code runtime is not registered.');
+    const entries = await runtime.readTranscript(sessionKey);
+    expect(entries.filter((entry) => entry.text === 'Provider stopped.')).toHaveLength(1);
   });
 
   it('serves a declarative owned runtime and keeps durable operator entries in route and inbox history', async () => {

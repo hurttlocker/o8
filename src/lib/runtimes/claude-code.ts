@@ -944,7 +944,7 @@ export const claudeCodeRuntime: AgentRuntime = {
   async readTranscript(sessionKey: string, sinceId?: string, limit = 50): Promise<RuntimeTranscriptEntry[]> {
     if (sessionKey.startsWith('claude-code-owned:')) {
       const tail = await getOwnedClaudeCodeRuntimeTail(sessionKey, sinceId ? 200 : limit);
-      return ownedTailToRuntimeTranscript(tail, sinceId, limit);
+      return ownedTailToRuntimeTranscript(tail, sinceId, limit, { includeSinceEntry: true });
     }
 
     const sessionId = sessionKey.replace('claude-code:', '');

@@ -123,10 +123,13 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
       // The result is a terminal summary. When stream deltas already built the
       // answer it is a replay, not another visible assistant message.
       if (event.isError) {
-        entries.push({
-          id: `${run.id}:terminal-error`, kind: 'event', label: 'error',
-          text: event.text || 'Worker reported an error.', timestamp: run.startedAt,
-        });
+        const errorText = event.text || 'Worker reported an error.';
+        if (!entries.some((entry) => entry.text === errorText)) {
+          entries.push({
+            id: `${run.id}:terminal-error`, kind: 'event', label: 'error',
+            text: errorText, timestamp: run.startedAt,
+          });
+        }
       } else if (!hasAssistantText && event.text) {
         entries.push({
           id: `${run.id}:message:result`,
