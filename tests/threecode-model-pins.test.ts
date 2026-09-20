@@ -5,7 +5,7 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const root = mkdtempSync(path.join(os.homedir(), '.o8', 'o8-threecode-pins-'));
+const root = mkdtempSync(path.join(os.homedir(), '.o8-threecode-pins-'));
 const dataDir = path.join(root, 'data');
 const repoPath = path.join(root, 'repo');
 const fixture = path.join(root, 'threecode-fixture.mjs');
