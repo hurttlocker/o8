@@ -53,6 +53,7 @@ export type DeclarativeOwnedRuntimeConfig = Omit<
   sessionFileName?: string;
   parseRunLog: DeclarativeRunLogPatterns;
   stderrNoise?: RegExp[];
+  staticSpawnEnv?: Record<string, string>;
 };
 
 export interface DeclarativeOwnedRuntimeRegistration {
@@ -60,8 +61,48 @@ export interface DeclarativeOwnedRuntimeRegistration {
   store: OwnedSessionStore;
 }
 
-const registry = new Map<string, DeclarativeOwnedRuntimeRegistration>();
+interface DeclarativeRegistryEntry {
+  config: DeclarativeOwnedRuntimeConfig;
+  registration: DeclarativeOwnedRuntimeRegistration;
+}
+
+interface DeclarativeRegistryGlobal {
+  __o8DeclarativeOwnedRuntimeRegistry?: Map<string, DeclarativeRegistryEntry>;
+}
+
+const registryGlobal = globalThis as typeof globalThis & DeclarativeRegistryGlobal;
+const registry = registryGlobal.__o8DeclarativeOwnedRuntimeRegistry
+  ?? new Map<string, DeclarativeRegistryEntry>();
+registryGlobal.__o8DeclarativeOwnedRuntimeRegistry = registry;
 const TEMPLATE_TOKEN = /\{\{(cwd|prompt|model|effort|threadId|sessionPath)\}\}/g;
+
+function valuesEquivalent(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (left instanceof RegExp && right instanceof RegExp) {
+    return left.source === right.source && left.flags === right.flags;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length
+      && left.every((value, index) => valuesEquivalent(value, right[index]));
+  }
+  if (left && right && typeof left === 'object' && typeof right === 'object') {
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const leftKeys = Object.keys(leftRecord).sort();
+    const rightKeys = Object.keys(rightRecord).sort();
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every((key, index) => key === rightKeys[index]
+        && valuesEquivalent(leftRecord[key], rightRecord[key]));
+  }
+  return false;
+}
+
+function configsEquivalent(
+  left: DeclarativeOwnedRuntimeConfig,
+  right: DeclarativeOwnedRuntimeConfig,
+): boolean {
+  return valuesEquivalent(left, right);
+}
 
 function renderArg(value: string, context: TemplateContext): string {
   return value.replace(TEMPLATE_TOKEN, (_match, key: TemplateKey) => {
@@ -277,9 +318,15 @@ function sessionPathContext(sessionDir?: string, sessionFileName?: string): Temp
 export function createDeclarativeOwnedRuntimeAdapter(
   config: DeclarativeOwnedRuntimeConfig,
 ): OwnedRuntimeAdapter {
-  const { launchArgs, resumeArgs, sessionFileName, parseRunLog, stderrNoise, ...base } = config;
+  const { launchArgs, resumeArgs, sessionFileName, parseRunLog, stderrNoise, staticSpawnEnv, ...base } = config;
   return {
     ...base,
+    ...(staticSpawnEnv ? {
+      extraSpawnEnv: async (session) => ({
+        ...staticSpawnEnv,
+        ...await base.extraSpawnEnv?.(session),
+      }),
+    } : {}),
     launchArgs: (ctx) => renderDeclarativeArgs(
       launchArgs,
       launchContext(ctx, base.defaultModel, sessionFileName),
@@ -306,8 +353,20 @@ export function createDeclarativeOwnedRuntimeAdapter(
 export function registerDeclarativeOwnedRuntime(
   config: DeclarativeOwnedRuntimeConfig,
 ): DeclarativeOwnedRuntimeRegistration {
-  if (registry.has(config.runtimeId)) {
-    throw new Error(`Declarative owned runtime already registered: ${config.runtimeId}`);
+  const existing = registry.get(config.runtimeId);
+  if (existing) {
+    if (!configsEquivalent(existing.config, config)) {
+      throw new Error(`Declarative owned runtime already registered with incompatible config: ${config.runtimeId}`);
+    }
+    registerOwnedSessionLifecycle({
+      runtimeId: config.runtimeId,
+      surfaceIdPrefix: config.surfaceIdPrefix,
+      commandLabel: config.binaryName,
+      rootEnvVar: config.rootEnvVar,
+      rootDefault: config.rootDefault,
+      store: existing.registration.store,
+    });
+    return existing.registration;
   }
   const adapter = createDeclarativeOwnedRuntimeAdapter(config);
   const store = createOwnedSessionStore(adapter);
@@ -320,12 +379,12 @@ export function registerDeclarativeOwnedRuntime(
     rootDefault: config.rootDefault,
     store,
   });
-  registry.set(config.runtimeId, registration);
+  registry.set(config.runtimeId, { config, registration });
   return registration;
 }
 
 export function getDeclarativeOwnedRuntime(
   runtimeId: string,
 ): DeclarativeOwnedRuntimeRegistration | undefined {
-  return registry.get(runtimeId);
+  return registry.get(runtimeId)?.registration;
 }
