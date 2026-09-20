@@ -5,6 +5,7 @@ const LEAD_COLUMNS: Array<[string, string]> = [
 ];
 
 const TURN_COLUMNS: Array<[string, string]> = [
+  ['root_turn_id', 'TEXT'],
   ['display_message', "TEXT NOT NULL DEFAULT ''"],
   ['permission_mode', "TEXT NOT NULL DEFAULT 'full'"],
   ['attachments_json', 'TEXT'],
@@ -60,6 +61,7 @@ export function ensureV65OrchestratorLeadSchema(sqlite: Database.Database): void
     CREATE TABLE IF NOT EXISTS orchestrator_lead_turns (
       id TEXT PRIMARY KEY,
       lead_id TEXT NOT NULL REFERENCES orchestrator_leads(id) ON DELETE CASCADE,
+      root_turn_id TEXT,
       idempotency_key TEXT NOT NULL,
       ordinal INTEGER NOT NULL,
       kind TEXT NOT NULL,
@@ -99,6 +101,8 @@ export function ensureV65OrchestratorLeadSchema(sqlite: Database.Database): void
 
     CREATE INDEX IF NOT EXISTS idx_orchestrator_lead_turns_queue
       ON orchestrator_lead_turns(lead_id, status, ordinal);
+    CREATE INDEX IF NOT EXISTS idx_orchestrator_lead_turns_root
+      ON orchestrator_lead_turns(lead_id, root_turn_id, ordinal);
     CREATE INDEX IF NOT EXISTS idx_orchestrator_lead_events_cursor
       ON orchestrator_lead_events(lead_id, cursor);
   `);

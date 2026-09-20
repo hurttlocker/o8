@@ -978,6 +978,7 @@ interface InternalTerminalSignalPayload {
 }
 
 const terminalAttachments = new Map<string, TerminalAttachment>();
+const watchedAttemptIds = new WeakMap<object, string>();
 const terminalWorkloadStats = process.env.O8_TERMINAL_BENCH === '1'
   ? new TerminalWorkloadStats()
   : null;
@@ -5030,7 +5031,8 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           channel: 'orchestrator',
           event: 'status',
           data: {
-            status: leadReceipt.lead.status,
+            status: 'busy',
+            leadStatus: leadReceipt.lead.status,
             repoPath,
             threadId,
             backend: leadReceipt.lead.routing.backend,
@@ -5139,13 +5141,32 @@ async function sendLeadTerminalStatus(
       waitMs: Math.min(30_000, deadline - Date.now()),
     });
     cursor = receipt.cursor;
-    const status = receipt.requestedTurn?.status;
-    if (!status || status === 'queued' || status === 'running') continue;
+    const leadStatus = receipt.lead.status;
+    const status = leadStatus === 'stopped' ? 'stopped' : receipt.requestedTurn?.status;
+    if (!status || status === 'queued' || status === 'running' || status === 'waiting_workers') continue;
+    const assistantText = receipt.requestedTurn?.resultText
+      ?? receipt.requestedTurn?.outcome?.summary
+      ?? receipt.requestedTurn?.error
+      ?? '';
+    if (assistantText) {
+      send(client, {
+        channel: 'orchestrator',
+        event: 'output',
+        data: {
+          text: assistantText,
+          repoPath: receipt.lead.repoPath,
+          threadId: receipt.lead.threadId,
+          backend: receipt.lead.routing.backend,
+          assistantMessageId: `lead-assistant-${receipt.requestedTurn?.id}`,
+        },
+      });
+    }
     send(client, {
       channel: 'orchestrator',
       event: 'status',
       data: {
-        status,
+        status: status === 'failed' || status === 'stopped' ? 'dead' : 'ready',
+        leadStatus: status,
         repoPath: receipt.lead.repoPath,
         threadId: receipt.lead.threadId,
         backend: receipt.lead.routing.backend,
@@ -7806,15 +7827,61 @@ const httpServer = createServer((req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'surfaceId and repoPath required' }));
           return;
         }
-        registerWatchedAgent(
-          body.surfaceId,
-          body.repoPath,
-          body.name ?? 'Unnamed agent',
-          body.prompt ?? '',
-          body.launchContext,
-        );
+        const surfaceId = body.surfaceId;
+        const repoPath = body.repoPath;
+        const priorWatch = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+        if (!priorWatch) {
+          registerWatchedAgent(
+            surfaceId,
+            repoPath,
+            body.name ?? 'Unnamed agent',
+            body.prompt ?? '',
+            body.launchContext,
+          );
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, watching: body.surfaceId }));
+        res.end(JSON.stringify({ ok: true, watching: surfaceId }));
+        void (async () => {
+          const [{ findLaneBySession }, { hasCurrentCleanWorkerExit, newestWorkerProcessExit, workerExitAttemptId }, { lookupOwnedActiveRunFresh }] = await Promise.all([
+            import('@/lib/lane/registry'),
+            import('@/lib/lane/worker-session-state'),
+            import('@/lib/runtimes/shared/owned-session-index'),
+          ]);
+          // A completed watch can remain through cleanup. Re-arm only for a
+          // different durable exit receipt or a proven newer active run.
+          const lane = findLaneBySession(surfaceId);
+          const attemptId = lane ? newestWorkerProcessExit(lane) : null;
+          const currentAttemptId = attemptId ? workerExitAttemptId(attemptId) : null;
+          const activeRun = priorWatch?.completionReported
+            ? await lookupOwnedActiveRunFresh(surfaceId)
+            : null;
+          const hasNewerExit = Boolean(currentAttemptId && currentAttemptId !== (priorWatch ? watchedAttemptIds.get(priorWatch) : undefined));
+          if (priorWatch && getWatchedAgents().find((agent) => agent.surfaceId === surfaceId) !== priorWatch) return;
+          if (priorWatch?.completionReported && (hasNewerExit || (activeRun && Object.keys(activeRun).length > 0))) {
+            registerWatchedAgent(
+              surfaceId,
+              repoPath,
+              body.name ?? priorWatch.name,
+              body.prompt ?? priorWatch.prompt,
+              body.launchContext ?? priorWatch.launchContext,
+            );
+          }
+          const currentWatch = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+          if (currentWatch && currentAttemptId) watchedAttemptIds.set(currentWatch, currentAttemptId);
+          if (
+            currentWatch
+            && getWatchedAgents().find((agent) => agent.surfaceId === surfaceId) === currentWatch
+            && lane
+            && await hasCurrentCleanWorkerExit(lane)
+            && getWatchedAgents().find((agent) => agent.surfaceId === surfaceId) === currentWatch
+            && (() => {
+              const currentExit = newestWorkerProcessExit(lane);
+              return currentExit && workerExitAttemptId(currentExit) === watchedAttemptIds.get(currentWatch);
+            })()
+          ) {
+            await ingestAgentCompletionSignal(surfaceId);
+          }
+        })().catch((error) => console.warn('[supervisor] post-watch completion reconciliation failed:', error));
       } catch {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
@@ -7849,12 +7916,20 @@ const httpServer = createServer((req, res) => {
             return;
           }
 
+          const { findLaneBySession } = await import('@/lib/lane/registry');
+          const lane = findLaneBySession(surfaceId);
+          const { newestWorkerProcessExit, workerExitAttemptId } = await import('@/lib/lane/worker-session-state');
+          const stampAttempt = () => {
+            const exit = lane ? newestWorkerProcessExit(lane) : null;
+            const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+            if (exit && watched) watchedAttemptIds.set(watched, workerExitAttemptId(exit));
+          };
+          stampAttempt();
           let ingested = await ingestAgentCompletionSignal(surfaceId);
           if (!ingested) {
-            const { findLaneBySession } = await import('@/lib/lane/registry');
-            const lane = findLaneBySession(surfaceId);
             if (lane && !isTerminalLaneStatus(lane.status)) {
               registerWatchedAgent(surfaceId, lane.repoPath, lane.label || lane.branch, '');
+              stampAttempt();
               ingested = await ingestAgentCompletionSignal(surfaceId);
             }
           }

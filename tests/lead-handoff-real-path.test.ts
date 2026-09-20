@@ -8,7 +8,7 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { dispatchWorkerHelper, fakeCodexScript, reviewWorkerHelper } from './fixtures/lead-handoff-scripts';
+import { fakeCodexScript, reviewWorkerHelper } from './fixtures/lead-handoff-scripts';
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
 vi.mock('@/lib/claude-code/warm-repl-pool', () => ({
   askClaudeWarm: vi.fn(async () => ''),
@@ -35,27 +35,32 @@ const briefPath = path.join(testHome, 'brief.json');
 const fakeCodex = path.join(testHome, '.local', 'bin', 'codex');
 const argsPath = path.join(testHome, 'codex-args.jsonl');
 const workerCapturePath = path.join(testHome, 'lead-worker.json');
+const workerMarkersPath = path.join(testHome, 'lead-worker-markers.jsonl');
 const reviewCapturePath = path.join(testHome, 'lead-review.json');
 const dispatchDebugPath = path.join(testHome, 'lead-dispatch-debug.json');
+const dispatchReadyPath = path.join(testHome, 'lead-dispatch-ready');
 const token = 'lead-handoff-operator-token-0123456789abcdef';
 const workerToken = 'lead-handoff-worker-token-0123456789abcdef';
 const originalEnv = {
   HOME: process.env.HOME,
   O8_DATA_DIR: process.env.O8_DATA_DIR,
   CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR,
+  CORTEX_IDE_OWNED_CODEX_ROOT: process.env.CORTEX_IDE_OWNED_CODEX_ROOT,
+  WS_TOKEN: process.env.WS_TOKEN,
   O8_CODEX_BIN: process.env.O8_CODEX_BIN,
   O8_TEST_LEAD_ARGS: process.env.O8_TEST_LEAD_ARGS,
   O8_CRASH_SURVIVABLE_WORKERS: process.env.O8_CRASH_SURVIVABLE_WORKERS,
   O8_STORAGE_RESERVE_RATIO: process.env.O8_STORAGE_RESERVE_RATIO,
   O8_STORAGE_RESERVE_FLOOR_GB: process.env.O8_STORAGE_RESERVE_FLOOR_GB,
   O8_CLAUDE_CODE_BIN: process.env.O8_CLAUDE_CODE_BIN,
-  O8_TEST_DISPATCH_HELPER: process.env.O8_TEST_DISPATCH_HELPER,
   O8_TEST_REVIEW_HELPER: process.env.O8_TEST_REVIEW_HELPER,
   O8_TEST_CONNECTED_WORKER_FILE: process.env.O8_TEST_CONNECTED_WORKER_FILE,
+  O8_TEST_WORKER_MARKERS: process.env.O8_TEST_WORKER_MARKERS,
   O8_TEST_REVIEW_FILE: process.env.O8_TEST_REVIEW_FILE,
   O8_TEST_DISPATCH_DEBUG_FILE: process.env.O8_TEST_DISPATCH_DEBUG_FILE,
   O8_TEST_SOURCE_ROOT: process.env.O8_TEST_SOURCE_ROOT,
   O8_TEST_TARGET_REPO: process.env.O8_TEST_TARGET_REPO,
+  O8_TEST_DISPATCH_READY_FILE: process.env.O8_TEST_DISPATCH_READY_FILE,
 };
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(repoPath, { recursive: true });
@@ -64,6 +69,14 @@ writeFileSync(path.join(dataDir, 'worker-token'), `${workerToken}\n`, 'utf8');
 process.env.HOME = testHome;
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+// The owned-session adapter captures this root during module initialization.
+// Keep the Vitest parent and the separately spawned WS supervisor on one
+// explicit root before either imports runtime code.
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = path.join(dataDir, 'owned-codex');
+// ws-auth caches its data-dir at import time. Pin the credential explicitly so
+// the test parent and the child WS supervisor authenticate the real completion
+// callback with the same token even if another setup module loaded ws-auth.
+process.env.WS_TOKEN = token;
 process.env.O8_CODEX_BIN = fakeCodex;
 process.env.O8_TEST_LEAD_ARGS = argsPath;
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
@@ -71,19 +84,23 @@ process.env.O8_STORAGE_RESERVE_RATIO = '0.000001';
 process.env.O8_STORAGE_RESERVE_FLOOR_GB = '0.001';
 process.env.O8_CLAUDE_CODE_BIN = fakeCodex;
 const leadRoute = await import('@/app/api/orchestrator/lead/route');
-const { __resetLeadRuntimeForTests, getLeadStatus, queueLeadReviewContinuation } = await import('@/lib/orchestrator/lead-lifecycle');
+const { __resetLeadRuntimeForTests, getLeadStatus, queueLeadReviewContinuation, queueLeadSupervisorReturn, sendLead } = await import('@/lib/orchestrator/lead-lifecycle');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { panelGateMiddleware } = await import('@/middleware');
 const { readOrchestratorBackendSessionId, readOrchestratorThreadMessages } = await import('@/lib/mobile/orchestrator-thread-history');
 const { probeMetadataLockProcessIdentitySync } = await import('@/lib/worktree/metadata-lock-process-identity');
-const { updateLane } = await import('@/lib/lane/registry');
+const { appendEvent, createLane, updateLane } = await import('@/lib/lane/registry');
 const { withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+const { addRepo } = await import('@/lib/repos/registry');
+const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+const { findLaneByPacket } = await import('@/lib/lane/registry');
 
 let apiServer: Server | null = null;
 let apiPort = 0;
 let wsPort = 0;
 let wsProcess: ChildProcess | null = null;
 let wsOutput = '';
+let retainDiagnosticFixture = false;
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -210,13 +227,14 @@ beforeAll(async () => {
   }), 'utf8');
   writeFileSync(fakeCodex, fakeCodexScript, 'utf8');
   chmodSync(fakeCodex, 0o755);
-  process.env.O8_TEST_DISPATCH_HELPER = dispatchWorkerHelper;
   process.env.O8_TEST_REVIEW_HELPER = reviewWorkerHelper;
   process.env.O8_TEST_CONNECTED_WORKER_FILE = workerCapturePath;
+  process.env.O8_TEST_WORKER_MARKERS = workerMarkersPath;
   process.env.O8_TEST_REVIEW_FILE = reviewCapturePath;
   process.env.O8_TEST_DISPATCH_DEBUG_FILE = dispatchDebugPath;
   process.env.O8_TEST_SOURCE_ROOT = process.cwd();
   process.env.O8_TEST_TARGET_REPO = repoPath;
+  process.env.O8_TEST_DISPATCH_READY_FILE = dispatchReadyPath;
   execFileSync(process.execPath, [path.join(process.cwd(), 'cli/esbuild.config.mjs')], { cwd: process.cwd(), stdio: 'ignore' });
 
   apiServer = createServer(async (request, response) => {
@@ -285,7 +303,7 @@ afterAll(async () => {
     apiServer.close((error) => error ? reject(error) : resolveClose());
   });
   closeDb();
-  rmSync(testHome, { recursive: true, force: true });
+  if (!retainDiagnosticFixture) rmSync(testHome, { recursive: true, force: true });
   for (const [key, previous] of Object.entries(originalEnv)) {
     if (previous === undefined) delete process.env[key];
     else process.env[key] = previous;
@@ -465,6 +483,59 @@ describe('persistent lead handoff real path', () => {
     expect(readArgs()).toHaveLength(callCount);
   });
 
+  it('rejects semantic idempotency conflicts while replaying an unchanged admission', async () => {
+    const lead = getSqlite().prepare(`SELECT id FROM orchestrator_leads WHERE start_key = 'lead-start-main'`).get() as { id: string };
+    const callsBefore = readArgs().length;
+    const input = {
+      leadId: lead.id,
+      message: 'Preserve this exact durable request.',
+      displayMessage: 'Visible durable request.',
+      permissionMode: 'full' as const,
+      idempotencyKey: 'semantic-idempotency-replay',
+    };
+    const admitted = sendLead(input);
+    const replayed = sendLead(input);
+    expect(replayed.admittedTurnId).toBe(admitted.admittedTurnId);
+    expect(() => sendLead({ ...input, permissionMode: 'plan' as const })).toThrow(/idempotency key/i);
+    expect(getSqlite().prepare(`
+      SELECT COUNT(*) AS count FROM orchestrator_lead_turns
+      WHERE lead_id = ? AND idempotency_key = 'semantic-idempotency-replay'
+    `).get(lead.id)).toEqual({ count: 1 });
+    expect(readArgs()).toHaveLength(callsBefore);
+    await settled(lead.id);
+    expect(readArgs()).toHaveLength(callsBefore + 1);
+  }, 10_000);
+
+  it('returns live supervisor context once and consumes it after the lead stops', async () => {
+    const started = await runCli(startArgs('live-supervisor-return'));
+    const receipt = JSON.parse(started.stdout) as LeadCliReceipt;
+    await settled(receipt.lead.id);
+    const sourceTurnId = receipt.admittedTurnId!;
+    const mission = await createMission({
+      issues: [{ number: 2541, title: 'Live context fixture', body: 'No exit receipt.', url: '' }],
+      repoPath, runtime: 'codex', constraints: '', orchestratorThreadId: receipt.lead.threadId,
+      orchestratorTurnId: `lead-assistant-${sourceTurnId}`,
+    });
+    const packet = mission.packets[0];
+    const lane = createLane({
+      repoPath, branch: 'live-supervisor-context', runtime: 'codex', packetId: packet.id,
+      sessionKey: 'fixture-live-supervisor-context', label: 'Live context fixture',
+    });
+    updateLane(lane.id, { status: 'running' }, 'system', { reason: 'fixture live worker' });
+    const message = '[SUPERVISOR] Agent "fixture" (fixture-live-supervisor-context) — STUCK for 1s';
+    const operatorTurnCount = (getSqlite().prepare(`
+      SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND kind = 'operator'
+    `).get(receipt.lead.id) as { count: number }).count;
+    expect(queueLeadSupervisorReturn(repoPath, message)).toBe(true);
+    expect(queueLeadSupervisorReturn(repoPath, message)).toBe(true);
+    expect(getSqlite().prepare(`
+      SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND kind = 'operator'
+    `).get(receipt.lead.id)).toEqual({ count: operatorTurnCount + 1 });
+    const stopped = await runCli(['lead', 'stop', receipt.lead.id, '--reason', 'live supervisor return proof']);
+    expect(stopped.exitCode, stopped.stderr).toBe(0);
+    expect(queueLeadSupervisorReturn(repoPath, message)).toBe(true);
+  }, 10_000);
+
   it('preserves an interrupted turn and requires an explicit recovery send', async () => {
     const lead = getSqlite().prepare(`SELECT id FROM orchestrator_leads WHERE start_key = 'lead-start-main'`).get() as { id: string };
     const latest = getSqlite().prepare(
@@ -495,29 +566,71 @@ describe('persistent lead handoff real path', () => {
   }, 10_000);
 
   it('dispatches a real worker and returns its production review wake to the same lead', async () => {
-    const lead = getSqlite().prepare(
-      `SELECT id, thread_id AS threadId FROM orchestrator_leads WHERE start_key = 'lead-start-main'`,
-    ).get() as { id: string; threadId: string };
+    const started = await runCli(startArgs('dispatch-real-worker-start'));
+    expect(started.exitCode, started.stderr).toBe(0);
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    expect((await settled(lead.id)).lead.status).toBe('completed');
     rmSync(workerCapturePath, { force: true });
+    rmSync(workerMarkersPath, { force: true });
     rmSync(reviewCapturePath, { force: true });
+    rmSync(dispatchReadyPath, { force: true });
     const sent = await runCli([
       'lead', 'send', lead.id, '--message', '[fixture:dispatch-worker]',
       '--idempotency-key', 'dispatch-real-worker',
     ]);
     expect(sent.exitCode, sent.stderr).toBe(0);
-    await vi.waitFor(() => expect(existsSync(workerCapturePath)).toBe(true), { timeout: 20_000 });
-    const launchedWorker = JSON.parse(readFileSync(workerCapturePath, 'utf8')) as { sessionKey: string };
-    const completion = await fetch(`http://127.0.0.1:${wsPort}/supervisor/completed`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ surfaceId: launchedWorker.sessionKey }),
+    const waitedPromise = runCli(['lead', 'wait', lead.id, '--turn',
+      (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '40s']);
+    const leadTurnId = (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!;
+    const [{ getOrCreateWsToken }, { resolvePortInfo }] = await Promise.all([
+      import('@/lib/ws-auth'),
+      import('@/lib/panel/api-port'),
+    ]);
+    const completionPushes: Array<{ url: string; status: number }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const response = await originalFetch(input, init);
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/supervisor/completed')) completionPushes.push({ url, status: response.status });
+      return response;
+    };
+    expect(getOrCreateWsToken() === token).toBe(true);
+    expect(resolvePortInfo().wsPort).toBe(wsPort);
+    await addRepo(repoPath);
+    const mission = await createMission({
+      issues: [{ number: 2541, title: 'Persistent lead worker fixture', body: 'Write the deterministic proof file.', url: '' }],
+      repoPath,
+      runtime: 'codex',
+      constraints: '',
+      orchestratorThreadId: lead.threadId,
+      orchestratorTurnId: `lead-assistant-${leadTurnId}`,
     });
-    expect(completion.status).toBe(200);
-    expect(await completion.json()).toMatchObject({ ok: true, ingested: true });
-    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '40s']);
+    await dispatchMission({ missionId: mission.missionId });
+    const packetId = mission.packets[0].id;
+    await vi.waitFor(() => expect(findLaneByPacket(packetId)?.sessionKey).toBeTruthy(), { timeout: 10_000 });
+    const lane = findLaneByPacket(packetId)!;
+    expect(lane.worktreePath).toBeTruthy();
+    const proofPath = path.join(lane.worktreePath!, 'lead-worker-proof.txt');
+    await vi.waitFor(() => expect(existsSync(proofPath)).toBe(true), { timeout: 10_000 });
+    writeFileSync(workerCapturePath, JSON.stringify({
+      missionId: mission.missionId,
+      packetId,
+      laneId: lane.id,
+      sessionKey: lane.sessionKey,
+      worktreePath: lane.worktreePath,
+      threadId: lead.threadId,
+      turnId: `lead-assistant-${leadTurnId}`,
+    }));
+    writeFileSync(dispatchReadyPath, 'ready');
+    await vi.waitFor(() => expect(existsSync(workerCapturePath)).toBe(true), { timeout: 20_000 });
+    const waited = await waitedPromise;
+    globalThis.fetch = originalFetch;
+    if (waited.exitCode !== 0) {
+      retainDiagnosticFixture = true;
+    }
     expect(
       waited.exitCode,
-      `${waited.stderr}\nstatus:\n${JSON.stringify(getLeadStatus(lead.id))}\nprovider calls:\n${JSON.stringify(readArgs())}\nworker:\n${existsSync(workerCapturePath) ? readFileSync(workerCapturePath, 'utf8') : '(missing)'}\nreview:\n${existsSync(reviewCapturePath) ? readFileSync(reviewCapturePath, 'utf8') : '(missing)'}\nws tail:\n${wsOutput.slice(-8_000)}`,
+      `${waited.stderr}\ncompletion pushes:\n${JSON.stringify(completionPushes)}\nstatus:\n${JSON.stringify(getLeadStatus(lead.id))}\nprovider calls:\n${JSON.stringify(readArgs())}\nworker:\n${existsSync(workerCapturePath) ? readFileSync(workerCapturePath, 'utf8') : '(missing)'}\nreview:\n${existsSync(reviewCapturePath) ? readFileSync(reviewCapturePath, 'utf8') : '(missing)'}\nws tail:\n${wsOutput.slice(-8_000)}`,
     ).toBe(0);
     const terminal = JSON.parse(waited.stdout) as LeadCliReceipt;
     expect(
@@ -536,12 +649,45 @@ describe('persistent lead handoff real path', () => {
     expect(worker.turnId).toBe((JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId?.replace('lead-turn-', 'lead-assistant-lead-turn-'));
     expect(existsSync(reviewCapturePath)).toBe(true);
     const review = JSON.parse(readFileSync(reviewCapturePath, 'utf8')) as {
+      packetId: string;
       review: { recorded: boolean };
     };
+    expect(review.packetId).toBe(worker.packetId);
     expect(review.review.recorded).toBe(true);
     expect(terminal.lead.status).toBe('needs_approval');
     expect(readArgs().filter((args) => args[0] === 'exec').at(-1)?.slice(0, 3))
       .toEqual(['exec', 'resume', 'fixture-persistent-lead-thread']);
+
+    const reviewCount = () => (getSqlite().prepare(`
+      SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND kind = 'review'
+    `).get(lead.id) as { count: number }).count;
+    const sameAttemptWatches = await Promise.all([1, 2].map(() => fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ surfaceId: lane.sessionKey, repoPath, name: lane.label, prompt: 'duplicate' }),
+    })));
+    expect(sameAttemptWatches.map((response) => response.status)).toEqual([200, 200]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reviewCount()).toBe(1);
+    expect(queueLeadReviewContinuation({
+      repoPath, packetId: worker.packetId, laneId: worker.laneId, label: 'duplicate natural return',
+    })).toBe(true);
+    expect(reviewCount()).toBe(1);
+    appendEvent(worker.laneId, 'runtime_process_exit', 'system', {
+      surfaceId: lane.sessionKey,
+      runId: 'fixture-successor-finished-run',
+      exitCode: 0,
+      signal: null,
+      classification: 'clean-exit',
+      runtimeOutcome: 'finished',
+    });
+    const successorWatch = await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ surfaceId: lane.sessionKey, repoPath, name: lane.label, prompt: 'successor' }),
+    });
+    expect(successorWatch.status).toBe(200);
+    await vi.waitFor(() => expect(reviewCount()).toBe(2), { timeout: 10_000 });
 
     updateLane(worker.laneId, { status: 'failed' }, 'system', { reason: 'retired test generation' });
     await withMissionRegistryState(worker.missionId, (state) => {
@@ -620,7 +766,8 @@ describe('persistent lead handoff real path', () => {
     expect(providerCall.at(-1)).toContain('[fixture:wire-full] private execution directive');
     expect(readOrchestratorThreadMessages(lead.threadId).filter((entry) => entry.role === 'user').at(-1)?.content)
       .toBe('Visible operator request.');
-    await vi.waitFor(() => expect(JSON.stringify(wsEvents)).toContain('"status":"completed"'), { timeout: 5_000 });
+    await vi.waitFor(() => expect(JSON.stringify(wsEvents)).toContain('"leadStatus":"completed"'), { timeout: 5_000 });
+    expect(JSON.stringify(wsEvents)).toContain('"status":"ready"');
 
     const turnsBeforeAttachment = (getSqlite().prepare(
       'SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ?',

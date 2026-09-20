@@ -5,7 +5,8 @@ import { getSqlite } from '@/lib/db';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
-import { findLaneBySession, findLatestLaneByPacket, listLanes } from '@/lib/lane/registry';
+import { findLaneBySession, findLatestLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { newestWorkerProcessExit, workerExitAttemptId } from '@/lib/lane/worker-session-state';
 import {
   appendMobileOrchestratorUserMessage,
   markMobileOrchestratorThreadFailed,
@@ -380,6 +381,7 @@ function admitTurn(input: {
   permissionMode?: 'full' | 'plan';
   attachments?: LeadAttachment[];
   brief?: LeadBrief;
+  rootTurnId?: string;
 }): TurnRow {
   const sqlite = getSqlite();
   const existing = turnByKey(input.lead.id, input.key);
@@ -388,7 +390,9 @@ function admitTurn(input: {
     const attachmentsJson = input.attachments?.length ? JSON.stringify(input.attachments) : null;
     if (existing.message !== input.message || (existing.display_message || existing.message) !== displayMessage
       || existing.permission_mode !== (input.permissionMode ?? 'full')
-      || existing.attachments_json !== attachmentsJson) {
+      || existing.attachments_json !== attachmentsJson
+      || existing.root_turn_id !== (input.rootTurnId ?? null)
+      || existing.brief_json !== (input.brief ? JSON.stringify(input.brief) : null)) {
       throw new LeadLifecycleError(
         'The idempotency key is already bound to a different message.',
         'lead_idempotency_conflict',
@@ -404,11 +408,11 @@ function admitTurn(input: {
   const now = Date.now();
   const inserted = sqlite.prepare(`
     INSERT INTO orchestrator_lead_turns
-      (id, lead_id, idempotency_key, ordinal, kind, message, display_message,
+      (id, lead_id, root_turn_id, idempotency_key, ordinal, kind, message, display_message,
        permission_mode, attachments_json, brief_json, status, created_at)
-    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?
     FROM orchestrator_leads WHERE id = ? AND status != 'stopped'
-  `).run(turnId, input.lead.id, input.key, ordinal, input.kind, input.message,
+  `).run(turnId, input.lead.id, input.rootTurnId ?? null, input.key, ordinal, input.kind, input.message,
     input.displayMessage ?? input.message, input.permissionMode ?? 'full',
     input.attachments?.length ? JSON.stringify(input.attachments) : null,
     input.brief ? JSON.stringify(input.brief) : null, now, input.lead.id);
@@ -433,12 +437,15 @@ function insertTurn(input: Parameters<typeof admitTurn>[0]): TurnRow {
   } catch (error) {
     const admitted = turnByKey(input.lead.id, input.key);
     if (!admitted) throw error;
-    if (admitted.message !== input.message) {
-      throw new LeadLifecycleError(
-        'The idempotency key is already bound to a different message.',
-        'lead_idempotency_conflict',
-        409,
-      );
+    const displayMessage = input.displayMessage ?? input.message;
+    const attachmentsJson = input.attachments?.length ? JSON.stringify(input.attachments) : null;
+    if (admitted.message !== input.message
+      || (admitted.display_message || admitted.message) !== displayMessage
+      || admitted.permission_mode !== (input.permissionMode ?? 'full')
+      || admitted.attachments_json !== attachmentsJson
+      || admitted.root_turn_id !== (input.rootTurnId ?? null)
+      || admitted.brief_json !== (input.brief ? JSON.stringify(input.brief) : null)) {
+      throw error;
     }
     turn = admitted;
   }
@@ -673,7 +680,7 @@ export function stopLead(leadIdRaw: string, reasonRaw?: string) {
     getSqlite().prepare(`
       UPDATE orchestrator_lead_turns
       SET status = 'stopped', error = ?, finished_at = ?
-      WHERE lead_id = ? AND status IN ('queued', 'running')
+      WHERE lead_id = ? AND status IN ('queued', 'running', 'waiting_workers')
     `).run(reason, now, leadId);
     event(leadId, lead.current_turn_id, 'lead', 'stopped', reason);
   })();
@@ -709,6 +716,15 @@ export function queueLeadWorkerReturn(input: {
   ).get(packet.orchestratorThreadId) as LeadRow | undefined;
   if (!lead) return false;
   if (lead.status === 'stopped') return true;
+  const lane = listLanes().find((candidate) => candidate.id === input.laneId) ?? null;
+  if (!lane) return false;
+  const workerExit = input.returnKind === 'review' || input.returnKind === 'failed'
+    ? newestWorkerProcessExit(lane)
+    : null;
+  const latestEvent = getLaneEvents(lane.id, 1)[0] ?? null;
+  const attemptId = workerExit
+    ? workerExitAttemptId(workerExit)
+    : latestEvent ? `event:${latestEvent.id}` : `turn:${packet.orchestratorTurnId ?? input.packetId}`;
   let repoPath: string | null = null;
   try { repoPath = realpathSync(input.repoPath); } catch { /* handled below */ }
   if (lead.repo_path !== repoPath) {
@@ -721,16 +737,21 @@ export function queueLeadWorkerReturn(input: {
     event(lead.id, null, 'review', 'blocked', message);
     return true;
   }
-  const message = [
-    `[FLEET] Lane "${input.label}" (${input.laneId}, packet ${input.packetId}) returned ${input.returnKind}.`,
-    input.detail,
-  ].join('\n');
+  const message = [`[FLEET] Lane "${input.label}" (${input.laneId}, packet ${input.packetId}) returned ${input.returnKind}.`, input.detail].join('\n');
   try {
+    const sourceTurnId = packet.orchestratorTurnId?.startsWith('lead-assistant-')
+      ? packet.orchestratorTurnId.slice('lead-assistant-'.length)
+      : null;
+    const sourceTurn = sourceTurnId ? getSqlite().prepare('SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND id = ?').get(lead.id, sourceTurnId) as TurnRow | undefined : undefined;
+    if (!sourceTurn) {
+      throw new LeadLifecycleError('Worker return did not identify its originating persistent lead turn.', 'lead_worker_return_unbound', 409);
+    }
     insertTurn({
       lead,
-      key: `worker-return:${input.laneId}`,
+      key: `worker-return:${input.laneId}:${attemptId}:${input.returnKind}`,
       kind: input.returnKind === 'review' ? 'review' : 'operator',
       message,
+      rootTurnId: sourceTurn.root_turn_id ?? sourceTurn.id,
     });
   } catch (error) {
     const detail = `Worker review return could not be admitted: ${error instanceof Error ? error.message : String(error)}`;

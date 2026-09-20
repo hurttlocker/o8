@@ -48,7 +48,7 @@ Every send key is durable. Retrying the same key and message returns the admitte
 
 The thoughts composer shares this admission only after its thread is bound to a persistent lead; ordinary unbound thoughts chats retain the legacy writer. A bound turn stores the full model-facing message separately from the cleaned user bubble, preserves Full versus Plan permission mode, and emits persisted queued and terminal status receipts. Image attachments are admitted only when the selected persistent backend supports them; unsupported attachments fail before the turn is stored or launched.
 
-`status` and `wait` read SQLite receipts only and never call the lead model. `wait --turn` follows the admitted turn, so a prior terminal receipt cannot hide a newer queued turn. It long-polls in bounded 30-second slices and can resume from its cursor. Full conversation content remains in the normal thoughts transcript; compact receipts return only a bounded result preview.
+`status` and `wait` read SQLite receipts only and never call the lead model. `wait --turn` follows the admitted turn through any worker-review continuation rooted in that turn, so it returns that task's reviewed handback rather than remaining on its earlier `waiting_workers` receipt. A later, unrelated queued turn cannot replace that result. It long-polls in bounded 30-second slices and can resume from its cursor. Full conversation content remains in the normal thoughts transcript; compact receipts return only a bounded result preview.
 
 ## Worker review and terminal states
 
@@ -62,7 +62,7 @@ Human approval remains separate. A lead can surface `needs_approval`, but it can
 o8 lead stop <lead-id> --reason "Operator stopped this bounded run."
 ```
 
-Stop is persisted before the live lead process is interrupted. Queued and running lead turns become `stopped`, new sends are refused, and restart recovery cannot relaunch the lead. Stop does not implicitly kill already dispatched child workers; their later returns are consumed without waking the stopped lead. If a process dies during a turn without a stop, o8 preserves that turn as `interrupted`, marks the lead `blocked`, and requires an explicit new `lead send` to recover; it never guesses whether the interrupted provider caused side effects.
+Stop is persisted before the live lead process is interrupted. Queued, running, and `waiting_workers` lead turns become `stopped`, new sends are refused, and restart recovery cannot relaunch the lead. Stop does not implicitly kill already dispatched child workers; their later returns are consumed without waking the stopped lead. If a process dies during a turn without a stop, o8 preserves that turn as `interrupted`, marks the lead `blocked`, and requires an explicit new `lead send` to recover; it never guesses whether the interrupted provider caused side effects.
 
 Only the operator principal can use this route. Worker, paired-device, spectator, and anonymous credentials are denied by the default-deny middleware.
 

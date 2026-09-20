@@ -490,6 +490,30 @@ describe('orchestrator socket — server turn-truth reconcile', () => {
 });
 
 describe('orchestrator socket — replay seq cursor', () => {
+  it('renders a persistent lead terminal reply before accepting its compatible ready status', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg], threadId: 'thoughts-lead-1' });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'output',
+      data: {
+        text: 'The reviewed worker result is ready.',
+        threadId: 'thoughts-lead-1',
+        backend: 'codex',
+        assistantMessageId: 'lead-assistant-review-1',
+      },
+    });
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'ready', leadStatus: 'needs_approval', threadId: 'thoughts-lead-1' },
+    });
+
+    expect(h.statusRef.current).toBe('ready');
+    expect(h.currentAssistantRef.current).toBeNull();
+    expect(h.flushCurrentAssistant).toHaveBeenCalled();
+  });
+
   it('advances the cursor on a seq-stamped event and renders it', () => {
     const h = makeHarness({ status: 'busy', messages: [userMsg] });
 

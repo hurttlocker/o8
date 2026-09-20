@@ -21,7 +21,7 @@ describe('orchestrator lead migration', () => {
       ]);
       const turnColumns = sqlite.prepare('PRAGMA table_info(orchestrator_lead_turns)').all() as Array<{ name: string }>;
       expect(turnColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
-        'display_message', 'permission_mode', 'attachments_json',
+        'display_message', 'permission_mode', 'attachments_json', 'root_turn_id',
       ]));
 
       sqlite.prepare(`

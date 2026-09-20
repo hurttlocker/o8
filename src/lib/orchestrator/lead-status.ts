@@ -76,14 +76,21 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
   const latestTurn = sqlite.prepare(
     'SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? ORDER BY ordinal DESC LIMIT 1',
   ).get(leadId) as TurnRow | undefined;
-  const requestedTurn = requestedTurnId
-    ? sqlite.prepare(
-      'SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND id = ?',
-    ).get(leadId, requestedTurnId) as TurnRow | undefined
+  const requestedRoot = requestedTurnId
+    ? sqlite.prepare('SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND id = ?')
+      .get(leadId, requestedTurnId) as TurnRow | undefined
     : latestTurn;
-  if (requestedTurnId && !requestedTurn) {
+  if (requestedTurnId && !requestedRoot) {
     throw new LeadLifecycleError('Lead turn not found.', 'lead_turn_not_found', 404);
   }
+  const rootTurnId = requestedRoot ? (requestedRoot.root_turn_id ?? requestedRoot.id) : null;
+  const requestedTurn = rootTurnId
+    ? sqlite.prepare(`
+      SELECT * FROM orchestrator_lead_turns
+      WHERE lead_id = ? AND (id = ? OR root_turn_id = ?)
+      ORDER BY ordinal DESC LIMIT 1
+    `).get(leadId, rootTurnId, rootTurnId) as TurnRow | undefined
+    : null;
   const queueDepth = (sqlite.prepare(
     `SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'queued'`,
   ).get(leadId) as { count: number }).count;
@@ -94,6 +101,7 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
   const cursor = events.length > 0 ? Number(events[events.length - 1].cursor) : Math.max(0, afterCursor);
   const turnReceipt = (turn: TurnRow) => ({
     id: turn.id,
+    rootTurnId: turn.root_turn_id ?? turn.id,
     ordinal: turn.ordinal,
     kind: turn.kind,
     status: turn.status,
@@ -102,6 +110,7 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
       summary: turn.outcome_summary,
       evidence: turn.outcome_evidence_json ? JSON.parse(turn.outcome_evidence_json) as unknown : [],
     } : null,
+    resultText: turn.result_text?.slice(0, 2_000) ?? null,
     error: turn.error?.slice(0, 2_000) ?? null,
     errorTruncated: Boolean(turn.error && turn.error.length > 2_000),
     createdAt: turn.created_at,

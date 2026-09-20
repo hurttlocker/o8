@@ -189,7 +189,9 @@ async function wait(mode: OutputMode, args: string[]): Promise<number> {
     latest = response.data as LeadResponse;
     turnId ??= latest.requestedTurn?.id;
     cursor = latest.cursor;
-    const terminalStatus = latest.requestedTurn?.status ?? latest.lead.status;
+    const terminalStatus = latest.lead.status === 'stopped'
+      ? 'stopped'
+      : latest.requestedTurn?.status ?? latest.lead.status;
     if (terminal.has(terminalStatus) || terminalStatus === 'interrupted') {
       printLead(mode, latest);
       return 0;

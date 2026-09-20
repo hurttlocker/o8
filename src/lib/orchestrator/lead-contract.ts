@@ -85,6 +85,7 @@ export interface LeadRow {
 export interface TurnRow {
   id: string;
   lead_id: string;
+  root_turn_id: string | null;
   idempotency_key: string;
   ordinal: number;
   kind: 'operator' | 'review' | 'worker_return';
