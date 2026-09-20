@@ -216,6 +216,29 @@ async function createMissionViaRoute(body: Record<string, unknown>) {
   return response;
 }
 
+async function createMissionViaMcp(body: Record<string, unknown>) {
+  const route = await import('@/app/api/orchestrator/create-mission/route');
+  vi.stubGlobal('fetch', vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const requestBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    return route.POST(routeRequest('/api/orchestrator/create-mission', requestBody));
+  }));
+  const { handleCreateMission } = await import('@/lib/mcp/operator-handlers/mission');
+  return handleCreateMission(body);
+}
+
+function stubExternalFetch() {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })));
+}
+
+function missionResultFromMcp(result: { content: Array<{ type: string; text?: string }> }): { missionId: string; packetId: string } {
+  const text = result.content.find((entry) => entry.type === 'text')?.text ?? '{}';
+  const payload = JSON.parse(text) as { missionId?: string; packets?: Array<{ id?: string }> };
+  return { missionId: payload.missionId ?? '', packetId: payload.packets?.[0]?.id ?? '' };
+}
+
 async function rejectEffortPin(body: Record<string, unknown>) {
   const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
   const beforeMissionId = readOrchestratorControlPlaneState().missionId ?? null;
@@ -249,10 +272,7 @@ process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tok
 `;
   writeFileSync(fakeCodexPath, fixture, 'utf8');
   chmodSync(fakeCodexPath, 0o755);
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })));
+  stubExternalFetch();
 });
 
 beforeEach(async () => {
@@ -288,6 +308,73 @@ afterAll(async () => {
 });
 
 describe('mission effort pin — launch boundary', () => {
+  it('MCP create_mission keeps an explicit medium pin through persistence and the Codex launch', async () => {
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    await updateOperatorDefaults({ codexWorkerEffort: 'xhigh' });
+    const repoPath = makeRepo();
+    try {
+      const result = await createMissionViaMcp({
+        repoPath,
+        issues_inline: [{ title: 'MCP medium effort survives', body: 'touch effort pin' }],
+        runtime: 'codex',
+        model: 'gpt-5.6-terra',
+        requestedEffort: 'medium',
+        dispatch: false,
+      });
+      expect(result.isError).not.toBe(true);
+      const { missionId, packetId } = missionResultFromMcp(result);
+      expect(missionId).toBeTruthy();
+
+      const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+      const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId);
+      expect(packet?.workerRouting).toMatchObject({ requestedEffort: 'medium', selectedEffort: 'medium' });
+
+      // The MCP transport is complete. Restore the normal external-call fixture
+      // before the real scheduler starts its unrelated telemetry work.
+      stubExternalFetch();
+      const { dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+      const before = readArgvCalls().length;
+      await dispatchMission({ missionId });
+      const launch = await waitForLaunchContaining(before, 'MCP medium effort survives');
+      expect(launch).toContain('model_reasoning_effort=medium');
+      expect(launch).not.toContain('model_reasoning_effort=xhigh');
+    } finally {
+      stubExternalFetch();
+    }
+  }, 30_000);
+
+  it('MCP create_mission keeps omitted effort at the runtime default and rejects malformed pins', async () => {
+    const repoPath = makeRepo();
+    try {
+      const omitted = await createMissionViaMcp({
+        repoPath,
+        issues_inline: [{ title: 'MCP omitted effort parity', body: 'touch effort pin' }],
+        runtime: 'codex',
+        model: 'gpt-5.6-terra',
+        dispatch: false,
+      });
+      expect(omitted.isError).not.toBe(true);
+      const { packetId } = missionResultFromMcp(omitted);
+      const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+      expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === packetId)?.workerRouting)
+        .toMatchObject({ requestedEffort: null, selectedEffort: null });
+
+      const beforeMissionId = readOrchestratorControlPlaneState().missionId;
+      const malformed = await createMissionViaMcp({
+        repoPath,
+        issues_inline: [{ title: 'MCP malformed effort', body: 'must not persist' }],
+        runtime: 'codex',
+        requestedEffort: 'turbo',
+        dispatch: false,
+      });
+      expect(malformed.isError).toBe(true);
+      expect(malformed.content.find((entry) => entry.type === 'text')?.text).toContain('effort must be one of');
+      expect(readOrchestratorControlPlaneState().missionId).toBe(beforeMissionId);
+    } finally {
+      stubExternalFetch();
+    }
+  }, 30_000);
+
   it.each(['high', 'max', 'ultra'] as const)('route creation → persisted reload → dispatch → argv keeps Terra %s exact', async (requestedEffort) => {
     const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
     await updateOperatorDefaults({ codexWorkerEffort: 'xhigh' });
