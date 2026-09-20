@@ -1,6 +1,6 @@
 export type ClaudeCodeStreamJsonChatEvent =
-  | { type: 'delta'; text: string; blockIndex?: number; messageIndex?: number }
-  | { type: 'thinking'; text: string; blockIndex?: number; messageIndex?: number }
+  | { type: 'delta'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
+  | { type: 'thinking'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
   | { type: 'tool_call'; id?: string | null; name: string; status: 'calling' | 'running' | 'done'; args?: Record<string, unknown>; preview?: string }
   | { type: 'tool_result'; id?: string | null; name?: string; args?: Record<string, unknown>; output?: string; preview?: string }
   | {
@@ -198,6 +198,8 @@ export function createClaudeCodeStreamJsonParser(
   let streamedTextWithoutIndex = false;
   let streamedThinkingWithoutIndex = false;
   let messageIndex = 0;
+  let messageKey = 'stream:0';
+  let snapshotMessageOrdinal = 0;
   let lineBuffer = '';
   let planLineBuffer = '';
 
@@ -219,6 +221,7 @@ export function createClaudeCodeStreamJsonParser(
     events: ClaudeCodeStreamJsonParserEvent[],
     blockIndex?: number,
     markStreamedText = false,
+    emittedMessageKey = messageKey,
   ) => {
     if (!text) return;
     state.fullResponse += text;
@@ -230,7 +233,7 @@ export function createClaudeCodeStreamJsonParser(
       }
     }
     events.push({
-      type: 'delta', text, messageIndex,
+      type: 'delta', text, messageIndex, messageKey: emittedMessageKey,
       ...(typeof blockIndex === 'number' ? { blockIndex } : {}),
     });
     events.push(...emitPlanSteps(text));
@@ -356,6 +359,8 @@ export function createClaudeCodeStreamJsonParser(
 
     if (type === 'message_start') {
       messageIndex += 1;
+      const message = asRecord(event.message);
+      messageKey = `stream:${asString(message?.id) ?? messageIndex}`;
       streamedTextIndices.clear();
       streamedThinkingIndices.clear();
       streamedTextWithoutIndex = false;
@@ -372,7 +377,7 @@ export function createClaudeCodeStreamJsonParser(
         if (typeof blockIndex === 'number' && blockIndex >= 0) streamedThinkingIndices.add(blockIndex);
         else streamedThinkingWithoutIndex = true;
         events.push({
-          type: 'thinking', text: thinking, messageIndex,
+          type: 'thinking', text: thinking, messageIndex, messageKey,
           ...(typeof blockIndex === 'number' ? { blockIndex } : {}),
         });
         return events;
@@ -383,7 +388,7 @@ export function createClaudeCodeStreamJsonParser(
           if (typeof blockIndex === 'number' && blockIndex >= 0) streamedThinkingIndices.add(blockIndex);
           else streamedThinkingWithoutIndex = true;
           events.push({
-            type: 'thinking', text: summary, messageIndex,
+            type: 'thinking', text: summary, messageIndex, messageKey,
             ...(typeof blockIndex === 'number' ? { blockIndex } : {}),
           });
         }
@@ -401,7 +406,7 @@ export function createClaudeCodeStreamJsonParser(
         emitToolUse(block, events);
       } else if (block?.type === 'thinking') {
         events.push({
-          type: 'thinking', text: '', messageIndex,
+          type: 'thinking', text: '', messageIndex, messageKey,
           ...(typeof asNumber(event.index) === 'number' ? { blockIndex: asNumber(event.index) } : {}),
         });
       }
@@ -411,6 +416,10 @@ export function createClaudeCodeStreamJsonParser(
     if (type === 'assistant') {
       const message = asRecord(event.message);
       const content = message?.content;
+      const hasStreamedText = streamedTextWithoutIndex || streamedTextIndices.size > 0;
+      const snapshotKey = hasStreamedText
+        ? messageKey
+        : `snapshot:${asString(message?.id) ?? snapshotMessageOrdinal++}`;
       if (Array.isArray(content)) {
         content.forEach((rawBlock, blockIndex) => {
           const block = asRecord(rawBlock);
@@ -427,12 +436,12 @@ export function createClaudeCodeStreamJsonParser(
             // every non-SSE answer built from it (found live 2026-06-11 via
             // doubled `o8 ask` answers). If ANY text streamed this turn, the
             // replay is redundant — skip it entirely.
-            if (streamedTextWithoutIndex || streamedTextIndices.size > 0) return;
-            emitText(text, events, blockIndex);
+            if (hasStreamedText) return;
+            emitText(text, events, blockIndex, false, snapshotKey);
           } else if (block.type === 'thinking') {
             const thinking = asString(block.thinking) ?? asString(block.text);
             if (thinking && !streamedThinkingWithoutIndex && !streamedThinkingIndices.has(blockIndex)) {
-              events.push({ type: 'thinking', text: thinking, blockIndex, messageIndex });
+              events.push({ type: 'thinking', text: thinking, blockIndex, messageIndex, messageKey: snapshotKey });
             }
           } else if (block.type === 'tool_use') {
             emitToolUse(block, events);

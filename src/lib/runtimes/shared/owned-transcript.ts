@@ -134,5 +134,8 @@ export function ownedTailToRuntimeTranscript(
   const includeSinceEntry = options?.includeSinceEntry ?? tail.groups.some((group) => (
     group.entries.some((entry) => entry.label === 'claude-assistant')
   ));
-  return applyTranscriptWindow(entries, sinceId, limit, includeSinceEntry);
+  // Claude tool results can settle an earlier row after a later tool became
+  // the cursor. Return its bounded mutable window so ID-based clients replace
+  // every changed row instead of missing the earlier completion.
+  return applyTranscriptWindow(entries, includeSinceEntry ? undefined : sinceId, limit, includeSinceEntry);
 }

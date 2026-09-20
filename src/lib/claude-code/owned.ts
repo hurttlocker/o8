@@ -78,7 +78,7 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
 
   for (const event of events) {
     if (event.type === 'delta') {
-      const blockKey = `${event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
+      const blockKey = `${event.messageKey ?? event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
       let entry = assistantBlocks.get(blockKey);
       if (!entry) {
         entry = {
@@ -99,7 +99,7 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
     }
 
     if (event.type === 'thinking') {
-      const blockKey = `${event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
+      const blockKey = `${event.messageKey ?? event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
       let entry = thinkingBlocks.get(blockKey);
       if (!entry) {
         entry = {
@@ -122,7 +122,12 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
     if (event.type === 'done') {
       // The result is a terminal summary. When stream deltas already built the
       // answer it is a replay, not another visible assistant message.
-      if (!hasAssistantText && event.text) {
+      if (event.isError) {
+        entries.push({
+          id: `${run.id}:terminal-error`, kind: 'event', label: 'error',
+          text: event.text || 'Worker reported an error.', timestamp: run.startedAt,
+        });
+      } else if (!hasAssistantText && event.text) {
         entries.push({
           id: `${run.id}:message:result`,
           kind: 'message',
