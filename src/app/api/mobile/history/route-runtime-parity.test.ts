@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-mobile-history-runtime-'));
 const piRoot = join(dataDir, 'owned-pi');
 const qwenRoot = join(dataDir, 'owned-qwen');
+const claudeRoot = join(dataDir, 'owned-claude-code');
 const managedEnv = new Map<string, string | undefined>();
 
 function setManagedEnv(key: string, value: string) {
@@ -18,10 +19,13 @@ function setManagedEnv(key: string, value: string) {
 setManagedEnv('CORTEX_IDE_DATA_DIR', dataDir);
 setManagedEnv('O8_OWNED_PI_ROOT', piRoot);
 setManagedEnv('O8_OWNED_QWEN_ROOT', qwenRoot);
+setManagedEnv('CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT', claudeRoot);
 
 const { appendEvent, createLane } = await import('@/lib/lane/registry');
 const { getMobileSessionTranscript } = await import('@/lib/mobile/history');
 const { getRuntime } = await import('@/lib/runtimes/registry');
+const { mobileEntriesFromRuntimeTranscript } = await import('@/lib/mobile/history');
+const { transcriptStore } = await import('@/lib/transcripts/store');
 const { GET } = await import('./route');
 
 function historyRequest(sessionKey: string, limit = 50) {
@@ -120,6 +124,160 @@ describe('mobile history runtime transcript parity', () => {
     ]));
     expect(payload.transcript.find((entry) => entry.text === 'Pi persisted answer')?.timestamp)
       .toEqual(expect.any(Number));
+  });
+
+  it('coalesces persisted owned Claude deltas through history and incremental runtime reads', async () => {
+    const sessionKey = 'claude-code-owned:mobile-history-claude';
+    const answerId = 'run-mobile-history-claude:message:stream:0:1';
+    const answer = 'A `code` span stays whole.\n\n```ts\nconst value = 1;\n```';
+    const timestamp = writePersistedSession({
+      root: claudeRoot,
+      sessionKey,
+      prompt: 'Check persisted Claude transcript grouping',
+      runOutput: [
+        JSON.stringify({ type: 'system', session_id: 'thread-mobile-history-claude' }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Inspecting the stream.' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'A `co' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'de` span stays whole.\n\n```ts\ncon' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'st value = 1;\n```' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'fixture.ts' } } } }),
+        JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'fixture content' }] } }),
+      ].join('\n'),
+    });
+
+    const runtime = getRuntime('claude-code');
+    if (!runtime) throw new Error('Claude Code runtime is not registered.');
+    const [response, full] = await Promise.all([
+      GET(historyRequest(sessionKey)),
+      runtime.readTranscript(sessionKey),
+    ]);
+    const payload = await response.json() as { transcript: Array<{
+      id: string;
+      role: string;
+      text: string;
+      thinking?: string;
+      toolCalls?: unknown[];
+    }> };
+
+    expect(response.status).toBe(200);
+    expect(full.filter((entry) => entry.id === answerId)).toEqual([
+      expect.objectContaining({ text: answer }),
+    ]);
+    expect(payload.transcript.filter((entry) => entry.id === answerId)).toEqual([
+      expect.objectContaining({ role: 'assistant', text: answer }),
+    ]);
+    expect(payload.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'run-mobile-history-claude:thinking:stream:0:0', thinking: 'Inspecting the stream.' }),
+      expect.objectContaining({ text: '', toolCalls: [expect.objectContaining({ name: 'Read', status: 'done' })] }),
+    ]));
+
+    const sessionId = sessionKey.slice(sessionKey.indexOf(':') + 1);
+    const stdoutPath = join(claudeRoot, sessionId, 'runs', 'run.stdout.jsonl');
+    appendFileSync(stdoutPath, '\n' + [
+      JSON.stringify({
+        type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '\n- next item' } },
+      }),
+      JSON.stringify({ type: 'result', result: `${answer}\n- next item`, session_id: 'thread-mobile-history-claude' }),
+    ].join('\n') + '\n');
+    const incremental = await runtime.readTranscript(sessionKey, answerId, 100);
+    expect(incremental.filter((entry) => entry.id === answerId)).toEqual([
+      expect.objectContaining({ text: `${answer}\n- next item` }),
+    ]);
+    expect(incremental.filter((entry) => entry.id === answerId)).toHaveLength(1);
+    expect(full.find((entry) => entry.id === answerId)?.timestamp.toISOString()).toBe(timestamp);
+  });
+
+  it('keeps separate Claude messages when tool rounds reuse content-block index zero', async () => {
+    const sessionKey = 'claude-code-owned:mobile-history-claude-rounds';
+    writePersistedSession({
+      root: claudeRoot,
+      sessionKey,
+      prompt: 'Check two Claude tool rounds',
+      runOutput: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'First assistant message.' } } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tool-round-1', name: 'Read', input: { file_path: 'first.ts' } } } }),
+        JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-round-1', content: 'raw tool output must not render as Markdown' }] } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } }),
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Second assistant message.' } } }),
+        JSON.stringify({ type: 'result', result: 'Second assistant message.' }),
+      ].join('\n'),
+    });
+
+    const runtime = getRuntime('claude-code');
+    if (!runtime) throw new Error('Claude Code runtime is not registered.');
+    const entries = await runtime.readTranscript(sessionKey);
+    const visible = entries
+      .filter((entry) => entry.role !== 'user')
+      .map((entry) => ({ id: entry.id, text: entry.text, toolCalls: entry.toolCalls }));
+
+    expect(visible).toEqual([
+      expect.objectContaining({ id: 'run-mobile-history-claude-rounds:message:stream:1:0', text: 'First assistant message.' }),
+      expect.objectContaining({ text: '', toolCalls: [expect.objectContaining({ id: 'tool-round-1', name: 'Read', status: 'done' })] }),
+      expect.objectContaining({ id: 'run-mobile-history-claude-rounds:message:stream:2:0', text: 'Second assistant message.' }),
+    ]);
+  });
+
+  it.each([true, false])('replays out-of-order tool completion with assistant snapshots: %s', async (withSnapshots) => {
+    const sessionKey = 'claude-code-owned:mobile-history-claude-snapshots';
+    const runOutput = [
+      ...(withSnapshots ? [JSON.stringify({ type: 'assistant', message: { id: 'snapshot-one', content: [{ type: 'text', text: 'First snapshot.' }] } })] : []),
+      JSON.stringify({ type: 'tool_use', id: 'tool-one', name: 'Read', input: { file_path: 'one.ts' } }),
+      JSON.stringify({ type: 'tool_use', id: 'tool-two', name: 'Read', input: { file_path: 'two.ts' } }),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-two', content: 'two complete' }] } }),
+      ...(withSnapshots ? [JSON.stringify({ type: 'assistant', message: { id: 'snapshot-two', content: [{ type: 'text', text: 'Second snapshot.' }] } })] : []),
+    ].join('\n');
+    writePersistedSession({ root: claudeRoot, sessionKey, prompt: 'Check snapshot boundaries', runOutput });
+    const runtime = getRuntime('claude-code');
+    if (!runtime) throw new Error('Claude Code runtime is not registered.');
+    const first = await runtime.readTranscript(sessionKey, undefined, 100);
+    expect(first.filter((entry) => entry.text.endsWith('snapshot.')).map((entry) => entry.text))
+      .toEqual(withSnapshots ? ['First snapshot.', 'Second snapshot.'] : []);
+    const secondToolId = first.find((entry) => entry.toolCalls?.[0]?.id === 'tool-two')?.id;
+    if (!secondToolId) throw new Error('Second tool row is missing.');
+    const sessionId = sessionKey.slice(sessionKey.indexOf(':') + 1);
+    appendFileSync(join(claudeRoot, sessionId, 'runs', 'run.stdout.jsonl'), `\n${JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-one', content: 'one complete' }] } })}\n`);
+    const full = await runtime.readTranscript(sessionKey, undefined, 100);
+    const incremental = await runtime.readTranscript(sessionKey, secondToolId, 100);
+    transcriptStore.clear(sessionKey);
+    transcriptStore.mergeEntries(sessionKey, mobileEntriesFromRuntimeTranscript(first));
+    transcriptStore.mergeEntries(sessionKey, mobileEntriesFromRuntimeTranscript(incremental));
+    expect(transcriptStore.getSlice(sessionKey).messages).toEqual(mobileEntriesFromRuntimeTranscript(full));
+    transcriptStore.clear(sessionKey);
+  });
+
+  it('keeps a terminal error after streamed partial text', async () => {
+    const sessionKey = 'claude-code-owned:mobile-history-claude-error';
+    writePersistedSession({
+      root: claudeRoot, sessionKey, prompt: 'Check terminal error',
+      runOutput: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Partial response.' } } }),
+        JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution', result: 'Provider stopped.' }),
+      ].join('\n'),
+    });
+    const runtime = getRuntime('claude-code');
+    if (!runtime) throw new Error('Claude Code runtime is not registered.');
+    const entries = await runtime.readTranscript(sessionKey);
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', text: 'Partial response.' }),
+      expect.objectContaining({ role: 'system', text: 'Provider stopped.' }),
+    ]));
+  });
+
+  it('renders a streamed terminal error only once when the result repeats it', async () => {
+    const sessionKey = 'claude-code-owned:mobile-history-claude-repeated-error';
+    writePersistedSession({
+      root: claudeRoot, sessionKey, prompt: 'Check repeated terminal error',
+      runOutput: [
+        JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Provider stopped.' } } }),
+        JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution', result: 'Provider stopped.' }),
+      ].join('\n'),
+    });
+    const runtime = getRuntime('claude-code');
+    if (!runtime) throw new Error('Claude Code runtime is not registered.');
+    const entries = await runtime.readTranscript(sessionKey);
+    expect(entries.filter((entry) => entry.text === 'Provider stopped.')).toHaveLength(1);
   });
 
   it('serves a declarative owned runtime and keeps durable operator entries in route and inbox history', async () => {
