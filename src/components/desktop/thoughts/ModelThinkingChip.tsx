@@ -89,6 +89,16 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
     ],
   },
+  // The model-agnostic house (#1729). Not bound to a provider: its catalogue is
+  // whatever the local opencode install is authenticated for, read live from the
+  // ACP session, so the operator can orchestrate on OpenRouter/Google/xAI models
+  // — and keep working when the Claude and Codex subscriptions are exhausted.
+  {
+    key: 'opencode',
+    label: 'OpenCode',
+    options: [],
+    searchable: true,
+  },
   // OpenClaw + Hermes pulled from the picker (Q ruling 2026-07-16): neither
   // is on the one-click path the official CLIs are. OpenClaw's governed clone
   // needs its own gateway + credential story that broke three ways in one
@@ -109,16 +119,6 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     options: [
       { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
     ],
-  },
-  // The model-agnostic house (#1729). Not bound to a provider: its catalogue is
-  // whatever the local opencode install is authenticated for, read live from the
-  // ACP session, so the operator can orchestrate on OpenRouter/Google/xAI models
-  // — and keep working when the Claude and Codex subscriptions are exhausted.
-  {
-    key: 'opencode',
-    label: 'OpenCode 2',
-    options: [],
-    searchable: true,
   },
 ];
 

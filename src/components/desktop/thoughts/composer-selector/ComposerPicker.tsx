@@ -1,18 +1,18 @@
 'use client';
 
-import { useMemo, useRef, useState, type Ref } from 'react';
+import { useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
 import { AcpModelPicker } from '../AcpModelPicker';
 import {
   type ComposerModelGroup,
   type ComposerModelOption,
 } from '../ModelThinkingChip';
 import {
-  shortWorkerModelLabel,
   workerModelForDisplay,
   type ComposerWorkerDefaults,
 } from './worker-settings';
 import { ComposerPopover } from '../chat-panel/ComposerPopover';
 import {
+  composerRuntimeLabel,
   isComposerEffortShortcut,
   providerMarkForLead,
   providerMarkForRuntime,
@@ -28,9 +28,15 @@ import { WORKER_START_OPTIONS, type WorkerStartMode } from '@/lib/operator/worke
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 
 type VisiblePick =
-  | { key: string; kind: 'lead'; option: ComposerModelOption }
+  | { key: string; kind: 'lead-house'; group: ComposerModelGroup }
+  | { key: string; kind: 'lead'; group: ComposerModelGroup; option: ComposerModelOption }
   | { key: string; kind: 'lead-searchable'; group: ComposerModelGroup }
   | { key: string; kind: 'worker'; runtime: OrchestratorRuntime };
+
+type LeadPickerView =
+  | { kind: 'providers' }
+  | { kind: 'models'; groupKey: ComposerModelGroup['key'] }
+  | { kind: 'effort'; groupKey: ComposerModelGroup['key'] };
 
 type AcpPickerTarget =
   | { kind: 'lead'; backend: OrchestratorBackendSetting }
@@ -48,6 +54,14 @@ function SearchGlyph() {
   return (
     <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function ChevronGlyph({ expanded }: { expanded: boolean }) {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={expanded ? 'm6 15 6-6 6 6' : 'm9 18 6-6-6-6'} />
     </svg>
   );
 }
@@ -86,6 +100,8 @@ export function ComposerPicker({
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [acpPicker, setAcpPicker] = useState<AcpPickerTarget | null>(null);
+  const [workersExpanded, setWorkersExpanded] = useState(false);
+  const [leadView, setLeadView] = useState<LeadPickerView>({ kind: 'providers' });
   const leadTriggerRef = useRef<HTMLButtonElement | null>(null);
   const workerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -98,17 +114,33 @@ export function ComposerPicker({
   const searchableLeadRows = useMemo(() => composerModelGroups.filter((group) => group.searchable && (
     !normalizedQuery || `${group.label} ${state.leadBackend === group.key ? state.leadModelLabel : ''}`.toLowerCase().includes(normalizedQuery)
   )), [composerModelGroups, normalizedQuery, state.leadBackend, state.leadModelLabel]);
+  const selectedLeadGroup = useMemo(() => composerModelGroups.find((group) => (
+    group.key === state.leadBackend
+    || group.options.some((option) => option.backend === state.leadBackend && option.model === state.leadModelId)
+  )) ?? composerModelGroups[0], [composerModelGroups, state.leadBackend, state.leadModelId]);
+  const activeLeadGroup = leadView.kind === 'providers'
+    ? null
+    : composerModelGroups.find((group) => group.key === leadView.groupKey) ?? selectedLeadGroup;
+  const providerRows = !normalizedQuery && leadView.kind === 'providers' ? composerModelGroups : [];
+  const shownLeadRows = leadView.kind === 'effort'
+    ? []
+    : normalizedQuery ? leadRows : activeLeadGroup?.options.map((option) => ({ group: activeLeadGroup, option })) ?? [];
+  const shownSearchableLeadRows = leadView.kind === 'effort'
+    ? []
+    : normalizedQuery ? searchableLeadRows : activeLeadGroup?.searchable ? [activeLeadGroup] : [];
   const workerRows = useMemo(() => listDispatchableRuntimes().filter((runtime) => {
     if (!normalizedQuery) return true;
     const capability = getRuntimeCapability(runtime);
     const model = workerModelForDisplay(runtime, defaults);
     return `${capability.label} ${runtime} ${model}`.toLowerCase().includes(normalizedQuery);
   }), [defaults, normalizedQuery]);
-  const visiblePicks = useMemo<VisiblePick[]>(() => [
-    ...leadRows.map(({ option }) => ({ key: `lead:${option.value}`, kind: 'lead' as const, option })),
-    ...searchableLeadRows.map((group) => ({ key: `lead-searchable:${group.key}`, kind: 'lead-searchable' as const, group })),
-    ...workerRows.map((runtime) => ({ key: `worker:${runtime}`, kind: 'worker' as const, runtime })),
-  ], [leadRows, searchableLeadRows, workerRows]);
+  const workersVisible = state.mode !== 'solo' && (workersExpanded || (normalizedQuery.length > 0 && workerRows.length > 0));
+  const visiblePicks: VisiblePick[] = [
+    ...providerRows.map((group) => ({ key: `lead-house:${group.key}`, kind: 'lead-house' as const, group })),
+    ...shownLeadRows.map(({ group, option }) => ({ key: `lead:${option.value}`, kind: 'lead' as const, group, option })),
+    ...shownSearchableLeadRows.map((group) => ({ key: `lead-searchable:${group.key}`, kind: 'lead-searchable' as const, group })),
+    ...(workersVisible ? workerRows.map((runtime) => ({ key: `worker:${runtime}`, kind: 'worker' as const, runtime })) : []),
+  ];
   const visibleActiveIndex = Math.min(activeIndex, Math.max(visiblePicks.length - 1, 0));
   const pickerOpen = open && !(state.mode === 'solo' && openTarget === 'workers');
 
@@ -117,6 +149,8 @@ export function ComposerPicker({
     setOpen(next);
     onOpenChange?.(next);
     if (next) {
+      if (target === 'workers') setWorkersExpanded(true);
+      if (target === 'lead') setLeadView({ kind: 'providers' });
       setActiveIndex(0);
       window.setTimeout(() => {
         if (target === 'lead') {
@@ -132,6 +166,8 @@ export function ComposerPicker({
     if (!next) {
       setQuery('');
       setAcpPicker(null);
+      setWorkersExpanded(false);
+      setLeadView({ kind: 'providers' });
     }
   };
 
@@ -143,10 +179,25 @@ export function ComposerPicker({
     setPopoverOpen(!(pickerOpen && openTarget === target), target);
   };
 
-  const selectLead = (option: ComposerModelOption) => {
+  const selectLead = (group: ComposerModelGroup, option: ComposerModelOption) => {
     if (option.backend === state.leadBackend) onModelChange?.(option.model ?? option.value);
     else onBackendChange?.(option.backend, option.model);
-    setPopoverOpen(false);
+    setQuery('');
+    setLeadView({ kind: 'effort', groupKey: group.key });
+    setActiveIndex(0);
+  };
+
+  const selectLeadHouse = (group: ComposerModelGroup) => {
+    if (group.searchable) setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting });
+    else setLeadView({ kind: 'models', groupKey: group.key });
+    setActiveIndex(0);
+  };
+
+  const backFromLeadView = () => {
+    setLeadView((view) => view.kind === 'effort'
+      ? { kind: 'models', groupKey: view.groupKey }
+      : { kind: 'providers' });
+    setActiveIndex(0);
   };
 
   const selectWorker = (runtime: OrchestratorRuntime) => {
@@ -158,12 +209,14 @@ export function ComposerPicker({
   const activateCurrent = () => {
     const item = visiblePicks[visibleActiveIndex];
     if (!item) return;
-    if (item.kind === 'lead') selectLead(item.option);
+    if (item.kind === 'lead-house') selectLeadHouse(item.group);
+    else if (item.kind === 'lead') selectLead(item.group, item.option);
     else if (item.kind === 'lead-searchable') setAcpPicker({ kind: 'lead', backend: item.group.key as OrchestratorBackendSetting });
     else selectWorker(item.runtime);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.defaultPrevented) return;
     if (isComposerEffortShortcut(event.nativeEvent)) {
       event.preventDefault();
       const nextEffort = stepComposerEffort(state.effort, state.effortOptions, event.shiftKey ? -1 : 1);
@@ -187,12 +240,18 @@ export function ComposerPicker({
     }
     if (event.key === 'Escape') {
       event.preventDefault();
-      setPopoverOpen(false);
-      onRequestTextareaFocus?.();
+      if (!normalizedQuery && leadView.kind !== 'providers') backFromLeadView();
+      else {
+        setPopoverOpen(false);
+        onRequestTextareaFocus?.();
+      }
     }
   };
 
   const runtime = defaults.defaultDispatchRuntime;
+  const selectedWorkerSummary = composerRuntimeLabel(runtime);
+  const leadHouseLabel = (group: ComposerModelGroup) => group.key === 'claude' ? 'Claude Code' : group.key === 'opencode' ? 'OpenCode' : group.label;
+  const scrollStyle: CSSProperties = { overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none' };
   const anchorRef = openTarget === 'workers' ? workerTriggerRef : leadTriggerRef;
 
   return (
@@ -222,9 +281,8 @@ export function ComposerPicker({
           onKeyDown={handleKeyDown}
           style={{
             width: 300,
-            maxWidth: 'min(300px, calc(100vw - 32px))',
-            height: 460,
-            maxHeight: 'calc(100vh - 56px)',
+            maxWidth: 'min(300px, calc(100vw * var(--zoom-inverse, 1) - 32px))',
+            maxHeight: 'calc(100vh * var(--zoom-inverse, 1) - 56px)',
             display: 'flex',
             flexDirection: 'column',
             overflowY: 'hidden',
@@ -270,93 +328,126 @@ export function ComposerPicker({
                   style={{ flex: 1, minWidth: 0, borderWidth: 0, outline: 'none', background: 'transparent', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12.5, fontWeight: 300 }}
                 />
               </div>
-              <SectionLabel text="Lead" hint="effort is remembered per model" />
-              <div data-testid="composer-selector-lead-scroll" style={{ flex: '1 1 auto', minHeight: 78, overflowY: 'auto', overscrollBehavior: 'contain' }}>
-                {leadRows.map(({ group, option }) => {
-                  const selected = option.model === state.leadModelId && option.backend === state.leadBackend;
-                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead:${option.value}`);
-                  return (
-                    <div key={option.value}>
-                      <PickerRow
-                        rowRef={selected ? selectedLeadRef : undefined}
-                        testId={`lead-row-${option.model ?? option.value}`}
-                        mark={providerMarkForLead(option.backend, option.model ?? option.value)}
-                        selected={selected}
-                        highlighted={pickIndex === visibleActiveIndex}
-                        label={option.label}
-                        meta={`${group.label.toLowerCase()}${option.sub ? ` · ${option.sub}` : ''}`}
-                        disabled={saving}
-                        onClick={() => selectLead(option)}
-                      />
-                      {selected && !normalizedQuery && (
-                        state.effortOptions.length > 0 || state.lockedEffortOptions.length > 0
-                      ) ? (
-                        <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
-                      ) : null}
-                    </div>
-                  );
-                })}
-                {searchableLeadRows.map((group) => {
-                  const selected = group.key === state.leadBackend;
-                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead-searchable:${group.key}`);
-                  return (
-                    <div key={group.key}>
-                      <PickerRow
-                        rowRef={selected ? selectedLeadRef : undefined}
-                        testId={`lead-row-${group.key}`}
-                        mark={providerMarkForLead(
-                          group.key as OrchestratorBackendSetting,
-                          selected ? state.leadModelId : group.key,
-                        )}
-                        selected={selected}
-                        highlighted={pickIndex === visibleActiveIndex}
-                        label={selected ? state.leadModelLabel : group.label}
-                        meta={selected ? group.label.toLowerCase() : 'live models'}
-                        disabled={saving}
-                        onClick={() => setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting })}
-                      />
-                      {selected && !normalizedQuery && (
-                        state.effortOptions.length > 0 || state.lockedEffortOptions.length > 0
-                      ) ? (
-                        <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-              <SectionLabel text="Workers" hint="runtime for dispatched packets" />
-              <div ref={workerSectionRef} data-testid="composer-selector-workers-scroll" style={{ height: 130, maxHeight: 130, flexShrink: 0, overflowY: 'auto', overscrollBehavior: 'contain', scrollMarginTop: 6 }}>
-                {workerRows.map((workerRuntime) => {
-                  const selected = workerRuntime === runtime;
-                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `worker:${workerRuntime}`);
-                  const rowModel = workerModelForDisplay(workerRuntime, defaults);
+              <SectionLabel text={leadView.kind === 'models' ? `${leadHouseLabel(activeLeadGroup!)} models` : leadView.kind === 'effort' ? 'Effort' : 'Models'} />
+              <div data-testid="composer-selector-lead-scroll" style={{ ...scrollStyle, flex: '0 1 auto', minHeight: 0, maxHeight: 184 }}>
+                {!normalizedQuery && leadView.kind !== 'providers' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', minHeight: 26, paddingTop: 2, paddingRight: 8, paddingBottom: 2, paddingLeft: 8 }}>
+                    <button data-testid="composer-selector-lead-back" type="button" onClick={backFromLeadView} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 22, paddingTop: 0, paddingRight: 4, paddingBottom: 0, paddingLeft: 0, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300 }}>
+                      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                      Back
+                    </button>
+                    {leadView.kind === 'effort' ? <span data-testid="composer-selector-lead-step" style={{ marginLeft: 4, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300 }}>{state.leadModelLabel}</span> : null}
+                  </div>
+                ) : null}
+                {providerRows.map((group) => {
+                  const selected = group.key === selectedLeadGroup.key;
+                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead-house:${group.key}`);
+                  const firstOption = group.options[0];
                   return (
                     <PickerRow
-                      key={workerRuntime}
-                      rowRef={selected ? selectedWorkerRef : undefined}
-                      testId={`worker-row-${workerRuntime}`}
-                      mark={providerMarkForRuntime(workerRuntime)}
+                      key={group.key}
+                      testId={`lead-house-${group.key}`}
+                      mark={providerMarkForLead(firstOption?.backend ?? group.key as OrchestratorBackendSetting, firstOption?.model ?? group.key)}
                       selected={selected}
                       highlighted={pickIndex === visibleActiveIndex}
-                      label={getRuntimeCapability(workerRuntime).label}
-                      meta={rowModel ? shortWorkerModelLabel(rowModel) : ''}
+                      label={leadHouseLabel(group)}
+                      meta=""
                       disabled={saving}
-                      onClick={() => selectWorker(workerRuntime)}
+                      onClick={() => selectLeadHouse(group)}
                     />
                   );
                 })}
-              </div>
-              <SectionLabel text="Start" />
-              <div style={{ display: 'flex', gap: 2, flexShrink: 0, marginTop: 4, marginRight: 8, marginBottom: 4, marginLeft: 27 }}>
-                {WORKER_START_OPTIONS.map((option) => {
-                  const selected = option.value === defaults.workerStartMode;
+                {leadView.kind !== 'effort' ? shownLeadRows.map(({ group, option }) => {
+                  const selected = option.model === state.leadModelId && option.backend === state.leadBackend;
+                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead:${option.value}`);
                   return (
-                    <button key={option.value} type="button" aria-pressed={selected} disabled={saving} onClick={() => onWorkerStartModeChange(option.value)} style={{ flex: 1, height: 22, borderRadius: 6, borderWidth: 1, borderStyle: 'solid', borderColor: selected ? 'transparent' : 'var(--t-border)', background: selected ? 'var(--t-accent-soft)' : 'transparent', color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1 }}>
-                      {option.long}
-                    </button>
+                    <PickerRow
+                      key={option.value}
+                      rowRef={selected ? selectedLeadRef : undefined}
+                      testId={`lead-row-${option.model ?? option.value}`}
+                      mark={providerMarkForLead(option.backend, option.model ?? option.value)}
+                      selected={selected}
+                      highlighted={pickIndex === visibleActiveIndex}
+                      label={option.label}
+                      meta={normalizedQuery ? group.label.toLowerCase() : ''}
+                      disabled={saving}
+                      onClick={() => selectLead(group, option)}
+                    />
                   );
-                })}
+                }) : null}
+                {leadView.kind !== 'effort' ? shownSearchableLeadRows.map((group) => {
+                  const selected = group.key === state.leadBackend;
+                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead-searchable:${group.key}`);
+                  return (
+                    <PickerRow
+                      key={group.key}
+                      rowRef={selected ? selectedLeadRef : undefined}
+                      testId={`lead-row-${group.key}`}
+                      mark={providerMarkForLead(group.key as OrchestratorBackendSetting, selected ? state.leadModelId : group.key)}
+                      selected={selected}
+                      highlighted={pickIndex === visibleActiveIndex}
+                      label={leadHouseLabel(group)}
+                      meta="live models"
+                      disabled={saving}
+                      onClick={() => setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting })}
+                    />
+                  );
+                }) : null}
+                {!normalizedQuery && leadView.kind === 'effort' ? (
+                  <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
+                ) : null}
               </div>
+              {state.mode !== 'solo' ? (
+              <div ref={workerSectionRef} style={{ flexShrink: 0, marginTop: 4, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-border)', scrollMarginTop: 6 }}>
+                <button
+                  data-testid="composer-selector-workers-section"
+                  type="button"
+                  aria-expanded={workersVisible}
+                  title={workersVisible ? 'Collapse workers' : `Workers: ${selectedWorkerSummary}`}
+                  onClick={() => setWorkersExpanded((expanded) => !expanded)}
+                  style={{ display: 'flex', alignItems: 'center', width: '100%', minHeight: 28, paddingTop: 5, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, borderWidth: 0, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textAlign: 'left', textTransform: 'uppercase' }}
+                >
+                  <span>Workers</span>
+                  <span data-testid="composer-selector-workers-summary" style={{ marginLeft: 7, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, letterSpacing: '-0.05px', textTransform: 'none' }}>{selectedWorkerSummary}</span>
+                  <span style={{ display: 'inline-flex', marginLeft: 'auto', color: 'var(--t-text-faint)' }}><ChevronGlyph expanded={workersVisible} /></span>
+                </button>
+                {workersVisible ? (
+                  <div style={{ paddingRight: 2, paddingBottom: 3, paddingLeft: 6 }}>
+                    <div data-testid="composer-selector-workers-scroll" style={{ ...scrollStyle, maxHeight: 112 }}>
+                      {workerRows.map((workerRuntime) => {
+                        const selected = workerRuntime === runtime;
+                        const pickIndex = visiblePicks.findIndex((entry) => entry.key === `worker:${workerRuntime}`);
+                        return (
+                          <PickerRow
+                            key={workerRuntime}
+                            rowRef={selected ? selectedWorkerRef : undefined}
+                            testId={`worker-row-${workerRuntime}`}
+                            mark={providerMarkForRuntime(workerRuntime)}
+                            selected={selected}
+                            highlighted={pickIndex === visibleActiveIndex}
+                            label={composerRuntimeLabel(workerRuntime)}
+                            meta={getRuntimeCapability(workerRuntime).workerProvider}
+                            disabled={saving}
+                            onClick={() => selectWorker(workerRuntime)}
+                          />
+                        );
+                      })}
+                    </div>
+                    <div style={{ paddingTop: 5, paddingRight: 8, paddingBottom: 3, paddingLeft: 8, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Start</div>
+                    <div data-testid="composer-selector-worker-start" style={{ display: 'flex', gap: 2, paddingRight: 8, paddingLeft: 8 }}>
+                      {WORKER_START_OPTIONS.map((option) => {
+                        const selected = option.value === defaults.workerStartMode;
+                        return (
+                          <button key={option.value} type="button" aria-pressed={selected} title={option.detail} disabled={saving} onClick={() => onWorkerStartModeChange(option.value)} style={{ display: 'inline-flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: 22, borderRadius: 6, borderWidth: 1, borderStyle: 'solid', borderColor: selected ? 'transparent' : 'var(--t-border)', background: selected ? 'var(--t-accent-soft)' : 'transparent', color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)', cursor: saving ? 'default' : 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300, opacity: saving ? 0.6 : 1, textAlign: 'center' }}>
+                            {option.long}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              ) : null}
               <div style={{ display: 'flex', gap: 10, flexShrink: 0, paddingTop: 6, paddingRight: 8, paddingBottom: 2, paddingLeft: 8, marginTop: 4, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-border)', fontSize: 10, color: 'var(--t-text-faint)' }}>
                 <span>⌥T effort</span><span>⇧⇥ mode</span><span>↑↓ ↵ pick</span>
               </div>

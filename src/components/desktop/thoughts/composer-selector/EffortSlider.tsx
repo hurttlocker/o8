@@ -26,6 +26,15 @@ function effortLabel(effort: ResolvedComposerSelectorState['effort']): string {
   return THINKING_EFFORT_LABELS[effort].long;
 }
 
+function effortConsequenceCopy(
+  backend: ResolvedComposerSelectorState['leadBackend'],
+  effort: ResolvedComposerSelectorState['effort'],
+): string {
+  const label = effortLabel(effort);
+  const consequence = composerEffortConsequence(backend, effort);
+  return consequence.startsWith(`${label} · `) ? consequence.slice(label.length + 3) : consequence;
+}
+
 function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() => (
     typeof window !== 'undefined'
@@ -216,9 +225,9 @@ export function EffortSlider({
       data-testid="composer-selector-lead-effort"
       style={{
         marginTop: 2,
-        marginRight: 6,
+        marginRight: 8,
         marginBottom: 6,
-        marginLeft: 31,
+        marginLeft: 8,
         paddingTop: 10,
         paddingRight: 12,
         paddingBottom: 10,
@@ -245,9 +254,6 @@ export function EffortSlider({
             duration={reducedMotion ? 0 : 260}
             reducedMotion={reducedMotion}
           />
-        </span>
-        <span style={{ marginLeft: 'auto', color: 'var(--t-text-faint)', fontSize: 10 }}>
-          {`${currentIndex + 1} of ${stops.length}`}
         </span>
         {state.effort !== 'high' && state.effortOptions.includes('high') ? (
           <button
@@ -463,7 +469,7 @@ export function EffortSlider({
           />
         ) : null}
         <DirectionalCopy
-          value={composerEffortConsequence(state.leadBackend, displayedEffort)}
+          value={effortConsequenceCopy(state.leadBackend, displayedEffort)}
           index={displayedIndex}
           distance={4}
           duration={reducedMotion ? 0 : 220}

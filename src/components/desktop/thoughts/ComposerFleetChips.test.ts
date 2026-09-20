@@ -45,14 +45,14 @@ describe('FleetWorkerChip', () => {
     vi.unstubAllGlobals();
   });
 
-  it('sets the OpenCode 2 worker model from the fleet popover', async () => {
+  it('sets the OpenCode worker model from the fleet popover', async () => {
     const onWorkerModelChange = vi.fn();
     await act(async () => { root.render(createElement(FleetWorkerChip, { onWorkerModelChange })); });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
     act(() => trigger?.click());
 
     const opencode = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('OpenCode 2'));
+      .find((button) => button.textContent?.includes('OpenCode'));
     expect(opencode).toBeDefined();
     await act(async () => { opencode?.click(); await Promise.resolve(); });
 
@@ -70,13 +70,13 @@ describe('FleetWorkerChip', () => {
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
     act(() => trigger?.click());
 
-    const planFirst = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Plan first');
-    expect(planFirst).toBeDefined();
-    expect(planFirst?.title).toBe(
-      'The worker reads the task, shares a plan with the lead, and waits before editing.',
+    const plan = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Plan');
+    expect(plan).toBeDefined();
+    expect(plan?.title).toBe(
+      'The worker reads the task, shares a plan with the lead, then waits before editing.',
     );
-    await act(async () => { planFirst?.click(); await Promise.resolve(); });
+    await act(async () => { plan?.click(); await Promise.resolve(); });
 
     expect(onWorkerStartModeChange).toHaveBeenCalledWith('huddle');
   });
