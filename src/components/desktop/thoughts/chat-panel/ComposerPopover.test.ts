@@ -38,10 +38,11 @@ afterEach(async () => {
 });
 
 async function mountPopover() {
-  await act(async () => root.render(createElement(ComposerPopover, {
+  const props = {
     anchorRef: { current: anchor }, open: true, onClose,
-  } as Parameters<typeof ComposerPopover>[0],
-  createElement('button', { onKeyDown: (event) => event.preventDefault() }, 'Handled control'))));
+    children: createElement('button', { onKeyDown: (event) => event.preventDefault() }, 'Handled control'),
+  };
+  await act(async () => root.render(createElement(ComposerPopover, props)));
   return document.querySelector<HTMLDivElement>('[data-composer-overlay]')!;
 }
 
