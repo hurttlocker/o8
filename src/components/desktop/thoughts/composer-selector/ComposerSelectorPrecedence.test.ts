@@ -115,7 +115,7 @@ describe('composer selector real-path precedence', () => {
     });
     expect(document.querySelector('[data-testid="worker-row-gemini"]')?.getAttribute('aria-pressed')).toBe('true');
     expect([...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Plan first')?.getAttribute('aria-pressed')).toBe('true');
+      .find((button) => button.textContent === 'Plan')?.getAttribute('aria-pressed')).toBe('true');
     await act(async () => {
       document.querySelector<HTMLButtonElement>('[data-testid="worker-row-codex"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 30));
@@ -135,9 +135,14 @@ describe('composer selector real-path precedence', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    const soloWorkersSection = document.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers-section"]')!;
+    await act(async () => {
+      soloWorkersSection.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(document.querySelector('[data-testid="worker-row-codex"]')?.getAttribute('aria-pressed')).toBe('true');
     expect([...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Plan first')?.getAttribute('aria-pressed')).toBe('true');
+      .find((button) => button.textContent === 'Plan')?.getAttribute('aria-pressed')).toBe('true');
 
     await act(async () => {
       root.render(createElement(RealComposerHarness, { key: 'tab-a-remount', tabId: 'tab-a', threadId: 'thread-a' }));

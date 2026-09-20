@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, type RefObject } from 'react';
 import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
-import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { useComposerChipCompact } from '../composer-compact-context';
 import { ProviderMarkGlyph } from './provider-marks';
 import {
   isHotComposerEffort,
   providerMarkForLead,
+  composerRuntimeLabel,
   providerMarkForRuntime,
   type ComposerSelectorMode,
   type ResolvedComposerSelectorState,
@@ -184,8 +185,8 @@ export function WorkersChip({
   const label = mode === 'fusion'
     ? `${runtimes.length} runtimes`
     : mode === 'moa'
-      ? `2 ${getRuntimeCapability(runtime).label}`
-      : getRuntimeCapability(runtime).label;
+      ? `2 ${composerRuntimeLabel(runtime)}`
+      : composerRuntimeLabel(runtime);
   return (
     <button
       ref={buttonRef}
