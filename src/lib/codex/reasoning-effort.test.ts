@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from './reasoning-effort';
+import {
+  codexCliSupportsUltraEfforts,
+  codexSupportsReasoningEffort,
+  resolveCodexReasoningEffort,
+} from './reasoning-effort';
 
 describe('codexCliSupportsUltraEfforts', () => {
   it('rejects pre-0.144 CLIs (the unknown-variant crash class)', () => {
@@ -24,5 +28,7 @@ describe('resolveCodexReasoningEffort', () => {
     expect(resolveCodexReasoningEffort('ultra', 'gpt-5.6-terra')).toBe('ultra');
     expect(resolveCodexReasoningEffort('max', 'gpt-5.5')).toBe('xhigh');
     expect(resolveCodexReasoningEffort('ultra', 'gpt-unknown')).toBe('xhigh');
+    expect(codexSupportsReasoningEffort('constructor', 'max')).toBe(false);
+    expect(codexSupportsReasoningEffort('__proto__', 'max')).toBe(false);
   });
 });

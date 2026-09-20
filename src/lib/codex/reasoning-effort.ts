@@ -13,9 +13,10 @@ import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/th
 const HIGH_END_EFFORTS = ['max', 'ultra'] as const satisfies readonly ManualThinkingEffort[];
 
 /**
- * Verified Codex CLI catalog captured from the installed 0.153.4 runtime on
- * 2026-09-19. This is intentionally exact-match evidence: do not infer support
- * from a provider prefix, a future model name, or a version alone.
+ * Verified model-catalog receipt: ~/.codex/models_cache.json client_version
+ * 0.154.0, fetched 2026-09-20T02:59:18Z. This is separate from the installed
+ * CLI binary receipt (0.153.4 observed 2026-09-19). Use exact own-key matches;
+ * do not infer support from a provider prefix, a future model name, or a version.
  */
 export const CODEX_HIGH_END_EFFORT_CATALOG: Readonly<Record<string, readonly ManualThinkingEffort[]>> = Object.freeze({
   'gpt-6-astra': HIGH_END_EFFORTS,
@@ -29,7 +30,11 @@ export function codexSupportsReasoningEffort(
 ): boolean {
   if (!HIGH_END_EFFORTS.includes(effort as typeof HIGH_END_EFFORTS[number])) return true;
   const normalized = model?.trim().toLowerCase();
-  return Boolean(normalized && CODEX_HIGH_END_EFFORT_CATALOG[normalized]?.includes(effort));
+  return Boolean(
+    normalized
+    && Object.hasOwn(CODEX_HIGH_END_EFFORT_CATALOG, normalized)
+    && CODEX_HIGH_END_EFFORT_CATALOG[normalized]?.includes(effort),
+  );
 }
 
 /** Whether the verified catalog lists the `ultra` effort tier for this model. */

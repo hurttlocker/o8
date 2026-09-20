@@ -77,20 +77,21 @@ afterAll(() => {
 
 describe.skipIf(process.platform === 'win32')('owned Codex persisted resume pins through a real process', () => {
   it.each([
-    ['warm', 'max'],
-    ['archived', 'ultra'],
-  ] as const)('preserves Terra %s on %s resume', async (kind, effort) => {
+    ['warm-high', 'gpt-5.6-sol', 'high', false],
+    ['warm-max', 'gpt-5.6-terra', 'max', false],
+    ['archived-ultra', 'gpt-5.6-terra', 'ultra', true],
+  ] as const)('preserves %s effort on %s resume', async (kind, model, effort, archived) => {
     const repoPath = join(root, `repo-${kind}`);
     mkdirSync(repoPath);
     execFileSync('git', ['init', '-q', repoPath]);
 
     const launched = await launchOwnedCodexSession({
-      cwd: repoPath, prompt: 'initial fixture turn', model: 'gpt-5.6-terra', effort,
+      cwd: repoPath, prompt: 'initial fixture turn', model, effort,
     });
     expect(launched.ok).toBe(true);
     const original = await settledSession(launched.surfaceId, 1);
-    expect(original).toMatchObject({ model: 'gpt-5.6-terra', effort });
-    if (kind === 'archived') {
+    expect(original).toMatchObject({ model, effort });
+    if (archived) {
       expect((await archiveOwnedCodexSession(launched.surfaceId)).archived).toBe(true);
     }
 
@@ -109,7 +110,7 @@ describe.skipIf(process.platform === 'win32')('owned Codex persisted resume pins
     expect(receipts).toHaveLength(2);
     for (const receipt of receipts) {
       expect(receipt).toMatchObject({
-        model: 'gpt-5.6-terra', effort: `model_reasoning_effort=${effort}`, threadId: original.threadId, cwd: realpathSync(repoPath),
+        model, effort: `model_reasoning_effort=${effort}`, threadId: original.threadId, cwd: realpathSync(repoPath),
       });
       expect(receipt.args).toContain('--ignore-user-config');
       expect(receipt.args).toContain('--dangerously-bypass-approvals-and-sandbox');

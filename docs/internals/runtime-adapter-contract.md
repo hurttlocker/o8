@@ -182,7 +182,7 @@ Runtime, provider, model, and billing mode are separate fields. A runtime can ex
 
 ### Codex reasoning-effort evidence
 
-The shared Codex effort contract lives in `src/lib/codex/reasoning-effort.ts`. Its high-end catalog records exact verified model/effort pairs from the installed Codex CLI, most recently 0.153.4 observed on 2026-09-19. Both the mission route and client picker consume that serializable contract. It is not a provider-name rule or a live capability query: unknown models and unlisted pairs remain unverified, so `max` and `ultra` are rejected at mission admission rather than silently changed at launch. Refresh the catalog only with a new installed-runtime observation and add fresh-launch plus persisted-resume argv proof for each pair.
+The shared Codex effort contract lives in `src/lib/codex/reasoning-effort.ts`. Its high-end catalog records exact verified model/effort pairs from `~/.codex/models_cache.json`, client version 0.154.0, fetched 2026-09-20T02:59:18Z. That catalog receipt is distinct from the installed CLI binary receipt, 0.153.4 observed on 2026-09-19. Both the mission route and client picker consume the serializable contract. It is not a provider-name rule or a live capability query: unknown models, inherited object keys, and unlisted pairs remain unverified, so `max` and `ultra` are rejected at mission admission rather than silently changed at launch. Refresh the catalog only with a new model-catalog receipt and add fresh-launch plus persisted-resume argv proof for each pair.
 
 ## Design rules
 

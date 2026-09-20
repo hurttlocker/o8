@@ -260,7 +260,7 @@ afterAll(() => {
 });
 
 describe('mission effort pin — launch boundary', () => {
-  it.each(['max', 'ultra'] as const)('route creation → persisted reload → dispatch → argv keeps Terra %s exact', async (requestedEffort) => {
+  it.each(['high', 'max', 'ultra'] as const)('route creation → persisted reload → dispatch → argv keeps Terra %s exact', async (requestedEffort) => {
     const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
     await updateOperatorDefaults({ codexWorkerEffort: 'xhigh' });
     const repoPath = makeRepo();
