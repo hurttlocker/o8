@@ -156,6 +156,7 @@ export function LeadChip({
 export function WorkersChip({
   mode,
   runtime,
+  model,
   open,
   saving,
   buttonRef,
@@ -163,6 +164,7 @@ export function WorkersChip({
 }: {
   mode: Exclude<ComposerSelectorMode, 'solo'>;
   runtime: OrchestratorRuntime;
+  model: string | null;
   open: boolean;
   saving: boolean;
   buttonRef: RefObject<HTMLButtonElement | null>;
@@ -187,13 +189,14 @@ export function WorkersChip({
     : mode === 'moa'
       ? `2 ${composerRuntimeLabel(runtime)}`
       : composerRuntimeLabel(runtime);
+  const selectionLabel = model ? `${label}, ${model}` : `${label}, runtime default`;
   return (
     <button
       ref={buttonRef}
       data-testid="composer-selector-workers"
       type="button"
-      title={`Workers: ${label}`}
-      aria-label={`Workers: ${label}`}
+      title={`Workers: ${selectionLabel}`}
+      aria-label={`Workers: ${selectionLabel}`}
       aria-expanded={open}
       disabled={saving}
       onClick={onClick}

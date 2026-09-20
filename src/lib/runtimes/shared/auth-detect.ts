@@ -40,6 +40,7 @@ import {
 } from '@/lib/deepseek-harness/runtime-resolution';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
+import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
@@ -735,6 +736,9 @@ export async function assertRuntimeDispatchable(
    */
   options?: { claudeCodeCarrier?: ClaudeCodeModelSource | null },
 ): Promise<void> {
+  if (runtime === '3code' && model?.trim()) {
+    await assertThreecodeWorkerModelAvailable(model);
+  }
   const snapshot = runtime === 'claude-code'
     ? options?.claudeCodeCarrier
       ? await getRuntimeAuthSnapshotForClaudeCarrier(options.claudeCodeCarrier)

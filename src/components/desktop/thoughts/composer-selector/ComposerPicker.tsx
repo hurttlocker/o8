@@ -89,7 +89,7 @@ export function ComposerPicker({
   onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   onEffortChange: (effort: ResolvedComposerSelectorState['effort']) => void;
   onRuntimeChange: (runtime: OrchestratorRuntime) => void;
-  onWorkerModelChange: (model: string | null) => void;
+  onWorkerModelChange: (model: string | null, runtime?: OrchestratorRuntime) => void;
   onWorkerStartModeChange: (mode: WorkerStartMode) => void;
   onRequestTextareaFocus?: () => void;
   onOpenChange?: (open: boolean) => void;
@@ -202,7 +202,7 @@ export function ComposerPicker({
 
   const selectWorker = (runtime: OrchestratorRuntime) => {
     onRuntimeChange(runtime);
-    if (runtime === 'opencode') setAcpPicker({ kind: 'worker', backend: runtime });
+    if (runtime === 'opencode' || runtime === '3code') setAcpPicker({ kind: 'worker', backend: runtime });
     else setPopoverOpen(false);
   };
 
@@ -267,6 +267,7 @@ export function ComposerPicker({
         <WorkersChip
           mode={state.mode}
           runtime={runtime}
+          model={workerModelForDisplay(runtime, defaults)}
           open={pickerOpen && openTarget === 'workers'}
           saving={saving}
           buttonRef={workerTriggerRef}
@@ -303,13 +304,20 @@ export function ComposerPicker({
             saving ? <div style={{ paddingTop: 12, paddingRight: 10, paddingBottom: 12, paddingLeft: 10, color: 'var(--t-text-faint)', fontSize: 11 }}>Saving selection…</div> : (
               <AcpModelPicker
                 backend={acpPicker.backend}
-                value={acpPicker.kind === 'lead' ? state.leadModelId : defaults.opencodeWorkerModel}
+                catalogueUrl={acpPicker.kind === 'worker' && acpPicker.backend === '3code'
+                  ? '/api/runtime/threecode-models'
+                  : undefined}
+                value={acpPicker.kind === 'lead'
+                  ? state.leadModelId
+                  : acpPicker.backend === '3code'
+                    ? defaults.threecodeWorkerModel
+                    : defaults.opencodeWorkerModel}
                 width={288}
                 onSelect={(model) => {
                   if (acpPicker.kind === 'lead') {
                     if (acpPicker.backend === state.leadBackend) onModelChange?.(model);
                     else onBackendChange?.(acpPicker.backend, model);
-                  } else onWorkerModelChange(model);
+                  } else onWorkerModelChange(model, acpPicker.backend);
                   setPopoverOpen(false);
                 }}
               />

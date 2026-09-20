@@ -9,6 +9,7 @@ export interface ComposerWorkerDefaults {
   defaultDispatchRuntime: OrchestratorRuntime;
   defaultDispatchModel: string;
   opencodeWorkerModel: string | null;
+  threecodeWorkerModel: string | null;
   workerStartMode: WorkerStartMode;
 }
 
@@ -16,6 +17,7 @@ export const FALLBACK_COMPOSER_WORKER_DEFAULTS: ComposerWorkerDefaults = {
   defaultDispatchRuntime: 'codex',
   defaultDispatchModel: '',
   opencodeWorkerModel: null,
+  threecodeWorkerModel: null,
   workerStartMode: 'autonomous',
 };
 
@@ -29,6 +31,9 @@ export function normalizeComposerWorkerDefaults(
       : '',
     opencodeWorkerModel: typeof values.opencodeWorkerModel === 'string' && values.opencodeWorkerModel
       ? values.opencodeWorkerModel
+      : null,
+    threecodeWorkerModel: typeof values.threecodeWorkerModel === 'string' && values.threecodeWorkerModel
+      ? values.threecodeWorkerModel
       : null,
     workerStartMode: isWorkerStartMode(values.workerStartMode)
       ? values.workerStartMode
@@ -47,6 +52,9 @@ export function workerModelForDisplay(
 ): string {
   if (runtime === 'opencode' && defaults.opencodeWorkerModel) {
     return defaults.opencodeWorkerModel;
+  }
+  if (runtime === '3code' && defaults.threecodeWorkerModel) {
+    return defaults.threecodeWorkerModel;
   }
   if (defaults.defaultDispatchModel && runtime === defaults.defaultDispatchRuntime) {
     return defaults.defaultDispatchModel;

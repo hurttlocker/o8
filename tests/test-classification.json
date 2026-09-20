@@ -3248,6 +3248,14 @@
       ]
     },
     {
+      "path": "tests/threecode-model-pins.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/transient-materialization-fallback-real-path.test.ts",
       "reasons": [
         "child-process",

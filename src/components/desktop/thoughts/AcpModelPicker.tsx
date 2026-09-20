@@ -210,7 +210,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
           type="text"
           value={query}
           onChange={(event) => { setQuery(event.target.value); }}
-          placeholder={state === 'ready' ? `Search ${total} models` : 'Search models'}
+          placeholder={state === 'ready' ? `Search ${total} ${total === 1 ? 'model' : 'models'}` : 'Search models'}
           aria-label="Search models"
           style={{
             ...ROW_TEXT,

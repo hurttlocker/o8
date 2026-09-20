@@ -19,7 +19,9 @@ function RealComposerHarness({ tabId, threadId }: { tabId: string; threadId: str
   const [mode, setMode] = useState<ComposerSelectorMode>('solo');
   const [effort, setEffort] = useState<ThinkingEffort>('high');
   const [model, setModel] = useState('gpt-5.6-sol');
-  return createElement(ComposerArea, {
+  return createElement('div', null,
+    createElement('span', { 'data-testid': 'composer-selector-test-lead' }, model),
+    createElement(ComposerArea, {
     activeComposer: true,
     input,
     onInputChange: setInput,
@@ -50,8 +52,9 @@ function RealComposerHarness({ tabId, threadId }: { tabId: string; threadId: str
     onComposerModeChange: setMode,
     composerModeStorageId: tabId,
     sessionRulesThreadId: threadId,
-    repoPath: '/repo/selector-precedence',
-  });
+      repoPath: '/repo/selector-precedence',
+    }),
+  );
 }
 
 describe('composer selector real-path precedence', () => {
@@ -59,6 +62,7 @@ describe('composer selector real-path precedence', () => {
   let root: Root;
   let operatorValues: ComposerWorkerDefaults;
   let postBodies: Array<Record<string, unknown>>;
+  let pendingThreecodeRuntimeSave: Promise<void> | null;
 
   beforeEach(() => {
     localStorage.clear();
@@ -66,16 +70,29 @@ describe('composer selector real-path precedence', () => {
       defaultDispatchRuntime: 'gemini',
       defaultDispatchModel: '',
       opencodeWorkerModel: null,
+      threecodeWorkerModel: null,
       workerStartMode: 'huddle',
     };
     postBodies = [];
+    pendingThreecodeRuntimeSave = null;
     invalidateOperatorDefaultsValuesSnapshot();
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(_input).includes('/api/runtime/threecode-models')) {
+        return new Response(JSON.stringify({
+          groups: [{
+            provider: 'deepseek',
+            models: [{ id: 'deepseek.deepseek-v4-pro', label: 'DeepSeek V4 Pro', efforts: [] }],
+          }],
+        }), { status: 200 });
+      }
       if (init?.method === 'POST') {
         const body = typeof init.body === 'string'
           ? JSON.parse(init.body) as Record<string, unknown>
           : {};
         postBodies.push(body);
+        if (body.defaultDispatchRuntime === '3code' && pendingThreecodeRuntimeSave) {
+          await pendingThreecodeRuntimeSave;
+        }
         operatorValues = { ...operatorValues, ...body } as ComposerWorkerDefaults;
       }
       return new Response(JSON.stringify({ values: operatorValues, sources: {} }), { status: 200 });
@@ -121,6 +138,7 @@ describe('composer selector real-path precedence', () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
     });
     expect(postBodies).toContainEqual({ defaultDispatchRuntime: 'codex' });
+    expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
     workersChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
     expect(workersChip.textContent).toContain('2 Codex');
 
@@ -167,5 +185,66 @@ describe('composer selector real-path precedence', () => {
     workersChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
     expect(modeChip.getAttribute('aria-label')).toBe('Mode: Compare plans');
     expect(workersChip.textContent).toContain('2 Codex');
+  });
+
+  it('keeps runtime-scoped optimistic worker pins isolated while 3code switches asynchronously', async () => {
+    operatorValues = {
+      ...operatorValues,
+      defaultDispatchRuntime: 'opencode',
+      opencodeWorkerModel: 'openrouter/openai/gpt-5.6',
+    };
+    writeStoredComposerMode('tab-async-runtime', 'moa');
+    let releaseRuntimeSave!: () => void;
+    pendingThreecodeRuntimeSave = new Promise<void>((resolve) => { releaseRuntimeSave = resolve; });
+
+    await act(async () => {
+      root.render(createElement(RealComposerHarness, { tabId: 'tab-async-runtime', threadId: 'thread-async-runtime' }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-testid="worker-row-3code"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const workerChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(workerChip.getAttribute('aria-label')).toBe('Workers: 2 3code, runtime default');
+    expect(workerChip.getAttribute('aria-label')).not.toContain('openrouter/openai/gpt-5.6');
+    expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
+
+    await act(async () => {
+      releaseRuntimeSave();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+  });
+
+  it('selects a configured 3code worker model without changing the Sol lead', async () => {
+    operatorValues = { ...operatorValues, defaultDispatchRuntime: 'opencode' };
+    writeStoredComposerMode('tab-threecode-model', 'moa');
+    await act(async () => {
+      root.render(createElement(RealComposerHarness, { tabId: 'tab-threecode-model', threadId: 'thread-threecode-model' }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      document.querySelector<HTMLButtonElement>('[data-testid="worker-row-3code"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[aria-label="Provider Deepseek"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      document.querySelector<HTMLButtonElement>('[title="deepseek.deepseek-v4-pro"]')!.click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    expect(postBodies).toContainEqual({ defaultDispatchRuntime: '3code' });
+    expect(postBodies).toContainEqual({ threecodeWorkerModel: 'deepseek.deepseek-v4-pro' });
+    expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')?.getAttribute('aria-label'))
+      .toBe('Workers: 2 3code, deepseek.deepseek-v4-pro');
   });
 });

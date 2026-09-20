@@ -50,6 +50,8 @@ import {
   getDispatchableRuntimeAvailability,
   getRuntimeAuthSnapshot,
 } from '@/lib/runtimes/shared/auth-detect';
+import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
+import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -326,7 +328,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   // save 400'd with "No supported fields" while the TOML path worked — the
   // reachability trap: the setting existed everywhere except the path the UI
   // actually posts through (live-hit on the shipped build, 2026-08-05).
-  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel'] as const) {
+  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel', 'threecodeWorkerModel'] as const) {
     if (body[key] === undefined) continue;
     if (body[key] !== null && typeof body[key] !== 'string') {
       throw new Error(`${key} must be a model id string or null.`);
@@ -742,6 +744,10 @@ export async function POST(request: Request) {
         return response({ error: 'settingsTomlRevision is required to save settings.toml.' }, 400);
       }
       assertRoutingTomlCompatibility(body.settingsToml, OPERATOR_DEFAULTS_FALLBACK);
+      const tomlModel = parseOperatorDefaultsToml(body.settingsToml).threecodeWorkerModel;
+      if (tomlModel) {
+        await assertThreecodeWorkerModelAvailable(tomlModel);
+      }
       const [updated, cliAuth] = await Promise.all([
         withStoragePressurePolicyLock(() => (
           applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string)
@@ -764,6 +770,7 @@ export async function POST(request: Request) {
     if (Object.keys(update).length === 0) {
       return response({ error: 'No supported fields in request body.' }, 400);
     }
+    if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
     const [updated, cliAuth] = await Promise.all([
       withStoragePressurePolicyLock(() => updateOperatorDefaults(update)),
       getRuntimeAuthSnapshot(),
