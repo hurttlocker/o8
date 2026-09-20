@@ -202,7 +202,7 @@ function materializeDeclarativeWorkerConfig(runtimeId: OrchestratorRuntime): Dec
     sessionFileName: manifest.sessionFileName,
     parseRunLog: parserForProfile(manifest.parserProfile, capability.label),
     ...(manifest.extraSpawnEnv
-      ? { extraSpawnEnv: () => ({ ...manifest.extraSpawnEnv }) }
+      ? { staticSpawnEnv: { ...manifest.extraSpawnEnv } }
       : {}),
     costFormat: manifest.costFormat,
   };
