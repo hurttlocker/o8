@@ -218,7 +218,18 @@ import {
   resolveHealBotEnabledSync,
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
-import { queueReviewContinuation as queueReviewContinuationTurn, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import {
+  findLeadThreadBinding,
+  getLeadStatus,
+  queueLeadReviewContinuation,
+  queueLeadSupervisorReturn,
+  queueLeadWorkerReturn,
+  sendLeadThreadMessage,
+  stopLead,
+  waitForLead,
+} from './lib/orchestrator/lead-lifecycle';
+import { resolveLeadRepoPath, validateLeadAttachments } from './lib/orchestrator/lead-contract';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
@@ -967,6 +978,7 @@ interface InternalTerminalSignalPayload {
 }
 
 const terminalAttachments = new Map<string, TerminalAttachment>();
+const watchedAttemptIds = new WeakMap<object, string>();
 const terminalWorkloadStats = process.env.O8_TERMINAL_BENCH === '1'
   ? new TerminalWorkloadStats()
   : null;
@@ -1331,11 +1343,17 @@ function enqueueOrchestratorAutoMessage(
 }
 
 function queueOrchestratorEscalation(repoPath: string, message: string): void {
+  if (queueLeadSupervisorReturn(repoPath, message)) return;
   queueSupervisorEscalationTurn(repoPath, message, enqueueOrchestratorAutoMessage);
 }
 
 function queueReviewContinuation(lane: ReviewContinuationLane): void {
-  queueReviewContinuationTurn(lane, enqueueOrchestratorAutoMessage);
+  routeReviewContinuation(lane, enqueueOrchestratorAutoMessage, (reviewLane) => queueLeadReviewContinuation({
+    repoPath: reviewLane.repoPath,
+    packetId: reviewLane.packetId,
+    laneId: reviewLane.id,
+    label: reviewLane.label,
+  }));
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {
@@ -4969,6 +4987,77 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   if (!repoPath || !message) return;
 
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
+  const threadId = resolveMsgThreadId(msg);
+  const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
+  if (threadId && leadBinding) {
+    try {
+      if (!correlationId) {
+        throw new Error('Persistent lead thread sends require a correlation id.');
+      }
+      for (const field of ['backend', 'model', 'thinkingEffort'] as const) {
+        if (field in msg && typeof msg[field] !== 'string') {
+          throw new Error(`${field} must be a string when supplied.`);
+        }
+      }
+      if ('displayMessage' in msg && typeof msg.displayMessage !== 'string') {
+        throw new Error('displayMessage must be a string when supplied.');
+      }
+      if ('permissionMode' in msg && msg.permissionMode !== 'full' && msg.permissionMode !== 'plan') {
+        throw new Error('permissionMode must be full or plan when supplied.');
+      }
+      const attachments = 'attachments' in msg ? validateLeadAttachments(msg.attachments) : undefined;
+      const leadReceipt = sendLeadThreadMessage({
+        threadId,
+        repoPath,
+        message,
+        displayMessage: resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage }),
+        permissionMode: msg.permissionMode === 'plan' ? 'plan' : 'full',
+        attachments,
+        idempotencyKey: `ws:${correlationId}`,
+        backend: typeof msg.backend === 'string' ? msg.backend : undefined,
+        model: typeof msg.model === 'string' ? msg.model : undefined,
+        effort: typeof msg.thinkingEffort === 'string' ? msg.thinkingEffort : undefined,
+      });
+      if (leadReceipt) {
+        sendOrchestratorSendAck(client, {
+          repoPath,
+          threadId,
+          backend: leadReceipt.lead.routing.backend,
+          correlationId,
+          state: leadReceipt.duplicate ? 'replayed' : 'accepted',
+          duplicate: leadReceipt.duplicate,
+        });
+        send(client, {
+          channel: 'orchestrator',
+          event: 'status',
+          data: {
+            status: 'busy',
+            leadStatus: leadReceipt.lead.status,
+            repoPath,
+            threadId,
+            backend: leadReceipt.lead.routing.backend,
+            lead: leadReceipt.lead,
+            admittedTurnId: leadReceipt.admittedTurnId,
+          },
+        });
+        void sendLeadTerminalStatus(client, leadReceipt.lead.id, leadReceipt.admittedTurnId, leadReceipt.cursor)
+          .catch((error) => console.warn('[ws-server] Persistent lead terminal status watch failed:', error));
+        return;
+      }
+    } catch (error) {
+      send(client, {
+        channel: 'orchestrator',
+        event: 'error',
+        data: {
+          error: error instanceof Error ? error.message : 'Persistent lead send failed.',
+          repoPath,
+          threadId,
+          ...orchestratorCommandAckCorrelation(correlationId),
+        },
+      });
+      return;
+    }
+  }
   // Legacy clients did not send a correlation id. Preserve their exact
   // execution behavior; the one-shot handler still emits an uncorrelated
   // accepted ACK at the later, truthful acceptance point.
@@ -4980,7 +5069,6 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const requestedBackendId = resolveMsgBackendId(msg);
   const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
   const agentId = backendId === requestedBackendId ? resolveMsgAgentId(msg, backendId) : '';
-  const threadId = resolveMsgThreadId(msg);
   const scopeId = orchestratorSendIdempotencyScope({
     repoPath,
     backend: backendId,
@@ -5034,6 +5122,59 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         ...orchestratorCommandAckCorrelation(correlationId),
       },
     });
+  }
+}
+
+async function sendLeadTerminalStatus(
+  client: ClientState,
+  leadId: string,
+  turnId: string,
+  afterCursor: number,
+): Promise<void> {
+  const deadline = Date.now() + 10 * 60_000;
+  let cursor = afterCursor;
+  while (Date.now() < deadline) {
+    const receipt = await waitForLead({
+      leadId,
+      turnId,
+      afterCursor: cursor,
+      waitMs: Math.min(30_000, deadline - Date.now()),
+    });
+    cursor = receipt.cursor;
+    const leadStatus = receipt.lead.status;
+    const status = leadStatus === 'stopped' ? 'stopped' : receipt.requestedTurn?.status;
+    if (!status || status === 'queued' || status === 'running' || status === 'waiting_workers') continue;
+    const assistantText = receipt.requestedTurn?.resultText
+      ?? receipt.requestedTurn?.outcome?.summary
+      ?? receipt.requestedTurn?.error
+      ?? '';
+    if (assistantText) {
+      send(client, {
+        channel: 'orchestrator',
+        event: 'output',
+        data: {
+          text: assistantText,
+          repoPath: receipt.lead.repoPath,
+          threadId: receipt.lead.threadId,
+          backend: receipt.lead.routing.backend,
+          assistantMessageId: `lead-assistant-${receipt.requestedTurn?.id}`,
+        },
+      });
+    }
+    send(client, {
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: status === 'failed' || status === 'stopped' ? 'dead' : 'ready',
+        leadStatus: status,
+        repoPath: receipt.lead.repoPath,
+        threadId: receipt.lead.threadId,
+        backend: receipt.lead.routing.backend,
+        lead: receipt.lead,
+        admittedTurnId: turnId,
+      },
+    });
+    return;
   }
 }
 
@@ -5950,6 +6091,52 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
+  const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
+  if (leadBinding) {
+    const correlationId = resolveOrchestratorCommandCorrelationId(msg);
+    try {
+      if (resolveLeadRepoPath(repoPath) !== leadBinding.repo_path) {
+        throw new Error('repoPath does not match the persistent lead binding.');
+      }
+    } catch (error) {
+      send(client, {
+        channel: 'orchestrator',
+        event: 'error',
+        data: {
+          error: error instanceof Error ? error.message : 'Persistent lead stop failed.',
+          repoPath,
+          threadId,
+          ...orchestratorCommandAckCorrelation(correlationId),
+        },
+      });
+      return;
+    }
+    const alreadyStopped = leadBinding.status === 'stopped';
+    const receipt = alreadyStopped
+      ? getLeadStatus(leadBinding.id)
+      : stopLead(leadBinding.id, 'Stopped from the orchestrator composer.');
+    sendOrchestratorInterruptAck(client, {
+      repoPath,
+      threadId,
+      backend: leadBinding.backend,
+      correlationId,
+      state: alreadyStopped ? 'already-interrupted' : 'accepted',
+      interrupted: !alreadyStopped,
+      duplicate: alreadyStopped,
+    });
+    send(client, {
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: 'stopped',
+        repoPath,
+        threadId,
+        backend: leadBinding.backend,
+        lead: receipt.lead,
+      },
+    });
+    return;
+  }
   const requestedBackendId = resolveMsgBackendId(msg);
   const activeRoute = activeOrchestratorRoutes.resolve({ repoPath, threadId, requestedBackend: requestedBackendId });
   const backendId = activeRoute?.toBackend ?? requestedBackendId;
@@ -7640,15 +7827,61 @@ const httpServer = createServer((req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'surfaceId and repoPath required' }));
           return;
         }
-        registerWatchedAgent(
-          body.surfaceId,
-          body.repoPath,
-          body.name ?? 'Unnamed agent',
-          body.prompt ?? '',
-          body.launchContext,
-        );
+        const surfaceId = body.surfaceId;
+        const repoPath = body.repoPath;
+        const priorWatch = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+        if (!priorWatch) {
+          registerWatchedAgent(
+            surfaceId,
+            repoPath,
+            body.name ?? 'Unnamed agent',
+            body.prompt ?? '',
+            body.launchContext,
+          );
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, watching: body.surfaceId }));
+        res.end(JSON.stringify({ ok: true, watching: surfaceId }));
+        void (async () => {
+          const [{ findLaneBySession }, { hasCurrentCleanWorkerExit, newestWorkerProcessExit, workerExitAttemptId }, { lookupOwnedActiveRunFresh }] = await Promise.all([
+            import('@/lib/lane/registry'),
+            import('@/lib/lane/worker-session-state'),
+            import('@/lib/runtimes/shared/owned-session-index'),
+          ]);
+          // A completed watch can remain through cleanup. Re-arm only for a
+          // different durable exit receipt or a proven newer active run.
+          const lane = findLaneBySession(surfaceId);
+          const attemptId = lane ? newestWorkerProcessExit(lane) : null;
+          const currentAttemptId = attemptId ? workerExitAttemptId(attemptId) : null;
+          const activeRun = priorWatch?.completionReported
+            ? await lookupOwnedActiveRunFresh(surfaceId)
+            : null;
+          const hasNewerExit = Boolean(currentAttemptId && currentAttemptId !== (priorWatch ? watchedAttemptIds.get(priorWatch) : undefined));
+          if (priorWatch && getWatchedAgents().find((agent) => agent.surfaceId === surfaceId) !== priorWatch) return;
+          if (priorWatch?.completionReported && (hasNewerExit || (activeRun && Object.keys(activeRun).length > 0))) {
+            registerWatchedAgent(
+              surfaceId,
+              repoPath,
+              body.name ?? priorWatch.name,
+              body.prompt ?? priorWatch.prompt,
+              body.launchContext ?? priorWatch.launchContext,
+            );
+          }
+          const currentWatch = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+          if (currentWatch && currentAttemptId) watchedAttemptIds.set(currentWatch, currentAttemptId);
+          if (
+            currentWatch
+            && getWatchedAgents().find((agent) => agent.surfaceId === surfaceId) === currentWatch
+            && lane
+            && await hasCurrentCleanWorkerExit(lane)
+            && getWatchedAgents().find((agent) => agent.surfaceId === surfaceId) === currentWatch
+            && (() => {
+              const currentExit = newestWorkerProcessExit(lane);
+              return currentExit && workerExitAttemptId(currentExit) === watchedAttemptIds.get(currentWatch);
+            })()
+          ) {
+            await ingestAgentCompletionSignal(surfaceId);
+          }
+        })().catch((error) => console.warn('[supervisor] post-watch completion reconciliation failed:', error));
       } catch {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
@@ -7683,12 +7916,20 @@ const httpServer = createServer((req, res) => {
             return;
           }
 
+          const { findLaneBySession } = await import('@/lib/lane/registry');
+          const lane = findLaneBySession(surfaceId);
+          const { newestWorkerProcessExit, workerExitAttemptId } = await import('@/lib/lane/worker-session-state');
+          const stampAttempt = () => {
+            const exit = lane ? newestWorkerProcessExit(lane) : null;
+            const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+            if (exit && watched) watchedAttemptIds.set(watched, workerExitAttemptId(exit));
+          };
+          stampAttempt();
           let ingested = await ingestAgentCompletionSignal(surfaceId);
           if (!ingested) {
-            const { findLaneBySession } = await import('@/lib/lane/registry');
-            const lane = findLaneBySession(surfaceId);
             if (lane && !isTerminalLaneStatus(lane.status)) {
               registerWatchedAgent(surfaceId, lane.repoPath, lane.label || lane.branch, '');
+              stampAttempt();
               ingested = await ingestAgentCompletionSignal(surfaceId);
             }
           }
@@ -9146,10 +9387,26 @@ async function bootstrapWsServer() {
       },
       async onAgentCompletion(surfaceId, outcome) {
         const { handleAgentCompletion } = await import('@/lib/supervisor/agent-completion');
-        return handleAgentCompletion(surfaceId, outcome, {
+        const decision = await handleAgentCompletion(surfaceId, outcome, {
           enqueueAutoReview, triggerHeadlessSprintTick,
           queueReviewContinuation, enqueueVerificationFailureInboxItem,
         });
+        const { findLaneBySession } = await import('@/lib/lane/registry');
+        const lane = findLaneBySession(surfaceId);
+        if (lane?.packetId && (outcome === 'failed'
+          || lane.status === 'failed'
+          || lane.status === 'awaiting_input'
+          || lane.status === 'awaiting_orchestrator')) {
+          queueLeadWorkerReturn({
+            repoPath: lane.repoPath,
+            packetId: lane.packetId,
+            laneId: lane.id,
+            label: lane.label,
+            returnKind: outcome === 'failed' || lane.status === 'failed' ? 'failed' : 'needs_context',
+            detail: decision?.detail ?? lane.lastEventLabel ?? `Worker ${outcome}.`,
+          });
+        }
+        return decision;
       },
       onAgentRetry(oldSurfaceId, newSurfaceId) {
         // Update the lane's session binding so the new agent is tracked

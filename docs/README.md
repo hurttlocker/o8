@@ -23,6 +23,7 @@ For operators who want to understand the product and run governed agent work wit
 | [Canonical workflow](user/canonical-workflow.md) | The expected path from a task request through reviewed integration. |
 | [Self-tuning harness](user/self-tuning-harness.md) | How grounded features, execution contracts, lift measurements, skeptical review, CI, and portable bundles fit together. |
 | [Orchestration playbook](user/orchestration-playbook.md) | How to brief, monitor, review, recover, and close agent work well. |
+| [Persistent lead handoff](user/persistent-leads.md) | How an external liaison starts, continues, waits on, and stops one durable o8 lead. |
 | [Claude Code model carriers](user/claude-code-model-carriers.md) | How native, API-billed, and Codex subscription model sources work behind the Claude Code harness. |
 | [Operator MCP bridge](user/operator-mcp-bridge.md) | How terminal and MCP clients drive the same governed control plane as the app. |
 | [Local PII MCP](user/local-pii-mcp.md) | Attach an on-device PII detect/redact MCP to the tool-spine and workers. |

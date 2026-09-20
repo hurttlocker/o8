@@ -1,6 +1,6 @@
 import { getLaneEvents } from '@/lib/lane/registry';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
-import { ownedRoots } from '@/lib/runtimes/shared/owned-session-index';
+import { lookupOwnedActiveRunFresh, ownedRoots } from '@/lib/runtimes/shared/owned-session-index';
 
 function eventMatchesWorkerSession(event: LaneEvent, lane: Lane): boolean {
   if (event.verb !== 'runtime_process_exit') return false;
@@ -18,6 +18,12 @@ export function newestWorkerProcessExit(lane: Lane): LaneEvent | null {
     .findLast((event) => eventMatchesWorkerSession(event, lane)) ?? null;
 }
 
+/** Immutable attempt identity for an owned worker completion. */
+export function workerExitAttemptId(event: LaneEvent): string {
+  const runId = typeof event.payload.runId === 'string' ? event.payload.runId.trim() : '';
+  return runId ? `run:${runId}` : `exit:${event.id}`;
+}
+
 export function hasRecordedWorkerExit(lane: Lane): boolean {
   return newestWorkerProcessExit(lane) !== null;
 }
@@ -29,6 +35,19 @@ export function hasRecordedCleanWorkerExit(lane: Lane): boolean {
   if (runtimeOutcome === 'failed') return false;
   return classification === 'clean-exit'
     || (exitCode === 0 && (signal === null || signal === undefined));
+}
+
+/**
+ * A worker can close between runtime launch and lane-session attachment. The
+ * exit receipt is durable, but only reconcile it after confirming this exact
+ * owned session has no newer active run. That prevents an earlier run from
+ * completing a resumed worker that reuses its surface id.
+ */
+export async function hasCurrentCleanWorkerExit(lane: Lane): Promise<boolean> {
+  const sessionKey = lane.sessionKey?.trim();
+  if (!sessionKey || !hasRecordedCleanWorkerExit(lane)) return false;
+  const activeRun = await lookupOwnedActiveRunFresh(sessionKey);
+  return activeRun !== null && Object.keys(activeRun).length === 0;
 }
 
 /**

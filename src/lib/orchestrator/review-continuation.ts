@@ -8,6 +8,15 @@ import { startWakeTriage } from '@/lib/orchestrator/wake-triage';
 
 export interface ReviewContinuationLane { id: string; label: string; repoPath: string; packetId?: string | null; branch?: string | null }
 
+export function routeReviewContinuation(
+  lane: ReviewContinuationLane,
+  enqueue: (repoPath: string, message: string, label: string) => void,
+  enqueuePersistentLead: (lane: ReviewContinuationLane & { packetId: string }) => boolean,
+): void {
+  if (lane.packetId && enqueuePersistentLead({ ...lane, packetId: lane.packetId })) return;
+  queueReviewContinuation(lane, enqueue);
+}
+
 // #1481 — review-ready self-continuation. When a MISSION lane lands at
 // review, the fleet must not park until the operator re-prompts: queue one
 // bounded orchestrator turn ("review + merge per the standing instruction").
