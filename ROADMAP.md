@@ -11,20 +11,20 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 3. **Runs on your subscriptions.** The coding-agent CLIs you already pay for, behind one runtime contract.
 4. **One control plane, every surface.** Desktop, phone, CLI, MCP, headless, voice. Same verbs, different authority.
 5. **Smooth for people and for agents.** Fast and legible for a person; drivable through a real interface for a program.
-6. **Runs where you are.** Light on the machine, on the machine you have. Mac today, Linux compiles but is unproven end to end, Windows help wanted.
+6. **Runs where you are.** Light on the machine, on the machine you have. Mac today; Linux and Windows have compile evidence, while maintainer VM validation is paused. Windows help is welcome.
 7. **Ahead.** Longer-term bets, advanced when their next proof warrants it.
 
 ## Now
 
-One arc first: **First ten minutes.** A new operator goes from download to a first merged packet, and the minutes and the stalls are measured. The first measurement exists: from source on a Mac, clone to merged packet took 6.8 minutes with nine stalls, one of them needing maintainer knowledge to pass. The eight product frictions behind those stalls shipped in 0.1.750. The download path is still unmeasured, so the arc stays open until a stranger's run is timed. [#2211](https://github.com/hurttlocker/o8/issues/2211), [receipt](./docs/user/first-run-receipt-2026-09-12.md)
+The next repair batch is [#2528](https://github.com/hurttlocker/o8/issues/2528) and [#2529](https://github.com/hurttlocker/o8/issues/2529), found by the effort-compatibility audit [#2520](https://github.com/hurttlocker/o8/issues/2520), plus [#2530](https://github.com/hurttlocker/o8/issues/2530) and [#2531](https://github.com/hurttlocker/o8/issues/2531), found by the inference-consumption audit [#2522](https://github.com/hurttlocker/o8/issues/2522). Version 0.1.760 shipped the earlier mission-effort, Brain-warmup, and managed-Brain routing fixes; these four findings remain open.
 
-Linux is the next platform milestone. Nine of ten children are shipped; the last is the proof that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. [#2060](https://github.com/hurttlocker/o8/issues/2060)
+After that batch, run the correctness and reliability queue: mobile approval-route parity [#2479](https://github.com/hurttlocker/o8/issues/2479) and its completed-merge equality test [#2480](https://github.com/hurttlocker/o8/issues/2480), remaining dispatch and lifecycle findings, then the dedicated Symon review [#2534](https://github.com/hurttlocker/o8/issues/2534). That review is queued, not claimed or started. Its scope is existing session, payer, model, tool-result, interruption, reconnect, and approval behavior; feature work stays in its separate program.
 
-Lane lifecycle and shared settings are gates on that path, not arcs that replace it. A refusal or a replaced mission must settle truthfully, and a changed setting must reach every surface on its next action. [#2197](https://github.com/hurttlocker/o8/issues/2197), [#2217](https://github.com/hurttlocker/o8/issues/2217)
+The typed judgment program measures and replays recorded answers before it adds a surface or promotes one. The replay labels shipped in 0.1.760; recorded labels do not establish a promotion decision. Managed judgment is a separately gated hosted-service change, and the bring-your-own-key path remains the current free path. [#2481](https://github.com/hurttlocker/o8/issues/2481)
 
-**The typed judgment referee is the next governance thread.** A non-generative model answers locked per-question facts over state o8 computed, every call receipted, thresholds only from the local replay. Seven surfaces exist; the next child is the managed proxy for paid plans with a free daily allowance, so the bring-your-own key stays the free path. [#2481](https://github.com/hurttlocker/o8/issues/2481), [#2452](https://github.com/hurttlocker/o8/issues/2452)
+First-use and remote project operation remain product outcomes, not substitutes for this repair order. First-use needs a measured download-to-merge run; remote operation needs durable worker and recovery proof. [#2211](https://github.com/hurttlocker/o8/issues/2211), [#2282](https://github.com/hurttlocker/o8/issues/2282)
 
-**Remote project operation is the next product milestone.** Its worker integration can proceed alongside the first-use and Linux proofs: run a project task on an external worker, close the laptop, and return to the same task, preview, diff, evidence, and approval path. A second supported agent system must then complete a later packet without rebuilding the project workflow. [#2282](https://github.com/hurttlocker/o8/issues/2282), [build order and proof](./docs/operations/remote-project-milestone.md)
+Linux and Windows maintainer-VM validation is paused; the install-to-merge proof remains outstanding. Do not start that work from this queue. [#1672](https://github.com/hurttlocker/o8/issues/1672), [#2204](https://github.com/hurttlocker/o8/issues/2204)
 
 ## What we need to prove
 
@@ -40,7 +40,9 @@ Only open arcs appear in the pillar tables. Shipped arcs are listed once at the 
 
 State words mean: **open** has children in flight; **parked** means we know what it would take and are not doing it now; **not usable** means the platform does not run o8 today, whatever the checklist says. Read the Gap column first. It says what is missing in words.
 
-`node scripts/roadmap-status.mjs` prints the checklist counts. `node scripts/roadmap-status.mjs --check` fails when a checked child is still open or when a Now link points at a closed issue. A closed child whose box is unchecked is reported as awaiting release, not as drift. CI runs the check on every push to main and weekly. The check reads issue state only: it does not read release tags and it cannot judge a Gap sentence, so the words on this page are the maintainers' to keep true.
+A `pillar/*` label locates a subsystem. An `area:*` label identifies an optional cross-cutting concern. Assignees and named claims record who has taken the work; categories do not assign ownership.
+
+`node scripts/roadmap-status.mjs` prints the checklist counts. `node scripts/roadmap-status.mjs --check` fails when a checked child is still open or when a Now link points at a closed issue. A closed child whose box is unchecked is reported as awaiting release, not as drift. CI runs this check on pushes, the Sunday scheduled run, and manual dispatches, not on pull requests. The check reads issue state only: it does not read release tags and it cannot judge a Gap sentence, so the words on this page are the maintainers' to keep true.
 
 ## 1. Governance is the product
 
@@ -53,7 +55,7 @@ Execution is separated from approval. Workers cannot merge their own packets. Th
 | Contributor-ready public repo | An outside pull request gets green checks and a human reply without maintainer plumbing. | open | Every child is shipped as of 0.1.750. No outside pull request has gone through the claiming protocol end to end, so the outcome is unproven. | [#2199](https://github.com/hurttlocker/o8/issues/2199) |
 | First-diff quality | A governed packet's first diff scores at least as well as the raw model coding alone on the same issue. | parked | Earlier headline comparisons reported 0/3 governed wins, but those scores were later withdrawn because judge bias could not be ruled out. Over-engineering and missed requirements remain the target failure modes. The later [paired contract trial](./docs/user/honest-benchmark-2026-08.md#track-1--coding-does-a-pre-edit-contract-improve-first-diff-quality) was mixed. The [September 12 fixed trial](https://github.com/hurttlocker/o8/issues/1684#issuecomment-5645498074) scored two complete tasks, with zero decisive contract wins in either runtime; one task was excluded for an invalid contract. The original decision rule remains unmet. Future intervention research is separate. | [#1684](https://github.com/hurttlocker/o8/issues/1684) |
 | Governed task completion and operator effort | A bounded comparison produces an auditable decision about final correctness, operator effort, and overhead. | open | Protocol [#2290](https://github.com/hurttlocker/o8/pull/2290) is merged. The near-term step is [#2296](https://github.com/hurttlocker/o8/issues/2296), three real-work dogfood observations one at a time; the formal [#2288](https://github.com/hurttlocker/o8/issues/2288) paired pilot remains parked. | [#2289](https://github.com/hurttlocker/o8/issues/2289) |
-| Typed judgment referee | Every advisory referee surface (approval card, Brain routing, merge-gate warning, phone inbox order and chips) runs behind one setting, writes a receipt per call, and reads a threshold only where the local calibration replay earned it. Bring-your-own key works on every plan; paid plans get the managed proxy and free installs a daily allowance. | open | Five surfaces shipped in 0.1.758 and two phone surfaces are merged unreleased. The replay on this install found no gate-failure signal in the risk score, so nothing gates on it. The managed proxy path and the free allowance do not exist yet. | [#2481](https://github.com/hurttlocker/o8/issues/2481), [#2452](https://github.com/hurttlocker/o8/issues/2452) |
+| Typed judgment referee | Every advisory referee surface (approval card, Brain routing, merge-gate warning, phone inbox order and chips) runs behind one setting, writes a receipt per call, and reads a threshold only where the local calibration replay earned it. | open | Advisory surfaces shipped in 0.1.759 and replay labels shipped in 0.1.760. The risk score has no gate-failure signal in the local replay, so nothing gates on it. Replay and measurement come before another surface or a promotion decision; managed judgment has a separate hosted-service gate. | [#2481](https://github.com/hurttlocker/o8/issues/2481) |
 
 ## 2. Organizational memory
 
@@ -82,6 +84,7 @@ Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control p
 | Terminals as a workspace surface | A tmux or vim session survives an update and a pane switch byte for byte, and agent terminal actions go through a governed adapter. | open | Agent terminal actions are raw writes, and agent status inside a terminal is not inspectable. | [#1723](https://github.com/hurttlocker/o8/issues/1723) |
 | Settings take effect everywhere | An operator changes a setting once and every surface uses the new value on its next action, with no reload and no second place to set it. | open | Operator defaults are snapshotted at page load and cached per terminal server; the same bug has recurred under four names. | [#2217](https://github.com/hurttlocker/o8/issues/2217) |
 | Remote project operation | An operator reconnects to the same remote task, preview, diff, evidence, and approval path; a later packet can use another supported agent system with the same project rules. | open | The standalone worker uses the legacy protocol. Durable worker integration, remote workspace identity, and an operator-visible recovery and continuation proof remain open. | [#2282](https://github.com/hurttlocker/o8/issues/2282) |
+| Symon correctness and reliability | Existing desktop and phone flows have a recorded correctness and reliability review. Confirmed failures become bounded issues; resulting fixes are verified through their real entry points and shipped. | open | The review is queued after the repair batch. | [#2534](https://github.com/hurttlocker/o8/issues/2534) |
 
 ## 5. Smooth for people and for agents
 
@@ -92,8 +95,6 @@ Two lanes, one pillar. The people lane covers the surfaces a person works in. Th
 | First ten minutes | people | A stranger goes from download to a first merged packet, and the minutes and the stalls are measured. | open | Measured once, from source: 6.8 minutes and nine stalls. The eight frictions from that run shipped in 0.1.750. The download path is unmeasured, and no second run confirms the fixes. | [#2211](https://github.com/hurttlocker/o8/issues/2211) |
 | Design Mode loop | people | "Change this button" is one bounded loop with a before-and-after proof card. | open | Screenshot crop timing is not measured through the supported capture path. | [#1695](https://github.com/hurttlocker/o8/issues/1695) |
 | Agent-facing API manifest | agents | One manifest lists every operator verb and its surfaces, and CI fails when a verb exists on one surface and not another. | open | No manifest exists; parity between the CLI, MCP, and the webview socket is checked by hand. | [#2212](https://github.com/hurttlocker/o8/issues/2212) |
-| Composer selector | people | One picker for lead model and effort, work mode independent of effort, a receipt on every sent turn of what actually ran, and one resolver with one label table behind every surface. | merged, unreleased | All eight children merged on 2026-09-13; ships in the next release. Ultra effort stays behind a Settings switch by design. | [#2314](https://github.com/hurttlocker/o8/issues/2314) |
-| Composer selector | people | From the composer alone, an operator can predict which lead model, effort, work mode, and worker runtime a turn will run, change any one without the others changing, and read back on the sent turn what actually ran. | open | Ten selector controls in two components write to four persistence homes, the top effort notch also changes the work mode, no keyboard path beyond the slider, and a sent turn carries no record of its model, effort, or mode. | [#2314](https://github.com/hurttlocker/o8/issues/2314) |
 
 ## 6. Runs where you are
 
@@ -101,13 +102,13 @@ o8 should be light on the machine it runs on, and it should run on the machine y
 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
-| Linux | A fresh Ubuntu machine installs o8, launches it, dispatches a packet, and merges it through the governed path. | not usable yet | Nobody has proven the install on a mainstream distro. | [#1672](https://github.com/hurttlocker/o8/issues/1672) |
-| Windows | The same as Linux, on Windows. | not usable | Code signing is pending validation, and every child after the audit is unbuilt. | [#2204](https://github.com/hurttlocker/o8/issues/2204) |
+| Linux | A fresh Ubuntu machine installs o8, launches it, dispatches a packet, and merges it through the governed path. | parked | Maintainer VM validation is paused; install-to-merge proof remains outstanding. | [#1672](https://github.com/hurttlocker/o8/issues/1672) |
+| Windows | The same as Linux, on Windows. | parked | Maintainer VM validation is paused; install-to-merge proof remains outstanding. | [#2204](https://github.com/hurttlocker/o8/issues/2204) |
 | Speed and idle-work pass | Interaction budgets hold under real load, not only at idle. | open | Conversation switching and long histories slow down under streaming load. | [#2202](https://github.com/hurttlocker/o8/issues/2202) |
 | Storage admission and reclaim | o8 never blocks a dispatch it could have serviced, and never fills the disk. | open | Admission uses one flat free-space reserve instead of the job's size. | [#2203](https://github.com/hurttlocker/o8/issues/2203) |
 | Release channels and build integrity | Preview and stable are separable, and a build is reproducible from a tag. | open | Preview enrollment with an isolated app identity and data does not exist. | [#2205](https://github.com/hurttlocker/o8/issues/2205) |
 
-Windows is help wanted. No maintainer has a Windows machine to verify on, so this arc needs a contributor who does. The port audit is written, with file-and-line evidence, in `docs/internals/port-audit-windows.md`.
+Windows is help wanted. Maintainer VM validation is paused; a contributor can take a bounded child with the required proof. The port audit is written, with file-and-line evidence, in `docs/internals/port-audit-windows.md`.
 
 ## 7. Ahead
 
@@ -130,7 +131,7 @@ Arcs whose every child is closed and released. They stay here so the pillars rea
 - **Organizational memory:** Engineering Brain question and answer ([#915](https://github.com/hurttlocker/o8/issues/915)); workers write back to memory (0.1.716); spec review inversion, where the operator owns the rules and agents only annotate.
 - **Runs on your subscriptions:** OpenCode 2 and ACP, a non-subscription CLI as worker and orchestrator backend (0.1.750); execution carriers (0.1.748); declarative runtimes (0.1.725).
 - **One control plane, every surface:** headless o8 (0.1.727); mobile as an operator surface ([#1074](https://github.com/hurttlocker/o8/issues/1074)); voice as an operator surface, with the planning seat as a registry choice (0.1.748).
-- **Smooth for people and for agents:** canvas IDE parity, carved scope ([#1664](https://github.com/hurttlocker/o8/issues/1664), 0.1.722); rich Markdown editor (0.1.722); interaction budgets (0.1.748); control surfaces instead of scraping (0.1.749); CLI and MCP symmetry (0.1.738).
+- **Smooth for people and for agents:** canvas IDE parity, carved scope ([#1664](https://github.com/hurttlocker/o8/issues/1664), 0.1.722); rich Markdown editor (0.1.722); interaction budgets (0.1.748); control surfaces instead of scraping (0.1.749); CLI and MCP symmetry (0.1.738); Composer selector ([#2314](https://github.com/hurttlocker/o8/issues/2314), 0.1.753). The separate effort-compatibility audit remains open.
 - **Runs where you are:** Mac hardening, a populated daily profile through an unchanged native idle gate (0.1.748).
 
 ## Claiming work
