@@ -142,6 +142,29 @@ describe('filterCatalogue', () => {
   });
 });
 
+describe('catalogue metadata', () => {
+  it('ranks metadata-known runtime ids without replacing or inventing selectable ids', () => {
+    const runtimeIds = [
+      { value: 'openrouter/acme/alpha' },
+      { value: 'openrouter/acme/beta' },
+      { value: 'openrouter/acme/unknown' },
+    ];
+    const metadata = new Map([
+      ['openrouter/acme/alpha', { rank: 1, label: 'Alpha', free: true, compatible: true }],
+      ['openrouter/acme/beta', { rank: 0, label: 'Beta', free: false, compatible: true }],
+    ]);
+    const models = buildModelCatalogue(runtimeIds, metadata)[0]!.models;
+
+    expect(models.map((model) => model.id)).toEqual([
+      'openrouter/acme/beta',
+      'openrouter/acme/alpha',
+      'openrouter/acme/unknown',
+    ]);
+    expect(models[0]).toMatchObject({ id: 'openrouter/acme/beta', label: 'Beta', metadata: { rank: 0, free: false } });
+    expect(models[2]?.metadata).toBeUndefined();
+  });
+});
+
 describe('stripRedundantProviderPrefix', () => {
   it('drops the display prefix when it names the row’s own provider group', () => {
     expect(stripRedundantProviderPrefix('OpenRouter/DeepSeek V4 Pro', 'openrouter')).toBe('DeepSeek V4 Pro');
