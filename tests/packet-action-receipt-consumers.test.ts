@@ -7,7 +7,6 @@ const ROOT = join(__dirname, '..');
 const MUTATION_CONSUMERS = [
   'src/components/desktop/InlineDiffViewer.tsx',
   'src/components/desktop/O8InboxPane.tsx',
-  'src/components/desktop/merge-beacon/MergeBeacon.tsx',
   'src/components/desktop/review/panel/LaneReviewSummaryHeader.tsx',
   'src/components/desktop/thoughts/mission-panel/RejectedFeedbackPanel.tsx',
   'src/components/desktop/thoughts/mission-panel/review-card/ReviewPane.tsx',

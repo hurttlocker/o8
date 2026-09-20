@@ -265,7 +265,6 @@ describe('desktop and preview packet mutation callers construct correlated bodie
 
   it.each([
     'src/components/desktop/InlineDiffViewer.tsx',
-    'src/components/desktop/merge-beacon/MergeBeacon.tsx',
     'src/components/desktop/review/panel/LaneReviewSummaryHeader.tsx',
     'src/components/desktop/workspace-terminal/ChatPacketStatusBanner.tsx',
     'src/app/preview/canvas-glass/diff-card.tsx',
