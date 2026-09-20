@@ -9,9 +9,11 @@ import {
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
+import { resolveEffortAliases, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   formatDispatchableRuntimeChoices,
+  getRuntimeCapability,
   isDispatchableRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
@@ -38,7 +40,15 @@ function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
  * that touches nothing), so it carries no approval gate; only the downstream
  * irreversible verbs (merge / push / prod) stay gated.
  *
- * Body: { repoPath, task, count?, runtime?, constraints?, useBrain?, origin? }
+ * Body: { repoPath, task, count?, runtime?, requestedRuntime?, requestedModel?,
+ *   requestedEffort?, thinkingEffort?, constraints?, useBrain?, origin? }
+ *
+ * `requestedEffort` / `thinkingEffort` are explicit reasoning-effort pins
+ * (aliases; one value at most). No current canvas/symon caller passes them —
+ * this is backend support so a future caller (e.g. voice "spawn at high effort")
+ * can pin without a new route. A malformed, conflicting, or unsupported pin is
+ * rejected here, before preflight/persistence/dispatch, mirroring the
+ * create-mission effort contract (#2528).
  */
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -68,6 +78,14 @@ export async function POST(request: NextRequest) {
 
   const requestedRuntimeRaw = record.requestedRuntime ?? record.runtime;
   const requestedModel = record.requestedModel ?? record.model;
+  // An explicit effort is a pin, not a hint. Validate BOTH aliases independently
+  // (so a malformed value cannot hide behind the other) and reject conflicting
+  // explicit values rather than letting first-wins pick one (#2528).
+  const effortAliases = resolveEffortAliases(record.requestedEffort, record.thinkingEffort);
+  if (!effortAliases.ok) {
+    return operatorError(effortAliases.code, effortAliases.message, 400);
+  }
+  const requestedEffort = effortAliases.requestedEffort;
   const explicitRuntimeRequested = !(requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === '');
   const requestedRuntime = !explicitRuntimeRequested
     ? resolveDefaultDispatchRuntimeSync()
@@ -91,6 +109,7 @@ export async function POST(request: NextRequest) {
     requestedProvider: record.requestedProvider,
     requestedRuntime: profileRouting.requestedRuntime,
     requestedModel: profileRouting.requestedModel,
+    requestedEffort,
     source: 'spawn-prompt-api',
   });
   const huddle = resolveWorkerHuddle({
@@ -100,6 +119,22 @@ export async function POST(request: NextRequest) {
     runtime: workerRouting.selectedRuntime,
     model: workerRouting.selectedModel,
   });
+  // Validate the FINAL selected runtime/model before preflight, persistence, or
+  // dispatch — an unsupported runtime or an adapter-coerced/dropped model fails
+  // here instead of silently losing the pin on a launched agent (#2528).
+  const actualLaunchedModel = workerRouting.selectedModel
+    ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
+    ?? null;
+  const effortPin = resolveEffortPin({
+    requestedEffort,
+    runtime: workerRouting.selectedRuntime,
+    explicitModel: typeof requestedModel === 'string' ? requestedModel.trim() || null : null,
+    model: actualLaunchedModel,
+    modelDisposition: workerRouting.modelDisposition,
+  });
+  if (!effortPin.ok) {
+    return operatorError(effortPin.code, effortPin.message, 400);
+  }
   try {
     if (defaults.workerExecutionCarrier) {
       await assertExecutionCarrierDispatchable(workerRouting.selectedRuntime, defaults.workerExecutionCarrier);
@@ -142,6 +177,7 @@ export async function POST(request: NextRequest) {
       requestedProvider: workerRouting.requestedProvider,
       requestedRuntime: profileRouting.requestedRuntime,
       requestedModel: workerRouting.requestedModel,
+      requestedEffort,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       // This endpoint creates and dispatches as one durable operation. Keep
       // scheduler admission if the synchronous dispatch is interrupted.
