@@ -78,7 +78,7 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
 
   for (const event of events) {
     if (event.type === 'delta') {
-      const blockKey = String(event.blockIndex ?? 0);
+      const blockKey = `${event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
       let entry = assistantBlocks.get(blockKey);
       if (!entry) {
         entry = {
@@ -99,7 +99,7 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
     }
 
     if (event.type === 'thinking') {
-      const blockKey = String(event.blockIndex ?? 0);
+      const blockKey = `${event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
       let entry = thinkingBlocks.get(blockKey);
       if (!entry) {
         entry = {
@@ -131,6 +131,46 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
           timestamp: run.startedAt,
         });
       }
+      continue;
+    }
+
+    if (event.type === 'tool_call') {
+      const text = eventText(event);
+      entries.push({
+        id: `${run.id}:tool:${event.id ?? eventOrdinal}`,
+        kind: 'tool',
+        label: event.name,
+        text,
+        timestamp: run.startedAt,
+        toolCall: {
+          ...(event.id ? { id: event.id } : {}),
+          name: event.name,
+          ...(event.args ? { args: event.args } : {}),
+          ...(event.preview ? { preview: event.preview } : {}),
+          status: 'running',
+        },
+      });
+      eventOrdinal += 1;
+      continue;
+    }
+
+    if (event.type === 'tool_result') {
+      const text = eventText(event);
+      entries.push({
+        id: `${run.id}:tool-result:${event.id ?? eventOrdinal}`,
+        kind: 'tool-output',
+        label: event.name ?? 'tool',
+        text,
+        timestamp: run.startedAt,
+        toolCall: {
+          ...(event.id ? { id: event.id } : {}),
+          name: event.name ?? 'tool',
+          ...(event.args ? { args: event.args } : {}),
+          ...(event.preview ? { preview: event.preview } : {}),
+          status: 'done',
+        },
+      });
+      eventOrdinal += 1;
       continue;
     }
 

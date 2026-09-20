@@ -1,6 +1,6 @@
 export type ClaudeCodeStreamJsonChatEvent =
-  | { type: 'delta'; text: string; blockIndex?: number }
-  | { type: 'thinking'; text: string; blockIndex?: number }
+  | { type: 'delta'; text: string; blockIndex?: number; messageIndex?: number }
+  | { type: 'thinking'; text: string; blockIndex?: number; messageIndex?: number }
   | { type: 'tool_call'; id?: string | null; name: string; status: 'calling' | 'running' | 'done'; args?: Record<string, unknown>; preview?: string }
   | { type: 'tool_result'; id?: string | null; name?: string; args?: Record<string, unknown>; output?: string; preview?: string }
   | {
@@ -194,7 +194,10 @@ export function createClaudeCodeStreamJsonParser(
   };
   const tracker = createToolTracker();
   const streamedTextIndices = new Set<number>();
+  const streamedThinkingIndices = new Set<number>();
   let streamedTextWithoutIndex = false;
+  let streamedThinkingWithoutIndex = false;
+  let messageIndex = 0;
   let lineBuffer = '';
   let planLineBuffer = '';
 
@@ -226,7 +229,10 @@ export function createClaudeCodeStreamJsonParser(
         streamedTextWithoutIndex = true;
       }
     }
-    events.push({ type: 'delta', text, ...(typeof blockIndex === 'number' ? { blockIndex } : {}) });
+    events.push({
+      type: 'delta', text, messageIndex,
+      ...(typeof blockIndex === 'number' ? { blockIndex } : {}),
+    });
     events.push(...emitPlanSteps(text));
   };
 
@@ -348,18 +354,39 @@ export function createClaudeCodeStreamJsonParser(
       return events;
     }
 
+    if (type === 'message_start') {
+      messageIndex += 1;
+      streamedTextIndices.clear();
+      streamedThinkingIndices.clear();
+      streamedTextWithoutIndex = false;
+      streamedThinkingWithoutIndex = false;
+      return events;
+    }
+
     if (type === 'content_block_delta') {
       const delta = asRecord(event.delta);
       const blockIndex = asNumber(event.index);
       const thinking = asString(delta?.thinking);
       const text = asString(delta?.text);
       if (delta?.type === 'thinking_delta' && thinking) {
-        events.push({ type: 'thinking', text: thinking, ...(typeof blockIndex === 'number' ? { blockIndex } : {}) });
+        if (typeof blockIndex === 'number' && blockIndex >= 0) streamedThinkingIndices.add(blockIndex);
+        else streamedThinkingWithoutIndex = true;
+        events.push({
+          type: 'thinking', text: thinking, messageIndex,
+          ...(typeof blockIndex === 'number' ? { blockIndex } : {}),
+        });
         return events;
       }
       if (delta?.type === 'thinking_summary') {
         const summary = asString(delta.summary) ?? thinking ?? text;
-        if (summary) events.push({ type: 'thinking', text: summary, ...(typeof blockIndex === 'number' ? { blockIndex } : {}) });
+        if (summary) {
+          if (typeof blockIndex === 'number' && blockIndex >= 0) streamedThinkingIndices.add(blockIndex);
+          else streamedThinkingWithoutIndex = true;
+          events.push({
+            type: 'thinking', text: summary, messageIndex,
+            ...(typeof blockIndex === 'number' ? { blockIndex } : {}),
+          });
+        }
         return events;
       }
       if (text) {
@@ -373,7 +400,10 @@ export function createClaudeCodeStreamJsonParser(
       if (block?.type === 'tool_use') {
         emitToolUse(block, events);
       } else if (block?.type === 'thinking') {
-        events.push({ type: 'thinking', text: '', ...(typeof asNumber(event.index) === 'number' ? { blockIndex: asNumber(event.index) } : {}) });
+        events.push({
+          type: 'thinking', text: '', messageIndex,
+          ...(typeof asNumber(event.index) === 'number' ? { blockIndex: asNumber(event.index) } : {}),
+        });
       }
       return events;
     }
@@ -401,7 +431,9 @@ export function createClaudeCodeStreamJsonParser(
             emitText(text, events, blockIndex);
           } else if (block.type === 'thinking') {
             const thinking = asString(block.thinking) ?? asString(block.text);
-            if (thinking) events.push({ type: 'thinking', text: thinking, blockIndex });
+            if (thinking && !streamedThinkingWithoutIndex && !streamedThinkingIndices.has(blockIndex)) {
+              events.push({ type: 'thinking', text: thinking, blockIndex, messageIndex });
+            }
           } else if (block.type === 'tool_use') {
             emitToolUse(block, events);
           }

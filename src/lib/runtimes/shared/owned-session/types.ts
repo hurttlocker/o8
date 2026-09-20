@@ -187,6 +187,14 @@ export interface OwnedTailEntry {
   thinking?: string;
   /** The provider started a reasoning block but did not expose its contents. */
   thinkingActive?: boolean;
+  /** A structured tool event that can be paired with its later result. */
+  toolCall?: {
+    id?: string;
+    name: string;
+    args?: Record<string, unknown>;
+    preview?: string;
+    status: 'running' | 'done';
+  };
 }
 
 export interface OwnedTailGroup {

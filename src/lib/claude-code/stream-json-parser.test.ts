@@ -22,6 +22,29 @@ function lines(...events: unknown[]): string {
 const wrap = (event: unknown) => ({ type: 'stream_event', event });
 
 describe('stream-json parser assistant-replay dedup', () => {
+  it('resets text and thinking replay deduplication at each provider message', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const events = parser.pushChunk(lines(
+      wrap({ type: 'message_start' }),
+      wrap({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'first thought' } }),
+      wrap({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'first answer' } }),
+      { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'first thought' }, { type: 'text', text: 'first answer' }] } },
+      wrap({ type: 'message_start' }),
+      wrap({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'second thought' } }),
+      wrap({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'second answer' } }),
+      { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'second thought' }, { type: 'text', text: 'second answer' }] } },
+    ));
+
+    expect(events.filter((event) => event.type === 'delta')).toEqual([
+      expect.objectContaining({ text: 'first answer', messageIndex: 1, blockIndex: 1 }),
+      expect.objectContaining({ text: 'second answer', messageIndex: 2, blockIndex: 1 }),
+    ]);
+    expect(events.filter((event) => event.type === 'thinking')).toEqual([
+      expect.objectContaining({ text: 'first thought', messageIndex: 1, blockIndex: 0 }),
+      expect.objectContaining({ text: 'second thought', messageIndex: 2, blockIndex: 0 }),
+    ]);
+  });
+
   it('skips the replay even when thinking blocks shift the content array', () => {
     const parser = createClaudeCodeStreamJsonParser();
     const events = parser.pushChunk(lines(

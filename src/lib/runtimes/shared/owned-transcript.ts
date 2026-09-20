@@ -62,11 +62,45 @@ export function ownedTailToRuntimeTranscript(
 ): RuntimeTranscriptEntry[] {
   const entries: RuntimeTranscriptEntry[] = [];
   const seenIds = new Set<string>();
+  const toolEntries = new Map<string, RuntimeTranscriptEntry>();
 
   const append = (entry: RuntimeTranscriptEntry) => {
     if (seenIds.has(entry.id)) return;
     seenIds.add(entry.id);
     entries.push(entry);
+  };
+
+  const appendOwnedEntry = (entry: OwnedTailEntry, fallbackTimestamp?: string) => {
+    if (entry.toolCall) {
+      const toolKey = entry.toolCall.id ?? entry.id;
+      const existing = entries.find((candidate) => candidate.id === entry.id);
+      if (entry.kind === 'tool' && existing) {
+        toolEntries.set(toolKey, existing);
+        return;
+      }
+      if (entry.kind === 'tool-output') {
+        const call = toolEntries.get(toolKey);
+        if (call?.toolCalls?.[0]) {
+          call.toolCalls[0] = {
+            ...call.toolCalls[0],
+            status: 'done',
+            preview: entry.toolCall.preview ?? call.toolCalls[0].preview,
+          };
+          return;
+        }
+      }
+      const toolEntry: RuntimeTranscriptEntry = {
+        id: entry.kind === 'tool-output' ? `${entry.id}:paired` : entry.id,
+        role: 'assistant',
+        text: '',
+        timestamp: transcriptTimestamp(entry.timestamp, fallbackTimestamp),
+        toolCalls: [{ ...entry.toolCall }],
+      };
+      append(toolEntry);
+      toolEntries.set(toolKey, toolEntry);
+      return;
+    }
+    append(runtimeEntry(entry, fallbackTimestamp));
   };
 
   for (const group of tail.groups) {
@@ -86,7 +120,7 @@ export function ownedTailToRuntimeTranscript(
           && entry.text.trim() === prompt
           && entry.label.toLowerCase().includes('prompt'));
       if (isDuplicatePrompt) continue;
-      append(runtimeEntry(entry, group.finishedAt ?? group.startedAt));
+      appendOwnedEntry(entry, group.finishedAt ?? group.startedAt);
     }
   }
 
@@ -94,7 +128,7 @@ export function ownedTailToRuntimeTranscript(
   // their raw entries readable, while the id set prevents normal tails from
   // being duplicated.
   for (const entry of tail.entries) {
-    append(runtimeEntry(entry));
+    appendOwnedEntry(entry);
   }
 
   const includeSinceEntry = options?.includeSinceEntry ?? tail.groups.some((group) => (
