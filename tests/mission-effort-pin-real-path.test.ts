@@ -44,6 +44,18 @@ const providerLaunches = vi.hoisted(() => ({
   gemini: [] as Array<{ model?: string }>,
 }));
 
+// Capacity telemetry is outside effort routing. Keep its completion event real,
+// but do not start unrelated adapter observations from this transport fixture.
+vi.mock('@/lib/runtime/capacity-service', () => ({
+  getRuntimeCapacityControlSnapshot: vi.fn(async () => ({
+    schema: 'o8/runtime-capacity-control/v1',
+    generatedAt: Date.now(),
+    capacities: [],
+    identities: [],
+    runtimes: [],
+  })),
+}));
+
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
   measureHostVolume: vi.fn(async () => ({
@@ -255,18 +267,22 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  // Launch completion deliberately detaches capacity observations. Settle their
-  // adapter work before removing this fixture's data directory: a late bridge
-  // registration otherwise recreates ws-token after rmSync has begun.
-  const [
-    { stopSupervisorLoop },
-    { settleRuntimeCapacityObservationsForTests },
-  ] = await Promise.all([
-    import('@/lib/supervisor/agent-supervisor'),
-    import('@/lib/runtime/capacity-service'),
-  ]);
+  const { listActiveLanes, getLaneEvents } = await import('@/lib/lane/registry');
+  // Argv appears before launch registration completes. The start-capacity event
+  // is persisted after supervisor registration, including its ws-token write.
+  await vi.waitFor(() => {
+    const lanes = listActiveLanes().filter((lane) => lane.repoPath.startsWith(dataDir + sep));
+    for (const lane of lanes) {
+      expect(['queued', 'launching']).not.toContain(lane.status);
+      if (lane.sessionKey) {
+        expect(getLaneEvents(lane.id, 10_000).some((event) => (
+          event.verb === 'capacity_snapshot' && event.payload.phase === 'start'
+        ))).toBe(true);
+      }
+    }
+  }, { timeout: 15_000, interval: 10 });
+  const { stopSupervisorLoop } = await import('@/lib/supervisor/agent-supervisor');
   stopSupervisorLoop();
-  await settleRuntimeCapacityObservationsForTests();
   vi.unstubAllGlobals();
   rmSync(dataDir, { recursive: true, force: true });
 });
