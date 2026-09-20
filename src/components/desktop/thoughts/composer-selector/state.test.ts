@@ -195,7 +195,7 @@ describe('composer selector state', () => {
 
   it.each([
     ['solo', 'Codex', 'Sol', 'single'],
-    ['multitask', 'OpenCode 2', null, 'fleet'],
+    ['multitask', 'OpenCode', null, 'fleet'],
     ['moa', 'Codex', 'Sol', 'fleet'],
     ['fusion', 'Codex', null, 'fusion'],
   ] as const)('keeps resolved mode and worker fields coherent for %s', (mode, runtime, workerModel, execution) => {
@@ -231,7 +231,7 @@ describe('composer selector state', () => {
     expect(resolved.workerModel).toBe('provider/default-model');
     expect(resolved.workerModelLabel).toBe('default-model');
     expect(resolved.workerStartMode).toBe('huddle');
-    expect(resolved.workerStartModeLabel).toBe('Plan first');
+    expect(resolved.workerStartModeLabel).toBe('Plan');
   });
 
   it('matches the Codex backend fallback, including local dispatch defaults', () => {

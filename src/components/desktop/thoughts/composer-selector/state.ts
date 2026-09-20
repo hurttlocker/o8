@@ -84,6 +84,10 @@ export function providerMarkForRuntime(runtime: OrchestratorRuntime): ComposerPr
   return COMPOSER_PROVIDER_MARK_TABLE.workerRuntimes[runtime];
 }
 
+export function composerRuntimeLabel(runtime: OrchestratorRuntime): string {
+  return runtime === 'opencode' ? 'OpenCode' : getRuntimeCapability(runtime).label;
+}
+
 export function composerEffortConsequence(
   backend: OrchestratorBackendSetting,
   effort: ThinkingEffort,
@@ -360,7 +364,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
   };
   const mode = composerSelectorModeSpec(resolvedSettings.mode);
   const workerRuntimeLabel = resolvedSettings.workerRuntime
-    ? getRuntimeCapability(resolvedSettings.workerRuntime).label
+    ? composerRuntimeLabel(resolvedSettings.workerRuntime)
     : input.workerRuntimeLabel?.trim() || '';
   const workerModel = resolvedSettings.workerModel?.trim() || null;
   const workerModelLabel = workerModel

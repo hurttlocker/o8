@@ -297,7 +297,9 @@ describe('composer fresh operator defaults at the send seam', () => {
         modelTrigger!.click();
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
-      if (!selectorEnabled) {
+      if (selectorEnabled) {
+        act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
+      } else {
         const codexHouse = [...document.querySelectorAll<HTMLButtonElement>('button')]
           .find((button) => button.textContent?.trim() === 'Codex')!;
         await act(async () => {
@@ -363,6 +365,7 @@ describe('composer fresh operator defaults at the send seam', () => {
       .find((button) => button.textContent?.includes('Fusion'))!.click());
     const leadTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
     act(() => leadTrigger.click());
+    act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-house-claude"]')!.click());
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-row-claude-sonnet-5"]')!.click());
 
     expect(modeTrigger.textContent).toContain('Fusion');

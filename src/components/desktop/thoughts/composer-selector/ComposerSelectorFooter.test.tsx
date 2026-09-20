@@ -19,7 +19,6 @@ import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
-import { WORKER_START_OPTIONS } from '@/lib/operator/worker-start-mode';
 import { MODEL_IDS } from '@/lib/models';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
@@ -222,6 +221,22 @@ describe('ComposerSelectorFooter', () => {
     vi.unstubAllGlobals();
   });
 
+  function openLeadHouse(house: string) {
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>(`[data-testid="lead-house-${house}"]`)!.click());
+  }
+
+  function openLeadEffort(house: string, model: string) {
+    openLeadHouse(house);
+    act(() => container.querySelector<HTMLButtonElement>(`[data-testid="lead-row-${model}"]`)!.click());
+  }
+
+  function selectMode(label: string) {
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!.click());
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes(label))!.click());
+  }
+
   it('orders mode, attach, lead, mic, and send with mic immediately before send', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     const footer = container.querySelector('[data-testid="composer-selector-footer"]');
@@ -248,9 +263,9 @@ describe('ComposerSelectorFooter', () => {
     expect(lead.textContent).toContain('high');
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
 
-    act(() => lead.click());
-    const slider = container.querySelector<HTMLElement>('[role="slider"]')!;
-    expect(slider).not.toBeNull();
+    openLeadEffort('codex', 'gpt-5.6-sol');
+    expect(container.querySelector('[data-testid="composer-selector-workers-section"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-lead-step"]')?.textContent).toContain('GPT-5.6 Sol');
     const stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
     expect(stops).toHaveLength(expectedEfforts.length);
     act(() => stops.find((stop) => stop.textContent === 'Extra')!.click());
@@ -283,16 +298,45 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
   });
 
-  it('renders composer setting text from the shared label tables', async () => {
+  it('steps from provider to model to dedicated effort with Back navigation', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    expect(container.querySelector('[data-testid="lead-house-claude"]')?.textContent).toContain('Claude Code');
+    expect(container.querySelector('[data-testid="lead-house-codex"]')?.textContent).toContain('Codex');
+    expect(container.querySelector('[data-testid="lead-house-o8"]')?.textContent).toContain('o8');
+    expect(container.querySelector('[data-testid="lead-house-opencode"]')?.textContent).toContain('OpenCode');
+    expect([...container.querySelectorAll<HTMLElement>('[data-testid^="lead-house-"]')].map((row) => row.dataset.testid))
+      .toEqual(['lead-house-claude', 'lead-house-codex', 'lead-house-opencode', 'lead-house-o8']);
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
+    expect(container.querySelector('[data-testid="lead-row-gpt-6-astra"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="lead-row-claude-opus-5"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-lead-step"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-lead-scroll"]')?.previousElementSibling?.textContent).toBe('Codex models');
+    expect(container.textContent).not.toContain('Fable-class');
+    expect(container.textContent).not.toContain('Sonnet-class');
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-gpt-6-astra"]')!.click());
+    expect(container.querySelector('[data-testid="composer-selector-lead-scroll"]')?.previousElementSibling?.textContent).toBe('Effort');
+    expect(container.querySelector('[data-testid="composer-selector-lead-step"]')?.textContent).toContain('GPT-6 Astra');
+    expect(container.querySelectorAll('[data-testid="composer-selector-effort-stop"]')).toHaveLength(
+      supportedEffortsForLead('codex', 'gpt-6-astra', true).length,
+    );
+    expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('High');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead-back"]')!.click());
+    expect(container.querySelector('[data-testid="lead-row-gpt-6-astra"]')).not.toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead-back"]')!.click());
+    expect(container.querySelector('[data-testid="lead-house-codex"]')).not.toBeNull();
+  });
+
+  it('renders effort labels from the shared label table', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
-    act(() => lead.click());
+    openLeadEffort('codex', 'gpt-5.6-sol');
     const pickerText = container.textContent ?? '';
     for (const effort of supportedEffortsForLead('codex', 'gpt-5.6-sol', true)) {
       expect(pickerText).toContain(THINKING_EFFORT_LABELS[effort].long);
     }
-    for (const option of WORKER_START_OPTIONS) expect(pickerText).toContain(option.long);
-
     act(() => lead.click());
     const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
     act(() => mode.click());
@@ -312,7 +356,7 @@ describe('ComposerSelectorFooter', () => {
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
-    act(() => lead.click());
+    openLeadEffort('codex', 'gpt-5.6-sol');
     const extra = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
       .find((stop) => stop.textContent === 'Extra')!;
     act(() => extra.click());
@@ -330,7 +374,7 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => { root.render(createElement(RealComposerHarness, { threadId: 'thread-real', operatorDefaultEffort: 'low' })); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('high');
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    openLeadEffort('codex', 'gpt-5.6-sol');
     act(() => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
       .find((stop) => stop.textContent === 'Extra')!.click());
     expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('xhigh');
@@ -369,43 +413,39 @@ describe('ComposerSelectorFooter', () => {
       .find((button) => button.textContent?.includes('Multitask'))!.click());
 
     const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(workers.textContent).toContain('OpenCode 2');
-    expect(workers.textContent).not.toContain('OC2');
+    expect(workers.textContent).toContain('OpenCode');
+    expect(workers.textContent).not.toContain('OpenCode 2');
     expect(workers.style.maxWidth).not.toBe('');
     expect(workers.querySelector<HTMLElement>('[data-testid="composer-selector-workers-label"]')?.style.textOverflow)
       .toBe('ellipsis');
   });
 
-  it('marks every picker row and shows model-specific effort consequences', async () => {
+  it('keeps Solo focused on models and shows concise effort consequences', async () => {
     entitlementState.plan = 'founder';
     await act(async () => { root.render(createElement(Harness)); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(document.activeElement).toBe(container.querySelector('[data-testid="composer-selector-search"]'));
 
-    const leadRows = [...container.querySelectorAll<HTMLElement>('[data-testid^="lead-row-"]')];
-    const workerRows = [...container.querySelectorAll<HTMLElement>('[data-testid^="worker-row-"]')];
+    const leadRows = [...container.querySelectorAll<HTMLElement>('[data-testid^="lead-house-"]')];
     expect(leadRows.every((row) => row.querySelector('[data-provider-mark]'))).toBe(true);
-    expect(workerRows.every((row) => row.querySelector('[data-provider-mark]'))).toBe(true);
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toContain('High · default for real work');
-
+    expect(container.querySelector('[data-testid="composer-selector-workers-section"]')).toBeNull();
+    expect(container.querySelector('[data-testid^="worker-row-"]')).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-o8"]')!.click());
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-o8-free"]')!.click());
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const o8Stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
     expect(o8Stops).toHaveLength(2);
     expect(o8Stops[0]?.textContent).toBe('Low');
     act(() => o8Stops[0]!.click());
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toContain('Low · free');
+    expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('Low');
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"] > span > span:not([aria-hidden])')?.textContent).toBe('free');
+    expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')?.textContent).not.toContain('of 2');
     act(() => o8Stops[1]!.click());
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toContain('High · founders');
   });
 
   it('shows but refuses the locked founders effort on the free o8 plan', async () => {
     await act(async () => { root.render(createElement(O8PlanHarness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    openLeadEffort('o8', 'o8-free');
     const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
       .find((stop) => stop.textContent === 'High')!;
 
@@ -414,16 +454,6 @@ describe('ComposerSelectorFooter', () => {
     expect(high.style.color).toBe('var(--t-text-faint)');
     expect(high.style.cursor).toBe('default');
     expect(high.style.background).toBe('transparent');
-    act(() => high.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toContain('High · founders');
-    expect(high.style.background).toBe('transparent');
-    act(() => high.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toContain('Low · free');
-    act(() => high.focus());
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"]')?.textContent)
-      .toContain('High · founders');
     act(() => high.click());
     act(() => high.dispatchEvent(new KeyboardEvent('keydown', {
       key: '†',
@@ -433,14 +463,14 @@ describe('ComposerSelectorFooter', () => {
     })));
 
     expect(container.querySelector('[data-testid="o8-plan-effort"]')?.textContent).toBe('low');
-    expect(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY) ?? '{}')).toEqual({ 'o8-free': 'low' });
   });
 
   it('selects and persists the founders effort on the paid o8 plan', async () => {
     entitlementState.plan = 'founder';
     localStorage.setItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY, JSON.stringify({ 'o8-free': 'low' }));
     await act(async () => { root.render(createElement(O8PlanHarness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    openLeadEffort('o8', 'o8-free');
     const high = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')]
       .find((stop) => stop.textContent === 'High')!;
 
@@ -508,35 +538,77 @@ describe('ComposerSelectorFooter', () => {
 
   it('updates the at-rest string after picking a model', async () => {
     await act(async () => { root.render(createElement(Harness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    openLeadHouse('codex');
     const terra = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('GPT-5.6 Terra'))!;
     act(() => terra.click());
     expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('Terra');
   });
 
-  it('search narrows both lead and worker rows', async () => {
+  it('search narrows worker rows and expands Workers only for a matching runtime', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    selectMode('Multitask');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'qwen');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid^="lead-row-"]')).toBeNull();
+    expect(container.querySelector('[data-testid="worker-row-qwen"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="worker-row-codex"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-workers-section"]')?.getAttribute('aria-expanded')).toBe('true');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Plan')).toBe(true);
+  });
+
+  it('keeps Workers collapsed and keyboard picks within lead rows for a lead-only search', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    selectMode('Multitask');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'astra');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="lead-row-gpt-6-astra"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-workers-section"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-testid="composer-selector-workers-scroll"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-worker-start"]')).toBeNull();
+    await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('Astra');
+  });
+
+  it('clears a model search before showing the selected model effort step', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(search, 'codex');
+      setter?.call(search, 'opus 4.8');
       search.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="lead-row-gpt-5.6-sol"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="lead-row-claude-sonnet-5"]')).toBeNull();
-    expect(container.querySelector('[data-testid="worker-row-codex"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="worker-row-claude-code"]')).toBeNull();
-    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Plan first')).toBe(true);
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-claude-opus-4-8"]')!.click());
+    expect(search.value).toBe('');
+    expect(container.querySelector('[data-testid="composer-selector-lead-step"]')?.textContent).toContain('Opus 4.8');
+    expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')).not.toBeNull();
+  });
+
+  it('uses the dedicated effort slider without routing its keyboard input into hidden rows', async () => {
+    await act(async () => { root.render(createElement(Harness)); });
+    openLeadEffort('codex', 'gpt-5.6-sol');
+    const slider = container.querySelector<HTMLElement>('[role="slider"]')!;
+    await act(async () => {
+      slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('extra');
   });
 
   it('includes live searchable lead houses from the shared model catalogue', async () => {
     const searchable = COMPOSER_MODEL_GROUPS.find((group) => group.searchable)!;
     await act(async () => { root.render(createElement(Harness)); });
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
-    expect(container.querySelector(`[data-testid="lead-row-${searchable.key}"]`)).not.toBeNull();
-
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -549,7 +621,11 @@ describe('ComposerSelectorFooter', () => {
   it('uses arrow navigation and Enter across the lead and worker sections', async () => {
     const lastRuntime = listDispatchableRuntimes().at(-1)!;
     await act(async () => { root.render(createElement(Harness)); });
+    selectMode('Multitask');
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    const workersSection = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers-section"]')!;
+    expect(workersSection.getAttribute('aria-expanded')).toBe('false');
+    act(() => workersSection.click());
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); });
     await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
@@ -661,17 +737,16 @@ describe('ComposerSelectorFooter', () => {
       .toBe(String(expectedStops.length - 1));
   });
 
-  it('moves the focused slider with arrows and digit keys', async () => {
+  it('uses the dedicated effort slider after choosing a lead model', async () => {
     await act(async () => { root.render(createElement(Harness)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    openLeadEffort('codex', 'gpt-5.6-sol');
     const slider = container.querySelector<HTMLElement>('[role="slider"]')!;
-    act(() => slider.focus());
     await act(async () => {
       slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
     });
     expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('extra');
     await act(async () => {
-      slider.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
+      slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
     });
     expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('low');
   });
@@ -681,7 +756,7 @@ describe('ComposerSelectorFooter', () => {
     localStorage.setItem('o8:orchestrator:ultra-effort', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    openLeadEffort('codex', 'gpt-5.6-sol');
     expect(container.querySelectorAll('[data-testid="composer-selector-effort-stop"]')).toHaveLength(7);
 
     localStorage.setItem('o8:orchestrator:ultra-effort', '0');
@@ -721,9 +796,11 @@ describe('ComposerSelectorFooter', () => {
     expect(picker.textContent).toContain('extra');
 
     act(() => picker.click());
-    const selectedLeadRows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-row-"][aria-pressed="true"]')];
-    expect(selectedLeadRows).toHaveLength(1);
-    expect(selectedLeadRows[0]?.dataset.testid).toBe(`lead-row-${MODEL_IDS.codexDefault}`);
+    const selectedLeadHouses = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-house-"][aria-pressed="true"]')];
+    expect(selectedLeadHouses).toHaveLength(1);
+    expect(selectedLeadHouses[0]?.dataset.testid).toBe('lead-house-codex');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>(`[data-testid="lead-row-${MODEL_IDS.codexDefault}"]`)!.click());
     expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')).not.toBeNull();
   });
 
@@ -753,13 +830,18 @@ describe('ComposerSelectorFooter', () => {
 
     const popover = container.querySelector<HTMLElement>('[data-testid="composer-selector-popover"]')!;
     const workerScroll = container.querySelector<HTMLElement>('[data-testid="composer-selector-workers-scroll"]')!;
-    expect(popover.style.height).toContain('460px');
+    expect(popover.style.height).toBe('');
     expect(popover.style.overflowY).toBe('hidden');
     expect(workerScroll.style.overflowY).toBe('auto');
+    expect(workerScroll.style.scrollbarWidth).toBe('none');
+    expect(container.querySelector('[data-testid="composer-selector-workers-section"]')?.getAttribute('aria-expanded')).toBe('true');
     expect(workerScroll.querySelectorAll('[data-testid^="worker-row-"]')).toHaveLength(listDispatchableRuntimes().length);
     expect(workerScroll.querySelector(`[data-testid="worker-row-${lastRuntime}"]`)?.getAttribute('aria-pressed')).toBe('true');
-    expect(workerScroll.textContent).not.toContain('Plan first');
-    expect(popover.textContent).toContain('Plan first');
+    expect(workerScroll.textContent).not.toContain('Plan');
+    expect(popover.textContent).toContain('Plan');
+    expect([...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-worker-start"] button')]
+      .find((button) => button.textContent === 'Auto')?.title)
+      .toContain('active worker profile');
     expect(popover.textContent).toContain('pick');
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     expect(scrollIntoView.mock.instances).toContain(workerScroll.querySelector(`[data-testid="worker-row-${lastRuntime}"]`));
@@ -772,8 +854,8 @@ describe('ComposerSelectorFooter', () => {
     const picker = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
     expect(picker.textContent).toContain('local-code:32b');
     act(() => picker.click());
-    const selectedLeadRows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-row-"][aria-pressed="true"]')];
-    expect(selectedLeadRows).toHaveLength(1);
-    expect(selectedLeadRows[0]?.dataset.testid).toBe('lead-row-ollama:local-code:32b');
+    const selectedLeadHouses = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-house-"][aria-pressed="true"]')];
+    expect(selectedLeadHouses).toHaveLength(1);
+    expect(selectedLeadHouses[0]?.dataset.testid).toBe('lead-house-codex');
   });
 });

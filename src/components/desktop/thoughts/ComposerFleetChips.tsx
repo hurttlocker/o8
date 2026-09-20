@@ -18,6 +18,7 @@
 import { useRef, useState } from 'react';
 
 import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
+import { composerRuntimeLabel } from './composer-selector/state';
 import { AcpModelPicker } from './AcpModelPicker';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import {
@@ -402,7 +403,7 @@ export function FleetWorkerChip({
                       letterSpacing: '-0.1px',
                     }}
                   >
-                    <span style={{ flexShrink: 0 }}>{getRuntimeCapability(id).label}</span>
+                    <span style={{ flexShrink: 0 }}>{composerRuntimeLabel(id)}</span>
                     <span style={{
                       flex: 1,
                       minWidth: 0,
@@ -431,7 +432,7 @@ export function FleetWorkerChip({
                 color: 'var(--t-text-faint)',
                 fontFamily: 'var(--font-sans-system)',
               }}>
-                Multitask packets dispatch to this runtime. Choose OpenCode 2 to set its worker model here.
+                Multitask packets dispatch to this runtime. Choose OpenCode to set its worker model here.
               </div>
             </>
           ) : (
@@ -459,7 +460,7 @@ export function FleetWorkerChip({
                   <BackGlyph />
                 </button>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans-system)', fontSize: 11.5, color: 'var(--t-text)' }}>
-                  OpenCode 2 worker model
+                  OpenCode worker model
                 </div>
                 {defaults.opencodeWorkerModel ? (
                   <button
