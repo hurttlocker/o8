@@ -11,6 +11,7 @@ const launchMock = vi.hoisted(() => ({
   calls: [] as Array<{
     packetId?: string;
     runtime?: string;
+    model?: string;
     branchName?: string;
     clientMutationId?: string;
   }>,
@@ -31,6 +32,7 @@ vi.mock('@/lib/runtime/actions', () => ({
   launchRuntimeSurface: vi.fn(async (input: {
     packetId?: string;
     runtime?: string;
+    model?: string;
     branchName?: string;
     repoPath: string;
     clientMutationId?: string;
@@ -39,6 +41,7 @@ vi.mock('@/lib/runtime/actions', () => ({
     launchMock.calls.push({
       packetId: input.packetId,
       runtime: input.runtime,
+      model: input.model,
       branchName: input.branchName,
       clientMutationId: input.clientMutationId,
     });
@@ -74,6 +77,7 @@ const {
   archiveLane,
   createLane,
   findLaneByPacket,
+  getLane,
   setLaneStatus,
   updateLane,
 } = await import('@/lib/lane/registry');
@@ -103,6 +107,7 @@ import { resetPacketFields } from '@/lib/orchestrator/operator-mission-service/r
 import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { launchPacketWithStorageAdmission } from '@/lib/orchestrator/dispatch-packet-launch';
+import { updateOperatorDefaults } from '@/lib/operator/defaults';
 import {
   readOrchestratorControlPlaneState,
   writeOrchestratorControlPlaneState,
@@ -384,6 +389,41 @@ describe('dispatch scheduling caps and waves', () => {
       cwd: repoPath,
       options: { claudeCodeCarrier: 'openrouter' },
     }));
+  }, 20_000);
+
+  it('carries a persisted 3code model pin through packet routing into the launch entry', async () => {
+    const repoPath = makeRepo();
+    await updateOperatorDefaults({ threecodeWorkerModel: 'deepseek.deepseek-v4-pro' });
+    try {
+      writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState(missionFixture(
+        repoPath,
+        [packetFixture(repoPath, 'threecode-persisted-model', { runtime: '3code' })],
+      )));
+      const candidate = readOrchestratorControlPlaneState().packets[0]!;
+      const launched = await launchPacketWithStorageAdmission({
+        packet: candidate,
+        allPackets: [candidate],
+        workerRouting: resolveWorkerRouting({ requestedRuntime: '3code', source: 'scheduler-dispatch' }),
+        storageAdmission: injectedAdmission(candidate.id, []),
+      });
+
+      expect(launched.workerRouting).toMatchObject({
+        selectedRuntime: '3code',
+        selectedModel: 'deepseek.deepseek-v4-pro',
+      });
+      expect(authPreflightMock.calls).toContainEqual(expect.objectContaining({
+        runtime: '3code',
+        model: 'deepseek.deepseek-v4-pro',
+        cwd: repoPath,
+      }));
+      expect(launchMock.calls).toContainEqual(expect.objectContaining({
+        runtime: '3code',
+        model: 'deepseek.deepseek-v4-pro',
+      }));
+      expect(getLane(launched.laneId)?.model).toBe('deepseek.deepseek-v4-pro');
+    } finally {
+      await updateOperatorDefaults({ threecodeWorkerModel: null });
+    }
   }, 20_000);
 
   it('uses the durable admission generation for the launch mutation after reset', async () => {

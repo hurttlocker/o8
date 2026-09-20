@@ -455,6 +455,30 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </SettingsGroup>
       </section>
 
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="3code worker"
+          footnote="Choose from configured 3code providers on this machine. Leave this unset to preserve 3code's configured default."
+        >
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Worker model"
+            subtitle={lockedSub('threecodeWorkerModel', values.threecodeWorkerModel ?? 'Unset — 3code picks')}
+            accessory={
+              <AcpModelPickerPopover
+                label={values.threecodeWorkerModel ?? 'Choose'}
+                value={values.threecodeWorkerModel}
+                backend="3code"
+                catalogueUrl="/api/runtime/threecode-models"
+                onSelect={(next) => { updateField('threecodeWorkerModel', next); }}
+                onClear={() => { updateField('threecodeWorkerModel', null); }}
+                disabled={envLocked('threecodeWorkerModel') || busyField === 'threecodeWorkerModel'}
+              />
+            }
+          />
+        </SettingsGroup>
+      </section>
+
       {/* ── Orchestrator ── */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup

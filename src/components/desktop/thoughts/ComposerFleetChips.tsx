@@ -34,7 +34,7 @@ import {
   type ComposerWorkerDefaults,
 } from './composer-selector/worker-settings';
 
-type FleetPickerView = 'runtimes' | 'opencode-model';
+type FleetPickerView = 'runtimes' | 'opencode-model' | 'threecode-model';
 
 export type DispatchDefaults = ComposerWorkerDefaults;
 export const FALLBACK_DISPATCH_DEFAULTS = FALLBACK_COMPOSER_WORKER_DEFAULTS;
@@ -212,7 +212,7 @@ export function FleetWorkerChip({
   workerModelLocked?: boolean;
   saving?: boolean;
   onRuntimeChange?: (runtime: OrchestratorRuntime) => void;
-  onWorkerModelChange?: (model: string | null) => void;
+  onWorkerModelChange?: (model: string | null, runtime?: OrchestratorRuntime) => void;
   onWorkerStartModeChange?: (mode: WorkerStartMode) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -221,11 +221,13 @@ export function FleetWorkerChip({
   const selectRuntime = (runtime: OrchestratorRuntime) => {
     onRuntimeChange?.(runtime);
     if (runtime === 'opencode') setView('opencode-model');
+    else if (runtime === '3code') setView('threecode-model');
     else setOpen(false);
   };
   const selectWorkerModel = (modelId: string | null) => {
     if (workerModelLocked) return;
-    onWorkerModelChange?.(modelId);
+    if (view === 'threecode-model') onWorkerModelChange?.(modelId, '3code');
+    else onWorkerModelChange?.(modelId);
     setOpen(false);
   };
   const selectWorkerStartMode = (workerStartMode: WorkerStartMode) => {
@@ -247,7 +249,7 @@ export function FleetWorkerChip({
         ref={triggerRef}
         type="button"
         title={`Fleet worker: ${runtimeLabel}${model ? ` — ${model}` : ''}. Starts: ${startOption.long}.`}
-        aria-label={`Fleet worker: ${runtimeLabel}. Starts: ${startOption.long}`}
+        aria-label={`Fleet worker: ${runtimeLabel}${model ? `, model ${model}` : ', runtime default'}. Starts: ${startOption.long}`}
         aria-expanded={open}
         onClick={() => {
           setView('runtimes');
@@ -460,9 +462,9 @@ export function FleetWorkerChip({
                   <BackGlyph />
                 </button>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans-system)', fontSize: 11.5, color: 'var(--t-text)' }}>
-                  OpenCode worker model
+                  {view === 'threecode-model' ? '3code worker model' : 'OpenCode worker model'}
                 </div>
-                {defaults.opencodeWorkerModel ? (
+                {(view === 'threecode-model' ? defaults.threecodeWorkerModel : defaults.opencodeWorkerModel) ? (
                   <button
                     type="button"
                     disabled={workerModelLocked || saving}
@@ -490,8 +492,9 @@ export function FleetWorkerChip({
                 </div>
               ) : (
                 <AcpModelPicker
-                  backend="opencode"
-                  value={defaults.opencodeWorkerModel}
+                  backend={view === 'threecode-model' ? '3code' : 'opencode'}
+                  catalogueUrl={view === 'threecode-model' ? '/api/runtime/threecode-models' : undefined}
+                  value={view === 'threecode-model' ? defaults.threecodeWorkerModel : defaults.opencodeWorkerModel}
                   width={258}
                   onSelect={(modelId) => { void selectWorkerModel(modelId); }}
                 />

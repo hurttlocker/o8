@@ -85,6 +85,8 @@ export interface OperatorDefaults {
    */
   opencodeOrchestratorModel: string | null;
   opencodeWorkerModel: string | null;
+  /** 3code CLI model pin. Null leaves the local 3code configuration in control. */
+  threecodeWorkerModel: string | null;
   defaultDispatchRuntime: DispatchRuntime;
   workerExecutionCarrier: 'ori' | null;
   workerRuntimes: DispatchRuntime[];

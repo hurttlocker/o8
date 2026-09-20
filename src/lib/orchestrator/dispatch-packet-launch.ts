@@ -10,6 +10,7 @@ import {
   getOperatorDefaultsSync,
   resolveDefaultWorkerEffortSync,
   resolveOpencodeWorkerModelSync,
+  resolveThreecodeWorkerModelSync,
 } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
@@ -63,6 +64,13 @@ function operatorWorkerModelFor(runtime: OrchestratorRuntime): string | null {
   if (runtime === 'claude-code') {
     try {
       return selectedClaudeCodeWorkerModelSync();
+    } catch {
+      return null;
+    }
+  }
+  if (runtime === '3code') {
+    try {
+      return resolveThreecodeWorkerModelSync();
     } catch {
       return null;
     }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { parse, stringify } from 'smol-toml';
 
 import { isPlausibleAcpModelId } from '@/lib/orchestrator/acp-model-id';
+import { isPlausibleThreecodeModelId } from '@/lib/runtimes/threecode-model-catalogue';
 
 import {
   CODEX_MODEL_IDS,
@@ -126,6 +127,22 @@ function acpModelIdField(section: string, key: string): TomlField<string | null>
       return isPlausibleAcpModelId(trimmed)
         ? trimmed
         : invalid(tomlKey, `a model id shaped provider/model, optionally with a /low or /high suffix; received ${JSON.stringify(trimmed)}`);
+    },
+  };
+}
+
+function threecodeModelIdField(section: string, key: string): TomlField<string | null> {
+  return {
+    path: [section, key],
+    serialize: (value) => value ?? '',
+    parse: (value, tomlKey) => {
+      if (value === null) return null;
+      if (typeof value !== 'string') return invalid(tomlKey, 'a configured 3code model id string');
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      return isPlausibleThreecodeModelId(trimmed)
+        ? trimmed
+        : invalid(tomlKey, 'a configured 3code model id string');
     },
   };
 }
@@ -275,6 +292,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   orchestratorModel: orchestratorModelField('models', 'orchestrator_model'),
   opencodeOrchestratorModel: acpModelIdField('models', 'opencode_orchestrator_model'),
   opencodeWorkerModel: acpModelIdField('models', 'opencode_worker_model'),
+  threecodeWorkerModel: threecodeModelIdField('models', 'threecode_worker_model'),
   defaultDispatchRuntime: enumField('models', 'default_dispatch_runtime', 'a dispatchable runtime name', isDispatchRuntime),
   workerExecutionCarrier: executionCarrierField('models', 'worker_execution_carrier'),
   workerStartMode: enumField('operator', 'worker_start_mode', 'one of "autonomous", "huddle", or "adaptive"', isWorkerStartMode),

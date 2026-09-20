@@ -37,7 +37,7 @@ import {
 
 type WorkerDefaultsPatch = Partial<Pick<
   ComposerWorkerDefaults,
-  'defaultDispatchRuntime' | 'opencodeWorkerModel' | 'workerStartMode'
+  'defaultDispatchRuntime' | 'opencodeWorkerModel' | 'threecodeWorkerModel' | 'workerStartMode'
 >>;
 
 const EMPTY_COMPOSER_EFFORTS: ComposerEffortMap = {};
@@ -107,7 +107,7 @@ export function useComposerSelectorState(input: {
     FALLBACK_COMPOSER_WORKER_DEFAULTS,
   );
   const [workerOverrides, setWorkerOverrides] = useState<WorkerDefaultsPatch>({});
-  const [workerModelLocked, setWorkerModelLocked] = useState(false);
+  const [workerModelLocks, setWorkerModelLocks] = useState({ opencode: false, threecode: false });
   const [savingWorkerDefaults, setSavingWorkerDefaults] = useState(false);
   const modeStorageIdRef = useRef(modeStorageId);
   const parentModeRef = useRef(mode);
@@ -153,7 +153,10 @@ export function useComposerSelectorState(input: {
         sources?: Partial<Record<keyof ComposerWorkerDefaults, string>>;
       };
       setOperatorWorkerDefaults(normalizeComposerWorkerDefaults(payload.values ?? {}));
-      setWorkerModelLocked(payload.sources?.opencodeWorkerModel === 'env');
+      setWorkerModelLocks({
+        opencode: payload.sources?.opencodeWorkerModel === 'env',
+        threecode: payload.sources?.threecodeWorkerModel === 'env',
+      });
     } catch {
       // Keep the last confirmed operator defaults.
     }
@@ -235,9 +238,14 @@ export function useComposerSelectorState(input: {
       ...(workerOverrides.defaultDispatchRuntime
         ? { workerRuntime: workerOverrides.defaultDispatchRuntime }
         : {}),
-      ...(Object.prototype.hasOwnProperty.call(workerOverrides, 'opencodeWorkerModel')
-        ? { workerModel: workerOverrides.opencodeWorkerModel }
-        : {}),
+      ...((workerOverrides.defaultDispatchRuntime ?? operatorWorkerDefaults.defaultDispatchRuntime) === '3code'
+        ? Object.prototype.hasOwnProperty.call(workerOverrides, 'threecodeWorkerModel')
+          ? { workerModel: workerOverrides.threecodeWorkerModel }
+          : {}
+        : (workerOverrides.defaultDispatchRuntime ?? operatorWorkerDefaults.defaultDispatchRuntime) === 'opencode'
+          && Object.prototype.hasOwnProperty.call(workerOverrides, 'opencodeWorkerModel')
+          ? { workerModel: workerOverrides.opencodeWorkerModel }
+          : {}),
       ...(workerOverrides.workerStartMode
         ? { workerStartMode: workerOverrides.workerStartMode }
         : {}),
@@ -378,9 +386,18 @@ export function useComposerSelectorState(input: {
   const onRuntimeChange = useCallback((defaultDispatchRuntime: OrchestratorRuntime) => {
     void persistWorkerDefaults({ defaultDispatchRuntime });
   }, [persistWorkerDefaults]);
-  const onWorkerModelChange = useCallback((opencodeWorkerModel: string | null) => {
-    if (!workerModelLocked) void persistWorkerDefaults({ opencodeWorkerModel });
-  }, [persistWorkerDefaults, workerModelLocked]);
+  const workerModelLocked = workerDefaults.defaultDispatchRuntime === '3code'
+    ? workerModelLocks.threecode
+    : workerModelLocks.opencode;
+  const onWorkerModelChange = useCallback((model: string | null, runtime = workerDefaults.defaultDispatchRuntime) => {
+    const locked = runtime === '3code' ? workerModelLocks.threecode : workerModelLocks.opencode;
+    if (locked) return;
+    if (runtime === '3code') {
+      void persistWorkerDefaults({ threecodeWorkerModel: model });
+    } else if (runtime === 'opencode') {
+      void persistWorkerDefaults({ opencodeWorkerModel: model });
+    }
+  }, [persistWorkerDefaults, workerDefaults.defaultDispatchRuntime, workerModelLocks]);
   const onWorkerStartModeChange = useCallback((workerStartMode: WorkerStartMode) => {
     void persistWorkerDefaults({ workerStartMode });
   }, [persistWorkerDefaults]);

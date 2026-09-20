@@ -26,7 +26,7 @@ import {
   type TargetingTier,
 } from './targeting-tier';
 export { isSubscriptionProfile };
-import { normalizeAcpModelId, isPlausibleAcpModelId } from '@/lib/orchestrator/acp-model-id';
+import { normalizeModelPinUpdates, normalizeStoredModelPins } from './model-pins';
 
 import { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, sanitizeBranchPrefix, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator, type PrLinkDestination } from './defaults-env';
 import {
@@ -147,6 +147,8 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
   opencodeOrchestratorModel: string | null;
   /** Model for dispatched opencode workers. Null = the adapter default. */
   opencodeWorkerModel: string | null;
+  /** Model for dispatched 3code workers. Null = the configured 3code default. */
+  threecodeWorkerModel: string | null;
   defaultDispatchRuntime: OrchestratorRuntime;
   workerExecutionCarrier: ExecutionCarrierId | null;
   workerStartMode: WorkerStartMode;
@@ -336,6 +338,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   orchestratorModel: MODEL_IDS.orchestratorDefault,
   opencodeOrchestratorModel: null,
   opencodeWorkerModel: null,
+  threecodeWorkerModel: null,
   defaultDispatchRuntime: 'codex',
   workerExecutionCarrier: null,
   workerStartMode: 'autonomous',
@@ -402,6 +405,7 @@ interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partia
   orchestratorModel?: string;
   opencodeOrchestratorModel?: string | null;
   opencodeWorkerModel?: string | null;
+  threecodeWorkerModel?: string | null;
   defaultDispatchRuntime?: OrchestratorRuntime;
   workerExecutionCarrier?: ExecutionCarrierId | null;
   defaultDispatchRuntimeExplicit?: boolean;
@@ -484,12 +488,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isRequireApproval(stored.requireApproval)) {
     result.requireApproval = stored.requireApproval;
   }
-  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel'] as const) {
-    // A stored id that no longer parses is dropped rather than surfaced: the
-    // resolved value falls back to null (agent default), which still runs.
-    const normalized = normalizeAcpModelId(stored[key]);
-    if (normalized) result[key] = normalized;
-  }
+  Object.assign(result, normalizeStoredModelPins(stored));
   if (typeof stored.orchestratorModel === 'string' && stored.orchestratorModel.trim()) {
     result.orchestratorModel = stored.orchestratorModel.trim();
   }
@@ -699,6 +698,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     opencodeOrchestratorModel:
       fileValues.opencodeOrchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeOrchestratorModel,
     opencodeWorkerModel: fileValues.opencodeWorkerModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeWorkerModel,
+    threecodeWorkerModel: fileValues.threecodeWorkerModel ?? OPERATOR_DEFAULTS_FALLBACK.threecodeWorkerModel,
     defaultDispatchRuntime,
     workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? fileValues.workerExecutionCarrier : OPERATOR_DEFAULTS_FALLBACK.workerExecutionCarrier,
     workerStartMode: fileValues.workerStartMode ?? OPERATOR_DEFAULTS_FALLBACK.workerStartMode,
@@ -773,6 +773,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     opencodeOrchestratorModel: fileValues.opencodeOrchestratorModel !== undefined ? 'file' : 'default',
     opencodeWorkerModel: fileValues.opencodeWorkerModel !== undefined ? 'file' : 'default',
+    threecodeWorkerModel: fileValues.threecodeWorkerModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: profileDefaults ? 'profile' : envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
     workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? 'file' : 'default',
     workerStartMode: fileValues.workerStartMode !== undefined ? 'file' : 'default',
@@ -914,18 +915,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     }
     stored.orchestratorModel = trimmed;
   }
-  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel'] as const) {
-    const value = update[key];
-    if (value === undefined) continue;
-    // null is meaningful: "no pin, use whatever the agent booted with".
-    if (value === null) { stored[key] = null; continue; }
-    if (!isPlausibleAcpModelId(value)) {
-      throw new Error(
-        `${key} ${JSON.stringify(value)} is not a usable model id. Expect provider/model, optionally with a /low or /high suffix — pick one from the model list rather than typing it.`,
-      );
-    }
-    stored[key] = value.trim();
-  }
+  Object.assign(stored, normalizeModelPinUpdates(update));
   if (update.defaultDispatchRuntime !== undefined) {
     if (!isDispatchRuntime(update.defaultDispatchRuntime)) {
       throw new Error('defaultDispatchRuntime must name a dispatchable runtime.');
@@ -1223,6 +1213,11 @@ export function resolveOpencodeOrchestratorModelSync(): string | null {
 /** The operator's pinned model for dispatched opencode workers, or null. */
 export function resolveOpencodeWorkerModelSync(): string | null {
   return getOperatorDefaultsSync().values.opencodeWorkerModel;
+}
+
+/** The operator's pinned model for dispatched 3code workers, or null. */
+export function resolveThreecodeWorkerModelSync(): string | null {
+  return getOperatorDefaultsSync().values.threecodeWorkerModel;
 }
 
 /** Which backend runs lane auto-reviews ('follow' → ride the orchestrator). */
