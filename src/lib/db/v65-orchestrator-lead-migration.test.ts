@@ -19,6 +19,10 @@ describe('orchestrator lead migration', () => {
         'orchestrator_lead_turns',
         'orchestrator_leads',
       ]);
+      const turnColumns = sqlite.prepare('PRAGMA table_info(orchestrator_lead_turns)').all() as Array<{ name: string }>;
+      expect(turnColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
+        'display_message', 'permission_mode', 'attachments_json',
+      ]));
 
       sqlite.prepare(`
         INSERT INTO orchestrator_leads

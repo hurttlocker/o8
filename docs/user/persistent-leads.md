@@ -46,6 +46,8 @@ o8 lead wait <lead-id> --turn <admitted-turn-id> --after 0 --timeout 10m
 
 Every send key is durable. Retrying the same key and message returns the admitted turn instead of launching twice. Different simultaneous sends queue in ordinal order. Omitted routing on follow-ups retains the original pins; explicit repo, thread, backend, model, or effort values must match the stored binding or the request fails before turn persistence or process launch.
 
+The thoughts composer shares this admission only after its thread is bound to a persistent lead; ordinary unbound thoughts chats retain the legacy writer. A bound turn stores the full model-facing message separately from the cleaned user bubble, preserves Full versus Plan permission mode, and emits persisted queued and terminal status receipts. Image attachments are admitted only when the selected persistent backend supports them; unsupported attachments fail before the turn is stored or launched.
+
 `status` and `wait` read SQLite receipts only and never call the lead model. `wait --turn` follows the admitted turn, so a prior terminal receipt cannot hide a newer queued turn. It long-polls in bounded 30-second slices and can resume from its cursor. Full conversation content remains in the normal thoughts transcript; compact receipts return only a bounded result preview.
 
 ## Worker review and terminal states

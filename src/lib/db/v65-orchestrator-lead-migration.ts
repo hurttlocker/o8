@@ -5,6 +5,9 @@ const LEAD_COLUMNS: Array<[string, string]> = [
 ];
 
 const TURN_COLUMNS: Array<[string, string]> = [
+  ['display_message', "TEXT NOT NULL DEFAULT ''"],
+  ['permission_mode', "TEXT NOT NULL DEFAULT 'full'"],
+  ['attachments_json', 'TEXT'],
   ['owner_identity_json', 'TEXT'],
   ['lease_token', 'TEXT'],
   ['lease_heartbeat_at', 'INTEGER'],
@@ -61,6 +64,9 @@ export function ensureV65OrchestratorLeadSchema(sqlite: Database.Database): void
       ordinal INTEGER NOT NULL,
       kind TEXT NOT NULL,
       message TEXT NOT NULL,
+      display_message TEXT NOT NULL DEFAULT '',
+      permission_mode TEXT NOT NULL DEFAULT 'full',
+      attachments_json TEXT,
       brief_json TEXT,
       status TEXT NOT NULL,
       result_text TEXT,

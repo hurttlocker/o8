@@ -8,6 +8,7 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
+import { dispatchWorkerHelper, fakeCodexScript, reviewWorkerHelper } from './fixtures/lead-handoff-scripts';
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
 vi.mock('@/lib/claude-code/warm-repl-pool', () => ({
   askClaudeWarm: vi.fn(async () => ''),
@@ -75,77 +76,14 @@ const { closeDb, getSqlite } = await import('@/lib/db');
 const { panelGateMiddleware } = await import('@/middleware');
 const { readOrchestratorBackendSessionId, readOrchestratorThreadMessages } = await import('@/lib/mobile/orchestrator-thread-history');
 const { probeMetadataLockProcessIdentitySync } = await import('@/lib/worktree/metadata-lock-process-identity');
+const { updateLane } = await import('@/lib/lane/registry');
+const { withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
 
 let apiServer: Server | null = null;
 let apiPort = 0;
 let wsPort = 0;
 let wsProcess: ChildProcess | null = null;
 let wsOutput = '';
-
-const dispatchWorkerHelper = `
-  import { execFileSync } from 'node:child_process';
-  import { existsSync, writeFileSync } from 'node:fs';
-  import path from 'node:path';
-  const repos = (await import('./src/lib/repos/registry.ts')).default;
-  const missions = (await import('./src/lib/orchestrator/operator-mission-service.ts')).default;
-  const laneRegistry = (await import('./src/lib/lane/registry.ts')).default;
-  const readiness = await fetch('http://127.0.0.1:' + process.env.O8_API_PORT + '/api/setup/status', {
-    headers: { authorization: 'Bearer ' + process.env.O8_API_TOKEN },
-  });
-  console.log('[lead-fixture] readiness=' + readiness.status + ' port=' + process.env.O8_API_PORT);
-  await repos.addRepo(process.env.O8_TEST_TARGET_REPO);
-  const mission = await missions.createMission({
-    issues: [{ number: 2541, title: 'Persistent lead worker fixture', body: 'Write the deterministic proof file.', url: '' }],
-    repoPath: process.env.O8_TEST_TARGET_REPO,
-    runtime: 'codex',
-    constraints: '',
-    orchestratorThreadId: process.env.O8_TEST_THREAD_ID,
-    orchestratorTurnId: process.env.O8_TEST_TURN_ID,
-  });
-  await missions.dispatchMission({ missionId: mission.missionId });
-  const packetId = mission.packets[0].id;
-  const deadline = Date.now() + 15000;
-  let lane;
-  while (Date.now() < deadline) {
-    lane = laneRegistry.findLaneByPacket(packetId);
-    if (lane?.sessionKey) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  if (!lane?.sessionKey) throw new Error('Worker did not launch for packet ' + packetId);
-  const proofPath = path.join(lane.worktreePath, 'lead-worker-proof.txt');
-  const proofDeadline = Date.now() + 10_000;
-  while (Date.now() < proofDeadline && !existsSync(proofPath)) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  if (!existsSync(proofPath)) throw new Error('Worker did not produce its proof file for packet ' + packetId);
-  const workerHead = execFileSync('git', ['-C', lane.worktreePath, 'log', '-1', '--format=%s'], { encoding: 'utf8' }).trim();
-  if (workerHead !== 'test: add persistent lead proof') throw new Error('Worker proof was not committed.');
-  writeFileSync(process.env.O8_TEST_CONNECTED_WORKER_FILE, JSON.stringify({
-    packetId,
-    laneId: lane.id,
-    sessionKey: lane.sessionKey,
-    worktreePath: lane.worktreePath,
-    threadId: process.env.O8_TEST_THREAD_ID,
-    turnId: process.env.O8_TEST_TURN_ID,
-  }));
-  process.exit(0);
-`;
-
-const reviewWorkerHelper = `
-  import { execFileSync } from 'node:child_process';
-  import { readFileSync, writeFileSync } from 'node:fs';
-  const missions = (await import('./src/lib/orchestrator/operator-mission-service.ts')).default;
-  const worker = JSON.parse(readFileSync(process.env.O8_TEST_CONNECTED_WORKER_FILE, 'utf8'));
-  if (!worker.packetId || !worker.worktreePath) throw new Error('Review worker binding is missing.');
-  const head = execFileSync('git', ['-C', worker.worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const review = await missions.submitPacketReview({
-    packetId: worker.packetId,
-    approved: true,
-    findings: [],
-    reviewedHeadSha: head,
-  });
-  writeFileSync(process.env.O8_TEST_REVIEW_FILE, JSON.stringify({ review }));
-`;
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -270,82 +208,7 @@ beforeAll(async () => {
     budgets: ['No external API spend.'],
     escalationCriteria: ['Escalate only when operator authority is required.'],
   }), 'utf8');
-  writeFileSync(fakeCodex, `#!/usr/bin/env node
-import { appendFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('codex-cli 0.145.0'); process.exit(0); }
-if (args[0] === 'login' && args[1] === 'status') { console.log('Logged in'); process.exit(0); }
-if (args.includes('--input-format')) process.exit(0);
-appendFileSync(process.env.O8_TEST_LEAD_ARGS, JSON.stringify(args) + '\\n');
-const prompt = args.at(-1) || '';
-const resumeIndex = args.indexOf('resume');
-const threadId = resumeIndex < 0 ? 'fixture-persistent-lead-thread' : args[resumeIndex + 1];
-console.log(JSON.stringify({ type: 'thread.started', thread_id: threadId }));
-if (process.env.O8_WORKER_PACKET_ID) {
-  writeFileSync('lead-worker-proof.txt', 'worker returned to persistent lead\\n');
-  const commit = spawnSync('git', [
-    '-c', 'user.name=o8 test', '-c', 'user.email=test@o8.local',
-    'add', 'lead-worker-proof.txt',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
-  if (commit.status !== 0) { console.error(commit.stderr); process.exit(commit.status || 1); }
-  const saved = spawnSync('git', [
-    '-c', 'user.name=o8 test', '-c', 'user.email=test@o8.local',
-    'commit', '-qm', 'test: add persistent lead proof',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
-  if (saved.status !== 0) { console.error(saved.stderr); process.exit(saved.status || 1); }
-}
-if (prompt.includes('[fixture:dispatch-worker]')) {
-  const turnThreadId = prompt.match(/orchestratorThreadId: "([^"]+)"/)?.[1];
-  const turnId = prompt.match(/orchestratorTurnId: "([^"]+)"/)?.[1];
-  const result = spawnSync(process.execPath, [
-    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
-    '--input-type=module', '--eval', process.env.O8_TEST_DISPATCH_HELPER,
-  ], {
-    cwd: process.env.O8_TEST_SOURCE_ROOT,
-    env: { ...process.env, O8_TEST_THREAD_ID: turnThreadId, O8_TEST_TURN_ID: turnId },
-    encoding: 'utf8', timeout: 30000,
-  });
-  writeFileSync(process.env.O8_TEST_DISPATCH_DEBUG_FILE, JSON.stringify(result));
-  if (result.status !== 0) {
-    console.error(((result.stderr || '') + '\\n' + (result.stdout || '')).slice(-3000));
-    process.exit(result.status || 1);
-  }
-}
-if (prompt.includes('returned review')) {
-  const packetId = prompt.match(/packet ([^)]+)\\)/)?.[1];
-  const result = spawnSync(process.execPath, [
-    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
-    '--input-type=module', '--eval', process.env.O8_TEST_REVIEW_HELPER,
-  ], {
-    cwd: process.env.O8_TEST_SOURCE_ROOT,
-    env: { ...process.env, O8_TEST_PACKET_ID: packetId },
-    encoding: 'utf8', timeout: 20000,
-  });
-  if (result.status !== 0) { console.error(result.stderr || result.stdout); process.exit(result.status || 1); }
-}
-if (prompt.includes('[fixture:hang]')) await new Promise((resolve) => setTimeout(resolve, 5000));
-else if (prompt.includes('[fixture:slow-left-2541]') || prompt.includes('returned review')) await new Promise((resolve) => setTimeout(resolve, 350));
-if (prompt.includes('[fixture:event-error]')) {
-  console.log(JSON.stringify({ type: 'error', message: 'fixture orchestrator event failed' }));
-  process.exit(0);
-}
-const report = prompt.match(/o8 lead report ([^ ]+) --turn ([^ ]+) --repo ([^ ]+) --thread-id ([^ ]+)/);
-if (report && !prompt.includes('[fixture:no-outcome]')) {
-  const kind = prompt.includes('[fixture:dispatch-worker]')
-    ? 'waiting_workers'
-    : prompt.includes('returned review') ? 'needs_approval' : 'completed';
-  const reported = spawnSync(process.execPath, [
-    process.env.O8_TEST_SOURCE_ROOT + '/cli/dist/o8.mjs',
-    'lead', 'report', report[1], '--turn', report[2], '--repo', JSON.parse(report[3]),
-    '--thread-id', report[4], '--kind', kind, '--summary', 'fixture structured outcome',
-    '--evidence', kind === 'completed' ? '["fixture provider receipt"]' : '[]',
-  ], { env: process.env, encoding: 'utf8' });
-  if (reported.status !== 0) { console.error(reported.stderr || reported.stdout); process.exit(reported.status || 1); }
-}
-console.log(JSON.stringify({ type: 'item.completed', item: { id: 'reply', type: 'agent_message', text: 'offline lead reply' } }));
-console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
-`, 'utf8');
+  writeFileSync(fakeCodex, fakeCodexScript, 'utf8');
   chmodSync(fakeCodex, 0o755);
   process.env.O8_TEST_DISPATCH_HELPER = dispatchWorkerHelper;
   process.env.O8_TEST_REVIEW_HELPER = reviewWorkerHelper;
@@ -663,7 +526,9 @@ describe('persistent lead handoff real path', () => {
     ).toContain(terminal.lead.status);
     expect(existsSync(workerCapturePath)).toBe(true);
     const worker = JSON.parse(readFileSync(workerCapturePath, 'utf8')) as {
+      missionId: string;
       packetId: string;
+      laneId: string;
       threadId: string;
       turnId: string;
     };
@@ -677,9 +542,24 @@ describe('persistent lead handoff real path', () => {
     expect(terminal.lead.status).toBe('needs_approval');
     expect(readArgs().filter((args) => args[0] === 'exec').at(-1)?.slice(0, 3))
       .toEqual(['exec', 'resume', 'fixture-persistent-lead-thread']);
+
+    updateLane(worker.laneId, { status: 'failed' }, 'system', { reason: 'retired test generation' });
+    await withMissionRegistryState(worker.missionId, (state) => {
+      const packet = state.packets.find((candidate) => candidate.id === worker.packetId)!;
+      packet.releaseState = 'released';
+      packet.status = 'released';
+      packet.releaseStatePayload = { source: 'test_release', releasedAt: new Date().toISOString() };
+      return { state, result: undefined };
+    });
+    const released = await runCli([
+      'lead', 'send', lead.id, '--message', 'Confirm released work is terminal.',
+      '--idempotency-key', 'released-worker-terminal',
+    ]);
+    expect(released.exitCode, released.stderr).toBe(0);
+    expect((await settled(lead.id)).lead.status).toBe('completed');
   }, 90_000);
 
-  it('requires structured outcomes, honors stream errors, and governs the real WS thoughts writer', async () => {
+  it('preserves legacy WS chat and governs persistent WS execution, display, permissions, and stop', async () => {
     const started = await runCli(startArgs('outcome-and-ws'));
     const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
     await settled(lead.id);
@@ -699,12 +579,25 @@ describe('persistent lead handoff real path', () => {
       .toContain('fixture orchestrator event failed');
 
     const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+    const wsEvents: Array<Record<string, unknown>> = [];
+    socket.on('message', (chunk) => { wsEvents.push(JSON.parse(String(chunk)) as Record<string, unknown>); });
     await once(socket, 'open');
+    const legacyCalls = readArgs().length;
+    socket.send(JSON.stringify({
+      type: 'orchestrator-send', repoPath, threadId: 'thoughts-unbound-legacy',
+      message: '[fixture:legacy-full] provider-only context', displayMessage: 'Legacy visible request.',
+      backend: 'codex', model: 'gpt-5.6-sol', thinkingEffort: 'high', permissionMode: 'full',
+      orchestrationMode: 'fleet',
+    }));
+    await vi.waitFor(() => expect(readArgs()).toHaveLength(legacyCalls + 1), { timeout: 10_000 });
+    expect(readArgs().at(-1)?.at(-1)).toContain('[fixture:legacy-full] provider-only context');
+
     const payload = JSON.stringify({
       type: 'orchestrator-send', repoPath, threadId: lead.threadId,
-      clientMessageId: 'persistent-ws-send', message: 'WS follows the persistent lead.',
-      displayMessage: 'WS follows the persistent lead.', backend: 'codex',
-      model: 'gpt-5.6-sol', thinkingEffort: 'high', permissionMode: 'full', orchestrationMode: 'fleet',
+      clientMessageId: 'persistent-ws-send',
+      message: '[fixture:wire-full] private execution directive\nVisible operator request.',
+      displayMessage: 'Visible operator request.', backend: 'codex',
+      model: 'gpt-5.6-sol', thinkingEffort: 'high', permissionMode: 'plan', orchestrationMode: 'fleet',
     });
     socket.send(payload);
     socket.send(payload);
@@ -713,8 +606,72 @@ describe('persistent lead handoff real path', () => {
       WHERE lead_id = ? AND idempotency_key = 'ws:persistent-ws-send'
     `).get(lead.id)).toEqual({ count: 1 }), { timeout: 5_000 });
     await settled(lead.id);
+    const persisted = getSqlite().prepare(`
+      SELECT message, display_message, permission_mode FROM orchestrator_lead_turns
+      WHERE lead_id = ? AND idempotency_key = 'ws:persistent-ws-send'
+    `).get(lead.id) as { message: string; display_message: string; permission_mode: string };
+    expect(persisted).toEqual({
+      message: '[fixture:wire-full] private execution directive\nVisible operator request.',
+      display_message: 'Visible operator request.',
+      permission_mode: 'plan',
+    });
+    const providerCall = readArgs().at(-1)!;
+    expect(providerCall).toContain('sandbox_mode=read-only');
+    expect(providerCall.at(-1)).toContain('[fixture:wire-full] private execution directive');
+    expect(readOrchestratorThreadMessages(lead.threadId).filter((entry) => entry.role === 'user').at(-1)?.content)
+      .toBe('Visible operator request.');
+    await vi.waitFor(() => expect(JSON.stringify(wsEvents)).toContain('"status":"completed"'), { timeout: 5_000 });
+
+    const turnsBeforeAttachment = (getSqlite().prepare(
+      'SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ?',
+    ).get(lead.id) as { count: number }).count;
+    socket.send(JSON.stringify({
+      type: 'orchestrator-send', repoPath, threadId: lead.threadId,
+      clientMessageId: 'unsupported-attachment', message: 'Inspect image.',
+      backend: 'codex', model: 'gpt-5.6-sol', thinkingEffort: 'high', permissionMode: 'plan',
+      attachments: [{ dataUri: 'data:image/png;base64,AA==', name: 'proof.png' }],
+    }));
+    await vi.waitFor(() => expect(JSON.stringify(wsEvents)).toContain('Attachments are not supported'), { timeout: 5_000 });
+    expect((getSqlite().prepare(
+      'SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ?',
+    ).get(lead.id) as { count: number }).count).toBe(turnsBeforeAttachment);
+
+    const stopStarted = await runCli(startArgs('ws-durable-stop'));
+    const stopLead = (JSON.parse(stopStarted.stdout) as LeadCliReceipt).lead;
+    await settled(stopLead.id);
+    const callsBeforeStop = readArgs().length;
+    socket.send(JSON.stringify({
+      type: 'orchestrator-send', repoPath, threadId: stopLead.threadId,
+      clientMessageId: 'ws-stop-running', message: '[fixture:hang] stop through WS',
+      displayMessage: 'Stop through WS.', backend: 'codex', model: 'gpt-5.6-sol',
+      thinkingEffort: 'high', permissionMode: 'full', orchestrationMode: 'fleet',
+    }));
+    await vi.waitFor(() => expect(getLeadStatus(stopLead.id).lead.status).toBe('running'), { timeout: 5_000 });
+    await vi.waitFor(() => expect(readArgs()).toHaveLength(callsBeforeStop + 1), { timeout: 5_000 });
+    socket.send(JSON.stringify({
+      type: 'orchestrator-send', repoPath, threadId: stopLead.threadId,
+      clientMessageId: 'ws-stop-queued', message: 'This queued turn must not drain.',
+      backend: 'codex', model: 'gpt-5.6-sol', thinkingEffort: 'high', permissionMode: 'full',
+    }));
+    await vi.waitFor(() => expect(getLeadStatus(stopLead.id).queueDepth).toBe(1), { timeout: 5_000 });
+    socket.send(JSON.stringify({
+      type: 'orchestrator-interrupt', repoPath, threadId: stopLead.threadId,
+      clientMessageId: 'ws-stop-command', backend: 'codex',
+    }));
+    await vi.waitFor(() => expect(getLeadStatus(stopLead.id).lead.status).toBe('stopped'), { timeout: 5_000 });
+    expect(getSqlite().prepare(`
+      SELECT COUNT(*) AS count FROM orchestrator_lead_turns
+      WHERE lead_id = ? AND status IN ('queued', 'running')
+    `).get(stopLead.id)).toEqual({ count: 0 });
+    expect(getSqlite().prepare(`
+      SELECT status FROM orchestrator_lead_turns
+      WHERE lead_id = ? AND idempotency_key = 'ws:ws-stop-queued'
+    `).get(stopLead.id)).toEqual({ status: 'stopped' });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(readArgs()).toHaveLength(callsBeforeStop + 1);
+    expect(JSON.stringify(wsEvents)).toContain('"status":"stopped"');
     socket.terminate();
-  }, 30_000);
+  }, 50_000);
 
   it('persists stop across runtime recovery and never relaunches', async () => {
     const lead = getSqlite().prepare(`SELECT id FROM orchestrator_leads WHERE start_key = 'lead-start-main'`).get() as { id: string };

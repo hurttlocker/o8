@@ -5,7 +5,7 @@ import { getSqlite } from '@/lib/db';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
-import { findLaneBySession, listLanes } from '@/lib/lane/registry';
+import { findLaneBySession, findLatestLaneByPacket, listLanes } from '@/lib/lane/registry';
 import {
   appendMobileOrchestratorUserMessage,
   markMobileOrchestratorThreadFailed,
@@ -19,6 +19,7 @@ import {
   LeadLifecycleError,
   resolveLeadRepoPath,
   type LeadBrief,
+  type LeadAttachment,
   type LeadRow,
   type LeadStatus,
   type ReportLeadOutcomeInput,
@@ -26,6 +27,7 @@ import {
   type StartLeadInput,
   type TurnRow,
   validateLeadBrief,
+  validateLeadAttachments,
   validateLeadRouting,
   validateLeadStringList,
 } from '@/lib/orchestrator/lead-contract';
@@ -99,7 +101,7 @@ function buildLeadPrompt(lead: LeadRow, turn: TurnRow, brief: LeadBrief | null):
 function threadPackets(threadId: string) {
   const states = [
     readOrchestratorControlPlaneState(),
-    ...listMissionRegistryEntries({ includeArchived: false }).map((entry) => entry.mission),
+    ...listMissionRegistryEntries({ includeArchived: true }).map((entry) => entry.mission),
   ];
   const packets = new Map<string, (typeof states)[number]['packets'][number]>();
   for (const state of states) {
@@ -110,29 +112,50 @@ function threadPackets(threadId: string) {
   return [...packets.values()];
 }
 
+function packetIsResolved(packet: ReturnType<typeof threadPackets>[number]): boolean {
+  return packet.releaseState === 'released'
+    || packet.status === 'released'
+    || packet.status === 'archived'
+    || Boolean(packet.archivedAt)
+    || (packet.operatorStopped === true
+      && packet.releaseStatePayload?.source?.startsWith('mission_superseded:') === true);
+}
+
+function authoritativeLane(packet: ReturnType<typeof threadPackets>[number]) {
+  const boundLaneId = packet.lane?.laneId?.trim();
+  if (boundLaneId) {
+    return listLanes(new Set([packet.id])).find((lane) => lane.id === boundLaneId) ?? null;
+  }
+  return findLatestLaneByPacket(packet.id);
+}
+
 async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: LeadStatus; detail: string }> {
   const packets = threadPackets(lead.thread_id);
-  const packetIds = new Set(packets.map((packet) => packet.id));
-  const lanes = listLanes().filter((lane) => lane.packetId && packetIds.has(lane.packetId));
+  const unresolvedPackets = packets.filter((packet) => !packetIsResolved(packet));
+  const obligations = unresolvedPackets.map((packet) => ({ packet, lane: authoritativeLane(packet) }));
+  const lanes = obligations.flatMap(({ lane }) => lane ? [lane] : []);
   if (lanes.some((lane) => lane.status === 'awaiting_human')) {
     return { status: 'needs_approval', detail: 'A bound worker requires a distinct human approval.' };
   }
-  if (packets.some((packet) => packet.review?.approved === true && packet.releaseState !== 'released')) {
+  if (unresolvedPackets.some((packet) => packet.review?.approved === true)) {
     return { status: 'needs_approval', detail: 'Lead review passed; operator-controlled release remains pending.' };
   }
   const durableReviewStates = await Promise.all(lanes.map((lane) => hasDurableApprovedReview(lane)));
   if (durableReviewStates.some(Boolean)) {
     return { status: 'needs_approval', detail: 'Lead review passed; operator-controlled release remains pending.' };
   }
-  const activeWorker = lanes.some((lane) => ['claimed', 'running', 'retrying'].includes(lane.status));
-  const openPacket = packets.some((packet) => packet.status !== 'archived'
-    && packet.status !== 'failed'
-    && packet.releaseState !== 'released');
-  if (activeWorker || (openPacket && lanes.length === 0)) {
+  const activeWorker = lanes.some((lane) => [
+    'idle', 'launching', 'running', 'paused', 'recovering', 'merging',
+  ].includes(lane.status));
+  const missingActiveLane = obligations.some(({ packet, lane }) => !lane
+    && !['failed', 'blocked'].includes(packet.status));
+  if (activeWorker || missingActiveLane) {
     return { status: 'waiting_workers', detail: 'Lead is waiting for a bound worker return.' };
   }
   const unresolvedReview = lanes.some((lane) => ['reviewing', 'awaiting_orchestrator', 'awaiting_input', 'failed'].includes(lane.status));
-  if (unresolvedReview) {
+  const unresolvedPacket = obligations.some(({ packet, lane }) => !lane
+    && ['failed', 'blocked'].includes(packet.status));
+  if (unresolvedReview || unresolvedPacket) {
     return { status: 'blocked', detail: 'A bound worker failure, context request, or review obligation remains unresolved.' };
   }
   if (!turn.outcome_kind) {
@@ -194,7 +217,7 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
   appendMobileOrchestratorUserMessage({
     tabId: lead.thread_id,
     repoPath: lead.repo_path,
-    message: turn.message,
+    message: turn.display_message || turn.message,
     messageId: `lead-user-${turn.id}`,
     backend: lead.backend,
   });
@@ -236,8 +259,11 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
         model: lead.model,
         thinkingEffort: lead.effort,
         threadId: lead.thread_id,
-        permissionMode: 'full',
+        permissionMode: turn.permission_mode,
         signal: controller.signal,
+        ...(turn.attachments_json
+          ? { attachments: JSON.parse(turn.attachments_json) as LeadAttachment[] }
+          : {}),
       },
       'fleet',
     );
@@ -350,12 +376,19 @@ function admitTurn(input: {
   key: string;
   kind: 'operator' | 'review';
   message: string;
+  displayMessage?: string;
+  permissionMode?: 'full' | 'plan';
+  attachments?: LeadAttachment[];
   brief?: LeadBrief;
 }): TurnRow {
   const sqlite = getSqlite();
   const existing = turnByKey(input.lead.id, input.key);
   if (existing) {
-    if (existing.message !== input.message) {
+    const displayMessage = input.displayMessage ?? input.message;
+    const attachmentsJson = input.attachments?.length ? JSON.stringify(input.attachments) : null;
+    if (existing.message !== input.message || (existing.display_message || existing.message) !== displayMessage
+      || existing.permission_mode !== (input.permissionMode ?? 'full')
+      || existing.attachments_json !== attachmentsJson) {
       throw new LeadLifecycleError(
         'The idempotency key is already bound to a different message.',
         'lead_idempotency_conflict',
@@ -371,10 +404,13 @@ function admitTurn(input: {
   const now = Date.now();
   const inserted = sqlite.prepare(`
     INSERT INTO orchestrator_lead_turns
-      (id, lead_id, idempotency_key, ordinal, kind, message, brief_json, status, created_at)
-    SELECT ?, ?, ?, ?, ?, ?, ?, 'queued', ?
+      (id, lead_id, idempotency_key, ordinal, kind, message, display_message,
+       permission_mode, attachments_json, brief_json, status, created_at)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?
     FROM orchestrator_leads WHERE id = ? AND status != 'stopped'
   `).run(turnId, input.lead.id, input.key, ordinal, input.kind, input.message,
+    input.displayMessage ?? input.message, input.permissionMode ?? 'full',
+    input.attachments?.length ? JSON.stringify(input.attachments) : null,
     input.brief ? JSON.stringify(input.brief) : null, now, input.lead.id);
   if (inserted.changes !== 1) {
     throw new LeadLifecycleError('A stopped lead cannot accept new turns.', 'lead_stopped', 409);
@@ -500,13 +536,28 @@ export function startLead(input: StartLeadInput) {
 
 export function sendLead(input: SendLeadInput) {
   const leadId = cleanLeadString(input.leadId, 'leadId', 128);
-  const message = cleanLeadString(input.message, 'message', 20_000);
+  const message = cleanLeadString(input.message, 'message', 200_000);
+  const displayMessage = input.displayMessage === undefined
+    ? message
+    : cleanLeadString(input.displayMessage, 'displayMessage', 20_000);
+  const permissionMode = input.permissionMode ?? 'full';
+  if (permissionMode !== 'full' && permissionMode !== 'plan') {
+    throw new LeadLifecycleError('permissionMode must be full or plan.', 'invalid_lead_request', 400);
+  }
+  const attachments = input.attachments === undefined ? [] : validateLeadAttachments(input.attachments);
   const key = cleanLeadString(input.idempotencyKey, 'idempotencyKey', 256);
   const lead = leadById(leadId);
   if (!lead) throw new LeadLifecycleError('Lead not found.', 'lead_not_found', 404);
   assertLeadBinding(lead, input);
+  if (attachments.length > 0 && lead.backend !== 'claude') {
+    throw new LeadLifecycleError(
+      `Attachments are not supported by the persistent ${lead.backend} backend.`,
+      'lead_attachments_unsupported',
+      400,
+    );
+  }
   const duplicate = Boolean(turnByKey(lead.id, key));
-  const turn = insertTurn({ lead, key, kind: 'operator', message });
+  const turn = insertTurn({ lead, key, kind: 'operator', message, displayMessage, permissionMode, attachments });
   return { ...getLeadStatus(lead.id), admittedTurnId: turn.id, duplicate };
 }
 
@@ -514,6 +565,9 @@ export function sendLeadThreadMessage(input: {
   threadId: string;
   repoPath: string;
   message: string;
+  displayMessage?: string;
+  permissionMode?: 'full' | 'plan';
+  attachments?: LeadAttachment[];
   idempotencyKey: string;
   backend?: string;
   model?: string;
@@ -529,11 +583,22 @@ export function sendLeadThreadMessage(input: {
     repoPath: input.repoPath,
     threadId,
     message: input.message,
+    displayMessage: input.displayMessage,
+    permissionMode: input.permissionMode,
+    attachments: input.attachments,
     idempotencyKey: input.idempotencyKey,
     backend: input.backend as SendLeadInput['backend'],
     model: input.model,
     effort: input.effort,
   });
+}
+
+export function findLeadThreadBinding(threadIdRaw: string): LeadRow | null {
+  const threadId = typeof threadIdRaw === 'string' ? threadIdRaw.trim() : '';
+  if (!threadId || threadId.length > 256) return null;
+  return getSqlite().prepare(
+    'SELECT * FROM orchestrator_leads WHERE thread_id = ?',
+  ).get(threadId) as LeadRow | undefined ?? null;
 }
 
 export function reportLeadOutcome(input: ReportLeadOutcomeInput) {
@@ -697,7 +762,7 @@ export function queueLeadSupervisorReturn(repoPath: string, message: string): bo
 function threadPacketsForPacket(packetId: string) {
   const states = [
     readOrchestratorControlPlaneState(),
-    ...listMissionRegistryEntries({ includeArchived: false }).map((entry) => entry.mission),
+    ...listMissionRegistryEntries({ includeArchived: true }).map((entry) => entry.mission),
   ];
   for (const state of states) {
     const packet = state.packets.find((candidate) => candidate.id === packetId);

@@ -220,11 +220,16 @@ import {
 } from './lib/operator/defaults';
 import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
 import {
+  findLeadThreadBinding,
+  getLeadStatus,
   queueLeadReviewContinuation,
   queueLeadSupervisorReturn,
   queueLeadWorkerReturn,
   sendLeadThreadMessage,
+  stopLead,
+  waitForLead,
 } from './lib/orchestrator/lead-lifecycle';
+import { resolveLeadRepoPath, validateLeadAttachments } from './lib/orchestrator/lead-contract';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
@@ -4982,7 +4987,8 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
 
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const threadId = resolveMsgThreadId(msg);
-  if (threadId) {
+  const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
+  if (threadId && leadBinding) {
     try {
       if (!correlationId) {
         throw new Error('Persistent lead thread sends require a correlation id.');
@@ -4992,10 +4998,20 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           throw new Error(`${field} must be a string when supplied.`);
         }
       }
+      if ('displayMessage' in msg && typeof msg.displayMessage !== 'string') {
+        throw new Error('displayMessage must be a string when supplied.');
+      }
+      if ('permissionMode' in msg && msg.permissionMode !== 'full' && msg.permissionMode !== 'plan') {
+        throw new Error('permissionMode must be full or plan when supplied.');
+      }
+      const attachments = 'attachments' in msg ? validateLeadAttachments(msg.attachments) : undefined;
       const leadReceipt = sendLeadThreadMessage({
         threadId,
         repoPath,
-        message: resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage }),
+        message,
+        displayMessage: resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage }),
+        permissionMode: msg.permissionMode === 'plan' ? 'plan' : 'full',
+        attachments,
         idempotencyKey: `ws:${correlationId}`,
         backend: typeof msg.backend === 'string' ? msg.backend : undefined,
         model: typeof msg.model === 'string' ? msg.model : undefined,
@@ -5022,6 +5038,8 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
             admittedTurnId: leadReceipt.admittedTurnId,
           },
         });
+        void sendLeadTerminalStatus(client, leadReceipt.lead.id, leadReceipt.admittedTurnId, leadReceipt.cursor)
+          .catch((error) => console.warn('[ws-server] Persistent lead terminal status watch failed:', error));
         return;
       }
     } catch (error) {
@@ -5102,6 +5120,40 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         ...orchestratorCommandAckCorrelation(correlationId),
       },
     });
+  }
+}
+
+async function sendLeadTerminalStatus(
+  client: ClientState,
+  leadId: string,
+  turnId: string,
+  afterCursor: number,
+): Promise<void> {
+  const deadline = Date.now() + 10 * 60_000;
+  let cursor = afterCursor;
+  while (Date.now() < deadline) {
+    const receipt = await waitForLead({
+      leadId,
+      turnId,
+      afterCursor: cursor,
+      waitMs: Math.min(30_000, deadline - Date.now()),
+    });
+    cursor = receipt.cursor;
+    const status = receipt.requestedTurn?.status;
+    if (!status || status === 'queued' || status === 'running') continue;
+    send(client, {
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status,
+        repoPath: receipt.lead.repoPath,
+        threadId: receipt.lead.threadId,
+        backend: receipt.lead.routing.backend,
+        lead: receipt.lead,
+        admittedTurnId: turnId,
+      },
+    });
+    return;
   }
 }
 
@@ -6018,6 +6070,52 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
+  const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
+  if (leadBinding) {
+    const correlationId = resolveOrchestratorCommandCorrelationId(msg);
+    try {
+      if (resolveLeadRepoPath(repoPath) !== leadBinding.repo_path) {
+        throw new Error('repoPath does not match the persistent lead binding.');
+      }
+    } catch (error) {
+      send(client, {
+        channel: 'orchestrator',
+        event: 'error',
+        data: {
+          error: error instanceof Error ? error.message : 'Persistent lead stop failed.',
+          repoPath,
+          threadId,
+          ...orchestratorCommandAckCorrelation(correlationId),
+        },
+      });
+      return;
+    }
+    const alreadyStopped = leadBinding.status === 'stopped';
+    const receipt = alreadyStopped
+      ? getLeadStatus(leadBinding.id)
+      : stopLead(leadBinding.id, 'Stopped from the orchestrator composer.');
+    sendOrchestratorInterruptAck(client, {
+      repoPath,
+      threadId,
+      backend: leadBinding.backend,
+      correlationId,
+      state: alreadyStopped ? 'already-interrupted' : 'accepted',
+      interrupted: !alreadyStopped,
+      duplicate: alreadyStopped,
+    });
+    send(client, {
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: 'stopped',
+        repoPath,
+        threadId,
+        backend: leadBinding.backend,
+        lead: receipt.lead,
+      },
+    });
+    return;
+  }
   const requestedBackendId = resolveMsgBackendId(msg);
   const activeRoute = activeOrchestratorRoutes.resolve({ repoPath, threadId, requestedBackend: requestedBackendId });
   const backendId = activeRoute?.toBackend ?? requestedBackendId;

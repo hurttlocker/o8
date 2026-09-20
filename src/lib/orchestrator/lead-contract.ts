@@ -36,12 +36,20 @@ export interface StartLeadInput extends LeadRouting {
 export interface SendLeadInput {
   leadId: string;
   message: string;
+  displayMessage?: string;
+  permissionMode?: 'full' | 'plan';
+  attachments?: LeadAttachment[];
   idempotencyKey: string;
   repoPath?: string;
   threadId?: string;
   backend?: OrchestratorBackendId;
   model?: string;
   effort?: string;
+}
+
+export interface LeadAttachment {
+  dataUri: string;
+  name?: string;
 }
 
 export interface ReportLeadOutcomeInput {
@@ -81,6 +89,9 @@ export interface TurnRow {
   ordinal: number;
   kind: 'operator' | 'review' | 'worker_return';
   message: string;
+  display_message: string;
+  permission_mode: 'full' | 'plan';
+  attachments_json: string | null;
   brief_json: string | null;
   status: LeadStatus | 'interrupted';
   result_text: string | null;
@@ -97,6 +108,35 @@ export interface TurnRow {
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
+}
+
+export function validateLeadAttachments(value: unknown): LeadAttachment[] {
+  if (!Array.isArray(value) || value.length > 8) {
+    throw new LeadLifecycleError('attachments must be an array with at most 8 entries.', 'invalid_lead_request', 400);
+  }
+  return value.map((attachment, index) => {
+    if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) {
+      throw new LeadLifecycleError(`attachments[${index}] must be an object.`, 'invalid_lead_request', 400);
+    }
+    const record = attachment as Record<string, unknown>;
+    if (typeof record.dataUri !== 'string'
+      || !/^data:image\/[a-z+.-]+;base64,/i.test(record.dataUri)
+      || record.dataUri.length >= 5_000_000) {
+      throw new LeadLifecycleError(
+        `attachments[${index}].dataUri must be a supported image data URI under 5MB.`,
+        'invalid_lead_request',
+        400,
+      );
+    }
+    if (record.name !== undefined && typeof record.name !== 'string') {
+      throw new LeadLifecycleError(`attachments[${index}].name must be a string.`, 'invalid_lead_request', 400);
+    }
+    const name = typeof record.name === 'string' ? record.name.trim() : '';
+    if (name.length > 500) {
+      throw new LeadLifecycleError(`attachments[${index}].name must be 500 characters or fewer.`, 'invalid_lead_request', 400);
+    }
+    return { dataUri: record.dataUri, ...(name ? { name } : {}) };
+  });
 }
 
 export class LeadLifecycleError extends Error {
