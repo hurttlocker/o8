@@ -56,17 +56,26 @@ export function ComposerPopover({ anchorRef, open, onClose, align = 'end', child
     if (!anchor) return;
 
     const place = () => {
-      const a = anchor.getBoundingClientRect();
+      const root = document.documentElement;
+      const configuredZoom = Number.parseFloat(getComputedStyle(root).getPropertyValue('--ui-zoom'));
+      const zoom = Number.isFinite(configuredZoom) && configuredZoom > 0 ? configuredZoom : 1;
+      const rect = anchor.getBoundingClientRect();
+      // Rects are scaled screen pixels; fixed offsets and measured panel sizes
+      // are document pixels under the root UI zoom. Keep one coordinate space.
+      const a = { left: rect.left / zoom, right: rect.right / zoom, top: rect.top / zoom, bottom: rect.bottom / zoom };
+      const viewportWidth = window.innerWidth / zoom;
+      const viewportHeight = window.innerHeight / zoom;
       const panel = panelRef.current;
       const panelH = panel?.offsetHeight ?? 0;
       const panelW = panel?.offsetWidth ?? 0;
       // Open upward by default (composer sits at the viewport bottom); only
       // drop down when there genuinely isn't room above.
-      const openUp = a.top >= panelH + GAP || a.top >= window.innerHeight - a.bottom;
-      const top = openUp ? Math.max(EDGE, a.top - panelH - GAP) : a.bottom + GAP;
+      const openUp = a.top >= panelH + GAP || a.top >= viewportHeight - a.bottom;
+      const preferredTop = openUp ? a.top - panelH - GAP : a.bottom + GAP;
+      const top = Math.max(EDGE, Math.min(preferredTop, viewportHeight - panelH - EDGE));
       const rawLeft = align === 'end' ? a.right - panelW : a.left;
-      const left = Math.max(EDGE, Math.min(rawLeft, window.innerWidth - panelW - EDGE));
-      setPos({ left, top });
+      const left = Math.max(EDGE, Math.min(rawLeft, viewportWidth - panelW - EDGE));
+      setPos((current) => current?.left === left && current.top === top ? current : { left, top });
     };
 
     place(); // measure-then-place: panel starts hidden off-screen, no flash
@@ -75,6 +84,9 @@ export function ComposerPopover({ anchorRef, open, onClose, align = 'end', child
     if (panelRef.current) ro.observe(panelRef.current); // content height settles
     window.addEventListener('scroll', place, true); // capture: catch transcript scroll
     window.addEventListener('resize', place);
+    // CSS zoom does not consistently emit resize or change observed layout size.
+    const zoomObserver = new MutationObserver(place);
+    zoomObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
 
     const onDown = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -83,13 +95,14 @@ export function ComposerPopover({ anchorRef, open, onClose, align = 'end', child
       onCloseRef.current();
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current();
+      if (!event.defaultPrevented && event.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey);
 
     return () => {
       ro.disconnect();
+      zoomObserver.disconnect();
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
       document.removeEventListener('mousedown', onDown, true);
