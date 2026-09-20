@@ -5,7 +5,6 @@ import { AttachFilesButton } from './AttachFilesButton';
 import { ComposerModeChip, FleetWorkerChip } from './ComposerFleetChips';
 import type { ComposerMode } from './composer-mode';
 import { MicButton } from './MicButton';
-import { VoiceModeButton } from './VoiceModeButton';
 import { SessionRulesChip } from './SessionRulesChip';
 import { ModelThinkingChip } from './ModelThinkingChip';
 import type { OrchestratorBackendSetting } from './operator-defaults';
@@ -425,8 +424,6 @@ export function InputButtons({
   onSelectRepoPath,
   inlineLeadingExtras,
   inlineMeterSlot,
-  voiceModeEnabled,
-  onVoiceModeChange,
   onBrowsePrompts,
   onSavePrompt,
   onRequestTextareaFocus,
@@ -564,9 +561,6 @@ export function InputButtons({
           )}
           meterControl={inlineMeterSlot}
           micControl={<MicButton />}
-          voiceControl={onVoiceModeChange ? (
-            <VoiceModeButton enabled={Boolean(voiceModeEnabled)} onChange={onVoiceModeChange} />
-          ) : null}
           sendControl={(
             <SendPill
               canSubmit={canSubmit}
@@ -650,9 +644,6 @@ export function InputButtons({
         onSavePrompt={onSavePrompt}
       />
       <MicButton />
-      {onVoiceModeChange ? (
-        <VoiceModeButton enabled={Boolean(voiceModeEnabled)} onChange={onVoiceModeChange} />
-      ) : null}
 
       </div>
 

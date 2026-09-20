@@ -596,7 +596,7 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('button[title="Chat target"]')?.textContent).toContain('Test repo');
     expect(container.querySelector('[data-testid="composer-selector-session-rules"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="test-context-meter"]')).not.toBeNull();
-    expect(container.querySelector('button[aria-label^="Voice mode off"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label^="Voice mode off"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Fleet worker: Codex. Starts: Run now"]')).toBeNull();
 
     localStorage.setItem('o8:composer-selector-v1', '0');

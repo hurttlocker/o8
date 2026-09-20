@@ -33,16 +33,19 @@ let root: Root;
 
 function Harness({
   busy = false,
+  dictationOnly = false,
   messages = [],
   surfaceKey,
 }: {
   busy?: boolean;
+  dictationOnly?: boolean;
   messages?: MobileTranscriptEntry[];
   surfaceKey: string;
 }) {
   const composerNodeRef = useRef<HTMLTextAreaElement>(null);
   const voiceMode = useAgentVoiceMode({
     active: true,
+    dictationOnly,
     busy,
     composerNodeRef,
     fillInput: mocks.fillInput,
@@ -122,5 +125,24 @@ describe('useAgentVoiceMode', () => {
       'complete answer',
       'voice-mode:playback-test:a1',
     );
+  });
+
+  it('keeps legacy enabled preferences inert in a dictation-only composer', () => {
+    const surfaceKey = 'dictation-only-test';
+    localStorage.setItem(`o8:agent-voice-mode:v1:${surfaceKey}`, 'true');
+    act(() => root.render(createElement(Harness, { surfaceKey, dictationOnly: true })));
+    act(() => activeDelivery()('keep this draft'));
+    expect(mocks.fillInput).toHaveBeenCalledWith('keep this draft');
+    expect(mocks.sendNow).not.toHaveBeenCalled();
+    act(() => root.render(createElement(Harness, {
+      surfaceKey, dictationOnly: true, busy: true,
+      messages: [entry('u1', 'user', 'question'), entry('a1', 'assistant', 'partial')],
+    })));
+    act(() => root.render(createElement(Harness, {
+      surfaceKey, dictationOnly: true,
+      messages: [entry('u1', 'user', 'question'), entry('a1', 'assistant', 'answer')],
+    })));
+    expect(mocks.play).not.toHaveBeenCalled();
+    expect(container.querySelector('button')?.textContent).toBe('off');
   });
 });
