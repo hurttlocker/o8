@@ -39,15 +39,23 @@ function defaultMerge(
 ): MobileTranscriptEntry[] {
   if (current.length === 0) return incoming;
   if (incoming.length === 0) return current;
-  const seen = new Set(current.map((entry) => entry.id));
-  const appended: MobileTranscriptEntry[] = [];
+  const indices = new Map(current.map((entry, index) => [entry.id, index]));
+  const merged = [...current];
+  let changed = false;
   for (const entry of incoming) {
-    if (seen.has(entry.id)) continue;
-    seen.add(entry.id);
-    appended.push(entry);
+    const index = indices.get(entry.id);
+    if (index === undefined) {
+      indices.set(entry.id, merged.length);
+      merged.push(entry);
+      changed = true;
+      continue;
+    }
+    if (merged[index] !== entry) {
+      merged[index] = entry;
+      changed = true;
+    }
   }
-  if (appended.length === 0) return current;
-  return [...current, ...appended];
+  return changed ? merged : current;
 }
 
 interface MergeOptions {
