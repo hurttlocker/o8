@@ -2052,8 +2052,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
 
-  const voiceMode = useAgentVoiceMode({
+  useAgentVoiceMode({
     active: open,
+    dictationOnly: true,
     busy: isChatMode ? waitingForReply : displayWaiting,
     composerNodeRef: inputRef,
     fillInput,
@@ -2383,8 +2384,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         selectedRepoPath={resolvedRepoPath}
         onSelectRepoPath={handleSelectComposerRepoPath}
         promptStash={isOrchestratorMode && !isChatMode ? { repoPath: resolvedRepoPath ?? '~', threadId, onRestore: fillInput } : undefined}
-        voiceModeEnabled={voiceMode.enabled}
-        onVoiceModeChange={voiceMode.setEnabled}
       />
       {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}
       {annotatingIndex !== null && attachedImages[annotatingIndex] ? (() => {

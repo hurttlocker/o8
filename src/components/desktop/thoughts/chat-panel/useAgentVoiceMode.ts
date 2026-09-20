@@ -46,6 +46,7 @@ function subscribeVoiceMode(storageKey: string, onStoreChange: () => void): () =
 
 interface UseAgentVoiceModeOptions {
   active: boolean;
+  dictationOnly?: boolean;
   busy: boolean;
   composerNodeRef: RefObject<HTMLTextAreaElement | null>;
   fillInput: (text: string) => void;
@@ -56,6 +57,7 @@ interface UseAgentVoiceModeOptions {
 
 export function useAgentVoiceMode({
   active,
+  dictationOnly = false,
   busy,
   composerNodeRef,
   fillInput,
@@ -72,7 +74,8 @@ export function useAgentVoiceMode({
     [storageKey],
   );
   const getSnapshot = useCallback(() => readVoiceMode(storageKey), [storageKey]);
-  const enabled = useSyncExternalStore(subscribe, getSnapshot, () => false);
+  const savedEnabled = useSyncExternalStore(subscribe, getSnapshot, () => false);
+  const enabled = !dictationOnly && savedEnabled;
   const enabledRef = useRef(enabled);
   const fillInputRef = useRef(fillInput);
   const sendNowRef = useRef(sendNow);
@@ -91,7 +94,7 @@ export function useAgentVoiceMode({
 
   const setEnabled = useCallback((next: boolean) => {
     memoryPreferences.set(storageKey, next);
-    enabledRef.current = next;
+    enabledRef.current = !dictationOnly && next;
     try {
       window.localStorage.setItem(storageKey, String(next));
     } catch {
@@ -101,7 +104,7 @@ export function useAgentVoiceMode({
     if (!next && ttsEngine.state.activeMessageId?.startsWith(`voice-mode:${surfaceKey}:`)) {
       ttsEngine.stop();
     }
-  }, [storageKey, surfaceKey]);
+  }, [storageKey, surfaceKey, dictationOnly]);
 
   const dictationHost = useDictationHostOptional();
   const setActiveComposer = dictationHost?.setActiveComposer;
