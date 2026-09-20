@@ -96,7 +96,7 @@ describe('single-subscription token ladder rerun escalation', () => {
     );
     expect(resolveBrainCodexRouteSync()).toEqual({
       model: 'gpt-5.6-terra',
-      reasoningEffort: 'xhigh',
+      reasoningEffort: 'max',
     });
 
     writeFileSync(

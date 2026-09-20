@@ -3,7 +3,7 @@ import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
-import { isCodexUltraCapableModel } from '@/lib/codex/reasoning-effort';
+import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
@@ -648,9 +648,8 @@ export function ModelThinkingChip({
                               } else {
                                 onBackendChange?.(option.backend, option.model);
                               }
-                              // Codex flagships keep ultra available; Terra + any Claude
-                              // model cap at max — drop a stale ultra selection.
-                              if (!isCodexUltraCapableModel(option.model) && effort === 'ultra') onEffortChange?.('max');
+                              // Drop an effort only when the shared verified catalog excludes it.
+                              if (!codexSupportsReasoningEffort(option.model, 'ultra') && effort === 'ultra') onEffortChange?.('max');
                               // o8 auto tier (Q ruling 2026-07-12): founders land on
                               // High, free lands on Low — the server enforces the
                               // same gate regardless.

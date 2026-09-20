@@ -180,6 +180,10 @@ remains discovery-only.
 
 Runtime, provider, model, and billing mode are separate fields. A runtime can expose several providers, one model can be reached through several runtimes, and subscription capacity is never converted into an API-token price. Unknown and stale evidence remain visible. Every catalog entry must retain at least one source, observation date, and freshness bound; `runtime-evidence.test.ts` rejects omissions before they can become silent guesses.
 
+### Codex reasoning-effort evidence
+
+The shared Codex effort contract lives in `src/lib/codex/reasoning-effort.ts`. Its high-end catalog records exact verified model/effort pairs from `~/.codex/models_cache.json`, client version 0.154.0, fetched 2026-09-20T02:59:18Z. That catalog receipt is distinct from the installed CLI binary receipt, 0.153.4 observed on 2026-09-19. Both the mission route and client picker consume the serializable contract. It is not a provider-name rule or a live capability query: unknown models, inherited object keys, and unlisted pairs remain unverified, so `max` and `ultra` are rejected at mission admission rather than silently changed at launch. Refresh the catalog only with a new model-catalog receipt and add fresh-launch plus persisted-resume argv proof for each pair.
+
 ## Design rules
 
 1. The UI consumes normalized runtime surfaces, not vendor protocols.

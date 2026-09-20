@@ -18,7 +18,8 @@ describe('codexResumeArgs — codex exec resume argv contract', () => {
   it.each([
     ['gpt-5.6-sol', 'high', 'high'],
     ['gpt-5.6-sol', 'ultra', 'ultra'],
-    ['gpt-5.6-terra', 'max', 'xhigh'],
+    ['gpt-5.6-terra', 'max', 'max'],
+    ['gpt-5.6-terra', 'ultra', 'ultra'],
   ] as const)('pins the saved model %s and effort %s', (model, effort, expectedEffort) => {
     const args = codexResumeArgs({ threadId: 'thread-1', prompt: 'continue', model, effort });
     expect(args.slice(0, 3)).toEqual(['exec', 'resume', 'thread-1']);
