@@ -254,7 +254,19 @@ beforeEach(async () => {
   }
 });
 
-afterAll(() => {
+afterAll(async () => {
+  // Launch completion deliberately detaches capacity observations. Settle their
+  // adapter work before removing this fixture's data directory: a late bridge
+  // registration otherwise recreates ws-token after rmSync has begun.
+  const [
+    { stopSupervisorLoop },
+    { settleRuntimeCapacityObservationsForTests },
+  ] = await Promise.all([
+    import('@/lib/supervisor/agent-supervisor'),
+    import('@/lib/runtime/capacity-service'),
+  ]);
+  stopSupervisorLoop();
+  await settleRuntimeCapacityObservationsForTests();
   vi.unstubAllGlobals();
   rmSync(dataDir, { recursive: true, force: true });
 });

@@ -25,6 +25,16 @@ export interface RuntimeCapacityControlSnapshot {
 let cached: { value: RuntimeCapacityControlSnapshot; cachedAt: number } | null = null;
 let inflight: Promise<RuntimeCapacityControlSnapshot> | null = null;
 let capacityGeneration = 0;
+const inflightObservations = new Set<Promise<unknown>>();
+
+function trackCapacityObservation<T>(observation: Promise<T>): Promise<T> {
+  inflightObservations.add(observation);
+  void observation.then(
+    () => inflightObservations.delete(observation),
+    () => inflightObservations.delete(observation),
+  );
+  return observation;
+}
 
 function unavailable(runtime: string, reason: string, identityId: string | null = null): RuntimeCapacitySnapshot {
   return {
@@ -45,9 +55,10 @@ async function boundedCapacity(
 ): Promise<RuntimeCapacitySnapshot> {
   if (!runtime.getCapacity) return unavailable(runtime.id, 'adapter_observation_unavailable', identityId);
   let timeout: NodeJS.Timeout | undefined;
+  const observation = trackCapacityObservation(Promise.resolve(runtime.getCapacity(identityId)));
   try {
     return await Promise.race([
-      Promise.resolve(runtime.getCapacity(identityId)),
+      observation,
       new Promise<RuntimeCapacitySnapshot>((resolve) => {
         timeout = setTimeout(
           () => resolve(unavailable(runtime.id, 'observation_timeout', identityId)),
@@ -121,4 +132,9 @@ export function resetRuntimeCapacityServiceForTests(): void {
   capacityGeneration += 1;
   cached = null;
   inflight = null;
+}
+
+/** Test-only teardown boundary for adapter observations that outlive their timeout. */
+export async function settleRuntimeCapacityObservationsForTests(): Promise<void> {
+  await Promise.allSettled([...inflightObservations]);
 }
