@@ -70,19 +70,81 @@ function entryKind(event: ClaudeCodeStreamJsonParserEvent): OwnedTailEntry['kind
 function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
   const parser = createClaudeCodeStreamJsonParser();
   const events = [...parser.pushChunk(raw), ...parser.flush()];
-  const entries = events
-    .map((event, index): OwnedTailEntry | null => {
-      const text = eventText(event).trim();
-      if (!text) return null;
-      return {
-        id: `${run.id}-${index}`,
-        kind: entryKind(event),
-        label: event.type,
-        text,
-        timestamp: run.startedAt,
-      };
-    })
-    .filter((entry): entry is OwnedTailEntry => entry !== null);
+  const entries: OwnedTailEntry[] = [];
+  const assistantBlocks = new Map<string, OwnedTailEntry>();
+  const thinkingBlocks = new Map<string, OwnedTailEntry>();
+  let eventOrdinal = 0;
+  let hasAssistantText = false;
+
+  for (const event of events) {
+    if (event.type === 'delta') {
+      const blockKey = String(event.blockIndex ?? 0);
+      let entry = assistantBlocks.get(blockKey);
+      if (!entry) {
+        entry = {
+          id: `${run.id}:message:${blockKey}`,
+          kind: 'message',
+          label: 'claude-assistant',
+          text: '',
+          timestamp: run.startedAt,
+        };
+        assistantBlocks.set(blockKey, entry);
+        entries.push(entry);
+      }
+      // Deltas split Markdown tokens arbitrarily. Preserve every byte so the
+      // renderer receives one complete answer rather than fragment rows.
+      entry.text += event.text;
+      hasAssistantText = hasAssistantText || event.text.length > 0;
+      continue;
+    }
+
+    if (event.type === 'thinking') {
+      const blockKey = String(event.blockIndex ?? 0);
+      let entry = thinkingBlocks.get(blockKey);
+      if (!entry) {
+        entry = {
+          id: `${run.id}:thinking:${blockKey}`,
+          kind: 'message',
+          label: 'thinking',
+          text: '',
+          timestamp: run.startedAt,
+          thinking: '',
+          thinkingActive: true,
+        };
+        thinkingBlocks.set(blockKey, entry);
+        entries.push(entry);
+      }
+      entry.thinking = `${entry.thinking ?? ''}${event.text}`;
+      if (event.text) entry.thinkingActive = false;
+      continue;
+    }
+
+    if (event.type === 'done') {
+      // The result is a terminal summary. When stream deltas already built the
+      // answer it is a replay, not another visible assistant message.
+      if (!hasAssistantText && event.text) {
+        entries.push({
+          id: `${run.id}:message:result`,
+          kind: 'message',
+          label: 'claude-assistant',
+          text: event.text,
+          timestamp: run.startedAt,
+        });
+      }
+      continue;
+    }
+
+    const text = eventText(event);
+    if (!text) continue;
+    entries.push({
+      id: `${run.id}:${event.type}:${eventOrdinal}`,
+      kind: entryKind(event),
+      label: event.type,
+      text,
+      timestamp: run.startedAt,
+    });
+    eventOrdinal += 1;
+  }
   const done = events.find((event): event is Extract<ClaudeCodeStreamJsonParserEvent, { type: 'done' }> =>
     event.type === 'done');
   const usage = [...events].reverse().find(

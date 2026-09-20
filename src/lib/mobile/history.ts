@@ -120,6 +120,8 @@ export function mobileEntriesFromRuntimeTranscript(
         ? entry.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
         : '',
       toolCalls,
+      thinking: entry.thinking,
+      thinkingActive: entry.thinkingActive,
       compaction: entry.compaction ? {
         timestamp: entry.compaction.timestamp.getTime(),
         tokensBefore: entry.compaction.tokensBefore,

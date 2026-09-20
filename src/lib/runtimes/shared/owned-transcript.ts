@@ -27,6 +27,8 @@ function runtimeEntry(
     text: entry.text,
     timestamp: transcriptTimestamp(entry.timestamp, fallbackTimestamp),
     toolName: entry.kind === 'tool' ? entry.label : undefined,
+    thinking: entry.thinking,
+    thinkingActive: entry.thinkingActive,
   };
 }
 
@@ -34,11 +36,12 @@ function applyTranscriptWindow(
   entries: RuntimeTranscriptEntry[],
   sinceId?: string,
   limit?: number,
+  includeSinceEntry = false,
 ): RuntimeTranscriptEntry[] {
   let next = entries;
   if (sinceId) {
     const sinceIndex = next.findIndex((entry) => entry.id === sinceId);
-    if (sinceIndex >= 0) next = next.slice(sinceIndex + 1);
+    if (sinceIndex >= 0) next = next.slice(sinceIndex + (includeSinceEntry ? 0 : 1));
   }
   if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && next.length > limit) {
     next = next.slice(-limit);
@@ -55,6 +58,7 @@ export function ownedTailToRuntimeTranscript(
   tail: OwnedTranscriptTail,
   sinceId?: string,
   limit?: number,
+  options?: { includeSinceEntry?: boolean },
 ): RuntimeTranscriptEntry[] {
   const entries: RuntimeTranscriptEntry[] = [];
   const seenIds = new Set<string>();
@@ -93,5 +97,8 @@ export function ownedTailToRuntimeTranscript(
     append(runtimeEntry(entry));
   }
 
-  return applyTranscriptWindow(entries, sinceId, limit);
+  const includeSinceEntry = options?.includeSinceEntry ?? tail.groups.some((group) => (
+    group.entries.some((entry) => entry.label === 'claude-assistant')
+  ));
+  return applyTranscriptWindow(entries, sinceId, limit, includeSinceEntry);
 }

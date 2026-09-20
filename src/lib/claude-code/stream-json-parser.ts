@@ -1,6 +1,6 @@
 export type ClaudeCodeStreamJsonChatEvent =
-  | { type: 'delta'; text: string }
-  | { type: 'thinking'; text: string }
+  | { type: 'delta'; text: string; blockIndex?: number }
+  | { type: 'thinking'; text: string; blockIndex?: number }
   | { type: 'tool_call'; id?: string | null; name: string; status: 'calling' | 'running' | 'done'; args?: Record<string, unknown>; preview?: string }
   | { type: 'tool_result'; id?: string | null; name?: string; args?: Record<string, unknown>; output?: string; preview?: string }
   | {
@@ -226,7 +226,7 @@ export function createClaudeCodeStreamJsonParser(
         streamedTextWithoutIndex = true;
       }
     }
-    events.push({ type: 'delta', text });
+    events.push({ type: 'delta', text, ...(typeof blockIndex === 'number' ? { blockIndex } : {}) });
     events.push(...emitPlanSteps(text));
   };
 
@@ -354,12 +354,12 @@ export function createClaudeCodeStreamJsonParser(
       const thinking = asString(delta?.thinking);
       const text = asString(delta?.text);
       if (delta?.type === 'thinking_delta' && thinking) {
-        events.push({ type: 'thinking', text: thinking });
+        events.push({ type: 'thinking', text: thinking, ...(typeof blockIndex === 'number' ? { blockIndex } : {}) });
         return events;
       }
       if (delta?.type === 'thinking_summary') {
         const summary = asString(delta.summary) ?? thinking ?? text;
-        if (summary) events.push({ type: 'thinking', text: summary });
+        if (summary) events.push({ type: 'thinking', text: summary, ...(typeof blockIndex === 'number' ? { blockIndex } : {}) });
         return events;
       }
       if (text) {
@@ -373,7 +373,7 @@ export function createClaudeCodeStreamJsonParser(
       if (block?.type === 'tool_use') {
         emitToolUse(block, events);
       } else if (block?.type === 'thinking') {
-        events.push({ type: 'thinking', text: '' });
+        events.push({ type: 'thinking', text: '', ...(typeof asNumber(event.index) === 'number' ? { blockIndex: asNumber(event.index) } : {}) });
       }
       return events;
     }
@@ -382,7 +382,7 @@ export function createClaudeCodeStreamJsonParser(
       const message = asRecord(event.message);
       const content = message?.content;
       if (Array.isArray(content)) {
-        content.forEach((rawBlock) => {
+        content.forEach((rawBlock, blockIndex) => {
           const block = asRecord(rawBlock);
           if (!block) return;
           if (block.type === 'text') {
@@ -398,10 +398,10 @@ export function createClaudeCodeStreamJsonParser(
             // doubled `o8 ask` answers). If ANY text streamed this turn, the
             // replay is redundant — skip it entirely.
             if (streamedTextWithoutIndex || streamedTextIndices.size > 0) return;
-            emitText(text, events);
+            emitText(text, events, blockIndex);
           } else if (block.type === 'thinking') {
             const thinking = asString(block.thinking) ?? asString(block.text);
-            if (thinking) events.push({ type: 'thinking', text: thinking });
+            if (thinking) events.push({ type: 'thinking', text: thinking, blockIndex });
           } else if (block.type === 'tool_use') {
             emitToolUse(block, events);
           }
