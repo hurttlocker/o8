@@ -193,7 +193,7 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
       },
     ],
   },
-  antigravity: unknownEvidence('antigravity', ['discovery-only'], 'provider-native'),
+  antigravity: unknownEvidence('antigravity', ['stream-json'], 'provider-native'),
   magnitude: unknownEvidence('magnitude', ['interactive-terminal']),
   opencode: {
     carriers: [{

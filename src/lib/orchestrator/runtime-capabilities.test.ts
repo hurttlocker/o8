@@ -23,7 +23,7 @@ describe('runtime capability catalog', () => {
       ORCHESTRATOR_RUNTIME_IDS.filter((runtime) => getRuntimeCapability(runtime).dispatchable),
     );
     expect(isOrchestratorRuntime('antigravity')).toBe(true);
-    expect(isDispatchableRuntime('antigravity')).toBe(false);
+    expect(isDispatchableRuntime('antigravity')).toBe(true);
     expect(isOrchestratorRuntime('made-up-cli')).toBe(false);
   });
 

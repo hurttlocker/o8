@@ -38,11 +38,24 @@ writeFileSync(fixtureBinary, `#!/usr/bin/env node
 const runtime = process.env.O8_SMOKE_RUNTIME || 'fixture-cli';
 const profile = process.env.O8_SMOKE_PARSER_PROFILE || 'fixture';
 const args = process.argv.slice(2).join(' ');
-if (process.env.O8_SMOKE_HANG === '1') {
-  process.stdout.write(JSON.stringify({ type: 'init', session_id: 'thread-' + runtime }) + '\\n');
-  process.stdout.write(JSON.stringify({ type: 'message', content: runtime + ' running' }) + '\\n');
+if (process.env.O8_SMOKE_NO_RESULT) {
+  process.stdout.write(JSON.stringify({ event: 'init', conversation_id: 'thread-' + runtime }) + '\\n');
+  if (process.env.O8_SMOKE_NO_RESULT === 'denied') process.stdout.write(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', denied_actions: [{ action: 'read_file' }] } }) + '\\n');
+} else if (process.env.O8_SMOKE_HANG === '1') {
+  process.stdout.write(JSON.stringify(profile === 'antigravity-stream-json' ? { event: 'init', conversation_id: 'thread-' + runtime } : { type: 'init', session_id: 'thread-' + runtime }) + '\\n');
+  process.stdout.write(JSON.stringify(profile === 'antigravity-stream-json' ? { event: 'step_update', step_update: { step_index: 1, step_type: 'agent_response', text_delta: runtime + ' running' } } : { type: 'message', content: runtime + ' running' }) + '\\n');
   process.on('SIGINT', () => {});
   setInterval(() => {}, 1000);
+} else
+if (profile === 'antigravity-stream-json') {
+  const argv = process.argv.slice(2);
+  if (!argv.includes('--conversation') && (!argv.includes('--add-dir') || !argv[argv.indexOf('--print') + 1].includes(process.cwd()))) process.exit(7);
+  if (!argv.includes('--model') || !argv.includes('--sandbox') || argv.includes('--dangerously-skip-permissions')) process.exit(9);
+  const resumeIndex = argv.indexOf('--conversation');
+  if (resumeIndex >= 0 && argv[resumeIndex + 1] !== 'thread-' + runtime) process.exit(8);
+  process.stdout.write(JSON.stringify({ event: 'init', conversation_id: 'thread-' + runtime }) + '\\n');
+  process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { step_index: 1, step_type: 'agent_response', text_delta: runtime + ' smoke complete' } }) + '\\n');
+  process.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: 'thread-' + runtime, status: 'SUCCESS', response: runtime + ' smoke complete', usage: { input_tokens: 12, output_tokens: 2, cache_read_tokens: 3 } } }) + '\\n');
 } else
 if (profile === 'copilot-jsonl') {
   process.stdout.write(JSON.stringify({ type: 'session.start', data: { sessionId: 'thread-' + runtime } }) + '\\n');
@@ -128,6 +141,15 @@ describe('declarative worker real-process smoke matrix', () => {
     }
   });
 
+  it('enables the formerly discovery-only worker through the production registry', () => {
+    expect(getRuntime('antigravity')?.capabilities).toMatchObject({ launch: true, resume: true, interrupt: true });
+    const config = DECLARATIVE_WORKER_CONFIGS.find(entry => entry.runtimeId === 'antigravity')!;
+    const { displayName, costFormat, ...ownedConfig } = config;
+    expect(displayName).toBe('Antigravity');
+    expect(costFormat).toBe('structured');
+    expect(() => registerDeclarativeOwnedRuntime(structuredClone(ownedConfig))).not.toThrow();
+  });
+
   it.each(DECLARATIVE_WORKER_CONFIGS)(
     '$runtimeId launches, normalizes output, records a clean exit, and reports one-shot resume honestly',
     async (config) => {
@@ -142,6 +164,10 @@ describe('declarative worker real-process smoke matrix', () => {
       const record = await waitForCleanExit(process.env[config.rootEnvVar]!, sessionKey, 'launch');
       const session = await waitForFinishedSession(runtime, sessionKey, 'launch');
       const transcript = await runtime.readTranscript(sessionKey);
+      if (config.runtimeId === 'antigravity') {
+        expect(await runtime.getTelemetry?.(sessionKey)).toMatchObject({ inputTokens: 12, outputTokens: 2, cacheReadTokens: 3, costSource: 'unknown', model: 'gemini-3.8-flash-low' });
+        expect((await runtime.getTelemetry?.(sessionKey))?.estimatedCostUsd).toBeUndefined();
+      }
 
       expect(record.recentRuns[0]?.childExit).toMatchObject({
         code: 0,
@@ -163,6 +189,22 @@ describe('declarative worker real-process smoke matrix', () => {
     },
     20_000,
   );
+
+  it.each(['missing', 'denied'])('persists failure after clean exit with a %s result', async (resultMode) => {
+    process.env.O8_SMOKE_RUNTIME = 'antigravity';
+    process.env.O8_SMOKE_PARSER_PROFILE = 'antigravity-stream-json';
+    process.env.O8_SMOKE_NO_RESULT = resultMode;
+    try {
+      const runtime = runtimeById('antigravity');
+      const launch = await runtime.launch({ cwd: repoPath, prompt: 'missing result' });
+      const record = await waitForCleanExit(process.env.O8_OWNED_ANTIGRAVITY_ROOT!, launch.sessionKey!, 'launch');
+      expect(record.recentRuns[0]?.outcome).toBe('failed');
+      const session = (await runtime.discoverSessions()).find(s => s.sessionKey === launch.sessionKey);
+      expect(session?.lifecycle?.lastOutcome).toBe('failed');
+    } finally {
+      delete process.env.O8_SMOKE_NO_RESULT;
+    }
+  });
 
   it('runs launch, resume, and clean exit for a representative new declarative CLI', async () => {
     process.env.O8_SMOKE_RUNTIME = 'fixture-cli';
@@ -213,28 +255,28 @@ describe('declarative worker real-process smoke matrix', () => {
     expect(transcript.map((entry) => entry.text).join('\n')).toContain('resume thread-fixture second turn');
   }, 20_000);
 
-  it('confirms and archives a live declarative worker through the shared lane lifecycle', async () => {
-    process.env.O8_SMOKE_RUNTIME = 'qwen';
-    process.env.O8_SMOKE_PARSER_PROFILE = 'qwen-stream-json';
+  it.each(['qwen', 'antigravity'] as const)('%s confirms and archives a live worker through the shared lane lifecycle', async (runtimeId) => {
+    process.env.O8_SMOKE_RUNTIME = runtimeId;
+    process.env.O8_SMOKE_PARSER_PROFILE = getRuntimeCapability(runtimeId).declarative!.parserProfile;
     process.env.O8_SMOKE_HANG = '1';
     try {
-      const runtime = runtimeById('qwen');
+      const runtime = runtimeById(runtimeId);
       const launch = await runtime.launch({ cwd: repoPath, prompt: 'live lifecycle proof' });
       const sessionKey = launch.sessionKey!;
-      const root = process.env.O8_OWNED_QWEN_ROOT!;
+      const root = process.env[`O8_OWNED_${runtimeId.toUpperCase()}_ROOT`]!;
       const record = await waitForActiveRun(root, sessionKey);
       expect(record.activeRun).toMatchObject({
         pid: expect.any(Number),
         commandIdentity: path.basename(fixtureBinary),
       });
-      await waitForTranscriptText(runtime, sessionKey, 'qwen running');
+      await waitForTranscriptText(runtime, sessionKey, `${runtimeId} running`);
 
       const { createLane } = await import('@/lib/lane/registry');
       const { archiveLaneSessionsConfirmed, killLaneSessionsConfirmed } = await import('@/lib/lane/reap-sessions');
       const lane = createLane({
         repoPath,
         branch: 'test/declarative-lifecycle',
-        runtime: 'qwen',
+        runtime: runtimeId,
         sessionKey,
       });
       const killed = await killLaneSessionsConfirmed([lane]);
@@ -245,7 +287,7 @@ describe('declarative worker real-process smoke matrix', () => {
       const archived = await archiveLaneSessionsConfirmed([lane]);
       expect(archived).toMatchObject({ targeted: 1, archived: 1, failures: [] });
       expect(await runtime.readTranscript(sessionKey)).toEqual(expect.arrayContaining([
-        expect.objectContaining({ text: 'qwen running' }),
+        expect.objectContaining({ text: `${runtimeId} running` }),
       ]));
 
       delete process.env.O8_SMOKE_HANG;
@@ -256,7 +298,7 @@ describe('declarative worker real-process smoke matrix', () => {
       const mergedLane = createLane({
         repoPath,
         branch: 'test/declarative-post-merge',
-        runtime: 'qwen',
+        runtime: runtimeId,
         sessionKey: mergedSessionKey,
       });
       const { archiveLane } = await import('@/lib/lane/registry');

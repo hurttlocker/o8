@@ -50,7 +50,6 @@ import { registerRuntime } from './registry';
 import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
 import { geminiRuntime } from './gemini';
-import { antigravityRuntime } from './antigravity';
 import { magnitudeRuntime } from './magnitude';
 import { cloudRuntime } from './cloud-adapter';
 import { opencodeRuntime } from './opencode';
@@ -100,9 +99,6 @@ registerRuntime(claudeCodeRuntime);
 // Code. Surfaces 'gemini-owned:' sessions, uses `gemini -p … --yolo
 // --output-format stream-json` under the hood. See src/lib/gemini/owned.ts.
 registerRuntime(geminiRuntime);
-// Antigravity replaces Gemini CLI at the Google runtime layer, but is
-// discovery-only until agy documents a resumable JSON/event contract.
-registerRuntime(antigravityRuntime);
 // Magnitude is operator-launched in a visible terminal while its upstream
 // headless mode is unavailable. Registering the canonical read-only adapter
 // keeps discovery honest without advertising packet dispatch controls.

@@ -18,10 +18,8 @@ import { requiresNativeWorkerToken } from '@/lib/claude-code/worker-token';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { claudeCarrierPresentation } from './claude-carrier-presentation';
 import { scanAndLink } from './cli-locate';
-import {
-  detectNativeClaudeAuth,
-  type ClaudeLoginState,
-} from './claude-login-probe';
+import { probeAntigravityLogin } from './antigravity-login-probe';
+import { detectNativeClaudeAuth, type ClaudeLoginState } from './claude-login-probe';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   localProviderIds,
@@ -597,11 +595,12 @@ async function detectDeclarativeRuntime(runtime: OrchestratorRuntime): Promise<R
   });
 }
 
-export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime): Promise<RuntimeAuthStatus> {
+export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt?: number): Promise<RuntimeAuthStatus> {
   switch (runtime) {
     case 'codex': return detectCodex();
     case 'claude-code': return detectClaude();
     case 'gemini': return detectGemini();
+    case 'antigravity': return probeAntigravityLogin(deadlineAt).then(status => nowStatus('antigravity', 'antigravity', status));
     case 'opencode': return detectOpencode();
     case 'cursor': return detectCursor();
     case 'grok': return detectGrok();

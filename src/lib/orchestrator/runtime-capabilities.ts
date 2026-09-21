@@ -2,6 +2,7 @@
 import { MODEL_IDS } from '@/lib/models';
 
 export type DeclarativeParserProfile =
+  | 'antigravity-stream-json'
   | 'text'
   | 'copilot-jsonl'
   | 'openhands-ndjson'
@@ -151,16 +152,25 @@ export const ORCHESTRATOR_RUNTIMES = {
   antigravity: {
     label: 'Antigravity',
     shortLabel: 'AGY',
-    dispatchable: false,
+    dispatchable: true,
     requiresModel: false,
-    defaultModel: 'antigravity-default',
+    defaultModel: 'gemini-3.8-flash-low',
     accentColor: '#0f9d58',
     binaryName: 'agy',
     workerProvider: 'antigravity',
-    authHouse: null,
+    authHouse: 'antigravity',
     reasoningEffort: false,
     tier: 'standard',
-    description: 'Google Antigravity CLI discovery skeleton. Launch stays disabled until a resumable JSON/event contract is documented.',
+    description: 'Google account CLI worker with streaming output and conversation resume. Uses existing permissions and quota settings.',
+    declarative: {
+      launchArgs: ['--print', 'Workspace directory: {{cwd}}\n\n{{prompt}}', '--add-dir', '{{cwd}}', '--output-format', 'stream-json', '--sandbox', '--print-timeout', '15m', { when: 'model', args: ['--model', '{{model}}'] }],
+      resumeArgs: ['--print', '{{prompt}}', '--output-format', 'stream-json', '--sandbox', '--print-timeout', '15m', '--conversation', '{{threadId}}', { when: 'model', args: ['--model', '{{model}}'] }],
+      parserProfile: 'antigravity-stream-json',
+      costFormat: 'structured',
+      authEnvVars: [],
+      authPaths: [],
+      authFix: 'Run agy and sign in with Google. Keep Use AI Credits off for quota-only use.',
+    },
   },
   magnitude: {
     label: 'Magnitude',
