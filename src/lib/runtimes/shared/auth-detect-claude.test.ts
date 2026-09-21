@@ -15,6 +15,10 @@ const authFixture = vi.hoisted(() => ({
 const symonBridgeFixture = vi.hoisted(() => ({
   selections: [] as Array<{ engine: string; model: string; effort: string } | undefined>,
 }));
+vi.mock('@/lib/runtimes/shared/antigravity-login-probe', () => ({
+  probeAntigravityLogin: vi.fn(async () => ({ installed: false, authenticated: false, detail: 'Fixture absent', fix: 'Sign in' })),
+}));
+
 vi.mock('@/lib/claude-code/worker-token', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/claude-code/worker-token')>(),
   requiresNativeWorkerToken: () => authFixture.dedicatedTokenRequired,

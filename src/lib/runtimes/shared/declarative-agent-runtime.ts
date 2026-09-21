@@ -144,11 +144,11 @@ export function createDeclarativeAgentRuntime(
       if (!sessionKey.startsWith(options.surfaceIdPrefix)) return undefined;
       const sources = await store.getTelemetrySources(sessionKey);
       if (!sources?.stdoutPaths.length) return undefined;
-      const cost = await parseCost(options.runtimeId, sources.stdoutPaths).catch(() => null);
+      const cost = await parseCost(options.runtimeId, sources.stdoutPaths, { fallbackModel: sources.model }).catch(() => null);
       if (!cost) return undefined;
       return {
         totalTokens: cost.inputTokens + cost.outputTokens,
-        estimatedCostUsd: cost.totalCostUsd,
+        estimatedCostUsd: options.runtimeId === 'antigravity' ? undefined : cost.totalCostUsd,
         inputTokens: cost.inputTokens,
         outputTokens: cost.outputTokens,
         cacheReadTokens: cost.cacheReadTokens,

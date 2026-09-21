@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { parseAntigravityRunLog } from '../../antigravity-protocol';
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { compactText, formatClock } from './helpers';
@@ -51,7 +52,7 @@ export type DeclarativeOwnedRuntimeConfig = Omit<
   launchArgs: DeclarativeArgTemplate;
   resumeArgs: DeclarativeArgTemplate | null;
   sessionFileName?: string;
-  parseRunLog: DeclarativeRunLogPatterns;
+  parseRunLog: DeclarativeRunLogPatterns | { profile: 'antigravity-stream-json' };
   stderrNoise?: RegExp[];
   staticSpawnEnv?: Record<string, string>;
 };
@@ -340,7 +341,9 @@ export function createDeclarativeOwnedRuntimeAdapter(
           ...(ctx.model || base.defaultModel ? { model: ctx.model || base.defaultModel } : {}),
         }),
     parseRunLog: (raw, run) => {
-      const parsed = parseDeclarativeRunLog(parseRunLog, raw, run);
+      const parsed = 'profile' in parseRunLog
+        ? parseAntigravityRunLog(raw, run)
+        : parseDeclarativeRunLog(parseRunLog, raw, run);
       if (!parsed.threadId && sessionFileName) {
         parsed.threadId = path.join(path.dirname(path.dirname(run.stdoutPath)), sessionFileName);
       }

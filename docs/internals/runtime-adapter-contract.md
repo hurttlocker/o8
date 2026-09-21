@@ -157,12 +157,15 @@ the service cached in memory.
 
 ## Current runtime set
 
-The catalog contains seventeen runtimes. Sixteen are dispatchable; `antigravity`
-remains discovery-only.
+The runtime catalog is authoritative for dispatch availability. The Google account
+CLI uses the [documented headless protocol](https://antigravity.google/docs/cli/headless/) with `init`, `step_update`, and `result` event protocol with
+explicit conversation IDs for resume. Its existing permissions and credit settings
+remain in force; headless tools requiring approval may be denied. A result with
+denied actions is reported as failed even when the CLI exits successfully. Token
+telemetry does not establish a monetary charge or remaining account quota.
 
 - Specialized: `codex`, `claude-code`, `gemini`, `opencode`, `pi`, `cursor`, `grok`, `prime-agent`, and `deepseek-harness`.
-- Declarative: `openhands`, `goose`, `qwen`, `qoder`, `kimi`, `aider`, and `3code`.
-- Discovery-only: `antigravity`.
+- Declarative: `openhands`, `goose`, `qwen`, `qoder`, `kimi`, `aider`, `3code`, `copilot-cli`, `crush`, and `antigravity`.
 
 ## Contract locations
 
