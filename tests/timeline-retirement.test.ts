@@ -26,7 +26,7 @@ describe('retired desktop timeline', () => {
 
   it('does not expose a settings toggle or search result for the retired strip', () => {
     const markup = renderToStaticMarkup(createElement(AppearanceTab));
-    expect(markup).toContain('Window chrome');
+    expect(markup).toContain('Choose a look for your workspace.');
     expect(markup).not.toMatch(/timeline/i);
     expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'timeline', { founder: true })).toEqual([]);
   });
