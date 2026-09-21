@@ -234,10 +234,10 @@ function UsageMetric({ label, value, error }: {
     <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
       <span style={{
         fontFamily: APP_FONT_STACK,
-        fontSize: 9.5,
-        fontWeight: 300,
+        fontSize: 11,
+        fontWeight: 400,
         letterSpacing: '-0.1px',
-        color: 'var(--t-text-faint)',
+        color: 'var(--t-text-secondary)',
       }}>
         {label}
       </span>
@@ -464,7 +464,7 @@ export function WorktreeRetentionSection() {
   const envLocked = (field: RetentionField) => sources[field] === 'env';
   const lockedSub = (field: RetentionField, normal: string) => (envLocked(field) ? ENV_LOCKED_REASON : normal);
   const usageSubtitle = usageState === 'loading'
-    ? 'Measuring allocated and logical worktree storage…'
+    ? 'Measuring workspace files and disk space…'
     : usageState === 'error'
       ? `Measurement incomplete: ${usageError ?? 'Unknown storage measurement error.'}`
       : usage?.totalCount === null
@@ -481,9 +481,10 @@ export function WorktreeRetentionSection() {
       ? 'Unknown'
       : formatBytes(usage.totalLogicalBytes);
   const admission = usageState === 'loading' ? null : usage?.storageAdmission;
-  const admissionUnknown = !admission || admission.accountingStatus !== 'observed';
+  const noRepositories = usageState === 'ready' && usage?.storagePressure.repositories.length === 0 && admission?.accountingStatus === 'unknown';
+  const admissionUnknown = !noRepositories && usageState !== 'loading' && (!admission || admission.accountingStatus !== 'observed');
   const admissionMetric = (value: number | null | undefined) => (
-    value === null || value === undefined ? 'Unknown' : formatBytes(value)
+    usageState === 'loading' || noRepositories ? '—' : value === null || value === undefined ? 'Unavailable' : formatBytes(value)
   );
   const pressure = usageState === 'loading' && repoParkingStage === null ? null : usage?.storagePressure;
   const categoryStorage = usageState === 'loading' ? null : usage?.categoryStorage;
@@ -534,16 +535,16 @@ export function WorktreeRetentionSection() {
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Storage usage"
-          footnote="On disk measures allocated space; Logical measures file size. Shared APFS blocks mean these totals may not equal the space cleanup can recover."
+          footnote="Disk space used measures allocated storage; Total file size counts file contents. APFS shares blocks, so neither total guarantees how much cleanup frees. Available task space excludes the minimum free space and reservations. Reservations estimate future use; they are not extra files."
         >
           <SettingsRow
             icon={<DiskIcon />}
-            label="Current usage"
+            label="Workspace files"
             subtitle={usageSubtitle}
             accessory={
               <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <UsageMetric label="On disk" value={allocatedUsage} error={allocatedUsage === 'Unknown'} />
-                <UsageMetric label="Logical" value={logicalUsage} error={logicalUsage === 'Unknown'} />
+                <UsageMetric label="Disk space used" value={allocatedUsage} error={allocatedUsage === 'Unknown'} />
+                <UsageMetric label="Total file size" value={logicalUsage} error={logicalUsage === 'Unknown'} />
                 <button
                   type="button"
                   aria-label="Refresh usage"
@@ -574,15 +575,16 @@ export function WorktreeRetentionSection() {
           />
           <SettingsRow
             icon={<GaugeIcon />}
-            label="Dispatch headroom"
-            subtitle={admissionUnknown
-              ? 'Admission accounting is unknown; new packet workspaces will be held.'
-              : `${admission.activeReservations} active reservation${admission.activeReservations === 1 ? '' : 's'}. Reserved estimates are separate from physical usage.`}
+            label="Space for new tasks"
+            subtitle={usageState === 'loading' ? 'Checking available disk space…'
+              : noRepositories ? 'No repositories yet. Add a repository in Projects to calculate available task space.'
+                : admissionUnknown ? 'Could not calculate available task space. Refresh to try again; new workspaces wait until their storage can be checked.'
+                  : `${admission!.activeReservations} active task reservation${admission!.activeReservations === 1 ? '' : 's'}. Estimated space is set aside before tasks start.`}
             accessory={
               <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <UsageMetric label="Physical available" value={admissionMetric(admission?.physicalAvailableBytes)} error={admissionMetric(admission?.physicalAvailableBytes) === 'Unknown'} />
-                <UsageMetric label="Reserved estimate" value={admissionMetric(admission?.reservedBytes)} error={admissionMetric(admission?.reservedBytes) === 'Unknown'} />
-                <UsageMetric label="Dispatch headroom" value={admissionMetric(admission?.dispatchHeadroomBytes)} error={admissionMetric(admission?.dispatchHeadroomBytes) === 'Unknown'} />
+                <UsageMetric label="Free on disk" value={admissionMetric(admission?.physicalAvailableBytes)} error={admissionMetric(admission?.physicalAvailableBytes) === 'Unavailable'} />
+                <UsageMetric label="Set aside for tasks" value={admissionMetric(admission?.reservedBytes)} error={admissionMetric(admission?.reservedBytes) === 'Unavailable'} />
+                <UsageMetric label="Available for new tasks" value={admissionMetric(admission?.dispatchHeadroomBytes)} error={admissionMetric(admission?.dispatchHeadroomBytes) === 'Unavailable'} />
               </span>
             }
           />

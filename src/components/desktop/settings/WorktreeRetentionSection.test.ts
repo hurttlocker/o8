@@ -133,12 +133,12 @@ describe('WorktreeRetentionSection storage accounting', () => {
     expect(container.querySelector('details')?.open).toBe(false);
     const sections = [...container.querySelectorAll('[data-settings-section]')].map((element) => element.getAttribute('data-settings-section'));
     expect(sections.slice(0, 2)).toEqual(['Storage usage', 'Automatic cleanup']);
-    expect(container.textContent).toContain('On disk');
+    expect(container.textContent).toContain('Disk space used');
     expect(container.textContent).toContain('1.0 GB');
-    expect(container.textContent).toContain('Logical');
+    expect(container.textContent).toContain('Total file size');
     expect(container.textContent).toContain('2.0 GB');
     expect(container.textContent).toContain('2 worktrees across 1 repo');
-    expect(container.textContent).toContain('Dispatch headroom');
+    expect(container.textContent).toContain('Available for new tasks');
     expect(container.textContent).toContain('28 GB');
     expect(container.textContent).toContain('Automatic parking is active');
     expect(container.textContent).toContain('Parked2');
@@ -151,6 +151,24 @@ describe('WorktreeRetentionSection storage accounting', () => {
     expect(container.textContent).toContain('Cached 2s ago');
     expect(container.textContent).toContain('Snapshot 2026-08-15 12:00:00 UTC');
     expect(container.textContent).toContain('neither exclusive nor guaranteed reclaimable');
+  });
+
+  it('distinguishes an empty repository list from a failed capacity measurement', async () => {
+    const unavailable = { ...observedUsage, totalCount: 0, totalAllocatedBytes: 0, totalLogicalBytes: 0, repos: [],
+      storageAdmission: { ...observedUsage.storageAdmission, accountingStatus: 'unknown', physicalAvailableBytes: null, dispatchHeadroomBytes: null, reservedBytes: 0, activeReservations: 0 },
+      storagePressure: { ...observedUsage.storagePressure, repositories: [] },
+    };
+    const fetchMock = vi.fn(async () => Response.json(unavailable));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(createElement(WorktreeRetentionSection)); await settle(); });
+    expect(container.textContent).toContain('No repositories yet.');
+    expect(container.textContent).not.toContain('Could not calculate available task space');
+    expect(container.textContent).toContain('Available for new tasks—');
+    fetchMock.mockImplementation(async () => Response.json({ ...unavailable, storagePressure: observedUsage.storagePressure }));
+    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Refresh usage"]')!.click(); await settle(); });
+    expect(container.textContent).not.toContain('No repositories yet.');
+    expect(container.textContent).toContain('Could not calculate available task space');
+    expect(container.textContent).toContain('Available for new tasksUnavailable');
   });
 
   it('updates parking mode and settles the selected control from the persisted response', async () => {
@@ -396,7 +414,7 @@ describe('WorktreeRetentionSection storage accounting', () => {
       await settle();
     });
 
-    expect(container.textContent).toContain('Measuring allocated and logical worktree storage');
+    expect(container.textContent).toContain('Measuring workspace files and disk space');
     expect(container.textContent).toContain('Measuring category storage');
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Refresh usage"]')?.disabled).toBe(true);
 
@@ -435,7 +453,7 @@ describe('WorktreeRetentionSection storage accounting', () => {
     });
 
     expect(container.textContent).not.toContain('Cached 2s ago');
-    expect(container.textContent).toContain('Measuring allocated and logical worktree storage');
+    expect(container.textContent).toContain('Measuring workspace files and disk space');
     expect(refresh?.disabled).toBe(true);
 
     await act(async () => {
