@@ -209,7 +209,7 @@ export function AppearanceTab() {
   const darkPalette = palettes.find((palette) => palette.id === 'dark');
 
   return (
-    <div style={{ paddingTop: 8, paddingLeft: 8, paddingRight: 32, paddingBottom: 40, maxWidth: SETTINGS_CONTENT_MAX_WIDTH, fontFamily: APP_FONT_STACK }}>
+    <div style={{ paddingTop: 8, paddingLeft: 8, paddingRight: 8, paddingBottom: 40, maxWidth: SETTINGS_CONTENT_MAX_WIDTH, fontFamily: APP_FONT_STACK }}>
       <TabHeading title="appearance" subtitle="Choose a look for your workspace. Changes apply immediately." />
       <section>
         <GroupHeader>Theme</GroupHeader>
