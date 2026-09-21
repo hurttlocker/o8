@@ -39,6 +39,7 @@ import {
   GitHubIcon,
   BrainIcon,
   SETTINGS_CONTENT_MAX_WIDTH,
+  SETTINGS_WIDE_CONTENT_MAX_WIDTH,
 } from './settings/shared';
 import { GeneralTab } from './settings/GeneralTab';
 import type { GitHubConnectionProps } from './settings/GitHubTab';
@@ -567,19 +568,16 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           )}
         </div>
 
-        {/* Right content — grid column capped at SETTINGS_CONTENT_MAX_WIDTH
-            (1400) and centered, so wide monitors render an editorial
-            margin:auto frame instead of left-aligned content with a sea of
-            cream on the right. The grid track sizing means tab bodies
-            already-styled with maxWidth: SETTINGS_CONTENT_MAX_WIDTH still
-            stretch to the full track width because grid items default to
-            justify-self: stretch. 2026-05-27. */}
+        {/* Center the actual tab width, not a wide frame around narrow cards.
+            Tables and analytics retain a wider centered column. */}
         <div
+          data-settings-content
           style={{
             flex: 1,
             minWidth: 0,
             display: 'grid',
-            gridTemplateColumns: `minmax(0, ${SETTINGS_CONTENT_MAX_WIDTH}px)`,
+            gridTemplateColumns: `minmax(0, ${activeTab === 'projects' || activeTab === 'analytics' ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
+            alignContent: 'start',
             justifyContent: 'center',
           }}
         >

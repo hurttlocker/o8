@@ -67,13 +67,9 @@ export const THEME_ACCENT_RING = 'var(--t-settings-accent-ring, rgba(124, 156, 2
 export const APP_FONT_STACK = 'var(--font-sans-system)';
 export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
-// Outer width cap for settings tab content. One knob.
-// 2026-05-27: bumped 1080 → 1400 so wide displays don't truncate, and the
-// right-content column in SettingsPage now centers its tab body via
-// alignItems:'center' so the leftover cream on either side reads as
-// intentional editorial breathing room (margin: auto) rather than orphan
-// empty space crammed to one side.
-export const SETTINGS_CONTENT_MAX_WIDTH = 1400;
+// Match the 620px settings cards plus equal 8px tab gutters.
+export const SETTINGS_CONTENT_MAX_WIDTH = 636;
+export const SETTINGS_WIDE_CONTENT_MAX_WIDTH = 1024;
 
 // Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.
 // Accent is palette-aware (registry.ts): deep #1D4ED8 on light paper, lighter
