@@ -1,21 +1,11 @@
 'use client';
 
-/**
- * ModelsTab — the Models settings page (Cursor-parity wave 2).
- *
- * One surface for everything model-shaped: per-runtime status + tuning, the
- * orchestrator model, runtime-specific worker profiles, BYOK provider keys,
- * and local models. Shared controls use the same live backends as Dispatch;
- * harness-specific choices use their runtime adapter's persisted profile.
- * Dispatch is left intact, with a link-row across to it for backend and
- * supervision tuning that would be confusing to duplicate here.
- */
+/** Provider and model choices share one settings state; task behavior lives in Dispatch. */
 
 import { useCallback, useEffect, useState } from 'react';
 
 import {
   APP_FONT_STACK,
-  RAMS_INK_QUIET,
   SettingsToggleButton,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
@@ -39,6 +29,9 @@ import {
 } from './dispatch-shared';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
 import { ClaudeCodeHarnessSection } from './ClaudeCodeHarnessSection';
+import { ModelRoutingControls } from './ModelRoutingControls';
+import { DispatchFoundersSection } from './DispatchFoundersSection';
+import { SettingsAdvanced } from './SettingsAdvanced';
 import { AgentRoleRoutingSection } from './AgentRoleRoutingSection';
 
 // ── Runtime detection (real, via /api/setup/detect) ──
@@ -223,8 +216,8 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       fontFamily: APP_FONT_STACK,
     }}>
       <TabHeading
-        title="models"
-        subtitle="Every model o8 can run — worker runtimes, the orchestrator, your own API keys, and local models. Runtime tuning here writes the same defaults as the Dispatch tab."
+        title="models & providers"
+        subtitle="Choose the AI for chat, code review, and agent tasks. Connect providers and tune each model in one place."
       />
 
       {notice ? (
@@ -244,16 +237,13 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </div>
       ) : null}
 
-      <AgentRoleRoutingSection
-        routes={data?.roleRoutes ?? []}
-        receipts={data?.recentRoleReceipts ?? []}
-      />
+      <ModelRoutingControls data={data!} busyField={busyField} updateField={updateField} />
 
       {/* ── Runtimes ── */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Runtimes"
-          footnote="Detection is live from your machine. Codex and Claude Code take a worker-effort default; Gemini and OpenCode 2 ship wired but hidden until you turn them on. Effort here is the same fallback the Dispatch tab sets."
+          header="Connected runtimes"
+          footnote="Installed tools and their default thinking effort. Availability is detected from your machine."
         >
           {/* Codex — worker effort */}
           <SettingsRow
@@ -482,8 +472,8 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       {/* ── Orchestrator ── */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Orchestrator"
-          footnote="The model behind the Orchestrator tab. Backend selection, the reviewer, and supervision live in Dispatch — this is the one model choice that belongs with the rest of your models."
+          header="Chat model"
+          footnote="The default model for chat using the native account connection. Other connections use their own model controls above."
         >
           <SettingsRow
             icon={<CpuIcon />}
@@ -503,8 +493,8 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
           />
           <SettingsRow
             icon={<CpuIcon />}
-            label="Backend & supervision"
-            subtitle="Orchestrator backend, reviewer, worker pairing, and heal-bot"
+            label="Task review & supervision"
+            subtitle="Automatic fixes, review behavior, and merge approval."
             onPress={onNavigateTab ? () => onNavigateTab('operator-defaults') : undefined}
             value="Dispatch"
             chevron={Boolean(onNavigateTab)}
@@ -596,11 +586,13 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         onCommit={(field, value) => { updateField(field, value); }}
       />
 
-      <div style={{ marginTop: 32, maxWidth: 620 }}>
-        <span style={{ fontSize: 11, color: RAMS_INK_QUIET, fontFamily: APP_FONT_STACK, letterSpacing: '-0.005em' }}>
-          Runtime effort and toggles also appear in Dispatch — both surfaces write the same operator defaults.
-        </span>
-      </div>
+      <SettingsAdvanced label="Advanced routing" description="Thinking overrides, Brain tuning, and details about which provider handles each job.">
+        <DispatchFoundersSection values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={false} />
+      <AgentRoleRoutingSection
+        routes={data?.roleRoutes ?? []}
+        receipts={data?.recentRoleReceipts ?? []}
+      />
+      </SettingsAdvanced>
     </div>
   );
 }

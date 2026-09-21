@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { NavSection } from '@/app/dashboard/types';
 import { useSettingsOverlayDismiss } from '@/app/dashboard/hooks/useSettingsOverlayDismiss';
 import { PickerMenu } from './dispatch-shared';
+import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsNavItem } from './SettingsNavItem';
 import { useSettingsSectionNavigation } from './useSettingsSectionNavigation';
 import { VoiceShortcutsSection } from './VoiceShortcutsSection';
@@ -40,7 +41,7 @@ function Harness() {
     // eslint-disable-next-line react-hooks/refs -- React invokes the ref during commit.
     createElement('div', { ref: (node: HTMLDivElement | null) => { contentRef.current = node; }, 'data-settings-content': true },
       activeTab === 'general' ? 'General content' : loaded
-        ? createElement('details', { 'data-settings-section': 'Advanced routing' }, createElement('summary', null, 'Advanced routing'), 'Controls')
+        ? createElement(SettingsAdvanced, { description: 'Additional task options' }, createElement('h2', { 'data-settings-section': 'Task limits & setup' }, 'Task limits & setup'))
         : 'Loading dispatch'));
 }
 
@@ -49,13 +50,13 @@ it('previews inactive sections, then waits for loaded content and opens the requ
   await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Dispatch sections"]')!.click(); });
   expect(container.textContent).toContain('General content');
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-  const target = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Advanced routing')!;
+  const target = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Task limits & setup')!;
   await act(async () => { target.click(); });
   expect(container.textContent).toContain('Loading dispatch');
   await act(async () => { [...container.querySelectorAll('button')].find((button) => button.textContent === 'Complete loading')!.click(); });
   const details = container.querySelector('details')!;
   expect(details.open).toBe(true);
-  expect(document.activeElement).toBe(details);
+  expect(document.activeElement).toBe(details.querySelector('h2'));
   expect(scroll).toHaveBeenCalledWith({ block: 'start', behavior: 'instant' });
 });
 

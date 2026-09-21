@@ -330,7 +330,7 @@ function orchestrateRoute(input: ProjectAgentRoleRoutesInput): AgentRoleRoute {
       ?? (values.orchestratorBackend === 'auto'
         ? `Auto resolves through the legacy orchestrator preference, currently ${autoReason}.`
         : `${backendLabel(effectiveBackend)} is pinned in operator settings.`),
-    changePath: 'Settings → Dispatch → Orchestrator',
+    changePath: 'Settings → Models & providers → Chat & code review',
     settingKeys: ['subscriptionProfile', 'orchestratorBackend', 'inAppOrchestratorEnabled', 'orchestratorModel', 'opencodeOrchestratorModel'],
   };
 }
@@ -372,7 +372,7 @@ function buildRoute(input: ProjectAgentRoleRoutesInput): AgentRoleRoute {
         ?? (configuredModel
           ? `The operator pinned ${configuredModel} for the default worker.`
           : `No worker model is pinned, so ${runtimeLabel(runtime)} uses its runtime default.`),
-    changePath: 'Settings → Dispatch → Dispatch runtime',
+    changePath: 'Settings → Models & providers → Default workers',
     settingKeys: [
       'subscriptionProfile',
       'defaultDispatchRuntime',
@@ -423,7 +423,7 @@ function reviewRoute(input: ProjectAgentRoleRoutesInput, orchestrate: AgentRoleR
       ?? (values.reviewerBackend === 'follow'
         ? `Review follows Orchestrate, currently ${backendLabel(backend)}.`
         : `${backendLabel(backend)} is pinned for review.`),
-    changePath: 'Settings → Dispatch → Orchestrator',
+    changePath: 'Settings → Models & providers → Chat & code review',
     settingKeys: ['subscriptionProfile', 'reviewerBackend', 'orchestratorBackend', 'inAppOrchestratorEnabled', 'orchestratorModel'],
   };
 }
@@ -488,7 +488,7 @@ function brainRoute(input: ProjectAgentRoleRoutesInput): AgentRoleRoute {
     ),
     fallbacks,
     reason,
-    changePath: 'Settings → Dispatch → Advanced routing',
+    changePath: 'Settings → Models & providers → Advanced routing',
     settingKeys: [
       'brainRoutingMode',
       'classAComposer',
@@ -527,7 +527,7 @@ function triageRoute(input: ProjectAgentRoleRoutesInput): AgentRoleRoute {
       : configuredModel
         ? `Triage is pinned to ${configuredModel}.`
         : `Triage uses the ${runtimeLabel(runtime)} runtime default.`,
-    changePath: 'Settings → Dispatch → Model tiers',
+    changePath: 'Settings → Models & providers → Thinking & task models',
     settingKeys: ['targetingTriage'],
   };
 }
@@ -547,7 +547,7 @@ function recoveryRoute(build: AgentRoleRoute): AgentRoleRoute {
     availability: { ...build.availability },
     fallbacks: ['Recovery reuses the packet\'s persisted worker routing before any quota fallback is considered.'],
     reason: 'Recovery follows the packet\'s persisted worker route, so a restart does not silently choose a different model.',
-    changePath: 'Packet override, then Settings → Dispatch → Dispatch runtime',
+    changePath: 'Packet override, then Settings → Models & providers → Default workers',
     settingKeys: [
       'defaultDispatchRuntime',
       'defaultDispatchModel',

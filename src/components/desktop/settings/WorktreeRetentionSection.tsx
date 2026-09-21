@@ -1,24 +1,11 @@
 'use client';
 
-/**
- * WorktreeRetentionSection — the Worktrees retention settings surface
- * (Cursor-parity wave 2, analog of Cursor's Workspaces page).
- *
- * Two operator knobs that bound how much `.cortex-worktrees` disk o8 keeps:
- * a max worktree COUNT and a max total SIZE (GB). Both write through the same
- * gated /api/panel/operator-defaults route as the Dispatch / Git & PRs tabs and
- * are enforced OLDEST-FIRST at the WorktreeManager prune seam — the guard only
- * ever removes terminal-lane / orphan worktrees with a clean git status, never
- * active work. A status row reads the live count + measured size across repos.
- *
- * Exported as a standalone section; the orchestrator mounts it (no nav wiring
- * here). Self-contained: it owns its own fetch/save and defines its own response
- * shape rather than coupling to the Dispatch tab's mirror type.
- */
+/** Storage usage, cleanup, and advanced workspace disk settings. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { APP_FONT_STACK, MONO_FONT_STACK, RAMS_CONTROL_ACTIVE_BG, RAMS_CONTROL_ACTIVE_BORDER, RAMS_CONTROL_BG, RAMS_CONTROL_BORDER, SETTINGS_CONTENT_MAX_WIDTH, TabHeading } from './shared';
+import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 
@@ -523,8 +510,8 @@ export function WorktreeRetentionSection() {
       fontFamily: APP_FONT_STACK,
     }}>
       <TabHeading
-        title="worktrees"
-        subtitle="How much disk o8 keeps for the isolated worktrees it spins up per packet. When a repo exceeds either limit, the oldest safe worktrees are reclaimed first — never one with unmerged work or an active agent."
+        title="worktrees & storage"
+        subtitle="Manage disk space for the isolated workspaces agents use. Cleanup skips active work and unsaved changes; unmerged commits are preserved as branches."
       />
 
       {notice ? (
@@ -544,10 +531,68 @@ export function WorktreeRetentionSection() {
         </div>
       ) : null}
 
-      <section>
+      <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Retention"
-          footnote="Limits are enforced during o8's periodic worktree sweep, oldest-first. A worktree is only ever removed when it backs no active or reviewing agent AND has a clean git status — a dirty tree is always skipped, and unmerged commits are preserved as a branch before its directory is reclaimed. Set a limit to 0 for unbounded (∞)."
+          header="Storage usage"
+          footnote="On disk measures allocated space; Logical measures file size. Shared APFS blocks mean these totals may not equal the space cleanup can recover."
+        >
+          <SettingsRow
+            icon={<DiskIcon />}
+            label="Current usage"
+            subtitle={usageSubtitle}
+            accessory={
+              <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <UsageMetric label="On disk" value={allocatedUsage} error={allocatedUsage === 'Unknown'} />
+                <UsageMetric label="Logical" value={logicalUsage} error={logicalUsage === 'Unknown'} />
+                <button
+                  type="button"
+                  aria-label="Refresh usage"
+                  disabled={usageState === 'loading'}
+                  onClick={() => { void loadUsage(); }}
+                  style={{
+                    minWidth: CONTROL_TARGET_PX,
+                    height: CONTROL_TARGET_PX,
+                    paddingLeft: 12,
+                    paddingRight: 12,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: RAMS_CONTROL_BORDER,
+                    borderRadius: 8,
+                    background: RAMS_CONTROL_BG,
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 12,
+                    fontFamily: APP_FONT_STACK,
+                    cursor: usageState === 'loading' ? 'wait' : 'pointer',
+                    opacity: usageState === 'loading' ? 0.55 : 1,
+                  }}
+                >
+                  Refresh
+                </button>
+              </span>
+            }
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="Dispatch headroom"
+            subtitle={admissionUnknown
+              ? 'Admission accounting is unknown; new packet workspaces will be held.'
+              : `${admission.activeReservations} active reservation${admission.activeReservations === 1 ? '' : 's'}. Reserved estimates are separate from physical usage.`}
+            accessory={
+              <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <UsageMetric label="Physical available" value={admissionMetric(admission?.physicalAvailableBytes)} error={admissionMetric(admission?.physicalAvailableBytes) === 'Unknown'} />
+                <UsageMetric label="Reserved estimate" value={admissionMetric(admission?.reservedBytes)} error={admissionMetric(admission?.reservedBytes) === 'Unknown'} />
+                <UsageMetric label="Dispatch headroom" value={admissionMetric(admission?.dispatchHeadroomBytes)} error={admissionMetric(admission?.dispatchHeadroomBytes) === 'Unknown'} />
+              </span>
+            }
+          />
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Automatic cleanup"
+          footnote="When either limit is exceeded, o8 cleans up the oldest eligible workspaces. Active or reviewing tasks and uncommitted changes are skipped. Unmerged commits are kept as branches. Set a limit to 0 for no limit."
         >
           <SettingsRow
             icon={<StackIcon />}
@@ -584,6 +629,7 @@ export function WorktreeRetentionSection() {
         </SettingsGroup>
       </section>
 
+      <SettingsAdvanced description="Workspace parking, minimum free space, and detailed storage measurements.">
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Workspace parking"
@@ -671,7 +717,7 @@ export function WorktreeRetentionSection() {
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Dispatch reserve"
+          header="Minimum free space"
           footnote="Before o8 creates a packet workspace, it reserves the estimated growth and keeps the larger of these two free-space limits. A reservation is accounting only; it is not physical disk usage. Unknown accounting holds dispatch and does not delete anything."
         >
           <SettingsRow
@@ -712,64 +758,6 @@ export function WorktreeRetentionSection() {
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Worktree storage"
-          footnote="On disk is allocated filesystem space and preserves the existing retention metric. Logical is apparent file size. APFS clones and shared blocks mean neither number is exclusive or guaranteed reclaimable; actual host-space change is measured separately when a workspace is parked or restored."
-        >
-          <SettingsRow
-            icon={<DiskIcon />}
-            label="Current usage"
-            subtitle={usageSubtitle}
-            accessory={
-              <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <UsageMetric label="On disk" value={allocatedUsage} error={allocatedUsage === 'Unknown'} />
-                <UsageMetric label="Logical" value={logicalUsage} error={logicalUsage === 'Unknown'} />
-                <button
-                  type="button"
-                  aria-label="Refresh usage"
-                  disabled={usageState === 'loading'}
-                  onClick={() => { void loadUsage(); }}
-                  style={{
-                    minWidth: CONTROL_TARGET_PX,
-                    height: CONTROL_TARGET_PX,
-                    paddingLeft: 12,
-                    paddingRight: 12,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: RAMS_CONTROL_BORDER,
-                    borderRadius: 8,
-                    background: RAMS_CONTROL_BG,
-                    color: 'var(--t-text-secondary)',
-                    fontSize: 12,
-                    fontFamily: APP_FONT_STACK,
-                    cursor: usageState === 'loading' ? 'wait' : 'pointer',
-                    opacity: usageState === 'loading' ? 0.55 : 1,
-                  }}
-                >
-                  Refresh
-                </button>
-              </span>
-            }
-            divider
-          />
-          <SettingsRow
-            icon={<GaugeIcon />}
-            label="Dispatch headroom"
-            subtitle={admissionUnknown
-              ? 'Admission accounting is unknown; new packet workspaces will be held.'
-              : `${admission.activeReservations} active reservation${admission.activeReservations === 1 ? '' : 's'}. Reserved estimates are separate from physical usage.`}
-            accessory={
-              <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <UsageMetric label="Physical available" value={admissionMetric(admission?.physicalAvailableBytes)} error={admissionMetric(admission?.physicalAvailableBytes) === 'Unknown'} />
-                <UsageMetric label="Reserved estimate" value={admissionMetric(admission?.reservedBytes)} error={admissionMetric(admission?.reservedBytes) === 'Unknown'} />
-                <UsageMetric label="Dispatch headroom" value={admissionMetric(admission?.dispatchHeadroomBytes)} error={admissionMetric(admission?.dispatchHeadroomBytes) === 'Unknown'} />
-              </span>
-            }
-          />
-        </SettingsGroup>
-      </section>
-
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
           header="Storage categories"
           footnote={categoryFootnote}
         >
@@ -795,6 +783,7 @@ export function WorktreeRetentionSection() {
           })}
         </SettingsGroup>
       </section>
+      </SettingsAdvanced>
     </div>
   );
 }

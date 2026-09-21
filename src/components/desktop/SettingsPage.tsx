@@ -46,6 +46,7 @@ import { GeneralTab } from './settings/GeneralTab';
 import type { GitHubConnectionProps } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
 import { IndexingTab } from './settings/IndexingTab';
+import { WorktreeRetentionSection } from './settings/WorktreeRetentionSection';
 import { ModelsTab } from './settings/ModelsTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
@@ -406,7 +407,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
       >
         {/* Left sidebar — tab navigation */}
         <div style={{
-          width: 200,
+          width: 228,
           flexShrink: 0,
           overflowY: 'auto', scrollbarWidth: 'none',
           minHeight: 0,
@@ -561,9 +562,10 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
 
           <SectionHeader>Agents</SectionHeader>
           <SettingsNavItem label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} tab="operator-defaults" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
-          <SettingsNavItem label="Models" icon={<CpuNavIcon />} active={activeTab === 'models'} tab="models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Models & providers" icon={<CpuNavIcon />} active={activeTab === 'models'} tab="models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>Workspace</SectionHeader>
+          <SettingsNavItem label="Worktrees & storage" icon={<LayersIcon />} active={activeTab === 'worktrees'} tab="worktrees" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} tab="projects" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} tab="git-prs" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} tab="indexing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
@@ -615,8 +617,9 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
             <ConnectionsTab />
           )}
           {activeTab === 'operator-defaults' && (
-            <OperatorDefaultsTab />
+            <OperatorDefaultsTab onNavigateTab={navigate} />
           )}
+          {activeTab === 'worktrees' && <WorktreeRetentionSection />}
           {activeTab === 'projects' && (
             <ProjectsPanel />
           )}
@@ -627,7 +630,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
             <IndexingTab />
           )}
           {activeTab === 'models' && (
-            <ModelsTab onNavigateTab={setActiveTab} />
+            <ModelsTab onNavigateTab={navigate} />
           )}
           {activeTab === 'analytics' && (
             <AnalyticsPage embedded />
