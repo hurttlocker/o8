@@ -193,10 +193,17 @@ export const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it
 
 export const REQUIRE_APPROVAL_OPTIONS: Array<{ value: RequireApproval; label: string }> = [
   { value: 'always', label: 'Always' },
-  { value: 'surface', label: 'Surface' },
-  { value: 'high-risk', label: 'Risk' },
+  { value: 'surface', label: 'Task owner' },
+  { value: 'high-risk', label: 'After review' },
   { value: 'never', label: 'Never' },
 ];
+
+export const MERGE_APPROVAL_DESCRIPTIONS: Record<RequireApproval, string> = {
+  always: 'Ask before agent merges, even after automated review.',
+  surface: 'Send changes needing approval to the person or agent that started the task. Routine reviewed changes can merge automatically.',
+  'high-risk': 'Allow reviewed changes to merge automatically; other merges require approval.',
+  never: 'Skip routine merge approval. Required checks and blocking safeguards still apply.',
+};
 
 export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; label: string; detail: string }> = [
   { value: 'both', label: 'All available', detail: 'Use any installed dispatchable runtime; Codex remains the fallback until you choose one.' },

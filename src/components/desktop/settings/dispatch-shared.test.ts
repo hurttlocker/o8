@@ -33,7 +33,7 @@ describe('settings dispatch picker menu surface', () => {
   });
 
   it('offers the dispatcher-routed surface merge posture', () => {
-    expect(REQUIRE_APPROVAL_OPTIONS).toContainEqual({ value: 'surface', label: 'Surface' });
+    expect(REQUIRE_APPROVAL_OPTIONS).toContainEqual({ value: 'surface', label: 'Task owner' });
   });
 
   it('wraps arrow navigation and supports first/last keyboard jumps', () => {
