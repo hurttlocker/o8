@@ -206,7 +206,7 @@ export const MERGE_APPROVAL_DESCRIPTIONS: Record<RequireApproval, string> = {
 };
 
 export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; label: string; detail: string }> = [
-  { value: 'both', label: 'All available', detail: 'Use any installed dispatchable runtime; Codex remains the fallback until you choose one.' },
+  { value: 'both', label: 'All available', detail: 'Allow any connected tool to run tasks. Choose the default worker below.' },
   { value: 'claude-only', label: 'Claude only', detail: 'Everything runs on your Claude subscription — Opus orchestrates, Sonnet works, escalates only when needed.' },
   { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-6 Astra orchestrates, Terra works, escalates to Sol when needed.' },
 ];

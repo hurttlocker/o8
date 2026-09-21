@@ -87,7 +87,7 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
     if (sources.defaultDispatchRuntime !== 'default') {
       return 'Used when you say "dispatch" without naming a runtime';
     }
-    return 'Codex is the default worker — pick any available runtime to override';
+    return 'Used when a task does not specify a worker';
   })();
   const carrierCompatibilityReason = values.defaultDispatchRuntime === 'codex'
     ? null
@@ -138,7 +138,7 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
             icon={<RocketIcon />}
             label="Subscription profile"
             subtitle={lockedSub('subscriptionProfile', [
-              SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === activeProfile)?.detail ?? 'Use both houses by default',
+              SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === activeProfile)?.detail ?? 'Choose which connected tools may run tasks',
               `Codex: ${cliStatusLabel(cliAuth?.statuses.codex)} · Claude: ${cliStatusLabel(cliAuth?.statuses.claude)}`,
               profileHint?.detail ? `${profileHint.detail} Consider ${SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === profileHint.profile)?.label}.` : '',
             ].filter(Boolean).join(' '))}
