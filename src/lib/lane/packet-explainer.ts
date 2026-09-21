@@ -1,18 +1,6 @@
 /**
- * HTML packet explainer + quiz generation (#1491).
- *
- * When a packet reaches review, this runs fire-and-forget alongside the
- * auto-review: it asks the active reviewer backend to emit a self-contained
- * HTML explainer (what/why, annotated hunks, data flow, deviations, risk) plus
- * a structured multiple-choice quiz, then stores the HTML as a `report`
- * artifact and stamps the parsed quiz onto the packet.
- *
- * It NEVER blocks the review transition — the caller kicks it off without
- * awaiting and the packet carries a `generating → ready | failed` status. On any
- * failure the review surface degrades to the raw diff (status `failed`).
- *
- * The quiz is parsed out to STRUCTURED data here (app code), never read from
- * inside the sandboxed iframe, so the approve-gate logic stays in the app.
+ * Generate an optional HTML report explaining a completed change.
+ * Stores the report as an artifact without blocking review or merge.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -27,7 +15,6 @@ import {
   newArtifactId,
   recordArtifact,
 } from '@/lib/artifacts/store';
-import type { PacketExplainerQuiz } from '@/lib/orchestrator/types';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
 import type { Lane } from './types';
 
@@ -64,51 +51,6 @@ export interface PacketExplainerGenerationResult {
   reason?: string;
 }
 
-/**
- * Extract + validate the `<script type="application/json" id="o8-quiz">` block
- * from the explainer HTML. Returns null when absent or malformed — the gate
- * degrades to ungated in that case.
- */
-export function parseExplainerQuiz(html: string): PacketExplainerQuiz | null {
-  const match = html.match(/<script[^>]*id=["']o8-quiz["'][^>]*>([\s\S]*?)<\/script>/i);
-  if (!match) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(match[1].trim());
-  } catch {
-    return null;
-  }
-  const rawQuestions = Array.isArray(parsed)
-    ? parsed
-    : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { questions?: unknown }).questions)
-      ? (parsed as { questions: unknown[] }).questions
-      : null);
-  if (!rawQuestions) return null;
-
-  const questions = rawQuestions
-    .map((entry, index) => {
-      if (!entry || typeof entry !== 'object') return null;
-      const q = entry as { id?: unknown; prompt?: unknown; question?: unknown; options?: unknown; answerIndex?: unknown };
-      const prompt = typeof q.prompt === 'string' ? q.prompt.trim()
-        : typeof q.question === 'string' ? q.question.trim() : '';
-      const options = Array.isArray(q.options)
-        ? q.options.map((option) => String(option).trim()).filter(Boolean).slice(0, 8)
-        : [];
-      const answerIndex = typeof q.answerIndex === 'number' && Number.isInteger(q.answerIndex) ? q.answerIndex : -1;
-      if (!prompt || options.length < 2 || answerIndex < 0 || answerIndex >= options.length) return null;
-      return {
-        id: typeof q.id === 'string' && q.id.trim() ? q.id.trim() : `q${index + 1}`,
-        prompt,
-        options,
-        answerIndex,
-      };
-    })
-    .filter((question): question is NonNullable<typeof question> => question !== null)
-    .slice(0, 6);
-
-  return questions.length >= 3 ? { questions } : null;
-}
-
 function buildExplainerPrompt(params: GenerateExplainerParams, generationId: string): string {
   return [
     `Write a self-contained HTML "packet explainer" for a code change under review, so a human who does NOT read diffs can understand and verify it.`,
@@ -125,12 +67,9 @@ function buildExplainerPrompt(params: GenerateExplainerParams, generationId: str
     ``,
     `Produce a SINGLE self-contained .html file at the worktree root named exactly \`${explainerFilename(params.packetId, generationId)}\`.`,
     `Requirements for the file:`,
+    `- Do not include quizzes or comprehension tests.`,
     `- Inline all CSS; no external assets, no network requests.`,
     `- Sections: what & why (plain language), annotated key hunks (the 2-4 most important changes), data flow touched, deviations from brief, risk notes.`,
-    `- End with a quiz of 3 to 6 multiple-choice questions that test real comprehension of THIS change (not trivia). Render the quiz visibly for the reader.`,
-    `- ALSO embed the quiz as STRUCTURED JSON in exactly this element so the app can read it:`,
-    `  <script type="application/json" id="o8-quiz">{"questions":[{"id":"q1","prompt":"…","options":["…","…","…"],"answerIndex":0}]}</script>`,
-    `  answerIndex is the 0-based index of the correct option. Include every quiz question in the JSON.`,
     ``,
     `Write ONLY that file. Do NOT commit it, do NOT run git, do NOT modify any other file. When the file is written, reply with the single word DONE.`,
   ].filter((value): value is string => value !== null).join('\n');
@@ -208,7 +147,6 @@ export async function generatePacketExplainer(
       throw new Error('explainer file was empty');
     }
 
-    const quiz = parseExplainerQuiz(html);
 
     // Persist the HTML as a `report` artifact.
     const id = newArtifactId();
@@ -238,11 +176,11 @@ export async function generatePacketExplainer(
     await stamp({
       status: 'ready',
       artifactId: record?.id ?? id,
-      quiz: quiz ?? null,
+      quiz: null,
       changedFileCount: params.changedFileCount,
       generatedAt: new Date().toISOString(),
     });
-    console.log(`[explainer] Ready for packet ${params.packetId} (${quiz?.questions.length ?? 0} quiz questions)`);
+    console.log(`[explainer] Ready for packet ${params.packetId}`);
     return {
       outcome: 'ready',
       backend: turn.backend,

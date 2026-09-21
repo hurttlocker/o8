@@ -39,8 +39,8 @@ export function useSettingsOverlayDismiss({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      // Let an open Settings section menu consume Escape before closing Settings.
-      if (panelRef.current?.querySelector('[data-o8-settings-escape-scope]')) return;
+      // Let section menus and body-portaled Settings pickers consume Escape first.
+      if (document.querySelector('[data-o8-settings-escape-scope]')) return;
       event.preventDefault();
       event.stopPropagation();
       closeSettingsOverlay();

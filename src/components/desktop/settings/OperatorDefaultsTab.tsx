@@ -21,7 +21,6 @@ import {
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import { ApfsDependencyImagesRow } from './ApfsDependencyImagesRow';
-import { JudgmentProviderRow } from './JudgmentProviderRow';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { WorktreeRetentionSection } from './WorktreeRetentionSection';
@@ -29,7 +28,6 @@ import { SettingsTomlEditor } from './SettingsTomlEditor';
 import {
   PickerMenu,
   SUBSCRIPTION_PROFILE_OPTIONS,
-  ORCHESTRATOR_MODEL_OPTIONS,
   DISPATCH_RUNTIME_OPTIONS,
   CODEX_WORKER_EFFORT_OPTIONS,
   CLAUDE_WORKER_EFFORT_OPTIONS,
@@ -518,18 +516,20 @@ export function OperatorDefaultsTab() {
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Orchestrator"
-          footnote="Auto follows the classic toggle (Claude when on, Codex when off). Collide runs Claude + Codex as independent proposers with one synthesizer — the upgraded Claude, at roughly twice the Claude draw."
+          footnote="The orchestrator leads chat and coordinates agent tasks. Claude + Codex compares independent responses and combines them; it uses both AI runtimes."
         >
           <SettingsRow
             icon={<CpuIcon />}
-            label="Backend"
-            subtitle={profileOverrideReason ?? lockedSub('orchestratorBackend', 'The brain that drives chat and background turns')}
+            label="Chat provider"
+            subtitle={profileOverrideReason ?? lockedSub('orchestratorBackend', `Choose the AI that leads chat and coordinates tasks. Automatic currently uses ${values.inAppOrchestratorEnabled ? 'Claude' : 'Codex'}.`)}
             accessory={
-              <SettingsSegmented
+              <PickerMenu<string>
                 value={values.orchestratorBackend}
+                disabled={Boolean(profileOverrideReason) || envLocked('orchestratorBackend') || busyField === 'orchestratorBackend'}
+                minWidth={170}
                 onChange={(next) => { updateField('orchestratorBackend', next as OrchestratorBackendSetting); }}
                 options={[
-                  { value: 'auto', label: 'Auto' },
+                  { value: 'auto', label: 'Automatic' },
                   { value: 'codex', label: 'Codex' },
                   { value: 'claude', label: 'Claude' },
                   // OpenClaw hidden from the picker (Q ruling 2026-07-16, not
@@ -541,7 +541,7 @@ export function OperatorDefaultsTab() {
                   // this the composer could select opencode while Settings
                   // rendered no selected segment at all.
                   ...(opencodeAvailable || values.orchestratorBackend === 'opencode' ? [{ value: 'opencode', label: 'OpenCode 2' }] : []),
-                  { value: 'collide', label: 'Collide' },
+                  { value: 'collide', label: 'Claude + Codex' },
                 ]}
               />
             }
@@ -550,14 +550,14 @@ export function OperatorDefaultsTab() {
           />
           <SettingsRow
             icon={<CpuIcon />}
-            label="Reviewer"
-            subtitle={profileOverrideReason ?? lockedSub('reviewerBackend', 'Who reviews finished lanes before merge — Follow rides the Backend above')}
+            label="Code review provider"
+            subtitle={profileOverrideReason ?? lockedSub('reviewerBackend', 'Choose the AI that reviews completed changes. Same as chat uses the provider selected above.')}
             accessory={
               <SettingsSegmented
                 value={values.reviewerBackend}
                 onChange={(next) => { updateField('reviewerBackend', next as ReviewerBackendSetting); }}
                 options={[
-                  { value: 'follow', label: 'Follow' },
+                  { value: 'follow', label: 'Same as chat' },
                   { value: 'claude', label: 'Claude' },
                   { value: 'codex', label: 'Codex' },
                 ]}
@@ -566,56 +566,26 @@ export function OperatorDefaultsTab() {
             disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
             divider
           />
+
           <SettingsRow
             icon={<InboxIcon />}
-            label="Packet explainer"
-            subtitle={lockedSub('packetExplainerEnabled', 'Generate an HTML explainer + quiz for each reviewed packet (non-blocking)')}
+            label="Explain completed changes"
+            subtitle={lockedSub('packetExplainerEnabled', 'Create an extra AI report explaining what changed and why when a task is ready for review. Off by default; uses your review provider.')}
             checked={values.packetExplainerEnabled}
             disabled={envLocked('packetExplainerEnabled') || busyField === 'packetExplainerEnabled'}
             onToggle={(next) => { updateField('packetExplainerEnabled', next); }}
             divider
           />
-          <SettingsRow
-            icon={<MergeIcon />}
-            label="Quiz-gated merge"
-            subtitle={lockedSub('quizGateEnabled', 'Block the human Merge button on large packets until the explainer quiz is passed')}
-            checked={values.quizGateEnabled}
-            disabled={envLocked('quizGateEnabled') || busyField === 'quizGateEnabled'}
-            onToggle={(next) => { updateField('quizGateEnabled', next); }}
-            divider
-          />
+
           <SettingsRow
             icon={<BuyinDocIcon />}
-            label="Buy-in doc on merge"
-            subtitle={lockedSub('buyinDocEnabled', 'Generate a shareable HTML buy-in doc (demo-first, plain-language) after a merge (non-blocking)')}
+            label="Create a summary after merge"
+            subtitle={lockedSub('buyinDocEnabled', 'Create a shareable report of what changed, why, and how it was checked. Includes available demos; does not delay the merge.')}
             checked={values.buyinDocEnabled}
             disabled={envLocked('buyinDocEnabled') || busyField === 'buyinDocEnabled'}
             onToggle={(next) => { updateField('buyinDocEnabled', next); }}
-            divider
           />
-          <JudgmentProviderRow
-            icon={<MergeIcon />}
-            value={values.judgmentProvider}
-            path={data?.judgmentPath}
-            managedVisible={values.judgmentManagedOptionVisible}
-            busy={busyField === 'judgmentProvider'}
-            onChange={(next) => { updateField('judgmentProvider', next); }}
-          />
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Native Claude model"
-            subtitle={lockedSub('orchestratorModel', 'Used only when the Claude Code harness source is Native account')}
-            accessory={
-              <PickerMenu<string>
-                value={values.orchestratorModel}
-                options={ORCHESTRATOR_MODEL_OPTIONS}
-                onChange={(next) => { updateField('orchestratorModel', next); }}
-                disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-                minWidth={150}
-              />
-            }
-            disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-          />
+
         </SettingsGroup>
       </section>
 
