@@ -30,9 +30,12 @@ function Harness() {
   const { contentRef, navigate } = useSettingsSectionNavigation(activeTab, setActiveTab);
   useSettingsOverlayDismiss({ activeNavSection: nav, panelRef, setActiveNavSection: setNav });
   if (nav !== 'settings') return createElement('p', null, 'Workspace');
+  // React forwards these callback refs during commit; createElement does not invoke them.
+  // eslint-disable-next-line react-hooks/refs
   return createElement('div', { ref: (node: HTMLDivElement | null) => { panelRef.current = node; }, 'data-settings-shell': true },
     createElement(SettingsNavItem, { tab: 'operator-defaults', label: 'Dispatch', icon: null, active: activeTab === 'operator-defaults', openTab: open, onOpen: setOpen, onNavigate: navigate }),
     createElement('button', { onClick: () => setLoaded(true) }, 'Complete loading'),
+    // eslint-disable-next-line react-hooks/refs -- React invokes the ref during commit.
     createElement('div', { ref: (node: HTMLDivElement | null) => { contentRef.current = node; }, 'data-settings-content': true },
       activeTab === 'general' ? 'General content' : loaded
         ? createElement('details', { 'data-settings-section': 'Advanced routing' }, createElement('summary', null, 'Advanced routing'), 'Controls')
