@@ -22,11 +22,11 @@ function render(value: JudgmentProvider, options: { path?: JudgmentPath; managed
 
 describe('JudgmentProviderRow', () => {
   it.each([
-    ['off', 'off', 'Off. Advisory typed checks beside review decisions. When on, diff content leaves this machine and is sent to the provider.'],
-    ['typesafe', 'key', 'Using your key. Advisory typed checks beside review decisions. When on, diff content leaves this machine and is sent to the provider.'],
+    ['off', 'off', 'Off. Get an additional AI assessment of proposed changes. It advises the review without approving merges. When enabled, code changes are sent to the selected provider.'],
+    ['typesafe', 'key', 'Using your key. Get an additional AI assessment of proposed changes. It advises the review without approving merges. When enabled, code changes are sent to the selected provider.'],
   ] as const)('with the flag off and value %s it offers Off and your key only', (value, path, subtitle) => {
     const { markup, buttons, onChange } = render(value, { path });
-    expect(markup).toContain('Judgment referee');
+    expect(markup).toContain('Additional AI review');
     expect(markup).toContain(subtitle);
     expect(buttons).toEqual(['Off', 'Bring your own key']);
     expect(markup).not.toContain('Managed');
@@ -45,13 +45,13 @@ describe('JudgmentProviderRow', () => {
     ['none', 'No key or plan token found'],
   ] as const)('names the %s path and keeps the diff sentence under managed', (path, lead) => {
     const { markup } = render('managed', { path, managedVisible: true });
-    expect(markup).toContain(`${lead}. Advisory typed checks beside review decisions. When on, diff content leaves this machine and is sent to the provider.`);
+    expect(markup).toContain(`${lead}. Get an additional AI assessment of proposed changes. It advises the review without approving merges. When enabled, code changes are sent to the selected provider.`);
     expect(markup).not.toContain('not yet available');
   });
 
   it('says only a key is missing when typesafe has no credential', () => {
     const { markup } = render('typesafe', { path: 'none' });
-    expect(markup).toContain('No key found. Advisory typed checks');
+    expect(markup).toContain('No key found. Get an additional AI assessment');
     expect(markup).not.toContain('plan token');
   });
 

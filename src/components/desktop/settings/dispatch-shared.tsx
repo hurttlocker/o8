@@ -418,6 +418,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
           id={listboxId}
           ref={popoverRef}
           data-o8-settings-portal="true"
+          data-o8-settings-escape-scope
           role="listbox"
           aria-label="Settings picker options"
           aria-activedescendant={highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}

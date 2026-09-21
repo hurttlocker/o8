@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { NavSection } from '@/app/dashboard/types';
 import { useSettingsOverlayDismiss } from '@/app/dashboard/hooks/useSettingsOverlayDismiss';
+import { PickerMenu } from './dispatch-shared';
 import { SettingsNavItem } from './SettingsNavItem';
 import { useSettingsSectionNavigation } from './useSettingsSectionNavigation';
 import { VoiceShortcutsSection } from './VoiceShortcutsSection';
@@ -35,6 +36,7 @@ function Harness() {
   return createElement('div', { ref: (node: HTMLDivElement | null) => { panelRef.current = node; }, 'data-settings-shell': true },
     createElement(SettingsNavItem, { tab: 'operator-defaults', label: 'Dispatch', icon: null, active: activeTab === 'operator-defaults', openTab: open, onOpen: setOpen, onNavigate: navigate }),
     createElement('button', { onClick: () => setLoaded(true) }, 'Complete loading'),
+    createElement(PickerMenu<string>, { value: 'auto', options: [{ value: 'auto', label: 'Automatic' }], onChange: () => {} }),
     // eslint-disable-next-line react-hooks/refs -- React invokes the ref during commit.
     createElement('div', { ref: (node: HTMLDivElement | null) => { contentRef.current = node; }, 'data-settings-content': true },
       activeTab === 'general' ? 'General content' : loaded
@@ -87,4 +89,18 @@ it('keeps Voice quick tips collapsed until requested', async () => {
   expect(container.querySelector('details')!.open).toBe(false);
   expect(container.textContent).toContain('Fn or Left Control');
   expect(container.textContent).toContain('Hold Control + Z in o8');
+});
+
+it('Escape closes a body-portaled provider picker before closing Settings', async () => {
+  await act(async () => { root.render(createElement(Harness)); });
+  const trigger = container.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!;
+  await act(async () => { trigger.click(); });
+  expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
+  expect(container.querySelector('[role="listbox"]')).toBeNull();
+  await act(async () => { trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+  expect(document.body.querySelector('[role="listbox"]')).toBeNull();
+  expect(container.textContent).toContain('General content');
+  expect(document.activeElement).toBe(trigger);
+  await act(async () => { trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+  expect(container.textContent).toBe('Workspace');
 });

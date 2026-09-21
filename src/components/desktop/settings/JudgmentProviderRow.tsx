@@ -5,7 +5,7 @@ import type { JudgmentProvider } from '@/lib/operator/judgment-default';
 import { SettingsRow } from './grouped';
 import { SettingsSegmented } from './shared';
 
-export const JUDGMENT_PROVIDER_COPY = 'Advisory typed checks beside review decisions. When on, diff content leaves this machine and is sent to the provider';
+export const JUDGMENT_PROVIDER_COPY = 'Get an additional AI assessment of proposed changes. It advises the review without approving merges. When enabled, code changes are sent to the selected provider';
 
 /** Subtitle lead for each path the route resolver can report (#2485). */
 export const JUDGMENT_PATH_LABELS: Record<JudgmentPath, string> = {
@@ -57,7 +57,7 @@ export function JudgmentProviderRow({
   return (
     <SettingsRow
       icon={icon}
-      label="Judgment referee"
+      label="Additional AI review"
       subtitle={judgmentProviderSubtitle(value, path, managedVisible)}
       accessory={
         <SettingsSegmented
@@ -67,7 +67,6 @@ export function JudgmentProviderRow({
         />
       }
       disabled={busy}
-      divider
     />
   );
 }
