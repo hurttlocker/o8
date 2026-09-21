@@ -331,6 +331,17 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
 
   return (
     <div data-settings-shell style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}>
+      <style>{`
+        [data-settings-shell], [data-settings-shell] * {
+          scrollbar-width: none !important;
+        }
+        [data-settings-shell]::-webkit-scrollbar,
+        [data-settings-shell] *::-webkit-scrollbar {
+          display: none !important;
+          width: 0 !important;
+          height: 0 !important;
+        }
+      `}</style>
       {onClose ? (
         <header data-tauri-drag-region style={{ flexShrink: 0, paddingTop: 12, paddingRight: 24, paddingBottom: 12, paddingLeft: 24, borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
           <button
@@ -397,7 +408,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
         <div style={{
           width: 200,
           flexShrink: 0,
-          overflowY: 'auto',
+          overflowY: 'auto', scrollbarWidth: 'none',
           minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
@@ -583,7 +594,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
             flex: 1,
             minWidth: 0,
             minHeight: 0,
-            overflowY: 'auto',
+            overflowY: 'auto', scrollbarWidth: 'none',
             scrollPaddingTop: 8,
             display: 'grid',
             gridTemplateColumns: `minmax(0, ${activeTab === 'projects' || activeTab === 'analytics' ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
