@@ -35,9 +35,9 @@ import {
 import {
   APP_FONT_STACK,
   RAMS_ACCENT,
-  RAMS_INK_QUIET,
   MicIcon,
   SettingsSegmented,
+  RamsButton,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
@@ -50,6 +50,8 @@ import {
   type DictationInputMode,
 } from '@/lib/appearance/dictation-input-mode';
 import { useSyncExternalStore } from 'react';
+import { VoiceShortcutsSection } from './VoiceShortcutsSection';
+import { VoiceBrainModelPicker } from './VoiceBrainModelPicker';
 import { SymonAttentionSettingsSection } from './SymonAttentionSettingsSection';
 
 // macOS System Settings deep-links.
@@ -154,7 +156,6 @@ export function VoiceTab() {
   // #2156: the Symon brain seat — the stored provider/tier/model pin plus the
   // seat the native planner registry resolves right now.
   const [brain, setBrain] = useState<SymonBrainState | null>(null);
-  const [brainModelInput, setBrainModelInput] = useState('');
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -191,7 +192,6 @@ export function VoiceTab() {
     setExternalFn(await externalKeyboardFnState().catch(() => null));
     const nextBrain = await symonBrainState().catch(() => null);
     setBrain(nextBrain);
-    setBrainModelInput(nextBrain?.model ?? '');
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
     if (bg) void backgroundModeSet(false);
@@ -280,9 +280,9 @@ export function VoiceTab() {
     void writeBrainPref('symon_brain_tier', next);
   }, [writeBrainPref]);
 
-  const handleBrainModel = useCallback(async () => {
-    await writeBrainPref('symon_brain_model', brainModelInput.trim());
-  }, [brainModelInput, writeBrainPref]);
+  const handleBrainModel = useCallback(async (model: string) => {
+    await writeBrainPref('symon_brain_model', model);
+  }, [writeBrainPref]);
 
   const handleGroqKeySave = useCallback(async () => {
     const key = groqKeyInput.trim();
@@ -354,10 +354,10 @@ export function VoiceTab() {
   const frontStatus = !front || !frontSeat
     ? null
     : front.fellBackFrom
-      ? `Front brain: ${front.fellBackFrom} not installed — using ${frontSeat}`
+      ? `Conversation: ${front.fellBackFrom} not installed — using ${frontSeat}`
       : frontSeatSameAsBackground
-        ? `Front brain: same as background${front.choice === 'auto' ? ' (auto)' : ''}`
-        : `Front brain: ${frontSeat}${front.resolvedModel && front.resolvedModel !== frontSeat ? ` · ${front.resolvedModel}` : ''}`;
+        ? `Conversation: same as background provider${front.choice === 'auto' ? ' (auto)' : ''}`
+        : `Conversation: ${frontSeat}${front.resolvedModel && front.resolvedModel !== frontSeat ? ` · ${front.resolvedModel}` : ''}`;
   // Says what the NEXT task will run, so a pick whose CLI is missing reads as a
   // fallback instead of silently doing something else.
   const backgroundStatus = !brain
@@ -373,11 +373,6 @@ export function VoiceTab() {
     : brain?.fellBackFrom || front?.fellBackFrom
       ? RAMS_ACCENT
       : 'var(--t-text-faint)';
-  const brainModelPlaceholder = brain?.adapters.find(
-    (adapter) => adapter.id === brain.resolvedProvider,
-  )?.runtimeConfiguredModel
-    ? 'provider/model'
-    : 'model id';
 
   return (
     <div
@@ -392,7 +387,7 @@ export function VoiceTab() {
     >
       <TabHeading
         title="voice"
-        subtitle="Hold Fn, or its external-keyboard substitute, for polished dictation. Double-tap for hands-free dictation. Hold Right Option to talk to Symon."
+        subtitle="Set up dictation, find voice shortcuts, and choose how Symon handles your requests."
       />
 
       {!tauri ? (
@@ -401,6 +396,22 @@ export function VoiceTab() {
         </p>
       ) : (
         <>
+          <VoiceShortcutsSection externalFnActive={Boolean(externalFn?.active)} />
+          <section style={{ marginBottom: 28 }}>
+            <SettingsGroup
+              header="Symon"
+              footnote="Symon has its own settings window. You can also open it by double-tapping Symon. The controls below manage voice input, permissions, and brain behavior in o8."
+            >
+              <SettingsRow
+                icon={<SparkleIcon />}
+                label="Open Symon settings"
+                subtitle="Explore dictation history, writing polish, custom words and snippets, memory, appearance, and voice customization."
+                onPress={() => { void openVoiceSettings(); }}
+                chevron
+              />
+            </SettingsGroup>
+          </section>
+
           <section>
             <SettingsGroup
               header="Permissions"
@@ -540,14 +551,14 @@ export function VoiceTab() {
           <section style={{ marginTop: 28 }}>
             <SettingsGroup
               header="Transcription"
-              footnote="A free Groq key makes release-to-paste near-instant (their free tier easily covers one person's dictation). Keys stay in macOS Keychain and are sent only to Groq."
+              footnote="Groq provides cloud transcription. Usage is subject to your Groq account limits. Keys stay in macOS Keychain and are sent only to Groq."
             >
               <SettingsRow
                 icon={<MicIcon />}
                 label="Groq API key"
                 subtitle={groqKeySet
                   ? 'Key saved — fast transcription active. Paste a new key to replace it.'
-                  : 'Free at console.groq.com/keys — paste it here'}
+                  : 'Get a key at console.groq.com/keys, then paste it here'}
                 accessory={
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     <input
@@ -558,7 +569,8 @@ export function VoiceTab() {
                       onKeyDown={(e) => { if (e.key === 'Enter') void handleGroqKeySave(); }}
                       style={{
                         width: 180,
-                        height: 26,
+                        height: 32,
+                        boxSizing: 'border-box',
                         paddingLeft: 8,
                         paddingRight: 8,
                         fontSize: 12,
@@ -568,54 +580,18 @@ export function VoiceTab() {
                         color: 'var(--t-text)',
                         background: 'var(--t-input-bg)',
                         border: '1px solid var(--t-divider)',
-                        borderRadius: 7,
+                        borderRadius: 9,
                         outline: 'none',
                       }}
                     />
                     {groqKeyInput.trim() ? (
-                      <button
-                        type="button"
-                        onClick={() => { void handleGroqKeySave(); }}
-                        disabled={groqKeySaving}
-                        style={{
-                          height: 26,
-                          paddingLeft: 10,
-                          paddingRight: 10,
-                          fontSize: 12,
-                          fontWeight: 300,
-                          letterSpacing: '-0.1px',
-                          fontFamily: APP_FONT_STACK,
-                          color: 'var(--t-text)',
-                          background: 'var(--t-input-bg)',
-                          border: '1px solid var(--t-divider)',
-                          borderRadius: 7,
-                          cursor: groqKeySaving ? 'default' : 'pointer',
-                        }}
-                      >
+                      <RamsButton variant="ghost" onClick={() => { void handleGroqKeySave(); }} busy={groqKeySaving}>
                         {groqKeySaving ? 'Saving…' : 'Save'}
-                      </button>
+                      </RamsButton>
                     ) : groqKeySet ? (
-                      <button
-                        type="button"
-                        onClick={() => { void handleGroqKeyRemove(); }}
-                        disabled={groqKeySaving}
-                        style={{
-                          height: 26,
-                          paddingLeft: 10,
-                          paddingRight: 10,
-                          fontSize: 12,
-                          fontWeight: 300,
-                          letterSpacing: '-0.1px',
-                          fontFamily: APP_FONT_STACK,
-                          color: 'var(--t-text-muted)',
-                          background: 'transparent',
-                          border: '1px solid var(--t-divider)',
-                          borderRadius: 7,
-                          cursor: groqKeySaving ? 'default' : 'pointer',
-                        }}
-                      >
+                      <RamsButton variant="ghost" onClick={() => { void handleGroqKeyRemove(); }} disabled={groqKeySaving}>
                         Remove
-                      </button>
+                      </RamsButton>
                     ) : null}
                   </span>
                 }
@@ -647,8 +623,8 @@ export function VoiceTab() {
               />
               <SettingsRow
                 icon={<BrainGlyph />}
-                label="Front brain"
-                subtitle="Which brain the Right-Option gesture runs. Ask and Agent both take this seat; Auto follows the background brain below."
+                label="Conversation provider"
+                subtitle="Handles requests when you hold Right Option to talk to Symon. Auto uses the background provider below."
                 accessory={
                   <SettingsSegmented
                     value={front?.choice ?? 'auto'}
@@ -660,10 +636,10 @@ export function VoiceTab() {
               />
               <SettingsRow
                 icon={<BrainGlyph />}
-                label="Symon brain"
+                label="Background provider"
                 subtitle={
                   <>
-                    Which installed agent CLI runs the background brain.
+                    Runs tasks handed off by Symon using an installed agent.
                     <span
                       style={{
                         display: 'block',
@@ -686,8 +662,8 @@ export function VoiceTab() {
               />
               <SettingsRow
                 icon={<BrainGlyph />}
-                label="Seat"
-                subtitle="Worker is the cheap everyday rung; Builder runs the stronger model at full reasoning."
+                label="Model preset"
+                subtitle="Worker favors everyday tasks; Builder favors deeper reasoning. Automatic uses the provider default. A specific model below overrides this preset."
                 accessory={
                   <SettingsSegmented
                     value={brain?.tier ?? 'auto'}
@@ -703,85 +679,24 @@ export function VoiceTab() {
               />
               <SettingsRow
                 icon={<BrainGlyph />}
-                label="Model pin"
-                subtitle="Optional. Overrides the seat above — leave empty to let the runtime choose."
+                label="Model"
+                subtitle="Choose a supported model for the background brain. Automatic follows the model preset above. A compatible front brain also uses this choice. Provider access still applies."
                 accessory={
-                  <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-                    <input
-                      value={brainModelInput}
-                      onChange={(e) => setBrainModelInput(e.target.value)}
-                      placeholder={brainModelPlaceholder}
-                      spellCheck={false}
-                      style={{
-                        width: 210,
-                        height: 26,
-                        paddingLeft: 9,
-                        paddingRight: 9,
-                        fontSize: 12,
-                        fontWeight: 300,
-                        fontFamily: APP_FONT_STACK,
-                        color: 'var(--t-text)',
-                        background: 'var(--t-input-bg)',
-                        border: '1px solid var(--t-divider)',
-                        borderRadius: 7,
-                        outline: 'none',
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { void handleBrainModel(); }}
-                      disabled={brainModelInput.trim() === (brain?.model ?? '')}
-                      style={{
-                        height: 26,
-                        paddingLeft: 10,
-                        paddingRight: 10,
-                        fontSize: 12,
-                        fontWeight: 300,
-                        letterSpacing: '-0.1px',
-                        fontFamily: APP_FONT_STACK,
-                        color: 'var(--t-text)',
-                        background: 'var(--t-input-bg)',
-                        border: '1px solid var(--t-divider)',
-                        borderRadius: 7,
-                        cursor: brainModelInput.trim() === (brain?.model ?? '') ? 'default' : 'pointer',
-                      }}
-                    >
-                      {brainModelInput.trim() ? 'Save' : 'Clear'}
-                    </button>
-                  </span>
+                  <VoiceBrainModelPicker
+                    key={brain?.resolvedProvider ?? 'unavailable'}
+                    provider={brain?.resolvedProvider ?? null}
+                    value={brain?.model ?? null}
+                    onChange={handleBrainModel}
+                  />
                 }
               />
             </SettingsGroup>
           </section>
 
           <SymonAttentionSettingsSection />
-
-          <section style={{ marginTop: 28 }}>
-            <SettingsGroup>
-              <SettingsRow
-                icon={<SparkleIcon />}
-                label="Symon settings"
-                subtitle="History, polish, dictionary, voice persona — double-tap Symon, or open here"
-                onPress={() => { void openVoiceSettings(); }}
-                chevron
-              />
-            </SettingsGroup>
-          </section>
         </>
       )}
 
-      <p
-        style={{
-          marginTop: 36,
-          fontSize: 11,
-          fontWeight: 300,
-          color: RAMS_INK_QUIET,
-          fontFamily: APP_FONT_STACK,
-          letterSpacing: '0.04em',
-        }}
-      >
-        <span style={{ color: RAMS_ACCENT }}>{externalFn?.active ? 'LEFT CTRL / FN' : 'FN'}</span> &nbsp; Dictate &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>RIGHT OPTION</span> &nbsp; Talk to Symon
-      </p>
     </div>
   );
 }

@@ -24,7 +24,6 @@ import {
   MONO_FONT_STACK,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  TabButton,
   SettingsTabSectionHeader as SectionHeader,
   PlugIcon,
   KeyIcon,
@@ -41,6 +40,8 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
   SETTINGS_WIDE_CONTENT_MAX_WIDTH,
 } from './settings/shared';
+import { SettingsNavItem } from './settings/SettingsNavItem';
+import { useSettingsSectionNavigation } from './settings/useSettingsSectionNavigation';
 import { GeneralTab } from './settings/GeneralTab';
 import type { GitHubConnectionProps } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
@@ -112,6 +113,8 @@ function SearchNavIcon({ size = 13 }: { size?: number }) {
 export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?: SettingsTab; onClose?: () => void }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
+  const [openNavTab, setOpenNavTab] = useState<SettingsTab | null>(null);
+  const { contentRef, navigate, notice } = useSettingsSectionNavigation(activeTab, setActiveTab);
   const { founder, plan } = useEntitlement();
   const auth = useO8Auth();
   const searchMatches = useMemo(
@@ -327,7 +330,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   };
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}>
+    <div data-settings-shell style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}>
       {onClose ? (
         <header data-tauri-drag-region style={{ flexShrink: 0, paddingTop: 12, paddingRight: 24, paddingBottom: 12, paddingLeft: 24, borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
           <button
@@ -374,7 +377,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
         style={{
           flex: 1,
           minHeight: 0,
-          overflow: 'auto',
+          overflow: 'hidden',
           paddingTop: 24,
           paddingRight: 24,
           paddingBottom: 24,
@@ -394,6 +397,8 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
         <div style={{
           width: 200,
           flexShrink: 0,
+          overflowY: 'auto',
+          minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
@@ -445,7 +450,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
                   setSearchQuery('');
                 }
                 if (event.key === 'Enter' && searchMatches.length > 0) {
-                  setActiveTab(searchMatches[0].tab);
+                  navigate(searchMatches[0].tab, searchMatches[0].group);
                   setSearchQuery('');
                 }
               }}
@@ -485,7 +490,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
                   key={`${match.tab}:${match.group ?? ''}:${match.label}`}
                   type="button"
                   onClick={() => {
-                    setActiveTab(match.tab);
+                    navigate(match.tab, match.group);
                     setSearchQuery('');
                   }}
                   style={{
@@ -538,43 +543,48 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           ) : (
           <>
           <SectionHeader>General</SectionHeader>
-          <TabButton label="General" icon={<GearNavIcon />} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
-          <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
-          <TabButton label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} onClick={() => setActiveTab('voice')} />
-          <TabButton label="Permissions" icon={<ShieldNavIcon />} active={activeTab === 'permissions'} onClick={() => setActiveTab('permissions')} />
+          <SettingsNavItem label="General" icon={<GearNavIcon />} active={activeTab === 'general'} tab="general" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} tab="appearance" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} tab="voice" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Permissions" icon={<ShieldNavIcon />} active={activeTab === 'permissions'} tab="permissions" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>Agents</SectionHeader>
-          <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
-          <TabButton label="Models" icon={<CpuNavIcon />} active={activeTab === 'models'} onClick={() => setActiveTab('models')} />
+          <SettingsNavItem label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} tab="operator-defaults" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Models" icon={<CpuNavIcon />} active={activeTab === 'models'} tab="models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>Workspace</SectionHeader>
-          <TabButton label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} onClick={() => setActiveTab('projects')} />
-          <TabButton label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} onClick={() => setActiveTab('git-prs')} />
-          <TabButton label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} onClick={() => setActiveTab('indexing')} />
+          <SettingsNavItem label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} tab="projects" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} tab="git-prs" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} tab="indexing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>Connections</SectionHeader>
           {process.env.NEXT_PUBLIC_O8_SHOW_BYOK === '1' && (
-            <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
+            <SettingsNavItem label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} tab="api-keys" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           )}
-          <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
-          <TabButton label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} onClick={() => setActiveTab('connections')} />
+          <SettingsNavItem label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} tab="mcp" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} tab="connections" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>System</SectionHeader>
-          <TabButton label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} onClick={() => setActiveTab('billing')} />
-          <TabButton label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
-          <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
-          <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
+          <SettingsNavItem label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} tab="billing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} tab="analytics" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} tab="diagnostics" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="About" icon={<InfoIcon />} active={activeTab === 'about'} tab="about" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           </>
           )}
+          {notice ? <p role="status" style={{ fontSize: 12, lineHeight: 1.4, padding: 10, color: 'var(--t-text-secondary)' }}>{notice}</p> : null}
         </div>
 
         {/* Center the actual tab width, not a wide frame around narrow cards.
             Tables and analytics retain a wider centered column. */}
         <div
           data-settings-content
+          ref={contentRef}
           style={{
             flex: 1,
             minWidth: 0,
+            minHeight: 0,
+            overflowY: 'auto',
+            scrollPaddingTop: 8,
             display: 'grid',
             gridTemplateColumns: `minmax(0, ${activeTab === 'projects' || activeTab === 'analytics' ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
             alignContent: 'start',
