@@ -350,7 +350,14 @@ export function OperatorDefaultsTab() {
           onClick={() => { void openTomlEditor(); }}
           style={{
             flexShrink: 0,
-            height: 30,
+            height: 32,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxSizing: 'border-box',
+            lineHeight: 1,
+            paddingTop: 0,
+            paddingBottom: 0,
             marginTop: 2,
             paddingLeft: 13,
             paddingRight: 13,
@@ -396,12 +403,12 @@ export function OperatorDefaultsTab() {
       <section>
         <SettingsGroup
           header="Fleet"
-          footnote="Advisory dispatches everything and resolves conflicts at rebase time; Strict holds overlapping packets until the active one merges — safer, slower."
+          footnote="Strict waits while another active task may edit the same files. Advisory allows both tasks to run and resolves conflicts later. New setups use 5 agents and Strict; saved choices are kept."
         >
           <SettingsRow
             icon={<LanesIcon />}
-            label="Agents in flight"
-            subtitle={lockedSub('parallelCap', `Up to ${values.parallelCap} dispatched packets run at once`)}
+            label="Concurrent agents"
+            subtitle={lockedSub('parallelCap', `Up to ${values.parallelCap} agent tasks run at once`)}
             accessory={
               <SettingsSegmented
                 value={activePresetKey}
@@ -418,7 +425,7 @@ export function OperatorDefaultsTab() {
           <SettingsRow
             icon={<MergeIcon />}
             label="Overlapping work"
-            subtitle={lockedSub('overlapGate', 'When two packets predict changes to the same files')}
+            subtitle={lockedSub('overlapGate', 'Choose whether tasks that may edit the same files can run together')}
             accessory={
               <SettingsSegmented
                 value={values.overlapGate}

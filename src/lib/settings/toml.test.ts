@@ -97,6 +97,17 @@ orchestrator_model = "gpt-6-astra"
     expect((await getOperatorDefaults()).values.orchestratorModel).toBe('gpt-6-astra');
   });
 
+  it('defaults Fleet to five and Strict while preserving explicit Advisory choices', async () => {
+    const initial = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
+    expect((await initial.json()).values).toMatchObject({ parallelCap: 5, overlapGate: 'strict' });
+
+    const saved = await POST(postDefaults({ overlapGate: 'advisory' }));
+    expect(saved.status).toBe(200);
+    const readback = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
+    expect((await readback.json()).values.overlapGate).toBe('advisory');
+    expect(parseOperatorDefaultsToml(readFileSync(tomlPath, 'utf8')).overlapGate).toBe('advisory');
+  });
+
   it('persists APFS dependency images through the real route and store', async () => {
     expect((await getOperatorDefaults()).values.apfsDependencyImages)
       .toBe(process.platform === 'darwin');
