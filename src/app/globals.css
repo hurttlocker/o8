@@ -2462,3 +2462,14 @@ button.workflow-file-item.workflow-file-item-active {
 @media (prefers-reduced-motion: reduce) {
   [data-design-composer] { animation: none !important; }
 }
+
+/* Settings scrolls without visible bars, including section previews and nested panes. */
+[data-settings-shell],
+[data-settings-shell] * {
+  scrollbar-width: none;
+}
+
+[data-settings-shell]::-webkit-scrollbar,
+[data-settings-shell] *::-webkit-scrollbar {
+  display: none;
+}
