@@ -230,6 +230,8 @@ export async function POST(request: NextRequest) {
   let starred = false;
   let pinned = false;
   let title: string | undefined;
+  let titleSource: 'code' | 'llm' | 'operator' | undefined;
+  let autoTitledAtCount: number | undefined;
   let planText: string | undefined;
   let repoName: string | undefined;
   let repoPath: string | undefined;
@@ -254,6 +256,12 @@ export async function POST(request: NextRequest) {
     pinned = existing.pinned === true;
     model = normalizeModel(existing.model);
     title = normalizeTitle(existing.title);
+    // Title provenance and refresh state are server-owned, never taken from body.
+    titleSource = existing.titleSource === 'code' || existing.titleSource === 'llm'
+      || existing.titleSource === 'operator' ? existing.titleSource : undefined;
+    autoTitledAtCount = typeof existing.autoTitledAtCount === 'number'
+      && Number.isInteger(existing.autoTitledAtCount) && existing.autoTitledAtCount >= 0
+      ? existing.autoTitledAtCount : undefined;
     planText = normalizePlanText(existing.planText);
     repoName = existing.repoName;
     repoPath = existing.repoPath;
@@ -334,6 +342,8 @@ export async function POST(request: NextRequest) {
       existingTitle: title,
       incomingTitle: body.title,
     }),
+    titleSource,
+    autoTitledAtCount,
     planText: normalizePlanText(body.planText) ?? planText ?? extractedPlanText,
     repoName: repoMetadata.repoName,
     repoPath: repoMetadata.repoPath,
