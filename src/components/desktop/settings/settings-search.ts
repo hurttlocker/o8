@@ -62,7 +62,8 @@ export function searchSettings(
 
 /** Registry population is generated from the tab inventory — see module doc. */
 export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
-  { tab: 'worktrees', tabLabel: 'Worktrees & storage', group: 'Storage usage', label: 'Current usage', description: 'Worktrees and disk space used across repositories' },
+  { tab: 'worktrees', tabLabel: 'Worktrees & storage', group: 'Storage usage', label: 'Space for new tasks', description: 'Free disk space, task reservations, and space available after minimum free space is kept', keywords: ['headroom', 'reserved', 'capacity'] },
+  { tab: 'worktrees', tabLabel: 'Worktrees & storage', group: 'Storage usage', label: 'Workspace files', description: 'Disk space used and total file size across repositories', keywords: ['usage', 'allocated', 'logical'] },
   { tab: 'worktrees', tabLabel: 'Worktrees & storage', group: 'Workspace parking', label: 'Parking mode', description: 'Temporarily reclaim eligible workspaces while preserving restoration information' },
   { tab: 'worktrees', tabLabel: 'Worktrees & storage', group: 'Minimum free space', label: 'Volume reserve', description: 'Percentage of disk capacity to keep available' },
   { tab: 'worktrees', tabLabel: 'Worktrees & storage', group: 'Minimum free space', label: 'Absolute floor', description: 'Minimum free disk space before starting tasks' },
