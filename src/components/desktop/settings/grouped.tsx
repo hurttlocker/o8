@@ -25,7 +25,7 @@ const DESTRUCTIVE = '#d94f3a';
 
 export function GroupHeader({ children }: { children: React.ReactNode }) {
   return (
-    <h2 style={{
+    <h2 data-settings-section={typeof children === 'string' ? children : undefined} style={{
       fontFamily: APP_FONT_STACK,
       fontSize: 15,
       fontWeight: 600,

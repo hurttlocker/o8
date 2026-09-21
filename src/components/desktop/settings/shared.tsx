@@ -448,7 +448,7 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
 
 export function SectionLabel({ number, children }: { number: string; children: React.ReactNode }) {
   return (
-    <h2 style={{
+    <h2 data-settings-section={typeof children === 'string' ? children : undefined} style={{
       display: 'flex',
       alignItems: 'baseline',
       gap: 10,
