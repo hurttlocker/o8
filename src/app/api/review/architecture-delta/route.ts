@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import { readLaneReviewDiff } from '@/lib/lane/review-source';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -28,10 +27,6 @@ export async function GET(request: NextRequest) {
       const lane = getLane(laneId) ?? findLatestLaneByPacket(laneId);
       if (!lane) {
         return NextResponse.json({ ok: false, error: 'No review lane found for that id or packet.' }, { status: 404 });
-      }
-      const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), lane.packetId);
-      if (ownershipRefusal) {
-        return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
       }
       const review = await readLaneReviewDiff(lane);
       if (review.source.kind !== 'materialized') {

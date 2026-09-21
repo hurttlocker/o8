@@ -30,6 +30,8 @@ export interface ArchitectureDeltaResult {
   edges: ArchitectureDeltaEdge[];
   summary: ArchitectureDeltaSummary;
   unsupportedPaths: string[];
+  omittedPaths: string[];
+  resolutionWarnings: string[];
   truncated: boolean;
   generatedAt: string;
 }

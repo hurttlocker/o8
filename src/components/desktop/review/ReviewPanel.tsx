@@ -30,6 +30,7 @@ import { MissingWorktreeNotice } from './panel/MissingWorktreeNotice';
 import { WORKTREE_MISSING_CODE } from '@/lib/lane/review-target-codes';
 import { useArchitectureDelta } from './useArchitectureDelta';
 import { ArchitectureDeltaCard } from './panel/ArchitectureDeltaCard';
+import { reviewPathCandidates, reviewRowPathForSourcePath } from './panel/review-paths';
 
 /**
  * ReviewPanel — the dedicated Review surface for the right panel's `review`
@@ -44,11 +45,6 @@ import { ArchitectureDeltaCard } from './panel/ArchitectureDeltaCard';
 
 interface LastTurnScopeResponse {
   filePaths?: string[];
-}
-
-function reviewPathCandidates(reviewPath: string) {
-  const parts = reviewPath.includes(' → ') ? reviewPath.split(' → ') : [reviewPath];
-  return [reviewPath, ...parts].filter(Boolean);
 }
 
 function lastTurnPathMatches(reviewPath: string, lastTurnPaths: Set<string>) {
@@ -149,25 +145,16 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const repoLabel = currentRepo?.name ?? (repoPath ? (repoPath.split('/').filter(Boolean).pop() ?? 'Repo') : 'Repo');
   const changedFilesKey = useMemo(() => changes.files.map((file) => file.path).join('\n'), [changes.files]);
   const diffRepoPath = changes.repoPath ?? repoPath ?? null;
-  const architectureAnalysisKey = useMemo(() => changes.files.map((file) => (
-    `${file.path}:${file.status}:${file.additions ?? 0}:${file.deletions ?? 0}`
-  )).join('\n'), [changes.files]);
   const architecture = useArchitectureDelta({
     repoPath: diffRepoPath,
     laneId: reviewLaneId,
-    analysisKey: architectureAnalysisKey,
+    analysisKey: changes.files,
     enabled: Boolean(diffRepoPath && changes.files.length > 0 && !changes.loading),
   });
   const handleRefresh = () => {
-    void Promise.all([changes.refresh(), architecture.refresh()]);
+    void changes.refresh();
     setMenuOpen(false);
   };
-  const jumpFromArchitecture = useCallback((path: string) => {
-    setScope('all');
-    setFileQuery('');
-    jumpToFile(path);
-  }, [jumpToFile]);
-
   useEffect(() => {
     if (!repoPath) {
       setLastTurnPaths(new Set());
@@ -200,6 +187,14 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     else if (scope === 'last-turn') list = list.filter((file) => lastTurnPathMatches(file.path, lastTurnPaths));
     return list;
   }, [changes.files, lastTurnPaths, scope]);
+  const architectureScopePaths = useMemo(
+    () => [...new Set(visible.flatMap((file) => reviewPathCandidates(file.path)))],
+    [visible],
+  );
+  const jumpFromArchitecture = useCallback((path: string) => {
+    const reviewPath = reviewRowPathForSourcePath(path, visible.map((file) => file.path));
+    if (reviewPath) jumpToFile(reviewPath);
+  }, [jumpToFile, visible]);
   const drawerQuery = fileQuery.trim().toLowerCase();
   const drawerFiles = useMemo(() => (
     drawerQuery ? visible.filter((file) => file.path.toLowerCase().includes(drawerQuery)) : visible
@@ -429,7 +424,6 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
           />
         ) : (
           <>
-            <ArchitectureDeltaCard analysis={architecture} onSelectFile={jumpFromArchitecture} />
             {reviewLaneId ? (
               <LaneReviewSummaryHeader
                 summary={laneSummary.summary}
@@ -444,6 +438,11 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
                 onMerged={() => { void changes.refresh(); }}
               />
             ) : null}
+            <ArchitectureDeltaCard
+              analysis={architecture}
+              scopePaths={architectureScopePaths}
+              onSelectFile={jumpFromArchitecture}
+            />
             {visible.map((file) => (
             <ReviewFileRow
               key={file.path}

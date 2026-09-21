@@ -7,7 +7,7 @@ import type { ArchitectureDeltaResult } from '@/lib/review/architecture-delta-ty
 interface UseArchitectureDeltaOptions {
   repoPath?: string | null;
   laneId?: string | null;
-  analysisKey: string;
+  analysisKey: unknown;
   enabled: boolean;
 }
 
@@ -64,13 +64,6 @@ export function useArchitectureDelta({
     void refresh();
     return () => { requestVersion.current += 1; };
   }, [analysisKey, refresh]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    const handler = () => { void refresh(); };
-    window.addEventListener('o8:lifecycle-reconcile', handler);
-    return () => window.removeEventListener('o8:lifecycle-reconcile', handler);
-  }, [enabled, refresh]);
 
   return { result, loading, error, refresh };
 }

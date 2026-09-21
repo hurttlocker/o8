@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const architectureDeltaRoute = await import('@/app/api/review/architecture-delta/route');
+const { buildArchitectureDelta } = await import('@/lib/review/architecture-delta');
 const fixturePaths = new Set<string>();
 
 afterEach(() => {
@@ -99,5 +100,133 @@ describe('review architecture delta route', () => {
       edges: [],
     });
     expect(body.unsupportedPaths).toContain('README.md');
+  });
+
+  it('rejects a mixed snapshot when modified bytes change without changing porcelain status', async () => {
+    const repoPath = createRepo();
+    write(repoPath, 'src/feature.ts', 'export const feature = 2;\n');
+
+    const result = await buildArchitectureDelta({
+      repoPath,
+      afterSnapshotForTesting: () => {
+        write(repoPath, 'src/feature.ts', 'export const feature = 3;\n');
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'unavailable',
+      reason: 'The workspace changed during architecture analysis. Refresh Review to retry.',
+    });
+  });
+
+  it('rejects source symlinks before reading and reports them as safely omitted', async () => {
+    const repoPath = createRepo();
+    symlinkSync('/dev/zero', path.join(repoPath, 'src/stream.ts'));
+
+    const response = await architectureDeltaRoute.GET(requestFor(repoPath));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, status: 'ready', truncated: true });
+    expect(body.omittedPaths).toContain('src/stream.ts');
+    expect(body.nodes).toContainEqual(expect.objectContaining({ path: 'src/stream.ts', state: 'added' }));
+    expect(body.edges.some((edge: { from: string }) => edge.from === 'src/stream.ts')).toBe(false);
+  });
+
+  it('does not fabricate dependency removals when a changed source exceeds the read bound', async () => {
+    const repoPath = createRepo();
+    write(repoPath, 'src/feature.ts', `export const oversized = '${'x'.repeat(513 * 1024)}';\n`);
+
+    const response = await architectureDeltaRoute.GET(requestFor(repoPath));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, status: 'ready', truncated: true });
+    expect(body.omittedPaths).toContain('src/feature.ts');
+    expect(body.edges).not.toContainEqual(expect.objectContaining({
+      from: 'src/feature.ts',
+      to: 'src/core.ts',
+      state: 'removed',
+    }));
+  });
+
+  it('bounds import processing without presenting a partially parsed source as evidence', async () => {
+    const repoPath = createRepo();
+    write(
+      repoPath,
+      'src/feature.ts',
+      `${Array.from({ length: 2_001 }, (_, index) => `import './missing-${index}';`).join('\n')}\nexport const feature = 2;\n`,
+    );
+
+    const response = await architectureDeltaRoute.GET(requestFor(repoPath));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, status: 'ready', truncated: true });
+    expect(body.edges).not.toContainEqual(expect.objectContaining({
+      from: 'src/feature.ts',
+      to: 'src/core.ts',
+      state: 'removed',
+    }));
+  });
+
+  it('uses each snapshot config and resolves current baseUrl imports without invented aliases', async () => {
+    const repoPath = createRepo();
+    write(repoPath, 'tsconfig.json', JSON.stringify({
+      compilerOptions: {
+        baseUrl: 'src',
+      },
+    }));
+    write(repoPath, 'src/feature.ts', "import { nextCore } from 'next-core';\nexport const feature = nextCore;\n");
+    write(repoPath, 'src/next-core.ts', 'export const nextCore = 2;\n');
+
+    const response = await architectureDeltaRoute.GET(requestFor(repoPath));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'src/feature.ts', to: 'src/core.ts', state: 'removed' }),
+      expect.objectContaining({ from: 'src/feature.ts', to: 'src/next-core.ts', state: 'added' }),
+    ]));
+  });
+
+  it('shows dependencies from a deleted module as removed evidence', async () => {
+    const repoPath = createRepo();
+    rmSync(path.join(repoPath, 'src/feature.ts'));
+    write(repoPath, 'src/entry.ts', 'export const entry = 1;\n');
+
+    const response = await architectureDeltaRoute.GET(requestFor(repoPath));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.nodes).toContainEqual(expect.objectContaining({
+      path: 'src/feature.ts',
+      state: 'removed',
+      focusPath: 'src/feature.ts',
+    }));
+    expect(body.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'src/feature.ts', to: 'src/core.ts', state: 'removed' }),
+      expect.objectContaining({ from: 'src/entry.ts', to: 'src/feature.ts', state: 'removed' }),
+    ]));
+  });
+
+  it('keeps rename focus on the reviewable destination while showing both topology sides', async () => {
+    const repoPath = createRepo();
+    git(repoPath, ['mv', 'src/feature.ts', 'src/renamed-feature.ts']);
+    write(repoPath, 'src/entry.ts', "import { feature } from './renamed-feature';\nexport const entry = feature;\n");
+
+    const response = await architectureDeltaRoute.GET(requestFor(repoPath));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'src/feature.ts', state: 'removed', focusPath: 'src/renamed-feature.ts' }),
+      expect.objectContaining({ path: 'src/renamed-feature.ts', state: 'added', focusPath: 'src/renamed-feature.ts' }),
+    ]));
+    expect(body.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'src/feature.ts', to: 'src/core.ts', state: 'removed' }),
+      expect.objectContaining({ from: 'src/renamed-feature.ts', to: 'src/core.ts', state: 'added' }),
+    ]));
   });
 });
