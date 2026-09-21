@@ -16,7 +16,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 ## Now
 
-The next repair batch is [#2528](https://github.com/hurttlocker/o8/issues/2528) and [#2529](https://github.com/hurttlocker/o8/issues/2529), found by the effort-compatibility audit [#2520](https://github.com/hurttlocker/o8/issues/2520), plus [#2530](https://github.com/hurttlocker/o8/issues/2530) and [#2531](https://github.com/hurttlocker/o8/issues/2531), found by the inference-consumption audit [#2522](https://github.com/hurttlocker/o8/issues/2522). Version 0.1.760 shipped the earlier mission-effort, Brain-warmup, and managed-Brain routing fixes; these four findings remain open.
+The effort-compatibility fixes found by [#2520](https://github.com/hurttlocker/o8/issues/2520) shipped in version 0.1.761. The next repair batch is [#2530](https://github.com/hurttlocker/o8/issues/2530) and [#2531](https://github.com/hurttlocker/o8/issues/2531), found by the inference-consumption audit [#2522](https://github.com/hurttlocker/o8/issues/2522); these two findings remain open.
 
 After that batch, run the correctness and reliability queue: mobile approval-route parity [#2479](https://github.com/hurttlocker/o8/issues/2479) and its completed-merge equality test [#2480](https://github.com/hurttlocker/o8/issues/2480), remaining dispatch and lifecycle findings, then the dedicated Symon review [#2534](https://github.com/hurttlocker/o8/issues/2534). That review is queued, not claimed or started. Its scope is existing session, payer, model, tool-result, interruption, reconnect, and approval behavior; feature work stays in its separate program.
 
