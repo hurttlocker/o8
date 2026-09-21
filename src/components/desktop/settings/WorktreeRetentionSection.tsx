@@ -594,12 +594,12 @@ export function WorktreeRetentionSection() {
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Automatic cleanup"
-          footnote="When either limit is exceeded, o8 cleans up the oldest eligible workspaces. Active or reviewing tasks and uncommitted changes are skipped. Unmerged commits are kept as branches. Set a limit to 0 for no limit."
+          footnote="These limits apply to inactive task workspaces in each repository. During periodic cleanup, o8 removes the oldest eligible workspaces when either threshold is exceeded. Active or reviewing tasks and unsaved changes are protected; unmerged commits are kept as branches. Protected workspaces can keep usage above the limits. Set a limit to 0 (∞) to stop using that threshold."
         >
           <SettingsRow
             icon={<StackIcon />}
-            label="Max worktrees"
-            subtitle={lockedSub('worktreeMaxCount', 'Most packet worktrees kept per repo before the oldest safe ones are pruned')}
+            label="Workspace count per repository"
+            subtitle={lockedSub('worktreeMaxCount', 'How many inactive task workspaces to keep before cleanup')}
             accessory={
               <Stepper
                 value={values.worktreeMaxCount}
@@ -614,8 +614,8 @@ export function WorktreeRetentionSection() {
           />
           <SettingsRow
             icon={<GaugeIcon />}
-            label="Max total size"
-            subtitle={lockedSub('worktreeMaxTotalGb', 'Total on-disk size of packet worktrees per repo before the oldest safe ones are pruned')}
+            label="Disk usage per repository"
+            subtitle={lockedSub('worktreeMaxTotalGb', 'Disk space for inactive task workspaces before cleanup')}
             accessory={
               <Stepper
                 value={values.worktreeMaxTotalGb}
