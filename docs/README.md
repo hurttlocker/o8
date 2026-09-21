@@ -2,6 +2,10 @@
 
 This documentation covers using o8, understanding and extending its architecture, and operating production builds.
 
+Agents start with [`AGENTS.md`](../AGENTS.md). Detailed commands, repository orientation, and the
+map from former always-loaded instructions to scoped sources live in
+[`AGENT_REFERENCE.md`](../AGENT_REFERENCE.md).
+
 ## Reference collections
 
 | Collection | What it contains |
