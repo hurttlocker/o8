@@ -28,6 +28,8 @@ import { FilesDrawer } from './panel/FilesDrawer';
 import { ReviewSkeleton } from './panel/ReviewSkeleton';
 import { MissingWorktreeNotice } from './panel/MissingWorktreeNotice';
 import { WORKTREE_MISSING_CODE } from '@/lib/lane/review-target-codes';
+import { useArchitectureDelta } from './useArchitectureDelta';
+import { ArchitectureDeltaCard } from './panel/ArchitectureDeltaCard';
 
 /**
  * ReviewPanel — the dedicated Review surface for the right panel's `review`
@@ -125,10 +127,6 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     setRichPreview((value) => !value);
     setMenuOpen(false);
   };
-  const handleRefresh = () => {
-    void changes.refresh();
-    setMenuOpen(false);
-  };
   const handleSelectScope = (next: ReviewScope) => {
     setScope(next);
     setScopeOpen(false);
@@ -151,6 +149,24 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const repoLabel = currentRepo?.name ?? (repoPath ? (repoPath.split('/').filter(Boolean).pop() ?? 'Repo') : 'Repo');
   const changedFilesKey = useMemo(() => changes.files.map((file) => file.path).join('\n'), [changes.files]);
   const diffRepoPath = changes.repoPath ?? repoPath ?? null;
+  const architectureAnalysisKey = useMemo(() => changes.files.map((file) => (
+    `${file.path}:${file.status}:${file.additions ?? 0}:${file.deletions ?? 0}`
+  )).join('\n'), [changes.files]);
+  const architecture = useArchitectureDelta({
+    repoPath: diffRepoPath,
+    laneId: reviewLaneId,
+    analysisKey: architectureAnalysisKey,
+    enabled: Boolean(diffRepoPath && changes.files.length > 0 && !changes.loading),
+  });
+  const handleRefresh = () => {
+    void Promise.all([changes.refresh(), architecture.refresh()]);
+    setMenuOpen(false);
+  };
+  const jumpFromArchitecture = useCallback((path: string) => {
+    setScope('all');
+    setFileQuery('');
+    jumpToFile(path);
+  }, [jumpToFile]);
 
   useEffect(() => {
     if (!repoPath) {
@@ -413,6 +429,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
           />
         ) : (
           <>
+            <ArchitectureDeltaCard analysis={architecture} onSelectFile={jumpFromArchitecture} />
             {reviewLaneId ? (
               <LaneReviewSummaryHeader
                 summary={laneSummary.summary}
