@@ -115,7 +115,7 @@ function IconTile({ icon, destructive }: { icon: React.ReactNode; destructive?: 
   );
 }
 
-export function ValuePill({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'destructive' }) {
+export function ValuePill({ children, tone = 'default', style }: { children: React.ReactNode; tone?: 'default' | 'success' | 'destructive'; style?: React.CSSProperties }) {
   return (
     <span style={{
       fontFamily: APP_FONT_STACK,
@@ -130,6 +130,7 @@ export function ValuePill({ children, tone = 'default' }: { children: React.Reac
       paddingBottom: 3,
       whiteSpace: 'nowrap',
       flexShrink: 0,
+      ...style,
     }}>
       {children}
     </span>

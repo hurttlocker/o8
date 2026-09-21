@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
+import { RAMS_BUTTON_GEOMETRY } from './control-geometry';
 
 // ── Types ──
 
@@ -540,6 +541,7 @@ export function RamsButton({
   type = 'button',
   busy = false,
   icon,
+  width,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -548,6 +550,7 @@ export function RamsButton({
   type?: 'button' | 'submit';
   busy?: boolean;
   icon?: React.ReactNode;
+  width?: number;
 }) {
   const tone = variant === 'danger' ? '#d94f3a' : variant === 'ghost' ? 'var(--t-text-secondary)' : RAMS_ACCENT;
   const border = variant === 'ghost'
@@ -570,24 +573,13 @@ export function RamsButton({
       onClick={onClick}
       disabled={disabled || busy}
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        ...RAMS_BUTTON_GEOMETRY,
+        width,
         gap: 7,
-        height: 32,
-        paddingLeft: 14,
-        paddingRight: 14,
-        borderRadius: 9,
-        borderWidth: 1,
-        borderStyle: 'solid',
         borderColor: disabled ? RAMS_HAIRLINE_SOFT : border,
         background: bg,
         color: disabled ? RAMS_INK_QUIET : tone,
         cursor: disabled || busy ? 'default' : 'pointer',
-        fontFamily: APP_FONT_STACK,
-        fontSize: 12,
-        fontWeight: 400,
-        letterSpacing: '-0.01em',
         whiteSpace: 'nowrap',
         flexShrink: 0,
         transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
