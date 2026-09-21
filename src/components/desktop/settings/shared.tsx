@@ -448,22 +448,22 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
 
 export function SectionLabel({ number, children }: { number: string; children: React.ReactNode }) {
   return (
-    <div style={{
+    <h2 style={{
       display: 'flex',
       alignItems: 'baseline',
       gap: 10,
       fontFamily: APP_FONT_STACK,
-      fontSize: 10,
-      fontWeight: 300,
-      letterSpacing: '0.14em',
-      textTransform: 'uppercase',
-      color: 'var(--t-text-secondary)',
+      fontSize: 15,
+      fontWeight: 600,
+      lineHeight: 1.4,
+      color: 'var(--t-text)',
+      margin: 0,
       marginBottom: 14,
     }}>
       <span style={{ color: RAMS_ACCENT }}>{number}</span>
       <span style={{ color: RAMS_INK_QUIET }}>—</span>
       <span>{children}</span>
-    </div>
+    </h2>
   );
 }
 

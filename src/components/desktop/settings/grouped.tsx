@@ -2,7 +2,7 @@
 
 /**
  * Inset-grouped settings primitives — the o8-mobile settings system ported to
- * desktop (epic #1450). Apple Settings grouping (uppercase section header →
+ * desktop (epic #1450). Apple Settings grouping (section heading →
  * inset rounded card → icon-tile rows with trailing accessories + label-inset
  * dividers) on o8's paper/ink tokens. Selection stays monochrome — alpha-gray
  * fills and hairlines; hue is reserved for destructive.
@@ -25,19 +25,18 @@ const DESTRUCTIVE = '#d94f3a';
 
 export function GroupHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{
+    <h2 style={{
       fontFamily: APP_FONT_STACK,
-      fontSize: 10,
-      fontWeight: 400,
-      letterSpacing: '0.14em',
-      textTransform: 'uppercase',
-      color: RAMS_INK_QUIET,
+      fontSize: 15,
+      fontWeight: 600,
+      lineHeight: 1.4,
+      color: 'var(--t-text)',
+      margin: 0,
       paddingLeft: ROW_PAD_H + 2,
-      paddingBottom: 7,
-      userSelect: 'none',
+      paddingBottom: 10,
     }}>
       {children}
-    </div>
+    </h2>
   );
 }
 
