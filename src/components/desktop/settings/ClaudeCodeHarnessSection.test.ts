@@ -41,7 +41,7 @@ describe('ClaudeCodeHarnessSection', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(container.textContent).toContain('Claude Code harness');
+    expect(container.textContent).toContain('Claude model connection');
     expect(container.textContent).toContain('deepseek/deepseek-v4-pro-0813');
     expect(container.textContent).toContain('API billed');
     expect(container.textContent).toContain('Codex subscription');

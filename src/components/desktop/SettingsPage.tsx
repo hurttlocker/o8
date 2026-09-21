@@ -47,6 +47,7 @@ import type { GitHubConnectionProps } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
 import { IndexingTab } from './settings/IndexingTab';
 import { WorktreeRetentionSection } from './settings/WorktreeRetentionSection';
+import { LocalModelsTab } from './settings/LocalModelsTab';
 import { ModelsTab } from './settings/ModelsTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
@@ -564,6 +565,8 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           <SettingsNavItem label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} tab="operator-defaults" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Models & providers" icon={<CpuNavIcon />} active={activeTab === 'models'} tab="models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
+          <SettingsNavItem label="Local models" icon={<CpuNavIcon />} active={activeTab === 'local-models'} tab="local-models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+
           <SectionHeader>Workspace</SectionHeader>
           <SettingsNavItem label="Worktrees & storage" icon={<LayersIcon />} active={activeTab === 'worktrees'} tab="worktrees" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} tab="projects" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
@@ -571,9 +574,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           <SettingsNavItem label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} tab="indexing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>Connections</SectionHeader>
-          {process.env.NEXT_PUBLIC_O8_SHOW_BYOK === '1' && (
             <SettingsNavItem label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} tab="api-keys" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
-          )}
           <SettingsNavItem label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} tab="mcp" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} tab="connections" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
@@ -607,8 +608,9 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           {activeTab === 'general' && (
             <GeneralTab onNavigateTab={setActiveTab} />
           )}
+          {activeTab === 'local-models' && <LocalModelsTab />}
           {activeTab === 'api-keys' && (
-            <APIKeysTab />
+            <APIKeysTab onNavigateTab={navigate} />
           )}
           {activeTab === 'mcp' && (
             <MCPTab />

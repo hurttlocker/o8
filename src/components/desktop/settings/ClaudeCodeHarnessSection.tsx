@@ -118,7 +118,7 @@ export function ClaudeCodeHarnessSection() {
 
   if (!data) {
     return (
-      <SettingsGroup header="Claude Code harness" footnote={error ?? 'Loading the harness carrier…'}>
+      <SettingsGroup header="Claude model connection" footnote={error ?? 'Loading the harness carrier…'}>
         <SettingsRow icon={<HarnessIcon />} label="Model source" value="Loading…" disabled />
       </SettingsGroup>
     );
@@ -135,7 +135,7 @@ export function ClaudeCodeHarnessSection() {
 
   return (
     <SettingsGroup
-      header="Claude Code harness"
+      header="Claude model connection"
       footnote={error ?? (gatewayActive
         ? 'Each orchestrator chat gets its own resident Claude Code session and config. OpenRouter supplies the model and bills the API usage; your Claude and Codex subscriptions are not charged.'
         : codexActive
@@ -160,7 +160,7 @@ export function ClaudeCodeHarnessSection() {
       {gatewayActive ? (
         <SettingsRow
           icon={<HarnessIcon />}
-          label="Harness model"
+          label="Model"
           subtitle="Live tool-capable OpenRouter catalogue"
           accessory={
             <AcpModelPickerPopover
@@ -221,7 +221,7 @@ export function ClaudeCodeHarnessSection() {
       {codexActive && data.codexProxy.authenticated ? (
         <SettingsRow
           icon={<HarnessIcon />}
-          label="Harness model"
+          label="Model"
           subtitle="Models reported by the connected Codex subscription"
           accessory={
             <AcpModelPickerPopover
@@ -280,7 +280,7 @@ export function ClaudeCodeHarnessSection() {
         icon={<HarnessIcon />}
         label="Billing"
         subtitle={gatewayActive
-          ? 'Requires the encrypted OpenRouter key in API Keys below'
+          ? 'Requires the encrypted OpenRouter key in the API keys page'
           : codexActive
             ? 'No API key; worker turns consume the connected Codex subscription quota'
             : 'Uses the account or gateway already configured in Claude Code'}

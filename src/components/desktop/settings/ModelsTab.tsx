@@ -2,7 +2,7 @@
 
 /** Provider and model choices share one settings state; task behavior lives in Dispatch. */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   APP_FONT_STACK,
@@ -11,11 +11,9 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
 } from './shared';
-import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow, ValuePill } from './grouped';
-import { fetchOperatorDefaults } from './operator-defaults-client';
+import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
+import { useModelSettings } from './useModelSettings';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
-import { ApiKeysProviderList } from './APIKeysTab';
-import { LocalModelsSection } from './LocalModelsSection';
 import {
   PickerMenu,
   BRAIN_CODEX_MODEL_OPTIONS,
@@ -24,7 +22,6 @@ import {
   CLAUDE_WORKER_EFFORT_OPTIONS,
   ENV_LOCKED_REASON,
   type OperatorDefaults,
-  type OperatorDefaultsResponse,
   type ThinkingEffort,
 } from './dispatch-shared';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
@@ -43,7 +40,7 @@ interface DetectedTool {
   authHint?: string;
 }
 
-type DetectState = 'loading' | 'ready';
+type DetectState = 'loading' | 'ready' | 'error';
 
 // ── Row icons (raw SVG only — React icon libs don't render in the webview) ──
 
@@ -72,24 +69,20 @@ function CpuIcon() {
   );
 }
 
-function TierLabel(tier: 'frontier' | 'standard' | 'local'): string {
-  if (tier === 'frontier') return 'Frontier';
-  if (tier === 'standard') return 'Standard';
-  return 'Local';
-}
-
 // Short, honest one-liners keyed off runtime-capabilities.ts (its `description`
 // strings run long; these fit a settings row).
 const RUNTIME_BLURB: Record<string, string> = {
-  codex: 'GPT-6 Astra orchestrates, GPT-5.6 Terra works',
-  'claude-code': 'Claude Code harness, native account or API gateway',
-  gemini: 'Retired CLI adapter — existing lanes stay readable',
-  opencode: 'OpenCode 2 multi-provider CLI, routes through your provider keys',
-  cursor: 'Cursor CLI worker — subscription or CURSOR_API_KEY',
-  grok: 'Grok Build, using the current model selected by its CLI',
+  codex: 'Codex connection and default worker effort',
+  'claude-code': 'Claude Code connection and default worker effort',
+  antigravity: 'Google account connection for agent tasks',
+  '3code': 'Uses the providers and models configured in 3code',
+  opencode: 'Uses the providers configured in OpenCode',
+  cursor: 'Cursor account or API key connection',
+  grok: 'Uses the model selected in Grok Build',
 };
 
 function DetectionPill({ tool, state }: { tool: DetectedTool | undefined; state: DetectState }) {
+  if (state === 'error') return <ValuePill>Unavailable</ValuePill>;
   if (state === 'loading') {
     return <ValuePill>Checking…</ValuePill>;
   }
@@ -112,52 +105,7 @@ function TrailingCluster({ children }: { children: React.ReactNode }) {
 }
 
 export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab) => void }) {
-  // ── Operator defaults (shared store with the Dispatch tab) ──
-  const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
-
-  const loadDefaults = useCallback(async () => {
-    try {
-      const response = await fetchOperatorDefaults();
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load model settings.');
-      }
-      setData(payload as OperatorDefaultsResponse);
-      setNotice(null);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Failed to load model settings.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void loadDefaults(); }, [loadDefaults]);
-
-  const updateField = useCallback(<K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => {
-    void (async () => {
-      setBusyField(field);
-      setNotice(null);
-      try {
-        const response = await fetchOperatorDefaults({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ [field]: value }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to update setting.');
-        }
-        setData(payload as OperatorDefaultsResponse);
-      } catch (error) {
-        setNotice(error instanceof Error ? error.message : 'Failed to update setting.');
-      } finally {
-        setBusyField(null);
-      }
-    })();
-  }, []);
+  const { data, loading, notice, busyField, updateField } = useModelSettings();
 
   // ── Runtime detection ──
   const [detectState, setDetectState] = useState<DetectState>('loading');
@@ -166,7 +114,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
   useEffect(() => {
     let alive = true;
     fetch('/api/setup/detect', { cache: 'no-store' })
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error('Tool detection failed'); return r.json(); })
       .then((payload: { tools?: DetectedTool[] }) => {
         if (!alive) return;
         const map: Record<string, DetectedTool> = {};
@@ -176,7 +124,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         setTools(map);
         setDetectState('ready');
       })
-      .catch(() => { if (alive) setDetectState('ready'); });
+      .catch(() => { if (alive) setDetectState('error'); });
     return () => { alive = false; };
   }, []);
 
@@ -203,7 +151,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
 
   const runtimeSubtitle = (id: keyof typeof ORCHESTRATOR_RUNTIMES) => {
     const cap = ORCHESTRATOR_RUNTIMES[id];
-    return `${TierLabel(cap.tier)} · ${RUNTIME_BLURB[id] ?? cap.shortLabel}`;
+    return RUNTIME_BLURB[id] ?? cap.shortLabel;
   };
 
   return (
@@ -239,10 +187,11 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
 
       <ModelRoutingControls data={data!} busyField={busyField} updateField={updateField} />
 
-      {/* ── Runtimes ── */}
-      <section style={{ marginTop: 28 }}>
+      <SettingsAdvanced label="Connected tools" description={detectState === 'loading'
+        ? 'Checking installed tools…'
+        : detectState === 'error' ? 'Could not check connections. Reopen this page to try again.'
+        : `Ready: ${Object.entries(tools).filter(([id, tool]) => id in RUNTIME_BLURB && tool.ready).map(([id]) => ORCHESTRATOR_RUNTIMES[id as keyof typeof ORCHESTRATOR_RUNTIMES].label).join(', ') || 'none confirmed'}. Expand to see connection status and worker options.`}>
         <SettingsGroup
-          header="Connected runtimes"
           footnote="Installed tools and their default thinking effort. Availability is detected from your machine."
         >
           {/* Codex — worker effort */}
@@ -299,26 +248,18 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
             accessory={<TrailingCluster><DetectionPill tool={tools.cursor} state={detectState} /></TrailingCluster>}
             divider
           />
-          {/* Gemini — enable toggle (experimentalGemini) */}
           <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.gemini.accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES.gemini.label}
-            subtitle={lockedSub('experimentalGemini', runtimeSubtitle('gemini'))}
-            accessory={
-              <TrailingCluster>
-                <DetectionPill tool={tools.gemini} state={detectState} />
-                <SettingsToggleButton
-                  checked={values.experimentalGemini}
-                  disabled={envLocked('experimentalGemini') || busyField === 'experimentalGemini'}
-                  onChange={(next) => {
-                    updateField('experimentalGemini', next);
-                    if (!next && values.defaultDispatchRuntime === 'gemini') {
-                      updateField('defaultDispatchRuntime', 'codex');
-                    }
-                  }}
-                />
-              </TrailingCluster>
-            }
+            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.antigravity.accentColor} />}
+            label="Antigravity"
+            subtitle={tools.antigravity?.authHint ?? runtimeSubtitle('antigravity')}
+            accessory={<DetectionPill tool={tools.antigravity} state={detectState} />}
+            divider
+          />
+          <SettingsRow
+            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES['3code'].accentColor} />}
+            label="3code"
+            subtitle={runtimeSubtitle('3code')}
+            accessory={<DetectionPill tool={tools['3code']} state={detectState} />}
             divider
           />
           {/* opencode — enable toggle (experimentalOpencode) */}
@@ -343,11 +284,37 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
             }
           />
         </SettingsGroup>
+      </SettingsAdvanced>
+
+      <SettingsAdvanced label="Claude Code settings" description="Model connection and account options for Claude chat and workers."
+        initiallyOpen={values.subscriptionProfile === 'claude-only' || (values.subscriptionProfile !== 'codex-only' && (values.orchestratorBackend === 'claude' || values.orchestratorBackend === 'collide' || (values.orchestratorBackend === 'auto' && values.inAppOrchestratorEnabled)))}>
+        <ClaudeCodeHarnessSection />
+      {/* ── Orchestrator ── */}
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Claude account model"
+          footnote="The default model for chat using the native account connection. Other connections use their own model controls above."
+        >
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Native Claude model"
+            subtitle={lockedSub('orchestratorModel', 'Used with Native account. Other connections use the model selected above.')}
+            accessory={
+              <PickerMenu<string>
+                value={values.orchestratorModel}
+                options={ORCHESTRATOR_MODEL_OPTIONS}
+                onChange={(next) => { updateField('orchestratorModel', next); }}
+                disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
+                minWidth={150}
+              />
+            }
+            disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
+            divider
+          />
+        </SettingsGroup>
       </section>
 
-      <section style={{ marginTop: 28 }}>
-        <ClaudeCodeHarnessSection />
-      </section>
+      </SettingsAdvanced>
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
@@ -469,39 +436,6 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </SettingsGroup>
       </section>
 
-      {/* ── Orchestrator ── */}
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Chat model"
-          footnote="The default model for chat using the native account connection. Other connections use their own model controls above."
-        >
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Native Claude model"
-            subtitle={lockedSub('orchestratorModel', 'Used when the Claude Code harness source is Native account; other sources use the harness model above')}
-            accessory={
-              <PickerMenu<string>
-                value={values.orchestratorModel}
-                options={ORCHESTRATOR_MODEL_OPTIONS}
-                onChange={(next) => { updateField('orchestratorModel', next); }}
-                disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-                minWidth={150}
-              />
-            }
-            disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-            divider
-          />
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Task review & supervision"
-            subtitle="Automatic fixes, review behavior, and merge approval."
-            onPress={onNavigateTab ? () => onNavigateTab('operator-defaults') : undefined}
-            value="Dispatch"
-            chevron={Boolean(onNavigateTab)}
-          />
-        </SettingsGroup>
-      </section>
-
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Metered packet limits"
@@ -545,46 +479,16 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </SettingsGroup>
       </section>
 
-      {/* ── API keys (BYOK — unhidden here, no env flag) ── */}
       <section style={{ marginTop: 28 }}>
-        <GroupHeader>API keys</GroupHeader>
-        <div style={{
-          borderRadius: 14,
-          border: '1px solid var(--t-panel-border)',
-          background: 'var(--t-bg-card)',
-          paddingLeft: 14,
-          paddingRight: 14,
-          paddingTop: 2,
-          paddingBottom: 6,
-          maxWidth: 620,
-        }}>
-          <ApiKeysProviderList />
-        </div>
-        <div style={{ maxWidth: 620 }}>
-          <GroupFootnote>
-            Bring your own provider keys. AES-256-GCM encrypted, written to <span style={{ fontFamily: 'var(--font-sans-system)' }}>~/.o8/.env.local</span>, and active immediately — they never leave this machine.
-          </GroupFootnote>
-        </div>
+        <SettingsGroup header="More setup">
+          <SettingsRow icon={<CpuIcon />} label="API keys" subtitle="Manage provider keys and find voice service keys."
+            onPress={onNavigateTab ? () => onNavigateTab('api-keys') : undefined} chevron={Boolean(onNavigateTab)} divider />
+          <SettingsRow icon={<CpuIcon />} label="Local models" subtitle="Connect models running on your own computer or server."
+            onPress={onNavigateTab ? () => onNavigateTab('local-models') : undefined} chevron={Boolean(onNavigateTab)} divider />
+          <SettingsRow icon={<CpuIcon />} label="Task review & supervision" subtitle="Automatic fixes, review behavior, and merge approval."
+            onPress={onNavigateTab ? () => onNavigateTab('operator-defaults') : undefined} value="Dispatch" chevron={Boolean(onNavigateTab)} />
+        </SettingsGroup>
       </section>
-
-      {/* ── Local models — operator-owned compute is never paywalled ── */}
-      <LocalModelsSection
-        values={{
-          defaultDispatchModel: values.defaultDispatchModel,
-          localInferenceBaseUrl: values.localInferenceBaseUrl,
-          localEmbedModel: values.localEmbedModel,
-          localChatModel: values.localChatModel,
-        }}
-        sources={{
-          defaultDispatchModel: sources.defaultDispatchModel,
-          localInferenceBaseUrl: sources.localInferenceBaseUrl,
-          localEmbedModel: sources.localEmbedModel,
-          localChatModel: sources.localChatModel,
-        }}
-        busyField={busyField}
-        envDisabledReason={ENV_LOCKED_REASON}
-        onCommit={(field, value) => { updateField(field, value); }}
-      />
 
       <SettingsAdvanced label="Advanced routing" description="Thinking overrides, Brain tuning, and details about which provider handles each job.">
         <DispatchFoundersSection values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={false} />

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsSegmented } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { PickerMenu, SUBSCRIPTION_PROFILE_OPTIONS, DISPATCH_RUNTIME_OPTIONS, ENV_LOCKED_REASON, resolvePickerGroupOpen,
@@ -149,7 +150,7 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
       </SettingsGroup>
     </section>
     <section style={{ marginTop: 28 }}>
-      <SettingsGroup header="Default workers" footnote="Choose which connected tools may run tasks and which one starts when no worker is specified. Worker effort is configured below in Connected runtimes.">
+      <SettingsGroup header="Default workers" footnote="Choose which connected tools may run tasks and which one starts when no worker is specified. Worker effort is available under Connected tools.">
           <SettingsRow
             icon={<RocketIcon />}
             label="Subscription profile"
@@ -190,10 +191,14 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
             disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
             divider
           />
+      </SettingsGroup>
+    </section>
+    <SettingsAdvanced label="Advanced worker setup" description="Optional launcher integration. Keep Direct unless you use Ori.">
+      <SettingsGroup>
           <SettingsRow
             icon={<RocketIcon />}
-            label="Execution carrier"
-            subtitle={carrierCompatibilityReason ?? 'Optional typed argv and credential wrapper. The runtime still owns sessions, transcripts, costs, and review.'}
+            label="Worker launcher"
+            subtitle={carrierCompatibilityReason ?? 'Direct starts the selected tool normally. Ori uses its configured connection to launch Codex; Codex still runs the task.'}
             accessory={
               <PickerMenu<ExecutionCarrierSelection>
                 value={values.workerExecutionCarrier ?? 'direct'}
@@ -208,6 +213,6 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
             disabled={busyField === 'workerExecutionCarrier'}
           />
       </SettingsGroup>
-    </section>
+    </SettingsAdvanced>
   </>);
 }
