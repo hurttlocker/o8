@@ -3,7 +3,7 @@
 These are the canonical operating rules for agents working in this repository. Read the sections
 that apply to the current task once. Load scoped references only when their trigger applies.
 
-## Outcome and authority
+## Outcome ownership and authority
 
 - Turn the request into an observable outcome. Separate symptoms, established facts, hypotheses,
   and root cause. Choose the smallest complete remedy inside the requested scope.

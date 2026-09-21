@@ -3,6 +3,10 @@
 [`AGENTS.md`](./AGENTS.md) is the canonical repository policy for every agent. Read it once when a
 task begins or when its scope changes. Do not load every linked manual by default.
 
+## Outcome ownership
+
+Own the observable outcome under `AGENTS.md`; report Outcome, Evidence, Residual, and Decision.
+
 ## Claude-specific execution
 
 - One Claude execution agent handles ordinary tasks directly. Use a subagent only when the bounded
