@@ -99,11 +99,11 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
 
   return (<>
     <section style={{ marginTop: 28 }}>
-      <SettingsGroup header="Chat & code review" footnote="Choose who leads chat and who reviews completed work. Claude + Codex compares two independent responses and uses both runtimes.">
+      <SettingsGroup header="Orchestrator" footnote="The orchestrator is your lead: talk through ideas, plan work, and coordinate workers here. Claude + Codex uses both providers.">
           <SettingsRow
             icon={<CpuIcon />}
-            label="Chat provider"
-            subtitle={profileOverrideReason ?? lockedSub('orchestratorBackend', `Choose the AI that leads chat and coordinates tasks. When set to Automatic, it uses ${values.inAppOrchestratorEnabled ? 'Claude' : 'Codex'}.`)}
+            label="Lead provider"
+            subtitle={profileOverrideReason ?? lockedSub('orchestratorBackend', values.orchestratorBackend === 'auto' ? `Uses your existing setup (${values.inAppOrchestratorEnabled ? 'Claude' : 'Codex'}). Select a connected provider to choose the lead explicitly.` : 'Choose the provider that leads the conversation, plans work, and coordinates workers.')}
             accessory={
               <PickerMenu<string>
                 value={values.orchestratorBackend}
@@ -111,9 +111,9 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
                 minWidth={170}
                 onChange={(next) => { updateField('orchestratorBackend', next as OrchestratorBackendSetting); }}
                 options={[
-                  { value: 'auto', label: 'Automatic' },
-                  { value: 'codex', label: 'Codex' },
-                  { value: 'claude', label: 'Claude' },
+                  { value: 'auto', label: 'Use existing setup' },
+                  { value: 'codex', label: 'Codex', detail: cliStatusLabel(cliAuth?.statuses.codex) },
+                  { value: 'claude', label: 'Claude', detail: cliStatusLabel(cliAuth?.statuses.claude) },
                   // OpenClaw hidden from the picker (Q ruling 2026-07-16, not
                   // one-click yet); shown only if it's already the selection so
                   // an existing choice stays visible + escapable.
@@ -130,27 +130,10 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
             disabled={Boolean(profileOverrideReason) || envLocked('orchestratorBackend') || busyField === 'orchestratorBackend'}
             divider
           />
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Code review provider"
-            subtitle={profileOverrideReason ?? lockedSub('reviewerBackend', 'Choose the AI that reviews completed changes. Same as chat uses the provider selected above.')}
-            accessory={
-              <SettingsSegmented
-                value={values.reviewerBackend}
-                onChange={(next) => { updateField('reviewerBackend', next as ReviewerBackendSetting); }}
-                options={[
-                  { value: 'follow', label: 'Same as chat' },
-                  { value: 'claude', label: 'Claude' },
-                  { value: 'codex', label: 'Codex' },
-                ]}
-              />
-            }
-            disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
-          />
       </SettingsGroup>
     </section>
     <section style={{ marginTop: 28 }}>
-      <SettingsGroup header="Default workers" footnote="Choose which connected tools may run tasks and which one starts when no worker is specified. Worker effort is available under Connected tools.">
+      <SettingsGroup header="Workers" footnote="Choose which connected tools may run tasks and which one starts when no worker is specified. Worker effort is available under Connected tools.">
           <SettingsRow
             icon={<RocketIcon />}
             label="Subscription profile"
@@ -193,6 +176,27 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
           />
       </SettingsGroup>
     </section>
+    <SettingsAdvanced label="Advanced orchestrator options" description="Optional provider choice for reviewing completed work.">
+      <SettingsGroup>
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Code review provider"
+            subtitle={profileOverrideReason ?? lockedSub('reviewerBackend', 'Optionally choose a different provider to review completed changes. Same as lead uses your orchestrator provider.')}
+            accessory={
+              <SettingsSegmented
+                value={values.reviewerBackend}
+                onChange={(next) => { updateField('reviewerBackend', next as ReviewerBackendSetting); }}
+                options={[
+                  { value: 'follow', label: 'Same as lead' },
+                  { value: 'claude', label: 'Claude' },
+                  { value: 'codex', label: 'Codex' },
+                ]}
+              />
+            }
+            disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
+          />
+      </SettingsGroup>
+    </SettingsAdvanced>
     <SettingsAdvanced label="Advanced worker setup" description="Optional launcher integration. Keep Direct unless you use Ori.">
       <SettingsGroup>
           <SettingsRow

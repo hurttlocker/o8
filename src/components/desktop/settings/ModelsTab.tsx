@@ -165,7 +165,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
     }}>
       <TabHeading
         title="models & providers"
-        subtitle="Choose the AI for chat, code review, and agent tasks. Connect providers and tune each model in one place."
+        subtitle="Choose your orchestrator to lead conversations and coordinate work, then choose the tools and models workers use."
       />
 
       {notice ? (
@@ -286,14 +286,14 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </SettingsGroup>
       </SettingsAdvanced>
 
-      <SettingsAdvanced label="Claude Code settings" description="Model connection and account options for Claude chat and workers."
+      <SettingsAdvanced label="Claude Code settings" description="Model connection and account options for Claude orchestrators and workers."
         initiallyOpen={values.subscriptionProfile === 'claude-only' || (values.subscriptionProfile !== 'codex-only' && (values.orchestratorBackend === 'claude' || values.orchestratorBackend === 'collide' || (values.orchestratorBackend === 'auto' && values.inAppOrchestratorEnabled)))}>
         <ClaudeCodeHarnessSection />
       {/* ── Orchestrator ── */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Claude account model"
-          footnote="The default model for chat using the native account connection. Other connections use their own model controls above."
+          footnote="The orchestrator model used with the native account connection. Other connections use their own model controls above."
         >
           <SettingsRow
             icon={<CpuIcon />}

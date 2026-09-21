@@ -46,6 +46,9 @@ describe('model setup navigation', () => {
     const navigate = vi.fn();
     await act(async () => root.render(createElement(ModelsTab, { onNavigateTab: navigate })));
     const tools = container.querySelector('[data-settings-section="Connected tools"]')?.closest('details');
+    expect(container.querySelector('[data-settings-section="Orchestrator"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('When set to Automatic, it uses Claude');
+    expect(container.querySelector('[data-settings-section="Advanced orchestrator options"]')?.closest('details')?.open).toBe(false);
     expect(tools?.open).toBe(false);
     expect(tools?.querySelector('summary')?.textContent).toContain('Ready: Antigravity');
     expect(tools?.textContent).not.toContain('Gemini');
