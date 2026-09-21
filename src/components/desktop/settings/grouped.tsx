@@ -189,7 +189,7 @@ export function SettingsRow({
   const body = (
     <>
       {icon ? <IconTile icon={icon} destructive={destructive} /> : null}
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left' }}>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, textAlign: 'left' }}>
         <span style={{
           fontFamily: APP_FONT_STACK,
           fontSize: 13.5,
