@@ -21,8 +21,6 @@ import {
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import { ApfsDependencyImagesRow } from './ApfsDependencyImagesRow';
-import { DEFAULT_QUIZ_FILE_THRESHOLD } from '@/lib/orchestrator/quiz-gate';
-import { JudgmentProviderRow } from './JudgmentProviderRow';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { WorktreeRetentionSection } from './WorktreeRetentionSection';
@@ -30,7 +28,6 @@ import { SettingsTomlEditor } from './SettingsTomlEditor';
 import {
   PickerMenu,
   SUBSCRIPTION_PROFILE_OPTIONS,
-  ORCHESTRATOR_MODEL_OPTIONS,
   DISPATCH_RUNTIME_OPTIONS,
   CODEX_WORKER_EFFORT_OPTIONS,
   CLAUDE_WORKER_EFFORT_OPTIONS,
@@ -569,40 +566,17 @@ export function OperatorDefaultsTab() {
             disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
             divider
           />
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Claude account model"
-            subtitle={lockedSub('orchestratorModel', 'Applies when Claude Code uses Native account in Models settings. Other connections use their own model settings.')}
-            accessory={
-              <PickerMenu<string>
-                value={values.orchestratorModel}
-                options={ORCHESTRATOR_MODEL_OPTIONS}
-                onChange={(next) => { updateField('orchestratorModel', next); }}
-                disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-                minWidth={150}
-              />
-            }
-            disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-            divider
-          />
+
           <SettingsRow
             icon={<InboxIcon />}
             label="Explain completed changes"
-            subtitle={lockedSub('packetExplainerEnabled', 'Create a readable report and short quiz when a task is ready for review. Report generation does not block review.')}
+            subtitle={lockedSub('packetExplainerEnabled', 'Create an extra AI report explaining what changed and why when a task is ready for review. Off by default; uses your review provider.')}
             checked={values.packetExplainerEnabled}
             disabled={envLocked('packetExplainerEnabled') || busyField === 'packetExplainerEnabled'}
             onToggle={(next) => { updateField('packetExplainerEnabled', next); }}
             divider
           />
-          <SettingsRow
-            icon={<MergeIcon />}
-            label="Require a quiz before manual merge"
-            subtitle={lockedSub('quizGateEnabled', `For changes to more than ${DEFAULT_QUIZ_FILE_THRESHOLD} files with a generated quiz, require correct answers before you click Merge. Automated merges are unaffected.`)}
-            checked={values.quizGateEnabled}
-            disabled={envLocked('quizGateEnabled') || busyField === 'quizGateEnabled'}
-            onToggle={(next) => { updateField('quizGateEnabled', next); }}
-            divider
-          />
+
           <SettingsRow
             icon={<BuyinDocIcon />}
             label="Create a summary after merge"
@@ -610,16 +584,8 @@ export function OperatorDefaultsTab() {
             checked={values.buyinDocEnabled}
             disabled={envLocked('buyinDocEnabled') || busyField === 'buyinDocEnabled'}
             onToggle={(next) => { updateField('buyinDocEnabled', next); }}
-            divider
           />
-          <JudgmentProviderRow
-            icon={<MergeIcon />}
-            value={values.judgmentProvider}
-            path={data?.judgmentPath}
-            managedVisible={values.judgmentManagedOptionVisible}
-            busy={busyField === 'judgmentProvider'}
-            onChange={(next) => { updateField('judgmentProvider', next); }}
-          />
+
         </SettingsGroup>
       </section>
 
