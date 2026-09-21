@@ -130,6 +130,9 @@ describe('WorktreeRetentionSection storage accounting', () => {
       await settle();
     });
 
+    expect(container.querySelector('details')?.open).toBe(false);
+    const sections = [...container.querySelectorAll('[data-settings-section]')].map((element) => element.getAttribute('data-settings-section'));
+    expect(sections.slice(0, 2)).toEqual(['Storage usage', 'Automatic cleanup']);
     expect(container.textContent).toContain('On disk');
     expect(container.textContent).toContain('1.0 GB');
     expect(container.textContent).toContain('Logical');
