@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArchitectureDeltaState } from '../useArchitectureDelta';
+import type { ArchitectureAttentionState } from '../useArchitectureAttention';
 import { ArchitectureDeltaCard } from './ArchitectureDeltaCard';
 
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -31,6 +32,33 @@ const analysis: ArchitectureDeltaState = {
     resolutionWarnings: [],
     truncated: false,
     generatedAt: '2026-09-21T00:00:00.000Z',
+  },
+};
+
+const attention: ArchitectureAttentionState = {
+  loading: false,
+  error: null,
+  refresh: async () => undefined,
+  result: {
+    ok: true,
+    status: 'ready',
+    reason: null,
+    analysisId: 'analysis-1',
+    items: [{
+      path: 'src/feature.ts',
+      reviewPath: 'src/feature.ts',
+      rank: 1,
+      attentionScore: 1.8,
+      attentionConfidence: 0.82,
+      lens: 'interface_contract',
+      lensConfidence: 0.79,
+      signals: ['1 removed relationship'],
+    }],
+    model: 'jev-latest',
+    latencyMs: 241,
+    receiptId: 'receipt-1',
+    cached: false,
+    generatedAt: '2026-09-21T00:00:01.000Z',
   },
 };
 
@@ -99,5 +127,27 @@ describe('ArchitectureDeltaCard', () => {
     expect(Number(svg?.getAttribute('height'))).toBeGreaterThan(350);
     expect((svg?.parentElement as HTMLElement | null)?.style.overflow).toBe('auto');
     expect((svg?.parentElement as HTMLElement | null)?.style.maxHeight).toBe('350px');
+  });
+
+  it('shows an advisory review order without removing the underlying graph', async () => {
+    const onSelectFile = vi.fn();
+    await act(async () => {
+      root.render(createElement(ArchitectureDeltaCard, {
+        analysis,
+        attention,
+        scopePaths: ['src/feature.ts'],
+        onSelectFile,
+      }));
+    });
+
+    expect(container.textContent).toContain('Jev review lens');
+    expect(container.textContent).toContain('ADVISORY');
+    expect(container.textContent).toContain('API + contracts');
+    expect(container.textContent).toContain('feature.ts');
+    expect(container.querySelector('g[aria-label*="suggested review 1"]')).not.toBeNull();
+
+    const suggested = container.querySelector<HTMLButtonElement>('button[title="Open src/feature.ts diff"]');
+    await act(async () => { suggested?.click(); });
+    expect(onSelectFile).toHaveBeenCalledWith('src/feature.ts');
   });
 });

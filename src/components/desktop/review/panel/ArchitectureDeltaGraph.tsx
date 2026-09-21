@@ -3,6 +3,7 @@
 import { useId, useMemo, useState } from 'react';
 
 import type { ArchitectureDeltaResult } from '@/lib/review/architecture-delta-types';
+import type { ArchitectureAttentionResult } from '@/lib/review/architecture-attention-types';
 import {
   buildArchitectureGraph,
   initialArchitecturePrefix,
@@ -10,6 +11,7 @@ import {
   type ArchitectureGraphNode,
   type ArchitectureGraphState,
 } from './architecture-delta-graph';
+import { ARCHITECTURE_LENS_LABEL } from './ArchitectureAttentionStrip';
 import { UI_FONT } from './constants';
 
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -49,9 +51,11 @@ function sourceLabel(edge: ArchitectureGraphEdge) {
 
 export function ArchitectureDeltaGraph({
   result,
+  attention,
   onSelectFile,
 }: {
   result: ArchitectureDeltaResult;
+  attention: ArchitectureAttentionResult | null;
   onSelectFile: (path: string) => void;
 }) {
   const initialPrefix = useMemo(() => initialArchitecturePrefix(result.nodes), [result.nodes]);
@@ -64,7 +68,17 @@ export function ArchitectureDeltaGraph({
     [prefix, result.edges, result.nodes],
   );
   const nodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
+  const attentionByPath = useMemo(() => new Map(
+    (attention?.status === 'ready' ? attention.items : []).map((item) => [item.path, item]),
+  ), [attention]);
+  const attentionForNode = (node: ArchitectureGraphNode) => node.sourceNodes
+    .flatMap((sourceNode) => {
+      const item = attentionByPath.get(sourceNode.path);
+      return item ? [item] : [];
+    })
+    .sort((left, right) => left.rank - right.rank)[0] ?? null;
   const selectedNode = selection?.kind === 'node' ? nodeById.get(selection.id) ?? null : null;
+  const selectedAttention = selectedNode ? attentionForNode(selectedNode) : null;
   const selectedEdge = selection?.kind === 'edge'
     ? graph.edges.find((edge) => edge.id === selection.id) ?? null
     : null;
@@ -197,12 +211,13 @@ export function ArchitectureDeltaGraph({
             {graph.nodes.map((node) => {
               const selected = selectedNode?.id === node.id;
               const color = STATE_COLOR[node.state];
+              const suggestion = attentionForNode(node);
               return (
                 <g
                   key={node.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${node.directory ? 'Component' : 'Module'} ${node.id}, ${node.state}`}
+                  aria-label={`${node.directory ? 'Component' : 'Module'} ${node.id}, ${node.state}${suggestion?.rank && suggestion.rank <= 3 ? `, suggested review ${suggestion.rank}` : ''}`}
                   transform={`translate(${node.x} ${node.y})`}
                   onClick={() => setSelection({ kind: 'node', id: node.id })}
                   onFocus={() => setSelection({ kind: 'node', id: node.id })}
@@ -221,7 +236,13 @@ export function ArchitectureDeltaGraph({
                   <text x="16" y="45" fill="var(--t-text-faint)" fontFamily={MONO_FONT} fontSize="9.5" fontWeight="300">
                     {node.detail.length > 27 ? `${node.detail.slice(0, 25)}…` : node.detail}
                   </text>
-                  {node.directory ? <text x="162" y="24" textAnchor="end" fill={color} fontFamily={UI_FONT} fontSize="12">↳</text> : null}
+                  {suggestion?.rank && suggestion.rank <= 3 ? (
+                    <>
+                      <circle cx="160" cy="15" r="11" fill="var(--t-accent)" />
+                      <text x="160" y="18.5" textAnchor="middle" fill="white" fontFamily={MONO_FONT} fontSize="9" fontWeight="500">{suggestion.rank}</text>
+                    </>
+                  ) : null}
+                  {node.directory ? <text x="164" y="55" textAnchor="end" fill={color} fontFamily={UI_FONT} fontSize="12">↳</text> : null}
                   {node.cyclic ? <circle cx="163" cy="46" r="4" fill="var(--t-brand-orange, #f97316)" /> : null}
                 </g>
               );
@@ -247,6 +268,12 @@ export function ArchitectureDeltaGraph({
             <div title={selectedNode?.id ?? sourceLabel(selectedEdge!)} style={{ marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text)', fontFamily: MONO_FONT, fontSize: 10.5 }}>
               {selectedNode?.id ?? `${selectedEdge?.from} → ${selectedEdge?.to}`}
             </div>
+            {selectedAttention ? (
+              <div style={{ marginTop: 4, color: 'var(--t-accent)', fontSize: 9.5 }}>
+                {selectedAttention.rank <= 3 ? `Review ${selectedAttention.rank} · ` : ''}{ARCHITECTURE_LENS_LABEL[selectedAttention.lens]}
+                {typeof selectedAttention.lensConfidence === 'number' ? ` · ${Math.round(selectedAttention.lensConfidence * 100)}%` : ''}
+              </div>
+            ) : null}
           </div>
           {selectedNode?.directory ? (
             <button type="button" onClick={() => drillInto(selectedNode)} style={{ minHeight: 44, paddingTop: 0, paddingRight: 11, paddingBottom: 0, paddingLeft: 11, border: '1px solid var(--t-accent)', borderRadius: 8, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', fontFamily: UI_FONT, fontSize: 10.5 }}>

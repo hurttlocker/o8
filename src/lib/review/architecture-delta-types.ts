@@ -26,6 +26,8 @@ export interface ArchitectureDeltaResult {
   ok: true;
   status: ArchitectureDeltaStatus;
   reason: string | null;
+  /** Stable digest of the graph evidence; unlike generatedAt, it changes only when the evidence changes. */
+  analysisId?: string;
   nodes: ArchitectureDeltaNode[];
   edges: ArchitectureDeltaEdge[];
   summary: ArchitectureDeltaSummary;

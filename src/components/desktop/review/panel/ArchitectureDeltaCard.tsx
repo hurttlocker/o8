@@ -3,8 +3,10 @@
 import { useMemo, useState } from 'react';
 
 import type { ArchitectureDeltaResult } from '@/lib/review/architecture-delta-types';
+import type { ArchitectureAttentionState } from '../useArchitectureAttention';
 import type { ArchitectureDeltaState } from '../useArchitectureDelta';
 import { ChevronDown } from '../../lucide-shims';
+import { ArchitectureAttentionStrip } from './ArchitectureAttentionStrip';
 import { ArchitectureDeltaGraph } from './ArchitectureDeltaGraph';
 import { filterArchitectureResult } from './architecture-delta-graph';
 import { UI_FONT } from './constants';
@@ -12,6 +14,12 @@ import { UI_FONT } from './constants';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const ADDED_COLOR = 'var(--t-terminal-ansi-bright-green, #22c55e)';
 const REMOVED_COLOR = 'var(--t-brand-red, #ef4444)';
+const EMPTY_ATTENTION: ArchitectureAttentionState = {
+  result: null,
+  loading: false,
+  error: null,
+  refresh: async () => undefined,
+};
 
 function Summary({ result }: { result: ArchitectureDeltaResult }) {
   if (result.status !== 'ready') return <span>{result.status}</span>;
@@ -26,10 +34,12 @@ function Summary({ result }: { result: ArchitectureDeltaResult }) {
 
 export function ArchitectureDeltaCard({
   analysis,
+  attention = EMPTY_ATTENTION,
   scopePaths,
   onSelectFile,
 }: {
   analysis: ArchitectureDeltaState;
+  attention?: ArchitectureAttentionState;
   scopePaths: string[];
   onSelectFile: (path: string) => void;
 }) {
@@ -70,7 +80,8 @@ export function ArchitectureDeltaCard({
             <p style={{ marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0, color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 300 }}>No supported module changes are included in the selected Review scope.</p>
           ) : (
             <>
-              <ArchitectureDeltaGraph key={graphKey} result={result} onSelectFile={onSelectFile} />
+              <ArchitectureAttentionStrip attention={attention} onSelectFile={onSelectFile} />
+              <ArchitectureDeltaGraph key={graphKey} result={result} attention={attention.result} onSelectFile={onSelectFile} />
               {result.truncated ? (
                 <p style={{ marginTop: 8, marginRight: 0, marginBottom: 0, marginLeft: 0, color: 'var(--t-brand-orange)', fontSize: 10, fontWeight: 300 }}>
                   Bounded view: {result.omittedPaths.length || 'additional'} source module(s) were safely omitted; their outgoing dependency changes are not inferred.
