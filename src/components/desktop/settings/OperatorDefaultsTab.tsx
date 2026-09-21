@@ -35,6 +35,7 @@ import {
   CLAUDE_WORKER_EFFORT_OPTIONS,
   ENV_LOCKED_REASON,
   REQUIRE_APPROVAL_OPTIONS,
+  MERGE_APPROVAL_DESCRIPTIONS,
   resolvePickerGroupOpen,
   type UpdateAutoApply,
   type DispatchRuntime,
@@ -452,12 +453,12 @@ export function OperatorDefaultsTab() {
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Supervision"
-          footnote="When a packet fails verification, heal-bot tries a scoped fix before asking you. Auto-apply installs a downloaded update only after all lanes are idle and you've been inactive for five minutes."
+          footnote="Automatic fixes, chat investigations, and reviews use your connected AI runtime and may use its allowance. Merge approval controls when to ask before merging; required checks still apply."
         >
           <SettingsRow
             icon={<WrenchIcon />}
-            label="Heal-bot"
-            subtitle={lockedSub('healBotEnabled', 'Attempt an automatic fix before asking a human')}
+            label="Automatically fix failed checks"
+            subtitle={lockedSub('healBotEnabled', 'Try one focused AI repair, limited to five minutes, before asking for help. Changes take effect after restarting o8.')}
             checked={values.healBotEnabled}
             disabled={envLocked('healBotEnabled') || busyField === 'healBotEnabled'}
             onToggle={(next) => { updateField('healBotEnabled', next); }}
@@ -465,8 +466,8 @@ export function OperatorDefaultsTab() {
           />
           <SettingsRow
             icon={<InboxIcon />}
-            label="Auto-escalate to chat"
-            subtitle={lockedSub('supervisorAutoEscalate', 'Surface supervisor failures in the orchestrator chat')}
+            label="Investigate failures in chat"
+            subtitle={lockedSub('supervisorAutoEscalate', 'Start an AI investigation in chat when a task needs help. When off, failures remain visible in task status and activity.')}
             checked={values.supervisorAutoEscalate}
             disabled={envLocked('supervisorAutoEscalate') || busyField === 'supervisorAutoEscalate'}
             onToggle={(next) => { updateField('supervisorAutoEscalate', next); }}
@@ -474,8 +475,8 @@ export function OperatorDefaultsTab() {
           />
           <SettingsRow
             icon={<InboxIcon />}
-            label="Review continuation"
-            subtitle={lockedSub('reviewContinuation', 'When a mission lane reaches review, queue one orchestrator turn to review + merge it')}
+            label="Automatically review completed work"
+            subtitle={lockedSub('reviewContinuation', 'Start an AI review when an assigned task is ready. It can request fixes or merge approved changes, subject to Merge approval below.')}
             checked={values.reviewContinuation}
             disabled={envLocked('reviewContinuation') || busyField === 'reviewContinuation'}
             onToggle={(next) => { updateField('reviewContinuation', next); }}
@@ -484,7 +485,7 @@ export function OperatorDefaultsTab() {
           <SettingsRow
             icon={<MergeIcon />}
             label="Merge approval"
-            subtitle={lockedSub('requireApproval', 'Surface routes review-worthy work back to its dispatcher; easy reviewed packets keep moving')}
+            subtitle={lockedSub('requireApproval', MERGE_APPROVAL_DESCRIPTIONS[values.requireApproval])}
             accessory={
               <SettingsSegmented
                 value={values.requireApproval}
@@ -497,8 +498,8 @@ export function OperatorDefaultsTab() {
           />
           <SettingsRow
             icon={<UpdateIcon />}
-            label="Auto-apply updates"
-            subtitle={lockedSub('updateAutoApply', 'Install updates on headless nodes when lanes and terminals are idle')}
+            label="Install app updates automatically"
+            subtitle={lockedSub('updateAutoApply', 'Install an available update and restart o8 when no agents, terminal sessions, or background jobs are active.')}
             accessory={
               <SettingsSegmented
                 value={values.updateAutoApply}
