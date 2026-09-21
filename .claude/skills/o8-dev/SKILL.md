@@ -1,29 +1,37 @@
 ---
 name: o8-dev
-description: How to develop o8 itself — the bootstrap doctrine (ginsu hardens o8 dispatch from OUTSIDE, then the fleet + shipping loop run THROUGH o8), the model ladder, the dispatch→review→ship loop, and the hard-won lifecycle traps. Load at the start of any o8 development session, before dispatching the fleet, or when deciding who does a task (me / ginsu / the o8 fleet).
+description: Scoped guidance for o8 dispatch, packet review, lifecycle recovery, and self-hosting hazards. Load when a task uses those paths, not for ordinary repository work.
 ---
 
-# Developing o8 (the self-hosting bootstrap)
+# Developing o8 through its control plane
 
-o8 is a fleet-orchestration product we build BY orchestrating a fleet. The catch: o8's own dispatch pipeline isn't fully hardened, and the meta-bugs that break dispatch can't be reliably fixed by the fleet — they're the thing that's broken. So there's a bootstrap.
+This skill covers work that exercises o8's own dispatch, packet, review, and release machinery. The
+canonical task policy is `AGENTS.md`: one execution agent owns ordinary work directly, and dispatch
+is a cost and independence decision.
 
-## The bootstrap doctrine (Q, 2026-07-18)
+## Dispatch decision
 
-**ginsu lives OUTSIDE o8 → it hardens o8's own dispatch until the fleet runs smoothly → THEN feature work and the shipping loop run THROUGH o8.** That's how we speed up shipping: dogfood the fleet on real work once it's reliable, and use ginsu (immune to o8's dispatch bugs) to get it reliable.
+- Execute ordinary changes in the current task. Do not dispatch because a task is large, spans several
+  files, or the fleet is available.
+- Dispatch only when the bounded benefit exceeds briefing, review, retries, and context cost, or an
+  independent seat is required for risk. Pin the delegated model and effort without changing the
+  operator's selected main model or saved defaults.
+- If the defect is in dispatch itself, use an execution path independent of the broken component.
+  Keep work isolated from the main checkout, review the actual diff, and preserve governance gates.
+- After two correction rounds on delegated implementation, stop repeating the loop and report or
+  escalate the remaining defect. Use scripts or bounded waits for routine polling.
+- Evaluate the whole accepted task. Subscription agents share allowance, and token counts alone do
+  not establish weekly capacity or savings.
 
-Division of labor:
-- **ginsu (Codex sol xhigh, external, via `ginsu send datagate "…" --model gpt-5.6-sol --effort xhigh`):** o8-dispatch-HARDENING bugs, adversarial review of risky fixes, and any task the fleet can't dispatch smoothly YET (large packets that keep stalling). External = it won't be killed by the very bug it's fixing. Multi-issue BATCH tickets are fine and fast (it's strong) — group by shared file area to minimize conflicts. **CRITICAL: ginsu works in the MAIN tree and leaves changes UNCOMMITTED ("no commit"). COMMIT one batch before queuing the next, or the second batch's edits pile onto the first's in the shared working copy and you can't tell them apart. One batch → review → commit → next batch.** Also: don't double-background the send (`&` + run_in_background) — it detaches the log; use a single background mechanism so `/tmp/ginsu-*.log` captures the report.
-- **Fable (orchestrator):** decisions, review of every diff, hardest synthesis, ship gate. Conserve usage — don't code inline when a worker can. Never spawn Fable subagents (sole Fable, low usage).
-- **The o8 fleet (Codex sol xhigh via `create_mission`):** the packets it CAN complete smoothly today. Don't feed it the tasks that stall until the stalling bug is fixed.
-- **Opus native agents:** fallback when ginsu is busy and the fleet can't take it.
+## Dispatch and review loop
 
-Model ladder: **xhigh is the default effort. MAX effort = codex fans out / sub-delegates (its orchestrator mode) — extreme usage, use only when a task genuinely warrants.** Codex is effectively free (sub with resets — burn before they expire); prefer it heavily. Never `claude -p`.
+Use this loop only after the dispatch decision above is satisfied.
 
-## The dispatch → review → ship loop (through o8)
-
-1. **Dispatch:** `create_mission({repoPath, issues:[…], runtime:'codex', existingBranchPolicy:'reset'})`. Constraints string MUST include: "commit with explicit pathspecs, NEVER `git add -A`" (the token-leak trap below) + tsc/test-green + the repo rules.
+1. **Dispatch:** create a bounded mission with explicit scope, done condition, verification, compact
+   handback, model, and effort. Require explicit pathspecs and never `git add -A`.
 2. **Watch:** `wait_for_mission_ready({missionId, timeoutMs:1800000})` — long-poll that returns the instant a packet hits review/terminal; that return re-enters your turn (this is how you "get pinged" — o8 workers are NOT harness-tracked, so re-arm it or piggyback on a ginsu/background-task notification). Verify liveness via `get_mission_status` + the owned rollout tails; the UI packet card via `o8_view_*`.
-3. **Review EVERY diff:** `o8_packet_diff` + `o8_review_state`. The o8 auto-reviewer runs too — read its verdict. Apply the review discipline below.
+3. **Review every delegated diff:** inspect the raw diff and verification receipts. Read high-risk
+   authentication, authorization, schema, payment, destructive, and security evidence directly.
 4. **Merge or salvage:**
    - Clean + gate passing → `approve_and_merge`.
    - Gate blocked on a credential/artifact leak but the CODE is verified correct → **salvage by pathspec**: copy the specific good files from the packet worktree into main, verify no `.tmp-owned-push-*`, tsc+test, commit with explicit pathspec. (Never merge a branch carrying a leaked token.)
@@ -45,14 +53,15 @@ Model ladder: **xhigh is the default effort. MAX effort = codex fans out / sub-d
 - **Green tests + green tsc ≠ green build (the server-only client leak).** `npm test` stubs `server-only` (tests/stubs/server-only.ts) and tsc doesn't run webpack, so a CLIENT component that imports a module which transitively pulls `import 'server-only'` (e.g. via the lane/orchestrator backends → codex.ts → haiku-adapter.ts) passes tsc + vitest but FAILS `next build` ("server-only ... not supported in the pages/ directory"). Fix: split the client-safe vocabulary (types/consts/pure fns) into a `*-shared.ts` with zero runtime imports; the client imports `-shared`, the server module re-exports it. Merges that add a client component reaching into a server module are the risk. **The ship runs `next build` and catches this — so a merge that's tsc/test-green can still break the ship.** Before shipping a batch that touched client↔server import boundaries, run `npm run build` yourself; don't trust tsc+vitest alone. (#1570 broke the .624 build exactly this way.)
 
 ## Disk hygiene (the internal disk fills and breaks ships)
-The Mac's internal disk repeatedly hits <10GB and OOMs/ENOSPCs the ship. Before shipping, `df -h /`; if tight, reclaim in this order (all read-safe): dead `.cortex-worktrees/*` (biggest recurring hog — clear when 0 live workers), `~/o8/.next/cache` + `src-tauri/target/debug` (NEVER `target/release` pre-ship — it's the artifact), regenerable caches (`~/.npm/_cacache`, `~/Library/Caches/{codex,ms-playwright,go-build,CocoaPods,swiftpm}`, `~/.cache/codex-runtimes`), and DONE sibling feature-repo clones (verify `git branch -r --contains HEAD` shows the tip is on a remote before `rm -rf` a whole repo — else the work is lost). iOS simulators (12G) + Xcode (5G) are needed for the o8-mobile Expo lane — don't nuke while mobile is active. T7 (`/Volumes/T7 Touch/`) is archive-only under `rainwater/`, never a worktree target (read-only masters + CoW breaks cross-volume). A read-only Opus disk-audit agent is the way to get a classified reclaim map before deleting.
+Before shipping, check free disk space. If cleanup is required, inventory candidates first, verify
+that no live process or unpushed work owns them, and keep destructive cleanup operator-gated. Use a
+separate read-only audit only when independence or the bounded benefit justifies its cost.
 
 ## Dogfood-first
 
-Every dispatch is also a test of o8's dispatch itself. File EVERY friction as a GitHub issue with forensics (lane_events, rollout tails, log lines) the moment you hit it — that's how the blocker queue gets built. Dispatch fails → STOP and fix o8 (via ginsu), never reset+redispatch in a loop.
+Every dispatch is also a test of o8's dispatch path. Record blocking or recurrence-relevant friction
+with sanitized evidence. If dispatch fails, stop identical retry loops and use the cheapest correct
+independent path or report the blocker.
 
-## The blocker queue lives in memory
-
-`o8_dispatch_hardening_via_ginsu.md` holds the current ordered dispatch-smoothness blocker list. Read it; keep it current as ginsu clears items. When it's empty, the fleet + shipping loop run through o8 unaided — that's the goal.
-
-Ship discipline itself: the `ship` skill.
+Shipping discipline lives in the `ship` skill. Load it only when work becomes release-related or
+commit-ready under the current repository rules.
