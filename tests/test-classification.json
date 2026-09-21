@@ -1292,6 +1292,12 @@
       ]
     },
     {
+      "path": "tests/chat-history-auto-title-integration.test.ts",
+      "reasons": [
+        "integration"
+      ]
+    },
+    {
       "path": "tests/chat-history-merge.integration.test.ts",
       "reasons": [
         "child-process"
