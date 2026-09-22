@@ -125,7 +125,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
     }} className="cortex-themed-scroll">
       <div style={{
         width: '100%',
-        maxWidth: 880,
+        maxWidth: 1100,
         marginLeft: 'auto',
         marginRight: 'auto',
         paddingTop: 36,

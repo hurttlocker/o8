@@ -17,7 +17,7 @@ const TABS: Array<{ id: CustomizeTab; label: string }> = [
 ];
 
 const fieldStyle: CSSProperties = {
-  minWidth: 0, minHeight: 36, border: '1px solid var(--t-divider)', borderRadius: 8,
+  minWidth: 0, minHeight: 42, border: '1px solid var(--t-divider)', borderRadius: 12,
   background: 'var(--t-input-bg)', color: 'var(--t-text)', font: 'inherit',
   paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,
 };
@@ -35,14 +35,14 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
   onClose?: () => void;
 }) {
   const tabs = process.env.NODE_ENV === 'development'
-    ? [...TABS.slice(0, 4), { id: 'plugins' as const, label: 'Plugins' }, ...TABS.slice(4)]
+    ? [{ id: 'plugins' as const, label: 'Plugins' }, ...TABS.filter((item) => item.id === 'skills'), ...TABS.filter((item) => item.id !== 'skills')]
     : TABS;
   const label = tabs.find((item) => item.id === tab)?.label ?? 'customizations';
   const repoName = scope === 'personal' || !project ? 'Personal' : repos.find((repo) => repo.localPath === scope)?.name ?? project.name;
   const filtersRepositories = ['rules', 'skills', 'prompts', 'agents', 'hooks'].includes(tab);
   const explanations: Record<CustomizeTab, string> = {
     rules: 'Project instructions are shared guidance. Additional rules below show their own scope and source.',
-    skills: 'Review skills found in this project and your personal folders. Expand a skill to inspect its source copies.',
+    skills: 'Reusable instructions for your agents. Browse skills by project or personal library.',
     prompts: 'Saved text you choose to insert into a task. Choose Personal or a repository when saving a prompt.',
     commands: 'Built-in shortcuts for the orchestrator. Type / in the composer to use them in your current task.',
     connections: 'Manage connected services once in Settings. Access during a task depends on the agent and its permissions.',
@@ -54,7 +54,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
     <header style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <h1 style={{ marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0, fontSize: 28, fontWeight: 400, letterSpacing: '-0.8px', color: 'var(--t-text)' }}>Customize</h1>
+          <h1 style={{ marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0, fontSize: 28, fontWeight: 400, letterSpacing: '-0.8px', color: 'var(--t-text)' }}>{label}</h1>
           {onClose ? <RamsButton variant="ghost" onClick={onClose}>Back to workspace</RamsButton> : null}
         </div>
         <p style={{ marginTop: 12, marginBottom: 0, fontSize: 14, lineHeight: 1.6, color: 'var(--t-text-muted)' }}>
@@ -89,7 +89,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
           </label> : <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Shared across projects</span>}
         </div>
       ) : null}
-      <p style={{ marginTop: 0, marginBottom: 0, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.6 }}>{explanations[tab]}{filtersRepositories && project ? ' This view filters the list; it does not change your task’s repository.' : ''}</p>
+      {tab !== 'plugins' ? <p style={{ marginTop: 0, marginBottom: 0, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.6 }}>{explanations[tab]}{filtersRepositories && project ? ' This view filters the list; it does not change your task’s repository.' : ''}</p> : null}
     </header>
   );
 }
