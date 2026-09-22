@@ -48,6 +48,10 @@ describe('model setup navigation', () => {
     const tools = container.querySelector('[data-settings-section="Connected tools"]')?.closest('details');
     expect(container.querySelector('[data-settings-section="Orchestrator"]')).not.toBeNull();
     expect(container.textContent).not.toContain('When set to Automatic, it uses Claude');
+    expect(container.querySelector('[data-settings-section="OpenCode 2 models"]')).toBeNull();
+    expect(container.querySelector('[data-settings-section="3code worker"]')).toBeNull();
+    const fallback = [...container.querySelectorAll('span')].find(element => element.textContent === 'OpenCode fallback model');
+    expect(fallback?.closest('details')?.querySelector('summary')?.dataset.settingsSection).toBe('Advanced orchestrator options');
     expect(container.querySelector('[data-settings-section="Advanced orchestrator options"]')?.closest('details')?.open).toBe(false);
     expect(tools?.open).toBe(false);
     expect(tools?.querySelector('summary')?.textContent).toContain('Ready: Antigravity');

@@ -10,7 +10,7 @@ const SECTIONS: Partial<Record<SettingsTab, string[]>> = {
   voice: ['Voice shortcuts', 'Symon', 'Permissions', 'Dictation', 'Transcription', 'Voice brain', 'Proactive attention'],
   permissions: ['macOS permissions'],
   'operator-defaults': ['Fleet', 'Supervision', 'Change reports', 'Related settings', 'Advanced', 'Task limits & setup'],
-  models: ['Orchestrator', 'Workers', 'Advanced orchestrator options', 'Advanced worker setup', 'Connected tools', 'Claude Code settings', 'Claude model connection', 'Claude account model', 'Engineering Brain', 'OpenCode 2 models', '3code worker', 'Metered packet limits', 'More setup', 'Advanced routing', 'Thinking & task models', 'Brain advanced', 'Runtime routing'],
+  models: ['Orchestrator', 'Workers', 'Advanced orchestrator options', 'Advanced worker setup', 'Connected tools', 'Claude Code settings', 'Claude model connection', 'Claude account model', 'Engineering Brain', 'Metered packet limits', 'More setup', 'Advanced routing', 'Thinking & task models', 'Brain advanced', 'Runtime routing'],
   worktrees: ['Storage usage', 'Automatic cleanup', 'Advanced', 'Workspace parking', 'Minimum free space', 'Storage categories'],
   projects: ['Overview', 'Runtime context'],
   'git-prs': ['GitHub', 'Branches', 'Commits', 'Pull requests'],
