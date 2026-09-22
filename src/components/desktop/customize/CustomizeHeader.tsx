@@ -48,7 +48,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
     connections: 'Manage connected services once in Settings. Access during a task depends on the agent and its permissions.',
     agents: 'Agent definitions found in personal and repository folders. These entries currently come from Claude Code configuration.',
     hooks: 'Configured commands that run on agent events. These entries currently come from Claude Code configuration.',
-    plugins: 'A design preview with sample packages. It does not change this project or install tools.',
+    plugins: 'Install and manage reusable instruction bundles.',
   };
   return (
     <header style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -70,7 +70,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
             fontSize: 13, fontWeight: 300, fontFamily: 'inherit', cursor: 'pointer',
           }}>
             {item.label}
-            {item.id === 'plugins' ? <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>Preview</span>
+            {item.id === 'plugins' ? <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>Dev</span>
               : counts[item.id] ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{counts[item.id]}</span> : null}
           </button>
         ))}

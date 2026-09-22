@@ -20,6 +20,7 @@ describe('CustomizePage skills', () => {
       if (url === '/api/panel/repos') {
         return Response.json({ repos: [{ name: 'o8', localPath: '/repo/o8' }] });
       }
+      if (url.startsWith('/api/customize/skills?')) return Response.json({ ok: true, instructions: 'Review behavior and verify the result.' });
       if (url.startsWith('/api/customize/inventory')) {
         return Response.json({
           ok: true,
@@ -277,10 +278,11 @@ describe('CustomizePage skills', () => {
       expect(button('Use in task')).toBeDefined();
       const composer = host.querySelector<HTMLTextAreaElement>('textarea[data-o8-active-composer]')!;
       composer.setSelectionRange(composer.value.length, composer.value.length);
-      act(() => button('Use in task').click());
+      await act(async () => button('Use in task').click());
       while (frames.length) act(() => frames.shift()!(performance.now()));
       expect(composer.value).toContain('Review this change. Use the "review" skill for this task.');
-      expect(composer.value).toContain('/repo/o8/.agents/skills/review/SKILL.md');
+      expect(composer.value).toContain('Review behavior and verify the result.');
+      expect(composer.value).not.toContain('/repo/o8/.agents/skills/review/SKILL.md');
       expect(composer.value).not.toContain('/home/.gemini');
       expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
     } finally {

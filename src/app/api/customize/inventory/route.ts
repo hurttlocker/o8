@@ -3,6 +3,8 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import os from 'node:os';
 import path from 'node:path';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { listPackages } from '@/lib/customize/storage';
+import { customizeFailure } from '@/lib/customize/http';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 
 export const runtime = 'nodejs';
@@ -202,7 +204,15 @@ export async function GET(request: NextRequest) {
     ...(repoPath ? readHooksFile(path.join(repoPath, '.claude', 'settings.json'), 'project', repoPath) : []),
   ];
 
+  let packageSkills: CustomizeSkillEntry[];
+  try {
+    packageSkills = [null, ...(repoPath ? [repoPath] : [])].flatMap((scopeRepo) => listPackages(scopeRepo).filter((entry) => entry.enabled).flatMap((entry) => entry.manifest.skills.map((skill) => ({
+      name: skill.name, description: skill.description, scope: scopeRepo ? 'project' as const : 'user' as const, source: 'o8' as const,
+      file: entry.files.find((file) => file.name === skill.name)!.file, pluginName: entry.manifest.name,
+    }))));
+  } catch (error) { return customizeFailure(error); }
   const skills: CustomizeSkillEntry[] = [
+    ...packageSkills,
     ...readSkillsDir(path.join(home, '.o8', 'skills'), 'user', 'o8', home),
     ...readSkillsDir(path.join(home, '.agents', 'skills'), 'user', 'shared', home),
     ...readSkillsDir(path.join(home, '.codex', 'skills'), 'user', 'codex', home),

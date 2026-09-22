@@ -12,6 +12,7 @@ export interface SkillInventoryEntry {
   scope: 'user' | 'project';
   source: 'o8' | 'shared' | 'codex' | 'claude-code' | 'gemini';
   file: string;
+  pluginName?: string;
   repoName?: string;
   repoPath?: string;
 }
@@ -127,8 +128,9 @@ export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
   skills: SkillInventoryEntry[];
   query: string;
   onOpenFile: (path: string) => void;
-  onUseSkill?: (skill: SkillInventoryEntry) => void;
+  onUseSkill?: (skill: SkillInventoryEntry) => void | Promise<void>;
 }) {
+  const [usingSkill, setUsingSkill] = useState<string | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [claudeEditorOpen, setClaudeEditorOpen] = useState(false);
   const groups = groupInventory(skills).map((group) => ({
@@ -165,11 +167,11 @@ export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
                 borderTopColor: 'var(--t-divider-subtle)',
               }}
             >
-              <DetailLine label="Found in" value={SOURCE_LABELS[skill.source]} />
+              <DetailLine label="Found in" value={skill.pluginName ? `Plugin · ${skill.pluginName}` : SOURCE_LABELS[skill.source]} />
               <DetailLine label="Description" value={skill.description} />
               <DetailLine label="File" value={skill.file} mono />
               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                {onUseSkill ? <RamsButton variant="primary" onClick={() => onUseSkill(skill)}>Use in task</RamsButton> : null}
+                {onUseSkill ? <RamsButton variant="primary" disabled={usingSkill !== null} busy={usingSkill === skill.file} onClick={() => { setUsingSkill(skill.file); void Promise.resolve(onUseSkill(skill)).finally(() => setUsingSkill(null)); }}>Use in task</RamsButton> : null}
                 <OpenFileLink file={skill.file} onOpenFile={onOpenFile} />
               </div>
             </div>
@@ -184,7 +186,7 @@ export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
       <div style={{ paddingTop: 16, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)' }}>Discovered skills</span>
         <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
-          Use in task adds a request to your draft. Automatic loading depends on the agent.
+          Use in task copies the instructions into your draft. Automatic loading depends on the agent.
         </span>
       </div>
 
