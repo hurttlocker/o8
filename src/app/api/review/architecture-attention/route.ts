@@ -56,10 +56,10 @@ async function analyzeRequestTarget(laneId: string | null, workspace: string | n
       ) } as const;
     }
     const baseRef = review.diffBase.mergeBase ?? review.diffBase.comparisonRef;
-    return { result: await buildArchitectureDelta({ repoPath: review.source.cwd, baseRef }) } as const;
+    return { result: await buildArchitectureDelta({ repoPath: review.source.cwd, baseRef }), repoPath: review.source.cwd } as const;
   }
   if (!workspace) return { error: 'A review lane or workspace is required.', status: 400 } as const;
-  return { result: await buildArchitectureDelta({ repoPath: workspace }) } as const;
+  return { result: await buildArchitectureDelta({ repoPath: workspace }), repoPath: workspace } as const;
 }
 
 export async function POST(request: NextRequest) {
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
     const scoped = filterArchitectureResult(analyzed.result, parsed.scopePaths);
-    return NextResponse.json(await rankArchitectureAttention(scoped, { laneId }), {
+    return NextResponse.json(await rankArchitectureAttention(scoped, { laneId, repoPath: analyzed.repoPath! }), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {

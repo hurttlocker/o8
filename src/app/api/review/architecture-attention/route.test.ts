@@ -79,7 +79,24 @@ describe('POST /api/review/architecture-attention', () => {
     expect(h.rankArchitectureAttention).toHaveBeenCalledWith(expect.objectContaining({
       nodes: [expect.objectContaining({ path: 'src/a.ts' })],
       summary: expect.objectContaining({ changedModules: 1 }),
-    }), { laneId: 'lane-1' });
+    }), { laneId: 'lane-1', repoPath: '/worktree' });
+  });
+
+  it('passes the workspace identity for reviews without a lane', async () => {
+    const workspaceRequest = new NextRequest('http://localhost/api/review/architecture-attention?workspace=%2Frepo-b', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedAnalysisId: analysisId, scopePaths: ['src/a.ts'] }),
+    });
+
+    const response = await POST(workspaceRequest);
+
+    expect(response.status).toBe(200);
+    expect(h.buildArchitectureDelta).toHaveBeenCalledWith({ repoPath: '/repo-b' });
+    expect(h.rankArchitectureAttention).toHaveBeenCalledWith(expect.anything(), {
+      laneId: null,
+      repoPath: '/repo-b',
+    });
   });
 
   it('rejects stale evidence before making an advisory model call', async () => {
