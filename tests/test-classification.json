@@ -51,6 +51,12 @@
       ]
     },
     {
+      "path": "src/app/api/setup/mcp-servers/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/app/api/v2/proxy/cli/route.test.ts",
       "reasons": [
         "child-process"
@@ -540,6 +546,12 @@
         "executable-fixture",
         "git-cli",
         "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/antigravity-auth-smoke.test.ts",
+      "reasons": [
+        "executable-fixture"
       ]
     },
     {
@@ -1289,6 +1301,12 @@
       "reasons": [
         "child-process",
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/chat-history-auto-title-integration.test.ts",
+      "reasons": [
+        "integration"
       ]
     },
     {
@@ -2894,7 +2912,6 @@
       "reasons": [
         "child-process",
         "git-cli",
-        "network-listener",
         "real-path"
       ]
     },

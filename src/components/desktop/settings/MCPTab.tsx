@@ -281,14 +281,14 @@ export function MCPTab() {
     <div style={{
       paddingTop: 8,
       paddingLeft: 8,
-      paddingRight: 32,
+      paddingRight: 8,
       paddingBottom: 40,
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
       <TabHeading
         title="MCP"
-        subtitle="One click to let Claude Desktop or Claude Code dispatch work to your o8 fleet. Your other MCP servers stay untouched — we only write the o8 entry."
+        subtitle="Connect compatible apps to o8, or add MCP servers that give your orchestrator more tools and context."
       />
 
       {!ready ? (

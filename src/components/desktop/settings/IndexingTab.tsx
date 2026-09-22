@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   APP_FONT_STACK,
   BrainIcon,
+  RamsButton,
   SETTINGS_CONTENT_MAX_WIDTH,
   TabHeading,
 } from './shared';
@@ -194,21 +195,21 @@ export function IndexingTab() {
     <div style={{
       paddingTop: 8,
       paddingLeft: 8,
-      paddingRight: 32,
+      paddingRight: 8,
       paddingBottom: 40,
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
       <TabHeading
         title="indexing"
-        subtitle="What o8 has read from your repos — the code-symbol index and the docs that feed the Engineering Brain's citations."
+        subtitle="See which repositories o8 has indexed and refresh the documentation used for repository answers."
       />
 
       {/* ── Repositories ─────────────────────────────────────────────── */}
       <section style={{ marginBottom: 28 }}>
         <SettingsGroup
           header="Repositories"
-          footnote="Each connected repo is indexed for code symbols so agents can navigate it. Reindex re-reads the repo's docs (README, CLAUDE.md, AGENTS.md, DESIGN.md, and docs/) into the Brain's citations — run it after editing those files."
+          footnote="Each connected repo is indexed for code symbols so agents can navigate it. Refresh docs re-reads the repo's docs (README, CLAUDE.md, AGENTS.md, DESIGN.md, and docs/) into the Brain's citations — run it after editing those files."
         >
           {indexLoading ? (
             <SettingsRow icon={<RepoIcon />} label="Loading index state…" />
@@ -243,12 +244,12 @@ export function IndexingTab() {
 
               const busy = rx.phase === 'busy';
               const actionLabel = busy
-                ? 'Reindexing…'
+                ? 'Refreshing…'
                 : rx.phase === 'done'
-                  ? `${rx.written} directive${rx.written === 1 ? '' : 's'}`
+                  ? `${rx.written} section${rx.written === 1 ? '' : 's'}`
                   : rx.phase === 'error'
                     ? 'Retry'
-                    : 'Reindex';
+                    : 'Refresh docs';
 
               return (
                 <SettingsRow
@@ -259,22 +260,9 @@ export function IndexingTab() {
                   accessory={
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       <ValuePill tone={status.tone}>{status.label}</ValuePill>
-                      <ValuePill tone={rx.phase === 'error' ? 'destructive' : rx.phase === 'done' ? 'success' : 'default'}>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void runReindex(entry)}
-                          style={{
-                            all: 'unset',
-                            cursor: busy ? 'default' : 'pointer',
-                            fontFamily: APP_FONT_STACK,
-                            fontSize: 11.5,
-                            opacity: busy ? 0.6 : 1,
-                          }}
-                        >
-                          {actionLabel}
-                        </button>
-                      </ValuePill>
+                      <RamsButton variant="ghost" disabled={busy} busy={busy} onClick={() => void runReindex(entry)}>
+                        {actionLabel}
+                      </RamsButton>
                     </span>
                   }
                   divider={i < entries.length - 1}
@@ -289,19 +277,19 @@ export function IndexingTab() {
       <section style={{ marginBottom: 28 }}>
         <SettingsGroup
           header="Engineering Brain"
-          footnote="The Brain answers questions about your repos from what it has ingested — directives distilled from your docs plus every completed agent session in the ledger. These totals span all connected repos."
+          footnote="Repository answers can cite saved documentation, project guidance, and recorded task outcomes. These totals cover all connected repositories."
         >
           <SettingsRow
             icon={<DocIcon />}
-            label="Directives"
-            subtitle="Doc sections + operator rules the Brain can cite"
+            label="Saved instructions"
+            subtitle="Documentation and project guidance available to repository answers"
             value={diagLoading ? '…' : diagnostics ? String(diagnostics.directivesCount ?? 0) : '—'}
             pill
             divider
           />
           <SettingsRow
             icon={<LedgerIcon />}
-            label="Ledger outcomes"
+            label="Recorded task outcomes"
             subtitle="Completed agent sessions recorded as memory"
             value={diagLoading ? '…' : diagnostics ? String(diagnostics.outcomesCount ?? 0) : '—'}
             pill
@@ -309,8 +297,8 @@ export function IndexingTab() {
           />
           <SettingsRow
             icon={<BrainIcon />}
-            label="Substrate"
-            subtitle="SQLite-backed — directives, ledger, and FTS5 search"
+            label="Knowledge storage"
+            subtitle="Instructions and task history are stored locally"
             value="Local"
           />
         </SettingsGroup>

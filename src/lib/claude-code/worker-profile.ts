@@ -22,6 +22,8 @@ export { OPENROUTER_CLAUDE_CODE_DEFAULT_MODEL } from './worker-profile-types';
 
 type StoredProfile = ClaudeCodeWorkerProfile & { version: number };
 
+let profileMutationQueue: Promise<void> = Promise.resolve();
+
 function profilePath(): string {
   return path.join(getDataDir(), 'claude-code-worker.json');
 }
@@ -52,6 +54,22 @@ export function readClaudeCodeWorkerProfileSync(): ClaudeCodeWorkerProfile {
 export async function writeClaudeCodeWorkerProfile(
   profile: ClaudeCodeWorkerProfile,
 ): Promise<ClaudeCodeWorkerProfile> {
+  return enqueueProfileMutation(() => persistProfile(profile));
+}
+
+export async function updateClaudeCodeWorkerProfile(
+  update: (profile: ClaudeCodeWorkerProfile) => ClaudeCodeWorkerProfile,
+): Promise<ClaudeCodeWorkerProfile> {
+  return enqueueProfileMutation(() => persistProfile(update(readClaudeCodeWorkerProfileSync())));
+}
+
+function enqueueProfileMutation<T>(mutation: () => Promise<T>): Promise<T> {
+  const pending = profileMutationQueue.then(mutation, mutation);
+  profileMutationQueue = pending.then(() => undefined, () => undefined);
+  return pending;
+}
+
+async function persistProfile(profile: ClaudeCodeWorkerProfile): Promise<ClaudeCodeWorkerProfile> {
   const normalized = normalizeProfile(profile);
   const stored: StoredProfile = { version: PROFILE_VERSION, ...normalized };
   await writeFileAtomic(profilePath(), `${JSON.stringify(stored, null, 2)}\n`);

@@ -1,29 +1,34 @@
 'use client';
 
-import { useTheme, type ReduceTransparency } from '@/lib/theme/context';
-import { useEntitlement } from '@/lib/entitlement/context';
-import type { ThemePalette } from '@/lib/theme/registry';
+import { useTheme } from '@/lib/theme/context';
+import type { ThemePalette, SurfaceMode } from '@/lib/theme/registry';
 import {
   APP_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   RAMS_CONTROL_ACTIVE_BORDER,
-  LayersIcon,
-  SettingsSegmented,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
-import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
+import { GroupFootnote, GroupHeader } from './grouped';
 
 // ── Palette Preview Card ────────────────────────────────────────────────────
 
 function PalettePreviewCard({
   palette,
+  name,
+  description,
+  glass,
+  allGlass = false,
   active,
   onSelect,
 }: {
   palette: ThemePalette;
+  name: string;
+  description: string;
+  glass: boolean;
+  allGlass?: boolean;
   active: boolean;
   onSelect: () => void;
 }) {
@@ -33,12 +38,16 @@ function PalettePreviewCard({
     <button
       type="button"
       onClick={onSelect}
+      aria-label={name}
+      aria-pressed={active}
       style={{
         position: 'relative',
-        width: 220,
+        width: '100%',
+        minWidth: 0,
+        textAlign: 'left',
         padding: 0,
         border: `1px solid ${active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_HAIRLINE_SOFT}`,
-        borderRadius: 4,
+        borderRadius: 9,
         background: 'transparent',
         cursor: 'pointer',
         overflow: 'hidden',
@@ -48,8 +57,8 @@ function PalettePreviewCard({
     >
       <div
         style={{
-          height: 130,
-          background: p.bg,
+          height: 96,
+          background: glass ? `linear-gradient(135deg, ${p.accent}55, ${p.bg} 55%, ${p.accent}33)` : p.bg,
           paddingTop: 8,
           paddingBottom: 8,
           paddingLeft: 8,
@@ -63,7 +72,7 @@ function PalettePreviewCard({
           style={{
             height: 10,
             borderRadius: 3,
-            background: p.titlebar,
+            background: glass ? `${p.titlebar}99` : p.titlebar,
             display: 'flex',
             alignItems: 'center',
             paddingLeft: 4,
@@ -80,7 +89,7 @@ function PalettePreviewCard({
             style={{
               width: 14,
               borderRadius: 3,
-              background: p.nav,
+              background: glass ? `${p.nav}88` : p.nav,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -97,7 +106,7 @@ function PalettePreviewCard({
             style={{
               width: 46,
               borderRadius: 3,
-              background: p.panel,
+              background: glass ? `${p.panel}99` : p.panel,
               paddingTop: 4,
               paddingBottom: 4,
               paddingLeft: 4,
@@ -116,7 +125,7 @@ function PalettePreviewCard({
             style={{
               flex: 1,
               borderRadius: 3,
-              background: p.bg,
+              background: allGlass ? `${p.bg}55` : p.bg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -136,7 +145,7 @@ function PalettePreviewCard({
             style={{
               width: 46,
               borderRadius: 3,
-              background: p.panel,
+              background: glass ? `${p.panel}99` : p.panel,
               paddingTop: 4,
               paddingBottom: 4,
               paddingLeft: 4,
@@ -163,154 +172,77 @@ function PalettePreviewCard({
           paddingLeft: 14,
           paddingRight: 14,
           display: 'flex',
-          alignItems: 'baseline',
-          justifyContent: 'space-between',
-          gap: 12,
+          flexDirection: 'column',
+          gap: 6,
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-          {palette.name.toLowerCase()}
+        <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--t-text)' }}>{name}</span>
+          <span style={{ fontSize: 10, color: active ? RAMS_ACCENT : RAMS_INK_QUIET }}>
+            {active ? 'Selected' : ''}
+          </span>
         </div>
-        <div
-          style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 10,
-            fontWeight: 400,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: active ? RAMS_ACCENT : RAMS_INK_QUIET,
-          }}
-        >
-          {active ? '(active)' : ''}
-        </div>
+        <span style={{ fontSize: 11.5, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{description}</span>
       </div>
     </button>
   );
 }
 
-// While All glass is on, the mode pins palette=dark + surface=glass wholesale
-// (WORKSPACE_GLASS_OVERRIDES in theme/context.tsx + the layout.tsx pre-paint
-// stamp), so both controls below are no-ops until it's switched off. We dim
-// them and say so rather than letting a click look like it did something —
-// the preference still persists and applies once All glass turns off (#1625).
-const GLASS_LOCK_HINT = 'Locked by All glass — dark glass while it’s on';
-const GLASS_LOCK_OPACITY = 0.45;
-
-// ── Appearance Tab ──────────────────────────────────────────────────────────
-
+// Each card applies a complete look using the existing persisted theme settings.
 export function AppearanceTab() {
   const {
     paletteId,
     setPalette,
     palettes,
-    reduceTransparency,
+    surface,
     setReduceTransparency,
     workspaceGlass,
     setWorkspaceGlass,
   } = useTheme();
-  const { founder, plan } = useEntitlement();
-  const foundersMode = founder !== null || plan === 'founder';
-  // Free keeps the core o8 theme (light/dark); founders-flagged palettes are
-  // founders-only, with more shipping founders-first (#1450).
-  const visiblePalettes = palettes.filter((p) => !p.foundersOnly || foundersMode);
+  const options = palettes.flatMap((palette) => (['solid', 'glass'] as SurfaceMode[]).map((surface) => ({
+    id: `${palette.id}-${surface}`,
+    palette,
+    surface,
+    name: `${palette.name} ${surface === 'solid' ? 'Solid' : 'Glass'}`,
+    description: surface === 'solid' ? 'Opaque panels and workspace.' : 'Glass panels with an opaque workspace.',
+  })));
+  const darkPalette = palettes.find((palette) => palette.id === 'dark');
 
   return (
-    <div
-      style={{
-        paddingTop: 8,
-        paddingLeft: 8,
-        paddingRight: 32,
-        paddingBottom: 40,
-        maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
-        fontFamily: APP_FONT_STACK,
-      }}
-    >
-      <TabHeading
-        title="appearance"
-        subtitle="Theme controls how o8 looks. Accent colors and status indicators stay consistent across themes."
-      />
-
+    <div style={{ paddingTop: 8, paddingLeft: 8, paddingRight: 8, paddingBottom: 40, maxWidth: SETTINGS_CONTENT_MAX_WIDTH, fontFamily: APP_FONT_STACK }}>
+      <TabHeading title="appearance" subtitle="Choose a look for your workspace. Changes apply immediately." />
       <section>
-        <GroupHeader>Palette</GroupHeader>
-
-        <div
-          style={{
-            display: 'flex',
-            gap: 18,
-            marginTop: 4,
-            flexWrap: 'wrap',
-            opacity: workspaceGlass ? GLASS_LOCK_OPACITY : 1,
-            transition: 'opacity 160ms',
-          }}
-        >
-          {visiblePalettes.map((p) => (
+        <GroupHeader>Theme</GroupHeader>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 12, marginTop: 4, maxWidth: 1000 }}>
+          {options.map((option) => (
             <PalettePreviewCard
-              key={p.id}
-              palette={p}
-              active={paletteId === p.id}
+              key={option.id}
+              palette={option.palette}
+              name={option.name}
+              description={option.description}
+              glass={option.surface === 'glass'}
+              active={!workspaceGlass && paletteId === option.palette.id && surface === option.surface}
               onSelect={() => {
-                // #1649: a pick while All glass is on must not silently no-op —
-                // picking a palette IS the intent to use palettes, so it leaves
-                // the mode and applies in one click.
-                if (workspaceGlass) setWorkspaceGlass(false);
-                setPalette(p.id);
+                setWorkspaceGlass(false);
+                setPalette(option.palette.id);
+                setReduceTransparency(option.surface === 'solid' ? 'on' : 'off');
               }}
             />
           ))}
+          {darkPalette ? (
+            <PalettePreviewCard
+              palette={darkPalette}
+              name="All Glass"
+              description="Glass across the entire window."
+              glass
+              allGlass
+              active={workspaceGlass}
+              onSelect={() => setWorkspaceGlass(true)}
+            />
+          ) : null}
         </div>
-        {workspaceGlass ? <GroupFootnote>Locked by All glass — picking a palette turns All glass off and applies it</GroupFootnote> : null}
-        {foundersMode ? (
-          <GroupFootnote>More founders themes are on the way — they land here first.</GroupFootnote>
-        ) : null}
-
+        <GroupFootnote>Glass lets your wallpaper show through in the macOS desktop app. Solid keeps surfaces opaque for clearer contrast. Other platforms may use solid surfaces.</GroupFootnote>
       </section>
-
-      <section style={{ marginTop: 36 }}>
-        <SettingsGroup
-          header="Interface"
-          footnote="Solid chrome replaces translucent glass with opaque panels when wallpaper makes the interface harder to read."
-        >
-          <SettingsRow
-            icon={<LayersIcon />}
-            label="Window chrome"
-            subtitle={workspaceGlass ? GLASS_LOCK_HINT : 'Glass follows your wallpaper; solid is opaque'}
-            accessory={
-              <span
-                style={{
-                  display: 'inline-flex',
-                  opacity: workspaceGlass ? GLASS_LOCK_OPACITY : 1,
-                  transition: 'opacity 160ms',
-                }}
-              >
-                <SettingsSegmented
-                  value={reduceTransparency}
-                  onChange={(v) => setReduceTransparency(v as ReduceTransparency)}
-                  options={[
-                    { value: 'system', label: 'System' },
-                    { value: 'off', label: 'Glass' },
-                    { value: 'on', label: 'Solid' },
-                  ]}
-                />
-              </span>
-            }
-            divider
-          />
-          {/* All Glass (experimental, Q 2026-07-16): the workspace CENTER goes
-              translucent too — the one exception to the center-is-always-solid
-              doctrine. Lives HERE, not in the quick drawer's Appearance row
-              (operator's call: settings-page only until the values are tuned
-              with the development sliders). While on, palette has no effect
-              (the mode pins dark ink over glass); drawers keep their palette. */}
-          <SettingsRow
-            icon={<LayersIcon />}
-            label="All glass"
-            subtitle="Experimental — the workspace surface goes translucent too; the whole window follows your wallpaper"
-            checked={workspaceGlass}
-            onToggle={setWorkspaceGlass}
-          />
-        </SettingsGroup>
-      </section>
-
     </div>
   );
 }

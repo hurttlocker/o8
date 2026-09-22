@@ -41,7 +41,7 @@ function structuredCost(lines: string[], fallbackModel: string | null): SessionC
         'output_tokens', 'outputTokens', 'completion_tokens', 'candidatesTokenCount',
       ]));
       cacheReadTokens = Math.max(cacheReadTokens, findTokenCount(parsed, [
-        'cached_input_tokens', 'cacheReadTokens', 'cachedContentTokenCount',
+        'cached_input_tokens', 'cache_read_tokens', 'cacheReadTokens', 'cachedContentTokenCount',
       ]));
     } catch {
       // Unknown NDJSON rows are ignored; adapter parsing remains best-effort.

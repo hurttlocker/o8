@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
-  RAMS_ACCENT,
   RAMS_INK_QUIET,
   BracketLabel,
   RamsButton,
@@ -14,6 +13,7 @@ import {
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { formatDuration } from '@/lib/format/duration';
 import { RecallHealthSection } from './RecallHealthSection';
@@ -61,9 +61,9 @@ function formatToolLabel(id: string): string {
 }
 
 function toolStatusLine(tool: DiagnosticTool): string {
-  if (!tool.detected) return 'Not found';
-  if (tool.ready === false) return tool.authHint ?? 'Auth missing';
-  return tool.path ?? tool.version ?? 'Detected';
+  if (!tool.detected) return 'Optional tool is not installed.';
+  if (tool.ready === false) return tool.authHint ?? 'Connect this tool before using it.';
+  return [tool.ready ? 'Ready' : 'Installed; connection not confirmed', tool.version, tool.path].filter(Boolean).join(' · ');
 }
 
 // ── Diagnostics Tab ──
@@ -180,14 +180,14 @@ export function DiagnosticsTab() {
     <div style={{
       paddingTop: 8,
       paddingLeft: 8,
-      paddingRight: 32,
+      paddingRight: 8,
       paddingBottom: 40,
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
       <TabHeading
         title="diagnostics"
-        subtitle="Runtime and tool health. Quiet neutral dots when everything is fine; colored badges only when action is demanded."
+        subtitle="Check which tools are available, troubleshoot connections, and find maintenance options."
       />
 
       {error ? (
@@ -217,16 +217,16 @@ export function DiagnosticsTab() {
       {/* Runtimes */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Runtimes"
-          footnote="Re-run any time to refresh detected versions, paths, and auth status."
+          header="Connection health"
+          footnote="Check again to refresh installed tools and sign-in status. You only need the tools you plan to use."
         >
           <SettingsRow
             icon={<ActivityIcon />}
-            label="Runtime diagnostics"
+            label="Check installed tools"
             subtitle={lastChecked ? `Last checked ${lastChecked}` : 'Not yet checked'}
             accessory={
               <RamsButton variant="ghost" onClick={() => { void runDiagnostics(); }} disabled={loading} busy={loading}>
-                {loading ? 'Checking…' : 'Re-run'}
+                {loading ? 'Checking…' : 'Check again'}
               </RamsButton>
             }
             divider={tools.length > 0 || (!loading && tools.length === 0)}
@@ -238,7 +238,7 @@ export function DiagnosticsTab() {
               label={formatToolLabel(tool.id)}
               subtitle={toolStatusLine(tool)}
               accessory={!tool.detected || tool.ready === false ? (
-                <ValuePill tone="destructive">{!tool.detected ? 'Missing' : 'Needs auth'}</ValuePill>
+                <ValuePill>{!tool.detected ? 'Not installed' : 'Setup needed'}</ValuePill>
               ) : undefined}
               divider={index < tools.length - 1}
             />
@@ -253,9 +253,9 @@ export function DiagnosticsTab() {
         </SettingsGroup>
       </section>
 
-      <section style={{ marginTop: 28 }}>
+      <SettingsAdvanced label="Feature diagnostics" description="Technical checks for troubleshooting specific features.">
         <ShippedDarkAuditSection />
-      </section>
+      </SettingsAdvanced>
 
       {/* Maintenance */}
       <section style={{ marginTop: 28 }}>
@@ -265,11 +265,11 @@ export function DiagnosticsTab() {
         >
           <SettingsRow
             icon={<LayersIcon />}
-            label="Prune Codex session archive"
+            label="Archive old Codex sessions"
             subtitle="Archive sessions older than 14 days"
             accessory={
               <RamsButton variant="ghost" onClick={() => { void runPrune(); }} disabled={pruneBusy} busy={pruneBusy}>
-                {pruneBusy ? 'Pruning…' : 'Prune'}
+                {pruneBusy ? 'Archiving…' : 'Archive'}
               </RamsButton>
             }
             divider={!!pruneError || !!pruneResult}
@@ -321,7 +321,7 @@ export function DiagnosticsTab() {
                   color: 'var(--t-text)',
                   letterSpacing: '-0.01em',
                 }}>
-                  Prune finished in {formatDuration(pruneResult.durationMs)}
+                  Archive finished in {formatDuration(pruneResult.durationMs)}
                 </span>
                 <span style={{
                   fontFamily: APP_FONT_STACK,
@@ -361,7 +361,7 @@ export function DiagnosticsTab() {
       {/* Danger */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Danger"
+          header="Reset app data"
           footnote="You will need to quit and reopen o8 afterward to reinitialize. The legacy ~/.cortex-ide dir is left in place as a rollback safety net."
         >
           <SettingsRow
@@ -407,40 +407,10 @@ export function DiagnosticsTab() {
           and the golden-demo runner. Internal-only: repair signals for the
           team, never customer-facing (not even founders). */}
       {internalMode ? (
-        <>
-          <div style={{
-            marginTop: 40,
-            marginBottom: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            maxWidth: 620,
-          }}>
-            <span style={{
-              fontFamily: APP_FONT_STACK,
-              fontSize: 10,
-              fontWeight: 400,
-              letterSpacing: '0.2em',
-              textTransform: 'uppercase',
-              color: RAMS_ACCENT,
-            }}>
-              Internal
-            </span>
-            <div style={{ flex: 1, height: 1, background: 'var(--t-divider, rgba(17,17,17,0.06))' }} />
-            <span style={{
-              fontFamily: APP_FONT_STACK,
-              fontSize: 10,
-              fontWeight: 400,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: RAMS_INK_QUIET,
-            }}>
-              Instrumentation
-            </span>
-          </div>
-
-          {/* Constrained to the same 620 rhythm as every group above — these
-              cards previously spanned the full content width and read detached. */}
+        <SettingsAdvanced
+          label="Developer diagnostics"
+          description="Internal tools for inspecting memory retrieval, automation, and demo runs."
+        >
           <div style={{ maxWidth: 620 }}>
             {/* Recall health (#749 substrate eval gate) */}
             <section style={{ marginTop: 20 }}>
@@ -457,7 +427,7 @@ export function DiagnosticsTab() {
               <DemoRunSection />
             </section>
           </div>
-        </>
+        </SettingsAdvanced>
       ) : null}
 
       {/* Two-step confirmation modal */}

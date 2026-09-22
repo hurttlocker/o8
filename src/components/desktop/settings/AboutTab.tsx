@@ -97,14 +97,14 @@ export function AboutTab() {
     <div style={{
       paddingTop: 8,
       paddingLeft: 8,
-      paddingRight: 32,
+      paddingRight: 8,
       paddingBottom: 40,
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
       <TabHeading
         title="about"
-        subtitle="A precision instrument for autonomous engineering teams. Built with Next.js and Tauri."
+        subtitle="Version information, documentation, and help for your o8 installation."
       />
 
       <section>

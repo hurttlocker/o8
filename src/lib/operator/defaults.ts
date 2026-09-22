@@ -323,7 +323,7 @@ export interface OperatorDefaultsWithSources {
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   subscriptionProfile: 'both',
   parallelCap: 5,
-  overlapGate: 'advisory',
+  overlapGate: 'strict',
   healBotEnabled: true,
   supervisorAutoEscalate: false,
   ...REVIEW_CONTINUATION_FALLBACK,

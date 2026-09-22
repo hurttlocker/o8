@@ -19,7 +19,7 @@ import {
   listDispatchableRuntimes,
 } from "@/lib/orchestrator/runtime-capabilities";
 
-const declarativeRuntimeIds = listDeclarativeRuntimes();
+const declarativeRuntimeIds = listDeclarativeRuntimes().filter(id => id !== "antigravity");
 
 const authFixture = vi.hoisted(() => ({
   home: "",
@@ -30,6 +30,10 @@ const scanAndLinkMock = vi.hoisted(() =>
     authFixture.installed.has(binaryName) ? `/test-bin/${binaryName}` : null,
   ),
 );
+
+vi.mock('@/lib/runtimes/shared/antigravity-login-probe', () => ({
+  probeAntigravityLogin: vi.fn(async () => ({ installed: false, authenticated: false, detail: 'Fixture absent', fix: 'Sign in' })),
+}));
 
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();

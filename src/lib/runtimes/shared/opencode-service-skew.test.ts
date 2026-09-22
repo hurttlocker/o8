@@ -10,6 +10,10 @@ const authFixture = vi.hoisted(() => ({
   home: '',
 }));
 
+vi.mock('@/lib/runtimes/shared/antigravity-login-probe', () => ({
+  probeAntigravityLogin: vi.fn(async () => ({ installed: false, authenticated: false, detail: 'Fixture absent', fix: 'Sign in' })),
+}));
+
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>();
   return {

@@ -83,7 +83,7 @@ export function ProjectsPanel() {
     <div style={{
       paddingTop: 8,
       paddingLeft: 8,
-      paddingRight: 32,
+      paddingRight: 8,
       paddingBottom: 40,
       maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
@@ -92,12 +92,14 @@ export function ProjectsPanel() {
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
-        gap: 24,
+        gap: 16,
+        flexWrap: 'wrap',
+        marginBottom: 16,
       }}>
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, flex: '1 1 320px' }}>
           <TabHeading
             title="projects"
-            subtitle="A project is the shared context for a product: multiple repositories, standing instructions, and attached files."
+            subtitle="Group repositories and shared instructions so agents have the right context for your project."
           />
         </div>
 
@@ -115,10 +117,10 @@ export function ProjectsPanel() {
       </div>
 
       <section>
-        <SettingsGroup header="Overview">
+        <SettingsGroup header="Overview" maxWidth={SETTINGS_CONTENT_MAX_WIDTH}>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))',
             gap: 10,
             paddingTop: 14,
             paddingRight: 14,
@@ -137,7 +139,7 @@ export function ProjectsPanel() {
       </section>
 
       <section style={{ marginTop: 28 }}>
-        <SettingsGroup header="Runtime context">
+        <SettingsGroup header="Active project context" maxWidth={SETTINGS_CONTENT_MAX_WIDTH}>
           <RuntimeContextPanel context={runtimeContext} locks={projectLocks} />
         </SettingsGroup>
       </section>

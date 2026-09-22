@@ -2,7 +2,7 @@
 
 /**
  * Inset-grouped settings primitives — the o8-mobile settings system ported to
- * desktop (epic #1450). Apple Settings grouping (uppercase section header →
+ * desktop (epic #1450). Apple Settings grouping (section heading →
  * inset rounded card → icon-tile rows with trailing accessories + label-inset
  * dividers) on o8's paper/ink tokens. Selection stays monochrome — alpha-gray
  * fills and hairlines; hue is reserved for destructive.
@@ -25,19 +25,18 @@ const DESTRUCTIVE = '#d94f3a';
 
 export function GroupHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{
+    <h2 data-settings-section={typeof children === 'string' ? children : undefined} style={{
       fontFamily: APP_FONT_STACK,
-      fontSize: 10,
-      fontWeight: 400,
-      letterSpacing: '0.14em',
-      textTransform: 'uppercase',
-      color: RAMS_INK_QUIET,
+      fontSize: 15,
+      fontWeight: 600,
+      lineHeight: 1.4,
+      color: 'var(--t-text)',
+      margin: 0,
       paddingLeft: ROW_PAD_H + 2,
-      paddingBottom: 7,
-      userSelect: 'none',
+      paddingBottom: 10,
     }}>
       {children}
-    </div>
+    </h2>
   );
 }
 
@@ -115,7 +114,7 @@ function IconTile({ icon, destructive }: { icon: React.ReactNode; destructive?: 
   );
 }
 
-export function ValuePill({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'destructive' }) {
+export function ValuePill({ children, tone = 'default', style }: { children: React.ReactNode; tone?: 'default' | 'success' | 'destructive'; style?: React.CSSProperties }) {
   return (
     <span style={{
       fontFamily: APP_FONT_STACK,
@@ -130,6 +129,7 @@ export function ValuePill({ children, tone = 'default' }: { children: React.Reac
       paddingBottom: 3,
       whiteSpace: 'nowrap',
       flexShrink: 0,
+      ...style,
     }}>
       {children}
     </span>
@@ -189,7 +189,7 @@ export function SettingsRow({
   const body = (
     <>
       {icon ? <IconTile icon={icon} destructive={destructive} /> : null}
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left' }}>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, textAlign: 'left' }}>
         <span style={{
           fontFamily: APP_FONT_STACK,
           fontSize: 13.5,

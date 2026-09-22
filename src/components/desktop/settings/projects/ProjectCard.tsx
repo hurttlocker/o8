@@ -134,6 +134,7 @@ export function ProjectCard({
       <div style={{
         display: 'flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
         gap: 12,
         minHeight: 52,
         paddingTop: 10,
@@ -141,7 +142,7 @@ export function ProjectCard({
         paddingLeft: 14,
         paddingRight: 14,
       }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: '1 1 180px', minWidth: 0 }}>
           <span style={{
             fontFamily: APP_FONT_STACK,
             fontSize: 14.5,
@@ -163,7 +164,7 @@ export function ProjectCard({
         </div>
 
         {!isEditing ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             {pendingConfirm ? (
               <>
                 <span style={{
