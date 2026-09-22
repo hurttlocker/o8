@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 
 export function SkillCatalogItem({ title, subtitle, pill, expanded, onClick, children }: {
-  title: string; subtitle: string; pill: string; expanded: boolean; onClick: () => void; children: ReactNode;
+  title: string; subtitle: string; pill: string; expanded: boolean; onClick: () => void; children?: ReactNode;
 }) {
   return <div style={{ minWidth: 0, gridColumn: expanded ? '1 / -1' : undefined }}>
     <div role="button" tabIndex={0} aria-expanded={expanded} onClick={onClick} onKeyDown={(event) => {

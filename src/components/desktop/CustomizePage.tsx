@@ -1,6 +1,6 @@
 'use client';
 
-/** Live customization inventories with a development-only package design preview. */
+/** Live customization inventories and scoped installation flows. */
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -14,21 +14,21 @@ import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { insertPromptIntoActiveComposer, type PromptLibraryEntry } from '@/lib/prompt-library/client';
 import { PromptLibraryTab } from './customize/PromptLibraryTab';
+import { AddSkillForm } from './customize/AddSkillForm';
 import { SkillsInventoryTab } from './customize/SkillsInventoryTab';
 import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './customize/shared';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
-const PluginsPreviewTab = dynamic(() => import('./customize/PluginsPreviewTab'), {
-  loading: () => <p style={{ color: 'var(--t-text-muted)' }}>Opening plugin preview…</p>,
+const PluginsTab = dynamic(() => import('./customize/PluginsTab'), {
+  loading: () => <p style={{ color: 'var(--t-text-muted)' }}>Opening plugins…</p>,
 });
 
 /** o8's own always-on MCP servers — shown so "all connections" is honest. */
 const BUILTIN_CONNECTIONS: Array<{ name: string; detail: string }> = [
   { name: 'o8 operator', detail: 'Missions, approvals, webview control — the operator MCP surface' },
   { name: 'cortex', detail: 'Fleet, issues, PRs — internal orchestrator tools' },
-  { name: 'codebase-memory', detail: 'Repo knowledge graph and code search' },
 ];
 
 function openSettingsMcpTab() {
@@ -43,6 +43,9 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
 }) {
   const [tab, setTab] = useState<CustomizeTab>('rules');
   const [query, setQuery] = useState('');
+  const [pluginRepo, setPluginRepo] = useState('');
+  const [addingSkill, setAddingSkill] = useState(false);
+  const [skillNotice, setSkillNotice] = useState('');
   const [selection, setSelection] = useState({ projectId: project?.id, value: 'all' });
   const projectPaths = JSON.stringify(project?.repoPaths ?? []);
   const repos = useMemo(() => {
@@ -114,6 +117,17 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
     window.requestAnimationFrame(insertWhenReady);
   };
 
+  const useSkill = async (skill: { name: string; file: string; repoPath?: string }) => {
+    try {
+      const params = new URLSearchParams({ file: skill.file });
+      if (skill.repoPath) params.set('repo', skill.repoPath);
+      const response = await fetch(`/api/customize/skills?${params}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message ?? 'Could not read this skill.');
+      insertTaskText(`Use the ${JSON.stringify(skill.name)} skill for this task. Its instructions are included below. Supporting files are not included.\n\n${data.instructions}\n\n`);
+    } catch (error) { toast(error instanceof Error ? error.message : 'Could not add the skill to your draft.', 'error'); }
+  };
+
   return (
     <div style={{
       height: '100%',
@@ -146,8 +160,8 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
         {tab === 'rules' && scope !== 'personal' && project ? <ProjectInstructions key={project.id} project={project} /> : null}
 
         {/* Keep section changes immediate. */}
-        {process.env.NODE_ENV === 'development' && tab === 'plugins' ? (
-          <PluginsPreviewTab />
+        {tab === 'plugins' ? (
+          <PluginsTab selectedRepo={pluginRepo} onSelectRepo={setPluginRepo} repos={repos} onChanged={() => setRefreshCount((value) => value + 1)} onUseSkill={useSkill} />
         ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
         ) : inventoryError ? (
@@ -169,7 +183,11 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
             onCountDelta={() => {}}
           />
         ) : tab === 'skills' ? (
-          <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} onUseSkill={(skill) => insertTaskText(`Use the ${JSON.stringify(skill.name)} skill for this task. Read its instructions at ${JSON.stringify(skill.file)} first. If that file is unavailable in your environment, tell me before proceeding.\n\n`)} />
+          <>
+            {addingSkill ? <AddSkillForm repos={repos} initialRepo={repoPath} onCancel={() => setAddingSkill(false)} onSaved={(savedRepo) => { setAddingSkill(false); setQuery(''); setSelection({ projectId: project?.id, value: savedRepo ?? 'personal' }); setRefreshCount((value) => value + 1); setSkillNotice('Skill saved. Open it below or use it in a task.'); }} /> : <div><RamsButton variant="primary" onClick={() => { setAddingSkill(true); setSkillNotice(''); }}>Add skill</RamsButton></div>}
+            {skillNotice ? <p role="status" style={{ color: 'var(--t-text-muted)', fontSize: 13 }}>{skillNotice}</p> : null}
+            <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} onUseSkill={useSkill} />
+          </>
         ) : tab === 'agents' ? (
           <AgentsTab agents={agents.filter((a) => matches(a.name, a.description, a.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (
