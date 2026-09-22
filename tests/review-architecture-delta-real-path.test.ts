@@ -120,6 +120,44 @@ describe('review architecture delta route', () => {
     });
   });
 
+  it('reuses an exact snapshot and invalidates the cache when modified bytes change', async () => {
+    const repoPath = createRepo();
+    write(repoPath, 'src/feature.ts', "import { core } from './core';\nexport const feature = core + 1;\n");
+
+    const first = await buildArchitectureDelta({ repoPath });
+    const cached = await buildArchitectureDelta({ repoPath });
+
+    expect(cached).toBe(first);
+
+    write(repoPath, 'src/feature.ts', 'export const feature = 3;\n');
+    const refreshed = await buildArchitectureDelta({ repoPath });
+
+    expect(refreshed).not.toBe(first);
+    expect(refreshed.analysisId).not.toBe(first.analysisId);
+  });
+
+  it('does not store later analyzed bytes under an earlier same-porcelain cache key', async () => {
+    const repoPath = createRepo();
+    const snapshotA = "import { core } from './core';\nexport const feature = core + 1;\n";
+    const snapshotB = 'export const feature = 3;\n';
+    write(repoPath, 'src/feature.ts', snapshotA);
+
+    const analyzedB = await buildArchitectureDelta({
+      repoPath,
+      afterCacheKeyForTesting: () => write(repoPath, 'src/feature.ts', snapshotB),
+    });
+    write(repoPath, 'src/feature.ts', snapshotA);
+    const restoredA = await buildArchitectureDelta({ repoPath });
+
+    expect(restoredA).not.toBe(analyzedB);
+    expect(restoredA.analysisId).not.toBe(analyzedB.analysisId);
+    expect(restoredA.edges).toContainEqual(expect.objectContaining({
+      from: 'src/feature.ts',
+      to: 'src/core.ts',
+      state: 'context',
+    }));
+  });
+
   it('rejects source symlinks before reading and reports them as safely omitted', async () => {
     const repoPath = createRepo();
     symlinkSync('/dev/zero', path.join(repoPath, 'src/stream.ts'));
