@@ -202,6 +202,8 @@ export interface AgentPanelProps {
   selectedRepo?: string | null;
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
+  /** Repository bound to the focused workspace tab, independent of browsing. */
+  workingRepoPath?: string | null;
   activeWorkspacePath?: string | null;
   activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
   onFocusOrchestratorTab?: () => void;

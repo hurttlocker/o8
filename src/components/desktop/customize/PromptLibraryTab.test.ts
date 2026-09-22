@@ -117,6 +117,13 @@ describe('PromptLibraryTab', () => {
           json: async () => ({ ok: true, entries: [{ ...prompt, id: 'prompt-imported' }], created: 1, skipped: 0 }),
         } as Response;
       }
+      if (url === '/api/prompt-library' && init?.method === 'POST') {
+        const input = JSON.parse(String(init.body)) as Pick<PromptLibraryEntry, 'title' | 'body' | 'tags' | 'scope' | 'repoPath'>;
+        return {
+          ok: true,
+          json: async () => ({ ok: true, prompt: { ...prompt, ...input, id: 'prompt-created' }, created: true }),
+        } as Response;
+      }
       if (url.startsWith('/api/prompt-library?')) {
         const repo = parsed.searchParams.get('repoPath');
         const prompts = repo === '/repos/o8'
@@ -170,6 +177,59 @@ describe('PromptLibraryTab', () => {
       repoPath: '/repos/o8',
     });
     expect(onCountDelta).toHaveBeenCalledWith(1);
+
+    act(() => button('New prompt')?.click());
+    expect(document.querySelector<HTMLSelectElement>('select[aria-label="Prompt destination"]')?.value)
+      .toBe('/repos/o8');
+  });
+
+  it('creates an all-project prompt in the explicitly selected member repository', async () => {
+    act(() => root.render(createElement(PromptLibraryTab, {
+      query: '',
+      repoPath: null,
+      repoName: 'Personal',
+      repoPaths: ['/repos/web', '/repos/api'],
+      onInsert: vi.fn(),
+      onCountDelta: vi.fn(),
+    })));
+    await settle();
+
+    act(() => button('New prompt')?.click());
+    const destination = document.querySelector<HTMLSelectElement>('select[aria-label="Prompt destination"]');
+    expect(destination?.value).toBe('personal');
+    expect([...destination?.options ?? []].map((option) => [option.text, option.value])).toEqual([
+      ['Personal', 'personal'],
+      ['web', '/repos/web'],
+      ['api', '/repos/api'],
+    ]);
+
+    const title = document.querySelector<HTMLInputElement>('input');
+    const body = document.querySelector<HTMLTextAreaElement>('textarea');
+    act(() => {
+      const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      inputSetter?.call(title, 'API deployment review');
+      title?.dispatchEvent(new Event('input', { bubbles: true }));
+      const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      textareaSetter?.call(body, 'Review the API deployment contract.');
+      body?.dispatchEvent(new Event('input', { bubbles: true }));
+      if (destination) {
+        destination.value = '/repos/api';
+        destination.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await act(async () => button('Save prompt')?.click());
+    await settle();
+
+    const request = fetchMock.mock.calls.find(([url, init]) => (
+      url === '/api/prompt-library' && (init as RequestInit | undefined)?.method === 'POST'
+    ));
+    expect(JSON.parse(String((request?.[1] as RequestInit).body))).toEqual({
+      title: 'API deployment review',
+      body: 'Review the API deployment contract.',
+      tags: [],
+      scope: 'repo',
+      repoPath: '/repos/api',
+    });
   });
 
   it('imports each aggregate source back into its original member repository', async () => {
@@ -242,6 +302,9 @@ describe('PromptLibraryTab', () => {
     const textarea = document.querySelector('textarea');
     expect(textarea?.value).toBe(webPrompt.body);
     expect(rowButton?.parentElement?.contains(textarea ?? null)).toBe(true);
+    const destination = document.querySelector<HTMLSelectElement>('select[aria-label="Prompt destination"]');
+    expect(destination?.value).toBe('/repos/web');
+    expect([...destination?.options ?? []].map((option) => option.value)).toContain('/repos/api');
     await act(async () => button('Save changes')?.click());
     await settle();
 
@@ -271,5 +334,10 @@ describe('PromptLibraryTab', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/prompt-library/import?'))).toBe(false);
     const listRequest = fetchMock.mock.calls.find(([url]) => String(url).startsWith('/api/prompt-library?'));
     expect(new URL(String(listRequest?.[0]), 'http://localhost').searchParams.has('repoPath')).toBe(false);
+
+    act(() => button('New prompt')?.click());
+    expect(document.querySelector('select[aria-label="Prompt destination"]')).toBeNull();
+    expect(document.body.textContent).toContain('Destination');
+    expect(document.body.textContent).toContain('Personal');
   });
 });

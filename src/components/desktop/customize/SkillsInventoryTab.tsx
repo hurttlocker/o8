@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { RamsButton } from '../settings/shared';
 import { ClaudeWorkerSkills } from './ClaudeWorkerSkills';
 import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './shared';
 
@@ -121,10 +122,11 @@ function sourceSummary(entries: SkillInventoryEntry[]) {
   return `Found in ${labels.join(', ')}`;
 }
 
-export function SkillsInventoryTab({ skills, query, onOpenFile }: {
+export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
   skills: SkillInventoryEntry[];
   query: string;
   onOpenFile: (path: string) => void;
+  onUseSkill?: (skill: SkillInventoryEntry) => void;
 }) {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [claudeEditorOpen, setClaudeEditorOpen] = useState(false);
@@ -166,7 +168,10 @@ export function SkillsInventoryTab({ skills, query, onOpenFile }: {
               <DetailLine label="Found in" value={SOURCE_LABELS[skill.source]} />
               <DetailLine label="Description" value={skill.description} />
               <DetailLine label="File" value={skill.file} mono />
-              <OpenFileLink file={skill.file} onOpenFile={onOpenFile} />
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                {onUseSkill ? <RamsButton variant="primary" onClick={() => onUseSkill(skill)}>Use in task</RamsButton> : null}
+                <OpenFileLink file={skill.file} onOpenFile={onOpenFile} />
+              </div>
             </div>
           ))}
         </div>
@@ -179,7 +184,7 @@ export function SkillsInventoryTab({ skills, query, onOpenFile }: {
       <div style={{ paddingTop: 16, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)' }}>Discovered skills</span>
         <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
-          Skills give agents reusable instructions for a task. Same-name files are grouped within each repository or your personal folders. Expand a row to compare copies; finding a file here does not mean every agent loads it.
+          Skills found on this computer. Use in task asks your agent to read the chosen copy: review the request in your draft, then send it. Automatic loading depends on the agent.
         </span>
       </div>
 

@@ -4,6 +4,7 @@ import { act, createElement, useState, type ChangeEvent } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomizePage } from './CustomizePage';
+import { RetainedCustomizeView } from './customize/RetainedCustomizeView';
 
 describe('CustomizePage skills', () => {
   let host: HTMLDivElement;
@@ -227,6 +228,64 @@ describe('CustomizePage skills', () => {
     await settle();
     await insertSavedPrompt();
     expect(insertedCount()).toBe(2);
+  });
+
+  it('keeps skill inspection state on return and inserts the selected skill into the draft without sending', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    }));
+    const openedFiles: string[] = [];
+    const onFile = (event: Event) => openedFiles.push((event as CustomEvent<{ path: string }>).detail.path);
+    window.addEventListener('o8:open-file', onFile);
+    function Harness() {
+      const [customizing, setCustomizing] = useState(true);
+      const [draft, setDraft] = useState('Review this change. ');
+      return createElement('div', null,
+        createElement(RetainedCustomizeView, { active: customizing },
+          createElement(CustomizePage, {
+            project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8'], createdAt: '' },
+            registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }],
+            onClose: () => setCustomizing(false),
+          }),
+        ),
+        createElement('div', { hidden: customizing },
+          createElement('textarea', {
+            'data-o8-active-composer': 'true', value: draft,
+            onChange: (event: ChangeEvent<HTMLTextAreaElement>) => setDraft(event.currentTarget.value),
+          }),
+          createElement('button', { onClick: () => setCustomizing(true) }, 'Return to Customize'),
+        ),
+      );
+    }
+    const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find((item) => item.textContent?.trim() === label)!;
+    try {
+      await act(async () => { root.render(createElement(Harness)); });
+      act(() => [...host.querySelectorAll('button')].find((item) => item.textContent?.startsWith('Skills'))!.click());
+      const search = host.querySelector<HTMLInputElement>('input[placeholder^="Search Skills"]')!;
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Shared review');
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => host.querySelector<HTMLElement>('[role="button"]')!.click());
+      act(() => button('Open file ›').click());
+      expect(openedFiles).toEqual(['/repo/o8/.agents/skills/review/SKILL.md']);
+      await act(async () => button('Return to Customize').click());
+      expect(host.querySelector<HTMLInputElement>('input[placeholder^="Search Skills"]')?.value).toBe('Shared review');
+      expect(button('Use in task')).toBeDefined();
+      const composer = host.querySelector<HTMLTextAreaElement>('textarea[data-o8-active-composer]')!;
+      composer.setSelectionRange(composer.value.length, composer.value.length);
+      act(() => button('Use in task').click());
+      while (frames.length) act(() => frames.shift()!(performance.now()));
+      expect(composer.value).toContain('Review this change. Use the "review" skill for this task.');
+      expect(composer.value).toContain('/repo/o8/.agents/skills/review/SKILL.md');
+      expect(composer.value).not.toContain('/home/.gemini');
+      expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+    } finally {
+      window.removeEventListener('o8:open-file', onFile);
+    }
   });
 
 });
