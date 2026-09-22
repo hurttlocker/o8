@@ -97,7 +97,7 @@ export function OrchestratorProjectPicker({
             textAlign: 'center',
           }}
         >
-          Which project?
+          Choose a repository
         </h1>
 
         <p
@@ -134,7 +134,7 @@ export function OrchestratorProjectPicker({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search projects…"
+              placeholder="Search repositories…"
               autoFocus
               style={{
                 width: '100%',
@@ -182,7 +182,7 @@ export function OrchestratorProjectPicker({
                 fontFamily: 'var(--font-sans-system)',
               }}
             >
-              No projects match “{query.trim()}”.
+              No repositories match “{query.trim()}”.
             </div>
           ) : null}
         </div>
@@ -194,7 +194,7 @@ export function OrchestratorProjectPicker({
             label="Add a repo"
           />
           {onWorkWithoutProject ? (
-            <FooterLink onClick={onWorkWithoutProject} label="Work without a project" />
+            <FooterLink onClick={onWorkWithoutProject} label="Work without a repository" />
           ) : null}
         </div>
       </div>

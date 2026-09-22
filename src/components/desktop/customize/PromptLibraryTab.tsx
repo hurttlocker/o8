@@ -26,12 +26,14 @@ interface PromptEditorState {
   body: string;
   tags: string;
   scope: PromptLibraryScope;
+  repoPath: string | null;
 }
 
-export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountDelta }: {
+export function PromptLibraryTab({ query, repoPath, repoName, repoPaths, onInsert, onCountDelta }: {
   query: string;
   repoPath: string | null;
   repoName: string;
+  repoPaths?: string[];
   onInsert: (prompt: PromptLibraryEntry) => void;
   onCountDelta: (delta: number) => void;
 }) {
@@ -47,11 +49,19 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
   const [importConfirm, setImportConfirm] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
 
+  const pathsKey = JSON.stringify(repoPath ? [repoPath] : repoPaths ?? []);
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const next = await listSavedPrompts({ query, repoPath, signal });
+      const scopedPaths = JSON.parse(pathsKey) as string[];
+      const paths: Array<string | null> = scopedPaths.length > 0 ? scopedPaths : [null];
+      const batches = await Promise.all(paths.map((path) => listSavedPrompts({ query, repoPath: path, signal })));
+      const allowedRepoPaths = new Set(scopedPaths);
+      const next = [...new Map(batches.flat().map((prompt) => [prompt.id, prompt])).values()]
+        .filter((prompt) => prompt.scope === 'global' || (
+          prompt.scope === 'repo' && Boolean(prompt.repoPath && allowedRepoPaths.has(prompt.repoPath))
+        ));
       setPrompts(next);
     } catch (cause) {
       if (signal?.aborted) return;
@@ -59,7 +69,7 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [query, repoPath]);
+  }, [query, pathsKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -72,13 +82,22 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
 
   const refreshImportSources = useCallback(async (signal?: AbortSignal) => {
     try {
-      setImportSources(await listPromptImportSources(repoPath, signal));
+      const paths = JSON.parse(pathsKey) as string[];
+      if (paths.length === 0) {
+        setImportSources([]);
+        return;
+      }
+      const batches = await Promise.all(paths.map((path) => listPromptImportSources(path, signal)));
+      setImportSources([...new Map(batches.flat().map((source) => [
+        `${source.repoPath}:${source.key}`,
+        source,
+      ])).values()]);
     } catch (cause) {
       if (!signal?.aborted) {
         setError(cause instanceof Error ? cause.message : 'Existing prompts could not be inspected.');
       }
     }
-  }, [repoPath]);
+  }, [pathsKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -92,7 +111,7 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
   }), [prompts]);
 
   const openCreate = () => {
-    setEditor({ id: null, title: '', body: '', tags: '', scope: repoPath ? 'repo' : 'global' });
+    setEditor({ id: null, title: '', body: '', tags: '', scope: repoPath ? 'repo' : 'global', repoPath });
     setNotice(null);
   };
 
@@ -103,6 +122,7 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
       body: prompt.body,
       tags: prompt.tags.join(', '),
       scope: prompt.scope,
+      repoPath: prompt.repoPath ?? repoPath,
     });
     setExpandedId(prompt.id);
     setDeleteId(null);
@@ -115,7 +135,7 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
       body: draft.body,
       tags: draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
       scope: draft.scope,
-      repoPath: draft.scope === 'repo' ? repoPath : null,
+      repoPath: draft.scope === 'repo' ? draft.repoPath : null,
     };
     try {
       if (draft.id) {
@@ -167,7 +187,19 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
     setImportBusy(true);
     setError(null);
     try {
-      const result = await importSavedPromptSources(importSources, repoPath);
+      const sourcesByRepo = new Map<string, PromptLibraryImportSource[]>();
+      importSources.forEach((source) => {
+        const existing = sourcesByRepo.get(source.repoPath) ?? [];
+        existing.push(source);
+        sourcesByRepo.set(source.repoPath, existing);
+      });
+      const results = await Promise.all([...sourcesByRepo.entries()].map(([sourceRepoPath, sources]) => (
+        importSavedPromptSources(sources, sourceRepoPath)
+      )));
+      const result = results.reduce((total, batch) => ({
+        created: total.created + batch.created,
+        skipped: total.skipped + batch.skipped,
+      }), { created: 0, skipped: 0 });
       if (result.created > 0) onCountDelta(result.created);
       const skipped = result.skipped > 0 ? ` ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped.` : '';
       setNotice(`Imported ${result.created} prompt${result.created === 1 ? '' : 's'}.${skipped}`);
@@ -230,7 +262,7 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
 
       {grouped.global.length > 0 ? (
         <PromptSection
-          label="Global"
+          label="Personal"
           prompts={grouped.global}
           expandedId={expandedId}
           deleteId={deleteId}
@@ -249,10 +281,11 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
           onEditorSave={save}
         />
       ) : null}
-      {grouped.repo.length > 0 ? (
+      {[...new Set(grouped.repo.map((prompt) => prompt.repoPath))].map((path) => (
         <PromptSection
-          label={repoName}
-          prompts={grouped.repo}
+          key={path}
+          label={path?.split('/').pop() ?? 'Repository'}
+          prompts={grouped.repo.filter((prompt) => prompt.repoPath === path)}
           expandedId={expandedId}
           deleteId={deleteId}
           copiedId={copiedId}
@@ -263,13 +296,13 @@ export function PromptLibraryTab({ query, repoPath, repoName, onInsert, onCountD
           onCopy={copy}
           onInsert={insert}
           editor={editor}
-          repoName={repoName}
-          repoAvailable={Boolean(repoPath)}
+          repoName={path?.split('/').pop() ?? 'Repository'}
+          repoAvailable={Boolean(path)}
           onEditorChange={setEditor}
           onEditorCancel={() => setEditor(null)}
           onEditorSave={save}
         />
-      ) : null}
+      ))}
     </div>
   );
 }
@@ -391,7 +424,7 @@ function PromptEditor({ value, repoName, repoAvailable, onChange, onCancel, onSa
       <input value={value.tags} onChange={(event) => set({ tags: event.currentTarget.value })} placeholder="security, review, release" style={fieldStyle} />
       <FieldLabel text="Scope" />
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <ScopeButton active={value.scope === 'global'} label="Global" onClick={() => set({ scope: 'global' })} />
+        <ScopeButton active={value.scope === 'global'} label="Personal" onClick={() => set({ scope: 'global' })} />
         <ScopeButton active={value.scope === 'repo'} label={repoAvailable ? repoName : 'Repo unavailable'} disabled={!repoAvailable} onClick={() => set({ scope: 'repo' })} />
       </div>
       {error ? <StatusLine text={error} error /> : null}

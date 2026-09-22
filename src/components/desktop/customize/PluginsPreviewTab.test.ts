@@ -94,11 +94,11 @@ describe('development plugin preview', () => {
   });
 
   it('offers the preview only in development while retaining all real sections', () => {
-    const props = { tab: 'rules' as const, onTab: vi.fn(), query: '', onQuery: vi.fn(), repos: [], repoPath: null, onRepo: vi.fn(), counts: {} };
+    const props = { tab: 'rules' as const, onTab: vi.fn(), query: '', onQuery: vi.fn(), repos: [], scope: 'all', onScope: vi.fn(), counts: {} };
     vi.stubEnv('NODE_ENV', 'production');
     act(() => root.render(createElement(CustomizeHeader, props)));
     expect(host.textContent).not.toContain('Plugins');
-    for (const label of ['Rules', 'Commands', 'Prompts', 'Skills', 'Connections', 'Agents', 'Hooks']) expect(host.textContent).toContain(label);
+    for (const label of ['Instructions', 'Commands', 'Prompts', 'Skills', 'Connections', 'Agents', 'Hooks']) expect(host.textContent).toContain(label);
     vi.stubEnv('NODE_ENV', 'development');
     act(() => root.render(createElement(CustomizeHeader, props)));
     expect(host.textContent).toContain('Plugins');

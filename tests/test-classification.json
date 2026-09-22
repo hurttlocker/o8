@@ -420,6 +420,13 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/lead-project-context.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/merged-by-ancestry.test.ts",
       "reasons": [
         "child-process",

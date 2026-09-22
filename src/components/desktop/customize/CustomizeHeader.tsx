@@ -1,12 +1,13 @@
 'use client';
 
 import type { CSSProperties } from 'react';
+import type { ProjectRecord } from '../repo-registry/useProjects';
 import { RamsButton } from '../settings/shared';
 
 export type CustomizeTab = 'rules' | 'commands' | 'prompts' | 'skills' | 'plugins' | 'connections' | 'agents' | 'hooks';
 
 const TABS: Array<{ id: CustomizeTab; label: string }> = [
-  { id: 'rules', label: 'Rules' },
+  { id: 'rules', label: 'Instructions' },
   { id: 'commands', label: 'Commands' },
   { id: 'prompts', label: 'Prompts' },
   { id: 'skills', label: 'Skills' },
@@ -21,14 +22,15 @@ const fieldStyle: CSSProperties = {
   paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,
 };
 
-export function CustomizeHeader({ tab, onTab, query, onQuery, repos, repoPath, onRepo, counts, onClose }: {
+export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onScope, project, counts, onClose }: {
   tab: CustomizeTab;
   onTab: (tab: CustomizeTab) => void;
   query: string;
   onQuery: (query: string) => void;
   repos: Array<{ name: string; localPath: string }>;
-  repoPath: string | null;
-  onRepo: (path: string | null) => void;
+  scope: string;
+  onScope: (scope: string) => void;
+  project?: ProjectRecord | null;
   counts: Partial<Record<CustomizeTab, number>>;
   onClose?: () => void;
 }) {
@@ -36,7 +38,18 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, repoPath, o
     ? [...TABS.slice(0, 4), { id: 'plugins' as const, label: 'Plugins' }, ...TABS.slice(4)]
     : TABS;
   const label = tabs.find((item) => item.id === tab)?.label ?? 'customizations';
-  const repoName = repos.find((repo) => repo.localPath === repoPath)?.name ?? 'Personal';
+  const repoName = scope === 'personal' || !project ? 'Personal' : repos.find((repo) => repo.localPath === scope)?.name ?? project.name;
+  const filtersRepositories = ['rules', 'skills', 'prompts', 'agents', 'hooks'].includes(tab);
+  const explanations: Record<CustomizeTab, string> = {
+    rules: 'Project instructions are shared guidance. Additional rules below show their own scope and source.',
+    skills: 'Review skills found in this project and your personal folders. Expand a skill to inspect its source copies.',
+    prompts: 'Saved text you choose to insert into a task. Select a repository to create a prompt just for that repository.',
+    commands: 'Built-in shortcuts for the orchestrator. Type / in the composer to use them in your current task.',
+    connections: 'Manage connected services once in Settings. Access during a task depends on the agent and its permissions.',
+    agents: 'Agent definitions found in personal and repository folders. These entries currently come from Claude Code configuration.',
+    hooks: 'Configured commands that run on agent events. These entries currently come from Claude Code configuration.',
+    plugins: 'A design preview with sample packages. It does not change this project or install tools.',
+  };
   return (
     <header style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
@@ -45,7 +58,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, repoPath, o
           {onClose ? <RamsButton variant="ghost" onClick={onClose}>Back to workspace</RamsButton> : null}
         </div>
         <p style={{ marginTop: 12, marginBottom: 0, fontSize: 14, lineHeight: 1.6, color: 'var(--t-text-muted)' }}>
-          Shape how your agents work. Keep shared tools and project guidance in one place.
+          {project ? `${project.name} · ${project.repoPaths.length} ${project.repoPaths.length === 1 ? 'repository' : 'repositories'}` : 'Personal customizations'}
         </p>
       </div>
       <nav aria-label="Customization sections" style={{ display: 'flex', flexWrap: 'wrap', columnGap: 22, rowGap: 4, borderBottom: '1px solid var(--t-divider-subtle)' }}>
@@ -66,15 +79,17 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, repoPath, o
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
           <input aria-label={`Search ${label}`} placeholder={`Search ${label} for ${repoName}…`} value={query} onChange={(event) => onQuery(event.target.value)}
             style={{ ...fieldStyle, flex: '1 1 200px', fontSize: 13 }} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t-text-muted)', maxWidth: '100%' }}>
-            Context
-            <select aria-label="Customization context" value={repoPath ?? ''} onChange={(event) => onRepo(event.target.value || null)} style={{ ...fieldStyle, maxWidth: 240 }}>
-              <option value="">Personal</option>
-              {repos.map((repo) => <option key={repo.localPath} value={repo.localPath}>{repo.name}</option>)}
+          {filtersRepositories ? <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t-text-muted)', maxWidth: '100%' }}>
+            Show
+            <select aria-label="Customization view" value={scope} onChange={(event) => onScope(event.target.value)} style={{ ...fieldStyle, maxWidth: 240 }}>
+              <option value="all">{project ? 'All project repositories + personal' : 'Personal'}</option>
+              {project ? <option value="personal">Personal only</option> : null}
+              {repos.map((repo) => <option key={repo.localPath} value={repo.localPath}>{repo.name} + personal</option>)}
             </select>
-          </label>
+          </label> : <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Shared across projects</span>}
         </div>
       ) : null}
+      <p style={{ marginTop: 0, marginBottom: 0, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.6 }}>{explanations[tab]}{filtersRepositories && project ? ' This view filters the list; it does not change your task’s repository.' : ''}</p>
     </header>
   );
 }

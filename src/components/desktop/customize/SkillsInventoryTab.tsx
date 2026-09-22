@@ -10,6 +10,8 @@ export interface SkillInventoryEntry {
   scope: 'user' | 'project';
   source: 'o8' | 'shared' | 'codex' | 'claude-code' | 'gemini';
   file: string;
+  repoName?: string;
+  repoPath?: string;
 }
 
 const SOURCE_LABELS: Record<SkillInventoryEntry['source'], string> = {
@@ -20,15 +22,103 @@ const SOURCE_LABELS: Record<SkillInventoryEntry['source'], string> = {
   gemini: 'Gemini',
 };
 
-function skillsForQuery(skills: SkillInventoryEntry[], query: string) {
+interface SkillNameGroup {
+  key: string;
+  name: string;
+  entries: SkillInventoryEntry[];
+}
+
+interface SkillScopeGroup {
+  key: string;
+  label: string;
+  repoPath?: string;
+  skillGroups: SkillNameGroup[];
+}
+
+function normalizeName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function groupByName(entries: SkillInventoryEntry[], scopeKey: string): SkillNameGroup[] {
+  const groups = new Map<string, SkillNameGroup>();
+
+  entries.forEach((entry) => {
+    const normalizedName = normalizeName(entry.name);
+    const key = `${scopeKey}:${normalizedName}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.entries.push(entry);
+      return;
+    }
+    groups.set(key, { key, name: entry.name, entries: [entry] });
+  });
+
+  return [...groups.values()];
+}
+
+function groupInventory(skills: SkillInventoryEntry[]): SkillScopeGroup[] {
+  const projectGroups = new Map<string, { label: string; repoPath?: string; entries: SkillInventoryEntry[] }>();
+  const personalEntries: SkillInventoryEntry[] = [];
+
+  skills.forEach((skill) => {
+    if (skill.scope === 'user') {
+      personalEntries.push(skill);
+      return;
+    }
+
+    const repoName = skill.repoName?.trim();
+    const repoPath = skill.repoPath?.trim();
+    const repoKey = repoPath || repoName || 'selected-repository';
+    const existing = projectGroups.get(repoKey);
+    if (existing) {
+      existing.entries.push(skill);
+      return;
+    }
+    projectGroups.set(repoKey, {
+      label: repoName || repoPath || 'Selected repository',
+      repoPath,
+      entries: [skill],
+    });
+  });
+
+  const groups: SkillScopeGroup[] = [...projectGroups.entries()].map(([repoKey, group]) => ({
+    key: `project:${repoKey}`,
+    label: `Project · ${group.label} · files found`,
+    repoPath: group.repoPath,
+    skillGroups: groupByName(group.entries, `project:${repoKey}`),
+  }));
+
+  if (personalEntries.length > 0) {
+    groups.push({
+      key: 'personal',
+      label: 'Personal skills · files found',
+      skillGroups: groupByName(personalEntries, 'personal'),
+    });
+  }
+
+  return groups;
+}
+
+function skillMatchesQuery(skill: SkillInventoryEntry, query: string) {
   const normalized = query.trim().toLowerCase();
-  if (!normalized) return skills;
-  return skills.filter((skill) => [
+  if (!normalized) return true;
+  return [
     skill.name,
     skill.description,
     SOURCE_LABELS[skill.source],
     skill.scope,
-  ].some((value) => value.toLowerCase().includes(normalized)));
+    skill.repoName,
+    skill.repoPath,
+  ].some((value) => value?.toLowerCase().includes(normalized));
+}
+
+function copyLabel(count: number) {
+  return `${count} ${count === 1 ? 'copy' : 'copies'}`;
+}
+
+function sourceSummary(entries: SkillInventoryEntry[]) {
+  const labels = [...new Set(entries.map((entry) => SOURCE_LABELS[entry.source]))];
+  return `Found in ${labels.join(', ')}`;
 }
 
 export function SkillsInventoryTab({ skills, query, onOpenFile }: {
@@ -36,27 +126,49 @@ export function SkillsInventoryTab({ skills, query, onOpenFile }: {
   query: string;
   onOpenFile: (path: string) => void;
 }) {
-  const [expandedFile, setExpandedFile] = useState<string | null>(null);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [claudeEditorOpen, setClaudeEditorOpen] = useState(false);
-  const filtered = skillsForQuery(skills, query);
-  const project = filtered.filter((skill) => skill.scope === 'project');
-  const user = filtered.filter((skill) => skill.scope === 'user');
+  const groups = groupInventory(skills).map((group) => ({
+    ...group,
+    skillGroups: group.skillGroups.filter((skillGroup) => (
+      skillGroup.entries.some((skill) => skillMatchesQuery(skill, query))
+    )),
+  })).filter((group) => group.skillGroups.length > 0);
 
-  const renderRows = (entries: SkillInventoryEntry[]) => (
-    <TruncatedRows rows={entries.map((skill) => (
+  const renderRows = (skillGroups: SkillNameGroup[]) => (
+    <TruncatedRows rows={skillGroups.map((skillGroup) => (
       <Row
-        key={`${skill.source}:${skill.file}`}
-        title={skill.name}
+        key={skillGroup.key}
+        title={skillGroup.name}
         titleMono
-        subtitle={skill.description}
-        pill={SOURCE_LABELS[skill.source]}
-        expanded={expandedFile === skill.file}
-        onClick={() => setExpandedFile(expandedFile === skill.file ? null : skill.file)}
+        subtitle={skillGroup.entries.length === 1
+          ? skillGroup.entries[0].description || sourceSummary(skillGroup.entries)
+          : `${sourceSummary(skillGroup.entries)}. Expand to compare the instructions.`}
+        pill={copyLabel(skillGroup.entries.length)}
+        expanded={expandedGroup === skillGroup.key}
+        onClick={() => setExpandedGroup(expandedGroup === skillGroup.key ? null : skillGroup.key)}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-          <DetailLine label="Scope" value={skill.scope === 'project' ? 'Selected repository' : 'User'} />
-          <DetailLine label="Source" value={SOURCE_LABELS[skill.source]} />
-          <OpenFileLink file={skill.file} onOpenFile={onOpenFile} />
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {skillGroup.entries.map((skill, index) => (
+            <div
+              key={`${skill.source}:${skill.file}:${index}`}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 7,
+                paddingTop: index === 0 ? 0 : 10,
+                marginTop: index === 0 ? 0 : 10,
+                borderTopWidth: index === 0 ? 0 : 1,
+                borderTopStyle: 'solid',
+                borderTopColor: 'var(--t-divider-subtle)',
+              }}
+            >
+              <DetailLine label="Found in" value={SOURCE_LABELS[skill.source]} />
+              <DetailLine label="Description" value={skill.description} />
+              <DetailLine label="File" value={skill.file} mono />
+              <OpenFileLink file={skill.file} onOpenFile={onOpenFile} />
+            </div>
+          ))}
         </div>
       </Row>
     ))} />
@@ -67,32 +179,27 @@ export function SkillsInventoryTab({ skills, query, onOpenFile }: {
       <div style={{ paddingTop: 16, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)' }}>Discovered skills</span>
         <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
-          SKILL.md files found in the selected repository and known local agent skill folders. Discovery does not mean every runtime activates a skill. This page does not install or execute skills.
+          Skills give agents reusable instructions for a task. Same-name files are grouped within each repository or your personal folders. Expand a row to compare copies; finding a file here does not mean every agent loads it.
         </span>
       </div>
 
-      {filtered.length === 0 ? (
+      {groups.length === 0 ? (
         <EmptyState
           title={query ? 'No matching skills' : 'No skills discovered'}
           body={query
-            ? 'Try another name, description, source, or scope.'
+            ? 'Try another skill name, description, source, or repository name.'
             : 'Add a SKILL.md under a supported local agent skill folder to make its metadata visible here.'}
         />
       ) : (
-        <>
-          {project.length > 0 ? (
-            <>
-              <SectionHeader label="Selected repository" count={project.length} />
-              {renderRows(project)}
-            </>
-          ) : null}
-          {user.length > 0 ? (
-            <>
-              <SectionHeader label="User folders" count={user.length} />
-              {renderRows(user)}
-            </>
-          ) : null}
-        </>
+        groups.map((group) => (
+          <div key={group.key}>
+            <SectionHeader
+              label={group.label}
+              count={group.skillGroups.reduce((total, skillGroup) => total + skillGroup.entries.length, 0)}
+            />
+            {renderRows(group.skillGroups)}
+          </div>
+        ))
       )}
 
       <details

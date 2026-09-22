@@ -114,16 +114,7 @@ function findSettingsProject(
   projects: ProjectWithRepos[],
   panelProject: ProjectRecord,
   scopedRepoId: string | null,
-  requestedProjectId: string | null,
 ): ProjectWithRepos | null {
-  const requested = requestedProjectId?.trim().toLowerCase() || null;
-  if (requested) {
-    const byId = projects.find((project) => project.id.toLowerCase() === requested);
-    if (byId) return byId;
-    const bySlug = projects.find((project) => project.slug.toLowerCase() === requested);
-    if (bySlug) return bySlug;
-  }
-
   // Prefer the SQLite project that matches the resolved (active) panel project.
   // A repo can belong to several projects, so a repo-id match alone would pick an
   // arbitrary one — the active project is the right context.
@@ -138,6 +129,40 @@ function findSettingsProject(
   }
 
   return null;
+}
+
+function resolveExplicitProject(
+  projects: ProjectWithRepos[],
+  ledgerProjects: ProjectRecord[],
+  requestedProjectId: string,
+): { panelProject: ProjectRecord; settingsProject: ProjectWithRepos | null } {
+  const requested = requestedProjectId.trim().toLowerCase();
+  const settingsProject = projects.find((project) => project.id.toLowerCase() === requested)
+    ?? projects.find((project) => project.slug.toLowerCase() === requested)
+    ?? null;
+  const panelProject = settingsProject
+    ? ledgerProjects.find((project) => project.id.toLowerCase() === settingsProject.id.toLowerCase())
+      ?? ledgerProjects.find((project) => (
+        projectNameToSlug(project.name) === settingsProject.slug
+        && project.name.toLowerCase() === settingsProject.name.toLowerCase()
+      ))
+      ?? null
+    : ledgerProjects.find((project) => project.id.toLowerCase() === requested)
+      ?? ledgerProjects.find((project) => projectNameToSlug(project.name) === requested)
+      ?? null;
+
+  if (!panelProject) {
+    throw new Error(`Project ${requestedProjectId.trim()} does not exist.`);
+  }
+
+  const matchedSettingsProject = settingsProject
+    ?? projects.find((project) => project.id === panelProject.id)
+    ?? projects.find((project) => (
+      project.slug === projectNameToSlug(panelProject.name)
+      && project.name.toLowerCase() === panelProject.name.toLowerCase()
+    ))
+    ?? null;
+  return { panelProject, settingsProject: matchedSettingsProject };
 }
 
 function primaryRepoScore(repo: ProjectContextRepo): number {
@@ -264,26 +289,36 @@ export async function getProjectContext(options: ProjectContextOptions = {}): Pr
   const projects = listProjects();
   const byPath = repoByPath(repos);
   const byId = repoById(repos);
-  const activeScope = await getActiveProjectScopeForRepo(options.repoPath);
   const requestedRepoPath = options.repoPath?.trim() ? normalizeRepoPath(options.repoPath) : null;
-  // Prefer the ACTIVE project when the requested repo belongs to it — a repo can
-  // sit in multiple projects, and the agent context should follow whichever
-  // project is active in the dashboard, not just the first that contains it.
-  const projectHasRepo = (project: ProjectRecord) => Boolean(requestedRepoPath)
-    && project.repoPaths.some((repoPath) => normalizeRepoPath(repoPath) === requestedRepoPath);
-  const panelProject = requestedRepoPath
-    ? (projectHasRepo(activeScope.project)
-        ? activeScope.project
-        : ledger.projects.find(projectHasRepo) ?? activeScope.project)
-    : activeScope.project;
   const explicitPrimaryRepo = options.primaryRepoId ? byId.get(options.primaryRepoId) ?? null : null;
   const currentRepoCandidate = requestedRepoPath ? byPath.get(requestedRepoPath) ?? null : null;
-  const settingsProject = findSettingsProject(
-    projects,
-    panelProject,
-    currentRepoCandidate?.id ?? explicitPrimaryRepo?.id ?? null,
-    options.projectId ?? null,
-  );
+  const requestedProjectId = options.projectId?.trim() || null;
+  let panelProject: ProjectRecord;
+  let settingsProject: ProjectWithRepos | null;
+  if (requestedProjectId) {
+    ({ panelProject, settingsProject } = resolveExplicitProject(
+      projects,
+      ledger.projects,
+      requestedProjectId,
+    ));
+  } else {
+    const activeScope = await getActiveProjectScopeForRepo(options.repoPath);
+    // Prefer the ACTIVE project when the requested repo belongs to it — a repo can
+    // sit in multiple projects, and the agent context should follow whichever
+    // project is active in the dashboard, not just the first that contains it.
+    const projectHasRepo = (project: ProjectRecord) => Boolean(requestedRepoPath)
+      && project.repoPaths.some((repoPath) => normalizeRepoPath(repoPath) === requestedRepoPath);
+    panelProject = requestedRepoPath
+      ? (projectHasRepo(activeScope.project)
+          ? activeScope.project
+          : ledger.projects.find(projectHasRepo) ?? activeScope.project)
+      : activeScope.project;
+    settingsProject = findSettingsProject(
+      projects,
+      panelProject,
+      currentRepoCandidate?.id ?? explicitPrimaryRepo?.id ?? null,
+    );
+  }
 
   const settingsRoles = new Map<string, ProjectRole | null>();
   for (const link of settingsProject?.repos ?? []) {
@@ -315,15 +350,24 @@ export async function getProjectContext(options: ProjectContextOptions = {}): Pr
     });
   };
 
-  // Membership = the SQLite settings project's repos (source of truth) + the
-  // current repo. Ledger paths are NOT unioned in — that union is what kept a
-  // removed repo visible. `panelPaths` is still used only to flag which SQLite
-  // repos are also present in the panel ledger.
+  // SQLite membership is authoritative when a Settings project exists. A
+  // ledger-only project (including a virtual single-repo project) uses its own
+  // paths. An explicit project never absorbs an unrelated current repo.
   for (const link of settingsProject?.repos ?? []) {
     const repo = byId.get(link.repoId);
     if (repo) pushRepo(repo, { inPanelProject: panelPaths.has(normalizeRepoPath(repo.localPath)), inSettingsProject: true });
   }
-  if (currentRepoCandidate) {
+  if (!settingsProject) {
+    for (const panelRepoPath of panelProject.repoPaths) {
+      const repo = byPath.get(normalizeRepoPath(panelRepoPath));
+      if (repo) pushRepo(repo, { inPanelProject: true, inSettingsProject: false });
+    }
+  }
+  const currentRepoBelongsToExplicitProject = currentRepoCandidate && (
+    settingsRoles.has(currentRepoCandidate.id)
+    || panelPaths.has(normalizeRepoPath(currentRepoCandidate.localPath))
+  );
+  if (currentRepoCandidate && (!requestedProjectId || currentRepoBelongsToExplicitProject)) {
     pushRepo(currentRepoCandidate, {
       inPanelProject: panelPaths.has(normalizeRepoPath(currentRepoCandidate.localPath)),
       inSettingsProject: settingsRoles.has(currentRepoCandidate.id),
@@ -401,7 +445,7 @@ export function buildProjectTaskBrief(context: ProjectContext, options: ProjectT
       ? `Related repos: ${siblingRepos.map(formatRepoLabel).join(', ')}`
       : null,
     context.instructions
-      ? `Project instructions: ${truncateText(context.instructions, 700, { normalizeWhitespace: true })}`
+      ? `Project instructions:\n${context.instructions}`
       : null,
     options.taskTitle?.trim()
       ? `Task: ${truncateText(options.taskTitle, 240, { normalizeWhitespace: true })}`

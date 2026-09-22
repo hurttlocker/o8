@@ -464,7 +464,7 @@ function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
       >
         {props.workspaceTargets ? (
           <ProjectChip
-            label={props.repoPath === '~' ? '~' : (props.repoLabel ?? 'No project')}
+            label={props.repoPath === '~' ? '~' : (props.repoLabel ?? 'Choose repository')}
             workspaceTargets={props.workspaceTargets}
             selectedRepoPath={props.repoPath}
             onSelectProject={props.onSelectProject}
@@ -794,7 +794,7 @@ function ProjectChip({
         label={label}
         onClick={() => { if (open) close(); else setOpen(true); }}
         open={open}
-        ariaLabel="Pick project"
+        ariaLabel="Choose repository"
         compact={compact}
       />
       <ChipPopover open={open} onClose={close} anchorRef={wrapperRef}>
@@ -814,7 +814,7 @@ function ProjectChip({
             id={searchId}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search projects"
+            placeholder="Search repositories"
             autoFocus
             style={{
               flex: 1,
@@ -844,7 +844,7 @@ function ProjectChip({
           ))}
           {filtered.length === 0 ? (
             <div style={{ padding: 12, color: 'var(--t-text-faint)', fontSize: 12 }}>
-              No projects match.
+              No repositories match.
             </div>
           ) : null}
         </div>
@@ -856,7 +856,7 @@ function ProjectChip({
         >
           <PopoverItem
             icon={<IconoirFolderPlus width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-            label="Add new project"
+            label="Add repository"
             onClick={() => setAddOpen((v) => !v)}
             trailing={(
               <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ color: 'var(--t-text-faint)' }}>
@@ -908,7 +908,7 @@ function ProjectChip({
         </div>
         <PopoverItem
           icon={<IconoirFolder width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-          label="Don't work in a project"
+          label="Work without a repository"
           destructive
           onClick={() => {
             onWorkWithoutProject?.();

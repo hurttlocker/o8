@@ -4461,6 +4461,7 @@ function DashboardInner() {
   });
 
   const settingsTakeoverActive = activeNavSection === 'settings';
+  const workspaceSurfaceHidden = settingsTakeoverActive || activeNavSection === 'customize';
   useEffect(() => {
     if (!settingsTakeoverActive) {
       if (settingsWasOpenRef.current) {
@@ -5360,20 +5361,24 @@ function DashboardInner() {
         {activeNavSection === 'customize' && (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading customize…</div>}>
-              <LazyCustomizePage onClose={() => setActiveNavSection('agents')} />
+              <LazyCustomizePage
+                project={leftPanelFocus.view?.project ?? dashboardProjects.activeProject}
+                registeredRepos={globalRepoEntries}
+                onClose={() => setActiveNavSection('agents')}
+              />
             </Suspense>
           </div>
         )}
 
-        {activeNavSection !== 'automations' && activeNavSection !== 'customize' && (
+        {activeNavSection !== 'automations' && (
           <div
             ref={workspaceSurfaceRef}
-            aria-hidden={settingsTakeoverActive}
-            inert={settingsTakeoverActive}
+            aria-hidden={workspaceSurfaceHidden}
+            inert={workspaceSurfaceHidden}
             style={{
               flex: 1,
               minHeight: 0,
-              display: settingsTakeoverActive ? 'none' : 'flex',
+              display: workspaceSurfaceHidden ? 'none' : 'flex',
               flexDirection: 'column',
             }}
           >
