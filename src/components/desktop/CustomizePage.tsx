@@ -4,12 +4,17 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { toast } from '@/components/shared/ConfirmToastHost';
+import { RamsButton } from './settings/shared';
+import { ProjectInstructions } from './customize/ProjectInstructions';
+import { emptyInventory, loadCustomizeInventory, type CustomizeInventory, type CustomizeRepo, type DirectiveSummary, type ExternalServer, type AgentEntry, type HookEntry } from './customize/inventory';
+import type { ProjectRecord } from './repo-registry/useProjects';
 import { CustomizeHeader, type CustomizeTab } from './customize/CustomizeHeader';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
-import type { PromptLibraryEntry } from '@/lib/prompt-library/client';
+import { insertPromptIntoActiveComposer, type PromptLibraryEntry } from '@/lib/prompt-library/client';
 import { PromptLibraryTab } from './customize/PromptLibraryTab';
-import { SkillsInventoryTab, type SkillInventoryEntry } from './customize/SkillsInventoryTab';
+import { SkillsInventoryTab } from './customize/SkillsInventoryTab';
 import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './customize/shared';
 
 const UI_FONT = 'var(--font-sans-system)';
@@ -18,46 +23,6 @@ const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 const PluginsPreviewTab = dynamic(() => import('./customize/PluginsPreviewTab'), {
   loading: () => <p style={{ color: 'var(--t-text-muted)' }}>Opening plugin preview…</p>,
 });
-
-interface DirectiveSummary {
-  id: string;
-  title: string;
-  scope: string;
-  repoName: string | null;
-  priority: number | null;
-  body: string;
-  projects: string[];
-  file: string | null;
-}
-
-interface ExternalServer {
-  id: string;
-  name: string;
-  transport: 'stdio' | 'http';
-  command?: string | null;
-  url?: string | null;
-  enabled?: boolean;
-}
-
-interface AgentEntry {
-  name: string;
-  description: string | null;
-  scope: 'user' | 'project';
-  file: string;
-}
-
-interface HookEntry {
-  event: string;
-  command: string;
-  matcher: string | null;
-  scope: 'user' | 'project';
-  file: string;
-}
-
-interface RegisteredRepoLite {
-  name: string;
-  localPath: string;
-}
 
 /** o8's own always-on MCP servers — shown so "all connections" is honest. */
 const BUILTIN_CONNECTIONS: Array<{ name: string; detail: string }> = [
@@ -71,83 +36,46 @@ function openSettingsMcpTab() {
   window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
 }
 
-export function CustomizePage({ onClose }: { onClose?: () => void }) {
+export function CustomizePage({ onClose, project = null, registeredRepos = [] }: {
+  onClose?: () => void;
+  project?: ProjectRecord | null;
+  registeredRepos?: CustomizeRepo[];
+}) {
   const [tab, setTab] = useState<CustomizeTab>('rules');
   const [query, setQuery] = useState('');
-  const [repos, setRepos] = useState<RegisteredRepoLite[]>([]);
-  const [repoPath, setRepoPath] = useState<string | null>(null);
-
-  const [directives, setDirectives] = useState<DirectiveSummary[]>([]);
-  const [servers, setServers] = useState<ExternalServer[]>([]);
-  const [agents, setAgents] = useState<AgentEntry[]>([]);
-  const [hooks, setHooks] = useState<HookEntry[]>([]);
-  const [skills, setSkills] = useState<SkillInventoryEntry[]>([]);
-  const [inventoryError, setInventoryError] = useState<string | null>(null);
-  const [promptCount, setPromptCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-
+  const [selection, setSelection] = useState({ projectId: project?.id, value: 'all' });
+  const projectPaths = JSON.stringify(project?.repoPaths ?? []);
+  const repos = useMemo(() => {
+    const paths = JSON.parse(projectPaths) as string[];
+    return paths.map((localPath) => ({
+      localPath,
+      name: registeredRepos.find((repo) => repo.localPath === localPath)?.name ?? localPath.split('/').filter(Boolean).pop() ?? localPath,
+    }));
+  }, [projectPaths, registeredRepos]);
+  const requestedScope = selection.projectId === project?.id ? selection.value : 'all';
+  const scope = requestedScope === 'personal' || repos.some((repo) => repo.localPath === requestedScope) ? requestedScope : 'all';
+  const repoPath = scope === 'all' || scope === 'personal' ? null : scope;
+  const selectedRepos = scope === 'personal' ? [] : repoPath ? repos.filter((repo) => repo.localPath === repoPath) : repos;
+  const requestKey = JSON.stringify([project?.id, scope, selectedRepos]);
+  const [loaded, setLoaded] = useState<{ key: string; data: CustomizeInventory; error: string | null } | null>(null);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const loading = loaded?.key !== requestKey;
+  const { directives, servers, agents, hooks, skills } = loading ? emptyInventory : loaded.data;
+  const inventoryError = loading ? null : loaded.error;
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch('/api/panel/repos');
-        if (!response.ok || cancelled) return;
-        const data = await response.json() as { repos?: Array<{ name?: string; localPath?: string }> };
-        const list = (data.repos ?? [])
-          .filter((repo): repo is { name: string; localPath: string } => Boolean(repo?.name && repo?.localPath))
-          .map((repo) => ({ name: repo.name, localPath: repo.localPath }));
-        if (cancelled) return;
-        setRepos(list);
-        setRepoPath((current) => current ?? list[0]?.localPath ?? null);
-      } catch { /* rail still renders; sections show their empty states */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    const controller = new AbortController();
+    const [, requestedScope, requestedRepos] = JSON.parse(requestKey) as [string | null, string, CustomizeRepo[]];
+    void loadCustomizeInventory(requestedRepos, requestedScope === 'personal' || !project?.id, controller.signal, project?.id)
+      .then((data) => { if (!controller.signal.aborted) setLoaded({ key: requestKey, data, error: null }); })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setLoaded({ key: requestKey, data: emptyInventory, error: error instanceof Error ? error.message : 'Could not load customizations.' });
+      });
+    return () => controller.abort();
+  }, [requestKey, refreshCount, project?.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const promptParams = new URLSearchParams({ scope: 'available', limit: '100' });
-      if (repoPath) promptParams.set('repoPath', repoPath);
-      const [directivesRes, serversRes, inventoryRes, promptsRes] = await Promise.allSettled([
-        fetch('/api/cortex/directives').then((r) => (r.ok ? r.json() : null)),
-        fetch('/api/setup/mcp-servers').then((r) => (r.ok ? r.json() : null)),
-        fetch(`/api/customize/inventory${repoPath ? `?repo=${encodeURIComponent(repoPath)}` : ''}`).then((r) => (r.ok ? r.json() : null)),
-        fetch(`/api/prompt-library?${promptParams.toString()}`).then((r) => (r.ok ? r.json() : null)),
-      ]);
-      if (cancelled) return;
-      if (directivesRes.status === 'fulfilled' && directivesRes.value?.directives) {
-        setDirectives(directivesRes.value.directives as DirectiveSummary[]);
-      }
-      if (serversRes.status === 'fulfilled' && serversRes.value?.servers) {
-        setServers(serversRes.value.servers as ExternalServer[]);
-      }
-      if (inventoryRes.status === 'fulfilled' && inventoryRes.value?.ok) {
-        setInventoryError(null);
-        setAgents(inventoryRes.value.agents as AgentEntry[]);
-        setHooks(inventoryRes.value.hooks as HookEntry[]);
-        setSkills(Array.isArray(inventoryRes.value.skills) ? inventoryRes.value.skills as SkillInventoryEntry[] : []);
-      } else {
-        setSkills([]);
-        setAgents([]);
-        setHooks([]);
-        setInventoryError('Could not load local customizations. Reopen Customize to try again.');
-      }
-      if (promptsRes.status === 'fulfilled' && promptsRes.value?.prompts) {
-        setPromptCount((promptsRes.value.prompts as unknown[]).length);
-      }
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [repoPath]);
-
-  const activeRepoName = useMemo(
-    () => repos.find((repo) => repo.localPath === repoPath)?.name ?? 'All repos',
-    [repos, repoPath],
-  );
-
+  const activeRepoName = repos.find((repo) => repo.localPath === repoPath)?.name ?? 'Personal';
   const q = query.trim().toLowerCase();
   const matches = (...fields: Array<string | null | undefined>) =>
     !q || fields.some((field) => field?.toLowerCase().includes(q));
@@ -156,7 +84,6 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   const tabCounts: Partial<Record<CustomizeTab, number>> = {
     rules: directives.length,
     commands: ORCHESTRATOR_SLASH_COMMANDS.length,
-    prompts: promptCount,
     skills: skills.length,
     connections: BUILTIN_CONNECTIONS.length + servers.length,
     agents: agents.length,
@@ -176,11 +103,15 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   const insertPrompt = (prompt: PromptLibraryEntry) => {
     onClose?.();
     if (typeof window === 'undefined') return;
-    window.requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('o8:orchestrator-inject', {
-        detail: { text: prompt.body },
-      }));
-    });
+    let attempts = 0;
+    const deadline = Date.now() + 3000;
+    const insertWhenReady = () => {
+      if (insertPromptIntoActiveComposer(prompt.body)) return;
+      attempts += 1;
+      if (attempts < 180 && Date.now() < deadline) window.requestAnimationFrame(insertWhenReady);
+      else toast('Prompt was not inserted. Open a task, then try again or use Copy.', 'error');
+    };
+    window.requestAnimationFrame(insertWhenReady);
   };
 
   return (
@@ -207,17 +138,20 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
       }}>
         <CustomizeHeader
           tab={tab} onTab={(next) => { setTab(next); setExpandedRow(null); }}
-          query={query} onQuery={setQuery} repos={repos} repoPath={repoPath} onRepo={setRepoPath}
+          query={query} onQuery={setQuery} repos={repos} scope={scope}
+          onScope={(value) => { setSelection({ projectId: project?.id, value }); setExpandedRow(null); }} project={project}
           counts={loading ? {} : tabCounts} onClose={onClose}
         />
+
+        {tab === 'rules' && scope !== 'personal' && project ? <ProjectInstructions key={project.id} project={project} /> : null}
 
         {/* Keep section changes immediate. */}
         {process.env.NODE_ENV === 'development' && tab === 'plugins' ? (
           <PluginsPreviewTab />
         ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
-        ) : inventoryError && (tab === 'skills' || tab === 'agents' || tab === 'hooks') ? (
-          <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError}</div>
+        ) : inventoryError ? (
+          <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError} <RamsButton variant="ghost" onClick={() => setRefreshCount((value) => value + 1)}>Retry</RamsButton></div>
         ) : tab === 'rules' ? (
           <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
@@ -226,18 +160,20 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
           <CommandsTab query={q} />
         ) : tab === 'prompts' ? (
           <PromptLibraryTab
+            key={requestKey}
             query={q}
             repoPath={repoPath}
             repoName={activeRepoName}
+            repoPaths={selectedRepos.map((repo) => repo.localPath)}
             onInsert={insertPrompt}
-            onCountDelta={(delta) => setPromptCount((current) => Math.max(0, current + delta))}
+            onCountDelta={() => {}}
           />
         ) : tab === 'skills' ? (
           <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} />
         ) : tab === 'agents' ? (
-          <AgentsTab agents={agents.filter((a) => matches(a.name, a.description))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
+          <AgentsTab agents={agents.filter((a) => matches(a.name, a.description, a.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (
-          <HooksTab hooks={hooks.filter((h) => matches(h.event, h.command, h.matcher))} onOpenFile={openFile} />
+          <HooksTab hooks={hooks.filter((h) => matches(h.event, h.command, h.matcher, h.repoName))} onOpenFile={openFile} />
         )}
       </div>
     </div>
@@ -257,8 +193,8 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
   if (directives.length === 0) {
     return (
       <EmptyState
-        title="No rules yet"
-        body="Rules are Cortex directives — durable guidance every orchestrator turn sees. They come from your o8.md, accepted auto-directive proposals, and the directives API."
+        title="No additional rules"
+        body="Rules appear here with their source and scope. Shared project instructions are managed separately in the project view."
       />
     );
   }
@@ -266,13 +202,13 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {global.length > 0 ? (
         <>
-          <SectionHeader label="Global" count={global.length} />
+          <SectionHeader label="Shared rules" count={global.length} />
           <TruncatedRows rows={global.map((d) => (
             <Row
               key={d.id}
               title={d.title}
               subtitle={d.body.replace(/\s+/g, ' ').slice(0, 160)}
-              pill={d.priority != null ? `P${d.priority}` : null}
+              pill={d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
@@ -288,13 +224,13 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
       ) : null}
       {repoScoped.length > 0 ? (
         <>
-          <SectionHeader label="Repo" count={repoScoped.length} />
+          <SectionHeader label="Repository guidance" count={repoScoped.length} />
           <TruncatedRows rows={repoScoped.map((d) => (
             <Row
               key={d.id}
               title={d.title}
               subtitle={`${d.repoName} — ${d.body.replace(/\s+/g, ' ').slice(0, 120)}`}
-              pill={d.priority != null ? `P${d.priority}` : null}
+              pill={d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
@@ -330,7 +266,7 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
       {servers.length === 0 ? (
         <EmptyState
           title="No external MCP servers"
-          body="Connect external MCP servers — every orchestrator turn and dispatched worker can use their tools. Managed in Settings."
+          body="Connect services in Settings to make their tools available to supported agents. Access depends on the agent and its permissions."
           actionLabel="Add in Settings"
           onAction={openSettingsMcpTab}
         />
@@ -437,7 +373,7 @@ function AgentsTab({ agents, expandedRow, onToggleRow, onOpenFile }: {
             key={agent.file}
             title={agent.name}
             titleMono
-            subtitle={agent.description}
+            subtitle={[agent.repoName, agent.description].filter(Boolean).join(' · ')}
             expanded={expandedRow === agent.file}
             onClick={() => onToggleRow(expandedRow === agent.file ? null : agent.file)}
           >
@@ -455,8 +391,8 @@ function AgentsTab({ agents, expandedRow, onToggleRow, onOpenFile }: {
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {section('User', user)}
-      {section('Repo', project)}
+      {section('Personal', user)}
+      {section('Repositories', project)}
     </div>
   );
 }
@@ -503,6 +439,7 @@ function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)', fontFamily: MONO_FONT }}>{hook.event}</span>
+              {hook.repoName ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{hook.repoName}</span> : null}
               {hook.matcher ? (
                 <span style={{ fontSize: 10.5, color: 'var(--t-text-faint)', fontFamily: MONO_FONT }}>{hook.matcher}</span>
               ) : null}
@@ -524,8 +461,8 @@ function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {section('User', user)}
-      {section('Repo', project)}
+      {section('Personal', user)}
+      {section('Repositories', project)}
     </div>
   );
 }

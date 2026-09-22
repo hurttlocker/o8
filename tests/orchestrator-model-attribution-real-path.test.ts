@@ -254,6 +254,27 @@ beforeAll(async () => {
   execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: originPath, stdio: 'pipe' });
   execFileSync('git', ['clone', originPath, repoPath], { stdio: 'pipe' });
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
+  writeFileSync(join(dataDir, 'repos.json'), JSON.stringify({
+    version: 1,
+    repos: [
+      { id: 'virtual-repo', name: 'repo', localPath: repoPath, addedAt: new Date().toISOString() },
+      { id: 'collision-repo', name: 'seed', localPath: seedPath, addedAt: new Date().toISOString() },
+    ],
+  }));
+  execFileSync(process.execPath, [
+    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--input-type=module', '--eval',
+    `const store = (await import('./src/lib/projects/store.ts')).default;
+     const project = store.createProject({ name: 'repo', description: 'SETTINGS_COLLISION_MARKER must never enter the virtual turn.' });
+     store.addRepoToProject(project.id, 'collision-repo', 'fullstack');`,
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      O8_DATA_DIR: dataDir,
+      CORTEX_IDE_DATA_DIR: dataDir,
+      CORTEX_IDE_DB_PATH: join(dataDir, 'cortex-ide.db'),
+    },
+  });
   const fakeCodex = join(dataDir, 'fake-codex.mjs');
   writeFileSync(fakeCodex, `#!/usr/bin/env node
 import { writeFileSync } from 'node:fs';
@@ -331,8 +352,8 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
   });
   wsProcess.stdout?.on('data', (chunk) => { serverOutput += String(chunk); });
   wsProcess.stderr?.on('data', (chunk) => { serverOutput += String(chunk); });
-  await waitFor(() => serverOutput.includes('WebSocket server listening'), 'ws-server startup');
-}, 30_000);
+  await waitFor(() => serverOutput.includes('WebSocket server listening'), 'ws-server startup', 45_000);
+}, 60_000);
 
 afterAll(async () => {
   for (const socket of sockets) socket.close();
@@ -348,6 +369,47 @@ afterAll(async () => {
 });
 
 describe('orchestrator model attribution through the real WebSocket turn handler', () => {
+  it('keeps a virtual repo project isolated through a real WebSocket send', async () => {
+    const projectId = 'repo:virtual-repo';
+    const threadId = `thoughts-virtual-ws-${Date.now()}`;
+    const message = 'Work only in this single repo.';
+    const historyPath = join(dataDir, 'chat-history', `${threadId}.json`);
+    const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+    sockets.add(socket);
+    const errors: string[] = [];
+    let subscribed = false;
+    socket.on('message', (chunk) => {
+      const event = JSON.parse(String(chunk)) as { event?: string; data?: { error?: string } };
+      if (event.event === 'error' && event.data?.error) errors.push(event.data.error);
+      if (event.event === 'status') subscribed = true;
+    });
+    await once(socket, 'open');
+    socket.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath, threadId, backend: 'codex' }));
+    await waitFor(() => subscribed, 'virtual project thread subscription');
+    socket.send(JSON.stringify({
+      type: 'orchestrator-send', repoPath, threadId, projectId,
+      message, displayMessage: message, backend: 'codex', model: 'gpt-5.6-sol',
+      permissionMode: 'plan', orchestrationMode: 'fleet',
+    }));
+
+    await waitFor(() => existsSync(historyPath) || errors.length > 0, 'virtual project thread persistence');
+    expect(errors).toEqual([]);
+    const history = JSON.parse(readFileSync(historyPath, 'utf8')) as {
+      projectId: string;
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(history.projectId).toBe(projectId);
+    expect(history.messages.find((entry) => entry.role === 'user')?.content).toBe(message);
+    await waitFor(() => existsSync(promptCapturePath) || errors.length > 0, 'virtual project prompt capture');
+    expect(errors).toEqual([]);
+    const prompt = readFileSync(promptCapturePath, 'utf8');
+    expect(prompt).toContain('Main repo: repo');
+    expect(prompt).not.toContain('SETTINGS_COLLISION_MARKER');
+    const projectBrief = prompt.split('## Project Brief\n\n')[1]?.split('\n\n## Task')[0];
+    expect(projectBrief).toContain(`Main repo: repo at ${repoPath}`);
+    expect(projectBrief).not.toContain(seedPath);
+  }, 30_000);
+
   it('records the freshly resolved default on the next real WebSocket turn', async () => {
     const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
     sockets.add(socket);
