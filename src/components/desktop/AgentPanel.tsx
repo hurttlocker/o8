@@ -228,9 +228,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   // stays a separate control so expanding the tree never changes work context.
   const handleMiniProjectOpen = useCallback((project: ProjectRecord) => {
     setProjectsMenuOpen(false);
-    if (activeProjectId !== project.id) void projects.switchActive(project.id);
-    onOpenProjectManagement?.();
-  }, [activeProjectId, onOpenProjectManagement, projects]);
+    onOpenProjectManagement?.(project.id);
+  }, [onOpenProjectManagement]);
 
   useEffect(() => {
     const nonce = addRepoIntent?.nonce ?? null;

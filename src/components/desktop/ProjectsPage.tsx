@@ -7,7 +7,7 @@ import { broadcastProjectsUpdated } from './repo-registry/useProjects';
 import { dispatchFocusRepoWorkspaceTab } from '@/lib/desktop/events';
 
 /** Project management uses the existing persisted project and repository APIs. */
-export function ProjectsPage({ onClose }: { onClose: () => void }) {
+export function ProjectsPage({ onClose, initialProjectId = null }: { onClose: () => void; initialProjectId?: string | null }) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
   const openWorkspace = async (projectId: string, repoId: string, repoPath: string) => {
@@ -25,7 +25,7 @@ export function ProjectsPage({ onClose }: { onClose: () => void }) {
     <div style={{ maxWidth: 1040, marginLeft: 'auto', marginRight: 'auto', paddingTop: 28, paddingRight: 28, paddingBottom: 64, paddingLeft: 28 }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}><RamsButton variant="ghost" onClick={onClose}>Back to workspace</RamsButton></div>
       {error ? <p role="alert" style={{ color: 'var(--t-text)' }}>{error}</p> : null}
-      <ProjectsPanel library opening={opening} onOpenWorkspace={openWorkspace} />
+      <ProjectsPanel library initialProjectId={initialProjectId} opening={opening} onOpenWorkspace={openWorkspace} />
     </div>
   </main>;
 }

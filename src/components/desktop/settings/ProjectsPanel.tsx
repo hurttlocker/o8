@@ -43,7 +43,7 @@ import { ProjectForm, emptyFormState, formStateFromProject } from './projects/Pr
 import { UnassignedReposGroup } from './projects/ProjectRepoRows';
 import { useProjectsData } from './projects/useProjectsData';
 
-export function ProjectsPanel({ library = false, opening = false, onOpenWorkspace }: { library?: boolean; opening?: boolean; onOpenWorkspace?: (projectId: string, repoId: string, repoPath: string) => Promise<void> }) {
+export function ProjectsPanel({ library = false, opening = false, initialProjectId = null, onOpenWorkspace }: { library?: boolean; initialProjectId?: string | null; opening?: boolean; onOpenWorkspace?: (projectId: string, repoId: string, repoPath: string) => Promise<void> }) {
   const data = useProjectsData();
   const {
     projects,
@@ -68,12 +68,13 @@ export function ProjectsPanel({ library = false, opening = false, onOpenWorkspac
 
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState('');
-  const [openedProjectId, setOpenedProjectId] = useState<string | null>(null);
+  const [requestedProjectId, setOpenedProjectId] = useState<string | null>(initialProjectId);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
 
   const isAnythingOpen = creating || editingProjectId !== null;
-  const openedProject = projects.find((project) => project.id === openedProjectId);
+  const openedProject = projects.find((project) => project.id === requestedProjectId);
+  const openedProjectId = openedProject?.id ?? null;
   const mainRepo = reposById.get(openedProject?.mainRepoId ?? openedProject?.repos[0]?.repoId ?? '');
 
   // Repos connected but not in any project — their home is the quiet group at
