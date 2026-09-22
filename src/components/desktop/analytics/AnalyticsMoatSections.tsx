@@ -133,16 +133,16 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
 }) {
   return (
     <>
-      {/* ── AUTONOMY — how much shipped without a human in the loop ── */}
+      {/* ── AUTONOMY — recorded outcomes, not end-to-end proof of zero human involvement ── */}
       <section style={{ marginBottom: 36 }}>
         <SectionLabel number="01">AUTONOMY</SectionLabel>
         {autonomy && autonomy.total > 0 ? (
           <div style={cellRowStyle}>
             <Cell
-              label="merged clean"
+              label="clean merge receipts"
               value={`${autonomy.mergedCleanRate.toFixed(0)}%`}
-              title="Packets merged without operator edits"
-              sub={`${autonomy.mergedClean} of ${autonomy.total} shipped untouched`}
+              title="Outcomes recorded as clean merges; not a measure of all human involvement."
+              sub={`${autonomy.mergedClean} of ${autonomy.total} recorded outcomes`}
               accent
             />
             <Cell
@@ -152,9 +152,9 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
               sub={`${autonomy.succeeded} succeeded`}
             />
             <Cell
-              label="needed a human"
+              label="partial or failed"
               value={(autonomy.partial + autonomy.failed).toString()}
-              title="Packets that ended partial or failed and needed operator intervention"
+              title="Recorded partial, failed, or interrupted outcomes; these do not establish human intervention."
               sub={`${autonomy.partial} partial · ${autonomy.failed} failed`}
             />
             <Cell
@@ -165,8 +165,9 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
             />
           </div>
         ) : (
-          <EmptyNote text="No completed packets in this window." />
+          <EmptyNote text={autonomy ? "No completed tasks in this window." : "Task outcome data is unavailable."} />
         )}
+        <p style={{ fontSize: 12, lineHeight: 1.5, color: RAMS_INK_QUIET }}>These are recorded task outcomes. A successful task or clean merge does not prove hands-free completion; approvals, manual edits, and interventions are not yet combined into one verified measure.</p>
         <HairlineRule />
       </section>
 
@@ -202,7 +203,7 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
             />
           </div>
         ) : (
-          <EmptyNote text="No approvals in this window." />
+          <EmptyNote text={governance ? "No approvals in this window." : "Approval data is unavailable."} />
         )}
         <HairlineRule />
       </section>

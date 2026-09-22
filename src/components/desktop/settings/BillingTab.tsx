@@ -3,13 +3,8 @@
 /**
  * BillingTab — Plan & Billing settings surface.
  *
- * o8 is free: the whole product (orchestration, governance, the Engineering
- * Brain, fleet, review, mobile-on-LAN, local voice) runs on the user's OWN CLI
- * subscriptions — nothing is gated. Paid plans are the cost/reach add-ons
- * (managed inference, off-network mobile relay, cloud agents) and are NOT live
- * yet. This tab celebrates what Free includes, previews what's coming, and
- * accepts a signed license key / founding pass (verified offline via
- * /api/panel/entitlement → license.ts).
+ * Separates free local workspace features, plan-dependent hosted services,
+ * and planned services. License activation uses the existing entitlement API.
  *
  * The global EntitlementProvider (useEntitlement) loads once on mount and has
  * no refresh hook, so this tab keeps a LOCAL copy fetched from the same route
@@ -62,28 +57,22 @@ const PLAN_LABELS: Record<Plan, string> = {
 };
 
 const PLAN_TAGLINES: Record<Plan, string> = {
-  free: 'The full o8 — orchestration, governance, the Engineering Brain, multi-repo fleet, and review. It all runs on your own CLI subscriptions. Free, forever.',
-  pro: 'Everything in Free, with managed inference (no keys to bring) and off-network mobile.',
-  team: 'Everything in Pro, plus shared team governance and cloud agents.',
-  founder: 'Everything free, plus managed inference included for life (fair-use capped), early access to everything new, and an exclusive theme. One-time — the first 250.',
+  free: 'Use the local workspace with your own connected AI tools. Your providers may charge for usage.',
+  pro: 'Adds hosted o8 High and Engineering Brain assistance, subject to your plan limits. Hosted mobile and cloud execution are planned.',
+  team: 'Your team plan and active license determine hosted access and limits. Planned services are listed separately below.',
+  founder: 'Your founding license provides Pro access and its included benefits. Hosted usage remains subject to plan limits.',
 };
 
-// What Free includes — i.e. everything. None of this is gated; it runs on the
-// user's own subscriptions, so it costs us nothing and ships free.
 const INCLUDED_ROWS: Array<{ label: string; detail: string }> = [
-  { label: 'Orchestration & dispatch', detail: 'Plan, dispatch, and supervise agents across your repos.' },
-  { label: 'Governance review', detail: 'Single-pass merge gate + AI blind second-pass before merge.' },
-  { label: 'Engineering Brain', detail: 'Cited organizational-memory Q&A across your codebase.' },
-  { label: 'Multi-repo fleet', detail: 'Run the orchestrator across as many repos as you want.' },
-  { label: 'Mobile on your network', detail: 'Drive approvals + dispatch from the app over LAN / Tailscale.' },
-  { label: 'Voice & dictation', detail: 'Local Symon dictation and read-aloud — free forever.' },
+  { label: 'Orchestrator & workers', detail: 'Plan and run tasks with your connected AI tools.' },
+  { label: 'Code review & approvals', detail: 'Review completed work and control when changes can merge.' },
+  { label: 'Projects & repositories', detail: 'Share project instructions and coordinate work across repositories.' },
+  { label: 'Voice & dictation', detail: 'Use supported local voice features or connect your own voice provider.' },
 ];
 
-// The paid plan covers only what costs us to run on your behalf. Not live yet.
 const COMING_ROWS: Array<{ label: string; detail: string }> = [
-  { label: 'Managed inference', detail: 'Skip bringing your own key — hosted, metered model access for the Brain + voice.' },
-  { label: 'Off-network mobile relay', detail: 'Reach your Mac from anywhere — even asleep or behind NAT.' },
-  { label: 'Cloud agents', detail: 'Agents that keep running while your laptop is closed.' },
+  { label: 'Fully hosted mobile', detail: 'Planned mobile services running on o8 infrastructure.' },
+  { label: 'Cloud execution', detail: 'Planned hosted workers that can run independently of your computer.' },
 ];
 
 function coercePlan(value: unknown): Plan {
@@ -245,7 +234,7 @@ export function BillingTab() {
     }}>
       <TabHeading
         title="plan & billing"
-        subtitle="o8 is free — the whole product runs on your own CLI subscriptions, and nothing here is gated. Paid plans add managed inference, off-network mobile, and cloud agents; they're on the way."
+        subtitle="Manage your o8 plan and license. The local workspace is free; hosted services depend on your plan."
       />
 
       {notice ? (
@@ -319,7 +308,7 @@ export function BillingTab() {
                   variant="ghost"
                   onClick={() => { window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer'); }}
                 >
-                  What&apos;s coming
+                  View plans
                 </RamsButton>
               ) : null}
             </div>
@@ -329,8 +318,8 @@ export function BillingTab() {
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="What's included"
-          footnote="Everything in o8 is included on Free and runs on your own subscriptions — none of it is gated."
+          header="Free workspace"
+          footnote="These workspace features are free in o8. Connected AI and voice providers apply their own prices, subscriptions, and usage limits."
         >
           {INCLUDED_ROWS.map((row, idx) => (
             <SettingsRow
@@ -346,9 +335,15 @@ export function BillingTab() {
       </section>
 
       <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Hosted services" footnote="Your active plan determines availability and usage limits. Provider keys and CLI subscriptions remain separate from your o8 license.">
+          <SettingsRow icon={<CheckGlyph />} label="o8 High & Engineering Brain" subtitle="Hosted model access and repository assistance on o8 infrastructure." accessory={<ValuePill>{isPaid ? 'Plan access' : 'Pro'}</ValuePill>} />
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Paid — coming soon"
-          footnote="A paid plan covers only what costs us to run on your behalf — hosted inference, off-network reach, and cloud compute. These are on the way; you'll activate them right here."
+          header="Planned services"
+          footnote="Roadmap items are not a promise of current availability. Existing mobile pairing and remote access are configured on their own settings pages."
         >
           {COMING_ROWS.map((row, idx) => (
             <SettingsRow
@@ -356,7 +351,7 @@ export function BillingTab() {
               icon={<SoonGlyph />}
               label={row.label}
               subtitle={row.detail}
-              accessory={<ValuePill>Soon</ValuePill>}
+              accessory={<ValuePill>Planned</ValuePill>}
               divider={idx < COMING_ROWS.length - 1}
             />
           ))}

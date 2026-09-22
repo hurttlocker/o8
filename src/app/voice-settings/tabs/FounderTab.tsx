@@ -165,7 +165,7 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
 
       <SectionCard>
         <SectionTitle icon={ICONS.sparkle}>ElevenLabs voice</SectionTitle>
-        <SectionHint>Add your ElevenLabs key to speak with your own voice — no key just uses the free Google default. Stored in your local o8 config.</SectionHint>
+        <SectionHint>API Keys in the main o8 Settings is the home for this credential. This standalone editor remains available when the main window is hidden; both write the same native macOS Keychain slot.</SectionHint>
         <ControlRow
           label="ElevenLabs API key"
           detail={elevenKeySet ? 'Your key is saved — enter a new one to replace it.' : 'Bring your own key — billed to you by ElevenLabs. No key = the free Google default.'}
@@ -315,7 +315,7 @@ function RealtimeSection() {
     <SectionCard>
       <SectionTitle icon={ICONS.sparkle}>Realtime voice · beta</SectionTitle>
       <SectionHint>
-        Voice-to-voice with gpt-realtime — talk and Symon talks back, no push-to-talk. Bring your own OpenAI key and it&apos;s free; you pay OpenAI directly. (Managed, metered realtime is the paid path and arrives later.)
+        Voice-to-voice with gpt-realtime — talk and Symon talks back, no push-to-talk. API Keys in the main o8 Settings is the home for the OpenAI credential. This fallback editor writes the same encrypted app-services store while the main window is hidden. You pay OpenAI directly for BYOK usage.
       </SectionHint>
       <ControlRow label="OpenAI API key" detail={masked ? `Saved: ${masked}. Enter a new key to replace it.` : 'Bring your own key — encrypted at rest, billed to you.'}>
         <input

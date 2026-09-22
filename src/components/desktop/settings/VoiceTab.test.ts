@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 
-const native = vi.hoisted(() => ({ model: '', write: vi.fn(), open: vi.fn() }));
+const native = vi.hoisted(() => ({ model: '', write: vi.fn(), open: vi.fn(), navigate: vi.fn() }));
 vi.mock('@/lib/tauri/bridge', () => ({
   isTauri: () => true,
   accessibilityPermissionGranted: async () => true,
@@ -12,7 +12,7 @@ vi.mock('@/lib/tauri/bridge', () => ({
   openSystemSettings: vi.fn(), openVoiceSettings: native.open,
   backgroundModeIsEnabled: async () => false, backgroundModeSet: vi.fn(),
   agentGetEscalation: async () => 'auto', agentSetEscalation: vi.fn(),
-  voicePrefsGet: async () => ({}),
+  voicePrefsGet: async () => ({ groq_api_key_set: true }),
   voicePrefsSet: async (key: string, value: string) => { native.write(key, value); if (key === 'symon_brain_model') native.model = value; },
   externalKeyboardFnState: async () => null,
   symonBrainState: async () => ({
@@ -25,15 +25,16 @@ vi.mock('@/lib/tauri/bridge', () => ({
 vi.mock('./SymonAttentionSettingsSection', () => ({ SymonAttentionSettingsSection: () => null }));
 import { VoiceTab } from './VoiceTab';
 
-it('saves model choices through the Voice preference bridge, rereads them, and opens the separate Symon window', async () => {
+it('saves model choices, opens Symon, and routes credential management to API Keys', async () => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   native.model = '';
   native.write.mockClear();
+  native.navigate.mockClear();
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    await act(async () => { root.render(createElement(VoiceTab)); });
+    await act(async () => { root.render(createElement(VoiceTab, { onNavigateTab: native.navigate })); });
     const select = container.querySelector('select')!;
     expect(select).not.toBeNull();
     await act(async () => { select.value = 'gpt-5.6-sol'; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -45,6 +46,9 @@ it('saves model choices through the Voice preference bridge, rereads them, and o
     const entry = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Open Symon settings'))!;
     await act(async () => { entry.click(); });
     expect(native.open).toHaveBeenCalledOnce();
+    const groq = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Groq API key'))!;
+    await act(async () => { groq.click(); });
+    expect(native.navigate).toHaveBeenCalledWith('api-keys');
     expect(native.write.mock.calls.every(([key]) => key === 'symon_brain_model')).toBe(true);
   } finally { act(() => root.unmount()); container.remove(); }
 });

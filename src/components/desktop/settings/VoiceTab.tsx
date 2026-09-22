@@ -37,9 +37,9 @@ import {
   RAMS_ACCENT,
   MicIcon,
   SettingsSegmented,
-  RamsButton,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
+  type SettingsTab,
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import {
@@ -134,7 +134,7 @@ function BrainGlyph() {
 const noopSubscribe = () => () => {};
 const dictationModeFallback = (): DictationInputMode => DEFAULT_DICTATION_INPUT_MODE;
 
-export function VoiceTab() {
+export function VoiceTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab, section?: string) => void }) {
   const tauri = isTauri();
 
   const [accessibility, setAccessibility] = useState<PermState>('unknown');
@@ -146,8 +146,6 @@ export function VoiceTab() {
   // Groq BYOK for fast transcription (free tier). The config read strips the
   // secret; `groq_api_key_set` is the redacted presence flag.
   const [groqKeySet, setGroqKeySet] = useState(false);
-  const [groqKeyInput, setGroqKeyInput] = useState('');
-  const [groqKeySaving, setGroqKeySaving] = useState(false);
   const [partialsSurface, setPartialsSurface] = useState<'caret' | 'hud' | 'off'>('caret');
   const [leftControlAsFn, setLeftControlAsFn] = useState(false);
   // #2158: the EFFECTIVE remap state — the pref ANDed with "a non-Apple external
@@ -283,29 +281,6 @@ export function VoiceTab() {
   const handleBrainModel = useCallback(async (model: string) => {
     await writeBrainPref('symon_brain_model', model);
   }, [writeBrainPref]);
-
-  const handleGroqKeySave = useCallback(async () => {
-    const key = groqKeyInput.trim();
-    if (!key) return;
-    setGroqKeySaving(true);
-    try {
-      await voicePrefsSet('groq_api_key', key);
-      setGroqKeySet(true);
-      setGroqKeyInput('');
-    } finally {
-      setGroqKeySaving(false);
-    }
-  }, [groqKeyInput]);
-
-  const handleGroqKeyRemove = useCallback(async () => {
-    setGroqKeySaving(true);
-    try {
-      await voicePrefsSet('groq_api_key', '');
-      setGroqKeySet(false);
-    } finally {
-      setGroqKeySaving(false);
-    }
-  }, []);
 
   // Only an EXPLICIT non-zero AppleFnUsageType means Apple Dictation owns the
   // key. Unset (null) is machine-dependent — on machines where the tap works
@@ -551,50 +526,17 @@ export function VoiceTab() {
           <section style={{ marginTop: 28 }}>
             <SettingsGroup
               header="Transcription"
-              footnote="Groq provides cloud transcription. Usage is subject to your Groq account limits. Keys stay in macOS Keychain and are sent only to Groq."
+              footnote="API Keys is the home for provider credentials. Voice keeps the feature context here while the key stays in the native macOS Keychain."
             >
               <SettingsRow
                 icon={<MicIcon />}
                 label="Groq API key"
                 subtitle={groqKeySet
-                  ? 'Key saved — fast transcription active. Paste a new key to replace it.'
-                  : 'Get a key at console.groq.com/keys, then paste it here'}
-                accessory={
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <input
-                      type="password"
-                      value={groqKeyInput}
-                      placeholder={groqKeySet ? '••••••••' : 'gsk_...'}
-                      onChange={(e) => setGroqKeyInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') void handleGroqKeySave(); }}
-                      style={{
-                        width: 180,
-                        height: 32,
-                        boxSizing: 'border-box',
-                        paddingLeft: 8,
-                        paddingRight: 8,
-                        fontSize: 12,
-                        fontWeight: 300,
-                        letterSpacing: '-0.1px',
-                        fontFamily: APP_FONT_STACK,
-                        color: 'var(--t-text)',
-                        background: 'var(--t-input-bg)',
-                        border: '1px solid var(--t-divider)',
-                        borderRadius: 9,
-                        outline: 'none',
-                      }}
-                    />
-                    {groqKeyInput.trim() ? (
-                      <RamsButton variant="ghost" onClick={() => { void handleGroqKeySave(); }} busy={groqKeySaving}>
-                        {groqKeySaving ? 'Saving…' : 'Save'}
-                      </RamsButton>
-                    ) : groqKeySet ? (
-                      <RamsButton variant="ghost" onClick={() => { void handleGroqKeyRemove(); }} disabled={groqKeySaving}>
-                        Remove
-                      </RamsButton>
-                    ) : null}
-                  </span>
-                }
+                  ? 'Saved in the native Keychain. Manage or replace it in API Keys.'
+                  : 'Not saved in the native Keychain. Add it in API Keys for fast cloud transcription.'}
+                accessory={<ValuePill tone={groqKeySet ? 'success' : 'default'}>{groqKeySet ? 'Saved' : 'Not saved'}</ValuePill>}
+                onPress={onNavigateTab ? () => onNavigateTab('api-keys') : undefined}
+                chevron={Boolean(onNavigateTab)}
               />
             </SettingsGroup>
           </section>

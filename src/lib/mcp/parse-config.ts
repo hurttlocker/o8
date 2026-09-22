@@ -1,25 +1,4 @@
-/**
- * Parses the standard Claude Desktop / Cursor MCP config snippet shape into
- * the normalized shape our "add external server" form consumes.
- *
- * Accepts any of:
- *
- *   1. Full config wrapper:
- *      { "mcpServers": { "filesystem": { "command": "npx", "args": [...] } } }
- *
- *   2. Object of servers (outer key = server name):
- *      { "filesystem": { "command": "npx", "args": [...] } }
- *
- *   3. Single server entry (no outer name key):
- *      { "command": "npx", "args": [...], "env": { ... } }
- *
- *   4. HTTP variant — any shape above with `url` / `httpUrl` / `type: "http"`
- *      on the inner object.
- *
- * Output — one or more `ParsedMcpServer` entries the caller can merge into
- * the form fields. If multiple servers are present (shape 1 or 2 with >1
- * entries), the caller can present a picker.
- */
+/** Parse user-provided MCP commands, URLs, and supported JSON config shapes. */
 
 export type ParsedMcpTransport = 'stdio' | 'http';
 
@@ -36,144 +15,154 @@ export interface ParsedMcpConfig {
   servers: ParsedMcpServer[];
 }
 
+const STDIO_KEYS = new Set(['command', 'args', 'env', 'type', 'transport']);
+const HTTP_KEYS = new Set(['command', 'url', 'httpUrl', 'endpoint', 'type', 'transport']);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function coerceString(value: unknown): string {
-  if (typeof value !== 'string') return '';
+function requiredString(value: unknown, field: string, name: string | null): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Server "${name ?? 'unnamed'}" is missing ${field}`);
+  }
   return value.trim();
 }
 
-function coerceStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => typeof entry === 'string' ? entry : '')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+function parseStringArray(value: unknown, name: string | null): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new Error(`Server "${name ?? 'unnamed'}" args must be an array of strings.`);
+  }
+  return [...value] as string[];
 }
 
-function coerceEnv(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {};
+function parseEnv(value: unknown, name: string | null): Record<string, string> {
+  if (value === undefined) return {};
+  if (!isRecord(value)) {
+    throw new Error(`Server "${name ?? 'unnamed'}" env must be an object of string values.`);
+  }
   const out: Record<string, string> = {};
   for (const [key, raw] of Object.entries(value)) {
-    if (typeof raw !== 'string') continue;
-    const trimmedKey = key.trim();
-    if (!trimmedKey) continue;
-    out[trimmedKey] = raw;
+    const normalizedKey = key.trim();
+    if (!normalizedKey || typeof raw !== 'string') {
+      throw new Error(`Server "${name ?? 'unnamed'}" env must be an object of string values.`);
+    }
+    out[normalizedKey] = raw;
   }
   return out;
 }
 
 function isHttpCandidate(entry: Record<string, unknown>): boolean {
-  if (typeof entry.type === 'string' && entry.type.toLowerCase() === 'http') return true;
-  if (typeof entry.transport === 'string' && entry.transport.toLowerCase() === 'http') return true;
-  if (typeof entry.url === 'string' && entry.url.trim()) return true;
-  if (typeof entry.httpUrl === 'string' && entry.httpUrl.trim()) return true;
-  if (typeof entry.endpoint === 'string' && entry.endpoint.trim()) return true;
-  return false;
+  const declared = typeof entry.type === 'string'
+    ? entry.type.toLowerCase()
+    : typeof entry.transport === 'string'
+      ? entry.transport.toLowerCase()
+      : null;
+  if (declared === 'http') return true;
+  return ['url', 'httpUrl', 'endpoint'].some((key) => (
+    typeof entry[key] === 'string' && Boolean((entry[key] as string).trim())
+  ));
 }
 
 function looksLikeServerEntry(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  if (typeof value.command === 'string' && value.command.trim()) return true;
-  if (typeof value.url === 'string' && value.url.trim()) return true;
-  if (typeof value.httpUrl === 'string' && value.httpUrl.trim()) return true;
-  if (typeof value.endpoint === 'string' && value.endpoint.trim()) return true;
-  return false;
+  return ['command', 'url', 'httpUrl', 'endpoint'].some((key) => (
+    typeof value[key] === 'string' && Boolean((value[key] as string).trim())
+  ));
+}
+
+function rejectUnknownKeys(raw: Record<string, unknown>, allowed: ReadonlySet<string>, name: string | null): void {
+  const unknown = Object.keys(raw).filter((key) => !allowed.has(key));
+  if (unknown.length === 0) return;
+  throw new Error(
+    `Server "${name ?? 'unnamed'}" has unsupported field${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}. Remove ${unknown.length === 1 ? 'it' : 'them'} so no config is lost.`,
+  );
+}
+
+function validateDeclaredTransport(raw: Record<string, unknown>, name: string | null): void {
+  for (const key of ['type', 'transport'] as const) {
+    if (raw[key] === undefined) continue;
+    if (typeof raw[key] !== 'string' || !['stdio', 'http'].includes(raw[key].toLowerCase())) {
+      throw new Error(`Server "${name ?? 'unnamed'}" has unsupported ${key} "${String(raw[key])}".`);
+    }
+  }
+}
+
+function parseHttpUrl(raw: string, name: string | null): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`Server "${name ?? 'unnamed'}" has an invalid URL.`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Server "${name ?? 'unnamed'}" URL must use http or https.`);
+  }
+  return raw;
 }
 
 function parseSingleEntry(name: string | null, raw: Record<string, unknown>): ParsedMcpServer {
+  validateDeclaredTransport(raw, name);
   if (isHttpCandidate(raw)) {
-    const url = coerceString(raw.url) || coerceString(raw.httpUrl) || coerceString(raw.endpoint) || coerceString(raw.command);
-    if (!url) {
-      throw new Error(`HTTP server "${name ?? 'unnamed'}" is missing a url`);
-    }
-    return {
-      name,
-      transport: 'http',
-      command: url,
-      args: [],
-      env: coerceEnv(raw.env),
-      url,
-    };
+    rejectUnknownKeys(raw, HTTP_KEYS, name);
+    const candidate = ['url', 'httpUrl', 'endpoint', 'command']
+      .map((key) => raw[key])
+      .find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+    const url = parseHttpUrl(requiredString(candidate, 'a URL', name), name);
+    return { name, transport: 'http', command: url, args: [], env: {}, url };
   }
 
-  const command = coerceString(raw.command);
-  if (!command) {
-    throw new Error(`Server "${name ?? 'unnamed'}" is missing a command`);
-  }
-
+  rejectUnknownKeys(raw, STDIO_KEYS, name);
   return {
     name,
     transport: 'stdio',
-    command,
-    args: coerceStringArray(raw.args),
-    env: coerceEnv(raw.env),
+    command: requiredString(raw.command, 'a command', name),
+    args: parseStringArray(raw.args, name),
+    env: parseEnv(raw.env, name),
   };
 }
 
-/**
- * Try to parse a JSON snippet the user pasted. Throws with an actionable
- * error message when the shape is unrecognizable.
- */
+/** Parse the supported Claude Desktop / Cursor MCP JSON shapes. */
 export function parseMcpConfigInput(raw: string): ParsedMcpConfig {
   const trimmed = raw.trim();
-  if (!trimmed) {
-    throw new Error('Paste an MCP server config to populate the fields.');
-  }
+  if (!trimmed) throw new Error('Paste an MCP server config first.');
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid JSON — ${detail}`);
+    throw new Error(`Invalid JSON: ${detail}`);
   }
+  if (!isRecord(parsed)) throw new Error('MCP config must be a JSON object.');
 
-  if (!isRecord(parsed)) {
-    throw new Error('MCP config must be a JSON object.');
-  }
-
-  // Shape 1: { "mcpServers": { name: entry, ... } }
-  if (isRecord(parsed.mcpServers)) {
-    const servers: ParsedMcpServer[] = [];
-    for (const [name, value] of Object.entries(parsed.mcpServers)) {
-      if (!isRecord(value)) continue;
-      servers.push(parseSingleEntry(name, value));
+  if ('mcpServers' in parsed) {
+    const wrapperKeys = Object.keys(parsed).filter((key) => key !== 'mcpServers');
+    if (wrapperKeys.length > 0) {
+      throw new Error(`Unsupported top-level field${wrapperKeys.length === 1 ? '' : 's'}: ${wrapperKeys.join(', ')}.`);
     }
-    if (servers.length === 0) {
-      throw new Error('"mcpServers" is empty — add at least one server entry.');
-    }
+    if (!isRecord(parsed.mcpServers)) throw new Error('"mcpServers" must be an object.');
+    const servers = Object.entries(parsed.mcpServers).map(([name, value]) => {
+      if (!isRecord(value)) throw new Error(`Server "${name}" must be a JSON object.`);
+      return parseSingleEntry(name, value);
+    });
+    if (servers.length === 0) throw new Error('"mcpServers" is empty. Add at least one server entry.');
     return { servers };
   }
 
-  // Shape 3: single server entry (outer has command/url etc.)
-  if (looksLikeServerEntry(parsed)) {
-    return { servers: [parseSingleEntry(null, parsed)] };
-  }
+  if (looksLikeServerEntry(parsed)) return { servers: [parseSingleEntry(null, parsed)] };
 
-  // Shape 2: object of servers { name: entry, ... }
-  const entries = Object.entries(parsed);
-  const servers: ParsedMcpServer[] = [];
-  for (const [name, value] of entries) {
-    if (!isRecord(value)) continue;
-    if (!looksLikeServerEntry(value)) continue;
-    servers.push(parseSingleEntry(name, value));
-  }
-
-  if (servers.length > 0) {
-    return { servers };
-  }
-
-  throw new Error('Unrecognized shape — expected {"mcpServers": {...}}, a map of servers, or a single {"command", "args"} object.');
+  const servers = Object.entries(parsed).map(([name, value]) => {
+    if (!isRecord(value) || !looksLikeServerEntry(value)) {
+      throw new Error(`Server "${name}" must contain a command or URL.`);
+    }
+    return parseSingleEntry(name, value);
+  });
+  if (servers.length > 0) return { servers };
+  throw new Error('Expected {"mcpServers": {...}}, a map of servers, or one server object.');
 }
 
-/**
- * Render the normalized parsed server back into the existing form shape
- * (argsJson string, envJson string). Keeps the UI decoupled from JSON
- * serialization order.
- */
 export function parsedServerToFormValues(server: ParsedMcpServer): {
   name: string;
   transport: ParsedMcpTransport;
@@ -181,104 +170,125 @@ export function parsedServerToFormValues(server: ParsedMcpServer): {
   argsJson: string;
   envJson: string;
 } {
-  const argsJson = server.args.length > 0
-    ? JSON.stringify(server.args, null, 2)
-    : '[]';
-  const envJson = Object.keys(server.env).length > 0
-    ? JSON.stringify(server.env, null, 2)
-    : '{}';
   return {
     name: server.name ?? '',
     transport: server.transport,
     command: server.command,
-    argsJson,
-    envJson,
+    argsJson: JSON.stringify(server.args, null, 2),
+    envJson: JSON.stringify(server.env, null, 2),
   };
 }
 
-/* ──────────────────────────────────────────────────────────────────────
- * Smart single-box input (operator, 2026-07-06 — "typing JSON args is
- * 2024"). One paste box accepts ANY of: the JSON shapes above, a bare
- * server URL, or a raw command line ("npx -y @modelcontextprotocol/
- * server-filesystem /tmp", optionally with leading ENV=VAL pairs). The
- * parser figures out which and returns normalized servers.
- * ────────────────────────────────────────────────────────────────────── */
-
-/** Shell-ish tokenizer: splits on whitespace, honors single/double quotes. */
 function tokenizeCommandLine(line: string): string[] {
+  if (/\r|\n/.test(line)) throw new Error('Enter one command only. Newlines are not supported.');
   const tokens: string[] = [];
   let current = '';
+  let tokenStarted = false;
   let quote: '"' | "'" | null = null;
-  for (const ch of line) {
-    if (quote) {
-      if (ch === quote) { quote = null; continue; }
+  let escaped = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const ch = line[index];
+    if (escaped) {
       current += ch;
+      tokenStarted = true;
+      escaped = false;
       continue;
     }
-    if (ch === '"' || ch === "'") { quote = ch as '"' | "'"; continue; }
-    if (/\s/.test(ch)) {
-      if (current) { tokens.push(current); current = ''; }
+    if (ch === '\\' && quote !== "'") {
+      const next = line[index + 1];
+      if (next === undefined) {
+        escaped = true;
+        tokenStarted = true;
+        continue;
+      }
+      const escapesNext = /\s/.test(next)
+        || next === '\\'
+        || (!quote && (next === '"' || next === "'"))
+        || next === quote;
+      if (escapesNext) {
+        escaped = true;
+      } else {
+        current += ch;
+      }
+      tokenStarted = true;
       continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      tokenStarted = true;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      tokenStarted = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (tokenStarted) {
+        tokens.push(current);
+        current = '';
+        tokenStarted = false;
+      }
+      continue;
+    }
+    if (';&|<>`'.includes(ch) || (ch === '$' && ['(', '{'].includes(line[index + 1] ?? ''))) {
+      throw new Error('Shell operators and command substitution are not supported. Enter a command and its arguments only.');
     }
     current += ch;
+    tokenStarted = true;
   }
-  if (current) tokens.push(current);
+  if (escaped) throw new Error('The command ends with an unfinished escape.');
+  if (quote) throw new Error('The command has an unterminated quote.');
+  if (tokenStarted) tokens.push(current);
   return tokens;
 }
 
-/** Infer a human server name from a command line's package/path argument. */
 function inferNameFromTokens(command: string, args: string[]): string {
-  const pkg = args.find((a) => a.startsWith('@') || /^[a-z0-9-]+\/[a-z0-9-]/i.test(a))
-    ?? args.find((a) => !a.startsWith('-'));
-  const base = (pkg ?? command).split('/').pop() ?? command;
-  return base
-    .replace(/^(server|mcp)[-_]/i, '')
-    .replace(/[-_](server|mcp)$/i, '')
-    .replace(/@.*$/, '')
-    .trim() || command;
+  const packageArg = args.find((arg) => !arg.startsWith('-')) ?? command;
+  const withoutVersion = packageArg.startsWith('@')
+    ? packageArg.replace(/@[^/]+$/, '')
+    : packageArg.replace(/@[^@/]+$/, '');
+  const base = (withoutVersion.split('/').pop() || command)
+    .replace(/^(?:mcp[-_]?server|server[-_]?mcp|mcp|server)[-_]?/i, '')
+    .replace(/[-_]?(?:mcp[-_]?server|server[-_]?mcp|mcp|server)$/i, '');
+  const safe = base.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return safe || 'server';
 }
 
-/**
- * Parse anything the operator throws at the box: JSON config, bare URL, or a
- * command line. Throws with a human message when nothing sensible parses.
- */
-export function parseMcpAnyInput(raw: string): ParsedMcpConfig {
+/** Parse a single executable plus argv, or one HTTP(S) endpoint. */
+export function parseMcpCommandOrUrlInput(raw: string): ParsedMcpConfig {
   const trimmed = raw.trim();
-  if (!trimmed) throw new Error('Paste a config, a command, or a URL first.');
+  if (!trimmed) throw new Error('Enter a command or URL first.');
+  if (trimmed.startsWith('{')) throw new Error('Use Advanced JSON for config objects.');
 
-  // JSON shapes (existing parser).
-  if (trimmed.startsWith('{')) return parseMcpConfigInput(trimmed);
-
-  // Bare URL → HTTP transport, name from the hostname.
-  if (/^https?:\/\/\S+$/i.test(trimmed)) {
-    let name = 'remote';
-    try {
-      const u = new URL(trimmed);
-      name = u.hostname.replace(/^www\./, '').split('.')[0] || 'remote';
-    } catch { /* keep fallback name */ }
-    return { servers: [{ name, transport: 'http', command: '', args: [], env: {}, url: trimmed }] };
+  if (/^https?:/i.test(trimmed)) {
+    const url = parseHttpUrl(trimmed, null);
+    const hostname = new URL(url).hostname.replace(/^www\./, '');
+    const name = hostname.split('.')[0]?.replace(/[^A-Za-z0-9_-]+/g, '-') || 'remote';
+    return { servers: [{ name, transport: 'http', command: url, args: [], env: {}, url }] };
   }
 
-  // Command line — pull leading ENV=VAL pairs, then command + args.
-  const firstLine = trimmed.split('\n')[0].trim();
-  const tokens = tokenizeCommandLine(firstLine);
+  const tokens = tokenizeCommandLine(trimmed);
   if (tokens.length === 0) throw new Error('Could not read that as a command.');
-  const env: Record<string, string> = {};
-  while (tokens.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) {
-    const [key, ...rest] = tokens.shift()!.split('=');
-    env[key] = rest.join('=');
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) {
+    throw new Error('Put environment variables in Advanced JSON so their values stay explicit.');
   }
-  if (tokens.length === 0) throw new Error('That looks like env vars with no command after them.');
   const command = tokens.shift()!;
-  if (/[{}[\]]/.test(command)) throw new Error('Could not parse — for JSON, start with "{".');
-  const args = tokens;
+  if (!command || command.startsWith('-')) throw new Error('The command must start with an executable name.');
   return {
     servers: [{
-      name: inferNameFromTokens(command, args),
+      name: inferNameFromTokens(command, tokens),
       transport: 'stdio',
       command,
-      args,
-      env,
+      args: tokens,
+      env: {},
     }],
   };
+}
+
+/** Backward-compatible dispatcher for callers that intentionally accept all forms. */
+export function parseMcpAnyInput(raw: string): ParsedMcpConfig {
+  return raw.trim().startsWith('{') ? parseMcpConfigInput(raw) : parseMcpCommandOrUrlInput(raw);
 }
