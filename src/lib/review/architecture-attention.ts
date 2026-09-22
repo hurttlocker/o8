@@ -204,14 +204,18 @@ function questionsFor(candidates: Candidate[]): JudgmentQuestionSet {
   return questions;
 }
 
-function cacheKey(result: ArchitectureDeltaResult) {
+function cacheKey(result: ArchitectureDeltaResult, context: { laneId?: string | null; repoPath: string }) {
   const evidence = result.analysisId ?? createHash('sha256').update(JSON.stringify({
     nodes: result.nodes,
     edges: result.edges,
     truncated: result.truncated,
   })).digest('hex').slice(0, 20);
   const scope = createHash('sha256').update(JSON.stringify({ nodes: result.nodes, edges: result.edges })).digest('hex').slice(0, 16);
-  return `${ARCHITECTURE_ATTENTION_QUESTION_VERSION}:${TYPESAFE_MODEL}:${evidence}:${scope}`;
+  const source = createHash('sha256').update(JSON.stringify({
+    laneId: context.laneId ?? null,
+    repoPath: context.repoPath,
+  })).digest('hex').slice(0, 20);
+  return `${ARCHITECTURE_ATTENTION_QUESTION_VERSION}:${TYPESAFE_MODEL}:${source}:${evidence}:${scope}`;
 }
 
 function readCache(key: string) {
@@ -237,7 +241,7 @@ function writeCache(key: string, result: ArchitectureAttentionResult) {
 
 export async function rankArchitectureAttention(
   result: ArchitectureDeltaResult,
-  context: { laneId?: string | null } = {},
+  context: { laneId?: string | null; repoPath: string },
 ): Promise<ArchitectureAttentionResult> {
   if (!isJudgmentRefereeEnabled()) {
     return baseResult('disabled', 'Advisory review lenses are off.', result.analysisId ?? null);
@@ -252,7 +256,7 @@ export async function rankArchitectureAttention(
   if (candidates.length === 0) {
     return baseResult('unavailable', 'No changed modules are available to rank.', result.analysisId ?? null);
   }
-  const key = cacheKey(result);
+  const key = cacheKey(result, context);
   const cached = readCache(key);
   if (cached) return cached;
 

@@ -71,7 +71,7 @@ describe('architecture attention', () => {
   });
 
   it('makes one bounded typed call from topology facts and ranks without hiding modules', async () => {
-    const result = await rankArchitectureAttention(graph, { laneId: 'lane-1' });
+    const result = await rankArchitectureAttention(graph, { laneId: 'lane-1', repoPath: '/worktree-1' });
 
     expect(h.askJudgment).toHaveBeenCalledTimes(1);
     const request = h.askJudgment.mock.calls[0][0];
@@ -99,10 +99,10 @@ describe('architecture attention', () => {
 
   it('fails open when advisory judgment is off or graph evidence is incomplete', async () => {
     h.enabled.mockReturnValue(false);
-    await expect(rankArchitectureAttention(graph)).resolves.toMatchObject({ status: 'disabled', items: [] });
+    await expect(rankArchitectureAttention(graph, { repoPath: '/worktree-1' })).resolves.toMatchObject({ status: 'disabled', items: [] });
 
     h.enabled.mockReturnValue(true);
-    await expect(rankArchitectureAttention({ ...graph, truncated: true })).resolves.toMatchObject({
+    await expect(rankArchitectureAttention({ ...graph, truncated: true }, { repoPath: '/worktree-1' })).resolves.toMatchObject({
       status: 'incomplete',
       items: [],
     });
@@ -124,7 +124,7 @@ describe('architecture attention', () => {
       receiptId: 'receipt-low',
     });
 
-    const result = await rankArchitectureAttention({ ...graph, analysisId: 'analysis-low-confidence' });
+    const result = await rankArchitectureAttention({ ...graph, analysisId: 'analysis-low-confidence' }, { repoPath: '/worktree-1' });
 
     expect(result.items[0]).toMatchObject({ path: 'src/auth/session.ts', lens: 'general', attentionScore: null });
     expect(result.items).toHaveLength(3);
@@ -147,7 +147,7 @@ describe('architecture attention', () => {
       receiptId: 'receipt-mixed',
     });
 
-    const result = await rankArchitectureAttention({ ...graph, analysisId: 'analysis-mixed-confidence' });
+    const result = await rankArchitectureAttention({ ...graph, analysisId: 'analysis-mixed-confidence' }, { repoPath: '/worktree-1' });
 
     expect(result.items[0]).toMatchObject({
       path: 'src/api/route.ts',
@@ -156,5 +156,33 @@ describe('architecture attention', () => {
       lens: 'interface_contract',
     });
     expect(result.items.slice(1).every((item) => item.attentionScore === null)).toBe(true);
+  });
+
+  it('keeps receipts in their lane and repository even when the graph is identical', async () => {
+    const evidence = { ...graph, analysisId: 'analysis-shared-graph' };
+    h.askJudgment.mockImplementation(async (request: { context: { laneId: string | null } }) => ({
+      answers: {},
+      model: 'jev-latest',
+      usage: { inputTokens: 10, outputTokens: 5 },
+      latencyMs: 100,
+      attempts: 1,
+      receiptId: `receipt-${request.context.laneId ?? 'workspace'}-${h.askJudgment.mock.calls.length}`,
+    }));
+
+    const first = await rankArchitectureAttention(evidence, { laneId: 'lane-a', repoPath: '/repo-a' });
+    const second = await rankArchitectureAttention(evidence, { laneId: 'lane-b', repoPath: '/repo-a' });
+    const otherRepo = await rankArchitectureAttention(evidence, { repoPath: '/repo-b' });
+    const otherWorkspace = await rankArchitectureAttention(evidence, { repoPath: '/repo-c' });
+    const repeated = await rankArchitectureAttention(evidence, { laneId: 'lane-a', repoPath: '/repo-a' });
+
+    expect(h.askJudgment).toHaveBeenCalledTimes(4);
+    expect(h.askJudgment.mock.calls.map(([request]) => request.context.laneId)).toEqual([
+      'lane-a', 'lane-b', null, null,
+    ]);
+    expect(first.receiptId).toBe('receipt-lane-a-1');
+    expect(second.receiptId).toBe('receipt-lane-b-2');
+    expect(otherRepo.receiptId).toBe('receipt-workspace-3');
+    expect(otherWorkspace.receiptId).toBe('receipt-workspace-4');
+    expect(repeated).toMatchObject({ receiptId: first.receiptId, cached: true });
   });
 });
