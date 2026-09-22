@@ -20,10 +20,10 @@ export function ApfsDependencyImagesRow({
   return (
     <SettingsRow
       icon={icon}
-      label="APFS dependency images (pilot)"
+      label="Reuse dependencies (APFS)"
       subtitle={overridden
         ? `Effective policy: ${effectiveValue ? 'On' : 'Off'} (overridden by environment)`
-        : 'Reuse eligible npm dependencies from APFS disk images on macOS'}
+        : 'On compatible Macs, reuse npm dependencies to save setup time and disk space. Otherwise, install normally.'}
       checked={effectiveValue}
       disabled={overridden || busy}
       onToggle={onToggle}

@@ -22,18 +22,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import type { PromptLibraryEntry } from '@/lib/prompt-library/client';
+import { ClaudeWorkerSkills } from './customize/ClaudeWorkerSkills';
 import { PromptLibraryTab } from './customize/PromptLibraryTab';
 import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './customize/shared';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
-type CustomizeTab = 'rules' | 'commands' | 'prompts' | 'connections' | 'agents' | 'hooks';
+type CustomizeTab = 'rules' | 'commands' | 'prompts' | 'skills' | 'connections' | 'agents' | 'hooks';
 
 const TABS: Array<{ id: CustomizeTab; label: string }> = [
   { id: 'rules', label: 'Rules' },
   { id: 'commands', label: 'Commands' },
   { id: 'prompts', label: 'Prompts' },
+  { id: 'skills', label: 'Skills' },
   { id: 'connections', label: 'Connections' },
   { id: 'agents', label: 'Agents' },
   { id: 'hooks', label: 'Hooks' },
@@ -168,7 +170,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
 
   // Inventory density on the pills themselves (operator ask): totals, not
   // filtered counts, so the numbers are stable while searching.
-  const tabCounts: Record<CustomizeTab, number> = {
+  const tabCounts: Partial<Record<CustomizeTab, number>> = {
     rules: directives.length,
     commands: ORCHESTRATOR_SLASH_COMMANDS.length,
     prompts: promptCount,
@@ -223,6 +225,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
           <div style={{
             flex: 1,
             display: 'flex',
+            visibility: tab === 'skills' ? 'hidden' : 'visible',
+            pointerEvents: tab === 'skills' ? 'none' : 'auto',
             alignItems: 'center',
             gap: 8,
             paddingTop: 7,
@@ -282,8 +286,9 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', position: 'relative' }}>
           <button
             type="button"
-            onClick={() => setRepoMenuOpen((open) => !open)}
-            aria-expanded={repoMenuOpen}
+            onClick={() => { if (tab !== 'skills') setRepoMenuOpen((open) => !open); }}
+            aria-expanded={tab === 'skills' ? undefined : repoMenuOpen}
+            disabled={tab === 'skills'}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -301,13 +306,13 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
               fontWeight: 300,
               letterSpacing: '-0.1px',
               fontFamily: UI_FONT,
-              cursor: 'pointer',
+              cursor: tab === 'skills' ? 'default' : 'pointer',
             }}
           >
-            {activeRepoName}
-            <ChevronDownGlyph />
+            {tab === 'skills' ? 'Global worker setting' : activeRepoName}
+            {tab === 'skills' ? null : <ChevronDownGlyph />}
           </button>
-          {repoMenuOpen ? (
+          {tab !== 'skills' && repoMenuOpen ? (
             <div style={{
               position: 'absolute',
               top: 32,
@@ -364,7 +369,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
             <button
               key={item.id}
               type="button"
-              onClick={() => { setTab(item.id); setExpandedRow(null); }}
+              onClick={() => { setTab(item.id); setExpandedRow(null); setRepoMenuOpen(false); }}
               aria-pressed={tab === item.id}
               style={{
                 height: 26,
@@ -386,7 +391,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
               }}
             >
               {item.label}
-              {!loading && tabCounts[item.id] > 0 ? (
+              {!loading && typeof tabCounts[item.id] === 'number' && tabCounts[item.id]! > 0 ? (
                 <span style={{
                   marginLeft: 5,
                   fontSize: 9.5,
@@ -418,6 +423,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
             onInsert={insertPrompt}
             onCountDelta={(delta) => setPromptCount((current) => Math.max(0, current + delta))}
           />
+        ) : tab === 'skills' ? (
+          <ClaudeWorkerSkills />
         ) : tab === 'agents' ? (
           <AgentsTab agents={agents.filter((a) => matches(a.name, a.description))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (

@@ -23,7 +23,7 @@ import { useMemo, useState } from 'react';
 import {
   RamsButton,
   TabHeading,
-  SETTINGS_CONTENT_MAX_WIDTH,
+  SETTINGS_WIDE_CONTENT_MAX_WIDTH,
 } from './shared';
 import { SettingsGroup } from './grouped';
 import {
@@ -83,9 +83,9 @@ export function ProjectsPanel() {
     <div style={{
       paddingTop: 8,
       paddingLeft: 8,
-      paddingRight: 32,
+      paddingRight: 8,
       paddingBottom: 40,
-      maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
+      maxWidth: SETTINGS_WIDE_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
       <div style={{
@@ -115,7 +115,7 @@ export function ProjectsPanel() {
       </div>
 
       <section>
-        <SettingsGroup header="Overview">
+        <SettingsGroup header="Overview" maxWidth={SETTINGS_WIDE_CONTENT_MAX_WIDTH}>
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -137,7 +137,7 @@ export function ProjectsPanel() {
       </section>
 
       <section style={{ marginTop: 28 }}>
-        <SettingsGroup header="Runtime context">
+        <SettingsGroup header="Runtime context" maxWidth={SETTINGS_WIDE_CONTENT_MAX_WIDTH}>
           <RuntimeContextPanel context={runtimeContext} locks={projectLocks} />
         </SettingsGroup>
       </section>

@@ -296,31 +296,16 @@ function detectGemini(deadlineAt?: number): DetectedTool {
   };
 }
 
-function detectAntigravity(deadlineAt?: number): DetectedTool {
-  const path = locateBin('agy', deadlineAt) || locateBin('antigravity', deadlineAt);
-  const detected = !!path;
-  let version: string | undefined;
-
-  if (detected) {
-    version = safeExec(path, ['--version'], 2000, deadlineAt);
-  }
-
-  const authPresent = keyPresent(
-    ['ANTIGRAVITY_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_AI_API_KEY'],
-    loadConfiguredKeyNames(),
-  ) || existsSync(join(homedir(), '.antigravity'));
-
+async function detectAntigravity(deadlineAt?: number): Promise<DetectedTool> {
+  const readiness = await detectRuntimeAuthStatus('antigravity', deadlineAt);
   return {
     id: 'antigravity',
     name: 'Antigravity CLI',
-    detected,
-    ready: false,
-    authHint: detected
-      ? 'Discovery only until agy documents a resumable JSON/event contract.'
-      : undefined,
-    version,
-    path,
-    details: { authPresent, dispatchable: false },
+    detected: readiness.installed,
+    ready: readiness.ready,
+    authHint: readiness.ready ? undefined : readiness.fix,
+    path: readiness.binaryPath,
+    details: { authPresent: readiness.authenticated, readiness: readiness.detail },
   };
 }
 
@@ -628,7 +613,7 @@ export async function GET() {
   }
   if (!isPastDeadline(deadlineAt)) tools.push(await detectClaudeCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
-  if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(await detectAntigravity(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(await detectOpenCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detect3code(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectMagnitude(deadlineAt));

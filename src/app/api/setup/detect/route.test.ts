@@ -6,7 +6,12 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 
 const h = vi.hoisted(() => ({
   claudeBinary: '',
+  antigravity: { installed: false, authenticated: false, detail: 'Fixture absent', fix: 'Sign in' },
   scanAndLink: vi.fn<(_: string) => string | null>(() => null),
+}));
+
+vi.mock('@/lib/runtimes/shared/antigravity-login-probe', () => ({
+  probeAntigravityLogin: vi.fn(async () => h.antigravity),
 }));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -39,6 +44,7 @@ writeFileSync(h.claudeBinary, [
 chmodSync(h.claudeBinary, 0o755);
 
 beforeEach(() => {
+  h.antigravity = { installed: false, authenticated: false, detail: 'Fixture absent', fix: 'Sign in' };
   h.scanAndLink.mockReset();
   h.scanAndLink.mockReturnValue(null);
   vi.stubEnv('CLAUDE_CONFIG_DIR', claudeConfigDir);
@@ -57,6 +63,16 @@ afterAll(() => {
 });
 
 describe('GET /api/setup/detect', () => {
+  it.each([false, true])('reports account CLI readiness only after sign-in evidence: %s', async (authenticated) => {
+    h.antigravity = { installed: true, authenticated, detail: 'Fixture status', fix: 'Sign in' };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    const { GET } = await import('./route');
+    const data = await (await GET()).json();
+    expect(data.tools.find((tool: { id: string }) => tool.id === 'antigravity')).toMatchObject({
+      detected: true, ready: authenticated,
+    });
+  });
+
   it('reports optional CLI runtimes as gracefully absent when their CLIs are missing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
     vi.stubEnv('CURSOR_API_KEY', '');
