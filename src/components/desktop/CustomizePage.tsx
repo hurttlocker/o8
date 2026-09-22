@@ -1,25 +1,10 @@
 'use client';
 
-/**
- * CustomizePage — first-class customization inventory (operator ask
- * 2026-07-13, vid3 Cursor study: left-rail "Customize" under Automations →
- * a full-page takeover with scope pill + tab pills + sectioned lists).
- *
- * Cursor mechanics carried over: instant tab swap, sectioned lists with
- * counts, hover-fill rows, metadata pills, instructive empty states,
- * click-throughs. o8 divergences (honest, no placeholder data): tabs map to
- * what o8 actually has — Rules (Cortex directives), Connections (MCP
- * servers), Commands (slash registry), Skills (known local skill roots),
- * Agents (.claude/agents), and Hooks (settings.json) — and there is no
- * marketplace button until a marketplace exists. Read-only inventory:
- * editing happens where each artifact already lives (Connections click
- * through to Settings → MCP).
- *
- * Mounted from dashboard/page.tsx when activeNavSection === 'customize'
- * (same page-takeover pattern as AutomationsPage).
- */
+/** Live customization inventories with a development-only package design preview. */
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { CustomizeHeader, type CustomizeTab } from './customize/CustomizeHeader';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import type { PromptLibraryEntry } from '@/lib/prompt-library/client';
@@ -30,17 +15,9 @@ import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
-type CustomizeTab = 'rules' | 'commands' | 'prompts' | 'skills' | 'connections' | 'agents' | 'hooks';
-
-const TABS: Array<{ id: CustomizeTab; label: string }> = [
-  { id: 'rules', label: 'Rules' },
-  { id: 'commands', label: 'Commands' },
-  { id: 'prompts', label: 'Prompts' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'connections', label: 'Connections' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'hooks', label: 'Hooks' },
-];
+const PluginsPreviewTab = dynamic(() => import('./customize/PluginsPreviewTab'), {
+  loading: () => <p style={{ color: 'var(--t-text-muted)' }}>Opening plugin preview…</p>,
+});
 
 interface DirectiveSummary {
   id: string;
@@ -99,7 +76,6 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   const [query, setQuery] = useState('');
   const [repos, setRepos] = useState<RegisteredRepoLite[]>([]);
   const [repoPath, setRepoPath] = useState<string | null>(null);
-  const [repoMenuOpen, setRepoMenuOpen] = useState(false);
 
   const [directives, setDirectives] = useState<DirectiveSummary[]>([]);
   const [servers, setServers] = useState<ExternalServer[]>([]);
@@ -176,10 +152,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   const matches = (...fields: Array<string | null | undefined>) =>
     !q || fields.some((field) => field?.toLowerCase().includes(q));
 
-  const searchNoun = TABS.find((t) => t.id === tab)?.label ?? 'customizations';
-
-  // Inventory density on the pills themselves (operator ask): totals, not
-  // filtered counts, so the numbers are stable while searching.
+  // Navigation counts show inventory totals rather than filtered results.
   const tabCounts: Partial<Record<CustomizeTab, number>> = {
     rules: directives.length,
     commands: ORCHESTRATOR_SLASH_COMMANDS.length,
@@ -215,12 +188,13 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
       height: '100%',
       minHeight: 0,
       overflowY: 'auto',
+      scrollbarWidth: 'none',
       background: 'var(--t-chat-surface-bg, var(--t-canvas-bg))',
       fontFamily: UI_FONT,
     }} className="cortex-themed-scroll">
       <div style={{
         width: '100%',
-        maxWidth: 760,
+        maxWidth: 880,
         marginLeft: 'auto',
         marginRight: 'auto',
         paddingTop: 36,
@@ -229,193 +203,18 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
         paddingRight: 24,
         display: 'flex',
         flexDirection: 'column',
-        gap: 14,
+        gap: 28,
       }}>
-        {/* Search row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 7,
-            paddingBottom: 7,
-            paddingLeft: 11,
-            paddingRight: 11,
-            borderRadius: 9,
-            background: 'var(--t-input-bg)',
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider-subtle)',
-          }}>
-            <SearchGlyph />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={`Search ${searchNoun} for ${activeRepoName}…`}
-              style={{
-                flex: 1,
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                fontSize: 12.5,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                fontFamily: UI_FONT,
-                color: 'var(--t-text)',
-              }}
-            />
-          </div>
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close Customize"
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                fontSize: 12,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                cursor: 'pointer',
-                paddingTop: 6,
-                paddingBottom: 6,
-                paddingLeft: 8,
-                paddingRight: 8,
-                borderRadius: 8,
-              }}
-            >
-              Done
-            </button>
-          ) : null}
-        </div>
+        <CustomizeHeader
+          tab={tab} onTab={(next) => { setTab(next); setExpandedRow(null); }}
+          query={query} onQuery={setQuery} repos={repos} repoPath={repoPath} onRepo={setRepoPath}
+          counts={loading ? {} : tabCounts} onClose={onClose}
+        />
 
-        {/* Scope pill + tab pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setRepoMenuOpen((open) => !open)}
-            aria-expanded={repoMenuOpen}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              height: 26,
-              paddingLeft: 10,
-              paddingRight: 8,
-              borderRadius: 7,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-divider)',
-              background: 'transparent',
-              color: 'var(--t-text)',
-              fontSize: 12,
-              fontWeight: 300,
-              letterSpacing: '-0.1px',
-              fontFamily: UI_FONT,
-              cursor: 'pointer',
-            }}
-          >
-            {activeRepoName}
-            <ChevronDownGlyph />
-          </button>
-          {repoMenuOpen ? (
-            <div style={{
-              position: 'absolute',
-              top: 32,
-              left: 0,
-              zIndex: 30,
-              minWidth: 200,
-              display: 'flex',
-              flexDirection: 'column',
-              paddingTop: 4,
-              paddingBottom: 4,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-divider)',
-              background: 'var(--t-panel, var(--t-bg-card))',
-              boxShadow: 'var(--t-shadow-card, 0 12px 32px rgba(15, 23, 42, 0.14))',
-            }}>
-              {repos.map((repo) => (
-                <button
-                  key={repo.localPath}
-                  type="button"
-                  onClick={() => { setRepoPath(repo.localPath); setRepoMenuOpen(false); }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    paddingTop: 6,
-                    paddingBottom: 6,
-                    paddingLeft: 12,
-                    paddingRight: 12,
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--t-text)',
-                    fontSize: 13.5,
-                    fontWeight: 300,
-                    letterSpacing: '-0.1px',
-                    fontFamily: UI_FONT,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <span style={{ width: 12, display: 'inline-flex' }}>
-                    {repo.localPath === repoPath ? <CheckGlyph /> : null}
-                  </span>
-                  {repo.name}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          <span style={{ width: 1, height: 16, background: 'var(--t-divider-subtle)', marginLeft: 2, marginRight: 2 }} />
-
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => { setTab(item.id); setExpandedRow(null); setRepoMenuOpen(false); }}
-              aria-pressed={tab === item.id}
-              style={{
-                height: 26,
-                display: 'inline-flex',
-                alignItems: 'center',
-                paddingLeft: 10,
-                paddingRight: 10,
-                borderRadius: 7,
-                border: 'none',
-                background: tab === item.id ? 'var(--t-input-bg)' : 'transparent',
-                color: tab === item.id ? 'var(--t-text)' : 'var(--t-text-muted)',
-                fontSize: 12,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                lineHeight: 1.25,
-                fontFamily: UI_FONT,
-                cursor: 'pointer',
-                transition: 'background 120ms ease, color 120ms ease',
-              }}
-            >
-              {item.label}
-              {!loading && typeof tabCounts[item.id] === 'number' && tabCounts[item.id]! > 0 ? (
-                <span style={{
-                  marginLeft: 5,
-                  fontSize: 9.5,
-                  fontWeight: 260,
-                  letterSpacing: '-0.4px',
-                  color: 'var(--t-text-faint)',
-                }}>
-                  {tabCounts[item.id]}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-
-        {/* Content — instant swap, no transitions (Cursor hybrid-motion rule) */}
-        {loading ? (
+        {/* Keep section changes immediate. */}
+        {process.env.NODE_ENV === 'development' && tab === 'plugins' ? (
+          <PluginsPreviewTab />
+        ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
         ) : inventoryError && (tab === 'skills' || tab === 'agents' || tab === 'hooks') ? (
           <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError}</div>
@@ -728,33 +527,6 @@ function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path
       {section('User', user)}
       {section('Repo', project)}
     </div>
-  );
-}
-
-// ── Glyphs (raw SVG — no icon component libraries in the Tauri webview) ──
-
-function SearchGlyph() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
-  );
-}
-
-function ChevronDownGlyph() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--t-text-faint)' }}>
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function CheckGlyph() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--t-text)' }}>
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
   );
 }
 
