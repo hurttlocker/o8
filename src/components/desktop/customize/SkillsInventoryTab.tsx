@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { SkillCatalogItem } from './SkillCatalogItem';
 import { RamsButton } from '../settings/shared';
 import { ClaudeWorkerSkills } from './ClaudeWorkerSkills';
-import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './shared';
+import { DetailLine, EmptyState, OpenFileLink, SectionHeader, TruncatedRows } from './shared';
 
 export interface SkillInventoryEntry {
   name: string;
@@ -138,11 +139,10 @@ export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
   })).filter((group) => group.skillGroups.length > 0);
 
   const renderRows = (skillGroups: SkillNameGroup[]) => (
-    <TruncatedRows rows={skillGroups.map((skillGroup) => (
-      <Row
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', columnGap: 28, rowGap: 8 }}><TruncatedRows rows={skillGroups.map((skillGroup) => (
+      <SkillCatalogItem
         key={skillGroup.key}
         title={skillGroup.name}
-        titleMono
         subtitle={skillGroup.entries.length === 1
           ? skillGroup.entries[0].description || sourceSummary(skillGroup.entries)
           : `${sourceSummary(skillGroup.entries)}. Expand to compare the instructions.`}
@@ -175,8 +175,8 @@ export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
             </div>
           ))}
         </div>
-      </Row>
-    ))} />
+      </SkillCatalogItem>
+    ))} /></div>
   );
 
   return (
@@ -184,7 +184,7 @@ export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
       <div style={{ paddingTop: 16, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)' }}>Discovered skills</span>
         <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.55, color: 'var(--t-text-secondary)' }}>
-          Skills found on this computer. Use in task asks your agent to read the chosen copy: review the request in your draft, then send it. Automatic loading depends on the agent.
+          Use in task adds a request to your draft. Automatic loading depends on the agent.
         </span>
       </div>
 

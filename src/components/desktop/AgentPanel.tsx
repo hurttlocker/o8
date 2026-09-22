@@ -229,8 +229,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const handleMiniProjectOpen = useCallback((project: ProjectRecord) => {
     setProjectsMenuOpen(false);
     if (activeProjectId !== project.id) void projects.switchActive(project.id);
-    leftPanelFocus.focusByProjectId(project.id);
-  }, [activeProjectId, leftPanelFocus, projects]);
+    onOpenProjectManagement?.();
+  }, [activeProjectId, onOpenProjectManagement, projects]);
 
   useEffect(() => {
     const nonce = addRepoIntent?.nonce ?? null;
@@ -602,11 +602,10 @@ function MiniAgentPanelHeader({
           icon={FolderIcon}
           label="Projects"
           active={projectsOpen}
-          disclosure="filter"
           onClick={() => {
             setSessionMenuOpen(false);
-            if (!projectsOpen) refreshProjectsFromExternalMutation();
-            onProjectsOpenChange(!projectsOpen);
+            refreshProjectsFromExternalMutation();
+            onManageProjects();
           }}
           // Add-repo lives here now (moved out of the status-bar footer,
           // Q ruling 2026-07-11) — contextual to Projects, left of the

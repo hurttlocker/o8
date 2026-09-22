@@ -16,6 +16,7 @@ import { readAnyXtermSelection } from '@/components/desktop/workspace-terminal/x
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
+import { ProjectsPage } from '@/components/desktop/ProjectsPage';
 import { RetainedCustomizeView } from '@/components/desktop/customize/RetainedCustomizeView';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
@@ -4462,7 +4463,7 @@ function DashboardInner() {
   });
 
   const settingsTakeoverActive = activeNavSection === 'settings';
-  const workspaceSurfaceHidden = settingsTakeoverActive || activeNavSection === 'customize';
+  const workspaceSurfaceHidden = settingsTakeoverActive || activeNavSection === 'customize' || activeNavSection === 'projects';
   useEffect(() => {
     if (!settingsTakeoverActive) {
       if (settingsWasOpenRef.current) {
@@ -4772,7 +4773,7 @@ function DashboardInner() {
       onCreateWorkspaceChat={() => { leaveNavTakeover(); handleCreateWorkspaceChat(); }}
       onCreateWorkspaceTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
       onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}
-      onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
+      onOpenProjectManagement={() => { leftPanelFocus.clearFocus(); setActiveNavSection('projects'); }}
       onOpenSettings={toggleSettingsOverlay}
       onOpenMobilePairing={openMobilePairing}
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
@@ -5298,7 +5299,7 @@ function DashboardInner() {
         marginLeft: workspaceInset,
         marginRight: workspaceInset,
       }}>
-        <WorkspaceHeaderStrip
+        {(!workspaceSurfaceHidden || !showSidebarColumn) && <WorkspaceHeaderStrip
           leadingInset={!showSidebarColumn}
           sidebarVisible={sidebarVisible}
           onToggleSidebar={!showSidebarColumn && !compactShell ? toggleSidebarFromChrome : undefined}
@@ -5323,7 +5324,7 @@ function DashboardInner() {
           splitHeaderWorkspaces={splitHeaderWorkspaces}
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
-        />
+        />}
         {/* The white workspace card. Lisse squircle ("list corners" from the
             canvas) on all four corners so the TOP rounds too — not just the
             bottom. autoEffects off = pure clip-path, no injected shadow. */}
@@ -5360,6 +5361,7 @@ function DashboardInner() {
           </div>
         )}
 
+        {activeNavSection === 'projects' ? <ProjectsPage onClose={() => setActiveNavSection('agents')} /> : null}
         <RetainedCustomizeView active={activeNavSection === 'customize'}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading customize…</div>}>
               <LazyCustomizePage

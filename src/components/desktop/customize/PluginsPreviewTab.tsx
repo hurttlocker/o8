@@ -24,9 +24,10 @@ function Notice({ title, children }: { title: string; children: ReactNode }) {
 
 function PreviewRow({ title, description, status, onClick }: { title: string; description: string; status: string; onClick: () => void }) {
   return <button type="button" onClick={onClick} style={{
-    ...surface, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, width: '100%',
+    display: 'flex', alignItems: 'center', gap: 16, width: '100%', minHeight: 88, border: 0, borderRadius: 10, background: 'transparent', paddingTop: 16, paddingRight: 12, paddingBottom: 16, paddingLeft: 12,
     textAlign: 'left', fontFamily: 'inherit', cursor: 'pointer', color: 'var(--t-text)',
   }}>
+    <svg aria-hidden="true" width="38" height="38" viewBox="0 0 36 36" style={{ flexShrink: 0, borderRadius: 9, background: 'var(--t-hover)', color: 'var(--t-accent)' }} fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="9" y="9" width="18" height="18" rx="5" /><path d="M13 18h10M18 13v10" /></svg>
     <span style={{ flex: '1 1 220px', minWidth: 0 }}>
       <span style={{ display: 'block', fontSize: 14, fontWeight: 300, lineHeight: 1.4 }}>{title}</span>
       <span style={{ display: 'block', ...paragraph, marginTop: 6, fontSize: 12 }}>{description}</span>
@@ -38,6 +39,7 @@ function PreviewRow({ title, description, status, onClick }: { title: string; de
 /** Sample state stays in this component. Never install, authenticate, or persist from this preview. */
 export default function PluginsPreviewTab() {
   const [page, setPage] = useState<Page>('installed');
+  const [query, setQuery] = useState('');
   const [sample, setSample] = useState(initialPackage);
   const [keepSetup, setKeepSetup] = useState(true);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -49,25 +51,28 @@ export default function PluginsPreviewTab() {
   const back = (next: Page = 'detail') => <div><RamsButton variant="ghost" onClick={() => go(next)}>{next === 'detail' ? 'Back to plugin' : next === 'browse' ? 'Back to Browse' : 'Back to Installed'}</RamsButton></div>;
 
   return <section aria-label="Plugin design preview" style={section}>
-    <div style={{ ...surface, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', justifyContent: 'space-between' }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', justifyContent: 'space-between' }}>
       <div style={{ flex: '1 1 240px' }}>
         <div style={{ fontSize: 13, color: 'var(--t-text)', marginBottom: 6 }}>Development preview</div>
-        <p style={paragraph}>Fictional packages. Actions only change this preview. Real skills, connections, and credentials stay unchanged.</p>
+        <p style={paragraph}>Sample catalog. Installation and account connection are not active.</p>
       </div>
       <RamsButton variant="ghost" onClick={() => { setSample(initialPackage); setKeepSetup(true); go('installed'); }}>Reset preview</RamsButton>
     </div>
     {message ? <Notice title="Preview updated">{message}</Notice> : null}
     {page === 'installed' || page === 'browse' ? <>
+      <input aria-label="Search plugins" placeholder="Search plugins" value={query} onChange={(event) => setQuery(event.target.value)} style={{ width: '100%', boxSizing: 'border-box', minHeight: 42, borderRadius: 12, border: '1px solid var(--t-divider)', background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 16, paddingRight: 16, font: 'inherit' }} />
       <div style={actions} aria-label="Plugin views">
         <RamsButton variant={page === 'installed' ? 'primary' : 'ghost'} onClick={() => go('installed')}>Installed</RamsButton>
         <RamsButton variant={page === 'browse' ? 'primary' : 'ghost'} onClick={() => go('browse')}>Browse</RamsButton>
       </div>
-      <h2 style={heading}>{page === 'installed' ? 'Your plugins' : 'Browse plugins'}</h2>
-      {page === 'browse' || sample.installed ? <PreviewRow title="Project guide" description="A project skill, a command, and a documentation connection." status={sample.updateFailed ? `Update failed · ${status}` : status} onClick={() => go('detail')} />
-        : <div style={surface}><h3 style={heading}>No sample plugins installed</h3><p style={{ ...paragraph, marginTop: 8 }}>Browse to add the example package again.</p></div>}
+      <h2 style={heading}>{page === 'installed' ? 'Installed · preview' : 'Marketplace · preview'}</h2>
+      {(page === 'browse' || sample.installed) && 'project guide'.includes(query.toLowerCase()) ? <PreviewRow title="Project guide" description="A project skill, a command, and a documentation connection." status={sample.updateFailed ? `Update failed · ${status}` : status} onClick={() => go('detail')} />
+        : <div style={surface}><h3 style={heading}>{query ? 'No matching plugins' : 'No sample plugins installed'}</h3><p style={{ ...paragraph, marginTop: 8 }}>Browse to add the example package again, or clear your search.</p></div>}
       {page === 'browse' ? <>
-        <PreviewRow title="Device tools" description="Example of a package requiring a newer adapter." status="Not compatible" onClick={() => setMessage('Device tools requires a newer adapter. Installation is unavailable in this example.')} />
-        <p style={paragraph}>These sample packages illustrate the proposed catalog. They are not available downloads.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 24 }}>
+          {[['Google Drive', 'Bring project briefs and documents into your workspace.'], ['Slack', 'Connect project discussions and team context.']].filter(([name]) => name.toLowerCase().includes(query.toLowerCase())).map(([name, description]) => <PreviewRow key={name} title={name} description={description} status="Planned" onClick={() => setMessage(`${name} is a planned integration. Account connection and installation are not available yet.`)} />)}
+        </div>
+        {'device tools'.includes(query.toLowerCase()) ? <PreviewRow title="Device tools" description="Example of a package requiring a newer adapter." status="Not compatible" onClick={() => setMessage('Device tools requires a newer adapter. Installation is unavailable in this example.')} /> : null}
         <div><RamsButton variant="ghost" onClick={() => go('sources')}>Manage sources</RamsButton></div>
       </> : null}
     </> : null}
