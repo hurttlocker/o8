@@ -600,7 +600,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
             overflowY: 'auto', scrollbarWidth: 'none',
             scrollPaddingTop: 8,
             display: 'grid',
-            gridTemplateColumns: `minmax(0, ${activeTab === 'projects' || activeTab === 'analytics' ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
+            gridTemplateColumns: `minmax(0, ${activeTab === 'analytics' ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
             alignContent: 'start',
             justifyContent: 'center',
           }}
@@ -610,7 +610,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           )}
           {activeTab === 'local-models' && <LocalModelsTab />}
           {activeTab === 'api-keys' && (
-            <APIKeysTab onNavigateTab={navigate} />
+            <APIKeysTab />
           )}
           {activeTab === 'mcp' && (
             <MCPTab />
@@ -641,7 +641,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
             <AppearanceTab />
           )}
           {activeTab === 'voice' && (
-            <VoiceTab />
+            <VoiceTab onNavigateTab={navigate} />
           )}
           {activeTab === 'permissions' && (
             <PermissionsTab />

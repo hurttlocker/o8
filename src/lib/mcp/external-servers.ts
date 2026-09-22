@@ -96,12 +96,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function sanitizeArgs(args: string[] | null | undefined): string[] {
-  if (!Array.isArray(args)) {
-    return [];
-  }
-  return args
-    .map((value) => typeof value === 'string' ? value.trim() : '')
-    .filter(Boolean);
+  if (!Array.isArray(args)) return [];
+  return args.filter((value): value is string => typeof value === 'string');
 }
 
 function parseArgsJson(raw: string): string[] {
@@ -110,9 +106,7 @@ function parseArgsJson(raw: string): string[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed
-      .map((value) => typeof value === 'string' ? value : '')
-      .filter(Boolean);
+    return parsed.filter((value): value is string => typeof value === 'string');
   } catch {
     return [];
   }

@@ -187,7 +187,7 @@ export function ExternalMcpServerRow({
             disabled={testing || busy || pendingRemoval}
             style={rowLinkStyle(testing || busy || pendingRemoval)}
           >
-            {testing ? (testingNpxFamily ? 'fetching…' : 'testing…') : 'test'}
+            {testing ? (testingNpxFamily ? 'fetching…' : 'testing…') : 'test connection'}
           </button>
           {pendingRemoval ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

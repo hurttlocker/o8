@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { isTauri, voicePrefsGet, voicePrefsSet } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -12,10 +14,9 @@ import {
   HairlineRule,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
-  type SettingsTab,
 } from './shared';
 
-import { GroupHeader, SettingsGroup, SettingsRow } from './grouped';
+import { GroupHeader } from './grouped';
 
 // ── Types ──
 
@@ -29,11 +30,64 @@ interface ProviderKeyInfo {
   maskedKey: string | null;
 }
 
+interface NativeKeyConfig {
+  id: string;
+  label: string;
+  envVar: string;
+  placeholder: string;
+  docsUrl: string;
+  description: string;
+}
+
+const NATIVE_KEYS: NativeKeyConfig[] = [
+  {
+    id: 'gemini_api_key',
+    label: 'Gemini (Symon & voice)',
+    envVar: 'GEMINI_API_KEY',
+    placeholder: 'AIza...',
+    docsUrl: 'https://aistudio.google.com/app/apikey',
+    description: 'Direct Gemini access for Symon and dictation polish. A managed plan route remains available when your plan includes it.',
+  },
+  {
+    id: 'openrouter_api_key',
+    label: 'OpenRouter (Symon & voice)',
+    envVar: 'OPENROUTER_API_KEY',
+    placeholder: 'sk-or-...',
+    docsUrl: 'https://openrouter.ai/keys',
+    description: 'Direct OpenRouter access for Symon and cloud transcription. This is the native Keychain slot, separate from the app-services key above.',
+  },
+  {
+    id: 'groq_api_key',
+    label: 'Groq transcription',
+    envVar: 'GROQ_API_KEY',
+    placeholder: 'gsk_...',
+    docsUrl: 'https://console.groq.com/keys',
+    description: 'Direct Groq access for fast cloud transcription.',
+  },
+  {
+    id: 'elevenlabs_api_key',
+    label: 'ElevenLabs voice',
+    envVar: 'ELEVENLABS_API_KEY',
+    placeholder: 'your ElevenLabs key',
+    docsUrl: 'https://elevenlabs.io/app/settings/api-keys',
+    description: 'Direct ElevenLabs access for Symon read-aloud and Ask voices.',
+  },
+  {
+    id: 'google_tts_api_key',
+    label: 'Google Cloud TTS',
+    envVar: 'GOOGLE_TTS_API_KEY',
+    placeholder: 'your Google Cloud TTS key',
+    docsUrl: 'https://console.cloud.google.com/apis/credentials',
+    description: 'Direct Google Cloud Text-to-Speech access for voice output.',
+  },
+];
+
 // Provider keys use the existing encrypted key store.
 
 export function ApiKeysProviderList() {
   const [providers, setProviders] = useState<ProviderKeyInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -46,38 +100,29 @@ export function ApiKeysProviderList() {
   }, []);
 
   const loadKeys = useCallback(async () => {
+    if (mountedRef.current) {
+      setLoading(true);
+      setLoadError(null);
+    }
     try {
       const res = await fetch('/api/v2/keys');
-      if (res.ok) {
-        const data = await res.json();
-        if (mountedRef.current) setProviders(data.providers);
+      if (!res.ok) throw new Error(`API key inventory returned ${res.status}.`);
+      const data = await res.json() as { providers?: ProviderKeyInfo[] };
+      if (!Array.isArray(data.providers)) throw new Error('API key inventory was unavailable.');
+      if (mountedRef.current) setProviders(data.providers);
+    } catch (error) {
+      if (mountedRef.current) {
+        setProviders([]);
+        setLoadError(error instanceof Error ? error.message : 'Could not load API keys.');
       }
-    } catch { /* ignore */ }
-    if (mountedRef.current) setLoading(false);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    let active = true;
-
-    void (async () => {
-      try {
-        const res = await fetch('/api/v2/keys');
-        if (!active) return;
-        if (res.ok) {
-          const data = await res.json();
-          if (active) setProviders(data.providers);
-        }
-      } catch {
-        // ignore
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, []);
+    void loadKeys();
+  }, [loadKeys]);
 
   const handleSave = useCallback(async (providerId: string) => {
     if (!keyInput.trim()) return;
@@ -135,6 +180,15 @@ export function ApiKeysProviderList() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div role="alert" style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`, borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`, paddingTop: 16, paddingBottom: 16 }}>
+        <div style={{ fontSize: 13, color: '#dc2626', lineHeight: 1.5 }}>{loadError}</div>
+        <button type="button" onClick={() => { void loadKeys(); }} style={{ ...quietLinkStyle(false), marginTop: 10 }}>retry</button>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
@@ -175,7 +229,7 @@ export function ApiKeysProviderList() {
                     color: 'var(--t-text)',
                     letterSpacing: '-0.01em',
                   }}>
-                    {p.label}
+                    {p.id === 'openrouter' ? 'OpenRouter (app services)' : p.label}
                   </span>
                   <BracketLabel tone={p.configured ? 'quiet' : 'accent'}>
                     {p.configured ? 'configured' : 'missing'}
@@ -198,8 +252,8 @@ export function ApiKeysProviderList() {
                   maxWidth: 520,
                 }}>
                   {p.configured
-                    ? 'Available to the orchestrator and assistant. Stored on this machine only.'
-                    : 'Add a key to unlock this model family. Stays local to this installation.'}
+                    ? 'Saved for app services on this machine.'
+                    : 'Add a direct provider key for app services on this installation.'}
                 </div>
 
                 <div style={{
@@ -380,9 +434,163 @@ export function ApiKeysProviderList() {
   );
 }
 
+function NativeKeysList() {
+  const nativeKeychain = isTauri() && !isNonMacShell();
+  const [presence, setPresence] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(nativeKeychain);
+  const [bridgeAvailable, setBridgeAvailable] = useState(nativeKeychain);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ key: string; type: 'success' | 'error'; message: string } | null>(null);
+
+  const loadPresence = useCallback(async () => {
+    if (!nativeKeychain) return {};
+    try {
+      const prefs = await voicePrefsGet();
+      if (!prefs) throw new Error('Could not read desktop key status.');
+      const next = Object.fromEntries(
+        NATIVE_KEYS.map((key) => [key.id, prefs[`${key.id}_set`] === true]),
+      );
+      setPresence(next);
+      setBridgeAvailable(true);
+      return next;
+    } catch (error) {
+      setPresence({});
+      setBridgeAvailable(false);
+      throw error;
+    }
+  }, [nativeKeychain]);
+
+  useEffect(() => {
+    let active = true;
+    if (!nativeKeychain) return undefined;
+    void loadPresence()
+      .catch((error) => {
+        if (active) {
+          setPresence({});
+          setBridgeAvailable(false);
+          setFeedback({ key: 'all', type: 'error', message: error instanceof Error ? error.message : 'Could not read desktop key status.' });
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [nativeKeychain, loadPresence]);
+
+  const saveKey = useCallback(async (key: NativeKeyConfig) => {
+    const value = keyInput.trim();
+    if (!value) return;
+    setSavingKey(key.id);
+    try {
+      await voicePrefsSet(key.id, value);
+      const next = await loadPresence();
+      if (!next[key.id]) throw new Error('Keychain readback did not confirm the saved key.');
+      setEditingKey(null);
+      setKeyInput('');
+      setFeedback({ key: key.id, type: 'success', message: 'Saved in macOS Keychain.' });
+    } catch (error) {
+      setFeedback({
+        key: key.id,
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Could not save this key.',
+      });
+    } finally {
+      setSavingKey(null);
+    }
+  }, [keyInput, loadPresence]);
+
+  const removeKey = useCallback(async (key: NativeKeyConfig) => {
+    setSavingKey(key.id);
+    try {
+      await voicePrefsSet(key.id, '');
+      const next = await loadPresence();
+      if (next[key.id]) throw new Error('Keychain readback still reports a saved key.');
+      setFeedback({ key: key.id, type: 'success', message: 'Removed from macOS Keychain.' });
+    } catch (error) {
+      setFeedback({
+        key: key.id,
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Could not remove this key.',
+      });
+    } finally {
+      setSavingKey(null);
+    }
+  }, [loadPresence]);
+
+  if (loading) {
+    return <div style={{ paddingTop: 8, paddingBottom: 8, color: 'var(--t-text-muted)', fontSize: 13 }}>Loading desktop key status...</div>;
+  }
+
+  return (
+    <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+      {feedback?.key === 'all' ? (
+        <p role="status" style={{ fontSize: 12, color: '#dc2626' }}>{feedback.message}</p>
+      ) : null}
+      {NATIVE_KEYS.map((key) => {
+        const configured = presence[key.id] === true;
+        const editing = editingKey === key.id;
+        const busy = savingKey === key.id;
+        const rowFeedback = feedback?.key === key.id ? feedback : null;
+        return (
+          <div key={key.id} style={{ borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`, paddingTop: 16, paddingBottom: 16, paddingLeft: 2, paddingRight: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: '1 1 360px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 15, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>{key.label}</span>
+                  <BracketLabel tone={nativeKeychain && bridgeAvailable && configured ? 'quiet' : 'accent'}>
+                    {!nativeKeychain ? 'macOS only' : !bridgeAvailable ? 'unavailable' : configured ? 'saved here' : 'not saved here'}
+                  </BracketLabel>
+                  <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, fontWeight: 400, letterSpacing: '0.12em', color: RAMS_INK_QUIET }}>{key.envVar}</span>
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55, maxWidth: 560 }}>{key.description}</div>
+                <div style={{ fontSize: 12, color: RAMS_INK_QUIET, lineHeight: 1.5 }}>
+                  {nativeKeychain
+                    ? 'This editor manages the native Keychain value. A matching environment variable takes precedence when present.'
+                    : 'Open o8 Desktop on macOS to manage this native Keychain value.'}
+                </div>
+                <a href={key.docsUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 32, width: 'fit-content', fontSize: 12, color: 'var(--t-text-muted)', textDecoration: 'underline', textDecorationColor: RAMS_HAIRLINE_SOFT, textUnderlineOffset: 3 }}>get key ›</a>
+              </div>
+              {nativeKeychain && bridgeAvailable && !editing ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => { setEditingKey(key.id); setKeyInput(''); }} style={accentLinkStyle(false)}>{configured ? 'update key' : 'add key'}</button>
+                  {configured ? <button type="button" onClick={() => { void removeKey(key); }} disabled={busy} style={quietLinkStyle(busy)}>remove</button> : null}
+                </div>
+              ) : null}
+            </div>
+            {editing ? (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 620 }}>
+                <FieldLabel>paste {key.label.toLowerCase()} key</FieldLabel>
+                <input
+                  type="password"
+                  value={keyInput}
+                  onChange={(event) => setKeyInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void saveKey(key);
+                    if (event.key === 'Escape') setEditingKey(null);
+                  }}
+                  placeholder={key.placeholder}
+                  autoFocus
+                  style={{ fontFamily: MONO_FONT_STACK, fontSize: 13, fontWeight: 400, letterSpacing: '0.02em', color: 'var(--t-text)', background: 'transparent', border: 'none', borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`, paddingTop: 6, paddingBottom: 8, paddingLeft: 0, paddingRight: 0, outline: 'none', width: '100%' }}
+                />
+                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button type="button" onClick={() => { void saveKey(key); }} disabled={!keyInput.trim() || busy} style={accentLinkStyle(!keyInput.trim() || busy)}>{busy ? 'saving...' : 'save key'}</button>
+                  <button type="button" onClick={() => { setEditingKey(null); setKeyInput(''); }} style={quietLinkStyle(false)}>cancel</button>
+                </div>
+              </div>
+            ) : null}
+            {rowFeedback ? <div role="status" style={{ marginTop: 10, fontSize: 12, color: rowFeedback.type === 'success' ? '#15803d' : '#dc2626' }}>{rowFeedback.message}</div> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── API Keys Tab ──
 
-export function APIKeysTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab, section?: string) => void }) {
+export function APIKeysTab() {
   return (
     <div style={{
       paddingTop: 8,
@@ -404,10 +612,8 @@ export function APIKeysTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       </section>
 
       <section style={{ marginBottom: 32 }}>
-        <SettingsGroup header="Voice service keys" footnote="Groq transcription uses the desktop voice settings. Its key is managed separately from the provider keys above.">
-          <SettingsRow label="Groq transcription key" subtitle="Open Voice → Transcription in the desktop app."
-            onPress={onNavigateTab ? () => onNavigateTab('voice', 'Transcription') : undefined} chevron={Boolean(onNavigateTab)} />
-        </SettingsGroup>
+        <GroupHeader>Symon &amp; voice keys</GroupHeader>
+        <NativeKeysList />
       </section>
 
       {/* 02 — STORAGE */}
@@ -419,7 +625,7 @@ export function APIKeysTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
           lineHeight: 1.55,
           maxWidth: 620,
         }}>
-          Provider keys are encrypted in this installation’s local configuration and take effect immediately. o8 uses them to authenticate requests to the selected provider.
+          App-service keys stay encrypted in this installation’s local configuration. Native Symon and voice keys stay in macOS Keychain. Existing environment variables remain separate and take precedence where the native resolver supports them.
         </div>
         <div style={{ marginTop: 16 }}>
           <HairlineRule />
