@@ -10,6 +10,7 @@ import {
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
+  RamsButton,
   FieldLabel,
   HairlineRule,
   TabHeading,
@@ -437,6 +438,7 @@ export function ApiKeysProviderList() {
 function NativeKeysList() {
   const nativeKeychain = isTauri() && !isNonMacShell();
   const [presence, setPresence] = useState<Record<string, boolean>>({});
+  const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(nativeKeychain);
   const [bridgeAvailable, setBridgeAvailable] = useState(nativeKeychain);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -507,6 +509,7 @@ function NativeKeysList() {
       await voicePrefsSet(key.id, '');
       const next = await loadPresence();
       if (next[key.id]) throw new Error('Keychain readback still reports a saved key.');
+      setRemovingKey(null);
       setFeedback({ key: key.id, type: 'success', message: 'Removed from macOS Keychain.' });
     } catch (error) {
       setFeedback({
@@ -554,11 +557,18 @@ function NativeKeysList() {
               </div>
               {nativeKeychain && bridgeAvailable && !editing ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => { setEditingKey(key.id); setKeyInput(''); }} style={accentLinkStyle(false)}>{configured ? 'update key' : 'add key'}</button>
-                  {configured ? <button type="button" onClick={() => { void removeKey(key); }} disabled={busy} style={quietLinkStyle(busy)}>remove</button> : null}
+                  <button type="button" onClick={() => { setRemovingKey(null); setEditingKey(key.id); setKeyInput(''); }} style={accentLinkStyle(false)}>{configured ? 'update key' : 'add key'}</button>
+                  {configured ? <RamsButton variant="danger" disabled={busy} onClick={() => setRemovingKey(key.id)}>Remove</RamsButton> : null}
                 </div>
               ) : null}
             </div>
+            {removingKey === key.id ? <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--t-text-secondary)' }}>Remove the saved {key.label} key from this Mac? You will need to add it again to use this connection.</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <RamsButton variant="danger" busy={busy} onClick={() => void removeKey(key)}>Confirm removal</RamsButton>
+                <RamsButton variant="ghost" disabled={busy} onClick={() => setRemovingKey(null)}>Cancel</RamsButton>
+              </div>
+            </div> : null}
             {editing ? (
               <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 620 }}>
                 <FieldLabel>paste {key.label.toLowerCase()} key</FieldLabel>
