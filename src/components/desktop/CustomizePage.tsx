@@ -9,10 +9,11 @@
  * counts, hover-fill rows, metadata pills, instructive empty states,
  * click-throughs. o8 divergences (honest, no placeholder data): tabs map to
  * what o8 actually has — Rules (Cortex directives), Connections (MCP
- * servers), Commands (slash registry), Agents (.claude/agents), Hooks
- * (settings.json) — and there is no marketplace button until a marketplace
- * exists. Read-only inventory: editing happens where each artifact lives
- * (Connections click through to Settings → MCP).
+ * servers), Commands (slash registry), Skills (known local skill roots),
+ * Agents (.claude/agents), and Hooks (settings.json) — and there is no
+ * marketplace button until a marketplace exists. Read-only inventory:
+ * editing happens where each artifact already lives (Connections click
+ * through to Settings → MCP).
  *
  * Mounted from dashboard/page.tsx when activeNavSection === 'customize'
  * (same page-takeover pattern as AutomationsPage).
@@ -22,8 +23,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import type { PromptLibraryEntry } from '@/lib/prompt-library/client';
-import { ClaudeWorkerSkills } from './customize/ClaudeWorkerSkills';
 import { PromptLibraryTab } from './customize/PromptLibraryTab';
+import { SkillsInventoryTab, type SkillInventoryEntry } from './customize/SkillsInventoryTab';
 import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './customize/shared';
 
 const UI_FONT = 'var(--font-sans-system)';
@@ -104,6 +105,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   const [servers, setServers] = useState<ExternalServer[]>([]);
   const [agents, setAgents] = useState<AgentEntry[]>([]);
   const [hooks, setHooks] = useState<HookEntry[]>([]);
+  const [skills, setSkills] = useState<SkillInventoryEntry[]>([]);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [promptCount, setPromptCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -146,8 +149,15 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
         setServers(serversRes.value.servers as ExternalServer[]);
       }
       if (inventoryRes.status === 'fulfilled' && inventoryRes.value?.ok) {
+        setInventoryError(null);
         setAgents(inventoryRes.value.agents as AgentEntry[]);
         setHooks(inventoryRes.value.hooks as HookEntry[]);
+        setSkills(Array.isArray(inventoryRes.value.skills) ? inventoryRes.value.skills as SkillInventoryEntry[] : []);
+      } else {
+        setSkills([]);
+        setAgents([]);
+        setHooks([]);
+        setInventoryError('Could not load local customizations. Reopen Customize to try again.');
       }
       if (promptsRes.status === 'fulfilled' && promptsRes.value?.prompts) {
         setPromptCount((promptsRes.value.prompts as unknown[]).length);
@@ -174,6 +184,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
     rules: directives.length,
     commands: ORCHESTRATOR_SLASH_COMMANDS.length,
     prompts: promptCount,
+    skills: skills.length,
     connections: BUILTIN_CONNECTIONS.length + servers.length,
     agents: agents.length,
     hooks: hooks.length,
@@ -225,8 +236,6 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
           <div style={{
             flex: 1,
             display: 'flex',
-            visibility: tab === 'skills' ? 'hidden' : 'visible',
-            pointerEvents: tab === 'skills' ? 'none' : 'auto',
             alignItems: 'center',
             gap: 8,
             paddingTop: 7,
@@ -286,9 +295,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', position: 'relative' }}>
           <button
             type="button"
-            onClick={() => { if (tab !== 'skills') setRepoMenuOpen((open) => !open); }}
-            aria-expanded={tab === 'skills' ? undefined : repoMenuOpen}
-            disabled={tab === 'skills'}
+            onClick={() => setRepoMenuOpen((open) => !open)}
+            aria-expanded={repoMenuOpen}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -306,13 +314,13 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
               fontWeight: 300,
               letterSpacing: '-0.1px',
               fontFamily: UI_FONT,
-              cursor: tab === 'skills' ? 'default' : 'pointer',
+              cursor: 'pointer',
             }}
           >
-            {tab === 'skills' ? 'Global worker setting' : activeRepoName}
-            {tab === 'skills' ? null : <ChevronDownGlyph />}
+            {activeRepoName}
+            <ChevronDownGlyph />
           </button>
-          {tab !== 'skills' && repoMenuOpen ? (
+          {repoMenuOpen ? (
             <div style={{
               position: 'absolute',
               top: 32,
@@ -409,6 +417,8 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
         {/* Content — instant swap, no transitions (Cursor hybrid-motion rule) */}
         {loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
+        ) : inventoryError && (tab === 'skills' || tab === 'agents' || tab === 'hooks') ? (
+          <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError}</div>
         ) : tab === 'rules' ? (
           <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
@@ -424,7 +434,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
             onCountDelta={(delta) => setPromptCount((current) => Math.max(0, current + delta))}
           />
         ) : tab === 'skills' ? (
-          <ClaudeWorkerSkills />
+          <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} />
         ) : tab === 'agents' ? (
           <AgentsTab agents={agents.filter((a) => matches(a.name, a.description))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (

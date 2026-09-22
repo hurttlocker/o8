@@ -104,7 +104,7 @@ export function AboutTab() {
     }}>
       <TabHeading
         title="about"
-        subtitle="A precision instrument for autonomous engineering teams. Built with Next.js and Tauri."
+        subtitle="Version information, documentation, and help for your o8 installation."
       />
 
       <section>

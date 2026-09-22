@@ -8,21 +8,17 @@ import {
   removeExternalMcpServer,
   type ExternalMcpTransport,
 } from '@/lib/mcp/external-servers';
-import { prewarmMcpServer } from '@/lib/mcp/prewarm';
 
 function isTransport(value: unknown): value is ExternalMcpTransport {
   return value === 'stdio' || value === 'http';
 }
 
 function parseArgs(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new Error('Args must be an array of strings');
   }
-
-  return value
-    .map((entry) => typeof entry === 'string' ? entry : '')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+  return [...value] as string[];
 }
 
 function parseEnv(value: unknown): Record<string, string> | null {
@@ -100,16 +96,6 @@ export async function POST(request: Request) {
       workerInjection: body.transport === 'stdio' && body.workerInjection === true,
       symonInjection: body.symonInjection === true,
     });
-
-    // Fire-and-forget: warm the npm cache for npx-family commands so the
-    // first "Test Connection" click doesn't hit the download delay.
-    if (body.transport === 'stdio') {
-      void prewarmMcpServer({
-        command: body.command,
-        args: parseArgs(body.args),
-        env: parseEnv(body.env) ?? undefined,
-      });
-    }
 
     return NextResponse.json({ ok: true, server });
   } catch (error) {
