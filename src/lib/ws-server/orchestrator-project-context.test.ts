@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
@@ -13,6 +14,8 @@ const dataDir = join(fixtureRoot, 'data');
 const selectedRepoPath = join(fixtureRoot, 'selected-app');
 const selectedSitePath = join(fixtureRoot, 'selected-site');
 const otherRepoPath = join(fixtureRoot, 'other-app');
+const virtualRepoPath = join(fixtureRoot, 'same-name-app');
+const collisionRepoPath = join(fixtureRoot, 'collision-app');
 const selectedInstructions = [
   'Use the selected project instructions exactly.',
   '',
@@ -31,6 +34,7 @@ interface FixtureModules {
   safeOrchestratorHistoryPath: typeof import('@/lib/mobile/orchestrator-thread-history').safeOrchestratorHistoryPath;
   persistOrchestratorThreadUserMessageFromWire: typeof import('./orchestrator-thread-send').persistOrchestratorThreadUserMessageFromWire;
   prepareOrchestratorProjectTurn: typeof import('./orchestrator-project-context').prepareOrchestratorProjectTurn;
+  getProjectContext: typeof import('@/lib/projects/context').getProjectContext;
   readPersistedOrchestratorProjectSelection: typeof import('./orchestrator-project-context').readPersistedOrchestratorProjectSelection;
 }
 
@@ -69,12 +73,16 @@ beforeAll(async () => {
   mkdirSync(selectedRepoPath, { recursive: true });
   mkdirSync(selectedSitePath, { recursive: true });
   mkdirSync(otherRepoPath, { recursive: true });
+  mkdirSync(virtualRepoPath, { recursive: true });
+  mkdirSync(collisionRepoPath, { recursive: true });
   writeFileSync(join(dataDir, 'repos.json'), JSON.stringify({
     version: 1,
     repos: [
       repo('repo-selected-app', 'Selected App', selectedRepoPath),
       repo('repo-selected-site', 'Selected Site', selectedSitePath),
       repo('repo-other-app', 'Other App', otherRepoPath),
+      repo('repo-virtual-app', 'Same Name App', virtualRepoPath),
+      repo('repo-collision-app', 'Collision App', collisionRepoPath),
     ],
   }));
 
@@ -83,6 +91,7 @@ beforeAll(async () => {
   const history = await import('@/lib/mobile/orchestrator-thread-history');
   const threadSend = await import('./orchestrator-thread-send');
   const projectContext = await import('./orchestrator-project-context');
+  const projectsContext = await import('@/lib/projects/context');
   modules = {
     createProject: projectStore.createProject,
     addRepoToProject: projectStore.addRepoToProject,
@@ -90,6 +99,7 @@ beforeAll(async () => {
     safeOrchestratorHistoryPath: history.safeOrchestratorHistoryPath,
     persistOrchestratorThreadUserMessageFromWire: threadSend.persistOrchestratorThreadUserMessageFromWire,
     prepareOrchestratorProjectTurn: projectContext.prepareOrchestratorProjectTurn,
+    getProjectContext: projectsContext.getProjectContext,
     readPersistedOrchestratorProjectSelection: projectContext.readPersistedOrchestratorProjectSelection,
   };
 
@@ -117,6 +127,13 @@ beforeAll(async () => {
     description: 'Empty projects still have valid instructions.',
   });
   emptyProjectId = empty.id;
+
+  const collision = modules.createProject({
+    name: 'Same Name App',
+    slug: 'same-name-app',
+    description: 'Settings-only instructions must not enter a virtual repo project.',
+  });
+  modules.addRepoToProject(collision.id, 'repo-collision-app', 'fullstack');
 });
 
 afterAll(() => {
@@ -130,6 +147,66 @@ afterAll(() => {
 });
 
 describe('orchestrator project turn preparation', () => {
+  it('keeps a persisted virtual repo project isolated from a same-name Settings project', async () => {
+    const threadId = 'thoughts-virtual-project-collision';
+    const projectId = 'repo:repo-virtual-app';
+    const original = 'Work in the single repo project.';
+    const persistedThread = modules.persistOrchestratorThreadUserMessageFromWire({
+      message: { projectId },
+      tabId: threadId,
+      repoPath: virtualRepoPath,
+      transcriptMessage: original,
+      messageId: 'user-virtual-project',
+      backend: 'codex',
+      timestampMs: Date.now(),
+    });
+
+    const selection = await modules.readPersistedOrchestratorProjectSelection(threadId);
+    const prepared = await modules.prepareOrchestratorProjectTurn({
+      message: original,
+      persistedProjectId: selection?.projectId,
+      repoPath: selection?.repoPath,
+    });
+
+    expect(persistedThread?.projectId).toBe(projectId);
+    expect(selection).toEqual({ projectId, repoPath: virtualRepoPath });
+    expect(prepared.projectContext).toMatchObject({
+      id: projectId,
+      runtimeProjectId: projectId,
+      panelProjectId: projectId,
+      settingsProjectId: null,
+      instructions: null,
+      repoPaths: [virtualRepoPath],
+      allowedRepoIds: ['repo-virtual-app'],
+    });
+    expect(prepared.message).toContain('Same Name App');
+    expect(prepared.message).not.toContain('Settings-only instructions');
+    expect(prepared.message).not.toContain('Collision App');
+  });
+
+  it('keeps the directives route scoped to an explicit virtual project identity', async () => {
+    const directivesDir = join(dataDir, 'directives');
+    mkdirSync(directivesDir, { recursive: true });
+    for (const [id, projectField] of [
+      ['global', 'scope: global'],
+      ['settings-collision', 'scope: project\nprojects: [same-name-app]'],
+      ['virtual-id', 'scope: project\nprojectIds: [repo:repo-virtual-app]'],
+    ]) {
+      writeFileSync(join(directivesDir, `${id}.md`), [
+        '---', `id: ${id}`, `title: ${id}`, projectField, '---', `${id} guidance`,
+      ].join('\n'));
+    }
+
+    const { GET } = await import('@/app/api/cortex/directives/route');
+    const response = await GET(new NextRequest(
+      `http://localhost/api/cortex/directives?projectId=repo%3Arepo-virtual-app&repoPath=${encodeURIComponent(virtualRepoPath)}`,
+    ));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).directives.map((directive: { id: string }) => directive.id).sort())
+      .toEqual(['global', 'virtual-id']);
+  });
+
   it('uses the persisted selected project across both repos while another project is active', async () => {
     const threadId = 'thoughts-selected-project';
     const original = '## Project Brief\nOperator-authored heading that must stay in the task.';
@@ -195,6 +272,20 @@ describe('orchestrator project turn preparation', () => {
       requestedProjectId: 'missing-project',
       repoPath: otherRepoPath,
     })).rejects.toThrow('Project missing-project does not exist.');
+  });
+
+  it('continues to resolve a real Settings project through its slug alias', async () => {
+    const context = await modules.getProjectContext({
+      projectId: 'selected-product',
+      repoPath: selectedRepoPath,
+    });
+
+    expect(context).toMatchObject({
+      id: selectedProjectId,
+      settingsProjectId: selectedProjectId,
+      allowedRepoIds: ['repo-selected-app', 'repo-selected-site'],
+    });
+    expect(context.instructions).toBe(selectedInstructions);
   });
 
   it('uses a valid wire project when persisted thread metadata is unreadable', async () => {
