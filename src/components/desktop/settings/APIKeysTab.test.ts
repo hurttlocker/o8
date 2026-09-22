@@ -102,8 +102,11 @@ it('saves and removes native keys through presence-only Keychain readback', asyn
     expect(native.writes).toContainEqual(['elevenlabs_api_key', 'fixture-eleven-key']);
     row = rowFor(container, 'ElevenLabs voice');
     expect(row.textContent).toContain('saved here');
-    const remove = [...row.querySelectorAll('button')].find((button) => button.textContent === 'remove')!;
+    const remove = [...row.querySelectorAll('button')].find((button) => button.textContent === 'Remove')!;
     await act(async () => { remove.click(); });
+    expect(native.writes).not.toContainEqual(['elevenlabs_api_key', '']);
+    const confirm = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Confirm removal')!;
+    await act(async () => { confirm.click(); });
     expect(native.writes).toContainEqual(['elevenlabs_api_key', '']);
     expect(rowFor(container, 'ElevenLabs voice').textContent).toContain('not saved here');
   } finally {
