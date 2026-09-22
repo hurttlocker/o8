@@ -5,7 +5,7 @@ Customize > Skills can create a skill or import one Markdown file. A save writes
 personal home folder. Existing names are never overwritten. Import accepts name
 and description frontmatter plus instructions; supporting files are not copied.
 
-The development Plugins page manages real local instruction bundles. Its first
+The Plugins page manages real local instruction bundles. Its first
 catalog entry is Project guide. The page supports review, install, update,
 disable, enable, and confirmed removal. Installed state survives reopening the
 page. Other Customize sections remain separate.
@@ -65,5 +65,4 @@ removed.
 
 This is an instruction-bundle installer, not a general executable plugin host.
 Connected-service plugins, external marketplace sources, native runtime plugin
-translation, and account authorization remain separate work. The development
-UI gate does not make those capabilities available.
+translation, and account authorization remain separate work.

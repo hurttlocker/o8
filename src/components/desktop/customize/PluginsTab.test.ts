@@ -48,10 +48,10 @@ describe('plugin installation UI', () => {
     await click('Remove plugin'); await click('Confirm removal');
     expect(JSON.parse(requests.mock.calls[1][1].body)).toMatchObject({ action: 'remove', id: 'project-guide' });
   });
-  it('keeps all customization sections and gates the plugin development surface', () => {
+  it('keeps the plugin library and all customization sections available in production', () => {
     const props = { tab: 'rules' as const, onTab: vi.fn(), query: '', onQuery: vi.fn(), repos: [], scope: 'all', onScope: vi.fn(), counts: {} };
     vi.stubEnv('NODE_ENV', 'production'); act(() => root.render(createElement(CustomizeHeader, props)));
-    expect(host.textContent).not.toContain('Plugins');
+    expect(host.textContent).toContain('Plugins');
     for (const label of ['Instructions', 'Commands', 'Prompts', 'Skills', 'Connections', 'Agents', 'Hooks']) expect(host.textContent).toContain(label);
     vi.stubEnv('NODE_ENV', 'development'); act(() => root.render(createElement(CustomizeHeader, props)));
     expect(host.textContent).toContain('Plugins');

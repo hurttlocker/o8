@@ -7,10 +7,11 @@ import { RamsButton } from '../settings/shared';
 export type CustomizeTab = 'rules' | 'commands' | 'prompts' | 'skills' | 'plugins' | 'connections' | 'agents' | 'hooks';
 
 const TABS: Array<{ id: CustomizeTab; label: string }> = [
+  { id: 'plugins', label: 'Plugins' },
+  { id: 'skills', label: 'Skills' },
   { id: 'rules', label: 'Instructions' },
   { id: 'commands', label: 'Commands' },
   { id: 'prompts', label: 'Prompts' },
-  { id: 'skills', label: 'Skills' },
   { id: 'connections', label: 'Connections' },
   { id: 'agents', label: 'Agents' },
   { id: 'hooks', label: 'Hooks' },
@@ -34,9 +35,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
   counts: Partial<Record<CustomizeTab, number>>;
   onClose?: () => void;
 }) {
-  const tabs = process.env.NODE_ENV === 'development'
-    ? [{ id: 'plugins' as const, label: 'Plugins' }, ...TABS.filter((item) => item.id === 'skills'), ...TABS.filter((item) => item.id !== 'skills')]
-    : TABS;
+  const tabs = TABS;
   const label = tabs.find((item) => item.id === tab)?.label ?? 'customizations';
   const repoName = scope === 'personal' || !project ? 'Personal' : repos.find((repo) => repo.localPath === scope)?.name ?? project.name;
   const filtersRepositories = ['rules', 'skills', 'prompts', 'agents', 'hooks'].includes(tab);
@@ -70,8 +69,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
             fontSize: 13, fontWeight: 300, fontFamily: 'inherit', cursor: 'pointer',
           }}>
             {item.label}
-            {item.id === 'plugins' ? <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>Dev</span>
-              : counts[item.id] ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{counts[item.id]}</span> : null}
+            {counts[item.id] ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{counts[item.id]}</span> : null}
           </button>
         ))}
       </nav>

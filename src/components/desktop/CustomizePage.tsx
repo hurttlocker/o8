@@ -29,7 +29,6 @@ const PluginsTab = dynamic(() => import('./customize/PluginsTab'), {
 const BUILTIN_CONNECTIONS: Array<{ name: string; detail: string }> = [
   { name: 'o8 operator', detail: 'Missions, approvals, webview control — the operator MCP surface' },
   { name: 'cortex', detail: 'Fleet, issues, PRs — internal orchestrator tools' },
-  { name: 'codebase-memory', detail: 'Repo knowledge graph and code search' },
 ];
 
 function openSettingsMcpTab() {
@@ -161,7 +160,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
         {tab === 'rules' && scope !== 'personal' && project ? <ProjectInstructions key={project.id} project={project} /> : null}
 
         {/* Keep section changes immediate. */}
-        {process.env.NODE_ENV === 'development' && tab === 'plugins' ? (
+        {tab === 'plugins' ? (
           <PluginsTab selectedRepo={pluginRepo} onSelectRepo={setPluginRepo} repos={repos} onChanged={() => setRefreshCount((value) => value + 1)} onUseSkill={useSkill} />
         ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
