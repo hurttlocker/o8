@@ -43,7 +43,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
   const explanations: Record<CustomizeTab, string> = {
     rules: 'Project instructions are shared guidance. Additional rules below show their own scope and source.',
     skills: 'Review skills found in this project and your personal folders. Expand a skill to inspect its source copies.',
-    prompts: 'Saved text you choose to insert into a task. Select a repository to create a prompt just for that repository.',
+    prompts: 'Saved text you choose to insert into a task. Choose Personal or a repository when saving a prompt.',
     commands: 'Built-in shortcuts for the orchestrator. Type / in the composer to use them in your current task.',
     connections: 'Manage connected services once in Settings. Access during a task depends on the agent and its permissions.',
     agents: 'Agent definitions found in personal and repository folders. These entries currently come from Claude Code configuration.',

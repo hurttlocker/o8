@@ -9,6 +9,7 @@ describe('SkillsInventoryTab', () => {
   let host: HTMLDivElement;
   let root: Root;
   const onOpenFile = vi.fn();
+  const onUseSkill = vi.fn();
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -16,6 +17,7 @@ describe('SkillsInventoryTab', () => {
     document.body.appendChild(host);
     root = createRoot(host);
     onOpenFile.mockReset();
+    onUseSkill.mockReset();
   });
 
   afterEach(() => {
@@ -48,7 +50,7 @@ describe('SkillsInventoryTab', () => {
     act(() => root.render(createElement(SkillsInventoryTab, { skills, query: '', onOpenFile })));
 
     expect(host.textContent).toContain('Discovered skills');
-    expect(host.textContent).toContain('does not mean every agent loads it');
+    expect(host.textContent).toContain('Automatic loading depends on the agent.');
     expect(host.textContent).toContain('Project · Acorn · files found');
     expect(host.textContent).toContain('Project · Birch · files found');
     expect([...host.querySelectorAll<HTMLElement>('[role="button"]')]
@@ -85,7 +87,7 @@ describe('SkillsInventoryTab', () => {
       },
     ];
 
-    act(() => root.render(createElement(SkillsInventoryTab, { skills, query: 'gemini', onOpenFile })));
+    act(() => root.render(createElement(SkillsInventoryTab, { skills, query: 'gemini', onOpenFile, onUseSkill })));
 
     expect(host.textContent).toContain('Personal skills · files found');
     expect(host.textContent).toContain('visual-check');
@@ -109,6 +111,11 @@ describe('SkillsInventoryTab', () => {
     act(() => openButtons.forEach((button) => button.click()));
     expect(onOpenFile).toHaveBeenNthCalledWith(1, '/home/.codex/skills/visual-check/SKILL.md');
     expect(onOpenFile).toHaveBeenNthCalledWith(2, '/home/.gemini/skills/visual-check/SKILL.md');
+    const useButtons = [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .filter((button) => button.textContent === 'Use in task');
+    expect(useButtons).toHaveLength(2);
+    act(() => useButtons[1].click());
+    expect(onUseSkill).toHaveBeenCalledExactlyOnceWith(skills[1]);
 
     act(() => root.render(createElement(SkillsInventoryTab, { skills, query: 'Codex visual review', onOpenFile })));
     expect(host.textContent).toContain('2 copies');

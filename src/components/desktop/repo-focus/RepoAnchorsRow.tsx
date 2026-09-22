@@ -18,28 +18,36 @@ export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchor
 
   return (
     <div
-      role="tablist"
-      aria-label="Project repositories"
-      className="hide-scrollbar"
       style={{
         flexShrink: 0,
+        paddingBottom: 6,
+        fontFamily: REPO_FOCUS_FONT,
+      }}
+    >
+      <div style={{ paddingTop: 0, paddingRight: 12, paddingBottom: 5, paddingLeft: 10, fontSize: 10, lineHeight: '14px', fontWeight: 300, color: 'var(--t-text-faint)' }}>
+        Browse conversations <span style={{ fontSize: 9.5, fontWeight: 260 }}>· filters this view only</span>
+      </div>
+      <div
+        role="tablist"
+        aria-label="Browse conversations by repository"
+        style={{
         display: 'flex',
         alignItems: 'center',
         gap: 6,
         paddingTop: 0,
         paddingRight: 12,
-        paddingBottom: 6,
+        paddingBottom: 0,
         paddingLeft: 10,
         overflowX: 'auto',
         scrollbarWidth: 'none',
         fontFamily: REPO_FOCUS_FONT,
-      }}
-    >
+        }}
+      >
       <button
         type="button"
         role="tab"
         aria-selected={!selected}
-        aria-label="Project-wide view"
+        aria-label="Browse all project conversations"
         onClick={() => onSelect(null)}
         style={chipStyle(!selected)}
         onMouseEnter={(e) => {
@@ -69,7 +77,7 @@ export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchor
             type="button"
             role="tab"
             aria-selected={isActive}
-            aria-label={`${repo.name} repository`}
+            aria-label={`Browse ${repo.name} conversations`}
             onClick={() => onSelect(isActive ? null : repo.localPath)}
             style={chipStyle(isActive)}
             onMouseEnter={(e) => {
@@ -104,6 +112,7 @@ export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchor
           </button>
         );
       })}
+      </div>
     </div>
   );
 }

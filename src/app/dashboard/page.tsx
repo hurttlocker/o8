@@ -16,6 +16,7 @@ import { readAnyXtermSelection } from '@/components/desktop/workspace-terminal/x
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
+import { RetainedCustomizeView } from '@/components/desktop/customize/RetainedCustomizeView';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
 import {
@@ -4733,6 +4734,7 @@ function DashboardInner() {
       selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
       selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
       selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
+      workingRepoPath={focusedWorkspaceTab?.repoPath ?? null}
       activeWorkspacePath={activeWorkspace ?? null}
       activeWorkspaceTabKind={activeWorkspaceTabKind}
       onFocusOrchestratorTab={() => {
@@ -5358,17 +5360,16 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection === 'customize' && (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <RetainedCustomizeView active={activeNavSection === 'customize'}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading customize…</div>}>
               <LazyCustomizePage
+                key={(leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id ?? 'personal'}
                 project={leftPanelFocus.view?.project ?? dashboardProjects.activeProject}
                 registeredRepos={globalRepoEntries}
                 onClose={() => setActiveNavSection('agents')}
               />
             </Suspense>
-          </div>
-        )}
+        </RetainedCustomizeView>
 
         {activeNavSection !== 'automations' && (
           <div

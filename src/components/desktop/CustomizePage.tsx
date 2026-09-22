@@ -100,16 +100,16 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
     window.dispatchEvent(new CustomEvent('o8:open-file', { detail: { path } }));
   };
 
-  const insertPrompt = (prompt: PromptLibraryEntry) => {
+  const insertTaskText = (body: string) => {
     onClose?.();
     if (typeof window === 'undefined') return;
     let attempts = 0;
     const deadline = Date.now() + 3000;
     const insertWhenReady = () => {
-      if (insertPromptIntoActiveComposer(prompt.body)) return;
+      if (insertPromptIntoActiveComposer(body)) return;
       attempts += 1;
       if (attempts < 180 && Date.now() < deadline) window.requestAnimationFrame(insertWhenReady);
-      else toast('Prompt was not inserted. Open a task, then try again or use Copy.', 'error');
+      else toast('Text was not inserted. Open a task, then try again.', 'error');
     };
     window.requestAnimationFrame(insertWhenReady);
   };
@@ -165,11 +165,11 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
             repoPath={repoPath}
             repoName={activeRepoName}
             repoPaths={selectedRepos.map((repo) => repo.localPath)}
-            onInsert={insertPrompt}
+            onInsert={(prompt: PromptLibraryEntry) => insertTaskText(prompt.body)}
             onCountDelta={() => {}}
           />
         ) : tab === 'skills' ? (
-          <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} />
+          <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} onUseSkill={(skill) => insertTaskText(`Use the ${JSON.stringify(skill.name)} skill for this task. Read its instructions at ${JSON.stringify(skill.file)} first. If that file is unavailable in your environment, tell me before proceeding.\n\n`)} />
         ) : tab === 'agents' ? (
           <AgentsTab agents={agents.filter((a) => matches(a.name, a.description, a.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (
