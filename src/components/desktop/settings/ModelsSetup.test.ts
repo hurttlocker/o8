@@ -8,6 +8,7 @@ vi.mock('./operator-defaults-client', () => ({ fetchOperatorDefaults: defaultsFe
 vi.mock('@/lib/entitlement/context', () => ({ useEntitlement: () => ({ isFounder: false }) }));
 
 import { ModelsTab } from './ModelsTab';
+import { OperatorDefaultsTab } from './OperatorDefaultsTab';
 import { LocalModelsTab } from './LocalModelsTab';
 import { SETTINGS_SEARCH_REGISTRY, searchSettings } from './settings-search';
 
@@ -15,7 +16,7 @@ const defaults = {
   values: { subscriptionProfile: 'hybrid', orchestratorBackend: 'codex', defaultDispatchRuntime: 'codex',
     targetingTriage: { runtime: 'codex', model: '', effort: 'low' }, targetingAction: { runtime: 'codex', model: '', effort: 'high' },
     reviewerBackend: 'auto', localInferenceBaseUrl: '', defaultDispatchModel: '', localEmbedModel: '', localChatModel: '' },
-  sources: {},
+  sources: {}, effectiveOverride: {},
 };
 
 describe('model setup navigation', () => {
@@ -55,7 +56,15 @@ describe('model setup navigation', () => {
     expect(container.querySelector('[data-settings-section="Advanced orchestrator options"]')?.closest('details')?.open).toBe(false);
     expect(tools?.open).toBe(false);
     expect(tools?.querySelector('summary')?.textContent).toContain('Ready: Antigravity');
-    expect(tools?.textContent).not.toContain('Gemini');
+    expect(tools?.textContent).toContain('Standalone Gemini CLI; separate from Antigravity');
+    expect(tools?.textContent).toContain('GitHub Copilot CLI');
+    expect(tools?.textContent).toContain('Not checked');
+    const review = [...container.querySelectorAll('span')].find(element => element.textContent === 'Code review provider');
+    expect(review).toBeDefined();
+    expect(review?.closest('details')).toBeNull();
+    const sections = [...container.querySelectorAll<HTMLElement>('[data-settings-section]')].map(element => element.dataset.settingsSection);
+    expect(sections.indexOf('Engineering Brain')).toBeLessThan(sections.indexOf('Advanced orchestrator options'));
+    expect(container.textContent).not.toContain('Spending limit per task');
     expect(container.querySelector('[data-settings-section="Advanced worker setup"]')?.closest('details')?.open).toBe(false);
     expect(container.querySelector('[data-settings-section="Claude Code settings"]')?.closest('details')?.open).toBe(false);
     const api = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Manage provider keys'))!;
@@ -68,6 +77,16 @@ describe('model setup navigation', () => {
     defaultsFetch.mockResolvedValue(Response.json({ ...defaults, values: { ...defaults.values, orchestratorBackend: 'claude' } }));
     await act(async () => root.render(createElement(ModelsTab)));
     expect(container.querySelector('[data-settings-section="Claude Code settings"]')?.closest('details')?.open).toBe(true);
+  });
+
+  it('saves the metered task limit from Dispatch without writing provider settings', async () => {
+    await act(async () => root.render(createElement(OperatorDefaultsTab)));
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Spending limit per task in USD"]')!;
+    expect(input).not.toBeNull();
+    input.value = '2.5';
+    await act(async () => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(defaultsFetch).toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', body: JSON.stringify({ meteredPacketCostCapUsd: 2.5 }) }));
+    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'Task spending limits', { founder: false })[0]?.tab).toBe('operator-defaults');
   });
 
   it('saves a local model through the existing defaults endpoint from its new page', async () => {

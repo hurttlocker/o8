@@ -78,6 +78,7 @@ const RUNTIME_BLURB: Record<string, string> = {
   opencode: 'Uses the providers configured in OpenCode',
   cursor: 'Cursor account or API key connection',
   grok: 'Uses the model selected in Grok Build',
+  gemini: 'Standalone Gemini CLI; separate from Antigravity',
 };
 
 function DetectionPill({ tool, state }: { tool: DetectedTool | undefined; state: DetectState }) {
@@ -85,7 +86,8 @@ function DetectionPill({ tool, state }: { tool: DetectedTool | undefined; state:
   if (state === 'loading') {
     return <ValuePill>Checking…</ValuePill>;
   }
-  if (!tool || !tool.detected) {
+  if (!tool) return <ValuePill>Not checked</ValuePill>;
+  if (!tool.detected) {
     return <ValuePill>Not installed</ValuePill>;
   }
   if (tool.ready === true) {
@@ -186,135 +188,6 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
 
       <ModelRoutingControls data={data!} busyField={busyField} updateField={updateField} />
 
-      <SettingsAdvanced label="Connected tools" description={detectState === 'loading'
-        ? 'Checking installed tools…'
-        : detectState === 'error' ? 'Could not check connections. Reopen this page to try again.'
-        : `Ready: ${Object.entries(tools).filter(([id, tool]) => id in RUNTIME_BLURB && tool.ready).map(([id]) => ORCHESTRATOR_RUNTIMES[id as keyof typeof ORCHESTRATOR_RUNTIMES].label).join(', ') || 'none confirmed'}. Expand to see connection status and worker options.`}>
-        <SettingsGroup
-          footnote="Installed tools and their default thinking effort. Availability is detected from your machine."
-        >
-          {/* Codex — worker effort */}
-          <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.codex.accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES.codex.label}
-            subtitle={lockedSub('codexWorkerEffort', runtimeSubtitle('codex'))}
-            accessory={
-              <TrailingCluster>
-                <DetectionPill tool={tools.codex} state={detectState} />
-                <PickerMenu<ThinkingEffort>
-                  value={values.codexWorkerEffort}
-                  options={CODEX_WORKER_EFFORT_OPTIONS}
-                  onChange={(next) => { updateField('codexWorkerEffort', next); }}
-                  disabled={envLocked('codexWorkerEffort') || busyField === 'codexWorkerEffort'}
-                  minWidth={130}
-                />
-              </TrailingCluster>
-            }
-            divider
-          />
-          {/* Claude Code — worker effort */}
-          <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES['claude-code'].accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES['claude-code'].label}
-            subtitle={lockedSub('claudeWorkerEffort', runtimeSubtitle('claude-code'))}
-            accessory={
-              <TrailingCluster>
-                <DetectionPill tool={tools['claude-code']} state={detectState} />
-                <PickerMenu<ThinkingEffort>
-                  value={values.claudeWorkerEffort}
-                  options={CLAUDE_WORKER_EFFORT_OPTIONS}
-                  onChange={(next) => { updateField('claudeWorkerEffort', next); }}
-                  disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
-                  minWidth={130}
-                />
-              </TrailingCluster>
-            }
-            divider
-          />
-          {/* Grok — detection only (no persisted per-runtime toggle) */}
-          <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.grok.accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES.grok.label}
-            subtitle={runtimeSubtitle('grok')}
-            accessory={<TrailingCluster><DetectionPill tool={tools.grok} state={detectState} /></TrailingCluster>}
-            divider
-          />
-          {/* Cursor — detection only */}
-          <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.cursor.accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES.cursor.label}
-            subtitle={runtimeSubtitle('cursor')}
-            accessory={<TrailingCluster><DetectionPill tool={tools.cursor} state={detectState} /></TrailingCluster>}
-            divider
-          />
-          <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.antigravity.accentColor} />}
-            label="Antigravity"
-            subtitle={tools.antigravity?.authHint ?? runtimeSubtitle('antigravity')}
-            accessory={<DetectionPill tool={tools.antigravity} state={detectState} />}
-            divider
-          />
-          <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES['3code'].accentColor} />}
-            label="3code"
-            subtitle={runtimeSubtitle('3code')}
-            accessory={<DetectionPill tool={tools['3code']} state={detectState} />}
-            divider
-          />
-          {/* opencode — enable toggle (experimentalOpencode) */}
-          <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.opencode.accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES.opencode.label}
-            subtitle={lockedSub('experimentalOpencode', runtimeSubtitle('opencode'))}
-            accessory={
-              <TrailingCluster>
-                <DetectionPill tool={tools.opencode} state={detectState} />
-                <SettingsToggleButton
-                  checked={values.experimentalOpencode}
-                  disabled={envLocked('experimentalOpencode') || busyField === 'experimentalOpencode'}
-                  onChange={(next) => {
-                    updateField('experimentalOpencode', next);
-                    if (!next && values.defaultDispatchRuntime === 'opencode') {
-                      updateField('defaultDispatchRuntime', 'codex');
-                    }
-                  }}
-                />
-              </TrailingCluster>
-            }
-          />
-        </SettingsGroup>
-      </SettingsAdvanced>
-
-      <SettingsAdvanced label="Claude Code settings" description="Model connection and account options for Claude orchestrators and workers."
-        initiallyOpen={values.subscriptionProfile === 'claude-only' || (values.subscriptionProfile !== 'codex-only' && (values.orchestratorBackend === 'claude' || values.orchestratorBackend === 'collide' || (values.orchestratorBackend === 'auto' && values.inAppOrchestratorEnabled)))}>
-        <ClaudeCodeHarnessSection />
-      {/* ── Orchestrator ── */}
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Claude account model"
-          footnote="The orchestrator model used with the native account connection. Other connections use their own model controls above."
-        >
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Native Claude model"
-            subtitle={lockedSub('orchestratorModel', 'Used with Native account. Other connections use the model selected above.')}
-            accessory={
-              <PickerMenu<string>
-                value={values.orchestratorModel}
-                options={ORCHESTRATOR_MODEL_OPTIONS}
-                onChange={(next) => { updateField('orchestratorModel', next); }}
-                disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-                minWidth={150}
-              />
-            }
-            disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-            divider
-          />
-        </SettingsGroup>
-      </section>
-
-      </SettingsAdvanced>
-
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Engineering Brain"
@@ -373,49 +246,122 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </SettingsGroup>
       </section>
 
+      <SettingsAdvanced label="Connected tools" description={detectState === 'loading'
+        ? 'Checking installed tools…'
+        : detectState === 'error' ? 'Could not check connections. Reopen this page to try again.'
+        : `Ready: ${Object.entries(tools).filter(([id, tool]) => id in ORCHESTRATOR_RUNTIMES && ORCHESTRATOR_RUNTIMES[id as keyof typeof ORCHESTRATOR_RUNTIMES].dispatchable && tool.ready).map(([id]) => ORCHESTRATOR_RUNTIMES[id as keyof typeof ORCHESTRATOR_RUNTIMES].label).join(', ') || 'none confirmed'}. Expand to see connection status and worker options.`}>
+        <SettingsGroup
+          footnote="Supported workers and available connection checks. Not checked means setup has no result for that tool; it does not mean the tool is missing. Local model connections and API keys have their own pages."
+        >
+          {/* Codex — worker effort */}
+          <SettingsRow
+            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.codex.accentColor} />}
+            label={ORCHESTRATOR_RUNTIMES.codex.label}
+            subtitle={lockedSub('codexWorkerEffort', runtimeSubtitle('codex'))}
+            accessory={
+              <TrailingCluster>
+                <DetectionPill tool={tools.codex} state={detectState} />
+                <PickerMenu<ThinkingEffort>
+                  value={values.codexWorkerEffort}
+                  options={CODEX_WORKER_EFFORT_OPTIONS}
+                  onChange={(next) => { updateField('codexWorkerEffort', next); }}
+                  disabled={envLocked('codexWorkerEffort') || busyField === 'codexWorkerEffort'}
+                  minWidth={130}
+                />
+              </TrailingCluster>
+            }
+            divider
+          />
+          {/* Claude Code — worker effort */}
+          <SettingsRow
+            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES['claude-code'].accentColor} />}
+            label={ORCHESTRATOR_RUNTIMES['claude-code'].label}
+            subtitle={lockedSub('claudeWorkerEffort', runtimeSubtitle('claude-code'))}
+            accessory={
+              <TrailingCluster>
+                <DetectionPill tool={tools['claude-code']} state={detectState} />
+                <PickerMenu<ThinkingEffort>
+                  value={values.claudeWorkerEffort}
+                  options={CLAUDE_WORKER_EFFORT_OPTIONS}
+                  onChange={(next) => { updateField('claudeWorkerEffort', next); }}
+                  disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
+                  minWidth={130}
+                />
+              </TrailingCluster>
+            }
+            divider
+          />
+          {Object.entries(ORCHESTRATOR_RUNTIMES).filter(([id, runtime]) => runtime.dispatchable && !['codex', 'claude-code', 'opencode'].includes(id)).map(([id, runtime]) => (
+            <SettingsRow key={id}
+              icon={<RuntimeDot color={runtime.accentColor} />}
+              label={runtime.label}
+              subtitle={tools[id]?.authHint ?? RUNTIME_BLURB[id] ?? `Connect through ${runtime.label}.`}
+              accessory={<DetectionPill tool={tools[id]} state={detectState} />}
+              divider
+            />
+          ))}
+          {/* opencode — enable toggle (experimentalOpencode) */}
+          <SettingsRow
+            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.opencode.accentColor} />}
+            label={ORCHESTRATOR_RUNTIMES.opencode.label}
+            subtitle={lockedSub('experimentalOpencode', runtimeSubtitle('opencode'))}
+            accessory={
+              <TrailingCluster>
+                <DetectionPill tool={tools.opencode} state={detectState} />
+                <SettingsToggleButton
+                  checked={values.experimentalOpencode}
+                  disabled={envLocked('experimentalOpencode') || busyField === 'experimentalOpencode'}
+                  onChange={(next) => {
+                    updateField('experimentalOpencode', next);
+                    if (!next && values.defaultDispatchRuntime === 'opencode') {
+                      updateField('defaultDispatchRuntime', 'codex');
+                    }
+                  }}
+                />
+              </TrailingCluster>
+            }
+          />
+        </SettingsGroup>
+      </SettingsAdvanced>
+
+      <SettingsAdvanced label="Claude Code settings" description="Choose what powers Claude Code: its existing connection, an API provider, or a subscription compatibility connection."
+        initiallyOpen={values.subscriptionProfile === 'claude-only' || (values.subscriptionProfile !== 'codex-only' && (values.orchestratorBackend === 'claude' || values.orchestratorBackend === 'collide' || (values.orchestratorBackend === 'auto' && values.inAppOrchestratorEnabled)))}>
+        <ClaudeCodeHarnessSection />
+      {/* ── Orchestrator ── */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="Metered packet limits"
-          footnote="Captured on each gateway-backed packet at launch. Authoritative cost stops the worker first; input tokens are the fail-closed fallback when cost is unavailable."
+          header="Claude fallback model"
+          footnote="Fallback for Claude account requests without a model choice. The composer selection takes precedence."
         >
           <SettingsRow
             icon={<CpuIcon />}
-            label="Cost cap"
-            subtitle="Maximum gateway-reported spend per packet (USD)"
-            accessory={(
-              <input
-                key={values.meteredPacketCostCapUsd}
-                type="number"
-                min="0.01"
-                step="0.01"
-                defaultValue={values.meteredPacketCostCapUsd}
-                disabled={busyField === 'meteredPacketCostCapUsd'}
-                onBlur={(event) => { updateField('meteredPacketCostCapUsd', Number(event.currentTarget.value)); }}
-                style={{ width: 92, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-input-border)', borderRadius: 8, background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 9, paddingRight: 9, fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}
+            label="Claude fallback model"
+            subtitle={lockedSub('orchestratorModel', 'Used with the existing Claude connection when a request does not select a model.')}
+            accessory={
+              <PickerMenu<string>
+                value={values.orchestratorModel}
+                options={ORCHESTRATOR_MODEL_OPTIONS}
+                onChange={(next) => { updateField('orchestratorModel', next); }}
+                disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
+                minWidth={150}
               />
-            )}
+            }
+            disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
             divider
-          />
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Input fallback"
-            subtitle="Token ceiling used only when gateway cost is unknown"
-            accessory={(
-              <input
-                key={values.meteredPacketInputTokenCap}
-                type="number"
-                min="1"
-                step="1000"
-                defaultValue={values.meteredPacketInputTokenCap}
-                disabled={busyField === 'meteredPacketInputTokenCap'}
-                onBlur={(event) => { updateField('meteredPacketInputTokenCap', Number(event.currentTarget.value)); }}
-                style={{ width: 92, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-input-border)', borderRadius: 8, background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 9, paddingRight: 9, fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}
-              />
-            )}
           />
         </SettingsGroup>
       </section>
 
+      </SettingsAdvanced>
+
+      <ModelRoutingControls data={data!} busyField={busyField} updateField={updateField} advanced />
+      <DispatchFoundersSection values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={false} />
+      <SettingsAdvanced label="Routing details" description="See which provider handles each job and the result of recent routing decisions.">
+        <AgentRoleRoutingSection
+          routes={data?.roleRoutes ?? []}
+          receipts={data?.recentRoleReceipts ?? []}
+        />
+      </SettingsAdvanced>
       <section style={{ marginTop: 28 }}>
         <SettingsGroup header="More setup">
           <SettingsRow icon={<CpuIcon />} label="API keys" subtitle="Manage provider keys and find voice service keys."
@@ -427,13 +373,6 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </SettingsGroup>
       </section>
 
-      <SettingsAdvanced label="Advanced routing" description="Thinking overrides, Brain tuning, and details about which provider handles each job.">
-        <DispatchFoundersSection values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={false} />
-      <AgentRoleRoutingSection
-        routes={data?.roleRoutes ?? []}
-        receipts={data?.recentRoleReceipts ?? []}
-      />
-      </SettingsAdvanced>
     </div>
   );
 }
