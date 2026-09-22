@@ -5,6 +5,7 @@ import { MAX_PACKAGE_BYTES, packageSchema, type DamagedPackage, type InstalledPa
 import { RamsButton } from '../settings/shared';
 import { customizationCopy as copy, customizationField as field, SaveScope } from './AddSkillForm';
 import { SkillCatalogItem } from './SkillCatalogItem';
+import { ImportFileButton } from './ImportFileButton';
 import type { CustomizeRepo } from './inventory';
 import type { SkillInventoryEntry } from './SkillsInventoryTab';
 
@@ -62,10 +63,10 @@ export default function PluginsTab({ repos, onChanged, onUseSkill, selectedRepo,
   const matches = (entry: InstructionPackage) => `${entry.name} ${entry.description}`.toLowerCase().includes(query.toLowerCase());
   const actions = { display: 'flex', gap: 12, flexWrap: 'wrap' as const, alignItems: 'center' };
   return <section aria-label="Plugins" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-    <p style={copy}>Plugins bundle reusable skills. Installed skills appear in Skills and can be added to a task. These bundles do not install a service connection or run code on installation.</p>
-    <div style={{ ...actions, alignItems: 'end' }}>
-      <div style={{ flex: '1 1 220px' }}><SaveScope label="Plugin library" repos={repos} value={repo} disabled={busy} onChange={(value) => { onSelectRepo(value); setSelected(null); setRemoveDamaged(null); setLoading(true); setError(''); setMessage(''); }} /></div>
-      <label style={{ color: 'var(--t-accent)', fontSize: 13 }}>Import bundle (.json)<input aria-label="Import plugin bundle" type="file" accept=".json,application/json" disabled={busy || loading} onChange={(event) => { void importFile(event.target.files?.[0]); event.target.value = ''; }} style={{ display: 'block', marginTop: 8, maxWidth: '100%' }} /></label>
+    <p style={copy}>Add reusable skills to your library with plugins. Installed skills are available in Skills and ready to use in a task.</p>
+    <div style={{ ...actions, alignItems: 'end', justifyContent: 'space-between' }}>
+      <div style={{ flex: '1 1 220px', maxWidth: 360 }}><SaveScope label="Plugin library" repos={repos} value={repo} disabled={busy} onChange={(value) => { onSelectRepo(value); setSelected(null); setRemoveDamaged(null); setLoading(true); setError(''); setMessage(''); }} /></div>
+      <div style={{ paddingBottom: 5 }}><ImportFileButton label="Import plugin bundle" accept=".json,application/json" disabled={busy || loading} onImport={importFile} /></div>
     </div>
     {error ? <div role="alert" style={copy}>{error} <RamsButton variant="ghost" disabled={busy} onClick={() => { setError(''); setLoading(true); setRefresh((value) => value + 1); }}>Refresh</RamsButton></div> : null}
     {message ? <p role="status" style={copy}>{message}</p> : null}
@@ -87,10 +88,10 @@ export default function PluginsTab({ repos, onChanged, onUseSkill, selectedRepo,
       <p style={copy}>Use in task copies the selected instructions into your draft for any agent. Automatic loading and native plugin support vary by agent. Disable hides these skills from the library; it does not change an active task’s context. To update, import a newer version of the same bundle.</p>
     </> : <>
       <input aria-label="Search plugins" placeholder="Search plugins" value={query} onChange={(event) => setQuery(event.target.value)} style={field} />
-      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 400, color: 'var(--t-text)' }}>Installed</h2>
+      <h2 style={{ margin: 0, paddingBottom: 12, borderBottom: '1px solid var(--t-divider)', fontSize: 18, fontWeight: 400, color: 'var(--t-text)' }}>Installed</h2>
       {damaged.map((entry) => <div key={entry.id} style={{ display: 'flex', flexDirection: 'column', gap: 12, border: '1px solid var(--t-divider)', borderRadius: 12, padding: 20 }}><p style={copy}><strong>{entry.id}</strong> · {entry.message}</p>{removeDamaged === entry.id ? <><p style={copy}>Remove this damaged installation and its stored files? Independently saved skills stay in place.</p><div style={actions}><RamsButton variant="danger" busy={busy} onClick={() => void mutate({ action: 'remove', id: entry.id, revision: 'damaged' }, 'Damaged plugin removed from the library.')}>Confirm removal</RamsButton><RamsButton variant="ghost" disabled={busy} onClick={() => setRemoveDamaged(null)}>Cancel</RamsButton></div></> : <div><RamsButton variant="danger" disabled={busy} onClick={() => setRemoveDamaged(entry.id)}>Remove damaged plugin</RamsButton></div>}</div>)}
       {installed.filter((entry) => matches(entry.manifest)).length ? installed.filter((entry) => matches(entry.manifest)).map((entry) => <SkillCatalogItem key={entry.manifest.id} title={entry.manifest.name} subtitle={entry.manifest.description} pill={entry.enabled ? 'Enabled' : 'Disabled'} expanded={false} onClick={() => choose(entry.manifest)} />) : damaged.length ? null : <p style={copy}>{query ? 'No matching installed plugins.' : 'No plugins installed in this scope yet.'}</p>}
-      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 400, color: 'var(--t-text)' }}>Browse · o8 collection</h2>
+      <h2 style={{ margin: 0, paddingBottom: 12, borderBottom: '1px solid var(--t-divider)', fontSize: 18, fontWeight: 400, color: 'var(--t-text)' }}>Browse · o8 collection</h2>
       {catalog.filter(matches).map((entry) => <SkillCatalogItem key={entry.id} title={entry.name} subtitle={entry.description} pill={installed.some((item) => item.manifest.id === entry.id) ? 'Installed' : 'View plugin'} expanded={false} onClick={() => choose(installed.find((item) => item.manifest.id === entry.id)?.manifest ?? entry)} />)}
       <p style={copy}>This first collection contains instruction bundles. Connected-service plugins and external marketplace sources are not available yet.</p>
       <details><summary style={{ color: 'var(--t-text)', cursor: 'pointer', fontSize: 13 }}>Bundle format</summary><p style={{ ...copy, marginTop: 12 }}>Import one JSON file with format, id, name, version, description, and skills. Each skill has name, description, and instructions. No install scripts, hooks, or external files are accepted.</p><pre style={{ ...copy, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: 12 }}>{JSON.stringify({ format: 'o8-instructions-v1', id: 'my-plugin', name: 'My plugin', version: '1.0.0', description: 'What this plugin helps with', skills: [{ name: 'my-skill', description: 'When to use it', instructions: 'Instructions for the agent' }] }, null, 2)}</pre></details>

@@ -3,6 +3,7 @@
 import { useState, type CSSProperties } from 'react';
 import { parseSkillMarkdown, skillSchema } from '@/lib/customize/packages';
 import { RamsButton } from '../settings/shared';
+import { ImportFileButton } from './ImportFileButton';
 import type { CustomizeRepo } from './inventory';
 
 export const customizationField: CSSProperties = { width: '100%', minHeight: 42, boxSizing: 'border-box', border: '1px solid var(--t-divider)', borderRadius: 10, padding: 12, background: 'var(--t-input-bg)', color: 'var(--t-text)', font: 'inherit' };
@@ -48,9 +49,12 @@ export function AddSkillForm({ repos, initialRepo, onSaved, onCancel }: {
   return <form aria-label="Add skill" onSubmit={(event) => { event.preventDefault(); void save(); }} style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: 24, border: '1px solid var(--t-divider)', borderRadius: 14 }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
       <h2 style={{ margin: 0, fontSize: 18, fontWeight: 400, color: 'var(--t-text)' }}>Add a skill</h2>
-      <label style={{ color: 'var(--t-accent)', fontSize: 13 }}>Import SKILL.md<input aria-label="Import SKILL.md" type="file" accept=".md,text/markdown" disabled={busy} onChange={(event) => { void importFile(event.target.files?.[0]); event.target.value = ''; }} style={{ display: 'block', marginTop: 8, maxWidth: '100%' }} /></label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <ImportFileButton label="Import SKILL.md" accept=".md,text/markdown" disabled={busy} onImport={importFile} />
+        <RamsButton variant="ghost" disabled={busy} onClick={onCancel}>Cancel</RamsButton>
+        <RamsButton type="submit" variant="primary" busy={busy}>Save skill</RamsButton>
+      </div>
     </div>
-    <div style={{ display: 'flex', gap: 12 }}><RamsButton variant="primary" busy={busy} onClick={() => void save()}>Save skill</RamsButton><RamsButton variant="ghost" disabled={busy} onClick={onCancel}>Cancel</RamsButton></div>
     <p style={customizationCopy}>Write reusable instructions or import a Markdown skill, then review and save. Import copies this file only; linked scripts and other files are not included.</p>
     <SaveScope repos={repos} value={repo} onChange={setRepo} disabled={busy} />
     {[['Name', name, setName, 'review-layout'], ['Description', description, setDescription, 'When should an agent use this skill?']] .map(([label, value, setter, placeholder]) => <label key={label as string} style={{ display: 'flex', flexDirection: 'column', gap: 8, color: 'var(--t-text)', fontSize: 13 }}>{label as string}<input disabled={busy} aria-label={label as string} value={value as string} placeholder={placeholder as string} maxLength={label === 'Name' ? 64 : 500} onChange={(event) => (setter as (value: string) => void)(event.target.value)} style={customizationField} /></label>)}
