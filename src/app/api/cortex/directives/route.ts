@@ -40,6 +40,7 @@ import {
 } from '@/lib/cortex/directives/filter';
 import { getProjectContext } from '@/lib/projects/context';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
+import { isVirtualRepoProjectId } from '@/lib/repos/virtual-project-id';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -131,7 +132,11 @@ export async function GET(req: NextRequest) {
       }
       const projectScope: DirectiveProjectScope = {
         projectIds: new Set([context.id, context.runtimeProjectId, context.settingsProjectId].filter((id): id is string => Boolean(id)).map((id) => id.toLowerCase())),
-        projectSlugs: new Set([context.slug.toLowerCase()]),
+        // A virtual repo project can share its display-name slug with an
+        // unrelated Settings project. Only its explicit id is unambiguous.
+        projectSlugs: isVirtualRepoProjectId(context.runtimeProjectId)
+          ? new Set()
+          : new Set([context.slug.toLowerCase()]),
         repoInActiveProject: context.repoInProject,
       };
       parsed = parsedAll.filter((directive) => repoPath

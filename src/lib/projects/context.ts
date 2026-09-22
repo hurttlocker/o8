@@ -18,6 +18,7 @@ import {
 } from '@/lib/repos/projects';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+import { isVirtualRepoProjectId } from '@/lib/repos/virtual-project-id';
 import { truncateText } from '@/lib/util/text';
 
 export interface ProjectContextRepo {
@@ -137,6 +138,15 @@ function resolveExplicitProject(
   requestedProjectId: string,
 ): { panelProject: ProjectRecord; settingsProject: ProjectWithRepos | null } {
   const requested = requestedProjectId.trim().toLowerCase();
+  if (isVirtualRepoProjectId(requested)) {
+    const panelProject = ledgerProjects.find((project) => project.id.toLowerCase() === requested);
+    if (!panelProject) {
+      throw new Error(`Project ${requestedProjectId.trim()} does not exist.`);
+    }
+    // Virtual single-repo ids represent their own ledger projection. A Settings
+    // project with the same name is a different identity and owns different repos.
+    return { panelProject, settingsProject: null };
+  }
   const settingsProject = projects.find((project) => project.id.toLowerCase() === requested)
     ?? projects.find((project) => project.slug.toLowerCase() === requested)
     ?? null;
