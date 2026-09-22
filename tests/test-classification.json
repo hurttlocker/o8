@@ -51,6 +51,12 @@
       ]
     },
     {
+      "path": "src/app/api/setup/mcp-servers/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/app/api/v2/proxy/cli/route.test.ts",
       "reasons": [
         "child-process"
