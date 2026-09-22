@@ -10,10 +10,12 @@ import {
   BracketLabel,
   FieldLabel,
   HairlineRule,
-  SectionLabel,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
+  type SettingsTab,
 } from './shared';
+
+import { GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 
 // ── Types ──
 
@@ -27,11 +29,7 @@ interface ProviderKeyInfo {
   maskedKey: string | null;
 }
 
-// ── Provider list (reusable) ──
-// Extracted so the Models tab can inline the BYOK provider surface without the
-// NEXT_PUBLIC_O8_SHOW_BYOK env flag (#1450 wave 2). Owns its own fetch + editor
-// state; both APIKeysTab and ModelsTab render it against the live /api/v2/keys
-// backend.
+// Provider keys use the existing encrypted key store.
 
 export function ApiKeysProviderList() {
   const [providers, setProviders] = useState<ProviderKeyInfo[]>([]);
@@ -384,7 +382,7 @@ export function ApiKeysProviderList() {
 
 // ── API Keys Tab ──
 
-export function APIKeysTab() {
+export function APIKeysTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab, section?: string) => void }) {
   return (
     <div style={{
       paddingTop: 8,
@@ -396,37 +394,32 @@ export function APIKeysTab() {
     }}>
       <TabHeading
         title="API keys"
-        subtitle="Provider keys unlock model families in the orchestrator and assistant. Keys stay local to this installation and take effect immediately."
+        subtitle="Manage keys for AI providers. API usage is billed by the provider; signing into a CLI account is managed separately."
       />
 
       {/* 01 — PROVIDERS */}
       <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="01">PROVIDERS</SectionLabel>
+        <GroupHeader>Provider keys</GroupHeader>
         <ApiKeysProviderList />
       </section>
 
-      {/* Adaptive-thinking toggle moved to Dispatch → Founders → Model tiers
-          (#1450 IA pass) — it was unreachable here behind the BYOK env gate. */}
+      <section style={{ marginBottom: 32 }}>
+        <SettingsGroup header="Voice service keys" footnote="Groq transcription uses the desktop voice settings. Its key is managed separately from the provider keys above.">
+          <SettingsRow label="Groq transcription key" subtitle="Open Voice → Transcription in the desktop app."
+            onPress={onNavigateTab ? () => onNavigateTab('voice', 'Transcription') : undefined} chevron={Boolean(onNavigateTab)} />
+        </SettingsGroup>
+      </section>
 
       {/* 02 — STORAGE */}
       <section>
-        <SectionLabel number="02">STORAGE</SectionLabel>
+        <GroupHeader>Key storage</GroupHeader>
         <div style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',
           lineHeight: 1.55,
           maxWidth: 620,
         }}>
-          Keys are AES-256-GCM encrypted and written to{' '}
-          <span style={{
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 12,
-            letterSpacing: '0.04em',
-            color: 'var(--t-text-secondary)',
-          }}>
-            ~/.o8/.env.local
-          </span>
-          {' '}and take effect immediately. They never leave this machine. Beta feature — removed before official release in favour of the hosted plan.
+          Provider keys are encrypted in this installation’s local configuration and take effect immediately. o8 uses them to authenticate requests to the selected provider.
         </div>
         <div style={{ marginTop: 16 }}>
           <HairlineRule />
