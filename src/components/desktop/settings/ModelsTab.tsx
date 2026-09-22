@@ -24,7 +24,6 @@ import {
   type OperatorDefaults,
   type ThinkingEffort,
 } from './dispatch-shared';
-import { AcpModelPickerPopover } from './AcpModelPickerPopover';
 import { ClaudeCodeHarnessSection } from './ClaudeCodeHarnessSection';
 import { ModelRoutingControls } from './ModelRoutingControls';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
@@ -165,7 +164,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
     }}>
       <TabHeading
         title="models & providers"
-        subtitle="Choose your orchestrator to lead conversations and coordinate work, then choose the tools and models workers use."
+        subtitle="Manage orchestrator and worker connections here. Choose their models in the workspace composer."
       />
 
       {notice ? (
@@ -370,68 +369,6 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
               />
             }
             disabled={envLocked('brainCodexEffort') || busyField === 'brainCodexEffort'}
-          />
-        </SettingsGroup>
-      </section>
-
-      {/* ── opencode (model-agnostic) ── */}
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="OpenCode 2 models"
-          footnote="OpenCode 2 is not bound to one provider. These lists come from your own install, so they show exactly the models your provider keys can reach. Leave either unset to use OpenCode 2's default. The composer can still override the orchestrator model for a single turn."
-        >
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Orchestrator model"
-            subtitle={lockedSub('opencodeOrchestratorModel', values.opencodeOrchestratorModel ?? 'Unset — OpenCode 2 picks')}
-            accessory={
-              <AcpModelPickerPopover
-                label={values.opencodeOrchestratorModel ?? 'Choose'}
-                value={values.opencodeOrchestratorModel}
-                onSelect={(next) => { updateField('opencodeOrchestratorModel', next); }}
-                onClear={() => { updateField('opencodeOrchestratorModel', null); }}
-                disabled={envLocked('opencodeOrchestratorModel') || busyField === 'opencodeOrchestratorModel'}
-              />
-            }
-            divider
-          />
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Worker model"
-            subtitle={lockedSub('opencodeWorkerModel', values.opencodeWorkerModel ?? 'Unset — the adapter default')}
-            accessory={
-              <AcpModelPickerPopover
-                label={values.opencodeWorkerModel ?? 'Choose'}
-                value={values.opencodeWorkerModel}
-                onSelect={(next) => { updateField('opencodeWorkerModel', next); }}
-                onClear={() => { updateField('opencodeWorkerModel', null); }}
-                disabled={envLocked('opencodeWorkerModel') || busyField === 'opencodeWorkerModel'}
-              />
-            }
-          />
-        </SettingsGroup>
-      </section>
-
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="3code worker"
-          footnote="Choose from configured 3code providers on this machine. Leave this unset to preserve 3code's configured default."
-        >
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Worker model"
-            subtitle={lockedSub('threecodeWorkerModel', values.threecodeWorkerModel ?? 'Unset — 3code picks')}
-            accessory={
-              <AcpModelPickerPopover
-                label={values.threecodeWorkerModel ?? 'Choose'}
-                value={values.threecodeWorkerModel}
-                backend="3code"
-                catalogueUrl="/api/runtime/threecode-models"
-                onSelect={(next) => { updateField('threecodeWorkerModel', next); }}
-                onClear={() => { updateField('threecodeWorkerModel', null); }}
-                disabled={envLocked('threecodeWorkerModel') || busyField === 'threecodeWorkerModel'}
-              />
-            }
           />
         </SettingsGroup>
       </section>

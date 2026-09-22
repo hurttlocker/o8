@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { AcpModelPickerPopover } from './AcpModelPickerPopover';
 import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsSegmented } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
@@ -176,7 +177,7 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
           />
       </SettingsGroup>
     </section>
-    <SettingsAdvanced label="Advanced orchestrator options" description="Optional provider choice for reviewing completed work.">
+    <SettingsAdvanced label="Advanced orchestrator options" description="Code review provider and fallback model for requests without a model choice.">
       <SettingsGroup>
           <SettingsRow
             icon={<CpuIcon />}
@@ -194,6 +195,21 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
               />
             }
             disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="OpenCode fallback model"
+            subtitle={lockedSub('opencodeOrchestratorModel', 'Used only when a request supplies no model. The composer’s selection takes precedence.')}
+            accessory={
+              <AcpModelPickerPopover
+                label={values.opencodeOrchestratorModel ?? 'Choose'}
+                value={values.opencodeOrchestratorModel}
+                onSelect={(next) => { updateField('opencodeOrchestratorModel', next); }}
+                onClear={() => { updateField('opencodeOrchestratorModel', null); }}
+                disabled={envLocked('opencodeOrchestratorModel') || busyField === 'opencodeOrchestratorModel'}
+              />
+            }
           />
       </SettingsGroup>
     </SettingsAdvanced>
