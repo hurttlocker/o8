@@ -33,9 +33,9 @@ type ProfileResponse = {
 };
 
 const SOURCE_OPTIONS: Array<{ value: ClaudeCodeModelSource; label: string; detail: string }> = [
-  { value: 'native', label: 'Native account', detail: 'Use the existing Claude Code login or inherited gateway.' },
-  { value: 'openrouter', label: 'OpenRouter', detail: 'Run the Claude Code harness against an API-billed model.' },
-  { value: 'codex-subscription', label: 'Codex subscription', detail: 'Route Claude Code through a localhost Codex OAuth carrier.' },
+  { value: 'native', label: 'Existing Claude connection', detail: 'Use the existing Claude Code login or inherited gateway.' },
+  { value: 'openrouter', label: 'OpenRouter', detail: 'Use OpenRouter models, billed to your API key.' },
+  { value: 'codex-subscription', label: 'Codex subscription (experimental)', detail: 'Unofficial local compatibility connection; uses Codex subscription quota.' },
 ];
 
 function HarnessIcon() {
@@ -78,7 +78,7 @@ export function ClaudeCodeHarnessSection() {
       const response = await fetch('/api/runtime/claude-code-profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile),
+        body: JSON.stringify({ source: profile.source, model: profile.model, codexModel: profile.codexModel }),
       });
       const payload = await response.json().catch(() => ({})) as ProfileResponse;
       if (!response.ok || !payload.ok) throw new Error(payload.error ?? 'Claude Code worker settings could not be saved.');
@@ -118,7 +118,7 @@ export function ClaudeCodeHarnessSection() {
 
   if (!data) {
     return (
-      <SettingsGroup header="Claude model connection" footnote={error ?? 'Loading the harness carrier…'}>
+      <SettingsGroup header="Claude Code connection" footnote={error ?? 'Checking the Claude Code connection…'}>
         <SettingsRow icon={<HarnessIcon />} label="Model source" value="Loading…" disabled />
       </SettingsGroup>
     );
@@ -135,17 +135,17 @@ export function ClaudeCodeHarnessSection() {
 
   return (
     <SettingsGroup
-      header="Claude model connection"
+      header="Claude Code connection"
       footnote={error ?? (gatewayActive
-        ? 'Each orchestrator chat gets its own resident Claude Code session and config. OpenRouter supplies the model and bills the API usage; your Claude and Codex subscriptions are not charged.'
+        ? 'OpenRouter supplies the model and bills your API key for usage. Configure that key in API keys. New sessions and workers use this connection.'
         : codexActive
-          ? 'Each orchestrator chat gets its own resident Claude Code session and config while Codex supplies the model through a localhost-only OAuth proxy. Usage counts against the connected Codex subscription quota.'
-          : 'Native uses the existing Claude Code login or inherited enterprise gateway. Each orchestrator chat keeps its own resident session, and each worker pins the selected source when it starts.')}
+          ? 'Experimental: an unofficial local compatibility proxy supplies Codex models to Claude Code. Connect Codex before starting tasks. Usage counts against that subscription quota.'
+          : 'Uses the account or enterprise gateway already configured in Claude Code. Its usage terms apply. Choose task models in the composer; manage worker skills in Customize → Skills.')}
     >
       <SettingsRow
         icon={<HarnessIcon />}
         label="Model source"
-        subtitle="Choose who supplies the model behind Claude Code orchestrators and workers"
+        subtitle="Choose the account or API that powers Claude Code orchestrators and workers."
         accessory={
           <PickerMenu<ClaudeCodeModelSource>
             value={profile.source}
@@ -179,7 +179,7 @@ export function ClaudeCodeHarnessSection() {
       {codexActive ? (
         <SettingsRow
           icon={<HarnessIcon />}
-          label="Codex connection"
+          label="Codex authorization"
           subtitle={!data.codexProxy.installed
             ? 'Install CLIProxyAPI with Homebrew before connecting'
             : data.codexProxy.authenticated
@@ -237,68 +237,6 @@ export function ClaudeCodeHarnessSection() {
           divider
         />
       ) : null}
-      <SettingsRow
-        icon={<HarnessIcon />}
-        label="Repository skills"
-        subtitle="Comma-separated skill names explicitly injected into dispatched worker prompts"
-        accessory={
-          <input
-            key={profile.repoSkillAllowlist?.join(',') ?? ''}
-            defaultValue={profile.repoSkillAllowlist?.join(', ') ?? ''}
-            placeholder="None"
-            aria-label="Claude Code repository skill allowlist"
-            disabled={busy}
-            onBlur={(event) => {
-              const repoSkillAllowlist = event.currentTarget.value
-                .split(',')
-                .map((name) => name.trim())
-                .filter(Boolean);
-              void save({ ...profile, repoSkillAllowlist });
-            }}
-            style={{
-              width: 180,
-              minHeight: 34,
-              paddingTop: 0,
-              paddingRight: 10,
-              paddingBottom: 0,
-              paddingLeft: 10,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-border)',
-              borderRadius: 9,
-              background: 'var(--t-input-bg)',
-              color: 'var(--t-text)',
-              fontFamily: 'var(--font-sans-system)',
-              fontSize: 12,
-              outline: 'none',
-            }}
-          />
-        }
-        divider
-      />
-      <SettingsRow
-        icon={<HarnessIcon />}
-        label="Billing"
-        subtitle={gatewayActive
-          ? 'Requires the encrypted OpenRouter key in the API keys page'
-          : codexActive
-            ? 'No API key; worker turns consume the connected Codex subscription quota'
-            : 'Uses the account or gateway already configured in Claude Code'}
-        accessory={<ValuePill tone={(gatewayActive && !data.openrouterConfigured) || (codexActive && !data.codexProxy.authenticated) ? 'destructive' : 'default'}>
-          {gatewayActive
-            ? (data.openrouterConfigured ? 'API billed' : 'Key required')
-            : codexActive
-              ? (data.codexProxy.authenticated ? 'Subscription quota' : 'Connect required')
-              : 'Account billed'}
-        </ValuePill>}
-        divider
-      />
-      <SettingsRow
-        icon={<HarnessIcon />}
-        label="Codex subscription"
-        subtitle={data.codexSubscriptionReason}
-        accessory={<ValuePill>Experimental</ValuePill>}
-      />
     </SettingsGroup>
   );
 }

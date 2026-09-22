@@ -5,12 +5,12 @@ import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsSegmented } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { PickerMenu, SUBSCRIPTION_PROFILE_OPTIONS, DISPATCH_RUNTIME_OPTIONS, ENV_LOCKED_REASON, resolvePickerGroupOpen,
-  type OperatorDefaults, type OperatorDefaultsResponse, type OrchestratorBackendSetting, type ReviewerBackendSetting, type SubscriptionProfile, type DispatchRuntime } from './dispatch-shared';
+  type CollideAggregator, type OperatorDefaults, type OperatorDefaultsResponse, type OrchestratorBackendSetting, type ReviewerBackendSetting, type SubscriptionProfile, type DispatchRuntime } from './dispatch-shared';
 const DEFAULT_WORKER_RUNTIME_OPTIONS = DISPATCH_RUNTIME_OPTIONS;
 type ExecutionCarrierSelection = 'direct' | 'ori';
 const EXECUTION_CARRIER_OPTIONS: Array<{ value: ExecutionCarrierSelection; label: string; detail: string }> = [
   { value: 'direct', label: 'Direct', detail: 'Launch the selected runtime CLI directly.' },
-  { value: 'ori', label: 'Ori', detail: 'Use Ori credentials and routing while Codex keeps session ownership.' },
+  { value: 'ori', label: 'Via Ori', detail: 'Use Ori credentials and routing while Codex keeps session ownership.' },
 ];
 
 type CliHouseStatus = NonNullable<OperatorDefaultsResponse['cliAuth']>['statuses']['codex'];
@@ -52,7 +52,8 @@ function RocketIcon() {
     </svg>
   );
 }
-export function ModelRoutingControls({ data, busyField, updateField }: {
+export function ModelRoutingControls({ data, busyField, updateField, advanced = false }: {
+  advanced?: boolean;
   data: OperatorDefaultsResponse;
   busyField: keyof OperatorDefaults | null;
   updateField: <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => void;
@@ -61,6 +62,7 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
   const [hermesAvailable, setHermesAvailable] = useState(false);
   const [opencodeAvailable, setOpencodeAvailable] = useState(false);
   useEffect(() => {
+    if (advanced) return;
     let alive = true;
     fetch('/api/setup/orchestrator-backends')
       .then((r) => r.json())
@@ -71,7 +73,7 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
       })
       .catch(() => { /* picker just omits Hermes */ });
     return () => { alive = false; };
-  }, []);
+  }, [advanced]);
   const [openDispatchPicker, setOpenDispatchPicker] = useState<string | null>(null);
   const { values, sources, cliAuth } = data;
   const envLocked = (field: keyof OperatorDefaults) => sources[field] === 'env';
@@ -93,12 +95,10 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
   const carrierCompatibilityReason = values.defaultDispatchRuntime === 'codex'
     ? null
     : 'Ori is available when the effective default worker is Codex.';
-  const profileHint = cliAuth?.suggestedSubscriptionProfile.profile
-    && cliAuth.suggestedSubscriptionProfile.profile !== activeProfile
-    ? cliAuth.suggestedSubscriptionProfile
-    : null;
+
 
   return (<>
+    {!advanced && <>
     <section style={{ marginTop: 28 }}>
       <SettingsGroup header="Orchestrator" footnote="The orchestrator is your lead: talk through ideas, plan work, and coordinate workers here. Claude + Codex uses both providers.">
           <SettingsRow
@@ -131,6 +131,24 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
             disabled={Boolean(profileOverrideReason) || envLocked('orchestratorBackend') || busyField === 'orchestratorBackend'}
             divider
           />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Code review provider"
+            subtitle={profileOverrideReason ?? lockedSub('reviewerBackend', 'Optionally choose a different provider to review completed changes. Same as lead uses your orchestrator provider.')}
+            accessory={
+              <SettingsSegmented
+                value={values.reviewerBackend}
+                onChange={(next) => { updateField('reviewerBackend', next as ReviewerBackendSetting); }}
+                options={[
+                  { value: 'follow', label: 'Same as lead' },
+                  { value: 'claude', label: 'Claude' },
+                  { value: 'codex', label: 'Codex' },
+                ]}
+              />
+            }
+            disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
+            divider
+          />
       </SettingsGroup>
     </section>
     <section style={{ marginTop: 28 }}>
@@ -138,11 +156,7 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
           <SettingsRow
             icon={<RocketIcon />}
             label="Subscription profile"
-            subtitle={lockedSub('subscriptionProfile', [
-              SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === activeProfile)?.detail ?? 'Choose which connected tools may run tasks',
-              `Codex: ${cliStatusLabel(cliAuth?.statuses.codex)} · Claude: ${cliStatusLabel(cliAuth?.statuses.claude)}`,
-              profileHint?.detail ? `${profileHint.detail} Consider ${SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === profileHint.profile)?.label}.` : '',
-            ].filter(Boolean).join(' '))}
+            subtitle={lockedSub('subscriptionProfile', SUBSCRIPTION_PROFILE_OPTIONS.find((opt) => opt.value === activeProfile)?.detail ?? 'Choose which connected tools may run tasks')}
             accessory={
               <PickerMenu<SubscriptionProfile>
                 value={activeProfile}
@@ -177,26 +191,10 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
           />
       </SettingsGroup>
     </section>
-    <SettingsAdvanced label="Advanced orchestrator options" description="Code review provider and fallback model for requests without a model choice.">
+    </>}
+    {advanced && <>
+    <SettingsAdvanced label="Advanced orchestrator options" description="Fallback models and behavior for combined or existing lead setups.">
       <SettingsGroup>
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Code review provider"
-            subtitle={profileOverrideReason ?? lockedSub('reviewerBackend', 'Optionally choose a different provider to review completed changes. Same as lead uses your orchestrator provider.')}
-            accessory={
-              <SettingsSegmented
-                value={values.reviewerBackend}
-                onChange={(next) => { updateField('reviewerBackend', next as ReviewerBackendSetting); }}
-                options={[
-                  { value: 'follow', label: 'Same as lead' },
-                  { value: 'claude', label: 'Claude' },
-                  { value: 'codex', label: 'Codex' },
-                ]}
-              />
-            }
-            disabled={Boolean(profileOverrideReason) || envLocked('reviewerBackend') || busyField === 'reviewerBackend'}
-            divider
-          />
           <SettingsRow
             icon={<CpuIcon />}
             label="OpenCode fallback model"
@@ -210,15 +208,43 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
                 disabled={envLocked('opencodeOrchestratorModel') || busyField === 'opencodeOrchestratorModel'}
               />
             }
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Combined answer provider"
+            disabled={envLocked('collideAggregator') || busyField === 'collideAggregator'}
+            subtitle={lockedSub('collideAggregator', 'Choose who combines the answers when the lead uses Claude + Codex.')}
+            accessory={
+              <SettingsSegmented
+                value={values.collideAggregator}
+                onChange={(next) => { updateField('collideAggregator', next as CollideAggregator); }}
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  { value: 'claude', label: 'Claude' },
+                  { value: 'codex', label: 'Codex' },
+                ]}
+              />
+            }
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Existing setup uses Claude"
+            subtitle={lockedSub('inAppOrchestratorEnabled', 'Only affects Use existing setup: on uses Claude, off uses Codex. An explicit lead provider takes precedence.')}
+            checked={values.inAppOrchestratorEnabled}
+            disabled={envLocked('inAppOrchestratorEnabled') || busyField === 'inAppOrchestratorEnabled'}
+            onToggle={(next) => { updateField('inAppOrchestratorEnabled', next); }}
+            divider
           />
       </SettingsGroup>
     </SettingsAdvanced>
-    <SettingsAdvanced label="Advanced worker setup" description="Optional launcher integration. Keep Direct unless you use Ori.">
+    <SettingsAdvanced label="Advanced worker setup" description="Optional local Codex launcher and switching providers after a usage limit.">
       <SettingsGroup>
           <SettingsRow
             icon={<RocketIcon />}
-            label="Worker launcher"
-            subtitle={carrierCompatibilityReason ?? 'Direct starts the selected tool normally. Ori uses its configured connection to launch Codex; Codex still runs the task.'}
+            label="Codex launch method"
+            subtitle={carrierCompatibilityReason ?? 'Direct starts Codex normally. Ori wraps the local Codex CLI and supplies credentials and routing. Both tools must be installed; this does not move tasks to a cloud server.'}
             accessory={
               <PickerMenu<ExecutionCarrierSelection>
                 value={values.workerExecutionCarrier ?? 'direct'}
@@ -232,7 +258,16 @@ export function ModelRoutingControls({ data, busyField, updateField }: {
             }
             disabled={busyField === 'workerExecutionCarrier'}
           />
+          <SettingsRow
+            icon={<RocketIcon />}
+            label="Worker quota fallback"
+            subtitle={lockedSub('crossHouseWorkerFallback', 'Allow a task to restart with another supported subscription provider when its worker reaches a usage limit.')}
+            checked={values.crossHouseWorkerFallback}
+            disabled={envLocked('crossHouseWorkerFallback') || busyField === 'crossHouseWorkerFallback'}
+            onToggle={(next) => { updateField('crossHouseWorkerFallback', next); }}
+          />
       </SettingsGroup>
     </SettingsAdvanced>
+    </>}
   </>);
 }

@@ -2,6 +2,7 @@
 
 /** Advanced model and Brain tuning, rendered inside Models & providers. */
 
+import { SettingsAdvanced } from './SettingsAdvanced';
 import { useState } from 'react';
 import {
   MONO_FONT_STACK,
@@ -22,7 +23,6 @@ import {
   DISPATCH_RUNTIME_OPTIONS,
   ENV_LOCKED_REASON,
   type ClassAComposer,
-  type CollideAggregator,
   type DispatchRuntime,
   type OperatorDefaults,
   type OperatorDefaultSources,
@@ -31,7 +31,6 @@ import {
 } from './dispatch-shared';
 
 // ── Minimal raw-SVG glyphs for row icon tiles ──
-
 
 function GaugeIcon() {
   return (
@@ -69,16 +68,6 @@ function BrainRowIcon() {
   );
 }
 
-function ChatIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-
-
 interface FoundersSectionProps {
   values: OperatorDefaults;
   sources: OperatorDefaultSources;
@@ -111,9 +100,8 @@ export function DispatchFoundersSection({
   return (
     <>
 
-      <section style={{ marginTop: 28 }}>
+      <SettingsAdvanced label="Thinking & task models" description="Default reasoning, task-specific routing, and prompt caching.">
         <SettingsGroup
-          header="Thinking & task models"
           footnote={<>Optional thinking, task-model, and caching overrides. Environment variables such as <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>O8_TRIAGE_MODEL</span> still win over anything set here.</>}
         >
           <SettingsRow
@@ -150,7 +138,7 @@ export function DispatchFoundersSection({
           <SettingsRow
             icon={<TargetIcon />}
             label="Targeting — triage tier"
-            subtitle={lockedSub('targetingTriage', 'Cheap tier: repo triage, rationales, trivial files')}
+            subtitle={lockedSub('targetingTriage', 'Provider and effort used to assess repositories and simpler files.')}
             accessory={
               <div style={{ display: 'flex', gap: 6 }}>
                 <PickerMenu<DispatchRuntime>
@@ -175,7 +163,7 @@ export function DispatchFoundersSection({
           <SettingsRow
             icon={<TargetIcon />}
             label="Targeting — action tier"
-            subtitle={lockedSub('targetingAction', 'Premium tier: the Dispatch button + hard-file routing')}
+            subtitle={lockedSub('targetingAction', 'Provider and effort used for targeted implementation tasks.')}
             accessory={
               <div style={{ display: 'flex', gap: 6 }}>
                 <PickerMenu<DispatchRuntime>
@@ -200,17 +188,16 @@ export function DispatchFoundersSection({
           <SettingsRow
             icon={<ZapIcon />}
             label="Prompt caching"
-            subtitle={lockedSub('promptCachingEnabled', 'Mark the Anthropic system prompt with cache_control')}
+            subtitle={lockedSub('promptCachingEnabled', 'Allow supported Anthropic requests to reuse cached prompt content.')}
             checked={values.promptCachingEnabled}
             disabled={envLocked(sources, 'promptCachingEnabled') || busyField === 'promptCachingEnabled'}
             onToggle={(next) => { updateField('promptCachingEnabled', next); }}
           />
         </SettingsGroup>
-      </section>
+      </SettingsAdvanced>
 
-      <section style={{ marginTop: 28 }}>
+      <SettingsAdvanced label="Brain advanced" description="Optional answer-model tuning, startup behavior, and worker access.">
         <SettingsGroup
-          header="Brain advanced"
           footnote="Advanced choices for repository answers and worker access to the Brain. These may use the selected provider or connected CLI quota."
         >
           <SettingsRow
@@ -226,14 +213,14 @@ export function DispatchFoundersSection({
           />
           <SettingsRow
             icon={<BrainRowIcon />}
-            label="Q&A composer"
-            subtitle={lockedSub('classAComposer', 'Class A composer for Brain answers')}
+            label="Brain answer model"
+            subtitle={lockedSub('classAComposer', 'Choose how repository answers are written when this route is available.')}
             accessory={
               <PickerMenu<ClassAComposer>
                 value={values.classAComposer}
                 options={[
                   { value: 'auto', label: 'Auto', detail: 'Choose the best ready route for each request.' },
-                  { value: 'haiku-cli', label: 'Haiku', detail: 'Free via the warm REPL pool.' },
+                  { value: 'haiku-cli', label: 'Haiku', detail: 'Uses the connected Claude CLI allowance.' },
                   { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, slower bootstrap.' },
                   { value: 'fastest', label: 'Fastest', detail: 'OpenRouter flash-lite, daily-capped.' },
                 ]}
@@ -246,34 +233,8 @@ export function DispatchFoundersSection({
           />
           <SettingsRow
             icon={<BrainRowIcon />}
-            label="Collide aggregator"
-            subtitle={lockedSub('collideAggregator', 'Who synthesizes when the Collide backend runs')}
-            accessory={
-              <SettingsSegmented
-                value={values.collideAggregator}
-                onChange={(next) => { updateField('collideAggregator', next as CollideAggregator); }}
-                options={[
-                  { value: 'auto', label: 'Auto' },
-                  { value: 'claude', label: 'Claude' },
-                  { value: 'codex', label: 'Codex' },
-                ]}
-              />
-            }
-            divider
-          />
-          <SettingsRow
-            icon={<ChatIcon />}
-            label="Legacy orchestrator toggle"
-            subtitle={lockedSub('inAppOrchestratorEnabled', 'What backend Auto follows: on = Claude REPL, off = Codex')}
-            checked={values.inAppOrchestratorEnabled}
-            disabled={envLocked(sources, 'inAppOrchestratorEnabled') || busyField === 'inAppOrchestratorEnabled'}
-            onToggle={(next) => { updateField('inAppOrchestratorEnabled', next); }}
-            divider
-          />
-          <SettingsRow
-            icon={<BrainRowIcon />}
             label="Brain uses Claude CLI"
-            subtitle={lockedSub('brainUseClaudeCli', 'Warm claude CLI answers (~2.7s Haiku), sub-billed')}
+            subtitle={lockedSub('brainUseClaudeCli', 'Use a connected Claude CLI for repository answers when that route is available; consumes its allowance.')}
             checked={values.brainUseClaudeCli}
             disabled={envLocked(sources, 'brainUseClaudeCli') || busyField === 'brainUseClaudeCli'}
             onToggle={(next) => { updateField('brainUseClaudeCli', next); }}
@@ -306,22 +267,8 @@ export function DispatchFoundersSection({
             divider
           />
 
-
-
-
-
-
-          <SettingsRow
-            icon={<TargetIcon />}
-            label="Worker quota fallback"
-            subtitle={lockedSub('crossHouseWorkerFallback', 'Redispatch capped workers sideways to the equal-tier subscription runtime')}
-            checked={values.crossHouseWorkerFallback}
-            disabled={busyField === 'crossHouseWorkerFallback'}
-            onToggle={(next) => { updateField('crossHouseWorkerFallback', next); }}
-          />
         </SettingsGroup>
-      </section>
-
+      </SettingsAdvanced>
 
     </>
   );

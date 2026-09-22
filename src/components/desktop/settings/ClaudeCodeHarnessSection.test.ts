@@ -41,10 +41,11 @@ describe('ClaudeCodeHarnessSection', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(container.textContent).toContain('Claude model connection');
+    expect(container.textContent).toContain('Claude Code connection');
     expect(container.textContent).toContain('deepseek/deepseek-v4-pro-0813');
-    expect(container.textContent).toContain('API billed');
-    expect(container.textContent).toContain('Codex subscription');
+    expect(container.textContent).toContain('bills your API key');
+    expect(container.textContent).not.toContain('Repository skills');
+    expect(container.textContent).not.toContain('Experimental');
   });
 
   it('starts the browser OAuth flow for the Codex subscription carrier', async () => {
@@ -112,8 +113,8 @@ describe('ClaudeCodeHarnessSection', () => {
 
     const options = Array.from(document.body.querySelectorAll('[role="option"]'))
       .map((option) => option.textContent);
-    expect(options).toContain('Native accountUse the existing Claude Code login or inherited gateway.');
-    expect(options).toContain('Codex subscriptionRoute Claude Code through a localhost Codex OAuth carrier.');
+    expect(options).toContain('Existing Claude connectionUse the existing Claude Code login or inherited gateway.');
+    expect(options).toContain('Codex subscription (experimental)Unofficial local compatibility connection; uses Codex subscription quota.');
     expect(options.some((option) => option?.includes('OpenRouter'))).toBe(false);
   });
 });
