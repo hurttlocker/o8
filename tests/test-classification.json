@@ -543,6 +543,12 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/antigravity-auth-smoke.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/auth-detect-claude.test.ts",
       "reasons": [
         "child-process",
@@ -1289,6 +1295,12 @@
       "reasons": [
         "child-process",
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/chat-history-auto-title-integration.test.ts",
+      "reasons": [
+        "integration"
       ]
     },
     {
@@ -2894,7 +2906,6 @@
       "reasons": [
         "child-process",
         "git-cli",
-        "network-listener",
         "real-path"
       ]
     },

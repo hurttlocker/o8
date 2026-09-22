@@ -5073,10 +5073,20 @@ function DashboardInner() {
         ) : null}
       </AnimatePresence>
 
+      {settingsTakeoverActive && (
+        <div ref={settingsPanelRef} data-mcp-scope="settings" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <Suspense fallback={<div style={{ padding: 24, color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings…</div>}>
+            <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
+          </Suspense>
+        </div>
+      )}
+      <ConfirmToastHost />
+      <DesktopCloseCoordinator />
+
       {/* ── Main Layout (horizontal) ── */}
-      <div data-mcp-scope="main-layout" style={{
+      <div data-mcp-scope="main-layout" aria-hidden={settingsTakeoverActive} inert={settingsTakeoverActive} style={{
         flex: 1,
-        display: 'flex',
+        display: settingsTakeoverActive ? 'none' : 'flex',
         overflow: 'hidden',
         minHeight: 0, // critical: allow flex children to shrink for scroll
       }}>
@@ -5355,18 +5365,6 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection === 'settings' && (
-          // Settings renders INLINE (operator ruling 2026-07-13, pre-work for
-          // the settings pass) — same page-takeover as Automations/Customize,
-          // replacing the old floating SettingsOverlay portal. The panelRef
-          // keeps useSettingsOverlayDismiss's outside-click + Escape behavior.
-          <div ref={settingsPanelRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
-              <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
-            </Suspense>
-          </div>
-        )}
-
         {activeNavSection !== 'automations' && activeNavSection !== 'customize' && (
           <div
             ref={workspaceSurfaceRef}
@@ -5610,10 +5608,6 @@ function DashboardInner() {
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
-
-      {/* ── Branded confirm / prompt / toast host (replaces native window.confirm/prompt/alert) ── */}
-      <ConfirmToastHost />
-      <DesktopCloseCoordinator />
 
       {/* ── Sidebar hover-preview trigger + drop overlay (collapsed only) ──
           When the AgentPanel column is hidden, we keep a thin invisible hot

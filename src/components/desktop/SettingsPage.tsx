@@ -24,7 +24,6 @@ import {
   MONO_FONT_STACK,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  TabButton,
   SettingsTabSectionHeader as SectionHeader,
   PlugIcon,
   KeyIcon,
@@ -39,11 +38,16 @@ import {
   GitHubIcon,
   BrainIcon,
   SETTINGS_CONTENT_MAX_WIDTH,
+  SETTINGS_WIDE_CONTENT_MAX_WIDTH,
 } from './settings/shared';
+import { SettingsNavItem } from './settings/SettingsNavItem';
+import { useSettingsSectionNavigation } from './settings/useSettingsSectionNavigation';
 import { GeneralTab } from './settings/GeneralTab';
 import type { GitHubConnectionProps } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
 import { IndexingTab } from './settings/IndexingTab';
+import { WorktreeRetentionSection } from './settings/WorktreeRetentionSection';
+import { LocalModelsTab } from './settings/LocalModelsTab';
 import { ModelsTab } from './settings/ModelsTab';
 import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
@@ -62,10 +66,10 @@ import { requestO8Capability } from '@/lib/auth/capabilities';
 
 export type { SettingsTab } from './settings/shared';
 
-function CloseSettingsIcon({ size = 14 }: { size?: number }) {
+function BackSettingsIcon({ size = 14 }: { size?: number }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.51,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z" />
+      <path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z" />
     </svg>
   );
 }
@@ -111,6 +115,8 @@ function SearchNavIcon({ size = 13 }: { size?: number }) {
 export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?: SettingsTab; onClose?: () => void }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
+  const [openNavTab, setOpenNavTab] = useState<SettingsTab | null>(null);
+  const { contentRef, navigate, notice } = useSettingsSectionNavigation(activeTab, setActiveTab);
   const { founder, plan } = useEntitlement();
   const auth = useO8Auth();
   const searchMatches = useMemo(
@@ -326,308 +332,330 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   };
 
   return (
-    <div
-      className="cortex-scroll-fade-y cortex-themed-scroll"
-      style={{
-        height: '100%',
-        overflow: 'auto',
-        paddingTop: 24,
-        paddingRight: 24,
-        paddingBottom: 24,
-        paddingLeft: 24,
-        background: 'var(--t-chat-surface-bg)',
-        color: 'var(--t-chat-surface-text)',
-        display: 'flex',
-        gap: 28,
-        fontFamily: APP_FONT_STACK,
-        position: 'relative',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
-        WebkitOverflowScrolling: 'touch',
-      } as CSSProperties}
-    >
+    <div data-settings-shell style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}>
+      <style>{`
+        [data-settings-shell], [data-settings-shell] * {
+          scrollbar-width: none !important;
+        }
+        [data-settings-shell]::-webkit-scrollbar,
+        [data-settings-shell] *::-webkit-scrollbar {
+          display: none !important;
+          width: 0 !important;
+          height: 0 !important;
+        }
+      `}</style>
       {onClose ? (
-        <button
-          type="button"
-          aria-label="Close settings"
-          title="Close settings"
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: 16,
-            right: 16,
-            zIndex: 2,
-            width: 34,
-            height: 34,
+        <header data-tauri-drag-region style={{ flexShrink: 0, paddingTop: 12, paddingRight: 24, paddingBottom: 12, paddingLeft: 24, borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+          <button
+            type="button"
+            aria-label="Back to workspace"
+            title="Back to workspace"
+            onClick={onClose}
+            style={{
+              gap: 8,
+              fontFamily: APP_FONT_STACK,
+              fontSize: 13,
+              height: 34,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-divider-subtle)',
+              background: 'var(--t-bg-card)',
+              color: 'var(--t-text-muted)',
+              cursor: 'pointer',
+              transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms, border-color 120ms',
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.background = 'var(--t-panel-hover)';
+              event.currentTarget.style.borderColor = 'var(--t-panel-border)';
+              event.currentTarget.style.color = 'var(--t-text)';
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = 'var(--t-bg-card)';
+              event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+              event.currentTarget.style.color = 'var(--t-text-muted)';
+            }}
+          >
+            <BackSettingsIcon />
+            Back to workspace
+          </button>
+        </header>
+      ) : null}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
+          paddingTop: 24,
+          paddingRight: 24,
+          paddingBottom: 24,
+          paddingLeft: 24,
+          background: 'var(--t-chat-surface-bg)',
+          color: 'var(--t-chat-surface-text)',
+          display: 'flex',
+          gap: 28,
+          fontFamily: APP_FONT_STACK,
+          position: 'relative',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+          WebkitOverflowScrolling: 'touch',
+        } as CSSProperties}
+      >
+        {/* Left sidebar — tab navigation */}
+        <div style={{
+          width: 228,
+          flexShrink: 0,
+          overflowY: 'auto', scrollbarWidth: 'none',
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          borderRight: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          paddingRight: 4,
+        }}>
+          <div style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 400,
+            color: RAMS_INK_QUIET,
+            textTransform: 'uppercase',
+            letterSpacing: '0.22em',
+            paddingTop: 16,
+            paddingRight: 14,
+            paddingBottom: 18,
+            paddingLeft: 16,
+          }}>
+            Settings
+          </div>
+          {/* Sticky settings search (Cursor parity) — filters the row registry
+              across every tab; a result jumps to its tab. */}
+          <div style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            padding: 0,
+            gap: 8,
+            marginLeft: 10,
+            marginRight: 10,
+            marginBottom: 10,
+            paddingLeft: 10,
+            paddingRight: 10,
+            height: 30,
             borderRadius: 10,
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-divider-subtle)',
-            background: 'var(--t-bg-card)',
-            color: 'var(--t-text-muted)',
-            cursor: 'pointer',
-            transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms, border-color 120ms',
-          }}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.background = 'var(--t-panel-hover)';
-            event.currentTarget.style.borderColor = 'var(--t-panel-border)';
-            event.currentTarget.style.color = 'var(--t-text)';
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.background = 'var(--t-bg-card)';
-            event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
-            event.currentTarget.style.color = 'var(--t-text-muted)';
+            background: 'var(--t-input-bg)',
+            color: RAMS_INK_QUIET,
+            flexShrink: 0,
+          }}>
+            <SearchNavIcon />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  setSearchQuery('');
+                }
+                if (event.key === 'Enter' && searchMatches.length > 0) {
+                  navigate(searchMatches[0].tab, searchMatches[0].group);
+                  setSearchQuery('');
+                }
+              }}
+              placeholder="Search settings"
+              spellCheck={false}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                border: 'none',
+                outline: 'none',
+                background: 'transparent',
+                fontFamily: APP_FONT_STACK,
+                fontSize: 12.5,
+                fontWeight: 300,
+                letterSpacing: '-0.01em',
+                color: 'var(--t-text)',
+                padding: 0,
+              }}
+            />
+          </div>
+          {searching ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto' }}>
+              {searchMatches.length === 0 ? (
+                <div style={{
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 12,
+                  fontWeight: 300,
+                  color: RAMS_INK_QUIET,
+                  paddingTop: 10,
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                }}>
+                  No settings match &ldquo;{searchQuery.trim()}&rdquo;
+                </div>
+              ) : searchMatches.map((match) => (
+                <button
+                  key={`${match.tab}:${match.group ?? ''}:${match.label}`}
+                  type="button"
+                  onClick={() => {
+                    navigate(match.tab, match.group);
+                    setSearchQuery('');
+                  }}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 2,
+                    width: '100%',
+                    paddingTop: 8,
+                    paddingRight: 12,
+                    paddingBottom: 8,
+                    paddingLeft: 14,
+                    borderRadius: 10,
+                    borderWidth: 0,
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: APP_FONT_STACK,
+                  }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 400,
+                    letterSpacing: '-0.01em',
+                    color: 'var(--t-text)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '100%',
+                  }}>
+                    {match.label}
+                  </span>
+                  <span style={{
+                    fontSize: 10.5,
+                    fontWeight: 300,
+                    letterSpacing: '-0.005em',
+                    color: RAMS_INK_QUIET,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '100%',
+                  }}>
+                    {match.tabLabel}{match.group ? ` › ${match.group}` : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+          <>
+          <SectionHeader>General</SectionHeader>
+          <SettingsNavItem label="General" icon={<GearNavIcon />} active={activeTab === 'general'} tab="general" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} tab="appearance" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} tab="voice" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Permissions" icon={<ShieldNavIcon />} active={activeTab === 'permissions'} tab="permissions" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+
+          <SectionHeader>Agents</SectionHeader>
+          <SettingsNavItem label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} tab="operator-defaults" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Models & providers" icon={<CpuNavIcon />} active={activeTab === 'models'} tab="models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+
+          <SettingsNavItem label="Local models" icon={<CpuNavIcon />} active={activeTab === 'local-models'} tab="local-models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+
+          <SectionHeader>Workspace</SectionHeader>
+          <SettingsNavItem label="Worktrees & storage" icon={<LayersIcon />} active={activeTab === 'worktrees'} tab="worktrees" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} tab="projects" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} tab="git-prs" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} tab="indexing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+
+          <SectionHeader>Connections</SectionHeader>
+            <SettingsNavItem label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} tab="api-keys" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} tab="mcp" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} tab="connections" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+
+          <SectionHeader>System</SectionHeader>
+          <SettingsNavItem label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} tab="billing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} tab="analytics" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} tab="diagnostics" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="About" icon={<InfoIcon />} active={activeTab === 'about'} tab="about" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          </>
+          )}
+          {notice ? <p role="status" style={{ fontSize: 12, lineHeight: 1.4, padding: 10, color: 'var(--t-text-secondary)' }}>{notice}</p> : null}
+        </div>
+
+        {/* Center the actual tab width, not a wide frame around narrow cards.
+            Tables and analytics retain a wider centered column. */}
+        <div
+          data-settings-content
+          ref={contentRef}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            overflowY: 'auto', scrollbarWidth: 'none',
+            scrollPaddingTop: 8,
+            display: 'grid',
+            gridTemplateColumns: `minmax(0, ${activeTab === 'projects' || activeTab === 'analytics' ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
+            alignContent: 'start',
+            justifyContent: 'center',
           }}
         >
-          <CloseSettingsIcon />
-        </button>
-      ) : null}
-      {/* Left sidebar — tab navigation */}
-      <div style={{
-        width: 200,
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        borderRight: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-        paddingRight: 4,
-      }}>
-        <div style={{
-          fontFamily: MONO_FONT_STACK,
-          fontSize: 11,
-          fontWeight: 400,
-          color: RAMS_INK_QUIET,
-          textTransform: 'uppercase',
-          letterSpacing: '0.22em',
-          paddingTop: 16,
-          paddingRight: 14,
-          paddingBottom: 18,
-          paddingLeft: 16,
-        }}>
-          Settings
+          {activeTab === 'general' && (
+            <GeneralTab onNavigateTab={setActiveTab} />
+          )}
+          {activeTab === 'local-models' && <LocalModelsTab />}
+          {activeTab === 'api-keys' && (
+            <APIKeysTab onNavigateTab={navigate} />
+          )}
+          {activeTab === 'mcp' && (
+            <MCPTab />
+          )}
+          {activeTab === 'connections' && (
+            <ConnectionsTab />
+          )}
+          {activeTab === 'operator-defaults' && (
+            <OperatorDefaultsTab onNavigateTab={navigate} />
+          )}
+          {activeTab === 'worktrees' && <WorktreeRetentionSection />}
+          {activeTab === 'projects' && (
+            <ProjectsPanel />
+          )}
+          {activeTab === 'git-prs' && (
+            <GitPrsTab {...githubConnection} />
+          )}
+          {activeTab === 'indexing' && (
+            <IndexingTab />
+          )}
+          {activeTab === 'models' && (
+            <ModelsTab onNavigateTab={navigate} />
+          )}
+          {activeTab === 'analytics' && (
+            <AnalyticsPage embedded />
+          )}
+          {activeTab === 'appearance' && (
+            <AppearanceTab />
+          )}
+          {activeTab === 'voice' && (
+            <VoiceTab />
+          )}
+          {activeTab === 'permissions' && (
+            <PermissionsTab />
+          )}
+          {activeTab === 'billing' && (
+            <BillingTab />
+          )}
+          {activeTab === 'diagnostics' && (
+            <DiagnosticsTab />
+          )}
+          {activeTab === 'about' && (
+            <AboutTab />
+          )}
         </div>
-        {/* Sticky settings search (Cursor parity) — filters the row registry
-            across every tab; a result jumps to its tab. */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginLeft: 10,
-          marginRight: 10,
-          marginBottom: 10,
-          paddingLeft: 10,
-          paddingRight: 10,
-          height: 30,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider-subtle)',
-          background: 'var(--t-input-bg)',
-          color: RAMS_INK_QUIET,
-          flexShrink: 0,
-        }}>
-          <SearchNavIcon />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.stopPropagation();
-                setSearchQuery('');
-              }
-              if (event.key === 'Enter' && searchMatches.length > 0) {
-                setActiveTab(searchMatches[0].tab);
-                setSearchQuery('');
-              }
-            }}
-            placeholder="Search settings"
-            spellCheck={false}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              border: 'none',
-              outline: 'none',
-              background: 'transparent',
-              fontFamily: APP_FONT_STACK,
-              fontSize: 12.5,
-              fontWeight: 300,
-              letterSpacing: '-0.01em',
-              color: 'var(--t-text)',
-              padding: 0,
-            }}
-          />
-        </div>
-        {searching ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto' }}>
-            {searchMatches.length === 0 ? (
-              <div style={{
-                fontFamily: APP_FONT_STACK,
-                fontSize: 12,
-                fontWeight: 300,
-                color: RAMS_INK_QUIET,
-                paddingTop: 10,
-                paddingLeft: 14,
-                paddingRight: 14,
-              }}>
-                No settings match &ldquo;{searchQuery.trim()}&rdquo;
-              </div>
-            ) : searchMatches.map((match) => (
-              <button
-                key={`${match.tab}:${match.group ?? ''}:${match.label}`}
-                type="button"
-                onClick={() => {
-                  setActiveTab(match.tab);
-                  setSearchQuery('');
-                }}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  gap: 2,
-                  width: '100%',
-                  paddingTop: 8,
-                  paddingRight: 12,
-                  paddingBottom: 8,
-                  paddingLeft: 14,
-                  borderRadius: 10,
-                  borderWidth: 0,
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontFamily: APP_FONT_STACK,
-                }}
-                onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
-                onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-              >
-                <span style={{
-                  fontSize: 13,
-                  fontWeight: 400,
-                  letterSpacing: '-0.01em',
-                  color: 'var(--t-text)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  maxWidth: '100%',
-                }}>
-                  {match.label}
-                </span>
-                <span style={{
-                  fontSize: 10.5,
-                  fontWeight: 300,
-                  letterSpacing: '-0.005em',
-                  color: RAMS_INK_QUIET,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  maxWidth: '100%',
-                }}>
-                  {match.tabLabel}{match.group ? ` › ${match.group}` : ''}
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : (
-        <>
-        <SectionHeader>General</SectionHeader>
-        <TabButton label="General" icon={<GearNavIcon />} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
-        <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
-        <TabButton label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} onClick={() => setActiveTab('voice')} />
-        <TabButton label="Permissions" icon={<ShieldNavIcon />} active={activeTab === 'permissions'} onClick={() => setActiveTab('permissions')} />
-
-        <SectionHeader>Agents</SectionHeader>
-        <TabButton label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} onClick={() => setActiveTab('operator-defaults')} />
-        <TabButton label="Models" icon={<CpuNavIcon />} active={activeTab === 'models'} onClick={() => setActiveTab('models')} />
-
-        <SectionHeader>Workspace</SectionHeader>
-        <TabButton label="Projects" icon={<LayersIcon />} active={activeTab === 'projects'} onClick={() => setActiveTab('projects')} />
-        <TabButton label="Git & PRs" icon={<GitHubIcon size={16} />} active={activeTab === 'git-prs'} onClick={() => setActiveTab('git-prs')} />
-        <TabButton label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} onClick={() => setActiveTab('indexing')} />
-
-        <SectionHeader>Connections</SectionHeader>
-        {process.env.NEXT_PUBLIC_O8_SHOW_BYOK === '1' && (
-          <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
-        )}
-        <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
-        <TabButton label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} onClick={() => setActiveTab('connections')} />
-
-        <SectionHeader>System</SectionHeader>
-        <TabButton label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} onClick={() => setActiveTab('billing')} />
-        <TabButton label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
-        <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
-        <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
-        </>
-        )}
-      </div>
-
-      {/* Right content — grid column capped at SETTINGS_CONTENT_MAX_WIDTH
-          (1400) and centered, so wide monitors render an editorial
-          margin:auto frame instead of left-aligned content with a sea of
-          cream on the right. The grid track sizing means tab bodies
-          already-styled with maxWidth: SETTINGS_CONTENT_MAX_WIDTH still
-          stretch to the full track width because grid items default to
-          justify-self: stretch. 2026-05-27. */}
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: 'grid',
-          gridTemplateColumns: `minmax(0, ${SETTINGS_CONTENT_MAX_WIDTH}px)`,
-          justifyContent: 'center',
-        }}
-      >
-        {activeTab === 'general' && (
-          <GeneralTab onNavigateTab={setActiveTab} />
-        )}
-        {activeTab === 'api-keys' && (
-          <APIKeysTab />
-        )}
-        {activeTab === 'mcp' && (
-          <MCPTab />
-        )}
-        {activeTab === 'connections' && (
-          <ConnectionsTab />
-        )}
-        {activeTab === 'operator-defaults' && (
-          <OperatorDefaultsTab />
-        )}
-        {activeTab === 'projects' && (
-          <ProjectsPanel />
-        )}
-        {activeTab === 'git-prs' && (
-          <GitPrsTab {...githubConnection} />
-        )}
-        {activeTab === 'indexing' && (
-          <IndexingTab />
-        )}
-        {activeTab === 'models' && (
-          <ModelsTab onNavigateTab={setActiveTab} />
-        )}
-        {activeTab === 'analytics' && (
-          <AnalyticsPage embedded />
-        )}
-        {activeTab === 'appearance' && (
-          <AppearanceTab />
-        )}
-        {activeTab === 'voice' && (
-          <VoiceTab />
-        )}
-        {activeTab === 'permissions' && (
-          <PermissionsTab />
-        )}
-        {activeTab === 'billing' && (
-          <BillingTab />
-        )}
-        {activeTab === 'diagnostics' && (
-          <DiagnosticsTab />
-        )}
-        {activeTab === 'about' && (
-          <AboutTab />
-        )}
       </div>
     </div>
   );

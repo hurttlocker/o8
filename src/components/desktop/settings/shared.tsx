@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
+import { RAMS_BUTTON_GEOMETRY } from './control-geometry';
 
 // ── Types ──
 
@@ -54,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'general' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'git-prs' | 'models' | 'indexing' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'permissions' | 'billing' | 'diagnostics' | 'about';
+export type SettingsTab = 'general' | 'local-models' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'worktrees' | 'git-prs' | 'models' | 'indexing' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'permissions' | 'billing' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -66,13 +67,9 @@ export const THEME_ACCENT_RING = 'var(--t-settings-accent-ring, rgba(124, 156, 2
 export const APP_FONT_STACK = 'var(--font-sans-system)';
 export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
-// Outer width cap for settings tab content. One knob.
-// 2026-05-27: bumped 1080 → 1400 so wide displays don't truncate, and the
-// right-content column in SettingsPage now centers its tab body via
-// alignItems:'center' so the leftover cream on either side reads as
-// intentional editorial breathing room (margin: auto) rather than orphan
-// empty space crammed to one side.
-export const SETTINGS_CONTENT_MAX_WIDTH = 1400;
+// Match the 620px settings cards plus equal 8px tab gutters.
+export const SETTINGS_CONTENT_MAX_WIDTH = 636;
+export const SETTINGS_WIDE_CONTENT_MAX_WIDTH = 1024;
 
 // Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.
 // Accent is palette-aware (registry.ts): deep #1D4ED8 on light paper, lighter
@@ -451,22 +448,22 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
 
 export function SectionLabel({ number, children }: { number: string; children: React.ReactNode }) {
   return (
-    <div style={{
+    <h2 data-settings-section={typeof children === 'string' ? children : undefined} style={{
       display: 'flex',
       alignItems: 'baseline',
       gap: 10,
       fontFamily: APP_FONT_STACK,
-      fontSize: 10,
-      fontWeight: 300,
-      letterSpacing: '0.14em',
-      textTransform: 'uppercase',
-      color: 'var(--t-text-secondary)',
+      fontSize: 15,
+      fontWeight: 600,
+      lineHeight: 1.4,
+      color: 'var(--t-text)',
+      margin: 0,
       marginBottom: 14,
     }}>
       <span style={{ color: RAMS_ACCENT }}>{number}</span>
       <span style={{ color: RAMS_INK_QUIET }}>—</span>
       <span>{children}</span>
-    </div>
+    </h2>
   );
 }
 
@@ -540,6 +537,7 @@ export function RamsButton({
   type = 'button',
   busy = false,
   icon,
+  width,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -548,6 +546,7 @@ export function RamsButton({
   type?: 'button' | 'submit';
   busy?: boolean;
   icon?: React.ReactNode;
+  width?: number;
 }) {
   const tone = variant === 'danger' ? '#d94f3a' : variant === 'ghost' ? 'var(--t-text-secondary)' : RAMS_ACCENT;
   const border = variant === 'ghost'
@@ -570,24 +569,13 @@ export function RamsButton({
       onClick={onClick}
       disabled={disabled || busy}
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        ...RAMS_BUTTON_GEOMETRY,
+        width,
         gap: 7,
-        height: 32,
-        paddingLeft: 14,
-        paddingRight: 14,
-        borderRadius: 9,
-        borderWidth: 1,
-        borderStyle: 'solid',
         borderColor: disabled ? RAMS_HAIRLINE_SOFT : border,
         background: bg,
         color: disabled ? RAMS_INK_QUIET : tone,
         cursor: disabled || busy ? 'default' : 'pointer',
-        fontFamily: APP_FONT_STACK,
-        fontSize: 12,
-        fontWeight: 400,
-        letterSpacing: '-0.01em',
         whiteSpace: 'nowrap',
         flexShrink: 0,
         transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',

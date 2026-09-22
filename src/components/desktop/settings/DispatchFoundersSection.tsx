@@ -1,12 +1,8 @@
 'use client';
 
-/**
- * Advanced Dispatch settings (epic #1450). Operator-owned model tiers, Brain
- * routing, and local-model controls are available to every installation;
- * founder mode only reveals experimental preview flags. Every write still goes
- * through the same gated /api/panel/operator-defaults route.
- */
+/** Advanced model and Brain tuning, rendered inside Models & providers. */
 
+import { SettingsAdvanced } from './SettingsAdvanced';
 import { useState } from 'react';
 import {
   MONO_FONT_STACK,
@@ -21,32 +17,20 @@ import {
   writeUltraEffortEnabled,
 } from '@/lib/orchestrator/thinking-preferences';
 import { SettingsGroup, SettingsRow } from './grouped';
-import { LocalModelsSection } from './LocalModelsSection';
 import {
   PickerMenu,
   THINKING_EFFORT_OPTIONS,
   DISPATCH_RUNTIME_OPTIONS,
   ENV_LOCKED_REASON,
   type ClassAComposer,
-  type CollideAggregator,
   type DispatchRuntime,
   type OperatorDefaults,
   type OperatorDefaultSources,
   type ThinkingEffort,
   type WorkersUseBrain,
-  type WorkspaceManifestPolicy,
 } from './dispatch-shared';
 
 // ── Minimal raw-SVG glyphs for row icon tiles ──
-
-function FlaskIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M10 2v7.31L4.34 19.03A2 2 0 0 0 6.07 22h11.86a2 2 0 0 0 1.73-2.97L14 9.31V2" />
-      <line x1="8.5" y1="2" x2="15.5" y2="2" />
-    </svg>
-  );
-}
 
 function GaugeIcon() {
   return (
@@ -84,70 +68,12 @@ function BrainRowIcon() {
   );
 }
 
-function ChatIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function CanvasIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M3 15l5-5 4 4 3-3 6 6" />
-    </svg>
-  );
-}
-
-function BrowserIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <line x1="2" y1="9" x2="22" y2="9" />
-    </svg>
-  );
-}
-
 interface FoundersSectionProps {
   values: OperatorDefaults;
   sources: OperatorDefaultSources;
   busyField: keyof OperatorDefaults | null;
   updateField: <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => void;
   showExperimental: boolean;
-}
-
-type UiLoopBudgetField =
-  | 'uiLoopMaxIterations'
-  | 'uiLoopMaxMinutes'
-  | 'uiLoopMaxDiffBytes'
-  | 'uiLoopMaxDiffFiles'
-  | 'uiLoopPreviewTimeoutMs';
-
-function UiLoopBudgetInput({
-  field,
-  value,
-  busyField,
-  updateField,
-}: {
-  field: UiLoopBudgetField;
-  value: number;
-  busyField: keyof OperatorDefaults | null;
-  updateField: FoundersSectionProps['updateField'];
-}) {
-  return (
-    <input
-      key={value}
-      type="number"
-      min="1"
-      step="1"
-      defaultValue={value}
-      disabled={busyField === field}
-      onBlur={(event) => { updateField(field, Number(event.currentTarget.value)); }}
-      style={{ width: 86, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-input-border)', borderRadius: 8, background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 9, paddingRight: 9, fontFamily: MONO_FONT_STACK, fontSize: 11 }}
-    />
-  );
 }
 
 function envLocked(sources: FoundersSectionProps['sources'], field: keyof OperatorDefaults): boolean {
@@ -159,7 +85,6 @@ export function DispatchFoundersSection({
   sources,
   busyField,
   updateField,
-  showExperimental,
 }: FoundersSectionProps) {
   // Client-side pref (localStorage via thinking-preferences.ts) — moved here
   // from the env-gated API Keys tab where it was unreachable (#1450 IA pass).
@@ -174,68 +99,10 @@ export function DispatchFoundersSection({
 
   return (
     <>
-      {showExperimental ? <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Experimental"
-          footnote={<>Adapters and surfaces that ship wired but hidden until they&apos;ve earned defaults. Turning a runtime off snaps any picker using it back to Codex.</>}
-        >
-          <SettingsRow
-            icon={<FlaskIcon />}
-            label="OpenCode 2 runtime"
-            subtitle={lockedSub('experimentalOpencode', 'Show OpenCode 2 in dispatch pickers')}
-            checked={values.experimentalOpencode}
-            disabled={envLocked(sources, 'experimentalOpencode') || busyField === 'experimentalOpencode'}
-            onToggle={(next) => {
-              updateField('experimentalOpencode', next);
-              if (!next && values.defaultDispatchRuntime === 'opencode') {
-                updateField('defaultDispatchRuntime', 'codex');
-              }
-            }}
-            divider
-          />
-          <SettingsRow
-            icon={<FlaskIcon />}
-            label="Gemini runtime"
-            subtitle={lockedSub('experimentalGemini', 'Show Gemini in dispatch + CLI pickers')}
-            checked={values.experimentalGemini}
-            disabled={envLocked(sources, 'experimentalGemini') || busyField === 'experimentalGemini'}
-            onToggle={(next) => {
-              updateField('experimentalGemini', next);
-              if (!next && values.defaultDispatchRuntime === 'gemini') {
-                updateField('defaultDispatchRuntime', 'codex');
-              }
-            }}
-            divider
-          />
-          {/* Casual-chat tab toggle intentionally NOT surfaced for the beta
-              (operator, 2026-07-06) — the flag still exists (experimentalChat /
-              env) but the orchestrator is the only conversational surface. */}
-          <SettingsRow
-            icon={<CanvasIcon />}
-            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>Canvas mode <ValuePill>Experimental</ValuePill></span>}
-            subtitle={lockedSub('experimentalCanvas', 'The glass canvas — voice-first fleet surface. Sole gate.')}
-            checked={values.experimentalCanvas}
-            disabled={envLocked(sources, 'experimentalCanvas') || busyField === 'experimentalCanvas'}
-            onToggle={(next) => { updateField('experimentalCanvas', next); }}
-            divider
-          />
-          {/* Glass tuning lives INSIDE the canvas (its own Appearance panel) —
-              the inline settings copy was redundant (operator, 2026-07-06). */}
-          <SettingsRow
-            icon={<BrowserIcon />}
-            label="Native browser-view"
-            subtitle={lockedSub('nativeBrowserView', 'Host-owned native window for the Browser pane (macOS)')}
-            checked={values.nativeBrowserView}
-            disabled={envLocked(sources, 'nativeBrowserView') || busyField === 'nativeBrowserView'}
-            onToggle={(next) => { updateField('nativeBrowserView', next); }}
-          />
-        </SettingsGroup>
-      </section> : null}
 
-      <section style={{ marginTop: 28 }}>
+      <SettingsAdvanced label="Thinking & task models" description="Default reasoning, task-specific routing, and prompt caching.">
         <SettingsGroup
-          header="Model tiers"
-          footnote={<>Tuning for the orchestrator&apos;s thinking budget, the Targeting Machine&apos;s triage/action tiers, and Anthropic prompt caching (saves ~90% on repeated turns). Env vars like <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>O8_TRIAGE_MODEL</span> still win over anything set here.</>}
+          footnote={<>Optional thinking, task-model, and caching overrides. Environment variables such as <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>O8_TRIAGE_MODEL</span> still win over anything set here.</>}
         >
           <SettingsRow
             icon={<GaugeIcon />}
@@ -271,7 +138,7 @@ export function DispatchFoundersSection({
           <SettingsRow
             icon={<TargetIcon />}
             label="Targeting — triage tier"
-            subtitle={lockedSub('targetingTriage', 'Cheap tier: repo triage, rationales, trivial files')}
+            subtitle={lockedSub('targetingTriage', 'Provider and effort used to assess repositories and simpler files.')}
             accessory={
               <div style={{ display: 'flex', gap: 6 }}>
                 <PickerMenu<DispatchRuntime>
@@ -296,7 +163,7 @@ export function DispatchFoundersSection({
           <SettingsRow
             icon={<TargetIcon />}
             label="Targeting — action tier"
-            subtitle={lockedSub('targetingAction', 'Premium tier: the Dispatch button + hard-file routing')}
+            subtitle={lockedSub('targetingAction', 'Provider and effort used for targeted implementation tasks.')}
             accessory={
               <div style={{ display: 'flex', gap: 6 }}>
                 <PickerMenu<DispatchRuntime>
@@ -321,18 +188,17 @@ export function DispatchFoundersSection({
           <SettingsRow
             icon={<ZapIcon />}
             label="Prompt caching"
-            subtitle={lockedSub('promptCachingEnabled', 'Mark the Anthropic system prompt with cache_control')}
+            subtitle={lockedSub('promptCachingEnabled', 'Allow supported Anthropic requests to reuse cached prompt content.')}
             checked={values.promptCachingEnabled}
             disabled={envLocked(sources, 'promptCachingEnabled') || busyField === 'promptCachingEnabled'}
             onToggle={(next) => { updateField('promptCachingEnabled', next); }}
           />
         </SettingsGroup>
-      </section>
+      </SettingsAdvanced>
 
-      <section style={{ marginTop: 28 }}>
+      <SettingsAdvanced label="Brain advanced" description="Optional answer-model tuning, startup behavior, and worker access.">
         <SettingsGroup
-          header="Brain routing"
-          footnote="The Q&A composer answers /ask questions (Haiku CLI is free via the warm REPL pool). The legacy orchestrator toggle is what backend Auto follows — Codex when off, Claude when on. Workers-use-Brain Auto gives the oracle to non-frontier models only; Codex stays lean."
+          footnote="Advanced choices for repository answers and worker access to the Brain. These may use the selected provider or connected CLI quota."
         >
           <SettingsRow
             icon={<ZapIcon />}
@@ -347,14 +213,14 @@ export function DispatchFoundersSection({
           />
           <SettingsRow
             icon={<BrainRowIcon />}
-            label="Q&A composer"
-            subtitle={lockedSub('classAComposer', 'Class A composer for Brain answers')}
+            label="Brain answer model"
+            subtitle={lockedSub('classAComposer', 'Choose how repository answers are written when this route is available.')}
             accessory={
               <PickerMenu<ClassAComposer>
                 value={values.classAComposer}
                 options={[
                   { value: 'auto', label: 'Auto', detail: 'Choose the best ready route for each request.' },
-                  { value: 'haiku-cli', label: 'Haiku', detail: 'Free via the warm REPL pool.' },
+                  { value: 'haiku-cli', label: 'Haiku', detail: 'Uses the connected Claude CLI allowance.' },
                   { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, slower bootstrap.' },
                   { value: 'fastest', label: 'Fastest', detail: 'OpenRouter flash-lite, daily-capped.' },
                 ]}
@@ -367,34 +233,8 @@ export function DispatchFoundersSection({
           />
           <SettingsRow
             icon={<BrainRowIcon />}
-            label="Collide aggregator"
-            subtitle={lockedSub('collideAggregator', 'Who synthesizes when the Collide backend runs')}
-            accessory={
-              <SettingsSegmented
-                value={values.collideAggregator}
-                onChange={(next) => { updateField('collideAggregator', next as CollideAggregator); }}
-                options={[
-                  { value: 'auto', label: 'Auto' },
-                  { value: 'claude', label: 'Claude' },
-                  { value: 'codex', label: 'Codex' },
-                ]}
-              />
-            }
-            divider
-          />
-          <SettingsRow
-            icon={<ChatIcon />}
-            label="Legacy orchestrator toggle"
-            subtitle={lockedSub('inAppOrchestratorEnabled', 'What backend Auto follows: on = Claude REPL, off = Codex')}
-            checked={values.inAppOrchestratorEnabled}
-            disabled={envLocked(sources, 'inAppOrchestratorEnabled') || busyField === 'inAppOrchestratorEnabled'}
-            onToggle={(next) => { updateField('inAppOrchestratorEnabled', next); }}
-            divider
-          />
-          <SettingsRow
-            icon={<BrainRowIcon />}
             label="Brain uses Claude CLI"
-            subtitle={lockedSub('brainUseClaudeCli', 'Warm claude CLI answers (~2.7s Haiku), sub-billed')}
+            subtitle={lockedSub('brainUseClaudeCli', 'Use a connected Claude CLI for repository answers when that route is available; consumes its allowance.')}
             checked={values.brainUseClaudeCli}
             disabled={envLocked(sources, 'brainUseClaudeCli') || busyField === 'brainUseClaudeCli'}
             onToggle={(next) => { updateField('brainUseClaudeCli', next); }}
@@ -426,86 +266,10 @@ export function DispatchFoundersSection({
             }
             divider
           />
-          <SettingsRow
-            icon={<GaugeIcon />}
-            label="UI loop iterations"
-            subtitle="Follow-up steers allowed per Design Mode packet"
-            accessory={<UiLoopBudgetInput field="uiLoopMaxIterations" value={values.uiLoopMaxIterations} busyField={busyField} updateField={updateField} />}
-            divider
-          />
-          <SettingsRow
-            icon={<GaugeIcon />}
-            label="UI loop minutes"
-            subtitle="Wall-time budget from the first Design Mode turn"
-            accessory={<UiLoopBudgetInput field="uiLoopMaxMinutes" value={values.uiLoopMaxMinutes} busyField={busyField} updateField={updateField} />}
-            divider
-          />
-          <SettingsRow
-            icon={<GaugeIcon />}
-            label="UI loop diff bytes"
-            subtitle="Maximum current packet diff size"
-            accessory={<UiLoopBudgetInput field="uiLoopMaxDiffBytes" value={values.uiLoopMaxDiffBytes} busyField={busyField} updateField={updateField} />}
-            divider
-          />
-          <SettingsRow
-            icon={<GaugeIcon />}
-            label="UI loop diff files"
-            subtitle="Maximum files in the current packet diff"
-            accessory={<UiLoopBudgetInput field="uiLoopMaxDiffFiles" value={values.uiLoopMaxDiffFiles} busyField={busyField} updateField={updateField} />}
-            divider
-          />
-          <SettingsRow
-            icon={<GaugeIcon />}
-            label="UI loop preview timeout"
-            subtitle="Milliseconds to wait for a preview to become ready"
-            accessory={<UiLoopBudgetInput field="uiLoopPreviewTimeoutMs" value={values.uiLoopPreviewTimeoutMs} busyField={busyField} updateField={updateField} />}
-            divider
-          />
-          <SettingsRow
-            icon={<TargetIcon />}
-            label="Workspace manifest execution"
-            subtitle={lockedSub('workspaceManifestPolicy', 'Gate checked-in setup commands before packet launch')}
-            accessory={
-              <SettingsSegmented
-                value={values.workspaceManifestPolicy}
-                onChange={(next) => { updateField('workspaceManifestPolicy', next as WorkspaceManifestPolicy); }}
-                options={[
-                  { value: 'disabled', label: 'Disabled' },
-                  { value: 'one-approval', label: 'Approve once' },
-                  { value: 'auto', label: 'Auto' },
-                ]}
-              />
-            }
-            divider
-          />
-          <SettingsRow
-            icon={<TargetIcon />}
-            label="Worker quota fallback"
-            subtitle={lockedSub('crossHouseWorkerFallback', 'Redispatch capped workers sideways to the equal-tier subscription runtime')}
-            checked={values.crossHouseWorkerFallback}
-            disabled={busyField === 'crossHouseWorkerFallback'}
-            onToggle={(next) => { updateField('crossHouseWorkerFallback', next); }}
-          />
-        </SettingsGroup>
-      </section>
 
-      <LocalModelsSection
-        values={{
-          defaultDispatchModel: values.defaultDispatchModel,
-          localInferenceBaseUrl: values.localInferenceBaseUrl,
-          localEmbedModel: values.localEmbedModel,
-          localChatModel: values.localChatModel,
-        }}
-        sources={{
-          defaultDispatchModel: sources.defaultDispatchModel,
-          localInferenceBaseUrl: sources.localInferenceBaseUrl,
-          localEmbedModel: sources.localEmbedModel,
-          localChatModel: sources.localChatModel,
-        }}
-        busyField={busyField}
-        envDisabledReason={ENV_LOCKED_REASON}
-        onCommit={(field, value) => { updateField(field, value); }}
-      />
+        </SettingsGroup>
+      </SettingsAdvanced>
+
     </>
   );
 }

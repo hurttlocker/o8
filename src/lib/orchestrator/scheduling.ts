@@ -516,13 +516,10 @@ export async function runDispatchTick(
     }),
   };
 
-  // #380 — Predicted-file overlap is now ADVISORY ONLY by default. The dispatch
-  // loop fans every wave packet out in parallel; conflicts get resolved at
-  // rebase time (the merge gate already enforces clean rebases). This keeps
-  // parallelism a root behavior so the orchestrator can still merge while
-  // codex packets work in their isolated worktrees.
-  // Set O8_STRICT_OVERLAP_GATE=1 (or flip Settings → Dispatch & Supervision →
-  // Overlap gate to "strict") to restore the old serializing behavior.
+  // Strict is the default: hold predicted file overlaps with active tasks or
+  // earlier tasks in this wave. Advisory allows parallel work and leaves
+  // conflicts to the clean-rebase merge gate. Saved settings and the
+  // O8_STRICT_OVERLAP_GATE environment override still take precedence.
   const overlapGate = resolveOverlapGateSync();
   const activePackets = nextState.packets.filter((p) => p.status === 'running' || p.status === 'launching');
   const wavePackets = getDispatchableWave(nextState.packets);

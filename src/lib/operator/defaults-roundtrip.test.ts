@@ -27,7 +27,7 @@ const { assertRoutingTomlCompatibility } = await import('./routing-compatibility
  */
 const NON_DEFAULT_UPDATE = {
   parallelCap: 3,
-  overlapGate: 'strict',
+  overlapGate: 'advisory',
   healBotEnabled: false,
   supervisorAutoEscalate: true,
   broadcastCommentary: 'interval',
