@@ -216,7 +216,7 @@ export interface AgentPanelProps {
   onCreateWorkspaceChat?: () => void;
   onCreateWorkspaceTerminal?: () => void;
   onOpenCommandPalette?: () => void;
-  onOpenProjectManagement?: () => void;
+  onOpenProjectManagement?: (projectId?: string) => void;
   onOpenSettings?: () => void;
   /** Pair-mobile, rendered on the account row beside the gear (Q 2026-07-16). */
   onOpenMobilePairing?: () => void;

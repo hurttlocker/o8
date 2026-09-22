@@ -717,6 +717,7 @@ function DashboardInner() {
 
   // ── Grouped state hooks ──
   const uiChrome = useUIChrome();
+  const [projectLibraryRequest, setProjectLibraryRequest] = useState<{ projectId: string | null; revision: number }>({ projectId: null, revision: 0 });
   const {
     activeNavSection, setActiveNavSection,
     settingsInitialTab,
@@ -4773,7 +4774,7 @@ function DashboardInner() {
       onCreateWorkspaceChat={() => { leaveNavTakeover(); handleCreateWorkspaceChat(); }}
       onCreateWorkspaceTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
       onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}
-      onOpenProjectManagement={() => { leftPanelFocus.clearFocus(); setActiveNavSection('projects'); }}
+      onOpenProjectManagement={(projectId) => { leftPanelFocus.clearFocus(); setProjectLibraryRequest((request) => ({ projectId: projectId ?? null, revision: request.revision + 1 })); setActiveNavSection('projects'); }}
       onOpenSettings={toggleSettingsOverlay}
       onOpenMobilePairing={openMobilePairing}
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
@@ -5361,7 +5362,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection === 'projects' ? <ProjectsPage onClose={() => setActiveNavSection('agents')} /> : null}
+        {activeNavSection === 'projects' ? <ProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /> : null}
         <RetainedCustomizeView active={activeNavSection === 'customize'}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading customize…</div>}>
               <LazyCustomizePage
