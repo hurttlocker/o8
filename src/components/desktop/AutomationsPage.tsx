@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AutomationEditor } from './automations-page/AutomationEditor';
 import { AutomationListRow } from './automations-page/AutomationRow';
+import { ConnectedAgentAutomations } from './automations-page/ConnectedAgentAutomations';
 import type {
   AutomationRecord,
   AutomationScope,
@@ -200,6 +201,7 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
   const [scope, setScope] = useState<AutomationScope>('mine');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<AutomationRecord | null>(null);
+  const [connectedActiveCount, setConnectedActiveCount] = useState(0);
 
   const fetchRows = useCallback(async () => {
     try {
@@ -384,7 +386,7 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', whiteSpace: 'nowrap' }}>
-              {activeCount} active
+              {activeCount + connectedActiveCount} active
             </span>
             <PrimaryButton onClick={handleNew}>New automation</PrimaryButton>
             {onClose ? (
@@ -455,6 +457,8 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
             </TruncatedRows>
           </div>
         )}
+
+        {scope === 'mine' ? <ConnectedAgentAutomations onActiveCountChange={setConnectedActiveCount} /> : null}
 
         <div style={{ paddingTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
           Automations refresh every 15 seconds while Mine is open.
