@@ -29,6 +29,10 @@ function riskLegend(referee: ApprovalReferee): string {
   return legend[String(level)] ?? '';
 }
 
+export function refereeRiskSummary(referee: ApprovalReferee): string {
+  return riskLegend(referee).split(':')[0]?.trim() || 'See details';
+}
+
 function flagLabels(referee: ApprovalReferee): string[] {
   const flags: string[] = [];
   if (referee.truncated) flags.push('diff truncated');

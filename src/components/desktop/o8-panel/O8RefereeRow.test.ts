@@ -107,13 +107,14 @@ describe('merge approval card', () => {
       policyRuleId: 'lane-merge',
       risk: 'high',
       metadata: { Packet: 'pkt-internal', Lane: 'lane-internal' },
-      referee,
+      referee: { ...referee, answers: { ...referee.answers, risk: { ...referee.answers.risk, score: 2 } } },
     }));
     const visible = text(markup);
 
     expect(visible).toContain('Merge paused: review these changes before approving.');
     expect(visible).toContain('No approved review is recorded for this exact revision.');
     expect(visible).toContain('Approve merge');
+    expect(visible).toContain('Advisory review: Moderate · Details');
     expect(markup).toContain('<details');
     expect(markup).not.toContain('<details open');
     expect(markup.indexOf('No approved review')).toBeLessThan(markup.indexOf('<details'));

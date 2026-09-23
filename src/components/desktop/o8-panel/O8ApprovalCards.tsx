@@ -4,7 +4,7 @@ import type { CSSProperties } from 'react';
 import type { ApprovalRecord, ApprovalRisk } from '@/lib/approvals/types';
 import { isGateApprovalRow } from '@/lib/approvals/gating';
 import { composeApprovalCardCopy } from '@/lib/inbox/card-copy';
-import { O8RefereeRow } from './O8RefereeRow';
+import { O8RefereeRow, refereeRiskSummary } from './O8RefereeRow';
 
 type ApprovalAction = 'approve' | 'reject';
 
@@ -231,7 +231,7 @@ function ApprovalRequestCard({
 
       <details style={{ marginBottom: 9, color: 'var(--t-text-muted)' }}>
         <summary style={{ cursor: 'pointer', fontSize: 10.5, fontWeight: 350, color: 'var(--t-text-secondary)' }}>
-          Request details{approval.referee ? ' and advisory review' : ''}
+          {approval.referee ? `Advisory review: ${refereeRiskSummary(approval.referee)} · Details` : 'Request details'}
         </summary>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, paddingLeft: 12 }}>
           <div style={{ fontSize: 10, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{copy.subline}</div>
