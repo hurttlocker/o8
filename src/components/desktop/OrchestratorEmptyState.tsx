@@ -16,15 +16,12 @@
  * first.
  */
 
-import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Computer as IconoirComputer,
-  Folder as IconoirFolder,
   FolderPlus as IconoirFolderPlus,
   GitBranch as IconoirGitBranch,
-  InputSearch as IconoirInputSearch,
-  Plus as IconoirPlus,
 } from 'iconoir-react';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { OrchestratorProjectPicker } from './orchestrator/OrchestratorProjectPicker';
@@ -113,19 +110,18 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
     <div
       style={{
         display: 'flex',
-        flex: 1,
+        flex: 'none',
         minHeight: 0,
-        // Center the title + quick-actions in the list area on BOTH axes with
-        // plain flexbox. The composer rests at the bottom of the column (no
-        // translate lift), so the empty state reads: centered prompt +
-        // suggestions, composer below. Pure flex centering reflows correctly at
-        // any workspace size — this replaces the old `28cqh` paddingTop +
-        // composer `translateY` dance that overlapped whenever the panel resized.
+        minWidth: 0,
+        width: '100%',
+        boxSizing: 'border-box',
+        // The transcript and composer now form one centered empty-state stack.
+        // Natural height keeps the prompt just above the ready composer.
         alignItems: 'center',
         justifyContent: 'center',
         paddingTop: 24,
         paddingRight: 24,
-        paddingBottom: 24,
+        paddingBottom: 12,
         paddingLeft: 24,
       }}
     >
@@ -137,6 +133,7 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
           gap: 14,
           width: '100%',
           maxWidth: 640,
+          minWidth: 0,
         }}
       >
         <h1
@@ -161,16 +158,10 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
           {title}
         </h1>
 
-        {/* Quick action pills sit RIGHT under the title, ABOVE the
-            composer (per operator pass 2026-05-27). The composer
-            lifts up via -32cqh and lands just below this block, so
-            the visual stack reads: title → suggestions → composer. */}
+        {/* Suggestions remain between the prompt and ready composer. */}
         <QuickActionPills onActionClick={onActionClick} />
 
-        {/* Run-context chips (project · worktree · branch) moved UP here
-            from below the composer (operator, 2026-07-06) — down there
-            they collided with the bottom status bar. The stack reads:
-            title → suggestions → context chips → composer. */}
+        {/* Worktree and branch intent remain visible before the first send. */}
         <div style={{ marginTop: 10 }}>
           <OrchestratorComposerBelow
             worktreeMode={props.worktreeMode}
@@ -178,12 +169,6 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
             branch={props.branch}
             repoPath={repoPath}
             onBranchChange={props.onBranchChange}
-            onActionClick={onActionClick}
-            repoLabel={repoLabel}
-            workspaceTargets={workspaceTargets}
-            onSelectProject={props.onSelectProject}
-            onAddProject={onAddProject}
-            onWorkWithoutProject={props.onWorkWithoutProject}
           />
         </div>
       </div>
@@ -396,10 +381,8 @@ export const OrchestratorEmptyState = memo(OrchestratorEmptyStateBase);
 
 /**
  * OrchestratorComposerBelow — the Worktree / Branch / Kind chip row
- * that renders BELOW the composer input on the compose-first empty
- * state (Antigravity / Cortex pattern). The Project chip stays above
- * the composer; these three sit under it, so the operator's eye flows
- * title → project → composer → run-context.
+ * that renders above the composer in the compose-first empty state.
+ * Repository selection now lives in the row directly beneath the composer.
  */
 interface OrchestratorComposerBelowProps {
   worktreeMode: WorktreeMode;
@@ -407,14 +390,6 @@ interface OrchestratorComposerBelowProps {
   branch: string;
   repoPath: string | null;
   onBranchChange?: (branch: string) => void;
-  onActionClick: (prompt: string) => void;
-  // Project chip (moved here from the heading row per operator
-  // request 2026-05-27 — sits to the right of Worktree).
-  repoLabel?: string | null;
-  workspaceTargets?: OrchestratorWorkspaceTarget[];
-  onSelectProject?: (target: OrchestratorWorkspaceTarget) => void;
-  onAddProject?: (mode?: 'scratch' | 'existing') => void;
-  onWorkWithoutProject?: () => void;
 }
 
 // Below this available width the chip row collapses every chip to an
@@ -462,17 +437,6 @@ function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
           gap: 8,
         }}
       >
-        {props.workspaceTargets ? (
-          <ProjectChip
-            label={props.repoPath === '~' ? '~' : (props.repoLabel ?? 'Choose repository')}
-            workspaceTargets={props.workspaceTargets}
-            selectedRepoPath={props.repoPath}
-            onSelectProject={props.onSelectProject}
-            onAddProject={props.onAddProject}
-            onWorkWithoutProject={props.onWorkWithoutProject}
-            compact={compact}
-          />
-        ) : null}
         <WorktreeChip mode={props.worktreeMode} onChange={props.onWorktreeModeChange} compact={compact} />
         {/* Branch chip is adaptive: only shown when starting in a NEW
             worktree (where the branch is the base for the new tree).
@@ -731,192 +695,6 @@ function PopoverItem({
       ) : null}
       {trailing}
     </button>
-  );
-}
-
-function PopoverDivider() {
-  return (
-    <div
-      aria-hidden
-      style={{
-        height: 1,
-        background: 'var(--t-divider-subtle)',
-        marginTop: 4,
-        marginBottom: 4,
-        marginLeft: 8,
-        marginRight: 8,
-      }}
-    />
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────────────
- * Project chip + popover
- * ────────────────────────────────────────────────────────────────────── */
-
-function ProjectChip({
-  label,
-  workspaceTargets,
-  selectedRepoPath,
-  onSelectProject,
-  onAddProject,
-  onWorkWithoutProject,
-  compact,
-}: {
-  label: string;
-  workspaceTargets: OrchestratorWorkspaceTarget[];
-  selectedRepoPath: string | null;
-  onSelectProject?: (target: OrchestratorWorkspaceTarget) => void;
-  onAddProject?: (mode?: 'scratch' | 'existing') => void;
-  onWorkWithoutProject?: () => void;
-  compact?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const searchId = useId();
-
-  const close = () => { setOpen(false); setQuery(''); };
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return workspaceTargets;
-    return workspaceTargets.filter((target) => (
-      target.repoName.toLowerCase().includes(q) || target.localPath.toLowerCase().includes(q)
-    ));
-  }, [query, workspaceTargets]);
-
-  return (
-    <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-flex' }}>
-      <ChipShell
-        icon={<IconoirFolder width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-        label={label}
-        onClick={() => { if (open) close(); else setOpen(true); }}
-        open={open}
-        ariaLabel="Choose repository"
-        compact={compact}
-      />
-      <ChipPopover open={open} onClose={close} anchorRef={wrapperRef}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 8,
-            paddingBottom: 4,
-            paddingLeft: 12,
-            paddingRight: 12,
-          }}
-        >
-          <IconoirInputSearch width={12} height={12} color="var(--t-text-faint)" strokeWidth={1.6} />
-          <input
-            id={searchId}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search repositories"
-            autoFocus
-            style={{
-              flex: 1,
-              minWidth: 0,
-              background: 'transparent',
-              borderWidth: 0,
-              outline: 'none',
-              color: 'var(--t-text)',
-              fontFamily: 'inherit',
-              fontSize: 12.5,
-              padding: 0,
-            }}
-          />
-        </div>
-        <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-          {filtered.map((target) => (
-            <PopoverItem
-              key={target.id}
-              icon={<IconoirFolder width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-              label={target.repoName}
-              selected={target.localPath === selectedRepoPath}
-              onClick={() => {
-                onSelectProject?.(target);
-                close();
-              }}
-            />
-          ))}
-          {filtered.length === 0 ? (
-            <div style={{ padding: 12, color: 'var(--t-text-faint)', fontSize: 12 }}>
-              No repositories match.
-            </div>
-          ) : null}
-        </div>
-        <PopoverDivider />
-        <div
-          style={{ position: 'relative' }}
-          onMouseEnter={() => setAddOpen(true)}
-          onMouseLeave={() => setAddOpen(false)}
-        >
-          <PopoverItem
-            icon={<IconoirFolderPlus width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-            label="Add repository"
-            onClick={() => setAddOpen((v) => !v)}
-            trailing={(
-              <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ color: 'var(--t-text-faint)' }}>
-                <path d="M9 6l6 6-6 6" />
-              </svg>
-            )}
-          />
-          {addOpen ? (
-            <div
-              role="menu"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: '100%',
-                marginLeft: 4,
-                minWidth: 200,
-                background: 'var(--t-popover-surface)',
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'var(--t-divider)',
-                borderRadius: 10,
-                boxShadow: '0 12px 32px rgba(0, 0, 0, 0.22)',
-                paddingTop: 4,
-                paddingBottom: 4,
-                zIndex: 70,
-                fontFamily: 'var(--font-sans-system)',
-              }}
-            >
-              <PopoverItem
-                icon={<IconoirPlus width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-                label="Start from scratch"
-                onClick={() => {
-                  onAddProject?.('scratch');
-                  setAddOpen(false);
-                  close();
-                }}
-              />
-              <PopoverItem
-                icon={<IconoirFolder width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-                label="Use an existing folder"
-                onClick={() => {
-                  onAddProject?.('existing');
-                  setAddOpen(false);
-                  close();
-                }}
-              />
-            </div>
-          ) : null}
-        </div>
-        <PopoverItem
-          icon={<IconoirFolder width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-          label="Work without a repository"
-          destructive
-          onClick={() => {
-            onWorkWithoutProject?.();
-            close();
-          }}
-        />
-      </ChipPopover>
-    </div>
   );
 }
 

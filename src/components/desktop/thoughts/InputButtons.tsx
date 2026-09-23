@@ -159,16 +159,18 @@ function compactRepoPath(path: string): string {
 const REPO_TARGET_MENU_WIDTH = 320;
 const REPO_TARGET_MENU_HEIGHT = 280;
 
-function RepoTargetChip({
+export function RepoTargetChip({
   repoLabel,
   workspaceTargets,
   selectedRepoPath,
   onSelectRepoPath,
+  onAddProject,
 }: {
   repoLabel?: string | null;
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
+  onAddProject?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -210,11 +212,11 @@ function RepoTargetChip({
     () => targets.find((target) => target.localPath === selectedRepoPath) ?? null,
     [selectedRepoPath, targets],
   );
-  const label = selectedTarget?.label
+  const label = selectedRepoPath === '~' ? 'Work in a project' : selectedTarget?.label
     ?? repoLabel
     ?? repoPathLabel(selectedRepoPath)
-    ?? (targets[0]?.label ?? null);
-  const canSelect = targets.length > 0 && Boolean(onSelectRepoPath);
+    ?? 'Work in a project';
+  const canSelect = (targets.length > 0 && Boolean(onSelectRepoPath)) || Boolean(onAddProject);
   const showingAffordance = canSelect && (hovered || focused || open);
 
   if (!label) return null;
@@ -391,6 +393,11 @@ function RepoTargetChip({
               </div>
             );
           })}
+          {onAddProject ? (
+            <button type="button" role="option" aria-selected={false} onClick={() => { onAddProject(); setOpen(false); }} style={{ width: '100%', paddingTop: 8, paddingRight: 9, paddingBottom: 8, paddingLeft: 12, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', textAlign: 'left', fontSize: 11.5, fontFamily: 'var(--font-sans-system)' }}>
+              Add repository…
+            </button>
+          ) : null}
         </div>
       </ComposerPopover>
     </div>

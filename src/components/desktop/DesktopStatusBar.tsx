@@ -79,6 +79,7 @@ function DesktopStatusBarBase({
   // Automations takeover) → fall
   // back to the column-width centering.
   const [composerCenterX, setComposerCenterX] = useState<number | null>(null);
+  const [composerSlot, setComposerSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let raf = 0;
@@ -94,6 +95,8 @@ function DesktopStatusBarBase({
       const rect = el?.getBoundingClientRect();
       const next = rect && rect.width > 0 ? Math.round(rect.left + rect.width / 2) : null;
       setComposerCenterX((prev) => (prev === next ? prev : next));
+      const slot = el?.closest<HTMLElement>('[data-o8-composer-root]')?.querySelector<HTMLElement>('[data-o8-composer-status-slot]') ?? null;
+      setComposerSlot((prev) => prev === slot ? prev : slot);
     };
     const schedule = () => {
       window.cancelAnimationFrame(raf);
@@ -109,6 +112,20 @@ function DesktopStatusBarBase({
       unsubscribe();
     };
   }, []);
+
+  if (composerSlot) {
+    return createPortal(
+      <div data-o8-composer-chrome="" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        <MergeBeacon parked={parkedLanes} compact={compact} onOpenNeedsReviewLane={onOpenReviewLane} onOpenAwaitingMerge={onOpenAwaitingMerge} />
+        {repoName ? <MergeActionCluster branchName={branchName} repoName={repoName} repoRemoteUrl={repoRemoteUrl} defaultBranch={defaultBranch} compact={compact} /> : null}
+        {!compact && onToggleBottomPanel ? <StatusBottomPanelControl active={bottomPanelVisible} onToggle={onToggleBottomPanel} onOpenSurface={onOpenBottomPanelSurface} /> : null}
+        {!compact && overrideActive ? <ViewAsFreeIndicator palette="chrome" /> : null}
+        {!compact ? <SymonOrbStatusLine /> : null}
+        {!compact && onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
+      </div>,
+      composerSlot,
+    );
+  }
 
   // Three-column footer that mirrors the dashboard layout above. Left section
   // takes the AgentPanel's exact width, right section takes the right-panel's
