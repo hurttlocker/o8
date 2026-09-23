@@ -111,7 +111,7 @@ export function SymonIMessageAccessSection() {
                 paddingBottom: 12,
                 paddingLeft: 14,
               }}>
-                <p style={{ margin: 0, marginBottom: 10, color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
+                <p style={{ marginTop: 0, marginRight: 0, marginBottom: 10, marginLeft: 0, color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
                   Give these approved members the same Symon tool access you have on this Mac?
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>

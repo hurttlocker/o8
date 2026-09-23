@@ -1,6 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -42,6 +44,21 @@ function request(method: 'GET' | 'POST', body?: object): NextRequest {
   });
 }
 
+function routedGroup(): { shared: boolean; conversationId: string } {
+  const pluginUrl = pathToFileURL(join(process.cwd(), 'integrations/openclaw-symon-imessage/core.mjs')).href;
+  const script = `
+    const { readBridgeConfig, routeFor } = await import(process.argv[1]);
+    const config = readBridgeConfig(process.argv[2]);
+    const result = routeFor({ isGroup: true }, {
+      channelId: 'imessage', senderId: '+15555550101', conversationId: 'imessage:group:68',
+    }, config, { liveGroupMembers: () => config.groupMembers['68'] });
+    console.log(JSON.stringify(result));
+  `;
+  return JSON.parse(execFileSync(process.execPath, [
+    '--input-type=module', '-e', script, pluginUrl, configPath,
+  ], { encoding: 'utf8', timeout: 5_000 })) as { shared: boolean; conversationId: string };
+}
+
 it('grants exactly the verified group members through an authenticated persisted setting', async () => {
   const initial = await GET(request('GET'));
   const initialJson = await initial.json() as { groups: Array<{ memberSuffixes: string[]; fullAccess: boolean; approvalVersion: string }> };
@@ -55,12 +72,14 @@ it('grants exactly the verified group members through an authenticated persisted
   expect((await granted.json()).group.fullAccess).toBe(true);
   const saved = JSON.parse(readFileSync(configPath, 'utf8')) as { groupFullAccess: Record<string, string[]> };
   expect(saved.groupFullAccess['68']).toEqual(['+15555550101', '+15555550102']);
+  expect(routedGroup()).toMatchObject({ shared: false, conversationId: 'full-imessage:imessage:group:68' });
 
   const revoked = await POST(request('POST', { groupId: '68', fullAccess: false }));
   expect(revoked.status).toBe(200);
   expect((await revoked.json()).group.fullAccess).toBe(false);
   const after = JSON.parse(readFileSync(configPath, 'utf8')) as { groupFullAccess: Record<string, string[]> };
   expect(after.groupFullAccess['68']).toBeUndefined();
+  expect(routedGroup()).toMatchObject({ shared: true, conversationId: 'shared-imessage:imessage:group:68' });
 });
 
 it('rejects unconfigured groups and unauthenticated callers', async () => {
