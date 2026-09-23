@@ -18,6 +18,7 @@ interface AccessResponse {
   ok: boolean;
   configured?: boolean;
   enabled?: boolean;
+  directSenderSuffix?: string | null;
   groups?: GroupAccess[];
   group?: GroupAccess;
   error?: string;
@@ -27,6 +28,7 @@ export function SymonIMessageAccessSection() {
   const [groups, setGroups] = useState<GroupAccess[]>([]);
   const [configured, setConfigured] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [directSenderSuffix, setDirectSenderSuffix] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +42,7 @@ export function SymonIMessageAccessSection() {
         if (cancelled) return;
         setConfigured(data.configured === true);
         setEnabled(data.enabled === true);
+        setDirectSenderSuffix(data.directSenderSuffix ?? null);
         setGroups(data.groups ?? []);
       })
       .catch(() => { if (!cancelled) setError('Could not read iMessage group access.'); });
@@ -112,7 +115,9 @@ export function SymonIMessageAccessSection() {
         <SettingsRow
           icon={<Smartphone size={14} />}
           label="Allow Symon on iMessage"
-          subtitle={enabled ? 'Symon is available in approved chats' : 'Symon will not reply to iMessage chats'}
+          subtitle={directSenderSuffix
+            ? `${enabled ? 'On' : 'Off'} · Your approved direct number ends ${directSenderSuffix}`
+            : enabled ? 'Symon is available in approved chats' : 'Symon will not reply to iMessage chats'}
           checked={enabled}
           onToggle={(next) => { void saveEnabled(next); }}
           disabled={busyId !== null}
