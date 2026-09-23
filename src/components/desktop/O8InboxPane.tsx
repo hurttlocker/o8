@@ -418,10 +418,10 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
           Governance
         </div>
         <div style={{ fontSize: 15, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)', marginBottom: 3 }}>
-          Incident Queue
+          Needs Attention
         </div>
         <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 6 }}>
-          Approval requests and deduped agent failures that still need operator attention.
+          Approvals, follow-ups, and agent failures that need your attention.
         </div>
         {(approvals.length + humanRequired.length + escalated.length + pending.length + healing.length) > 0 ? (
           <div style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.02em', color: 'var(--t-text-faint)', marginBottom: 10 }}>
