@@ -154,7 +154,7 @@ export function ModeChip({
             paddingBottom: 6,
             paddingLeft: 6,
             borderRadius: 12,
-            background: 'var(--t-panel-solid, #ffffff)',
+            background: 'var(--t-popover-surface)',
             border: '1px solid var(--t-border, rgba(15,23,42,0.12))',
             boxShadow: '0 18px 42px rgba(15, 23, 42, 0.16)',
             fontFamily: FONT_FAMILY,

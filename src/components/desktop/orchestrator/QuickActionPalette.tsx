@@ -126,7 +126,7 @@ export function QuickActionPalette({ open, onClose, onPick }: QuickActionPalette
   const paletteStyle: CSSProperties = {
     width: 480,
     maxWidth: 'calc(100vw - 48px)',
-    background: 'var(--t-bg-card)',
+    background: 'var(--t-popover-surface)',
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: 'var(--t-border-subtle, var(--t-border))',

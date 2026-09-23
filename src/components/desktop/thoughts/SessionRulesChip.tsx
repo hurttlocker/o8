@@ -399,7 +399,7 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-border)',
-            background: 'var(--t-panel)',
+            background: 'var(--t-popover-surface)',
             backdropFilter: 'blur(18px) saturate(1.3)',
             boxShadow: 'var(--t-panel-shadow)',
             display: 'flex',

@@ -762,7 +762,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 right: 0,
                 width: 320,
                 borderRadius: 14,
-                background: 'var(--t-panel)',
+                background: 'var(--t-popover-surface)',
                 backdropFilter: 'blur(24px) saturate(1.6)',
                 WebkitBackdropFilter: 'blur(24px) saturate(1.6)',
                 border: '1px solid var(--t-divider)',

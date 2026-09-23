@@ -244,7 +244,7 @@ function MergeBeaconBase({
             borderStyle: 'solid',
             borderColor: 'var(--t-input-border)',
             borderRadius: 8,
-            background: 'var(--t-panel)',
+            background: 'var(--t-popover-surface)',
             boxShadow: 'var(--t-shadow-popover)',
             overflowY: 'auto',
             overflowX: 'hidden',

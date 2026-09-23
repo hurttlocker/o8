@@ -255,7 +255,7 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
         left: Math.max(8, Math.min(anchorLeft, window.innerWidth - popoverWidth - 8)),
         bottom: anchorBottom,
         width: popoverWidth,
-        background: 'var(--t-panel-solid, #ffffff)',
+        background: 'var(--t-popover-surface)',
         backdropFilter: 'saturate(140%) blur(18px)',
         WebkitBackdropFilter: 'saturate(140%) blur(18px)',
         color: 'var(--t-text)',

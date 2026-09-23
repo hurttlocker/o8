@@ -540,7 +540,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
                 bottom: 'calc(100% + 6px)',
                 right: 0,
                 minWidth: 240,
-                background: 'var(--t-panel-solid)',
+                background: 'var(--t-popover-surface)',
                 border: '1px solid var(--t-panel-border)',
                 borderRadius: 10,
                 boxShadow: 'var(--t-panel-shadow)',

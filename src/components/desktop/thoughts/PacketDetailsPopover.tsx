@@ -183,7 +183,7 @@ export function PacketDetailsPopover({ packet, anchorRect, onClose }: PacketDeta
         maxHeight: POPOVER_MAX_HEIGHT,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--t-bg-card)',
+        background: 'var(--t-popover-surface)',
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: 'var(--t-border-subtle)',

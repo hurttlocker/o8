@@ -154,7 +154,7 @@ function PickerPopover({
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: RAMS_HAIRLINE,
-            background: 'var(--t-panel-solid, var(--t-panel))',
+            background: 'var(--t-popover-surface)',
             boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
           }}
         >

@@ -382,7 +382,7 @@ function AgentStatusHoverBase({
         padding: '14px 16px 12px',
         borderRadius: 12,
         border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-panel-solid)',
+        background: 'var(--t-popover-surface)',
         boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
         color: 'var(--t-text)',
         pointerEvents: 'auto',

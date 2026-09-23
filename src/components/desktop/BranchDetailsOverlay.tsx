@@ -74,10 +74,6 @@ export interface BranchDetailsOverlayProps {
 
 const OVERLAY_WIDTH = 304;
 const OVERLAY_MARGIN = 8;
-/** Pulls the card off the workspace card's top + right edges so its shadow has
- *  room to land on those sides instead of dying flush against them, and the card
- *  reads as floating on all four (Q 2026-07-16). */
-const OVERLAY_EDGE_GAP = 7;
 const OVERLAY_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 /**
@@ -121,8 +117,10 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
 
   const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight;
-  const top = Math.max(OVERLAY_MARGIN, anchorRect.top) + OVERLAY_EDGE_GAP;
-  const right = Math.max(OVERLAY_MARGIN, viewportWidth - anchorRect.right) + OVERLAY_EDGE_GAP;
+  // The rail and workspace share this top/right edge. Align the floating card
+  // to it so the rail's rounded outline cannot peek out from behind the card.
+  const top = Math.max(0, anchorRect.top);
+  const right = Math.max(0, viewportWidth - anchorRect.right);
   const maxHeight = Math.max(160, viewportHeight - top - OVERLAY_MARGIN);
 
   return createPortal(
@@ -183,9 +181,9 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
           paddingLeft: 14,
           overflowY: 'auto',
           scrollbarWidth: 'none',
-          // All-glass mode makes the chat surface transparent. Floating menus
-          // still need the solid panel token to cover the content below.
-          background: 'var(--t-panel-solid)',
+          background: 'var(--t-popover-surface)',
+          backdropFilter: 'blur(24px) saturate(1.4)',
+          WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
           boxShadow: 'var(--t-panel-shadow), 0 8px 30px rgba(15, 23, 42, 0.18)',
           color: 'var(--t-text)',
         }}

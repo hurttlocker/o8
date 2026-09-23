@@ -654,7 +654,7 @@ function ChipPopover({
         // so the pre-measured frame never flashes at the wrong spot.
         animation: 'o8ChipPopIn 130ms cubic-bezier(0.22, 1, 0.36, 1)',
         minWidth: 232,
-        background: 'var(--t-panel-solid, var(--t-panel))',
+        background: 'var(--t-popover-surface)',
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: 'var(--t-divider, var(--t-divider-subtle))',
@@ -873,7 +873,7 @@ function ProjectChip({
                 left: '100%',
                 marginLeft: 4,
                 minWidth: 200,
-                background: 'var(--t-panel)',
+                background: 'var(--t-popover-surface)',
                 borderWidth: 1,
                 borderStyle: 'solid',
                 borderColor: 'var(--t-divider)',

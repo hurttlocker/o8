@@ -40,14 +40,9 @@ const DOCS_URL = 'https://o8.run';
 // The canonical community invite — MUST match the README footer + o8.run
 // (the drawer previously carried a different, stale invite).
 const DISCORD_URL = 'https://o8.run/discord';
-// Paint the panel token directly — NOT through color-mix. In glass mode
-// --t-panel-solid is a linear-gradient (an <image>), and color-mix() only
-// accepts <color> args, so the old color-mix() was invalid CSS → the whole
-// background was dropped → the drawer rendered transparent over the dark
-// vibrancy with near-black text (illegible). A gradient is a valid
-// `background`, so this restores the frosted cream/graphite menu card in
-// every palette × surface combo.
-const PANEL_BG = 'var(--t-panel-solid, var(--t-panel, rgba(255,255,255,0.92)))';
+// Paint the floating surface directly. It can be a gradient in glass mode,
+// which color-mix() cannot accept as a color argument.
+const PANEL_BG = 'var(--t-popover-surface)';
 const ROW_HOVER_BG = 'var(--t-panel-hover, rgba(15, 23, 42, 0.04))';
 const SUBTLE_BG = 'var(--t-bg-card, rgba(15, 23, 42, 0.04))';
 const BORDER = 'var(--t-panel-border, rgba(15, 23, 42, 0.1))';

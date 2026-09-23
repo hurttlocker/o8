@@ -202,7 +202,7 @@ function ChatOpenRouterPopover({ anchorRect, selectedSlug, onPick }: PopoverProp
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: 'var(--t-border)',
-        background: 'var(--t-panel)',
+        background: 'var(--t-popover-surface)',
         backdropFilter: 'blur(20px) saturate(1.4)',
         boxShadow: 'var(--t-panel-shadow)',
         display: 'flex',
