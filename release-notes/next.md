@@ -1,0 +1,4 @@
+- Repairs Solo Codex tool access for repository work, including GitHub actions and the in-app attention queue.
+- Keeps sent chat photos visible, supports image-only messages, and shows an error when an attachment cannot reach the selected agent or be safely retried.
+- Renames the mixed-action inbox to Needs Attention and clears waiting cards when their GitHub threads are verified closed.
+- Adds an iMessage switch in Symon Settings and shows the approved direct-chat number by its last four digits. Group access remains separately controlled.
