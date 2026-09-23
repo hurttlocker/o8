@@ -7,6 +7,7 @@ import {
   IMessageMembershipChangedError,
   readIMessageAccessSettings,
   setIMessageBridgeEnabled,
+  setIMessageExecutionBackend,
   setIMessageGroupFullAccess,
 } from '@/lib/symon/imessage-access-settings';
 
@@ -20,6 +21,18 @@ export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (body && 'executionBackend' in body) {
+    if (body.executionBackend !== 'cli' && body.executionBackend !== 'openclaw') {
+      return NextResponse.json({ ok: false, error: 'invalid_backend' }, { status: 400 });
+    }
+    try {
+      const executionBackend = setIMessageExecutionBackend(body.executionBackend);
+      if (!executionBackend) return NextResponse.json({ ok: false, error: 'openclaw_not_configured' }, { status: 409 });
+      return NextResponse.json({ ok: true, executionBackend });
+    } catch {
+      return NextResponse.json({ ok: false, error: 'write_failed' }, { status: 500 });
+    }
+  }
   if (body && typeof body.enabled === 'boolean' && !('groupId' in body)) {
     try {
       const enabled = setIMessageBridgeEnabled(body.enabled);

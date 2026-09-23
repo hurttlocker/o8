@@ -18,6 +18,8 @@ interface AccessResponse {
   ok: boolean;
   configured?: boolean;
   enabled?: boolean;
+  executionBackend?: 'cli' | 'openclaw';
+  openclawConfigured?: boolean;
   directSenderSuffix?: string | null;
   groups?: GroupAccess[];
   group?: GroupAccess;
@@ -28,6 +30,8 @@ export function SymonIMessageAccessSection() {
   const [groups, setGroups] = useState<GroupAccess[]>([]);
   const [configured, setConfigured] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [executionBackend, setExecutionBackend] = useState<'cli' | 'openclaw'>('cli');
+  const [openclawConfigured, setOpenclawConfigured] = useState(false);
   const [directSenderSuffix, setDirectSenderSuffix] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -42,11 +46,34 @@ export function SymonIMessageAccessSection() {
         if (cancelled) return;
         setConfigured(data.configured === true);
         setEnabled(data.enabled === true);
+        setExecutionBackend(data.executionBackend ?? 'cli');
+        setOpenclawConfigured(data.openclawConfigured === true);
         setDirectSenderSuffix(data.directSenderSuffix ?? null);
         setGroups(data.groups ?? []);
       })
       .catch(() => { if (!cancelled) setError('Could not read iMessage group access.'); });
     return () => { cancelled = true; };
+  }, []);
+
+  const saveBackend = useCallback(async (next: 'cli' | 'openclaw') => {
+    setBusyId('backend');
+    setError(null);
+    try {
+      const response = await fetch('/api/panel/symon/imessage-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ executionBackend: next }),
+      });
+      const data = await response.json() as AccessResponse;
+      if (!response.ok || !data.ok || data.executionBackend !== next) {
+        throw new Error('Could not change the iMessage agent engine. Check that OpenClaw is connected to Symon.');
+      }
+      setExecutionBackend(next);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not change the iMessage agent engine.');
+    } finally {
+      setBusyId(null);
+    }
   }, []);
 
   const saveEnabled = useCallback(async (next: boolean) => {
@@ -121,6 +148,16 @@ export function SymonIMessageAccessSection() {
           checked={enabled}
           onToggle={(next) => { void saveEnabled(next); }}
           disabled={busyId !== null}
+        />
+        <SettingsRow
+          icon={<Smartphone size={14} />}
+          label="Use OpenClaw for iMessage"
+          subtitle={openclawConfigured
+            ? 'Symon runs through the connected OpenClaw agent; the CLI remains the default for other users.'
+            : 'Connect a Symon agent to iMessage in OpenClaw to enable this.'}
+          checked={executionBackend === 'openclaw'}
+          onToggle={(next) => { void saveBackend(next ? 'openclaw' : 'cli'); }}
+          disabled={busyId !== null || (!openclawConfigured && executionBackend !== 'openclaw')}
         />
         {groups.map((group) => (
           <div key={group.id}>

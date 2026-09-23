@@ -20,6 +20,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'o8-imessage-access-'));
   configPath = join(root, 'bridge.json');
   process.env.O8_SYMON_IMESSAGE_TEST_CONFIG = configPath;
+  process.env.O8_SYMON_IMESSAGE_TEST_OPENCLAW_CONFIG = join(root, 'openclaw.json');
   h.deny = false;
   writeFileSync(configPath, JSON.stringify({
     enabled: true,
@@ -34,7 +35,26 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.O8_SYMON_IMESSAGE_TEST_CONFIG;
+  delete process.env.O8_SYMON_IMESSAGE_TEST_OPENCLAW_CONFIG;
   rmSync(root, { recursive: true, force: true });
+});
+
+it('offers the native backend only when the selected agent owns the iMessage binding', async () => {
+  const openclawPath = process.env.O8_SYMON_IMESSAGE_TEST_OPENCLAW_CONFIG!;
+  expect((await (await GET(request('GET'))).json())).toMatchObject({ executionBackend: 'cli', openclawConfigured: false });
+  expect((await POST(request('POST', { executionBackend: 'openclaw' }))).status).toBe(409);
+  writeFileSync(openclawPath, JSON.stringify({
+    agents: { entries: { symon: { workspace: '/private/symon' } } },
+    bindings: [{ agentId: 'symon', match: { channel: 'imessage', accountId: '*' } }],
+  }), { mode: 0o600 });
+  expect((await (await GET(request('GET'))).json())).toMatchObject({ openclawConfigured: true });
+  const selected = await POST(request('POST', { executionBackend: 'openclaw' }));
+  expect(selected.status).toBe(200);
+  expect((await selected.json()).executionBackend).toBe('openclaw');
+  expect((await (await GET(request('GET'))).json())).toMatchObject({ executionBackend: 'openclaw' });
+  const persisted = JSON.parse(readFileSync(configPath, 'utf8')) as { executionBackend: string; openclawAgentId: string };
+  expect(persisted).toMatchObject({ executionBackend: 'openclaw', openclawAgentId: 'symon' });
+  expect((await (await POST(request('POST', { executionBackend: 'cli' }))).json()).executionBackend).toBe('cli');
 });
 
 function request(method: 'GET' | 'POST', body?: object): NextRequest {
