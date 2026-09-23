@@ -1,0 +1,1 @@
+- Keeps shared iMessage replies focused on the newest question, so narrow follow-ups do not repeat unrelated project status.
