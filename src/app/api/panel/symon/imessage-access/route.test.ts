@@ -89,7 +89,7 @@ it('switches the persisted bridge routing off and on through the authenticated r
   config.directSender = 'imessage:+1 (555) 555-0101';
   writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
   expect(bridgeLoads()).toBe(true);
-  expect((await (await GET(request('GET'))).json()).configured).toBe(true);
+  expect(await (await GET(request('GET'))).json()).toMatchObject({ configured: true, directSenderSuffix: '0101' });
   const off = await POST(request('POST', { enabled: false }));
   expect(off.status).toBe(200);
   expect((await off.json()).enabled).toBe(false);
@@ -106,7 +106,8 @@ it('switches the persisted bridge routing off and on through the authenticated r
 
 it('grants exactly the verified group members through an authenticated persisted setting', async () => {
   const initial = await GET(request('GET'));
-  const initialJson = await initial.json() as { groups: Array<{ memberSuffixes: string[]; fullAccess: boolean; approvalVersion: string }> };
+  const initialJson = await initial.json() as { directSenderSuffix: string; groups: Array<{ memberSuffixes: string[]; fullAccess: boolean; approvalVersion: string }> };
+  expect(initialJson.directSenderSuffix).toBe('0101');
   expect(initialJson.groups[0]).toMatchObject({ memberSuffixes: ['0101', '0102'], fullAccess: false });
   expect(JSON.stringify(initialJson)).not.toContain('+15555550101');
 

@@ -71,13 +71,14 @@ function approvalVersion(id: string, members: string[]): string {
 
 export class IMessageMembershipChangedError extends Error {}
 
-export function readIMessageAccessSettings(): { configured: boolean; enabled: boolean; groups: IMessageGroupAccess[] } {
+export function readIMessageAccessSettings(): { configured: boolean; enabled: boolean; directSenderSuffix: string | null; groups: IMessageGroupAccess[] } {
   const loaded = readConfig();
-  if (!loaded) return { configured: false, enabled: false, groups: [] };
+  if (!loaded) return { configured: false, enabled: false, directSenderSuffix: null, groups: [] };
   const { config } = loaded;
   return {
     configured: true,
     enabled: config.enabled,
+    directSenderSuffix: normalizedPhone(config.directSender).slice(-4),
     groups: config.groupConversationIds.map((id) => {
       const members = membersFor(config, id);
       const grants = config.groupFullAccess?.[id] ?? [];
