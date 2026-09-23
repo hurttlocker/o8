@@ -10,7 +10,7 @@ import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 // Retired NavRail's `NavSection` type — kept here so the dashboard hooks
 // that flip the section (useUIChrome, useGlobalRepoState,
 // useSettingsOverlayDismiss) can keep their existing imports.
-export type NavSection = 'agents' | 'automations' | 'customize' | 'analytics' | 'settings';
+export type NavSection = 'agents' | 'automations' | 'customize' | 'projects' | 'analytics' | 'settings';
 
 // Lifted out of the retired workspace-side-panel module so callers can
 // keep importing from the same dashboard/types barrel.

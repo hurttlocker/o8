@@ -7,6 +7,8 @@ import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscr
 import { createHandoffHistoryMarker, truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
 import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
+import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput } from './orchestrator-thread-project-binding';
+import { nextOrchestratorThreadId } from './orchestrator-thread-id';
 import { repairComposerPreambleHistory } from './orchestrator-thread-history-repair';
 import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
 import {
@@ -360,16 +362,6 @@ export async function mobileOrchestratorThreadHistoryStatTokenAsync(): Promise<s
   return `${historyWriteVersion}:${fileToken}`;
 }
 
-function nextThreadId(): string {
-  let candidate = `thoughts-${Date.now()}`;
-  let suffix = 0;
-  while (existsSync(safeOrchestratorHistoryPath(candidate))) {
-    suffix += 1;
-    candidate = `thoughts-${Date.now()}-${suffix}`;
-  }
-  return candidate;
-}
-
 export function listMobileOrchestratorThreads(options: {
   backend?: MobileOrchestratorBackend | null;
   limit?: number;
@@ -453,7 +445,7 @@ export function createMobileOrchestratorThread(input: {
   }
 
   const now = new Date().toISOString();
-  const tabId = nextThreadId();
+  const tabId = nextOrchestratorThreadId((candidate) => existsSync(safeOrchestratorHistoryPath(candidate)));
   const backend = input.backend ?? DEFAULT_BACKEND;
   const projectId = resolveOrchestratorThreadProjectId(null, input.projectId);
   const record: OrchestratorHistoryRecord = {
@@ -483,6 +475,14 @@ export function createMobileOrchestratorThread(input: {
 
   writeHistoryRecord(tabId, record);
   return projectThread(tabId, record, now);
+}
+
+export function bindMobileOrchestratorThreadProject(
+  input: BindOrchestratorThreadProjectInput,
+): MobileOrchestratorThread | null {
+  if (!input.tabId.startsWith('thoughts-')) return null;
+  writeHistoryRecord(input.tabId, buildProjectBoundThreadRecord(readHistoryRecord(input.tabId), input));
+  return readProjectedThread(input.tabId);
 }
 
 export function appendMobileOrchestratorUserMessage(input: {

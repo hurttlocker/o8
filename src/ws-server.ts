@@ -136,6 +136,7 @@ import {
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
 import { createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
+import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
@@ -5006,11 +5007,13 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         throw new Error('permissionMode must be full or plan when supplied.');
       }
       const attachments = 'attachments' in msg ? validateLeadAttachments(msg.attachments) : undefined;
-      const leadReceipt = sendLeadThreadMessage({
+      const transcriptMessage = resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage });
+      const leadReceipt = await sendLeadThreadMessage({
         threadId,
         repoPath,
         message,
-        displayMessage: resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage }),
+        displayMessage: transcriptMessage,
+        projectId: msg.projectId,
         permissionMode: msg.permissionMode === 'plan' ? 'plan' : 'full',
         attachments,
         idempotencyKey: `ws:${correlationId}`,
@@ -5415,8 +5418,13 @@ async function handleOrchestratorSendMsgOnce(
     const turnBody = backendSwitchHandoff
       ? `${backendSwitchHandoff.prelude}\n\n${message}`
       : message;
-    const turnMessageWithRules = withSessionRules(turnBody, threadId);
-    if (turnMessageWithRules !== turnBody) {
+    const projectTurn = await prepareOrchestratorProjectTurn({
+      message: turnBody,
+      persistedProjectId: updatedThread?.projectId,
+      repoPath: updatedThread?.repoPath ?? repoPath,
+    });
+    const turnMessageWithRules = withSessionRules(projectTurn.message, threadId);
+    if (turnMessageWithRules !== projectTurn.message) {
       console.log(`[session-rules] Injected session rules into orchestrator turn (thread=${threadId ?? 'none'})`);
     }
     const turnMessage = withOrchestratorTurnReceiptContext({
