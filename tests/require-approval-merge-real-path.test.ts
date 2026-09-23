@@ -292,6 +292,7 @@ function reviewRequest(
       verification?: string;
     }>;
   },
+  missingContractWaiverReason?: string,
 ): NextRequest {
   return new NextRequest('http://localhost:3001/api/orchestrator/review', {
     method: 'POST',
@@ -306,6 +307,7 @@ function reviewRequest(
       approved: true,
       reviewedHeadSha,
       contractCoverageEvidence,
+      missingContractWaiverReason,
       findings: [{
         file: 'safe.ts',
         severity: 'note',
@@ -528,6 +530,191 @@ describe('requireApproval merge governance through the real command path', () =>
     });
     expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
   }, 60_000);
+
+  it('blocks missing default coverage until an operator records a current-HEAD waiver, then merges once', async () => {
+    const fixture = await createStandardLane('missing-default-waiver', false);
+    persistDispatcherMission(
+      fixture.lane.packetId!,
+      fixture.repo,
+      `thoughts-missing-default-${Date.now()}`,
+      { taskContractRequired: true, taskContractSource: 'default', taskContract: null },
+    );
+
+    const forgedReview = await approvalsRoute.POST(new NextRequest('http://localhost:3001/api/panel/approvals', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'create',
+        approval: {
+          toolName: 'orchestrator_review',
+          args: {
+            packetId: fixture.lane.packetId,
+            approved: true,
+            reviewedHeadSha: fixture.reviewedHeadSha,
+            missingContractWaiverReason: 'Forged through the generic approval route.',
+          },
+          metadata: { Packet: fixture.lane.packetId, Lane: fixture.lane.id },
+        },
+      }),
+    }));
+    expect(forgedReview.status).toBe(403);
+
+    const workerAttempt = await reviewRoute.POST(reviewRequest(
+      mintPacketWorkerToken(fixture.lane.packetId!),
+      fixture.lane.packetId!,
+      fixture.reviewedHeadSha,
+      undefined,
+      'Accept unproven coverage for this small disposable task.',
+    ));
+    expect(workerAttempt.status).toBe(403);
+
+    const unwaived = await reviewRoute.POST(reviewRequest(
+      getOrCreateWsToken(),
+      fixture.lane.packetId!,
+      fixture.reviewedHeadSha,
+    ));
+    expect(unwaived.status).toBe(200);
+    await expect(unwaived.json()).resolves.toMatchObject({
+      result: { contractCoverage: { status: 'failed' } },
+    });
+    await expect(assessDurableApprovedReview(fixture.lane)).resolves.toMatchObject({ approved: false });
+    const blockedMerge = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), fixture.lane.packetId!));
+    await expect(blockedMerge.json()).resolves.toMatchObject({ result: { merged: false } });
+    const secondBlockedMerge = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), fixture.lane.packetId!));
+    await expect(secondBlockedMerge.json()).resolves.toMatchObject({ result: { merged: false } });
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.baseHeadSha);
+
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const receiptKey = randomUUID();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/lanes') {
+        return new Response(JSON.stringify({ lanes: [fixture.lane] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      const request = new NextRequest(url, {
+        method: init?.method,
+        headers: init?.headers,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      if (url.pathname === '/api/orchestrator/review') return reviewRoute.POST(request);
+      if (url.pathname === '/api/orchestrator/merge') return mergeRoute.POST(request);
+      throw new Error(`Unexpected CLI request: ${url.pathname}`);
+    }));
+
+    await expect(runPacketReview(
+      { human: false, verbose: false },
+      [
+        fixture.lane.packetId!,
+        '--approve',
+        '--expected-sha',
+        fixture.reviewedHeadSha,
+        '--waive-missing-contract',
+        'Operator reviewed the diff and accepts unproven pre-edit coverage for this HEAD.',
+        '--idempotency-key',
+        receiptKey,
+      ],
+    )).resolves.toBe(0);
+    const output = JSON.parse(stdout.mock.calls.map(([chunk]) => String(chunk)).join(''));
+    expect(output).toMatchObject({
+      packet: { contractCoverage: { status: 'waived' }, merge: { merged: true } },
+    });
+    const approval = listApprovalsForContext({ laneId: fixture.lane.id })
+      .find((candidate) => candidate.toolName === 'orchestrator_review'
+        && candidate.args?.missingContractWaiverReason);
+    expect(approval?.args?.missingContractWaiverReason).toContain('unproven pre-edit coverage');
+    expect(approval?.audit.some((event) => event.actor === 'desktop'
+      && event.note?.includes(fixture.reviewedHeadSha))).toBe(true);
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+    const replay = await mergeRoute.POST(new NextRequest('http://localhost:3001/api/orchestrator/merge', {
+      method: 'POST',
+      headers: {
+        host: 'localhost:3001',
+        authorization: `Bearer ${getOrCreateWsToken()}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        packetId: fixture.lane.packetId,
+        expectedHeadSha: fixture.reviewedHeadSha,
+        idempotencyKey: receiptKey,
+      }),
+    }));
+    await expect(replay.json()).resolves.toMatchObject({ result: { merged: true } });
+    expect(git(fixture.repo, ['rev-list', '--count', 'main'])).toBe('2');
+  }, 60_000);
+
+  it('keeps a missing default contract governed after its mission leaves current control-plane state', async () => {
+    const fixture = await createStandardLane('orphan-default-waiver', false);
+    persistDispatcherMission(
+      fixture.lane.packetId!, fixture.repo, `thoughts-orphan-default-${Date.now()}`,
+      { taskContractRequired: true, taskContractSource: 'default', taskContract: null },
+    );
+    persistDispatcherMission(
+      `pkt-replacement-${Date.now()}`, fixture.repo, `thoughts-replacement-${Date.now()}`,
+    );
+    expect(readOrchestratorControlPlaneState().packets.some((packet) => packet.id === fixture.lane.packetId)).toBe(false);
+
+    const unwaived = await reviewRoute.POST(reviewRequest(
+      getOrCreateWsToken(), fixture.lane.packetId!, fixture.reviewedHeadSha,
+    ));
+    await expect(unwaived.json()).resolves.toMatchObject({
+      result: { contractCoverage: { status: 'failed' } },
+    });
+    const { buildPreviewForLane } = await import('@/lib/lane/preview-merge');
+    await expect(buildPreviewForLane(fixture.lane, fixture.lane.packetId!)).resolves.toMatchObject({
+      wouldMerge: false,
+      blockers: expect.arrayContaining(['contract-review']),
+    });
+    const blocked = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), fixture.lane.packetId!));
+    await expect(blocked.json()).resolves.toMatchObject({ result: { merged: false } });
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.baseHeadSha);
+
+    const waived = await reviewRoute.POST(reviewRequest(
+      getOrCreateWsToken(), fixture.lane.packetId!, fixture.reviewedHeadSha,
+      undefined, 'Operator accepts unproven coverage after inspecting the orphan lane.',
+    ));
+    await expect(waived.json()).resolves.toMatchObject({
+      result: { contractCoverage: { status: 'waived' } },
+    });
+    const merged = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), fixture.lane.packetId!));
+    await expect(merged.json()).resolves.toMatchObject({ result: { merged: true } });
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+  }, 60_000);
+
+  it('does not carry an operator waiver into a later automated review at another HEAD', async () => {
+    const fixture = await createStandardLane('waiver-head-drift', false);
+    persistDispatcherMission(
+      fixture.lane.packetId!, fixture.repo, `thoughts-waiver-head-drift-${Date.now()}`,
+      { taskContractRequired: true, taskContractSource: 'default', taskContract: null },
+    );
+    const waived = await reviewRoute.POST(reviewRequest(
+      getOrCreateWsToken(), fixture.lane.packetId!, fixture.reviewedHeadSha,
+      undefined, 'Operator accepts missing contract coverage for the first HEAD.',
+    ));
+    await expect(waived.json()).resolves.toMatchObject({
+      result: { contractCoverage: { status: 'waived' } },
+    });
+
+    writeFileSync(join(fixture.lane.worktreePath!, 'file.txt'), 'base\nstandard change\nsecond change\n');
+    commitAll(fixture.lane.worktreePath!, 'second change');
+    const secondHead = git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD']);
+    recordOrchestratorReview(fixture.lane.packetId!, {
+      approved: true,
+      findings: [],
+      reviewer: 'codex',
+      reviewedHeadSha: secondHead,
+      requiresSecondPass: false,
+    });
+    await expect(assessDurableApprovedReview(fixture.lane)).resolves.toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed' },
+    });
+    const latest = listApprovalsForContext({ laneId: fixture.lane.id })
+      .find((candidate) => candidate.toolName === 'orchestrator_review');
+    expect(latest?.args?.missingContractWaiverReason).toBeUndefined();
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.baseHeadSha);
+  }, 30_000);
 
   it('does not let a pending review waive spoken merge-gate blockers', async () => {
     const fixture = await createBudgetBlockedLane('pending-spoken-review');

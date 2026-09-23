@@ -112,6 +112,9 @@ export async function POST(request: NextRequest) {
     if (!approvalBody) {
       return NextResponse.json({ ok: false, error: 'Approval payload is required' }, { status: 400 });
     }
+    if (approvalBody.toolName === 'orchestrator_review') {
+      return NextResponse.json({ ok: false, error: 'Orchestrator reviews must use the governed review route.' }, { status: 403 });
+    }
 
     try {
       const approval = createApproval({

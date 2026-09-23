@@ -120,6 +120,8 @@ export interface SubmitReviewInput {
   reviewedHeadSha?: string;
   /** Per-requirement evidence bound to the sealed contract and reviewed HEAD. */
   contractCoverageEvidence?: ReviewCoverageEvidence;
+  /** Operator-only, current-HEAD waiver when a runtime-default contract was never captured. */
+  missingContractWaiverReason?: string;
   /** #732 — Directives the review verified were respected by the diff. */
   directivesApplied?: string[];
   /** #732 — Directives the review found contradicted by the diff. */

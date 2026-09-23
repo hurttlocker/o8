@@ -29,17 +29,22 @@ export async function resolveTaskContractCoverageRequirement(input: {
       `[task-contract] failed to record missing default contract for lane ${input.laneId}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  return false;
+  return true;
 }
 
 export async function resolvePacketTaskContractGate(input: {
   lane: Pick<Lane, 'id' | 'packetId' | 'runtime'>;
   completionContext?: { taskContract?: PacketTaskContract } | null;
   deviations?: PacketDeviations | null;
-}): Promise<{ taskContract: PacketTaskContract | null; enforceCoverage: boolean; packetFound: boolean }> {
+}): Promise<{ taskContract: PacketTaskContract | null; enforceCoverage: boolean; packetFound: boolean; missingDefaultContract: boolean }> {
   const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-  const packet = readOrchestratorControlPlaneState().packets
+  let packet = readOrchestratorControlPlaneState().packets
     .find((candidate) => candidate.id === input.lane.packetId);
+  if (!packet && input.lane.packetId) {
+    const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
+    packet = findMissionRegistryEntryByPacketId(input.lane.packetId, { includeArchived: true })
+      ?.mission.packets.find((candidate) => candidate.id === input.lane.packetId);
+  }
   const taskContract = input.completionContext?.taskContract ?? packet?.taskContract ?? null;
   const enforceCoverage = await resolveTaskContractCoverageRequirement({
     laneId: input.lane.id,
@@ -55,5 +60,12 @@ export async function resolvePacketTaskContractGate(input: {
       taskContract,
     });
   }
-  return { taskContract, enforceCoverage, packetFound: Boolean(packet) };
+  return {
+    taskContract,
+    enforceCoverage,
+    packetFound: Boolean(packet),
+    missingDefaultContract: packet?.taskContractRequired === true
+      && packet.taskContractSource === 'default'
+      && !taskContract,
+  };
 }

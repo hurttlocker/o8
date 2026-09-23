@@ -65,7 +65,7 @@ export interface RequirementCoverageCheck {
 }
 
 export interface ContractCoverageResult {
-  status: 'passed' | 'failed' | 'not-applicable';
+  status: 'passed' | 'failed' | 'not-applicable' | 'waived';
   reason: string;
   contractVersion: number | null;
   reviewedHeadSha: string | null;

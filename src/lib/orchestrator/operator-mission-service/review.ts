@@ -189,6 +189,7 @@ function recordPacketReviewAudit(
   summary: string,
   reviewedHeadSha: string | undefined,
   contractCoverageEvidence: ReviewCoverageEvidence | undefined,
+  missingContractWaiverReason: string | undefined,
   reviewTurn: { id: string; outcome: 'active' | 'completed' },
 ) {
   const lane = findLaneByPacket(packet.id);
@@ -208,6 +209,7 @@ function recordPacketReviewAudit(
       findings,
       reviewedHeadSha,
       contractCoverageEvidence,
+      ...(missingContractWaiverReason ? { missingContractWaiverReason } : {}),
       requiresSecondPass,
       secondPassAgreed: false,
       reviewTurnId: reviewTurn.id,
@@ -223,6 +225,15 @@ function recordPacketReviewAudit(
     },
   });
   recordApprovalAudit(approval.id, 'orchestrator_review', 'system', summary);
+  if (missingContractWaiverReason) {
+    recordApprovalAudit(
+      approval.id,
+      'updated',
+      'desktop',
+      `Operator waived missing runtime-default contract coverage for reviewed HEAD ${reviewedHeadSha}: ${missingContractWaiverReason}`,
+      { reviewedHeadSha, rawText: missingContractWaiverReason },
+    );
+  }
   const resolved = resolveApproval(approval.id, approved ? 'approve' : 'reject', 'system', summary);
   return {
     approvalId: resolved?.id ?? approval.id,
@@ -328,6 +339,22 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       }
     }
   }
+  const missingContractWaiverReason = input.missingContractWaiverReason?.trim();
+  if (missingContractWaiverReason) {
+    const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
+    const waiverPacket = missionPacket ?? findMissionRegistryEntryByPacketId(input.packetId, { includeArchived: true })
+      ?.mission.packets.find((candidate) => candidate.id === input.packetId);
+    if (!input.approved || !waiverPacket || waiverPacket.taskContractRequired !== true
+      || waiverPacket.taskContractSource !== 'default' || waiverPacket.taskContract
+      || !input.reviewedHeadSha || !reviewedHeadSha || !reviewCwd
+      || missingContractWaiverReason.length > 500) {
+      throw new Error('A missing-contract waiver requires a missing runtime-default contract, an approved review, a full reviewed HEAD, and a bounded reason.');
+    }
+    const currentHeadSha = normalizeHeadSha(await readHeadSha(reviewCwd));
+    if (!currentHeadSha || !headShaMatches(currentHeadSha, reviewedHeadSha)) {
+      throw new Error('The missing-contract waiver does not match the packet current HEAD. Review the current commit before waiving.');
+    }
+  }
   if (activeReviewTurn?.surface === 'packet-explainer') {
     log(`Ignored non-authoritative packet-explainer verdict for packet ${packet.id}.`, {
       approved: input.approved,
@@ -374,6 +401,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     summary,
     reviewedHeadSha,
     input.contractCoverageEvidence,
+    missingContractWaiverReason,
     reviewTurn,
   );
 

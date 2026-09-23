@@ -14,7 +14,7 @@ export interface QualitySearchCandidateEvidence {
    * candidate with one mis-cited production path is indistinguishable from a
    * rejected review, and targeted repair has nothing to aim at.
    */
-  contractCoverageStatus: 'passed' | 'failed' | 'not-applicable' | 'unknown';
+  contractCoverageStatus: 'passed' | 'failed' | 'not-applicable' | 'waived' | 'unknown';
   missingRequirementIds: string[];
   coverageFailureReasons: string[];
   reviewApproved: boolean;
@@ -101,6 +101,7 @@ function normalizeCandidateEvidence(value: unknown): QualitySearchCandidateEvide
     contractCoverageStatus: raw.contractCoverageStatus === 'passed'
       || raw.contractCoverageStatus === 'failed'
       || raw.contractCoverageStatus === 'not-applicable'
+      || raw.contractCoverageStatus === 'waived'
       ? raw.contractCoverageStatus
       : 'unknown',
     missingRequirementIds: Array.isArray(raw.missingRequirementIds)

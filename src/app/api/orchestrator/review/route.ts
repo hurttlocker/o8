@@ -28,13 +28,30 @@ export async function POST(request: NextRequest) {
   if (!packetId) {
     return operatorError('invalid_request', 'packetId is required.', 400);
   }
-  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  const principal = resolveRequestPrincipalContext(request);
+  const ownershipRefusal = workerPacketRefusal(principal, packetId);
   if (ownershipRefusal) {
     return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
   }
 
   if (typeof record.approved !== 'boolean') {
     return operatorError('invalid_request', 'approved is required.', 400);
+  }
+  const waiverInput = record.missingContractWaiverReason;
+  if (waiverInput !== undefined && (
+    principal.role !== 'operator'
+    || record.approved !== true
+    || typeof waiverInput !== 'string'
+    || !waiverInput.trim()
+    || waiverInput.trim().length > 500
+    || typeof record.reviewedHeadSha !== 'string'
+    || !/^[0-9a-f]{40}$/i.test(record.reviewedHeadSha.trim())
+  )) {
+    return operatorError(
+      'invalid_missing_contract_waiver',
+      'A missing-contract waiver requires an operator, an approved review, a full reviewed HEAD, and a reason of at most 500 characters.',
+      principal.role === 'operator' ? 400 : 403,
+    );
   }
   const clientKey = typeof record.clientMutationId === 'string'
     ? record.clientMutationId.trim()
@@ -61,6 +78,7 @@ export async function POST(request: NextRequest) {
         ? record.reviewedHeadSha.trim()
         : undefined,
       contractCoverageEvidence: contractCoverageEvidence ?? undefined,
+      ...(waiverInput !== undefined ? { missingContractWaiverReason: (waiverInput as string).trim() } : {}),
   };
   const canonicalBody = JSON.stringify(reviewInput);
   try {

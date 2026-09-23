@@ -241,7 +241,12 @@ export async function buildPreviewForLane(
   ];
   const checks = buildCheckList(gateResult, verificationChecks);
   const blockers = buildBlockerList(gateResult, verificationChecks);
-  const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId);
+  let packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId);
+  if (!packet) {
+    const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
+    packet = findMissionRegistryEntryByPacketId(packetId, { includeArchived: true })
+      ?.mission.packets.find((candidate) => candidate.id === packetId);
+  }
   let reviewPrerequisite: string | undefined;
   let contractReviewReady = true;
   if (packet?.taskContractRequired && packet.taskContract) {
@@ -259,7 +264,14 @@ export async function buildPreviewForLane(
     if (!contractReviewReady) blockers.push('contract-review');
   } else if (packet?.taskContractRequired && !packet.taskContract) {
     if (packet.taskContractSource === 'default') {
-      reviewPrerequisite = 'The runtime-default task contract was not captured. Current policy allows review without contract coverage; inspect the missing-contract event before approval.';
+      const { assessDurableApprovedReview } = await import('./durable-review-approval');
+      const assessment = await assessDurableApprovedReview(resolvedLane);
+      contractReviewReady = assessment.approved && assessment.contractCoverage?.status === 'waived';
+      reviewPrerequisite = contractReviewReady
+        ? assessment.contractCoverage?.reason ?? 'The operator waived missing-contract coverage for this reviewed HEAD.'
+        : `The runtime-default task contract was not captured. Requirement coverage is unproven; an explicit operator waiver at the current HEAD is required. ${assessment.reason}`;
+      checks.push({ name: 'contract-review', verdict: contractReviewReady ? 'pass' : 'fail', detail: reviewPrerequisite });
+      if (!contractReviewReady) blockers.push('contract-review');
     } else {
       contractReviewReady = false;
       reviewPrerequisite = 'The explicitly required task contract is missing; restore or capture it before approval.';
