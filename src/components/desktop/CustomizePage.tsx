@@ -1,92 +1,34 @@
 'use client';
 
-/**
- * CustomizePage — first-class customization inventory (operator ask
- * 2026-07-13, vid3 Cursor study: left-rail "Customize" under Automations →
- * a full-page takeover with scope pill + tab pills + sectioned lists).
- *
- * Cursor mechanics carried over: instant tab swap, sectioned lists with
- * counts, hover-fill rows, metadata pills, instructive empty states,
- * click-throughs. o8 divergences (honest, no placeholder data): tabs map to
- * what o8 actually has — Rules (Cortex directives), Connections (MCP
- * servers), Commands (slash registry), Skills (known local skill roots),
- * Agents (.claude/agents), and Hooks (settings.json) — and there is no
- * marketplace button until a marketplace exists. Read-only inventory:
- * editing happens where each artifact already lives (Connections click
- * through to Settings → MCP).
- *
- * Mounted from dashboard/page.tsx when activeNavSection === 'customize'
- * (same page-takeover pattern as AutomationsPage).
- */
+/** Live customization inventories and scoped installation flows. */
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { toast } from '@/components/shared/ConfirmToastHost';
+import { RamsButton } from './settings/shared';
+import { ProjectInstructions } from './customize/ProjectInstructions';
+import { emptyInventory, loadCustomizeInventory, type CustomizeInventory, type CustomizeRepo, type DirectiveSummary, type ExternalServer, type AgentEntry, type HookEntry } from './customize/inventory';
+import type { ProjectRecord } from './repo-registry/useProjects';
+import { CustomizeHeader, type CustomizeTab } from './customize/CustomizeHeader';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
-import type { PromptLibraryEntry } from '@/lib/prompt-library/client';
+import { insertPromptIntoActiveComposer, type PromptLibraryEntry } from '@/lib/prompt-library/client';
 import { PromptLibraryTab } from './customize/PromptLibraryTab';
-import { SkillsInventoryTab, type SkillInventoryEntry } from './customize/SkillsInventoryTab';
+import { AddSkillForm } from './customize/AddSkillForm';
+import { SkillsInventoryTab } from './customize/SkillsInventoryTab';
 import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './customize/shared';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
-type CustomizeTab = 'rules' | 'commands' | 'prompts' | 'skills' | 'connections' | 'agents' | 'hooks';
-
-const TABS: Array<{ id: CustomizeTab; label: string }> = [
-  { id: 'rules', label: 'Rules' },
-  { id: 'commands', label: 'Commands' },
-  { id: 'prompts', label: 'Prompts' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'connections', label: 'Connections' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'hooks', label: 'Hooks' },
-];
-
-interface DirectiveSummary {
-  id: string;
-  title: string;
-  scope: string;
-  repoName: string | null;
-  priority: number | null;
-  body: string;
-  projects: string[];
-  file: string | null;
-}
-
-interface ExternalServer {
-  id: string;
-  name: string;
-  transport: 'stdio' | 'http';
-  command?: string | null;
-  url?: string | null;
-  enabled?: boolean;
-}
-
-interface AgentEntry {
-  name: string;
-  description: string | null;
-  scope: 'user' | 'project';
-  file: string;
-}
-
-interface HookEntry {
-  event: string;
-  command: string;
-  matcher: string | null;
-  scope: 'user' | 'project';
-  file: string;
-}
-
-interface RegisteredRepoLite {
-  name: string;
-  localPath: string;
-}
+const PluginsTab = dynamic(() => import('./customize/PluginsTab'), {
+  loading: () => <p style={{ color: 'var(--t-text-muted)' }}>Opening plugins…</p>,
+});
 
 /** o8's own always-on MCP servers — shown so "all connections" is honest. */
 const BUILTIN_CONNECTIONS: Array<{ name: string; detail: string }> = [
   { name: 'o8 operator', detail: 'Missions, approvals, webview control — the operator MCP surface' },
   { name: 'cortex', detail: 'Fleet, issues, PRs — internal orchestrator tools' },
-  { name: 'codebase-memory', detail: 'Repo knowledge graph and code search' },
 ];
 
 function openSettingsMcpTab() {
@@ -94,96 +36,57 @@ function openSettingsMcpTab() {
   window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
 }
 
-export function CustomizePage({ onClose }: { onClose?: () => void }) {
+export function CustomizePage({ onClose, project = null, registeredRepos = [] }: {
+  onClose?: () => void;
+  project?: ProjectRecord | null;
+  registeredRepos?: CustomizeRepo[];
+}) {
   const [tab, setTab] = useState<CustomizeTab>('rules');
   const [query, setQuery] = useState('');
-  const [repos, setRepos] = useState<RegisteredRepoLite[]>([]);
-  const [repoPath, setRepoPath] = useState<string | null>(null);
-  const [repoMenuOpen, setRepoMenuOpen] = useState(false);
-
-  const [directives, setDirectives] = useState<DirectiveSummary[]>([]);
-  const [servers, setServers] = useState<ExternalServer[]>([]);
-  const [agents, setAgents] = useState<AgentEntry[]>([]);
-  const [hooks, setHooks] = useState<HookEntry[]>([]);
-  const [skills, setSkills] = useState<SkillInventoryEntry[]>([]);
-  const [inventoryError, setInventoryError] = useState<string | null>(null);
-  const [promptCount, setPromptCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-
+  const [pluginRepo, setPluginRepo] = useState('');
+  const [addingSkill, setAddingSkill] = useState(false);
+  const [skillNotice, setSkillNotice] = useState('');
+  const [selection, setSelection] = useState({ projectId: project?.id, value: 'all' });
+  const projectPaths = JSON.stringify(project?.repoPaths ?? []);
+  const repos = useMemo(() => {
+    const paths = JSON.parse(projectPaths) as string[];
+    return paths.map((localPath) => ({
+      localPath,
+      name: registeredRepos.find((repo) => repo.localPath === localPath)?.name ?? localPath.split('/').filter(Boolean).pop() ?? localPath,
+    }));
+  }, [projectPaths, registeredRepos]);
+  const requestedScope = selection.projectId === project?.id ? selection.value : 'all';
+  const scope = requestedScope === 'personal' || repos.some((repo) => repo.localPath === requestedScope) ? requestedScope : 'all';
+  const repoPath = scope === 'all' || scope === 'personal' ? null : scope;
+  const selectedRepos = scope === 'personal' ? [] : repoPath ? repos.filter((repo) => repo.localPath === repoPath) : repos;
+  const requestKey = JSON.stringify([project?.id, scope, selectedRepos]);
+  const [loaded, setLoaded] = useState<{ key: string; data: CustomizeInventory; error: string | null } | null>(null);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const loading = loaded?.key !== requestKey;
+  const { directives, servers, agents, hooks, skills } = loading ? emptyInventory : loaded.data;
+  const inventoryError = loading ? null : loaded.error;
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch('/api/panel/repos');
-        if (!response.ok || cancelled) return;
-        const data = await response.json() as { repos?: Array<{ name?: string; localPath?: string }> };
-        const list = (data.repos ?? [])
-          .filter((repo): repo is { name: string; localPath: string } => Boolean(repo?.name && repo?.localPath))
-          .map((repo) => ({ name: repo.name, localPath: repo.localPath }));
-        if (cancelled) return;
-        setRepos(list);
-        setRepoPath((current) => current ?? list[0]?.localPath ?? null);
-      } catch { /* rail still renders; sections show their empty states */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    const controller = new AbortController();
+    const [, requestedScope, requestedRepos] = JSON.parse(requestKey) as [string | null, string, CustomizeRepo[]];
+    void loadCustomizeInventory(requestedRepos, requestedScope === 'personal' || !project?.id, controller.signal, project?.id)
+      .then((data) => { if (!controller.signal.aborted) setLoaded({ key: requestKey, data, error: null }); })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setLoaded({ key: requestKey, data: emptyInventory, error: error instanceof Error ? error.message : 'Could not load customizations.' });
+      });
+    return () => controller.abort();
+  }, [requestKey, refreshCount, project?.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const promptParams = new URLSearchParams({ scope: 'available', limit: '100' });
-      if (repoPath) promptParams.set('repoPath', repoPath);
-      const [directivesRes, serversRes, inventoryRes, promptsRes] = await Promise.allSettled([
-        fetch('/api/cortex/directives').then((r) => (r.ok ? r.json() : null)),
-        fetch('/api/setup/mcp-servers').then((r) => (r.ok ? r.json() : null)),
-        fetch(`/api/customize/inventory${repoPath ? `?repo=${encodeURIComponent(repoPath)}` : ''}`).then((r) => (r.ok ? r.json() : null)),
-        fetch(`/api/prompt-library?${promptParams.toString()}`).then((r) => (r.ok ? r.json() : null)),
-      ]);
-      if (cancelled) return;
-      if (directivesRes.status === 'fulfilled' && directivesRes.value?.directives) {
-        setDirectives(directivesRes.value.directives as DirectiveSummary[]);
-      }
-      if (serversRes.status === 'fulfilled' && serversRes.value?.servers) {
-        setServers(serversRes.value.servers as ExternalServer[]);
-      }
-      if (inventoryRes.status === 'fulfilled' && inventoryRes.value?.ok) {
-        setInventoryError(null);
-        setAgents(inventoryRes.value.agents as AgentEntry[]);
-        setHooks(inventoryRes.value.hooks as HookEntry[]);
-        setSkills(Array.isArray(inventoryRes.value.skills) ? inventoryRes.value.skills as SkillInventoryEntry[] : []);
-      } else {
-        setSkills([]);
-        setAgents([]);
-        setHooks([]);
-        setInventoryError('Could not load local customizations. Reopen Customize to try again.');
-      }
-      if (promptsRes.status === 'fulfilled' && promptsRes.value?.prompts) {
-        setPromptCount((promptsRes.value.prompts as unknown[]).length);
-      }
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [repoPath]);
-
-  const activeRepoName = useMemo(
-    () => repos.find((repo) => repo.localPath === repoPath)?.name ?? 'All repos',
-    [repos, repoPath],
-  );
-
+  const activeRepoName = repos.find((repo) => repo.localPath === repoPath)?.name ?? 'Personal';
   const q = query.trim().toLowerCase();
   const matches = (...fields: Array<string | null | undefined>) =>
     !q || fields.some((field) => field?.toLowerCase().includes(q));
 
-  const searchNoun = TABS.find((t) => t.id === tab)?.label ?? 'customizations';
-
-  // Inventory density on the pills themselves (operator ask): totals, not
-  // filtered counts, so the numbers are stable while searching.
+  // Navigation counts show inventory totals rather than filtered results.
   const tabCounts: Partial<Record<CustomizeTab, number>> = {
     rules: directives.length,
     commands: ORCHESTRATOR_SLASH_COMMANDS.length,
-    prompts: promptCount,
     skills: skills.length,
     connections: BUILTIN_CONNECTIONS.length + servers.length,
     agents: agents.length,
@@ -200,14 +103,29 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
     window.dispatchEvent(new CustomEvent('o8:open-file', { detail: { path } }));
   };
 
-  const insertPrompt = (prompt: PromptLibraryEntry) => {
+  const insertTaskText = (body: string) => {
     onClose?.();
     if (typeof window === 'undefined') return;
-    window.requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('o8:orchestrator-inject', {
-        detail: { text: prompt.body },
-      }));
-    });
+    let attempts = 0;
+    const deadline = Date.now() + 3000;
+    const insertWhenReady = () => {
+      if (insertPromptIntoActiveComposer(body)) return;
+      attempts += 1;
+      if (attempts < 180 && Date.now() < deadline) window.requestAnimationFrame(insertWhenReady);
+      else toast('Text was not inserted. Open a task, then try again.', 'error');
+    };
+    window.requestAnimationFrame(insertWhenReady);
+  };
+
+  const useSkill = async (skill: { name: string; file: string; repoPath?: string }) => {
+    try {
+      const params = new URLSearchParams({ file: skill.file });
+      if (skill.repoPath) params.set('repo', skill.repoPath);
+      const response = await fetch(`/api/customize/skills?${params}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message ?? 'Could not read this skill.');
+      insertTaskText(`Use the ${JSON.stringify(skill.name)} skill for this task. Its instructions are included below. Supporting files are not included.\n\n${data.instructions}\n\n`);
+    } catch (error) { toast(error instanceof Error ? error.message : 'Could not add the skill to your draft.', 'error'); }
   };
 
   return (
@@ -215,12 +133,13 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
       height: '100%',
       minHeight: 0,
       overflowY: 'auto',
+      scrollbarWidth: 'none',
       background: 'var(--t-chat-surface-bg, var(--t-canvas-bg))',
       fontFamily: UI_FONT,
     }} className="cortex-themed-scroll">
       <div style={{
         width: '100%',
-        maxWidth: 760,
+        maxWidth: 1100,
         marginLeft: 'auto',
         marginRight: 'auto',
         paddingTop: 36,
@@ -229,196 +148,24 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
         paddingRight: 24,
         display: 'flex',
         flexDirection: 'column',
-        gap: 14,
+        gap: 28,
       }}>
-        {/* Search row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 7,
-            paddingBottom: 7,
-            paddingLeft: 11,
-            paddingRight: 11,
-            borderRadius: 9,
-            background: 'var(--t-input-bg)',
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider-subtle)',
-          }}>
-            <SearchGlyph />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={`Search ${searchNoun} for ${activeRepoName}…`}
-              style={{
-                flex: 1,
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                fontSize: 12.5,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                fontFamily: UI_FONT,
-                color: 'var(--t-text)',
-              }}
-            />
-          </div>
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close Customize"
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                fontSize: 12,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                cursor: 'pointer',
-                paddingTop: 6,
-                paddingBottom: 6,
-                paddingLeft: 8,
-                paddingRight: 8,
-                borderRadius: 8,
-              }}
-            >
-              Done
-            </button>
-          ) : null}
-        </div>
+        <CustomizeHeader
+          tab={tab} onTab={(next) => { setTab(next); setExpandedRow(null); }}
+          query={query} onQuery={setQuery} repos={repos} scope={scope}
+          onScope={(value) => { setSelection({ projectId: project?.id, value }); setExpandedRow(null); }} project={project}
+          counts={loading ? {} : tabCounts} onClose={onClose}
+        />
 
-        {/* Scope pill + tab pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setRepoMenuOpen((open) => !open)}
-            aria-expanded={repoMenuOpen}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              height: 26,
-              paddingLeft: 10,
-              paddingRight: 8,
-              borderRadius: 7,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-divider)',
-              background: 'transparent',
-              color: 'var(--t-text)',
-              fontSize: 12,
-              fontWeight: 300,
-              letterSpacing: '-0.1px',
-              fontFamily: UI_FONT,
-              cursor: 'pointer',
-            }}
-          >
-            {activeRepoName}
-            <ChevronDownGlyph />
-          </button>
-          {repoMenuOpen ? (
-            <div style={{
-              position: 'absolute',
-              top: 32,
-              left: 0,
-              zIndex: 30,
-              minWidth: 200,
-              display: 'flex',
-              flexDirection: 'column',
-              paddingTop: 4,
-              paddingBottom: 4,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-divider)',
-              background: 'var(--t-panel, var(--t-bg-card))',
-              boxShadow: 'var(--t-shadow-card, 0 12px 32px rgba(15, 23, 42, 0.14))',
-            }}>
-              {repos.map((repo) => (
-                <button
-                  key={repo.localPath}
-                  type="button"
-                  onClick={() => { setRepoPath(repo.localPath); setRepoMenuOpen(false); }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    paddingTop: 6,
-                    paddingBottom: 6,
-                    paddingLeft: 12,
-                    paddingRight: 12,
-                    border: 'none',
-                    background: 'transparent',
-                    color: 'var(--t-text)',
-                    fontSize: 13.5,
-                    fontWeight: 300,
-                    letterSpacing: '-0.1px',
-                    fontFamily: UI_FONT,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <span style={{ width: 12, display: 'inline-flex' }}>
-                    {repo.localPath === repoPath ? <CheckGlyph /> : null}
-                  </span>
-                  {repo.name}
-                </button>
-              ))}
-            </div>
-          ) : null}
+        {tab === 'rules' && scope !== 'personal' && project ? <ProjectInstructions key={project.id} project={project} /> : null}
 
-          <span style={{ width: 1, height: 16, background: 'var(--t-divider-subtle)', marginLeft: 2, marginRight: 2 }} />
-
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => { setTab(item.id); setExpandedRow(null); setRepoMenuOpen(false); }}
-              aria-pressed={tab === item.id}
-              style={{
-                height: 26,
-                display: 'inline-flex',
-                alignItems: 'center',
-                paddingLeft: 10,
-                paddingRight: 10,
-                borderRadius: 7,
-                border: 'none',
-                background: tab === item.id ? 'var(--t-input-bg)' : 'transparent',
-                color: tab === item.id ? 'var(--t-text)' : 'var(--t-text-muted)',
-                fontSize: 12,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                lineHeight: 1.25,
-                fontFamily: UI_FONT,
-                cursor: 'pointer',
-                transition: 'background 120ms ease, color 120ms ease',
-              }}
-            >
-              {item.label}
-              {!loading && typeof tabCounts[item.id] === 'number' && tabCounts[item.id]! > 0 ? (
-                <span style={{
-                  marginLeft: 5,
-                  fontSize: 9.5,
-                  fontWeight: 260,
-                  letterSpacing: '-0.4px',
-                  color: 'var(--t-text-faint)',
-                }}>
-                  {tabCounts[item.id]}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-
-        {/* Content — instant swap, no transitions (Cursor hybrid-motion rule) */}
-        {loading ? (
+        {/* Keep section changes immediate. */}
+        {tab === 'plugins' ? (
+          <PluginsTab selectedRepo={pluginRepo} onSelectRepo={setPluginRepo} repos={repos} onChanged={() => setRefreshCount((value) => value + 1)} onUseSkill={useSkill} />
+        ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
-        ) : inventoryError && (tab === 'skills' || tab === 'agents' || tab === 'hooks') ? (
-          <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError}</div>
+        ) : inventoryError ? (
+          <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError} <RamsButton variant="ghost" onClick={() => setRefreshCount((value) => value + 1)}>Retry</RamsButton></div>
         ) : tab === 'rules' ? (
           <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
@@ -427,18 +174,24 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
           <CommandsTab query={q} />
         ) : tab === 'prompts' ? (
           <PromptLibraryTab
+            key={requestKey}
             query={q}
             repoPath={repoPath}
             repoName={activeRepoName}
-            onInsert={insertPrompt}
-            onCountDelta={(delta) => setPromptCount((current) => Math.max(0, current + delta))}
+            repoPaths={selectedRepos.map((repo) => repo.localPath)}
+            onInsert={(prompt: PromptLibraryEntry) => insertTaskText(prompt.body)}
+            onCountDelta={() => {}}
           />
         ) : tab === 'skills' ? (
-          <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} />
+          <>
+            {addingSkill ? <AddSkillForm repos={repos} initialRepo={repoPath} onCancel={() => setAddingSkill(false)} onSaved={(savedRepo) => { setAddingSkill(false); setQuery(''); setSelection({ projectId: project?.id, value: savedRepo ?? 'personal' }); setRefreshCount((value) => value + 1); setSkillNotice('Skill saved. Open it below or use it in a task.'); }} /> : <div><RamsButton variant="primary" onClick={() => { setAddingSkill(true); setSkillNotice(''); }}>Add skill</RamsButton></div>}
+            {skillNotice ? <p role="status" style={{ color: 'var(--t-text-muted)', fontSize: 13 }}>{skillNotice}</p> : null}
+            <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} onUseSkill={useSkill} />
+          </>
         ) : tab === 'agents' ? (
-          <AgentsTab agents={agents.filter((a) => matches(a.name, a.description))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
+          <AgentsTab agents={agents.filter((a) => matches(a.name, a.description, a.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (
-          <HooksTab hooks={hooks.filter((h) => matches(h.event, h.command, h.matcher))} onOpenFile={openFile} />
+          <HooksTab hooks={hooks.filter((h) => matches(h.event, h.command, h.matcher, h.repoName))} onOpenFile={openFile} />
         )}
       </div>
     </div>
@@ -458,8 +211,8 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
   if (directives.length === 0) {
     return (
       <EmptyState
-        title="No rules yet"
-        body="Rules are Cortex directives — durable guidance every orchestrator turn sees. They come from your o8.md, accepted auto-directive proposals, and the directives API."
+        title="No additional rules"
+        body="Rules appear here with their source and scope. Shared project instructions are managed separately in the project view."
       />
     );
   }
@@ -467,13 +220,13 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {global.length > 0 ? (
         <>
-          <SectionHeader label="Global" count={global.length} />
+          <SectionHeader label="Shared rules" count={global.length} />
           <TruncatedRows rows={global.map((d) => (
             <Row
               key={d.id}
               title={d.title}
               subtitle={d.body.replace(/\s+/g, ' ').slice(0, 160)}
-              pill={d.priority != null ? `P${d.priority}` : null}
+              pill={d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
@@ -489,13 +242,13 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
       ) : null}
       {repoScoped.length > 0 ? (
         <>
-          <SectionHeader label="Repo" count={repoScoped.length} />
+          <SectionHeader label="Repository guidance" count={repoScoped.length} />
           <TruncatedRows rows={repoScoped.map((d) => (
             <Row
               key={d.id}
               title={d.title}
               subtitle={`${d.repoName} — ${d.body.replace(/\s+/g, ' ').slice(0, 120)}`}
-              pill={d.priority != null ? `P${d.priority}` : null}
+              pill={d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
               expanded={expandedRow === d.id}
               onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
             >
@@ -531,7 +284,7 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
       {servers.length === 0 ? (
         <EmptyState
           title="No external MCP servers"
-          body="Connect external MCP servers — every orchestrator turn and dispatched worker can use their tools. Managed in Settings."
+          body="Connect services in Settings to make their tools available to supported agents. Access depends on the agent and its permissions."
           actionLabel="Add in Settings"
           onAction={openSettingsMcpTab}
         />
@@ -638,7 +391,7 @@ function AgentsTab({ agents, expandedRow, onToggleRow, onOpenFile }: {
             key={agent.file}
             title={agent.name}
             titleMono
-            subtitle={agent.description}
+            subtitle={[agent.repoName, agent.description].filter(Boolean).join(' · ')}
             expanded={expandedRow === agent.file}
             onClick={() => onToggleRow(expandedRow === agent.file ? null : agent.file)}
           >
@@ -656,8 +409,8 @@ function AgentsTab({ agents, expandedRow, onToggleRow, onOpenFile }: {
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {section('User', user)}
-      {section('Repo', project)}
+      {section('Personal', user)}
+      {section('Repositories', project)}
     </div>
   );
 }
@@ -704,6 +457,7 @@ function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)', fontFamily: MONO_FONT }}>{hook.event}</span>
+              {hook.repoName ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{hook.repoName}</span> : null}
               {hook.matcher ? (
                 <span style={{ fontSize: 10.5, color: 'var(--t-text-faint)', fontFamily: MONO_FONT }}>{hook.matcher}</span>
               ) : null}
@@ -725,36 +479,9 @@ function HooksTab({ hooks, onOpenFile }: { hooks: HookEntry[]; onOpenFile: (path
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {section('User', user)}
-      {section('Repo', project)}
+      {section('Personal', user)}
+      {section('Repositories', project)}
     </div>
-  );
-}
-
-// ── Glyphs (raw SVG — no icon component libraries in the Tauri webview) ──
-
-function SearchGlyph() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
-  );
-}
-
-function ChevronDownGlyph() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--t-text-faint)' }}>
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function CheckGlyph() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--t-text)' }}>
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
   );
 }
 

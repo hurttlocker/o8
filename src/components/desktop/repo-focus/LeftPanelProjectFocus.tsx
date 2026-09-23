@@ -5,6 +5,7 @@ import { ProjectHeader } from './ProjectHeader';
 import { RepoAnchorsRow } from './RepoAnchorsRow';
 import { RepoHeader } from './RepoHeader';
 import { RepoTabs } from './RepoTabs';
+import { RepoScopeNotice } from './RepoScopeNotice';
 import { ChatsTab } from './tabs/ChatsTab';
 import { ControlRoomTab } from './tabs/ControlRoomTab';
 import type { RepoFocusDataProps, RepoFocusRepo, RepoFocusTabId } from './types';
@@ -15,7 +16,9 @@ interface LeftPanelProjectFocusProps extends RepoFocusDataProps {
   project: ProjectRecord;
   repos: RepoFocusRepo[];
   selectedRepoPath: string | null;
+  workingRepoPath: string | null;
   onSelectRepoPath: (repoPath: string | null) => void;
+  onWorkInRepo?: (repo: RepoFocusRepo) => void;
   onBack: () => void;
 }
 
@@ -34,7 +37,9 @@ export function LeftPanelProjectFocus({
   project,
   repos,
   selectedRepoPath,
+  workingRepoPath,
   onSelectRepoPath,
+  onWorkInRepo,
   onBack,
   packets,
   missionState,
@@ -130,12 +135,20 @@ export function LeftPanelProjectFocus({
       ) : null}
 
       {selectedRepo ? (
-        <RepoHeader
-          repo={selectedRepo}
-          packets={allMissionPackets}
-          missionState={missionState}
-          onBack={() => onSelectRepoPath(null)}
-        />
+        <>
+          <RepoHeader
+            repo={selectedRepo}
+            packets={allMissionPackets}
+            missionState={missionState}
+            onBack={() => onSelectRepoPath(null)}
+          />
+          <RepoScopeNotice
+            selectedRepo={selectedRepo}
+            workingRepoPath={workingRepoPath}
+            repos={repos}
+            onWorkInRepo={onWorkInRepo}
+          />
+        </>
       ) : null}
 
       <RepoTabs activeTab={visibleActiveTab} onTabChange={setActiveTab} tabs={tabsForMode} />

@@ -22,6 +22,7 @@ import { MenuScale } from 'iconoir-react';
 import { AutoFlash, ControlSlider, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
 import { canCreateOrchestratorForRepo, deriveActiveProjectRepos, deriveAgentPanelRailRepos, resolveGlobalNewSessionRepo } from './agent-panel-repo-selection';
+import { groupProjectNavigationItems, selectWorkingRepository, visibleProjectNavigationItems } from './agent-panel/project-navigation';
 import { dispatchFocusRepoWorkspaceTab } from '@/lib/desktop/events';
 
 // ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
@@ -57,7 +58,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     activeSessionKey,
     selectedRepo,
     selectedRepoLocalPath,
-    activeWorkspacePath,
+    workingRepoPath,
     onLaunchWorkspaceAgent,
     onLaunchWorkspaceTask,
     onSelectSession,
@@ -151,15 +152,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   ), [activeProjectReposForChats, projects.ledger?.projects, registeredFocusRepos]);
 
   const activeProjectId = projects.activeProject?.id ?? null;
-  const handleProjectRepoSelect = useCallback((repo: RepoFocusRepo) => {
-    if (activeProjectId) {
-      leftPanelFocus.focusByProjectId(activeProjectId);
-      leftPanelFocus.setSelectedRepoPath(repo.localPath);
-    } else {
-      leftPanelFocus.focusByRepoId(repo.id || repo.localPath);
-    }
-    onSelectRepo?.(repo.id);
-  }, [activeProjectId, leftPanelFocus, onSelectRepo]);
+  const handleWorkInFocusedRepo = useCallback((repo: RepoFocusRepo) => {
+    selectWorkingRepository(repo, onSelectRepo);
+  }, [onSelectRepo]);
   const effectiveTitlebarSpacerHeight = Math.min(titlebarSpacerHeight, 10);
   const handleCreateOrchestrator = useCallback(() => {
     // #1572: the global New session must inherit what the rail is looking at.
@@ -221,13 +216,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       window.dispatchEvent(new CustomEvent('o8:repos-changed'));
     }
   }, [onRepoAdded, onSelectRepo, projects]);
-  // Clicking a project just SELECTS it (makes it active) — the rest of the app
-  // follows (right panel + a new orchestrator). The drawer stays OPEN so you can
-  // keep navigating; close it manually. Opening the control room is a separate
-  // action on the row's chevron (handleMiniOpenControlRoom).
-  const handleMiniProjectSelect = useCallback((project: ProjectRecord) => {
-    if (activeProjectId !== project.id) void projects.switchActive(project.id);
-  }, [activeProjectId, projects]);
   // Clicking a repo selects that specific repo so the right side shows it — no
   // auto control room, and the drawer stays open for repo-to-repo navigation.
   const handleMiniRepoSelect = useCallback((project: ProjectRecord, repoPath: string) => {
@@ -236,12 +224,12 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     if (dispatchFocusRepoWorkspaceTab({ repoId: repo?.id, repoPath })) return;
     onSelectRepo?.(repo?.id ?? repoPath);
   }, [activeProjectId, onSelectRepo, projects, registeredRepoByPath]);
-  // The chevron explicitly opens the control room (project focus drawer).
-  const handleMiniOpenControlRoom = useCallback((project: ProjectRecord) => {
+  // The project name is the primary route into its overview. Repo disclosure
+  // stays a separate control so expanding the tree never changes work context.
+  const handleMiniProjectOpen = useCallback((project: ProjectRecord) => {
     setProjectsMenuOpen(false);
-    if (activeProjectId !== project.id) void projects.switchActive(project.id);
-    leftPanelFocus.focusByProjectId(project.id);
-  }, [activeProjectId, leftPanelFocus, projects]);
+    onOpenProjectManagement?.(project.id);
+  }, [onOpenProjectManagement]);
 
   useEffect(() => {
     const nonce = addRepoIntent?.nonce ?? null;
@@ -293,7 +281,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           project={leftPanelFocus.view.project}
           repos={leftPanelFocus.view.repos}
           selectedRepoPath={leftPanelFocus.view.selectedRepo?.localPath ?? null}
+          workingRepoPath={workingRepoPath ?? null}
           onSelectRepoPath={leftPanelFocus.setSelectedRepoPath}
+          onWorkInRepo={handleWorkInFocusedRepo}
           onBack={leftPanelFocus.clearFocus}
           packets={orchestratorPackets}
           missionState={orchestratorMissionState}
@@ -346,9 +336,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           registeredRepoByPath={registeredRepoByPath}
           projectsOpen={projectsMenuOpen}
           onProjectsOpenChange={setProjectsMenuOpen}
-          onProjectSelect={handleMiniProjectSelect}
           onRepoSelect={handleMiniRepoSelect}
-          onOpenProjectControlRoom={handleMiniOpenControlRoom}
+          onOpenProject={handleMiniProjectOpen}
           onManageProjects={handleOpenProjectManagement}
           onAddRepo={handleOpenAddRepoDialog}
         />
@@ -521,9 +510,8 @@ function MiniAgentPanelHeader({
   registeredRepoByPath,
   projectsOpen,
   onProjectsOpenChange,
-  onProjectSelect,
   onRepoSelect,
-  onOpenProjectControlRoom,
+  onOpenProject,
   onManageProjects,
   onAddRepo,
 }: {
@@ -537,9 +525,8 @@ function MiniAgentPanelHeader({
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
   projectsOpen: boolean;
   onProjectsOpenChange: (open: boolean) => void;
-  onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
-  onOpenProjectControlRoom: (project: ProjectRecord) => void;
+  onOpenProject: (project: ProjectRecord) => void;
   onManageProjects: () => void;
   onAddRepo: () => void;
 }) {
@@ -614,11 +601,10 @@ function MiniAgentPanelHeader({
           icon={FolderIcon}
           label="Projects"
           active={projectsOpen}
-          disclosure="filter"
           onClick={() => {
             setSessionMenuOpen(false);
-            if (!projectsOpen) refreshProjectsFromExternalMutation();
-            onProjectsOpenChange(!projectsOpen);
+            refreshProjectsFromExternalMutation();
+            onManageProjects();
           }}
           // Add-repo lives here now (moved out of the status-bar footer,
           // Q ruling 2026-07-11) — contextual to Projects, left of the
@@ -670,9 +656,8 @@ function MiniAgentPanelHeader({
             activeProjectId={activeProjectId}
             selectedRepoPath={selectedRepoPath}
             registeredRepoByPath={registeredRepoByPath}
-            onProjectSelect={onProjectSelect}
             onRepoSelect={onRepoSelect}
-            onOpenProjectControlRoom={onOpenProjectControlRoom}
+            onOpenProject={onOpenProject}
             onManageProjects={onManageProjects}
             onAddRepo={onAddRepo}
           />
@@ -964,9 +949,8 @@ function MiniProjectsMenu({
   activeProjectId,
   selectedRepoPath,
   registeredRepoByPath,
-  onProjectSelect,
   onRepoSelect,
-  onOpenProjectControlRoom,
+  onOpenProject,
   onManageProjects,
   onAddRepo,
 }: {
@@ -974,18 +958,34 @@ function MiniProjectsMenu({
   activeProjectId: string | null;
   selectedRepoPath: string | null;
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
-  onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
-  onOpenProjectControlRoom: (project: ProjectRecord) => void;
+  onOpenProject: (project: ProjectRecord) => void;
   onManageProjects: () => void;
   onAddRepo: () => void;
 }) {
   const [hoveredRepo, setHoveredRepo] = useState<{ repo: RepoRegistryEntry; rect: DOMRect } | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const visibleProjects = useMemo(() => {
-    const hasConcreteProject = projects.some((project) => project.id !== 'default');
-    return hasConcreteProject ? projects.filter((project) => project.id !== 'default') : projects;
-  }, [projects]);
+  const projectOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set());
+  const [otherProjectsOpen, setOtherProjectsOpen] = useState(false);
+  const registeredRepos = useMemo(
+    () => Array.from(new Map(
+      Array.from(registeredRepoByPath.values()).map((repo) => [repo.id, repo]),
+    ).values()),
+    [registeredRepoByPath],
+  );
+  const visibleProjects = useMemo(
+    () => visibleProjectNavigationItems(projects, registeredRepos),
+    [projects, registeredRepos],
+  );
+  const groupedProjects = useMemo(
+    () => groupProjectNavigationItems(visibleProjects, activeProjectId),
+    [activeProjectId, visibleProjects],
+  );
+  const displayedProjects = useMemo(() => [
+    ...(groupedProjects.currentProject ? [groupedProjects.currentProject] : []),
+    ...(otherProjectsOpen ? groupedProjects.otherProjects : []),
+  ], [groupedProjects, otherProjectsOpen]);
 
   const clearCloseTimer = useCallback(() => {
     if (!closeTimerRef.current) return;
@@ -1001,7 +1001,10 @@ function MiniProjectsMenu({
     }, 120);
   }, [clearCloseTimer]);
 
-  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+  useEffect(() => () => {
+    clearCloseTimer();
+    if (projectOpenTimerRef.current) clearTimeout(projectOpenTimerRef.current);
+  }, [clearCloseTimer]);
 
   // B2 — rename is surfaced here because this is the live project list the user
   // actually sees; the old ProjectsBottomBar rename UI is orphaned/unmounted.
@@ -1013,6 +1016,10 @@ function MiniProjectsMenu({
   const [renameDraft, setRenameDraft] = useState('');
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const beginRename = useCallback((project: ProjectRecord) => {
+    if (projectOpenTimerRef.current) {
+      clearTimeout(projectOpenTimerRef.current);
+      projectOpenTimerRef.current = null;
+    }
     setRenamingId(project.id);
     setRenameDraft(project.name);
   }, []);
@@ -1034,6 +1041,28 @@ function MiniProjectsMenu({
     }
   }, [renamingId]);
 
+  const openProject = useCallback((project: ProjectRecord, clickDetail: number) => {
+    if (clickDetail === 0) {
+      onOpenProject(project);
+      return;
+    }
+    if (clickDetail > 1) return;
+    if (projectOpenTimerRef.current) clearTimeout(projectOpenTimerRef.current);
+    projectOpenTimerRef.current = setTimeout(() => {
+      projectOpenTimerRef.current = null;
+      onOpenProject(project);
+    }, 250);
+  }, [onOpenProject]);
+
+  const toggleProjectRepos = useCallback((projectId: string) => {
+    setCollapsedProjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  }, []);
+
   return (
     <div
       style={{
@@ -1052,11 +1081,13 @@ function MiniProjectsMenu({
       className="hide-scrollbar"
     >
       {visibleProjects.length > 0 ? (
-        visibleProjects.map((project) => {
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {displayedProjects.map((project) => {
           const active = project.id === activeProjectId;
           const visibleRepoPaths = project.repoPaths.filter((repoPath) => registeredRepoByPath.has(repoPath));
+          const reposExpanded = !collapsedProjectIds.has(project.id);
           return (
-            <div key={project.id} style={{ paddingTop: 1, paddingBottom: 1 }}>
+            <div key={project.id} style={{ paddingTop: 1, paddingBottom: 1, order: active ? 0 : 2 }}>
               {project.id === renamingId ? (
                 <input
                   ref={renameInputRef}
@@ -1069,6 +1100,7 @@ function MiniProjectsMenu({
                   }}
                   onBlur={() => { void submitRename(project); }}
                   placeholder={project.name}
+                  aria-label={`Rename ${project.name}`}
                   maxLength={60}
                   style={{
                     width: '100%',
@@ -1092,117 +1124,60 @@ function MiniProjectsMenu({
                   }}
                 />
               ) : (
-              <button
-                type="button"
-                onClick={() => onProjectSelect(project)}
-                onDoubleClick={(event) => { event.preventDefault(); beginRename(project); }}
-                title={`Double-click to rename ${project.name}`}
+              <div
                 style={{
-                  width: '100%',
-                  minHeight: 25,
-                  borderWidth: 0,
-                  borderRadius: 0,
+                  width: '100%', minHeight: 25, display: 'flex', alignItems: 'center',
                   background: active ? 'var(--t-hover)' : 'transparent',
-                  color: 'var(--t-text)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  paddingTop: 3,
-                  paddingRight: 18,
-                  paddingBottom: 3,
-                  paddingLeft: 15,
-                  textAlign: 'left',
-                  fontFamily: 'var(--font-sans-system)',
-                  outlineOffset: -2,
                   transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
-                onMouseEnter={(event) => {
-                  event.currentTarget.style.background = 'var(--t-hover)';
-                  const chevron = event.currentTarget.querySelector<HTMLElement>('.o8-project-row-chevron');
-                  if (chevron) chevron.style.opacity = '1';
-                }}
-                onMouseLeave={(event) => {
-                  event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent';
-                  const chevron = event.currentTarget.querySelector<HTMLElement>('.o8-project-row-chevron');
-                  if (chevron) chevron.style.opacity = '0';
-                }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
               >
-                <span
-                  aria-hidden
-                  style={{
-                    // Ring, not a filled dot: filled dots are the STATUS LED
-                    // vocabulary (green = running). A ring in the project color
-                    // reads as identity without implying agent state.
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background: 'transparent',
-                    border: `1.5px solid ${project.color ?? 'var(--t-text-faint)'}`,
-                    boxSizing: 'border-box',
-                    flexShrink: 0,
-                    marginRight: 9,
+                <button
+                  type="button"
+                  onClick={(event) => openProject(project, event.detail)}
+                  onDoubleClick={(event) => { event.preventDefault(); beginRename(project); }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'F2') return;
+                    event.preventDefault();
+                    beginRename(project);
                   }}
-                />
-                <span
+                  title={`Open ${project.name} project overview`}
+                  aria-label={`Open ${project.name} project overview`}
+                  aria-keyshortcuts="F2"
                   style={{
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontSize: 13.5,
-                    lineHeight: 1.25,
-                    fontWeight: 300,
-                    letterSpacing: '-0.1px',
+                    minWidth: 0, minHeight: 25, flex: 1, borderWidth: 0, borderRadius: 0,
+                    background: 'transparent', color: 'var(--t-text)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 7, paddingTop: 3,
+                    paddingRight: 4, paddingBottom: 3, paddingLeft: 15, textAlign: 'left',
+                    fontFamily: 'var(--font-sans-system)', outlineOffset: -2,
                   }}
                 >
-                  {project.name}
+                  <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: 'transparent', border: `1.5px solid ${project.color ?? 'var(--t-text-faint)'}`, boxSizing: 'border-box', flexShrink: 0, marginRight: 9 }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>
+                    {project.name}
+                  </span>
+                </button>
+                <span aria-label={`${visibleRepoPaths.length} repositories`} style={{ color: 'var(--t-text-faint)', fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', flexShrink: 0 }}>
+                  {visibleRepoPaths.length} repo{visibleRepoPaths.length === 1 ? '' : 's'}
                 </span>
-                <span
-                  style={{
-                    color: 'var(--t-text-faint)',
-                    fontSize: 9.5,
-                    lineHeight: 1.25,
-                    fontWeight: 260,
-                    letterSpacing: '-0.4px',
-                    flexShrink: 0,
-                  }}
-                >
-                  {visibleRepoPaths.length}
-                </span>
-                {/* Chevron = the explicit "open control room" affordance.
-                    Clicking the row itself just SELECTS the project; clicking
-                    this opens the project's control room (stopPropagation keeps
-                    the two separate). Hover-reveal via the row's mouse handlers. */}
-                <span
-                  className="o8-project-row-chevron"
-                  role="button"
-                  tabIndex={0}
-                  title="Open control room"
-                  aria-label={`Open control room for ${project.name}`}
-                  onClick={(event) => { event.stopPropagation(); onOpenProjectControlRoom(project); }}
+                <button
+                  type="button"
+                  title={`${reposExpanded ? 'Collapse' : 'Expand'} repositories`}
+                  aria-label={`${reposExpanded ? 'Collapse' : 'Expand'} repositories in ${project.name}`}
+                  aria-expanded={reposExpanded}
+                  onClick={() => toggleProjectRepos(project.id)}
                   onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
                   onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-faint)'; }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--t-text-faint)',
-                    opacity: 0,
-                    flexShrink: 0,
-                    cursor: 'pointer',
-                    marginLeft: 2,
-                    transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  }}
+                  style={{ width: 28, height: 25, borderWidth: 0, borderRadius: 0, background: 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', flexShrink: 0, cursor: 'pointer', marginLeft: 2, marginRight: 8, transition: 'color 120ms cubic-bezier(0.22, 1, 0.36, 1)' }}
                 >
                   <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="m9 6 6 6-6 6" />
+                    <path d={reposExpanded ? 'm6 9 6 6 6-6' : 'm9 6 6 6-6 6'} />
                   </svg>
-                </span>
-              </button>
+                </button>
+              </div>
               )}
-              {visibleRepoPaths.length > 0 ? (
+              {visibleRepoPaths.length > 0 && reposExpanded ? (
                 <div style={{ paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
                   {visibleRepoPaths.map((repoPath) => {
                     const repo = registeredRepoByPath.get(repoPath);
@@ -1280,7 +1255,30 @@ function MiniProjectsMenu({
               ) : null}
             </div>
           );
-        })
+        })}
+        {groupedProjects.otherProjects.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setOtherProjectsOpen((open) => !open)}
+            aria-expanded={otherProjectsOpen}
+            style={{
+              order: 1,
+              width: '100%', minHeight: 25, marginTop: 2, borderWidth: 0, borderRadius: 0,
+              background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 7, paddingTop: 3, paddingRight: 18,
+              paddingBottom: 3, paddingLeft: 15, textAlign: 'left', fontFamily: 'var(--font-sans-system)',
+              fontSize: 12.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', outlineOffset: -2,
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
+          >
+            <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d={otherProjectsOpen ? 'm6 9 6 6 6-6' : 'm9 6 6 6-6 6'} />
+            </svg>
+            <span>Other projects ({groupedProjects.otherProjects.length})</span>
+          </button>
+        ) : null}
+        </div>
       ) : (
         <div style={{ padding: '8px 7px', color: 'var(--t-text-faint)', fontSize: 12.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>
           No projects yet

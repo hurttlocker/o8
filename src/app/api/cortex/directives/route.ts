@@ -38,7 +38,9 @@ import {
   directiveAppliesToRepo,
   resolveActiveDirectiveProjectScope,
 } from '@/lib/cortex/directives/filter';
+import { getProjectContext } from '@/lib/projects/context';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
+import { isVirtualRepoProjectId } from '@/lib/repos/virtual-project-id';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,7 +124,25 @@ export async function GET(req: NextRequest) {
     // With a repoPath, use the same repo + active-project rules as dispatch.
     // Without a repoPath, expose only global + active-project directives.
     let parsed: ParsedDirective[] = parsedAll;
-    if (repoPath) {
+    const projectId = req.nextUrl.searchParams.get('projectId')?.trim();
+    if (projectId) {
+      const context = await getProjectContext({ projectId, repoPath });
+      if (![context.id, context.runtimeProjectId, context.settingsProjectId].includes(projectId)) {
+        return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
+      }
+      const projectScope: DirectiveProjectScope = {
+        projectIds: new Set([context.id, context.runtimeProjectId, context.settingsProjectId].filter((id): id is string => Boolean(id)).map((id) => id.toLowerCase())),
+        // A virtual repo project can share its display-name slug with an
+        // unrelated Settings project. Only its explicit id is unambiguous.
+        projectSlugs: isVirtualRepoProjectId(context.runtimeProjectId)
+          ? new Set()
+          : new Set([context.slug.toLowerCase()]),
+        repoInActiveProject: context.repoInProject,
+      };
+      parsed = parsedAll.filter((directive) => repoPath
+        ? directiveAppliesToRepo(directive, repoPath, projectScope)
+        : directiveAppliesToActiveProject(directive, projectScope));
+    } else if (repoPath) {
       const projectScope = await resolveActiveDirectiveProjectScope(repoPath);
       parsed = parsedAll.filter((d) => directiveAppliesToRepo(d, repoPath, projectScope));
     } else {
