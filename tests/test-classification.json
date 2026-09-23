@@ -10,6 +10,12 @@
       ]
     },
     {
+      "path": "src/app/api/automations/connected/route.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/app/api/leases/route.test.ts",
       "reasons": [
         "apfs-tool",
