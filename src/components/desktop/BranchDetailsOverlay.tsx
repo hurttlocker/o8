@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom';
 import { SmoothCorners } from '@lisse/react';
 import { CollapsedRailIcon, ChevronsRightIcon } from './branch-rail-collapse';
 import {
-  BRANCH_RAIL_CARD_RADIUS,
   COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
   WORKSPACE_RAIL_CORNER_RADIUS,
   WORKSPACE_RAIL_CORNER_SMOOTHING,
@@ -13,8 +12,8 @@ import {
 import type { PrDetail } from './pr-panel/types';
 import type { O8BrowserTab } from './use-o8-browser-tabs';
 
-const ROW_HEIGHT = 28;
-const CHECK_ROW_HEIGHT = 24;
+const ROW_HEIGHT = 34;
+const CHECK_ROW_HEIGHT = 28;
 
 /** The O8 right-panel tabs the rail rows can jump to (mirrors onOpenO8Panel). */
 export type OverlayPanelTab =
@@ -73,7 +72,7 @@ export interface BranchDetailsOverlayProps {
   onOpenTab: (tab: OverlayPanelTab) => void;
 }
 
-const OVERLAY_WIDTH = 256;
+const OVERLAY_WIDTH = 304;
 const OVERLAY_MARGIN = 8;
 /** Pulls the card off the workspace card's top + right edges so its shadow has
  *  room to land on those sides instead of dying flush against them, and the card
@@ -177,17 +176,16 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
           maxHeight,
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
-          paddingTop: 8,
-          paddingRight: 10,
-          paddingBottom: 12,
-          paddingLeft: 10,
+          gap: 2,
+          paddingTop: 12,
+          paddingRight: 14,
+          paddingBottom: 14,
+          paddingLeft: 14,
           overflowY: 'auto',
           scrollbarWidth: 'none',
-          // Opaque paper surface so the chat never bleeds through (--t-chat-surface-bg
-          // is pinned solid in every palette × surface). The card reads as an
-          // elevated panel over the chat, not a translucent scrim.
-          background: 'var(--t-chat-surface-bg)',
+          // All-glass mode makes the chat surface transparent. Floating menus
+          // still need the solid panel token to cover the content below.
+          background: 'var(--t-panel-solid)',
           boxShadow: 'var(--t-panel-shadow), 0 8px 30px rgba(15, 23, 42, 0.18)',
           color: 'var(--t-text)',
         }}
@@ -314,30 +312,18 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
 
 function Card({ children }: { children: ReactNode }) {
   return (
-    // Lisse squircle, same smoothing as the overlay + workspace card. A plain
-    // CSS corner at the same radius reads harder than the squircles around it
-    // — the same clash the 0.1.604 ruling caught one level up (Q 2026-07-16).
-    <SmoothCorners
-      corners={{ radius: BRANCH_RAIL_CARD_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
-      innerBorder={{
-        width: 1,
-        color: 'color-mix(in srgb, var(--t-border-subtle, var(--t-border)) 55%, transparent)',
-        opacity: 1,
-      }}
-      autoEffects={false}
-      style={{
-        background: 'color-mix(in srgb, var(--t-bg-card) 70%, transparent)',
-        paddingTop: 6,
-        paddingBottom: 4,
-        paddingLeft: 4,
-        paddingRight: 4,
-        display: 'flex',
-        flexDirection: 'column',
-        flexShrink: 0,
-      }}
-    >
+    <div style={{
+      paddingTop: 8,
+      paddingBottom: 9,
+      paddingLeft: 2,
+      paddingRight: 2,
+      display: 'flex',
+      flexDirection: 'column',
+      flexShrink: 0,
+      borderBottom: '1px solid var(--t-divider)',
+    }}>
       {children}
-    </SmoothCorners>
+    </div>
   );
 }
 
@@ -347,11 +333,11 @@ function StaticHeader({ label }: { label: string }) {
       style={{
         display: 'flex',
         alignItems: 'center',
-        minHeight: 22,
+        minHeight: 26,
         paddingLeft: 10,
         paddingRight: 10,
         paddingBottom: 4,
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: 300,
         letterSpacing: '-0.1px',
         lineHeight: '14px',
