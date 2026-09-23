@@ -481,13 +481,20 @@ describe('legacy packets remain outside the contract gate', () => {
   });
 });
 
-describe('default-armed contract capture fails soft on the durable approval path', () => {
-  it('lets a default-armed packet without a captured contract proceed and records the missing event', async () => {
+describe('default-armed contract capture requires an explicit decision on the durable approval path', () => {
+  it('blocks a default-armed packet without a captured contract and records the missing event', async () => {
     const { lane, assessment } = await assessPersistedContractPacket({ source: 'default' });
 
-    expect(assessment).toMatchObject({ approved: true, contractCoverage: null });
+    expect(assessment).toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed', reason: expect.stringContaining('Requirement coverage is unproven') },
+    });
     const preview = await buildPreviewForLane(lane, lane.packetId!);
-    expect(preview.reviewPrerequisite).toContain('Current policy allows review without contract coverage');
+    expect(preview).toMatchObject({
+      wouldMerge: false,
+      blockers: expect.arrayContaining(['contract-review']),
+      reviewPrerequisite: expect.stringContaining('explicit operator waiver'),
+    });
     const missingEvents = getLaneEvents(lane.id)
       .filter((event) => event.verb === 'task_contract_missing');
     expect(missingEvents).toHaveLength(1);

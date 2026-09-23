@@ -629,6 +629,8 @@ export function recordOrchestratorReview(
     },
     args: {
       ...approval.args,
+      // A later automated verdict cannot inherit an operator's waiver for an earlier HEAD.
+      missingContractWaiverReason: undefined,
       packetId: normalizedPacketId,
       approved: normalizedReview.approved,
       findings: normalizedReview.findings,

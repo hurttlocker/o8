@@ -33,6 +33,7 @@ import { isProtectedBranch } from '@/lib/lane/policy';
 import { evaluatePolicy } from '@/lib/approvals/policies';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/dispatch';
 import { assessDurableApprovedReview, hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
+import { resolvePacketTaskContractGate } from '@/lib/lane/task-contract-gate';
 import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
@@ -808,8 +809,7 @@ async function dispatchUnlocked(
       }
 
       // ── Merge gate enforcement ──
-      // Runs security, budget, and integrity checks. Block-level violations
-      // force human approval regardless of auto-review status.
+      // Security, budget, and integrity violations can require operator approval.
       //
       // When the orchestrator has already approved the review, pass that
       // through — the gate downgrades budget violations to warn so a
@@ -833,12 +833,12 @@ async function dispatchUnlocked(
         });
       }
 
-      // Durable approved-review precondition. Computed after the merge gate so
-      // block-level gate findings still force an operator card regardless of review.
-      // This invariant is intentionally independent of the policy table: a
-      // workspace override may make a reviewed merge stricter, but it cannot
-      // authorize an unreviewed orchestrator/agent merge. The explicit user
-      // actor path remains governed by the separate operator-trust contract.
+      const contractGate = await resolvePacketTaskContractGate({ lane });
+      if (contractGate.enforceCoverage
+        && durableReview.contractCoverage?.status !== 'passed'
+        && durableReview.contractCoverage?.status !== 'waived') {
+        return { ok: false, laneId: command.laneId, note: `Task-contract coverage is required. ${durableReview.reason}` };
+      }
       if (actor !== 'user' && !durableReview.approved) {
         return createLaneActionApproval(lane, actor, {
           verb: 'merge',

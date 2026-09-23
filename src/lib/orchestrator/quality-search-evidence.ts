@@ -70,7 +70,7 @@ function unavailableEvidence(packet: OrchestratorPacket, role: QualitySearchRole
 
 
 interface CandidateCoverage {
-  status: 'passed' | 'failed' | 'not-applicable' | 'unknown';
+  status: 'passed' | 'failed' | 'not-applicable' | 'waived' | 'unknown';
   missingRequirementIds: string[];
   failureReasons: string[];
 }

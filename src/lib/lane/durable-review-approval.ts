@@ -58,10 +58,9 @@ function reviewFindingsAreResolved(approval: ApprovalRecord): boolean {
  * Resolve the sealed contract and the review's recorded evidence, then run the
  * deterministic gate.
  *
- * Fail-closed policy is deliberately narrow: explicit arming stays hard, while
- * a runtime-default arm without a captured contract records an audit event and
- * preserves the legacy approval path. If we cannot determine whether a bound
- * packet requires a contract, review still fails closed.
+ * A missing required contract blocks approval unless the current-HEAD review
+ * carries an explicit operator waiver for a runtime-default contract. An
+ * explicitly armed contract is never waivable through that path.
  */
 async function assessContractCoverage(
   lane: Pick<Lane, 'id' | 'packetId' | 'worktreePath' | 'repoPath' | 'baseBranch' | 'runtime'>,
@@ -72,11 +71,13 @@ async function assessContractCoverage(
 
   let contract: PacketTaskContract | null = null;
   let enforceCoverage = false;
+  let missingDefaultContract = false;
   try {
     const gate = await resolvePacketTaskContractGate({ lane });
     if (!gate.packetFound) return null;
     contract = gate.taskContract;
     enforceCoverage = gate.enforceCoverage;
+    missingDefaultContract = gate.missingDefaultContract;
   } catch (error) {
     // A packet binding exists but its contract requirement could not be read.
     // Treating that as legacy would let an unverifiable packet merge, so this
@@ -95,6 +96,34 @@ async function assessContractCoverage(
     };
   }
   if (!enforceCoverage) return null;
+
+  if (missingDefaultContract) {
+    const waiverReason = approval.args?.missingContractWaiverReason;
+    const normalizedWaiverReason = typeof waiverReason === 'string' ? waiverReason.trim() : '';
+    const hasOperatorReceipt = normalizedWaiverReason.length > 0
+      && approval.audit.some((event) => event.type === 'updated'
+        && event.actor === 'desktop'
+        && event.reviewedHeadSha === reviewedHeadSha
+        && event.rawText === normalizedWaiverReason);
+    if (hasOperatorReceipt) {
+      return {
+        status: 'waived',
+        reason: `The runtime-default contract was missing. An operator explicitly waived requirement coverage for this reviewed HEAD: ${normalizedWaiverReason}`,
+        contractVersion: null,
+        reviewedHeadSha,
+        checks: [],
+        missingRequirementIds: [],
+      };
+    }
+    return {
+      status: 'failed',
+      reason: 'The runtime-default contract was missing. Requirement coverage is unproven; an operator must recover the contract or explicitly waive this state for the current HEAD.',
+      contractVersion: null,
+      reviewedHeadSha,
+      checks: [],
+      missingRequirementIds: [],
+    };
+  }
 
   try {
     const { evaluateContractCoverage, readCoverageEvidence } =
