@@ -47,7 +47,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
     connections: 'Manage connected services once in Settings. Access during a task depends on the agent and its permissions.',
     agents: 'Agent definitions found in personal and repository folders. These entries currently come from Claude Code configuration.',
     hooks: 'Configured commands that run on agent events. These entries currently come from Claude Code configuration.',
-    plugins: 'Install and manage reusable instruction bundles.',
+    plugins: 'Features that add new capabilities and interfaces to o8.',
   };
   return (
     <header style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>

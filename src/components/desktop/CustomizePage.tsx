@@ -24,6 +24,9 @@ const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 const PluginsTab = dynamic(() => import('./customize/PluginsTab'), {
   loading: () => <p style={{ color: 'var(--t-text-muted)' }}>Opening plugins…</p>,
 });
+const InstructionBundlesPanel = dynamic(() => import('./customize/InstructionBundlesPanel'), {
+  loading: () => <p style={{ color: 'var(--t-text-muted)' }}>Opening skill bundles…</p>,
+});
 
 /** o8's own always-on MCP servers — shown so "all connections" is honest. */
 const BUILTIN_CONNECTIONS: Array<{ name: string; detail: string }> = [
@@ -161,7 +164,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
 
         {/* Keep section changes immediate. */}
         {tab === 'plugins' ? (
-          <PluginsTab selectedRepo={pluginRepo} onSelectRepo={setPluginRepo} repos={repos} onChanged={() => setRefreshCount((value) => value + 1)} onUseSkill={useSkill} />
+          <PluginsTab />
         ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
         ) : inventoryError ? (
@@ -187,6 +190,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
             {addingSkill ? <AddSkillForm repos={repos} initialRepo={repoPath} onCancel={() => setAddingSkill(false)} onSaved={(savedRepo) => { setAddingSkill(false); setQuery(''); setSelection({ projectId: project?.id, value: savedRepo ?? 'personal' }); setRefreshCount((value) => value + 1); setSkillNotice('Skill saved. Open it below or use it in a task.'); }} /> : <div><RamsButton variant="primary" onClick={() => { setAddingSkill(true); setSkillNotice(''); }}>Add skill</RamsButton></div>}
             {skillNotice ? <p role="status" style={{ color: 'var(--t-text-muted)', fontSize: 13 }}>{skillNotice}</p> : null}
             <SkillsInventoryTab skills={skills} query={q} onOpenFile={openFile} onUseSkill={useSkill} />
+            <InstructionBundlesPanel selectedRepo={pluginRepo} onSelectRepo={setPluginRepo} repos={repos} onChanged={() => setRefreshCount((value) => value + 1)} onUseSkill={useSkill} />
           </>
         ) : tab === 'agents' ? (
           <AgentsTab agents={agents.filter((a) => matches(a.name, a.description, a.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
