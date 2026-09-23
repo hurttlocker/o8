@@ -132,7 +132,7 @@ export function BranchPickerPopover({
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: 'var(--t-panel-border)',
-        background: 'var(--t-panel-solid)',
+        background: 'var(--t-popover-surface)',
         boxShadow: 'var(--t-panel-shadow)',
         overflow: 'hidden',
       }}

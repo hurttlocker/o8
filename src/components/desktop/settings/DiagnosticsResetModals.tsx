@@ -59,9 +59,9 @@ export function ResetConfirmModal({
       <div style={{
         width: 480,
         maxWidth: '90vw',
-        background: 'var(--t-bg-card, #ffffff)',
+        background: 'var(--t-popover-surface)',
         border: `1px solid ${RAMS_HAIRLINE}`,
-        borderRadius: 4,
+        borderRadius: 14,
         paddingTop: 24,
         paddingRight: 28,
         paddingBottom: 24,
@@ -216,9 +216,9 @@ export function ResetDoneModal({
       <div style={{
         width: 460,
         maxWidth: '90vw',
-        background: 'var(--t-bg-card, #ffffff)',
+        background: 'var(--t-popover-surface)',
         border: `1px solid ${RAMS_HAIRLINE}`,
-        borderRadius: 4,
+        borderRadius: 14,
         paddingTop: 24,
         paddingRight: 28,
         paddingBottom: 24,

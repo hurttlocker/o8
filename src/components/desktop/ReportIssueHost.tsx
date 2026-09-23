@@ -199,7 +199,7 @@ export function ReportIssueHost() {
           borderWidth: 1,
           borderStyle: 'solid',
           borderColor: 'var(--t-panel-border)',
-          background: 'var(--t-panel-solid)',
+          background: 'var(--t-popover-surface)',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
           padding: 20,
           display: 'flex',

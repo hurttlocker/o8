@@ -133,7 +133,7 @@ export function InlinePicker({
           borderStyle: 'solid',
           borderColor: 'var(--t-divider)',
           borderRadius: 10,
-          background: 'var(--t-panel)',
+          background: 'var(--t-popover-surface)',
           boxShadow: 'var(--t-shadow-card)',
         }}>
           {options.map((option) => {

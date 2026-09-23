@@ -241,7 +241,7 @@ export function AutomationEditor({
           borderStyle: 'solid',
           borderColor: 'var(--t-divider)',
           borderRadius: 12,
-          background: 'var(--t-panel)',
+          background: 'var(--t-popover-surface)',
           color: 'var(--t-text)',
           boxShadow: 'var(--t-shadow-card)',
           fontFamily: UI_FONT,

@@ -94,7 +94,7 @@ export function DesktopCloseCoordinator() {
           width: 'min(440px, 100%)',
           borderRadius: 16,
           border: '1px solid var(--t-panel-border)',
-          background: 'var(--t-bg-card)',
+          background: 'var(--t-popover-surface)',
           boxShadow: '0 24px 72px rgba(0, 0, 0, 0.24)',
           color: 'var(--t-text)',
           fontFamily: APP_FONT_STACK,

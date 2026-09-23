@@ -352,7 +352,7 @@ export function RichMarkdownSlashMenu({
         paddingLeft: 4,
         border: '1px solid var(--t-divider-subtle)',
         borderRadius: 9,
-        background: 'var(--t-panel-solid)',
+        background: 'var(--t-popover-surface)',
         boxShadow: 'var(--t-panel-shadow)',
       }}
     >

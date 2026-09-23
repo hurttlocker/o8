@@ -566,7 +566,7 @@ function TimelineHoverCard({ info, card }: { info: TrackerHoverInfo; card: Hover
         paddingLeft: 16,
         borderRadius: 12,
         border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-panel-solid)',
+        background: 'var(--t-popover-surface)',
         boxShadow: 'var(--t-panel-shadow)',
         color: 'var(--t-text)',
         pointerEvents: 'none',
