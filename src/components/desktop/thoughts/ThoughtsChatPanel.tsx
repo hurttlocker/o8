@@ -225,7 +225,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedBorder,
   thoughtsElevatedShadow,
   thoughtsMutedGlass,
-  permissionMode = 'full',
+  permissionMode: initialPermissionMode = 'full',
   collideEnabled = false,
   onSetCollide,
   composerModeStorageId,
@@ -251,9 +251,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   expectsThreadLoad = false,
 }, ref) {
   const [input, setInput] = useState('');
-  // Composer mode (Cursor-parity, Q 2026-07-17) — persists across sends until
-  // switched, Cursor behavior. Ref mirrors state so handleTaskSend reads the
-  // live value without growing its dependency list.
+  const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(initialPermissionMode);
+  useEffect(() => setPermissionMode(initialPermissionMode), [initialPermissionMode]);
+  // The mode ref keeps sends in sync with the selected composer mode.
   const [composerMode, setComposerMode] = useState<ComposerMode>('solo');
   const composerModeRef = useRef<ComposerMode>(composerMode);
   composerModeRef.current = composerMode;
@@ -2178,20 +2178,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return { id: tool.id ?? `scout-${index}`, label, status };
     });
   })();
+  const composeFirst = displayMessages.length === 0 && !displayWaiting;
   return (
     <div
       style={{
-        // containerType: 'size' makes `cqh` resolve to the local chat
-        // column instead of the viewport — the compose-first composer
-        // lift uses `translateY(-32cqh)` which now scales with the
-        // workspace area (shrinks when the bottom panel is open).
-        // 'display: contents' would skip layout — we need a real flex
-        // column so the chat list + composer flow correctly.
         containerType: 'size',
         display: 'flex',
         flexDirection: 'column',
         flex: 1,
         minHeight: 0,
+        justifyContent: 'center',
       } as React.CSSProperties}
     >
       {displayMessages.length > 0 && showInlineExport ? (
@@ -2218,16 +2214,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         style={{
           position: 'relative',
           display: 'flex',
-          flex: 1,
+          flex: composeFirst ? '0 1 auto' : '1 1 auto',
           minHeight: 0,
+          transition: 'flex-grow 280ms cubic-bezier(0.22, 1, 0.36, 1)',
           background: thoughtsBodyBackground,
           outline: attachmentDragOver ? '2px solid var(--t-accent)' : 'none',
           outlineOffset: -2,
         }}
       >
-        {/* Transcript fills; the optional side rail sits to its RIGHT so the
-            composer below spans the full panel width (Q ruling 2026-07-11). */}
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        {/* Keep the optional rail beside the transcript and the composer below. */}
+        <div style={{ flex: composeFirst ? '0 1 auto' : 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
           <ChatMessageList
             ref={chatEndRef}
             displayMessages={displayMessages}
@@ -2240,6 +2236,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             thoughtsElevatedShadow={thoughtsElevatedShadow}
             emptyStateOverride={emptyStateOverride}
             emptyStateFallback={fallbackEmptyState}
+            composeFirst={composeFirst}
             topContent={transcriptTopContent}
             bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
               <SwarmStatusCard
@@ -2383,6 +2380,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         workspaceTargets={workspaceTargets}
         selectedRepoPath={resolvedRepoPath}
         onSelectRepoPath={handleSelectComposerRepoPath}
+        permissionMode={permissionMode}
+        onPermissionModeChange={setPermissionMode}
         promptStash={isOrchestratorMode && !isChatMode ? { repoPath: resolvedRepoPath ?? '~', threadId, onRestore: fillInput } : undefined}
       />
       {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}

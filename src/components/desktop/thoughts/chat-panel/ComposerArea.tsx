@@ -24,6 +24,8 @@ import {
   stepComposerEffort,
 } from '../composer-selector/state';
 import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
+import { ComposerContextRow } from './ComposerContextRow';
+import type { ThoughtsChatPermissionMode } from './types';
 
 interface ComposerAreaProps {
   activeComposer?: boolean;
@@ -82,6 +84,8 @@ interface ComposerAreaProps {
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
+  permissionMode?: ThoughtsChatPermissionMode;
+  onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
   composerLeadingExtras?: React.ReactNode;
   /** ⌘⏎ or Return while busy routes through the host send buffer. */
   onSteer?: () => void;
@@ -141,6 +145,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   workspaceTargets,
   selectedRepoPath,
   onSelectRepoPath,
+  permissionMode,
+  onPermissionModeChange,
   composerLeadingExtras,
   onSteer,
   sendBufferStatus,
@@ -247,14 +253,12 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 
   useEffect(() => {
     const composerCenter = composerCenterRef.current;
-    if (!composerCenter) return;
+    if (!composerCenter || !activeComposer) return;
     return registerComposerCenter(composerCenter);
-  }, []);
+  }, [activeComposer]);
 
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
-  // Textarea stays typeable while the agent is busy so the user can compose a
-  // steer. Enter queues through the parent's steer path; only the no-target
-  // case disables the textarea outright.
+  // Keep the textarea typeable during a running turn for steering.
   // The Send button itself still flips to Stop via `working` on InputButtons.
   const isDisabled = !acceptsDirectInput && !targetAgentExists;
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
@@ -348,7 +352,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   };
 
   return (
-    <div style={{
+    <div data-o8-composer-root="" style={{
       paddingTop: 24,
       paddingRight: 12,
       paddingBottom: 12,
@@ -378,9 +382,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           onSelect={handleSelectSlashCommand}
         />
         <div
-          // The bottom status bar measures this element to center its branch
-          // cluster directly under the composer — the column-width props it used
-          // before ignored insets/gaps + a hidden right region and drifted ~125px.
+          // The footer controls register against this active composer.
           data-composer-center=""
           ref={composerCenterRef}
           onDragOver={dragHandlers?.onDragOver}
@@ -744,7 +746,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onEffortChange={selectorControls.onEffortChange}
             adaptiveEnabled={adaptiveEnabled}
             sessionRulesThreadId={sessionRulesThreadId}
-            repoLabel={showReasoningControls ? repoLabel : null}
+            repoLabel={null}
             displayMessagesCount={displayMessagesCount}
             working={isOrchestratorMode && displayWaiting}
             onStop={isOrchestratorMode ? onStop : undefined}
@@ -774,6 +776,16 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           />
         </div>
       </div>
+
+      <ComposerContextRow
+        repoLabel={repoLabel}
+        workspaceTargets={workspaceTargets}
+        selectedRepoPath={selectedRepoPath}
+        onSelectRepoPath={onSelectRepoPath}
+        onAddProject={() => window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { mode: 'existing' } }))}
+        permissionMode={isOrchestratorMode ? permissionMode : undefined}
+        onPermissionModeChange={isOrchestratorMode ? onPermissionModeChange : undefined}
+      />
 
       {footerLeadingSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
