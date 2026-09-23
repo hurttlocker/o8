@@ -142,4 +142,15 @@ describe('mergeChatMessages (#1282 transcript-loss)', () => {
     const merged = mergeChatMessages(existing, inbound);
     expect(merged.map((m) => m.id)).toEqual(['u1', 'assistant-1']);
   });
+
+  it('keeps distinct images sent with the same caption in adjacent turns', () => {
+    const first = msg('u1', 'user', 100, {
+      content: 'look at this', media: [{ kind: 'image', path: '/private/media/first.png' }],
+    });
+    const second = msg('u2', 'user', 200, {
+      content: 'look at this', media: [{ kind: 'image', path: '/private/media/second.png' }],
+    });
+    expect(mergeChatMessages([first], [first, second]).map((message) => message.id)).toEqual(['u1', 'u2']);
+    expect(mergeChatMessages([first], [second]).map((message) => message.id)).toEqual(['u1', 'u2']);
+  });
 });

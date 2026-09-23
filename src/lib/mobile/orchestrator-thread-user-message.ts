@@ -16,6 +16,9 @@ export function appendUserHistoryMessage(input: {
     (Boolean(input.messageId) && last.id === input.messageId)
     || (!input.media?.length && last.content === input.content)
   );
+  if (duplicate && input.media?.length && input.messageId && last.id === input.messageId) {
+    next[next.length - 1] = { ...last, media: input.media };
+  }
   if (input.handoff && !next.some((message) => message.id === input.handoff?.handoffId)) {
     next.splice(duplicate ? next.length - 1 : next.length, 0, createHandoffHistoryMarker(input.handoff, input.timestamp));
   }

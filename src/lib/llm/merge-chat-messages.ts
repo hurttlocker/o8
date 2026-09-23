@@ -68,8 +68,11 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
 function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
+  const leftMedia = Array.isArray(leftRecord.media) ? leftRecord.media : [];
+  const rightMedia = Array.isArray(rightRecord.media) ? rightRecord.media : [];
   return typeof leftRecord.role === 'string' && leftRecord.role === rightRecord.role
-    && typeof leftRecord.content === 'string' && leftRecord.content === rightRecord.content;
+    && typeof leftRecord.content === 'string' && leftRecord.content === rightRecord.content
+    && JSON.stringify(leftMedia) === JSON.stringify(rightMedia);
 }
 
 function collapseAdjacentDuplicates<T extends ChatMessageLike>(messages: T[]): T[] {

@@ -14,6 +14,9 @@ const mediaRoute = await import('@/app/api/mobile/media/route');
 const { buildOrchestratorSendPayload } = await import(
   '@/components/desktop/thoughts/use-orchestrator-stream/send-payload'
 );
+const { serializeChatThreadMessages } = await import(
+  '@/components/desktop/thoughts/chat-panel/usePersistChatThread'
+);
 const {
   createMobileOrchestratorThreadFromRepo,
 } = await import('@/lib/mobile/orchestrator-thread-create');
@@ -181,6 +184,16 @@ describe('mobile first orchestrator conversation', () => {
   it('keeps a sent image visible and durable across a stale client transcript POST', async () => {
     const dataUri = 'data:image/png;base64,' + Buffer.from('image-fixture').toString('base64');
     const threadId = 'thoughts-desktop-image-send';
+    const optimisticMessages = serializeChatThreadMessages([{
+      id: 'orch-user-image-1', role: 'user', text: 'Please inspect this image.',
+      timestamp: 1_753_900_000_100,
+      media: [{ kind: 'image', path: dataUri, name: 'photo.png' }],
+    }]);
+    const earlyPost = await historyRoute.POST(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tabId: threadId, repoPath: '/tmp/repos/image-send', messages: optimisticMessages }),
+    }));
+    expect(earlyPost.status).toBe(200);
     persistOrchestratorThreadUserMessageFromWire({
       message: { threadId },
       tabId: threadId,
@@ -209,7 +222,7 @@ describe('mobile first orchestrator conversation', () => {
       body: JSON.stringify({
         tabId: threadId,
         repoPath: '/tmp/repos/image-send',
-        messages: [{ id: 'orch-user-image-1', role: 'user', content: 'Please inspect this image.', timestamp: 1_753_900_000_100 }],
+        messages: optimisticMessages,
       }),
     }));
     expect(response.status).toBe(200);
