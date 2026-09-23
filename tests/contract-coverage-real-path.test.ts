@@ -16,6 +16,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { OrchestratorPacket, PacketTaskContract, PacketTaskContractSource } from '@/lib/orchestrator/types';
+import type { AgentRuntime } from '@/lib/runtimes/types';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-realpath-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -203,6 +204,85 @@ async function assessPersistedContractPacket(input: {
 }
 
 describe('durable approval enforces contract coverage on the real path', () => {
+  it('persists the first captured contract on the bound packet before review starts', async () => {
+    const packetId = `pkt-capture-${Date.now()}`;
+    const sessionKey = `codex:${packetId}`;
+    const lane = createLane({
+      repoPath: reviewRepo,
+      worktreePath: reviewRepo,
+      branch: 'inline/contract-review',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      sessionKey,
+    });
+    const packet: OrchestratorPacket = {
+      id: packetId,
+      referenceLabel: 'P1',
+      title: 'Capture contract',
+      summary: 'Capture contract',
+      workspaceTargetPath: reviewRepo,
+      branchTarget: 'inline/contract-review',
+      runtime: 'codex',
+      dependencyLabels: [],
+      dependencyPacketIds: [],
+      queueState: 'queued',
+      releaseState: 'pending',
+      status: 'awaiting_review',
+      taskContractRequired: true,
+      taskContractSource: 'default',
+      taskContract: null,
+      lane: {
+        tileId: 'test', tabId: 'test', repoPath: reviewRepo, worktreePath: reviewRepo,
+        runtime: 'codex', sessionKey, laneId: lane.id,
+      },
+    };
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-${packetId}`,
+      prompt: 'Capture contract',
+      summary: 'Capture contract',
+      repoPath: reviewRepo,
+      packets: [packet],
+    });
+    const runtime: AgentRuntime = {
+      id: 'codex',
+      displayName: 'Contract capture fixture',
+      capabilities: {
+        discover: false, readTranscript: true, launch: false, resume: false,
+        interrupt: false, reviewDiffs: true, costTelemetry: false, streaming: false,
+      },
+      discoverSessions: async () => [],
+      readTranscript: async () => [{
+        id: 'contract-turn', role: 'assistant',
+        text: `<task-contract>${JSON.stringify(processContract)}</task-contract>`,
+        timestamp: new Date('2026-09-23T12:00:00Z'),
+      }],
+      launch: async () => ({ ok: false, note: 'not supported' }),
+      resume: async () => ({ ok: false, note: 'not supported' }),
+      interrupt: async () => ({ ok: false, note: 'not supported' }),
+      getChangedFiles: async () => [],
+    };
+    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+    const { registerRuntime } = await import('@/lib/runtimes/registry');
+    registerRuntime(runtime);
+    expect(readOrchestratorControlPlaneState().packets[0]?.lane?.sessionKey).toBe(sessionKey);
+    const context = await capturePacketCompletionContext(packetId, sessionKey);
+    expect(context.taskContract).toEqual(processContract);
+    expect(readOrchestratorControlPlaneState().packets[0]?.taskContract).toEqual(processContract);
+
+    registerRuntime({
+      ...runtime,
+      readTranscript: async () => [{
+        id: 'later-turn', role: 'assistant',
+        text: `<task-contract>${JSON.stringify(capturedContract)}</task-contract>`,
+        timestamp: new Date('2026-09-23T12:01:00Z'),
+      }],
+    });
+    await capturePacketCompletionContext(packetId, sessionKey);
+    expect(readOrchestratorControlPlaneState().packets[0]?.taskContract).toEqual(processContract);
+  }, 30_000);
+
   it('requires separate process evidence without inventing a changed path', async () => {
     const absent = await assessPersistedContractPacket({
       source: 'explicit', taskContract: processContract, coveragePath: 'file.txt',
