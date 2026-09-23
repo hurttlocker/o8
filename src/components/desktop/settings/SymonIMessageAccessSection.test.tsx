@@ -63,7 +63,7 @@ it('shows an explicit confirmation before granting every approved member full ac
 it('shows a master switch even when no groups are configured', async () => {
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'POST') return Response.json({ ok: true, enabled: false });
-    return Response.json({ ok: true, configured: true, enabled: true, groups: [] });
+    return Response.json({ ok: true, configured: true, enabled: true, directSenderSuffix: '1461', groups: [] });
   });
   vi.stubGlobal('fetch', fetchMock);
   await act(async () => {
@@ -71,6 +71,7 @@ it('shows a master switch even when no groups are configured', async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(container.textContent).toContain('Allow Symon on iMessage');
+  expect(container.textContent).toContain('Your approved direct number ends 1461');
   const toggle = container.querySelector<HTMLButtonElement>('[role="switch"]');
   expect(toggle?.getAttribute('aria-checked')).toBe('true');
   await act(async () => {
