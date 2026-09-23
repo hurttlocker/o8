@@ -67,8 +67,26 @@ function emptySummary() {
   return { changedModules: 0, addedEdges: 0, removedEdges: 0, contextEdges: 0 };
 }
 
+export function architectureAnalysisId(result: ArchitectureDeltaResult): string {
+  return createHash('sha256').update(JSON.stringify({
+    status: result.status,
+    reason: result.reason,
+    nodes: result.nodes,
+    edges: result.edges,
+    summary: result.summary,
+    unsupportedPaths: result.unsupportedPaths,
+    omittedPaths: result.omittedPaths,
+    resolutionWarnings: result.resolutionWarnings,
+    truncated: result.truncated,
+  })).digest('hex').slice(0, 24);
+}
+
+function withAnalysisId(result: ArchitectureDeltaResult): ArchitectureDeltaResult {
+  return { ...result, analysisId: architectureAnalysisId(result) };
+}
+
 export function unavailableArchitectureDelta(reason: string): ArchitectureDeltaResult {
-  return {
+  return withAnalysisId({
     ok: true,
     status: 'unavailable',
     reason,
@@ -80,7 +98,7 @@ export function unavailableArchitectureDelta(reason: string): ArchitectureDeltaR
     resolutionWarnings: [],
     truncated: false,
     generatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 async function gitOutput(cwd: string, args: string[]) {
@@ -519,7 +537,7 @@ function buildResult(
 ): ArchitectureDeltaResult {
   const states = moduleStates(changes);
   if (states.size === 0) {
-    return {
+    return withAnalysisId({
       ok: true,
       status: 'unsupported',
       reason: 'No supported source modules changed.',
@@ -531,7 +549,7 @@ function buildResult(
       resolutionWarnings,
       truncated: sourceTruncated,
       generatedAt: new Date().toISOString(),
-    };
+    });
   }
 
   const changedPaths = new Set(states.keys());
@@ -580,7 +598,7 @@ function buildResult(
     };
   });
 
-  return {
+  return withAnalysisId({
     ok: true,
     status: 'ready',
     reason: null,
@@ -597,7 +615,7 @@ function buildResult(
     resolutionWarnings,
     truncated,
     generatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 export async function buildArchitectureDelta({
