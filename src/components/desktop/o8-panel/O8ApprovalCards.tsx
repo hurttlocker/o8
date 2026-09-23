@@ -75,15 +75,17 @@ function ApprovalActionButton({
   action,
   busy,
   disabled,
+  label,
   onClick,
 }: {
   action: ApprovalAction;
   busy: boolean;
   disabled: boolean;
+  label?: string;
   onClick: () => void;
 }) {
   const approve = action === 'approve';
-  const label = approve ? 'Approve' : 'Reject';
+  const buttonLabel = label ?? (approve ? 'Approve' : 'Reject');
   const busyLabel = approve ? 'Approving...' : 'Rejecting...';
   const style: CSSProperties = approve
     ? {
@@ -126,7 +128,7 @@ function ApprovalActionButton({
         ...style,
       }}
     >
-      {busy ? busyLabel : label}
+      {busy ? busyLabel : buttonLabel}
     </button>
   );
 }
@@ -149,6 +151,11 @@ function ApprovalRequestCard({
   const disabled = busyAction !== null || continuationUnsettled;
   const tool = toolLabel(approval);
   const copy = composeApprovalCardCopy(approval);
+  const isMerge = approval.continuation?.kind === 'lane' && approval.continuation.verb === 'merge';
+  const isUnreviewedMerge = isMerge && approval.title === 'Review required before merge';
+  const reason = isUnreviewedMerge
+    ? 'No approved review is recorded for this exact revision. Check the current diff before deciding whether to merge.'
+    : approval.description || approval.summary;
 
   return (
     <article
@@ -210,26 +217,29 @@ function ApprovalRequestCard({
           <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, color: 'var(--t-text)', overflowWrap: 'anywhere' }}>
             {copy.headline}
           </div>
-          <div style={{ marginTop: 4, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>
-            {copy.subline}
-          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '68px minmax(0, 1fr)', gap: 8, alignItems: 'baseline', marginBottom: 7 }}>
-        <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
-          Tool
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', width: 'fit-content', maxWidth: '100%', minHeight: 20, paddingLeft: 7, paddingRight: 7, borderRadius: 6, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-input-bg)', color: 'var(--t-text-secondary)', fontFamily: MONO_FONT, fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {tool}
-        </span>
+      <div style={{ marginBottom: 10, paddingTop: 9, paddingRight: 10, paddingBottom: 9, paddingLeft: 10, borderRadius: 8, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-input-bg)' }}>
+        <div style={{ marginBottom: 3, fontSize: 9, fontWeight: 400, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
+          Why this needs you
+        </div>
+        <div style={{ fontSize: 11.5, fontWeight: 350, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-secondary)', overflowWrap: 'anywhere' }}>
+          {reason}
+        </div>
       </div>
 
-      {approval.referee ? <O8RefereeRow referee={approval.referee} /> : null}
-
-      <div style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-muted)', overflowWrap: 'anywhere' }}>
-        {approval.description || approval.summary}
-      </div>
+      <details style={{ marginBottom: 9, color: 'var(--t-text-muted)' }}>
+        <summary style={{ cursor: 'pointer', fontSize: 10.5, fontWeight: 350, color: 'var(--t-text-secondary)' }}>
+          Request details{approval.referee ? ' and advisory review' : ''}
+        </summary>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, paddingLeft: 12 }}>
+          <div style={{ fontSize: 10, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{copy.subline}</div>
+          <div style={{ fontSize: 10, lineHeight: 1.4 }}>Tool: <span style={{ fontFamily: MONO_FONT }}>{tool}</span></div>
+          {isUnreviewedMerge ? <div style={{ fontSize: 10, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{approval.description}</div> : null}
+          {approval.referee ? <O8RefereeRow referee={approval.referee} /> : null}
+        </div>
+      </details>
 
       {approval.command ? (
         <pre
@@ -276,6 +286,7 @@ function ApprovalRequestCard({
           action="approve"
           busy={busyAction === 'approve'}
           disabled={disabled}
+          label={isMerge ? 'Approve merge' : undefined}
           onClick={() => onResolve(approval, 'approve')}
         />
       </div>
