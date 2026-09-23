@@ -4,7 +4,8 @@ import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { persistCanonicalChatHistoryRecord, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
-import { createHandoffHistoryMarker, truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
+import { truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
+import { appendUserHistoryMessage } from './orchestrator-thread-user-message';
 import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
 import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput } from './orchestrator-thread-project-binding';
@@ -491,6 +492,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   projectId?: unknown;
   message: string;
   messageId?: string;
+  media?: MobileTranscriptEntry['media'];
   backend?: MobileOrchestratorBackend | null;
   agent?: string | null;
   timestampMs?: number;
@@ -522,22 +524,11 @@ export function appendMobileOrchestratorUserMessage(input: {
     orchestratorSessionUpdatedAt: null,
   };
   const projectId = resolveOrchestratorThreadProjectId(existing.projectId, input.projectId);
-  const messages = Array.isArray(existing.messages) ? existing.messages : [];
-  const last = messages[messages.length - 1];
-  const alreadyLastUserMessage = last?.role === 'user' && last.content === content;
-  const nextMessages = [...messages];
-  const handoff = input.handoff;
-  if (handoff && !nextMessages.some((message) => message.id === handoff.handoffId)) {
-    nextMessages.splice(alreadyLastUserMessage ? nextMessages.length - 1 : nextMessages.length, 0, createHandoffHistoryMarker(handoff, timestamp));
-  }
-  if (!alreadyLastUserMessage) {
-    nextMessages.push({
-      id: input.messageId?.trim() || `user-${now.getTime()}`,
-      role: 'user',
-      content,
-      timestamp: handoff ? timestamp + 1 : timestamp,
-    });
-  }
+  const nextMessages = appendUserHistoryMessage({
+    messages: Array.isArray(existing.messages) ? existing.messages : [],
+    content, messageId: input.messageId, media: input.media,
+    handoff: input.handoff, timestamp,
+  });
   writeHistoryRecord(tabId, {
     ...existing,
     messages: nextMessages,

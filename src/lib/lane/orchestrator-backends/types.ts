@@ -75,8 +75,8 @@ export interface OrchestratorTurnOptions {
   signal?: AbortSignal;
   /**
    * Composer image attachments (data URIs). The Claude backend converts
-   * them to base64 image content blocks on stdin; other backends ignore
-   * them for now.
+   * them to base64 image content blocks on stdin; Codex passes stored image
+   * files with --image.
    */
   attachments?: Array<{ dataUri: string; name?: string }>;
   crashSurvival?: OrchestratorCrashSurvivalMeta;

@@ -4,10 +4,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { SANDBOX_EXEC_PATH } from '@/lib/runtimes/shared/owned-session/sandbox';
+import { codexComposerImagePaths, persistComposerImages } from '@/lib/mobile/orchestrator-image-media';
 import { prepareSingleOrchestratorLaunch, singleOrchestratorEnvironment } from './single-orchestrator-policy';
 
 const tempRoots: string[] = [];
 const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
+const originalMediaRoot = process.env.CORTEX_IDE_MEDIA_ROOT;
 const bundledCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
 const bundledCodeModeHost = '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host';
 const installedCodex = (process.env.PATH ?? '')
@@ -46,6 +48,8 @@ async function runPrepared(
 afterEach(() => {
   if (originalDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
   else process.env.CORTEX_IDE_DATA_DIR = originalDataDir;
+  if (originalMediaRoot === undefined) delete process.env.CORTEX_IDE_MEDIA_ROOT;
+  else process.env.CORTEX_IDE_MEDIA_ROOT = originalMediaRoot;
   while (tempRoots.length) rmSync(tempRoots.pop()!, { recursive: true, force: true });
 });
 
@@ -145,6 +149,33 @@ describe('Single orchestrator process boundary', () => {
     expect(readFileSync(join(repo, 'repo-marker.txt'), 'utf8')).toBe('ok');
     expect(existsSync(launchRoot)).toBe(false);
     prepared.cleanup();
+  });
+
+  it.skipIf(process.platform !== 'darwin')('reads a persisted composer image from the actual Solo sandbox', async () => {
+    const repo = tempRoot('o8-single-image-repo-');
+    const dataDir = tempRoot('o8-single-image-data-');
+    const codexHome = join(dataDir, 'codex-runtime');
+    mkdirSync(codexHome, { recursive: true });
+    process.env.CORTEX_IDE_DATA_DIR = dataDir;
+    process.env.CORTEX_IDE_MEDIA_ROOT = join(dataDir, 'media');
+    const attachment = { dataUri: `data:image/png;base64,${Buffer.from('photo bytes').toString('base64')}`, name: 'photo.png' };
+    const [saved] = persistComposerImages([attachment]);
+    const [imagePath] = codexComposerImagePaths([attachment], codexHome);
+    expect(readFileSync(saved.path, 'utf8')).toBe('photo bytes');
+    const sourceLauncher = join(dataDir, 'codex-test-launcher');
+    writeFileSync(sourceLauncher, '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o700 });
+    const prepared = await prepareSingleOrchestratorLaunch({
+      repoPath: repo,
+      codexHome,
+      binary: sourceLauncher,
+      args: ['-c', 'cat "$1"', '--', imagePath],
+      env: process.env,
+    });
+    try {
+      expect(await runPrepared(prepared, repo)).toBe('photo bytes');
+    } finally {
+      prepared.cleanup();
+    }
   });
 
   it.skipIf(process.platform !== 'darwin' || !installedCodex)('one-shot launches the real Codex binary while wrapper relaunches are OS-denied', async () => {

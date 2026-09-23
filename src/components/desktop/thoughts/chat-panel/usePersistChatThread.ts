@@ -4,8 +4,14 @@ import { serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 
 const DEBOUNCE_MS = 800;
 
-function serializeMessages(msgs: MobileTranscriptEntry[]) {
-  return serializeTranscriptForStorage(msgs);
+export function serializeChatThreadMessages(msgs: MobileTranscriptEntry[]) {
+  // The server saves composer images under its media root. Keep the immediate
+  // data URI preview in memory, but never mirror megabytes of base64 into the
+  // transcript or overwrite the server's durable media path on a later POST.
+  return serializeTranscriptForStorage(msgs.map((message) => {
+    const media = message.media?.filter((item) => !item.path.startsWith('data:'));
+    return { ...message, media: media?.length ? media : undefined };
+  }));
 }
 
 export function publishPersistedChatHistory(threadId: string): void {
@@ -54,7 +60,7 @@ export function usePersistChatThread(resolvedRepoPath: string | null, projectId:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             tabId: tid,
-            messages: serializeMessages(msgs),
+            messages: serializeChatThreadMessages(msgs),
             model: 'claude-code',
             planText: nextPlanText ?? undefined,
             repoPath: resolvedRepoPath,

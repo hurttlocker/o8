@@ -10,8 +10,12 @@ process.env.CORTEX_IDE_DATA_DIR = testRoot;
 const threadRoute = await import('@/app/api/mobile/orchestrator/threads/route');
 const historyRoute = await import('@/app/api/v2/chat-history/route');
 const historyListRoute = await import('@/app/api/v2/chat-history/list/route');
+const mediaRoute = await import('@/app/api/mobile/media/route');
 const { buildOrchestratorSendPayload } = await import(
   '@/components/desktop/thoughts/use-orchestrator-stream/send-payload'
+);
+const { serializeChatThreadMessages } = await import(
+  '@/components/desktop/thoughts/chat-panel/usePersistChatThread'
 );
 const {
   createMobileOrchestratorThreadFromRepo,
@@ -175,6 +179,55 @@ describe('mobile first orchestrator conversation', () => {
       id: 'thoughts-desktop-project',
       projectId: project.id,
     }));
+  });
+
+  it('keeps a sent image visible and durable across a stale client transcript POST', async () => {
+    const dataUri = 'data:image/png;base64,' + Buffer.from('image-fixture').toString('base64');
+    const threadId = 'thoughts-desktop-image-send';
+    const optimisticMessages = serializeChatThreadMessages([{
+      id: 'orch-user-image-1', role: 'user', text: 'Please inspect this image.',
+      timestamp: 1_753_900_000_100,
+      media: [{ kind: 'image', path: dataUri, name: 'photo.png' }],
+    }]);
+    const earlyPost = await historyRoute.POST(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tabId: threadId, repoPath: '/tmp/repos/image-send', messages: optimisticMessages }),
+    }));
+    expect(earlyPost.status).toBe(200);
+    persistOrchestratorThreadUserMessageFromWire({
+      message: { threadId },
+      tabId: threadId,
+      repoPath: '/tmp/repos/image-send',
+      transcriptMessage: 'Please inspect this image.',
+      messageId: 'orch-user-image-1',
+      backend: 'codex',
+      timestampMs: 1_753_900_000_100,
+      attachments: [{ dataUri, name: 'photo.png' }],
+    });
+    const stored = JSON.parse(readFileSync(safeOrchestratorHistoryPath(threadId), 'utf8'));
+    const media = stored.messages[0].media[0];
+    expect(media).toMatchObject({ kind: 'image', name: 'photo.png', mimeType: 'image/png' });
+    expect(media.path).not.toContain('data:');
+    expect(readFileSync(media.path).toString()).toBe('image-fixture');
+    const mediaResponse = await mediaRoute.GET(new NextRequest(
+      `http://localhost/api/mobile/media?path=${encodeURIComponent(media.path)}`,
+    ));
+    expect(mediaResponse.status).toBe(200);
+    expect(mediaResponse.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await mediaResponse.arrayBuffer()).toString()).toBe('image-fixture');
+
+    const response = await historyRoute.POST(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        tabId: threadId,
+        repoPath: '/tmp/repos/image-send',
+        messages: optimisticMessages,
+      }),
+    }));
+    expect(response.status).toBe(200);
+    const afterPost = JSON.parse(readFileSync(safeOrchestratorHistoryPath(threadId), 'utf8'));
+    expect(afterPost.messages[0].media).toEqual([media]);
   });
 
   it('puts explicit handoff consent on the WebSocket command', () => {
