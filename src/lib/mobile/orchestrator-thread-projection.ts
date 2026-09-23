@@ -19,6 +19,7 @@ export type ChatHistoryMessage = {
   id?: string;
   role?: string;
   content?: string;
+  media?: MobileTranscriptEntry['media'];
   timestamp?: number;
   persistedVersion?: number;
   /**

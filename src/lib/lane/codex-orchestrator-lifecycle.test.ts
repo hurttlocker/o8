@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const spawnMock = vi.hoisted(() => vi.fn());
 const resolveCliMock = vi.hoisted(() => vi.fn(async () => ({ path: process.execPath, version: '0.140.0' })));
 const prepareSingleMock = vi.hoisted(() => vi.fn());
+const codexComposerImagePathsMock = vi.hoisted(() => vi.fn(() => ['/tmp/o8-test-image.png']));
 const backendSessions = vi.hoisted(() => new Map<string, string>());
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -19,6 +20,9 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', () => ({
 
 vi.mock('./single-orchestrator-policy', () => ({
   prepareSingleOrchestratorLaunch: prepareSingleMock,
+}));
+vi.mock('@/lib/mobile/orchestrator-image-media', () => ({
+  codexComposerImagePaths: codexComposerImagePathsMock,
 }));
 
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => ({}) }));
@@ -80,6 +84,7 @@ describe('Codex orchestrator process lifecycle', () => {
     resolveCliMock.mockReset();
     resolveCliMock.mockResolvedValue({ path: process.execPath, version: '0.140.0' });
     prepareSingleMock.mockReset();
+    codexComposerImagePathsMock.mockClear();
     prepareSingleMock.mockImplementation(async (input: {
       binary: string;
       args: string[];
@@ -189,6 +194,25 @@ describe('Codex orchestrator process lifecycle', () => {
     await turn;
     const prepared = await prepareSingleMock.mock.results[0].value;
     expect(prepared.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('passes composer images to a Codex Solo turn as image files', async () => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-single-image-${Date.now()}`);
+    const proc = useFakeProc();
+    const attachment = { dataUri: 'data:image/png;base64,aW1hZ2U=', name: 'photo.png' };
+    const turn = sendToCodexOrchestrator(session, 'inspect this', () => {}, {
+      orchestrationMode: 'single',
+      attachments: [attachment],
+    });
+    await waitForSpawn();
+    expect(codexComposerImagePathsMock).toHaveBeenCalledWith([attachment], expect.any(String));
+    const preparedArgs = prepareSingleMock.mock.calls[0][0].args as string[];
+    expect(preparedArgs).toEqual(expect.arrayContaining(['--image', '/tmp/o8-test-image.png']));
+    expect(preparedArgs.indexOf('--image')).toBeLessThan(preparedArgs.indexOf('--'));
+    proc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"single-image-thread"}\n'));
+    proc.exitCode = 0;
+    proc.emit('close', 0);
+    await turn;
   });
 
   it('uses resume-compatible sandbox config instead of the bypass flag for later Single turns', async () => {

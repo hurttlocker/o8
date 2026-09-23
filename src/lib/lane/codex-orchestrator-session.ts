@@ -41,6 +41,7 @@ import { handleCodexJsonLine, type CodexLineHandlerState } from './codex-orchest
 import { codexOrchestrationModeFlags } from './orchestrator-backends/orchestration-mode';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import { prepareSingleOrchestratorLaunch } from './single-orchestrator-policy';
+import { codexComposerImagePaths, type ComposerImageAttachment } from '@/lib/mobile/orchestrator-image-media';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   ensureRegisteredSession,
@@ -93,6 +94,7 @@ export interface SendToCodexOrchestratorOptions {
   toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
   model?: string;
+  attachments?: ComposerImageAttachment[];
   signal?: AbortSignal;
   crashSurvival?: OrchestratorCrashSurvivalMeta;
 }
@@ -435,6 +437,16 @@ async function sendToCodexOrchestratorAttempt(
   }
   if (settleBeforeSpawnIfAborted()) return;
 
+  let imagePaths: string[];
+  try {
+    imagePaths = codexComposerImagePaths(options.attachments ?? [], codexHome);
+  } catch (error) {
+    session.status = 'dead';
+    onEvent({ type: 'error', error: `Unable to prepare image attachments: ${error instanceof Error ? error.message : String(error)}` });
+    onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+    return;
+  }
+
   onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort });
 
   // First-turn launch vs resume.
@@ -452,6 +464,7 @@ async function sendToCodexOrchestratorAttempt(
         // gpt-image-2 in Codex CLI 0.130.0 → 400s every turn at spawn).
         '-c',
         'tools.image_generation=false',
+        ...imagePaths.flatMap((path) => ['--image', path]),
         '--',
         message,
       ]
@@ -465,6 +478,7 @@ async function sendToCodexOrchestratorAttempt(
         'tools.image_generation=false',
         '-C',
         session.repoPath,
+        ...imagePaths.flatMap((path) => ['--image', path]),
         '--',
         message,
       ];

@@ -76,6 +76,13 @@ describe('mergeChatMessages (#1282 transcript-loss)', () => {
     ]);
   });
 
+  it('preserves server-saved image paths when the client reposts the text bubble', () => {
+    const media = [{ kind: 'image', path: '/private/media/photo.png', name: 'photo.png' }];
+    const existing = [msg('u1', 'user', 101, { media })];
+    const inbound = [msg('u1', 'user', 101)];
+    expect(mergeChatMessages(existing, inbound)).toEqual([expect.objectContaining({ media })]);
+  });
+
   it('preserves stored worker rows when a stale client reposts the base receipt', () => {
     const worker = { packetId: 'packet-1', runtime: 'codex', model: 'gpt-5.6-terra' };
     const receipt = { leadModel: 'gpt-6-astra', effort: 'high', mode: 'multitask' };

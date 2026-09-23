@@ -5389,6 +5389,7 @@ async function handleOrchestratorSendMsgOnce(
       backend: activeBackend.id,
       agent: activeAgentTag,
       timestampMs: turnStartedAtMs,
+      attachments,
       handoff: backendSwitchHandoff ? {
         handoffId: backendSwitchHandoff.packet.handoffId,
         from: backendSwitchHandoff.seam.from,

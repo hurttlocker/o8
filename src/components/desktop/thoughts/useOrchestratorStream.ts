@@ -23,6 +23,7 @@ import {
   type PendingOrchestratorSend,
 } from './use-orchestrator-stream/delivery';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
+import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import {
   primeCompactedOrchestratorSession,
@@ -965,13 +966,11 @@ export function useOrchestratorStream(
           return;
         }
       }
-      const userEntry: MobileTranscriptEntry = {
-        id: sendHandle.userMessageId,
-        role: 'user',
-        text: displayMessage,
-        timestamp: sentAtMs,
-        timestampLabel: formatTimestampLabel(sentAtMs),
-      };
+      const userEntry = optimisticUserEntry({
+        id: sendHandle.userMessageId, text: displayMessage,
+        timestamp: sentAtMs, timestampLabel: formatTimestampLabel(sentAtMs),
+        attachments: turnOptions?.attachments,
+      });
       messagesRef.current = [...messagesRef.current, userEntry, ...localEntriesAfterUser];
       setMessages((prev) => [...prev, userEntry, ...localEntriesAfterUser]);
       currentAssistantRef.current = null;

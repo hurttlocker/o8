@@ -5,7 +5,13 @@ import { serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 const DEBOUNCE_MS = 800;
 
 function serializeMessages(msgs: MobileTranscriptEntry[]) {
-  return serializeTranscriptForStorage(msgs);
+  // The server saves composer images under its media root. Keep the immediate
+  // data URI preview in memory, but never mirror megabytes of base64 into the
+  // transcript or overwrite the server's durable media path on a later POST.
+  return serializeTranscriptForStorage(msgs.map((message) => ({
+    ...message,
+    media: message.media?.filter((item) => !item.path.startsWith('data:')),
+  })));
 }
 
 export function publishPersistedChatHistory(threadId: string): void {
