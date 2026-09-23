@@ -1,8 +1,0 @@
-- Settings now opens in its own full-screen view, with clearer section headings, centered layouts, and quick navigation to subsections.
-- Reorganized provider, voice, storage, and dispatch controls to reduce duplicate settings and explain what each choice changes.
-- Added a full Projects page for finding, creating, editing, and opening projects while preserving multiple repositories and shared instructions.
-- Expanded Customize with shared skill discovery, Markdown skill import, and an instruction-plugin library. Project guide is the first bundled plugin, with reviewed installation, updates, enable/disable, and removal.
-- Kept selected project instructions and repository scope consistent from Customize through orchestrator turns, including projects with matching names.
-- Added architecture change maps to Review, with optional advisory attention suggestions and separate receipts for each review source.
-- Simplified MCP setup with command entry and configuration preview. Saving a server configuration no longer downloads or starts its command.
-- Centralized supported API-key setup, added confirmation before removing native keys, and improved connected worker detection.
