@@ -34,7 +34,7 @@ beforeEach(() => {
 
 afterEach(() => sqlite.close());
 
-function request() {
+function request(overrides: Record<string, string> = {}) {
   return new NextRequest('http://localhost/api/symon/managed-messages/inbound', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -46,6 +46,7 @@ function request() {
       recipient: 'imessage',
       text: 'Is the date booked?',
       context: 'Current state: the date is tentative.',
+      ...overrides,
     }),
   });
 }
@@ -65,4 +66,26 @@ it('persists a shared reply through the route and never invokes a native planner
   expect(await replay.json()).toEqual({ ok: true, state: 'done', text: 'The date is a working plan.' });
   expect(h.generateShared).toHaveBeenCalledTimes(1);
   expect(sqlite.prepare('SELECT COUNT(*) AS count FROM managed_symon_turns').get()).toEqual({ count: 1 });
+});
+
+it('scopes a shared follow-up to the newest question while retaining conversation history', async () => {
+  await POST(request());
+  h.generateShared.mockResolvedValueOnce('The venue is selected.');
+
+  const response = await POST(request({
+    eventId: 'imessage:message-2',
+    messageId: 'message-2',
+    text: 'What is the venue?',
+    context: 'Current state: the venue is selected, while the date remains tentative.',
+  }));
+
+  expect(response.status).toBe(200);
+  const prompt = h.generateShared.mock.calls[1][0] as string;
+  expect(prompt).toContain('Recent conversation:');
+  expect(prompt).toContain('Is the date booked?');
+  expect(prompt).toContain('Newest message from');
+  expect(prompt).toContain('What is the venue?');
+  expect(prompt).toContain('Answer the newest question');
+  expect(prompt).toContain('Do not repeat unrelated facts from earlier turns');
+  expect(store.getConversation('shared-imessage:group-1').transcript).toHaveLength(4);
 });
