@@ -60,10 +60,10 @@ describe('findWaitingOutsiders', () => {
     })], NOW, DAY_MS)).toEqual([]);
   });
 
-  it('ignores threads closed more than seven days ago', () => {
+  it('ignores closed threads even when the close was recent', () => {
     expect(findWaitingOutsiders([thread({
       state: 'closed',
-      closedAt: '2026-08-20T15:59:59.999Z',
+      closedAt: '2026-08-27T15:59:59.999Z',
     })], NOW, DAY_MS)).toEqual([]);
   });
 });

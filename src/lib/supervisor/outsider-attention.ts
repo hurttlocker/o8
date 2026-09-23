@@ -58,10 +58,9 @@ export function findWaitingOutsiders(
     if (!waitingLogin || waitingSinceMs === null || isGitHubBotLogin(waitingLogin)) return [];
     if (isGitHubInsiderAssociation(thread.lastHumanCommentAuthorAssociation)) return [];
 
-    if (thread.state.toLowerCase() !== 'open') {
-      const closedAtMs = validTimestamp(thread.closedAt);
-      if (closedAtMs === null || nowMs - closedAtMs > OUTSIDER_ATTENTION_RECENTLY_CLOSED_MS) return [];
-    }
+    // Closed threads remain in the mirror briefly for history, but they cannot
+    // start a new human-waiting incident after the source thread has closed.
+    if (thread.state.toLowerCase() !== 'open') return [];
 
     const lastInsiderCommentMs = validTimestamp(thread.lastInsiderCommentAt);
     if (lastInsiderCommentMs !== null && lastInsiderCommentMs > waitingSinceMs) return [];
