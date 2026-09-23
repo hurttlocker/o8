@@ -3,11 +3,9 @@ import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, renameSync, r
 import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { MobileTranscriptMedia } from './types';
+import { validateComposerImageAttachments, type ComposerImageAttachment } from './composer-image-validation';
 
-export interface ComposerImageAttachment {
-  dataUri: string;
-  name?: string;
-}
+export type { ComposerImageAttachment } from './composer-image-validation';
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
   'image/png': '.png',
@@ -21,18 +19,16 @@ function imageMediaRoot(): string {
 }
 
 export function persistComposerImages(attachments: readonly ComposerImageAttachment[]): MobileTranscriptMedia[] {
-  if (attachments.length > 8) throw new Error('A message can contain at most 8 images.');
-  if (attachments.length === 0) return [];
+  const checked = validateComposerImageAttachments(attachments);
+  if (checked.length === 0) return [];
   const root = imageMediaRoot();
   mkdirSync(root, { recursive: true, mode: 0o700 });
 
-  return attachments.map((attachment) => {
+  return checked.map((attachment) => {
     const match = /^data:(image\/[a-z+.-]+);base64,([a-z\d+/]+={0,2})$/i.exec(attachment.dataUri);
     const mimeType = match?.[1].toLowerCase() ?? '';
     const extension = IMAGE_EXTENSIONS[mimeType];
-    if (!match || !extension || attachment.dataUri.length >= 5_000_000) {
-      throw new Error('Image attachment must be PNG, JPEG, GIF, or WebP and under 5 MB.');
-    }
+    if (!match || !extension) throw new Error('Image attachment format is unsupported.');
     const bytes = Buffer.from(match[2], 'base64');
     if (bytes.length === 0 || bytes.toString('base64') !== match[2]) {
       throw new Error('Image attachment has invalid base64 data.');

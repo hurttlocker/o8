@@ -7,6 +7,7 @@ import {
 } from '@/lib/hooks/use-composer-send-buffer';
 
 interface ComposerSendBufferStatusProps {
+  attachmentError?: string | null;
   undoArmed: boolean;
   undoSequence: number;
   queued: QueuedComposerSend[];
@@ -15,13 +16,14 @@ interface ComposerSendBufferStatusProps {
 }
 
 export function ComposerSendBufferStatus({
+  attachmentError,
   undoArmed,
   undoSequence,
   queued,
   onUndo,
   onCancelQueued,
 }: ComposerSendBufferStatusProps) {
-  if (!undoArmed && queued.length === 0) return null;
+  if (!attachmentError && !undoArmed && queued.length === 0) return null;
 
   return (
     <div
@@ -35,6 +37,11 @@ export function ComposerSendBufferStatus({
         paddingLeft: 2,
       }}
     >
+      {attachmentError ? (
+        <div role="alert" style={{ color: 'var(--t-danger)', fontSize: 11 }}>
+          {attachmentError}
+        </div>
+      ) : null}
       {undoArmed ? (
         <UndoSendButton key={undoSequence} onUndo={onUndo} />
       ) : null}

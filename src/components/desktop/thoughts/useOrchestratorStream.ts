@@ -1011,7 +1011,7 @@ export function useOrchestratorStream(
         threadId: sendHandle.threadId,
         clientMessageId,
         sentAtMs,
-        wirePayload: payload,
+        wirePayload: payload, attachmentsRequired: Boolean(turnOptions?.attachments?.length),
       };
       durablePendingSend.recordPending(pendingRecord);
       const delivered = await deliverOrchestratorPayload({

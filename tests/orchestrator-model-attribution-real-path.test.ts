@@ -369,6 +369,31 @@ afterAll(async () => {
 });
 
 describe('orchestrator model attribution through the real WebSocket turn handler', () => {
+  it('rejects an unsupported image before accepting or persisting a text-only turn', async () => {
+    const threadId = `thoughts-invalid-image-${Date.now()}`;
+    const clientMessageId = `invalid-image-${Date.now()}`;
+    const historyPath = join(dataDir, 'chat-history', `${threadId}.json`);
+    const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+    sockets.add(socket);
+    const events: Array<{ event?: string; data?: { error?: string; clientMessageId?: string } }> = [];
+    socket.on('message', (chunk) => {
+      events.push(JSON.parse(String(chunk)) as (typeof events)[number]);
+    });
+    await once(socket, 'open');
+    socket.send(JSON.stringify({
+      type: 'orchestrator-send', repoPath, threadId, clientMessageId,
+      message: 'Inspect this photo', displayMessage: 'Inspect this photo',
+      backend: 'codex', orchestrationMode: 'single',
+      attachments: [{ dataUri: 'data:image/heic;base64,aW1hZ2U=', name: 'photo.heic' }],
+    }));
+    await waitFor(() => events.some((event) => event.event === 'error'
+      && event.data?.clientMessageId === clientMessageId), 'image rejection');
+    expect(events.find((event) => event.event === 'error' && event.data?.clientMessageId === clientMessageId)?.data?.error)
+      .toContain('PNG, JPEG, GIF, or WebP');
+    expect(events.some((event) => event.event === 'send-ack' && event.data?.clientMessageId === clientMessageId)).toBe(false);
+    expect(existsSync(historyPath)).toBe(false);
+  }, 30_000);
+
   it('keeps a virtual repo project isolated through a real WebSocket send', async () => {
     const projectId = 'repo:virtual-repo';
     const threadId = `thoughts-virtual-ws-${Date.now()}`;

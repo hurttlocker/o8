@@ -46,7 +46,9 @@ function pendingUserEntry(record: PersistedOrchestratorPendingSend): MobileTrans
   };
 }
 
-function fallbackWirePayload(record: PersistedOrchestratorPendingSend, repoPath: string): string {
+export function pendingSendWirePayload(record: PersistedOrchestratorPendingSend, repoPath: string): string | null {
+  if (record.wirePayload) return record.wirePayload;
+  if (record.attachmentsRequired) return null;
   return JSON.stringify({
     type: 'orchestrator-send',
     repoPath,
@@ -104,8 +106,10 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
 
   const deliverRecord = useCallback(async (record: PersistedOrchestratorPendingSend) => {
     if (!repoPath) return false;
+    const payload = pendingSendWirePayload(record, repoPath);
+    if (!payload) return false;
     return deliverOrchestratorPayload({
-      payload: record.wirePayload ?? fallbackWirePayload(record, repoPath),
+      payload,
       getWebSocket,
       connect,
     });
@@ -135,6 +139,9 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     appendOrchestratorDeliveryFailureEntry(setMessages, messagesRef, {
       id: `orch-delivery-error-${record.clientMessageId}`,
       originalText: record.displayMessage,
+      reason: record.attachmentsRequired && !record.wirePayload
+        ? 'The image could not be saved for Retry. Reattach it and send again.'
+        : undefined,
     });
   }, [messagesRef, setMessages, setStatusReady]);
 
@@ -167,10 +174,17 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
 
   const retryPending = useCallback(async (clientMessageId: string) => {
     if (!threadId) return;
-    const record = readPersistedOrchestratorPendingSend(threadId, clientMessageId);
+    const activeRecord = activeRecordRef.current;
+    const record = activeRecord?.clientMessageId === clientMessageId
+      ? activeRecord
+      : readPersistedOrchestratorPendingSend(threadId, clientMessageId);
     if (!record) return;
     ensureUserBubble(record);
     removeFailureEntry(clientMessageId);
+    if (record.attachmentsRequired && !record.wirePayload) {
+      failPending(record);
+      return;
+    }
     recordPending(record);
     setStatusBusy();
     const delivered = await deliverRecord(record);
@@ -196,6 +210,10 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     for (const record of records) ensureUserBubble(record);
 
     activeRecordRef.current = newest;
+    if (newest.attachmentsRequired && !newest.wirePayload) {
+      failPending(newest);
+      return;
+    }
     if (Date.now() - newest.sentAtMs >= ORCHESTRATOR_PENDING_SEND_STALE_MS) {
       failPending(newest);
       return;

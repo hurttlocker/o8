@@ -399,6 +399,7 @@ function RepoTargetChip({
 
 export function InputButtons({
   input,
+  hasAttachments = false,
   onSubmit,
   modelLabel,
   modelId,
@@ -430,6 +431,7 @@ export function InputButtons({
   composerSelectorV1Enabled = false,
 }: {
   input: string;
+  hasAttachments?: boolean;
   enhancing: boolean;
   preEnhanceInput: string | null;
   onEnhance: () => void;
@@ -480,7 +482,7 @@ export function InputButtons({
   onRequestTextareaFocus?: () => void;
   composerSelectorV1Enabled?: boolean;
 }) {
-  const canSubmit = Boolean(input.trim());
+  const canSubmit = Boolean(input.trim() || hasAttachments);
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
   const selectorReady = Boolean(
     composerSelectorController && composerMode && modelLabel && modelId && activeBackend && onEffortChange,

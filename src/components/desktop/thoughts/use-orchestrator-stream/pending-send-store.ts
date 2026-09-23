@@ -11,6 +11,8 @@ export interface PersistedOrchestratorPendingSend {
   sentAtMs: number;
   /** Exact initial wire payload, so retry preserves backend/model/mode fields. */
   wirePayload?: string;
+  /** A reduced quota fallback must never retry an image message as text only. */
+  attachmentsRequired?: boolean;
 }
 
 export interface PendingSendStorage {
@@ -45,6 +47,7 @@ function parsePendingSend(value: string | null): PersistedOrchestratorPendingSen
       || typeof record.sentAtMs !== 'number'
       || !Number.isFinite(record.sentAtMs)
       || (record.wirePayload !== undefined && typeof record.wirePayload !== 'string')
+      || (record.attachmentsRequired !== undefined && typeof record.attachmentsRequired !== 'boolean')
     ) return null;
     return record as PersistedOrchestratorPendingSend;
   } catch {
@@ -61,8 +64,8 @@ export function persistOrchestratorPendingSend(
     storage.setItem(storageKey(record.threadId, record.clientMessageId), JSON.stringify(record));
   } catch {
     // Large attachment payloads can exceed localStorage quota. Preserve the
-    // required retry identity/text contract even if the exact wire payload
-    // cannot fit; a retry can reconstruct the minimal send from these fields.
+    // retry identity even if the exact wire payload cannot fit. Image sends
+    // retain their attachment marker so a reload can require reattachment.
     if (!record.wirePayload) return;
     try {
       const boundedRecord = { ...record };

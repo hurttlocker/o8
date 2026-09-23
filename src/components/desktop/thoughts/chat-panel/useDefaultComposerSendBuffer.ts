@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, type MutableRefObject, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
+import { composerBackendSupportsImages, validateComposerImageAttachments } from '@/lib/mobile/composer-image-validation';
 import {
   useComposerSendBuffer,
   type ComposerSendBuffer,
@@ -11,6 +12,7 @@ import type { ThoughtsAttachedImage } from './useThoughtsComposerAttachments';
 
 interface UseDefaultComposerSendBufferOptions {
   active: boolean;
+  backend: string;
   busy: boolean;
   threadId: string | null;
   repoPath: string | null;
@@ -29,6 +31,7 @@ interface UseDefaultComposerSendBufferOptions {
 
 export function useDefaultComposerSendBuffer({
   active,
+  backend,
   busy,
   threadId,
   repoPath,
@@ -46,7 +49,9 @@ export function useDefaultComposerSendBuffer({
 }: UseDefaultComposerSendBufferOptions): {
   sendBuffer: ComposerSendBuffer;
   handleSend: () => void;
+  attachmentError: string | null;
 } {
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const restoreDraft = useCallback((text: string, images: ComposerSendImage[]) => {
     setInput(text);
     latestInputRef.current = text;
@@ -76,19 +81,32 @@ export function useDefaultComposerSendBuffer({
   }, [clearSendBuffer, repoPath, threadId]);
 
   const handleSend = useCallback(() => {
-    const text = latestInputRef.current.trim();
+    const text = latestInputRef.current.trim() || (attachedImages.length > 0 ? '[Image attached]' : '');
     if (!text) return;
+    const images = attachedImages.map((image) => ({ name: image.name, dataUri: image.dataUri }));
+    if (images.length > 0) {
+      try {
+        validateComposerImageAttachments(images);
+      } catch (error) {
+        setAttachmentError(error instanceof Error ? error.message : 'Invalid image attachment.');
+        return;
+      }
+      if (!active || shouldBypass(text) || !composerBackendSupportsImages(backend)) {
+        setAttachmentError('This chat mode cannot receive images. Select a Codex or Claude agent, then send again.');
+        return;
+      }
+    }
+    setAttachmentError(null);
     if (!active || shouldBypass(text)) {
       sendUnbuffered(text);
       return;
     }
 
-    const images = attachedImages.map((image) => ({ name: image.name, dataUri: image.dataUri }));
     if (!sendBuffer.send(text, images)) return;
     setInput('');
     latestInputRef.current = '';
     clearAttachments();
-  }, [active, attachedImages, clearAttachments, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
+  }, [active, attachedImages, backend, clearAttachments, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
 
-  return { sendBuffer, handleSend };
+  return { sendBuffer, handleSend, attachmentError };
 }

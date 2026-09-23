@@ -49,15 +49,16 @@ export function createOrchestratorClientMessageId(): string {
 export function createOrchestratorDeliveryFailureEntry(options?: {
   id?: string;
   originalText?: string;
+  reason?: string;
 }): MobileTranscriptEntry {
   const timestamp = Date.now();
   const hasOriginalText = typeof options?.originalText === 'string' && options.originalText.trim().length > 0;
   return {
     id: options?.id ?? `orch-delivery-error-${timestamp}`,
     role: 'system',
-    text: hasOriginalText
+    text: options?.reason ?? (hasOriginalText
       ? `Message may not have been delivered — the bridge was still starting. Tap to retry.\n\n${options.originalText}`
-      : 'Couldn\'t reach the orchestrator — please re-send.',
+      : 'Couldn\'t reach the orchestrator — please re-send.'),
     isError: true,
     timestamp,
     timestampLabel: formatTimestampLabel(timestamp),
@@ -73,7 +74,7 @@ export function deliveryFailureClientMessageId(entryId: string): string | null {
 export function appendOrchestratorDeliveryFailureEntry(
   setMessages: Dispatch<SetStateAction<MobileTranscriptEntry[]>>,
   messagesRef: MutableRefObject<MobileTranscriptEntry[]>,
-  options?: { id?: string; originalText?: string },
+  options?: { id?: string; originalText?: string; reason?: string },
 ): void {
   const failureEntry = createOrchestratorDeliveryFailureEntry(options);
   setMessages((prev) => {
@@ -124,8 +125,7 @@ function isLiveOrchestratorActivity(eventName: string, data?: Record<string, unk
     || eventName === 'tool-use'
     || eventName === 'tool-result'
     || eventName === 'collide-phase'
-    || eventName === 'collide-proposal'
-    || eventName === 'error';
+    || eventName === 'collide-proposal';
 }
 
 export function isOrchestratorSendSettlementEvent(

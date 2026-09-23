@@ -649,7 +649,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               // ⌘⏎ / Ctrl+Enter — steer. Routes through the parent's enqueue path.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
-                if (!input.trim() || !onSteer) return;
+                if ((!input.trim() && attachedImages.length === 0) || !onSteer) return;
                 onSteer();
                 if (event.currentTarget) {
                   event.currentTarget.style.height = 'auto';
@@ -659,7 +659,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 if (isWorkingLocked) {
-                  if (!input.trim() || !onSteer) return;
+                  if ((!input.trim() && attachedImages.length === 0) || !onSteer) return;
                   onSteer();
                   if (event.currentTarget) {
                     event.currentTarget.style.height = 'auto';
@@ -729,6 +729,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           />
           <InputButtons
             input={input}
+            hasAttachments={attachedImages.length > 0}
             enhancing={enhancing}
             preEnhanceInput={preEnhanceInput}
             onEnhance={onEnhance}
