@@ -211,7 +211,9 @@ export function composeApprovalCardCopy(approval: ApprovalRecord): InboxCardCopy
   if (approval.continuation?.kind === 'lane') {
     if (approval.continuation.verb === 'merge') {
       return {
-        headline: 'A worker is ready to merge; review the files and approve or reject.',
+        headline: approval.title === 'Review required before merge'
+          ? 'Merge paused: review these changes before approving.'
+          : 'Merge ready for review: approve or reject the changes.',
         subline: approvalMetadata(approval, [approval.title]),
       };
     }

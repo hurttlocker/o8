@@ -98,3 +98,27 @@ describe('approval card referee row', () => {
     expect(render(approval({ referee: undefined }))).toBe(without);
   });
 });
+
+describe('merge approval card', () => {
+  it('puts the blocker and review action ahead of internal details and advisory scores', () => {
+    const markup = render(approval({
+      title: 'Review required before merge',
+      description: 'This merge has no durable approval for the current worktree HEAD. The latest AI review does not authorize the current HEAD. Operator approval is required to continue.',
+      policyRuleId: 'lane-merge',
+      risk: 'high',
+      metadata: { Packet: 'pkt-internal', Lane: 'lane-internal' },
+      referee: { ...referee, answers: { ...referee.answers, risk: { ...referee.answers.risk, score: 2 } } },
+    }));
+    const visible = text(markup);
+
+    expect(visible).toContain('Merge paused: review these changes before approving.');
+    expect(visible).toContain('No approved review is recorded for this exact revision.');
+    expect(visible).toContain('Approve merge');
+    expect(visible).toContain('Advisory review: Moderate · Details');
+    expect(markup).toContain('<details');
+    expect(markup).not.toContain('<details open');
+    expect(markup.indexOf('No approved review')).toBeLessThan(markup.indexOf('<details'));
+    expect(markup.indexOf('pkt-internal')).toBeGreaterThan(markup.indexOf('<details'));
+    expect(markup.indexOf('data-o8-referee-row')).toBeGreaterThan(markup.indexOf('<details'));
+  });
+});
