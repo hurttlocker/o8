@@ -204,6 +204,64 @@ afterAll(() => {
 });
 
 describe('GitHub outsider attention sync', () => {
+  it('resolves an old waiting issue only after a direct closed response', async () => {
+    const card = enqueueWaitingCard('issue', 104);
+    upsertGitHubIssue(issueSnapshot(104, 'closed', '2026-08-18T18:00:00.000Z'));
+    installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
+      if (path.includes('/issues?state=')) return fetched([]);
+      if (path.endsWith('/issues/104')) return fetched({
+        ...openIssue(104, 0), state: 'closed', closed_at: '2026-08-18T18:00:00.000Z',
+      });
+      throw new Error(`Unexpected GitHub path: ${path}`);
+    });
+
+    await ensureGitHubIssues('example/widgets', { fresh: true });
+    const row = getSqlite().prepare('SELECT status, payload FROM supervisor_inbox WHERE id = ?')
+      .get(card.id) as { status: string; payload: string };
+    expect(row.status).toBe('resolved');
+    expect(JSON.parse(row.payload).autoResolution).toMatchObject({
+      event: 'outside_human_waiting_thread_closed',
+      evidence: { closedAt: '2026-08-18T18:00:00.000Z', verifiedAt: NOW.toISOString() },
+    });
+  });
+
+  it('keeps a waiting issue active when direct verification fails or reports open', async () => {
+    const card = enqueueWaitingCard('issue', 105);
+    upsertGitHubIssue(issueSnapshot(105, 'closed', '2026-08-18T18:00:00.000Z'));
+    let directState: 'failed' | 'open' = 'failed';
+    installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
+      if (path.includes('/issues?state=')) return fetched([]);
+      if (path.endsWith('/issues/105')) {
+        return directState === 'failed' ? fetched({ message: 'Unavailable' }, 503) : fetched(openIssue(105, 0));
+      }
+      throw new Error(`Unexpected GitHub path: ${path}`);
+    });
+
+    await ensureGitHubIssues('example/widgets', { fresh: true });
+    expect(getSqlite().prepare('SELECT status FROM supervisor_inbox WHERE id = ?').get(card.id))
+      .toMatchObject({ status: 'human_required' });
+    directState = 'open';
+    await ensureGitHubIssues('example/widgets', { fresh: true });
+    expect(getSqlite().prepare('SELECT status FROM supervisor_inbox WHERE id = ?').get(card.id))
+      .toMatchObject({ status: 'human_required' });
+    expect(getSqlite().prepare('SELECT state FROM github_issues WHERE number = 105').get())
+      .toMatchObject({ state: 'open' });
+  });
+
+  it('resolves a waiting pull request after a direct closed response', async () => {
+    const card = enqueueWaitingCard('pr', 204);
+    upsertGitHubPullRequest(pullRequestSnapshot(204, 'closed', '2026-08-18T18:00:00.000Z'));
+    installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
+      if (path.includes('/pulls?state=')) return fetched([]);
+      if (path.endsWith('/pulls/204')) return fetched(pullRequestPayload(204, 'closed', '2026-08-18T18:00:00.000Z'));
+      throw new Error(`Unexpected GitHub path: ${path}`);
+    });
+
+    await ensureGitHubPullRequests('example/widgets');
+    expect(getSqlite().prepare('SELECT status FROM supervisor_inbox WHERE id = ?').get(card.id))
+      .toMatchObject({ status: 'resolved' });
+  });
+
   it('persists immutable merge evidence from a targeted pull response over a legacy mirror row', async () => {
     upsertGitHubPullRequest(pullRequestSnapshot(77, 'closed', NOW.toISOString()));
     const headSha = 'a'.repeat(40), mergeCommit = 'b'.repeat(40);

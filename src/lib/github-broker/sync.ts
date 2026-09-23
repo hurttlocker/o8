@@ -30,7 +30,11 @@ import {
   OUTSIDER_ATTENTION_RECENTLY_CLOSED_MS,
   type OutsiderAttentionThreadKind,
 } from '@/lib/supervisor/outsider-attention';
-import { listActiveOutsideHumanWaitingThreadNumbers } from '@/lib/supervisor/inbox';
+import {
+  listActiveOutsideHumanWaitingThreadNumbers,
+  resolveInboxItem,
+} from '@/lib/supervisor/inbox';
+import { resolveVerifiedClosedOutsideHumanWaitingThread } from '@/lib/supervisor/outsider-inbox-builder';
 
 const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
 
@@ -373,6 +377,47 @@ function applyThreadAttention(attention: GitHubThreadAttentionSnapshot[]): void 
   for (const item of attention) updateGitHubThreadAttention(item);
 }
 
+async function verifyActiveWaitingClosures(repoFullName: string, kind: OutsiderAttentionThreadKind): Promise<void> {
+  const numbers = listActiveOutsideHumanWaitingThreadNumbers(repoFullName, kind);
+  for (const number of numbers) {
+    try {
+      const endpoint = kind === 'issue' ? 'issues' : 'pulls';
+      const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/${endpoint}/${number}`);
+      const bodyText = await response.text();
+      if (!response.ok) throw buildGitHubError(response, bodyText);
+      const detail = JSON.parse(bodyText) as GitHubIssuePayloadItem & GitHubPullRequestPayload;
+      if (detail.number !== number) throw new Error('GitHub returned a different thread number');
+      if (kind === 'issue') upsertGitHubIssue(mapIssueSnapshot(repoFullName, detail));
+      else upsertGitHubPullRequest(mapPullRequestSnapshot(repoFullName, detail, detail));
+      if (detail.state !== 'closed' || !detail.closed_at) continue;
+      const closedAt = detail.closed_at;
+      const verifiedAt = new Date().toISOString();
+      resolveVerifiedClosedOutsideHumanWaitingThread({
+        repoFullName,
+        kind,
+        number,
+        closedAt,
+        verifiedAt,
+        resolve: (id, payload) => resolveInboxItem(id, null, {
+          note: 'Direct GitHub thread response confirmed that the thread is closed.',
+          packetId: null,
+          laneId: null,
+          event: 'outside_human_waiting_thread_closed',
+          evidence: {
+            url: payload.url,
+            waitingSince: payload.waitingSince,
+            closedAt,
+            verifiedAt,
+          },
+          resolvedAt: verifiedAt,
+        }),
+      });
+    } catch (error) {
+      console.warn(`[github-broker] Waiting thread verification failed for ${repoFullName}#${number}: ${errorMessage(error)}`);
+    }
+  }
+}
+
 async function syncIssues(repoFullName: string) {
   const syncState = readGitHubSyncState(repoFullName, 'issues');
   const etag = syncState?.etag ?? null;
@@ -449,6 +494,7 @@ async function syncIssues(repoFullName: string) {
     listActiveOutsideHumanWaitingThreadNumbers(repoFullName, 'issue'),
   );
   markGitHubSyncSuccess(repoFullName, 'issues', response.status === 304 ? etag : lastEtag);
+  await verifyActiveWaitingClosures(repoFullName, 'issue');
 }
 
 async function syncPullRequests(repoFullName: string) {
@@ -530,6 +576,7 @@ async function syncPullRequests(repoFullName: string) {
     'pull_requests',
     response.status === 304 ? etag : response.headers.get('etag'),
   );
+  await verifyActiveWaitingClosures(repoFullName, 'pr');
 }
 
 async function syncPullRequest(repoFullName: string, prNumber: number) {

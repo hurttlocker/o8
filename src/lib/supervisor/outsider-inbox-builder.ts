@@ -77,6 +77,33 @@ export function parseOutsideIncidentPayload(raw: string): OutsideIncidentPayload
   return null;
 }
 
+/** Match active waiting cards only after a direct GitHub response confirms closure. */
+export function resolveVerifiedClosedOutsideHumanWaitingThread(input: {
+  repoFullName: string;
+  kind: OutsiderAttentionThreadKind;
+  number: number;
+  closedAt: string;
+  verifiedAt: string;
+  resolve: (id: string, payload: OutsideIncidentPayload) => void;
+}): number {
+  if (!Number.isFinite(Date.parse(input.closedAt)) || !Number.isFinite(Date.parse(input.verifiedAt))) return 0;
+  const placeholders = ACTIVE_OUTSIDE_INCIDENT_STATUSES.map(() => '?').join(', ');
+  const rows = getSqlite().prepare(`
+    SELECT id, payload FROM supervisor_inbox
+    WHERE kind = 'outside_human_waiting' AND status IN (${placeholders})
+  `).all(...ACTIVE_OUTSIDE_INCIDENT_STATUSES) as Array<{ id: string; payload: string }>;
+  let resolved = 0;
+  for (const row of rows) {
+    const payload = parseOutsideIncidentPayload(row.payload);
+    if (payload?.threadRepo !== input.repoFullName
+      || payload.threadKind !== input.kind
+      || payload.threadNumber !== input.number) continue;
+    input.resolve(row.id, payload);
+    resolved += 1;
+  }
+  return resolved;
+}
+
 function incidentPayload(waiting: WaitingOutsider): OutsideIncidentPayload {
   return {
     title: `${waiting.waitingLogin} is waiting on ${waiting.repo}#${waiting.number}`,
