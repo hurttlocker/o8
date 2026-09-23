@@ -1,0 +1,2 @@
+- Lets approved iMessage chats use a connected agent workspace without opening extra planner chats.
+- Shows connected agent schedules in Automations with their time zone, run status, and Pause or Resume control.
