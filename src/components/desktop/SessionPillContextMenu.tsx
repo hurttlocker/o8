@@ -86,7 +86,7 @@ export function SessionPillContextMenu({
     left,
     top,
     width: MENU_WIDTH,
-    background: 'var(--t-bg-card)',
+    background: 'var(--t-popover-surface)',
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: 'var(--t-border)',

@@ -194,7 +194,7 @@ export function O8HeaderTabs({
             left: coords?.left ?? 0,
             opacity: coords ? 1 : 0,
             minWidth: 172,
-            background: 'var(--t-panel-solid, var(--t-panel))',
+            background: 'var(--t-popover-surface)',
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-divider, var(--t-divider-subtle))',

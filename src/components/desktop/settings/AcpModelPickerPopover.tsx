@@ -157,7 +157,7 @@ export function AcpModelPickerPopover({
               borderStyle: 'solid',
               borderColor: RAMS_CONTROL_BORDER,
               borderRadius: 12,
-              background: 'var(--t-bg-card)',
+              background: 'var(--t-popover-surface)',
               boxShadow: '0 12px 32px rgba(0, 0, 0, 0.22)',
               overflow: 'hidden',
             }}

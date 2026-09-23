@@ -186,7 +186,7 @@ export function SessionTransformMenu({ runtimeId, sessionKey }: SessionTransform
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-border)',
-            background: 'var(--t-bg-card)',
+            background: 'var(--t-popover-surface)',
             boxShadow: 'var(--t-glass-shadow, 0 18px 38px rgba(15, 23, 42, 0.18))',
             zIndex: 260,
             fontFamily: 'var(--font-sans-system)',

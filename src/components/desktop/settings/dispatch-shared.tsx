@@ -262,7 +262,7 @@ export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: st
     return { value, label: capability.label, detail: capability.description };
   });
 
-export const PICKER_MENU_POPOVER_BG = 'var(--t-panel-solid)';
+export const PICKER_MENU_POPOVER_BG = 'var(--t-popover-surface)';
 
 export function resolvePickerGroupOpen(current: string | null, pickerId: string, nextOpen: boolean): string | null {
   if (nextOpen) return pickerId;

@@ -124,7 +124,7 @@ export function HeaderPlayButton({
           borderWidth: 1,
           borderStyle: 'solid',
           borderColor: 'var(--t-divider)',
-          background: 'var(--t-panel)',
+          background: 'var(--t-popover-surface)',
           boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
           paddingTop: 4,
           paddingBottom: 4,

@@ -308,7 +308,7 @@ export function O8SpecTargetPicker({
             paddingLeft: 5,
             border: '1px solid var(--t-panel-border)',
             borderRadius: 13,
-            background: 'var(--t-panel-solid, var(--t-panel))',
+            background: 'var(--t-popover-surface)',
             boxShadow: 'var(--t-panel-shadow)',
             fontFamily: 'var(--font-sans-system)',
           }}>

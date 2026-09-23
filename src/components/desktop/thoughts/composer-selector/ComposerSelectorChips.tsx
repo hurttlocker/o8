@@ -230,7 +230,7 @@ export function WorkersChip({
               borderWidth: 1,
               borderStyle: 'solid',
               borderColor: 'var(--t-panel-border)',
-              background: 'var(--t-panel-solid, var(--t-panel))',
+              background: 'var(--t-popover-surface)',
               color: 'var(--t-text-secondary)',
             }}
           >

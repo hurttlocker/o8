@@ -120,7 +120,7 @@ function WorkspaceLaunchPickerBase({
             zIndex: 9000,
             marginTop: 4,
             minWidth: 240,
-            background: 'var(--t-panel-solid)',
+            background: 'var(--t-popover-surface)',
             backdropFilter: 'none',
             WebkitBackdropFilter: 'none',
             border: '1px solid var(--t-panel-border)',

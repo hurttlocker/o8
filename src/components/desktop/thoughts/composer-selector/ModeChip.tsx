@@ -128,7 +128,7 @@ function ModeSelectorModeMenu({
       borderWidth: 1,
       borderStyle: 'solid',
       borderColor: 'var(--t-panel-border)',
-      background: 'var(--t-panel-solid, var(--t-panel))',
+      background: 'var(--t-popover-surface)',
       boxShadow: 'var(--t-panel-shadow)',
       paddingTop: 6,
       paddingRight: 5,

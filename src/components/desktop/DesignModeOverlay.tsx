@@ -552,7 +552,7 @@ export function DesignModeOverlay({ active, onClose, onDrawPrompt }: DesignModeO
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: composerFocused ? 'var(--t-accent)' : 'var(--t-divider)',
-            background: 'var(--t-panel-solid, var(--t-panel))',
+            background: 'var(--t-popover-surface)',
             boxShadow: composerFocused
               ? '0 12px 32px rgba(15, 23, 42, 0.28), 0 0 0 2px var(--t-accent)'
               : '0 12px 32px rgba(15, 23, 42, 0.28)',

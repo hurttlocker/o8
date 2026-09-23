@@ -194,7 +194,7 @@ export function WhatsNewCard({ anchorRect, anchorElement, onClose }: WhatsNewCar
         borderStyle: 'solid',
         borderColor: 'var(--t-divider)',
         borderRadius: 10,
-        background: 'var(--t-panel-solid)',
+        background: 'var(--t-popover-surface)',
         boxShadow: 'var(--t-panel-shadow)',
         color: 'var(--t-text)',
         fontFamily: 'var(--font-sans-system)',

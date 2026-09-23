@@ -361,7 +361,7 @@ function StatusBottomPanelControl({
             gap: 8,
             padding: 10,
             borderRadius: 14,
-            background: 'var(--t-panel-solid)',
+            background: 'var(--t-popover-surface)',
             border: '1px solid var(--t-panel-border)',
             boxShadow: 'var(--t-panel-shadow), 0 18px 44px rgba(15, 23, 42, 0.20)',
             zIndex: 120,

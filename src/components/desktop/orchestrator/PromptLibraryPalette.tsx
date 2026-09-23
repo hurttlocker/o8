@@ -191,7 +191,7 @@ const paletteStyle: CSSProperties = {
   borderStyle: 'solid',
   borderColor: 'var(--t-divider-subtle)',
   borderRadius: 14,
-  background: 'var(--t-panel-solid, var(--t-bg-card))',
+  background: 'var(--t-popover-surface)',
   boxShadow: 'var(--t-panel-shadow)',
   color: 'var(--t-text)',
   fontFamily: UI_FONT,

@@ -102,7 +102,7 @@ export function HistoryActionMenu({
           width: menuWidth,
           borderRadius: 13,
           border: '1px solid var(--t-divider-subtle)',
-          background: 'var(--t-panel-solid)',
+          background: 'var(--t-popover-surface)',
           boxShadow: '0 18px 48px rgba(15, 23, 42, 0.12)',
           padding: 7,
           color: 'var(--t-text)',

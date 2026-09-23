@@ -152,7 +152,7 @@ export function IntentChips({
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-divider-subtle)',
-            background: 'var(--t-panel-solid)',
+            background: 'var(--t-popover-surface)',
             boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
           }}
         >

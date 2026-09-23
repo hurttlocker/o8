@@ -82,7 +82,7 @@ export function UiZoomLayer() {
         paddingLeft: 16,
         paddingRight: 16,
         borderRadius: 14,
-        background: 'var(--t-bg-card, rgba(28,28,30,0.92))',
+        background: 'var(--t-popover-surface)',
         color: 'var(--t-text, #f5f5f7)',
         border: '1px solid var(--t-border, rgba(255,255,255,0.12))',
         boxShadow: '0 12px 40px rgba(0,0,0,0.32)',

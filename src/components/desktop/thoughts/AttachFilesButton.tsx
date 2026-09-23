@@ -247,7 +247,7 @@ export function AttachFilesButton({
             maxWidth: 'min(240px, calc(100vw - 32px))',
             borderRadius: 14,
             border: '1px solid var(--t-panel-border)',
-            background: 'var(--t-panel-solid, var(--t-panel))',
+            background: 'var(--t-popover-surface)',
             boxShadow: 'var(--t-panel-shadow)',
             overflow: 'hidden',
           }}

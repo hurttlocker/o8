@@ -141,7 +141,7 @@ export function O8RepoSelector({
           zIndex: 20,
           borderRadius: 12,
           border: '1px solid var(--t-panel-border)',
-          background: 'var(--t-panel-solid)',
+          background: 'var(--t-popover-surface)',
           boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
           maxHeight: 240,
           overflowY: 'auto',
