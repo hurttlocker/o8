@@ -59,7 +59,12 @@ export function readBridgeConfig(path = CONFIG_PATH) {
       if (approved.some((sender) => !sender || !groupMembers[id]?.includes(sender))) continue;
       groupFullAccess[id] = approved;
     }
-    return { directSender: phone(config.directSender), groupSenders, groupConversationIds, groupMembers, groupFullAccess, knowledgeRepoPath: config.knowledgeRepoPath };
+    const openclawAgentId = typeof config.openclawAgentId === 'string'
+      && /^[a-z][a-z0-9_-]{0,63}$/.test(config.openclawAgentId)
+      ? config.openclawAgentId : '';
+    const executionBackend = config.executionBackend === 'openclaw' && openclawAgentId
+      ? 'openclaw' : 'cli';
+    return { directSender: phone(config.directSender), groupSenders, groupConversationIds, groupMembers, groupFullAccess, knowledgeRepoPath: config.knowledgeRepoPath, executionBackend, openclawAgentId };
   } catch {
     return null;
   }
@@ -238,6 +243,11 @@ export async function askSymon(payload, options = {}) {
 export async function handleMessage(event, ctx, config, options = {}) {
   const route = routeFor(event, ctx, config, options);
   if (!route) return;
+  if (!route.shared && config.executionBackend === 'openclaw') {
+    const sessionKey = String(ctx.sessionKey ?? event.sessionKey ?? '');
+    if (sessionKey.startsWith(`agent:${config.openclawAgentId}:`)) return { handled: false };
+    return { handled: true, text: 'Symon is unavailable right now. The iMessage agent binding needs attention in o8.' };
+  }
   const text = String(event.content ?? event.body ?? '').trim();
   const messageId = String(ctx.messageId ?? event.messageId ?? '').trim();
   if (!text || !messageId || text.length > 8_000) {

@@ -14,6 +14,8 @@ function normalizedPhone(value: unknown): string {
 
 interface BridgeConfig {
   enabled: boolean;
+  executionBackend?: 'cli' | 'openclaw';
+  openclawAgentId?: string;
   directSender: string;
   knowledgeRepoPath: string;
   groupSenders: string[];
@@ -31,6 +33,15 @@ export interface IMessageGroupAccess {
   approvalVersion: string;
   fullAccess: boolean;
   canGrant: boolean;
+}
+
+export interface IMessageAccessSettings {
+  configured: boolean;
+  enabled: boolean;
+  directSenderSuffix: string | null;
+  executionBackend: 'cli' | 'openclaw';
+  openclawConfigured: boolean;
+  groups: IMessageGroupAccess[];
 }
 
 function configPath(): string {
@@ -69,16 +80,40 @@ function approvalVersion(id: string, members: string[]): string {
   return createHash('sha256').update([id, ...[...members].sort()].join('\0')).digest('hex');
 }
 
+function openclawConfigPath(): string {
+  if (process.env.NODE_ENV === 'test' && process.env.O8_SYMON_IMESSAGE_TEST_OPENCLAW_CONFIG) {
+    return process.env.O8_SYMON_IMESSAGE_TEST_OPENCLAW_CONFIG;
+  }
+  return join(homedir(), '.openclaw', 'openclaw.json');
+}
+
+function hasOpenClawBinding(agentId: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(openclawConfigPath(), 'utf8')) as {
+      agents?: { entries?: Record<string, unknown> };
+      bindings?: Array<{ agentId?: string; match?: { channel?: string; accountId?: string } }>;
+    };
+    return Boolean(parsed.agents?.entries?.[agentId])
+      && Array.isArray(parsed.bindings)
+      && parsed.bindings.some((binding) => binding.agentId === agentId
+        && binding.match?.channel === 'imessage' && binding.match.accountId === '*');
+  } catch {
+    return false;
+  }
+}
+
 export class IMessageMembershipChangedError extends Error {}
 
-export function readIMessageAccessSettings(): { configured: boolean; enabled: boolean; directSenderSuffix: string | null; groups: IMessageGroupAccess[] } {
+export function readIMessageAccessSettings(): IMessageAccessSettings {
   const loaded = readConfig();
-  if (!loaded) return { configured: false, enabled: false, directSenderSuffix: null, groups: [] };
+  if (!loaded) return { configured: false, enabled: false, directSenderSuffix: null, executionBackend: 'cli', openclawConfigured: false, groups: [] };
   const { config } = loaded;
   return {
     configured: true,
     enabled: config.enabled,
     directSenderSuffix: normalizedPhone(config.directSender).slice(-4),
+    executionBackend: config.executionBackend === 'openclaw' ? 'openclaw' : 'cli',
+    openclawConfigured: hasOpenClawBinding(config.openclawAgentId ?? 'symon'),
     groups: config.groupConversationIds.map((id) => {
       const members = membersFor(config, id);
       const grants = config.groupFullAccess?.[id] ?? [];
@@ -94,6 +129,19 @@ export function readIMessageAccessSettings(): { configured: boolean; enabled: bo
       };
     }),
   };
+}
+
+export function setIMessageExecutionBackend(backend: 'cli' | 'openclaw'): 'cli' | 'openclaw' | null {
+  const loaded = readConfig();
+  if (!loaded) return null;
+  const agentId = loaded.config.openclawAgentId ?? 'symon';
+  if (backend === 'openclaw' && !hasOpenClawBinding(agentId)) return null;
+  writeConfig(loaded.path, {
+    ...loaded.config,
+    executionBackend: backend,
+    openclawAgentId: agentId,
+  });
+  return readIMessageAccessSettings().executionBackend;
 }
 
 function writeConfig(path: string, config: BridgeConfig): void {

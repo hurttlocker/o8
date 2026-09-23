@@ -43,7 +43,7 @@ it('shows an explicit confirmation before granting every approved member full ac
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(container.textContent).toContain('Family group');
-  const toggle = container.querySelectorAll<HTMLButtonElement>('[role="switch"]')[1];
+  const toggle = container.querySelectorAll<HTMLButtonElement>('[role="switch"]')[2];
   expect(toggle?.getAttribute('aria-checked')).toBe('false');
   await act(async () => { toggle?.click(); });
   expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -57,6 +57,31 @@ it('shows an explicit confirmation before granting every approved member full ac
   expect(JSON.parse(String(posted?.[1]?.body))).toEqual({
     groupId: '68', fullAccess: true, confirm: 'grant-all-approved-members', approvalVersion: 'v1',
   });
+  expect(toggle?.getAttribute('aria-checked')).toBe('true');
+});
+
+it('shows the optional native engine only when its agent binding is configured', async () => {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST') return Response.json({ ok: true, executionBackend: 'openclaw' });
+    return Response.json({
+      ok: true, configured: true, enabled: true, directSenderSuffix: '1461',
+      executionBackend: 'cli', openclawConfigured: true, groups: [],
+    });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  await act(async () => {
+    root.render(createElement(SymonIMessageAccessSection));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(container.textContent).toContain('Use OpenClaw for iMessage');
+  const toggle = container.querySelectorAll<HTMLButtonElement>('[role="switch"]')[1];
+  expect(toggle?.disabled).toBe(false);
+  await act(async () => {
+    toggle?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(JSON.parse(String(fetchMock.mock.calls.find((call) => call[1]?.method === 'POST')?.[1]?.body)))
+    .toEqual({ executionBackend: 'openclaw' });
   expect(toggle?.getAttribute('aria-checked')).toBe('true');
 });
 

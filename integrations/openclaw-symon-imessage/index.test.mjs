@@ -119,6 +119,59 @@ test('passes the registered project path only to the owner direct route', async 
   assert.equal(requests[0].context.includes(root), true);
 });
 
+test('hands approved full-access chats to the configured native agent without opening a managed session', async () => {
+  const nativeConfig = { ...config, executionBackend: 'openclaw', openclawAgentId: 'symon', groupFullAccess: { '68': [...config.groupMembers['68']] } };
+  let forwarded = false;
+  const options = {
+    liveGroupMembers: () => [...config.groupMembers['68']],
+    fetchImpl: async () => { forwarded = true; throw new Error('managed route must not run'); },
+  };
+  const direct = await handleMessage(
+    { isGroup: false, content: 'Hello', messageId: 'native-1' },
+    { channelId: 'imessage', senderId: config.directSender, conversationId: 'direct:1', sessionKey: 'agent:symon:imessage:direct:1', messageId: 'native-1' },
+    nativeConfig,
+    options,
+  );
+  assert.deepEqual(direct, { handled: false });
+  const group = await handleMessage(
+    { isGroup: true, content: 'Hello', messageId: 'native-2' },
+    { channelId: 'imessage', senderId: config.groupSenders[1], conversationId: 'imessage:group:68', sessionKey: 'agent:symon:imessage:group:68', messageId: 'native-2' },
+    nativeConfig,
+    options,
+  );
+  assert.deepEqual(group, { handled: false });
+  assert.equal(forwarded, false);
+});
+
+test('native route fails closed on another agent and retains the limited group route on roster mismatch', async () => {
+  const nativeConfig = { ...config, executionBackend: 'openclaw', openclawAgentId: 'symon', groupFullAccess: { '68': [...config.groupMembers['68']] } };
+  const wrongAgent = await handleMessage(
+    { isGroup: false, content: 'Hello', messageId: 'native-3' },
+    { channelId: 'imessage', senderId: config.directSender, conversationId: 'direct:1', sessionKey: 'agent:wedding:imessage:direct:1', messageId: 'native-3' },
+    nativeConfig,
+  );
+  assert.equal(wrongAgent.handled, true);
+  assert.match(wrongAgent.text, /unavailable/i);
+
+  const requests = [];
+  const limited = await handleMessage(
+    { isGroup: true, content: 'Hello', messageId: 'native-4' },
+    { channelId: 'imessage', senderId: config.groupSenders[1], conversationId: 'imessage:group:68', sessionKey: 'agent:symon:imessage:group:68', messageId: 'native-4' },
+    nativeConfig,
+    {
+      liveGroupMembers: () => [...config.groupMembers['68'], '+12155550103'],
+      apiBase: 'http://127.0.0.1:12345',
+      token: 'local-test-token-with-enough-length',
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return { status: 200, json: async () => ({ ok: true, state: 'done', text: 'Limited reply.' }) };
+      },
+    },
+  );
+  assert.deepEqual(limited, { handled: true, text: 'Limited reply.' });
+  assert.equal(requests[0].conversationId, 'shared-imessage:imessage:group:68');
+});
+
 test('never falls back to another agent after a selected route fails', async () => {
   const result = await handleMessage(
     { isGroup: false, content: 'Hello', messageId: 'message-8' },
