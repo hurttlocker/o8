@@ -95,6 +95,28 @@ test('claims a selected group message and forwards one durable turn to Symon', a
   assert.equal(requests[0].eventId, 'imessage:message-7');
   assert.equal(requests[0].conversationId, 'shared-imessage:imessage:group:68');
   assert.match(requests[0].context, /celebration date is tentative/);
+  assert.equal(requests[0].context.includes(root), false);
+});
+
+test('passes the registered project path only to the owner direct route', async () => {
+  const requests = [];
+  const result = await handleMessage(
+    { isGroup: false, content: 'Where is the agreement?', messageId: 'message-10' },
+    { channelId: 'imessage', senderId: '+12155550101', conversationId: 'direct:1', messageId: 'message-10' },
+    config,
+    {
+      apiBase: 'http://127.0.0.1:12345',
+      token: 'local-test-token-with-enough-length',
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(init.body));
+        return { status: 200, json: async () => ({ ok: true, state: 'done', text: 'I can open the registered project.' }) };
+      },
+    },
+  );
+  assert.equal(result?.handled, true);
+  assert.equal(requests[0].conversationId, 'imessage:direct:direct:1');
+  assert.match(requests[0].context, /Registered project repository:/);
+  assert.equal(requests[0].context.includes(root), true);
 });
 
 test('never falls back to another agent after a selected route fails', async () => {

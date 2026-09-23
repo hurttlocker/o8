@@ -244,7 +244,9 @@ export async function handleMessage(event, ctx, config, options = {}) {
     return { handled: true, text: 'Symon could not read this text message. Please send a shorter plain-text message.' };
   }
   try {
-    const context = weddingContext(config.knowledgeRepoPath, text, route.shared);
+    const reference = weddingContext(config.knowledgeRepoPath, text, route.shared);
+    const context = route.shared ? reference
+      : `Registered project repository: ${realpathSync(config.knowledgeRepoPath)}\n${reference}`;
     const reply = await askSymon({
       eventId: `imessage:${messageId}`,
       conversationId: route.conversationId,
