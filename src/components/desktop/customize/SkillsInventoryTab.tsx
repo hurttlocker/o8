@@ -167,7 +167,7 @@ export function SkillsInventoryTab({ skills, query, onOpenFile, onUseSkill }: {
                 borderTopColor: 'var(--t-divider-subtle)',
               }}
             >
-              <DetailLine label="Found in" value={skill.pluginName ? `Plugin · ${skill.pluginName}` : SOURCE_LABELS[skill.source]} />
+              <DetailLine label="Found in" value={skill.pluginName ? `Bundle · ${skill.pluginName}` : SOURCE_LABELS[skill.source]} />
               <DetailLine label="Description" value={skill.description} />
               <DetailLine label="File" value={skill.file} mono />
               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
