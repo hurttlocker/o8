@@ -187,7 +187,7 @@ const RIGHT_UTILITY_TABS: RightUtilityDefinition[] = [
   { id: 'browser', label: 'Browser', description: 'Open a website', icon: BrowserIcon },
   { id: 'review', label: 'Review', description: 'View code changes', icon: ReviewIcon },
   { id: 'terminal', label: 'Terminal', description: 'Start an interactive shell', icon: TerminalIcon },
-  { id: 'inbox', label: 'Incident Queue', description: 'Approvals & agent failures needing attention', icon: InboxIcon },
+  { id: 'inbox', label: 'Needs Attention', description: 'Approvals, follow-ups, and agent failures', icon: InboxIcon },
 ];
 
 const RIGHT_UTILITY_BY_ID = Object.fromEntries(
