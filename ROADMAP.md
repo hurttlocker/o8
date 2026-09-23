@@ -16,7 +16,7 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 ## Now
 
-The effort-compatibility fixes found by [#2520](https://github.com/hurttlocker/o8/issues/2520) shipped in version 0.1.761. The next repair batch is [#2530](https://github.com/hurttlocker/o8/issues/2530) and [#2531](https://github.com/hurttlocker/o8/issues/2531), found by the inference-consumption audit [#2522](https://github.com/hurttlocker/o8/issues/2522); these two findings remain open.
+The effort-compatibility fixes found by [#2520](https://github.com/hurttlocker/o8/issues/2520) shipped in version 0.1.761. The remaining inference-consumption repair is [#2531](https://github.com/hurttlocker/o8/issues/2531), found by the audit [#2522](https://github.com/hurttlocker/o8/issues/2522).
 
 After that batch, run the correctness and reliability queue: mobile approval-route parity [#2479](https://github.com/hurttlocker/o8/issues/2479) and its completed-merge equality test [#2480](https://github.com/hurttlocker/o8/issues/2480), remaining dispatch and lifecycle findings, then the dedicated Symon review [#2534](https://github.com/hurttlocker/o8/issues/2534). That review is queued, not claimed or started. Its scope is existing session, payer, model, tool-result, interruption, reconnect, and approval behavior; feature work stays in its separate program.
 
@@ -128,7 +128,7 @@ Longer-term bets, ordered by evidence and dependencies rather than a calendar ye
 Arcs whose every child is closed and released. They stay here so the pillars read as a whole, and they get no tracking issue.
 
 - **Governance:** merge-gate truth (0.1.738); dispatch honesty (0.1.749); signed receipts and truth queries (0.1.722); Broadcast, the audit trail as a live feed (0.1.717).
-- **Organizational memory:** Engineering Brain question and answer ([#915](https://github.com/hurttlocker/o8/issues/915)); workers write back to memory (0.1.716); spec review inversion, where the operator owns the rules and agents only annotate.
+- **Organizational memory:** Engineering Brain question and answer ([#915](https://github.com/hurttlocker/o8/issues/915)); workers write back to memory (0.1.716); automatic title state preserved across history saves ([#2530](https://github.com/hurttlocker/o8/issues/2530), 0.1.764); spec review inversion, where the operator owns the rules and agents only annotate.
 - **Runs on your subscriptions:** OpenCode 2 and ACP, a non-subscription CLI as worker and orchestrator backend (0.1.750); execution carriers (0.1.748); declarative runtimes (0.1.725).
 - **One control plane, every surface:** headless o8 (0.1.727); mobile as an operator surface ([#1074](https://github.com/hurttlocker/o8/issues/1074)); voice as an operator surface, with the planning seat as a registry choice (0.1.748).
 - **Smooth for people and for agents:** canvas IDE parity, carved scope ([#1664](https://github.com/hurttlocker/o8/issues/1664), 0.1.722); rich Markdown editor (0.1.722); interaction budgets (0.1.748); control surfaces instead of scraping (0.1.749); CLI and MCP symmetry (0.1.738); Composer selector ([#2314](https://github.com/hurttlocker/o8/issues/2314), 0.1.753). The separate effort-compatibility audit remains open.
