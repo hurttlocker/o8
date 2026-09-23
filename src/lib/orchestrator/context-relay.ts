@@ -19,8 +19,8 @@ import {
 } from '@/lib/orchestrator/packet-task-contract';
 import {
   findFirstTaskContractCapture,
-  recordTaskContractCostEvent,
 } from '@/lib/orchestrator/task-contract-cost';
+import { persistTaskContractCapture } from '@/lib/orchestrator/persist-task-contract-capture';
 import type { OrchestratorRuntime, PacketContext } from '@/lib/orchestrator/types';
 import {
   isDispatchableRuntime,
@@ -479,13 +479,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   };
 
   packetCompletionContextStore.set(normalizedPacketId, context);
-  recordTaskContractCostEvent({
-    lane,
-    runtime: runtimeId,
-    transcript,
-    capture: taskContractCapture,
-    telemetry,
-  });
+  await persistTaskContractCapture({ packetId: normalizedPacketId, sessionKey: normalizedSessionKey, contract: taskContract, lane, runtime: runtimeId, transcript, capture: taskContractCapture, telemetry });
 
   // #984 Stage 1 — index the transcript once, at packet completion. Cmd+K
   // reads this durable FTS document and never scans runtime files per keystroke.

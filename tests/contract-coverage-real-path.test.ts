@@ -16,6 +16,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { OrchestratorPacket, PacketTaskContract, PacketTaskContractSource } from '@/lib/orchestrator/types';
+import type { AgentRuntime } from '@/lib/runtimes/types';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-realpath-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -26,6 +27,7 @@ const reviewRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-review-rep
 
 const { recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+const { buildPreviewForLane } = await import('@/lib/lane/preview-merge');
 const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } =
   await import('@/lib/orchestrator/control-plane');
@@ -117,10 +119,21 @@ const capturedContract: PacketTaskContract = {
   exclusions: [],
 };
 
+const processContract: PacketTaskContract = {
+  ...capturedContract,
+  processConstraints: [{
+    id: 'P1',
+    source: 'Commit the edit and report the changed file.',
+    expectedBehavior: 'The worker commits the edit and names file.txt in its report.',
+    verification: 'git show HEAD and worker transcript',
+  }],
+};
+
 async function assessPersistedContractPacket(input: {
   source: PacketTaskContractSource;
   taskContract?: PacketTaskContract;
   coveragePath?: string;
+  processEvidence?: string;
 }) {
   const packetId = `pkt-contract-review-${input.source}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const lane = createLane({
@@ -179,6 +192,7 @@ async function assessPersistedContractPacket(input: {
         contractVersion: 1,
         headSha: reviewHeadSha,
         entries: [{ requirementId: 'R1', productionPath: input.coveragePath }],
+        ...(input.processEvidence ? { processEntries: [{ constraintId: 'P1', source: 'command', reference: input.processEvidence }] } : {}),
       },
     } : {}),
   });
@@ -190,6 +204,122 @@ async function assessPersistedContractPacket(input: {
 }
 
 describe('durable approval enforces contract coverage on the real path', () => {
+  it('persists the first captured contract on the bound packet before review starts', async () => {
+    const packetId = `pkt-capture-${Date.now()}`;
+    const sessionKey = `codex:${packetId}`;
+    const lane = createLane({
+      repoPath: reviewRepo,
+      worktreePath: reviewRepo,
+      branch: 'inline/contract-review',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      sessionKey,
+    });
+    const packet: OrchestratorPacket = {
+      id: packetId,
+      referenceLabel: 'P1',
+      title: 'Capture contract',
+      summary: 'Capture contract',
+      workspaceTargetPath: reviewRepo,
+      branchTarget: 'inline/contract-review',
+      runtime: 'codex',
+      dependencyLabels: [],
+      dependencyPacketIds: [],
+      queueState: 'queued',
+      releaseState: 'pending',
+      status: 'awaiting_review',
+      taskContractRequired: true,
+      taskContractSource: 'default',
+      taskContract: null,
+      lane: {
+        tileId: 'test', tabId: 'test', repoPath: reviewRepo, worktreePath: reviewRepo,
+        runtime: 'codex', sessionKey, laneId: lane.id,
+      },
+    };
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-${packetId}`,
+      prompt: 'Capture contract',
+      summary: 'Capture contract',
+      repoPath: reviewRepo,
+      packets: [packet],
+    });
+    const runtime: AgentRuntime = {
+      id: 'codex',
+      displayName: 'Contract capture fixture',
+      capabilities: {
+        discover: false, readTranscript: true, launch: false, resume: false,
+        interrupt: false, reviewDiffs: true, costTelemetry: false, streaming: false,
+      },
+      discoverSessions: async () => [],
+      readTranscript: async () => [{
+        id: 'contract-turn', role: 'assistant',
+        text: `<task-contract>${JSON.stringify(processContract)}</task-contract>`,
+        timestamp: new Date('2026-09-23T12:00:00Z'),
+      }],
+      launch: async () => ({ ok: false, note: 'not supported' }),
+      resume: async () => ({ ok: false, note: 'not supported' }),
+      interrupt: async () => ({ ok: false, note: 'not supported' }),
+      getChangedFiles: async () => [],
+    };
+    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+    const { registerRuntime } = await import('@/lib/runtimes/registry');
+    registerRuntime(runtime);
+    expect(readOrchestratorControlPlaneState().packets[0]?.lane?.sessionKey).toBe(sessionKey);
+    const context = await capturePacketCompletionContext(packetId, sessionKey);
+    expect(context.taskContract).toEqual(processContract);
+    expect(readOrchestratorControlPlaneState().packets[0]?.taskContract).toEqual(processContract);
+
+    registerRuntime({
+      ...runtime,
+      readTranscript: async () => [{
+        id: 'later-turn', role: 'assistant',
+        text: `<task-contract>${JSON.stringify(capturedContract)}</task-contract>`,
+        timestamp: new Date('2026-09-23T12:01:00Z'),
+      }],
+    });
+    await capturePacketCompletionContext(packetId, sessionKey);
+    expect(readOrchestratorControlPlaneState().packets[0]?.taskContract).toEqual(processContract);
+  }, 30_000);
+
+  it('requires separate process evidence without inventing a changed path', async () => {
+    const absent = await assessPersistedContractPacket({
+      source: 'explicit', taskContract: processContract, coveragePath: 'file.txt',
+    });
+    expect(absent.assessment).toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed', missingRequirementIds: ['P1'] },
+    });
+    const blockedPreview = await buildPreviewForLane(absent.lane, absent.lane.packetId!);
+    expect(blockedPreview).toMatchObject({
+      wouldMerge: false,
+      blockers: expect.arrayContaining(['contract-review']),
+      reviewPrerequisite: expect.stringContaining('process-constraint evidence'),
+    });
+
+    const evidenced = await assessPersistedContractPacket({
+      source: 'explicit', taskContract: processContract, coveragePath: 'file.txt',
+      processEvidence: 'git show HEAD confirms the commit; transcript turn 3 reports file.txt',
+    });
+    expect(evidenced.assessment).toMatchObject({
+      approved: true,
+      contractCoverage: { status: 'passed', missingRequirementIds: [] },
+    });
+    const evidencedPreview = await buildPreviewForLane(evidenced.lane, evidenced.lane.packetId!);
+    expect(evidencedPreview.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'contract-review', verdict: 'pass' }),
+    ]));
+
+    const stale = await assessPersistedContractPacket({
+      source: 'explicit', taskContract: processContract, coveragePath: 'other/file.txt',
+      processEvidence: 'git show HEAD confirms the commit; transcript turn 3 reports file.txt',
+    });
+    expect(stale.assessment).toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed', missingRequirementIds: ['R1'] },
+    });
+  });
   it.each(['other/file.txt', '/file.txt', path.join(reviewRepo, 'file.txt')])(
     'rejects a persisted review citing %s instead of the changed repository path',
     async (coveragePath) => {
@@ -356,6 +486,8 @@ describe('default-armed contract capture fails soft on the durable approval path
     const { lane, assessment } = await assessPersistedContractPacket({ source: 'default' });
 
     expect(assessment).toMatchObject({ approved: true, contractCoverage: null });
+    const preview = await buildPreviewForLane(lane, lane.packetId!);
+    expect(preview.reviewPrerequisite).toContain('Current policy allows review without contract coverage');
     const missingEvents = getLaneEvents(lane.id)
       .filter((event) => event.verb === 'task_contract_missing');
     expect(missingEvents).toHaveLength(1);
@@ -386,5 +518,11 @@ describe('default-armed contract capture fails soft on the durable approval path
       contractCoverage: { status: 'failed' },
     });
     expect(getLaneEvents(lane.id).some((event) => event.verb === 'task_contract_missing')).toBe(false);
+    const preview = await buildPreviewForLane(lane, lane.packetId!);
+    expect(preview).toMatchObject({
+      wouldMerge: false,
+      blockers: expect.arrayContaining(['contract-review']),
+      reviewPrerequisite: expect.stringContaining('explicitly required task contract is missing'),
+    });
   });
 });

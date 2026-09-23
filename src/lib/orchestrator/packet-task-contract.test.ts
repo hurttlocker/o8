@@ -54,6 +54,25 @@ describe('packet task contract', () => {
     })).toBeNull();
   });
 
+  it('keeps process obligations separate from changed-file requirements', () => {
+    const withProcess = {
+      ...contract,
+      processConstraints: [{
+        id: 'P1',
+        source: 'Commit the edit and report the changed file.',
+        expectedBehavior: 'The commit and report both exist.',
+        verification: 'git show HEAD and worker transcript',
+      }],
+    };
+    expect(normalizePacketTaskContract(withProcess)).toEqual(withProcess);
+    expect(formatPacketTaskContractForReview(withProcess)).toContain('P1: The commit and report both exist.');
+    expect(buildPacketTaskContractInstructions().join('\n')).toContain('processConstraints');
+    expect(normalizePacketTaskContract({
+      ...withProcess,
+      processConstraints: [...withProcess.processConstraints, { ...withProcess.processConstraints[0], id: 'R1' }],
+    })).toBeNull();
+  });
+
   it('normalizes worker-authored fields to single-line review evidence', () => {
     expect(normalizePacketTaskContract({
       ...contract,
@@ -78,7 +97,7 @@ describe('packet task contract', () => {
     expect(prompt).toContain('Before using any write/edit tool');
     expect(prompt).toContain(PACKET_TASK_CONTRACT_TAG_START);
     expect(prompt).toContain('Treat the first contract as immutable');
-    expect(prompt).toContain('Every requirement ID must appear in smallestRoute');
+    expect(prompt).toContain('Every file-backed requirement ID must appear in smallestRoute');
     expect(prompt).toContain(notesPath);
   });
 });

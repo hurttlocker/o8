@@ -219,10 +219,22 @@ export interface PacketTaskContractRoute {
   reason: string;
 }
 
+export interface PacketTaskContractProcessConstraint {
+  id: string;
+  /** Exact task wording or a traceable anchor to it. */
+  source: string;
+  /** Process result that the reviewer must assess separately from the diff. */
+  expectedBehavior: string;
+  /** Transcript, event, or command evidence that could verify the result. */
+  verification: string;
+}
+
 export interface PacketTaskContract {
   version: 1;
   requirements: PacketTaskContractRequirement[];
   smallestRoute: PacketTaskContractRoute[];
+  /** Obligations that cannot honestly be proven by citing a changed file. */
+  processConstraints?: PacketTaskContractProcessConstraint[];
   exclusions: string[];
 }
 

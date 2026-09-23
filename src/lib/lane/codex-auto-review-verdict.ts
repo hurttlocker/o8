@@ -173,7 +173,7 @@ export function appendCodexAutoReviewVerdictInstructions(prompt: string): string
     '',
     'If submit_review is unavailable in this runtime, still complete the review and end with one final machine-readable line:',
     `${CODEX_AUTO_REVIEW_MARKER} {"approved":true,"findings":[],"contractCoverageEvidence":{"contractVersion":1,"headSha":"<git rev-parse HEAD>","entries":[{"requirementId":"R1","productionPath":"src/example.ts","anchor":"symbol or line","verification":"command or observed behavior"}]}}`,
-    'When the review prompt contains a pre-edit task contract, contractCoverageEvidence is required and must contain every sealed requirement ID. Omit it only for legacy reviews with no task contract.',
+    'When the review prompt contains a pre-edit task contract, contractCoverageEvidence is required. Put every file-backed requirement ID in entries, and every process constraint ID in processEntries as `{constraintId,source,reference}` with source transcript, lane-event, or command and a concrete citation. Missing process evidence is unverified and must block approval. Omit contractCoverageEvidence only for legacy reviews with no task contract.',
     'For requested changes, set approved to false and include findings with file, line when known, severity (bug|rule_violation|note), description, and status (fixed|accepted|deferred).',
     'The final line must be the CODEX_AUTO_REVIEW marker followed by the JSON payload and nothing else — no prose, no code fence, no skill announcements, no text after it.',
   ].join('\n');

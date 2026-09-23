@@ -39,6 +39,9 @@ export function buildBlindSecondPassPromptV1(input: BlindSecondPassPromptInputV1
     contractArmed
       ? 'COVERAGE checklist: enumerate every task-contract requirement ID as `[x] <ID> <sub-requirement> - evidence <file:line|command output>` or `[ ] <ID> <sub-requirement> - gap <reason>`.'
       : 'COVERAGE checklist: enumerate each packet sub-requirement as `[x] <sub-requirement> - evidence <file:line|command output>` or `[ ] <sub-requirement> - gap <reason>`.',
+    contractArmed && input.taskContract?.processConstraints?.length
+      ? 'PROCESS checklist: assess every process constraint ID from transcript, lane event, or command evidence. Do not count a changed file as proof of an unrelated process action. Mark missing evidence unverified.'
+      : null,
     contractArmed ? 'MINIMALITY trace: map every changed file or change unit to requirement IDs. Cite the logged deviation for anything outside the smallestRoute, then state whether a substantially smaller complete diff exists.' : null,
     'COMPLETENESS trace - when the change establishes or restores an invariant, name it, then enumerate every production path with that property:',
     '`INVARIANT: <one sentence, or NONE>`',
@@ -136,6 +139,9 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     contractArmed
       ? '`[ ] <ID> <sub-requirement> - gap <reason>`'
       : '`[ ] <sub-requirement> - gap <reason>`',
+    contractArmed && input.taskContract?.processConstraints?.length
+      ? 'PROCESS checklist - assess every process constraint ID from transcript, lane events, or command observations. Mark unavailable evidence as unverified and request changes; never cite a changed file as proof of an unrelated process action.'
+      : null,
     contractArmed ? '' : null,
     contractArmed ? 'MINIMALITY trace - map every changed file or bounded change unit to task-contract requirement IDs:' : null,
     contractArmed ? '`MINIMALITY: <file|change-unit> -> <R1,R2|DEVIATION> necessary=<yes|no> evidence=<reason|implementation-notes entry>`' : null,
@@ -150,7 +156,7 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
       : 'Hard approval rule: You may NOT approve if any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, or any COMPLETENESS site is uncovered. Request changes instead.',
     'When any COMPLETENESS site is uncovered, list EVERY uncovered `SITE:` line in the request-changes findings so the next worker round receives the full set.',
     contractArmed
-      ? 'For submit_review, include contractCoverageEvidence with the sealed contractVersion, the exact reviewed HEAD from `git rev-parse HEAD`, and one entry per requirement: `{ requirementId, productionPath, anchor?, verification? }`. Each productionPath must be a repo-relative file the change actually touched, and reviewedHeadSha must equal contractCoverageEvidence.headSha.'
+      ? 'For submit_review, include contractCoverageEvidence with the sealed contractVersion, the exact reviewed HEAD from `git rev-parse HEAD`, and one entry per file-backed requirement: `{ requirementId, productionPath, anchor?, verification? }`. Each productionPath must be a repo-relative file the change actually touched. For every process constraint include a separate processEntries item `{ constraintId, source: "transcript"|"lane-event"|"command", reference }` citing a concrete turn, event, or command observation. If evidence is unavailable, say unverified and request changes. reviewedHeadSha must equal contractCoverageEvidence.headSha.'
       : null,
     'To clear an intentional global write, cite the file:line that proves the global destination is correct.',
     'Where the change has observable output (a file written, a command stdout, a function return), PREFER to run it in the worktree and inspect the ACTUAL output over reasoning about the diff.',

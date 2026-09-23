@@ -55,6 +55,7 @@ interface MergePreviewResult {
   checks?: Array<{ name?: string; passed?: boolean; detail?: string }>;
   blockers?: string[];
   branch?: string;
+  reviewPrerequisite?: string;
   error?: string;
 }
 
@@ -251,6 +252,7 @@ async function runPacketMergePreview(mode: OutputMode, rest: string[]): Promise<
       ['would merge', preview.wouldMerge ? 'yes' : 'no'],
       ['branch', preview.branch ?? '(unknown)'],
       ['blockers', preview.blockers?.length ? preview.blockers.join(', ') : '(none)'],
+      ['review prerequisite', preview.reviewPrerequisite ?? '(none)'],
     ]);
   } else {
     printJson(payload);

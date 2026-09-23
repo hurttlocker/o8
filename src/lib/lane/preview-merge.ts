@@ -33,7 +33,8 @@ export type MergeCheckName =
   | 'untracked-imports'
   | 'self-review-integrity'
   | 'typecheck'
-  | 'lint';
+  | 'lint'
+  | 'contract-review';
 
 export type MergeCheckVerdict = 'pass' | 'fail' | 'skipped';
 
@@ -60,6 +61,8 @@ export interface MergePreviewResult {
   unwired?: boolean;
   /** Advisory rule citations (#2446). Absent when judgment is off; the gate never reads it. */
   directiveCitations?: DirectiveCitationsPreview;
+  /** Contract state that approval and merge still need, separate from mechanical checks. */
+  reviewPrerequisite?: string;
 }
 
 interface MergePreviewOptions {
@@ -238,6 +241,32 @@ export async function buildPreviewForLane(
   ];
   const checks = buildCheckList(gateResult, verificationChecks);
   const blockers = buildBlockerList(gateResult, verificationChecks);
+  const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId);
+  let reviewPrerequisite: string | undefined;
+  let contractReviewReady = true;
+  if (packet?.taskContractRequired && packet.taskContract) {
+    const { assessDurableApprovedReview } = await import('./durable-review-approval');
+    const assessment = await assessDurableApprovedReview(resolvedLane);
+    contractReviewReady = assessment.approved;
+    reviewPrerequisite = assessment.approved
+      ? 'The current HEAD has an approved review with task-contract evidence.'
+      : `An approved review at the current HEAD still needs file-backed coverage and any process-constraint evidence. ${assessment.reason}`;
+    checks.push({
+      name: 'contract-review',
+      verdict: contractReviewReady ? 'pass' : 'fail',
+      detail: reviewPrerequisite,
+    });
+    if (!contractReviewReady) blockers.push('contract-review');
+  } else if (packet?.taskContractRequired && !packet.taskContract) {
+    if (packet.taskContractSource === 'default') {
+      reviewPrerequisite = 'The runtime-default task contract was not captured. Current policy allows review without contract coverage; inspect the missing-contract event before approval.';
+    } else {
+      contractReviewReady = false;
+      reviewPrerequisite = 'The explicitly required task contract is missing; restore or capture it before approval.';
+      checks.push({ name: 'contract-review', verdict: 'fail', detail: reviewPrerequisite });
+      blockers.push('contract-review');
+    }
+  }
   const dirtyDetail = readDirtyWorktreeDetail(reviewSource.cwd);
   if (dirtyDetail) {
     const cleanCheck = checks.find((check) => check.name === 'clean-worktree');
@@ -252,12 +281,13 @@ export async function buildPreviewForLane(
     : undefined;
   return {
     packetId,
-    wouldMerge: gateResult.passed && lint.ok && !dirtyDetail,
+    wouldMerge: gateResult.passed && lint.ok && !dirtyDetail && contractReviewReady,
     checks,
     blockers,
     branch: lane.branch ?? null,
     diffBase: gateResult.diffBase,
     reviewSource: reviewSource.kind,
+    ...(reviewPrerequisite ? { reviewPrerequisite } : {}),
     ...(directiveCitations ? { directiveCitations } : {}),
   };
 }

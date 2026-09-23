@@ -7,6 +7,7 @@ export const PACKET_TASK_CONTRACT_TAG_END = '</task-contract>';
 const MAX_REQUIREMENTS = 24;
 const MAX_ROUTE_ENTRIES = 24;
 const MAX_EXCLUSIONS = 12;
+const MAX_PROCESS_CONSTRAINTS = 24;
 const MAX_ID_LENGTH = 32;
 const MAX_TEXT_LENGTH = 480;
 
@@ -69,6 +70,22 @@ export function normalizePacketTaskContract(value: unknown): PacketTaskContract 
     return null;
   }
 
+  if (raw.processConstraints !== undefined && !Array.isArray(raw.processConstraints)) return null;
+  const processConstraints = Array.isArray(raw.processConstraints)
+    ? raw.processConstraints.slice(0, MAX_PROCESS_CONSTRAINTS).flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const constraint = entry as Record<string, unknown>;
+      const id = boundedText(constraint.id, MAX_ID_LENGTH).toUpperCase();
+      const source = boundedText(constraint.source);
+      const expectedBehavior = boundedText(constraint.expectedBehavior);
+      const verification = boundedText(constraint.verification);
+      if (!id || requirementIds.has(id) || !source || !expectedBehavior || !verification) return [];
+      requirementIds.add(id);
+      return [{ id, source, expectedBehavior, verification }];
+    })
+    : [];
+  if (Array.isArray(raw.processConstraints) && processConstraints.length !== raw.processConstraints.length) return null;
+
   const exclusions = Array.isArray(raw.exclusions)
     ? raw.exclusions
       .map((entry) => boundedText(entry))
@@ -76,7 +93,13 @@ export function normalizePacketTaskContract(value: unknown): PacketTaskContract 
       .slice(0, MAX_EXCLUSIONS)
     : [];
 
-  return { version: 1, requirements, smallestRoute, exclusions };
+  return {
+    version: 1,
+    requirements,
+    smallestRoute,
+    ...(processConstraints.length > 0 ? { processConstraints } : {}),
+    exclusions,
+  };
 }
 
 export function parsePacketTaskContract(text: string): PacketTaskContract | null {
@@ -96,9 +119,9 @@ export function stripPacketTaskContract(text: string): string {
 export function buildPacketTaskContractInstructions(implementationNotesPath = 'the packet notes artifact'): string[] {
   return [
     'Pre-edit task contract:',
-    '1. Before using any write/edit tool, inspect the task and the real production entry points, then enumerate every explicit obligation as an atomic requirement. Read-only inspection may happen first.',
-    `2. Before editing, emit exactly one machine-readable contract block in an assistant message: ${PACKET_TASK_CONTRACT_TAG_START} {"version":1,"requirements":[{"id":"R1","source":"exact task wording","expectedBehavior":"observable result","productionPath":"real entry point and call path","verification":"command or evidence that will prove it"}],"smallestRoute":[{"path":"repo-relative file or change unit","requirements":["R1"],"reason":"why this is the smallest complete route"}],"exclusions":["explicit non-goal"]} ${PACKET_TASK_CONTRACT_TAG_END}`,
-    '3. Every requirement ID must appear in smallestRoute. Do not begin implementation with an unmapped requirement.',
+    '1. Before using any write/edit tool, inspect the task and the real production entry points. Put deliverables and product behavior that a changed file can carry in requirements. Put instructions about how to work, commit, report, avoid actions, or stay in scope in processConstraints. Read-only inspection may happen first.',
+    `2. Before editing, emit exactly one machine-readable contract block in an assistant message: ${PACKET_TASK_CONTRACT_TAG_START} {"version":1,"requirements":[{"id":"R1","source":"exact deliverable wording","expectedBehavior":"observable result","productionPath":"real entry point and call path","verification":"command or evidence that will prove it"}],"smallestRoute":[{"path":"repo-relative file or change unit","requirements":["R1"],"reason":"why this is the smallest complete route"}],"processConstraints":[{"id":"P1","source":"exact process wording","expectedBehavior":"observable process result","verification":"transcript, event, or command evidence; say unverified if unavailable"}],"exclusions":["explicit non-goal"]} ${PACKET_TASK_CONTRACT_TAG_END}`,
+    '3. Every file-backed requirement ID must appear in smallestRoute. Never map a process constraint to a changed file as proof. Do not begin implementation with an unmapped file-backed requirement.',
     '4. If an alignment turn is armed, include the contract block in the huddle response before stopping. Otherwise emit it after read-only inspection and continue.',
     `5. Treat the first contract as immutable. If implementation forces a different route, record the change under ${implementationNotesPath} '## Deviations' with the affected requirement IDs and the reason.`,
   ];
@@ -142,6 +165,15 @@ export function formatPacketTaskContractForReview(contract: PacketTaskContract |
     ...contract.smallestRoute.map((route) => (
       `- ${route.path} -> ${route.requirements.join(', ')}: ${route.reason}`
     )),
+    '',
+    'Process constraints (assess from transcript, event, or command evidence; do not cite a changed file as proof):',
+    ...(contract.processConstraints?.length
+      ? contract.processConstraints.flatMap((constraint) => [
+        `- ${constraint.id}: ${constraint.expectedBehavior}`,
+        `  Source: ${constraint.source}`,
+        `  Planned verification: ${constraint.verification}`,
+      ])
+      : ['- none recorded']),
     '',
     'Explicit exclusions:',
     ...(contract.exclusions.length > 0
