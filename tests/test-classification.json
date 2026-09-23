@@ -37,6 +37,12 @@
       ]
     },
     {
+      "path": "src/app/api/panel/symon/imessage-access/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/app/api/panel/universal-search/route.test.ts",
       "reasons": [
         "child-process",

@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   loadSession: vi.fn(),
   createSession: vi.fn(),
   appendTranscript: vi.fn(),
+  generateShared: vi.fn(),
 }));
 
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
@@ -31,6 +32,7 @@ vi.mock('@/lib/mobile/symon-text-session-store', () => ({
   appendSymonTextTranscript: h.appendTranscript,
   formatSymonTextPlannerPrompt: (_session: unknown, text: string) => `User: ${text}`,
 }));
+vi.mock('@/lib/chat/gateway-client', () => ({ generateSharedSymonText: h.generateShared }));
 
 import { POST } from './route';
 
@@ -69,7 +71,7 @@ const session = {
   activeMachine: { id: 'imac', displayName: 'iMac' },
 };
 
-function request() {
+function request(overrides: Record<string, unknown> = {}) {
   return new NextRequest('http://localhost/api/symon/managed-messages/inbound', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -80,6 +82,7 @@ function request() {
       sender: baseTurn.senderHandle,
       recipient: baseTurn.recipientHandle,
       text: baseTurn.requestText,
+      ...overrides,
     }),
   });
 }
@@ -97,6 +100,7 @@ beforeEach(() => {
   });
   h.createSession.mockReturnValue(session);
   h.loadSession.mockReturnValue(session);
+  h.generateShared.mockResolvedValue('The date is still a working plan.');
   h.store.beginExecution.mockImplementation((input: Record<string, unknown>) => ({
     ...baseTurn,
     status: 'processing',
@@ -147,5 +151,74 @@ describe('managed Symon Messages real route', () => {
     expect(payload.text).toContain('stopped instead of risking the same action twice');
     expect(h.store.fail).toHaveBeenCalledOnce();
     expect(h.pollTurn).not.toHaveBeenCalled();
+  });
+
+  it('keeps direct prompts below the native byte limit as history grows', async () => {
+    h.store.getConversation.mockReturnValue({ sessionId: session.sessionId, transcript: [] });
+    h.loadSession.mockReturnValue({
+      ...session,
+      transcript: [{ role: 'user', text: '🧵'.repeat(12_000) }],
+    });
+    h.pollTurn.mockResolvedValue({ state: 'pending' });
+    await POST(request({ context: '🧵'.repeat(10_000) }));
+    const prompt = h.store.beginExecution.mock.calls[0][0].promptText as string;
+    expect(Buffer.byteLength(prompt, 'utf8')).toBeLessThan(40_000);
+    expect(prompt).toContain(baseTurn.requestText);
+  });
+
+  it('runs shared iMessage turns through provider text generation without opening a native CLI', async () => {
+    const conversationId = 'shared-imessage:group-1';
+    h.store.getOrCreateTurn.mockReturnValue({ ...baseTurn, conversationId });
+
+    const response = await POST(request({
+      conversationId,
+      context: 'Current plan: date is tentative, no venue booked.',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, state: 'done', text: 'The date is still a working plan.' });
+    expect(h.createSession).not.toHaveBeenCalled();
+    expect(h.readPlanner).not.toHaveBeenCalled();
+    expect(h.pollTurn).not.toHaveBeenCalled();
+    expect(h.store.beginExecution).toHaveBeenCalledWith(expect.objectContaining({
+      promptText: expect.stringContaining('Current plan: date is tentative'),
+    }));
+    expect(h.generateShared).toHaveBeenCalledWith(expect.stringContaining('Current plan: date is tentative'));
+    expect(h.store.appendConversation).toHaveBeenCalledWith(expect.objectContaining({
+      entries: [expect.objectContaining({ text: expect.stringContaining(baseTurn.senderHandle) })],
+    }));
+  });
+
+  it('attributes a full-access group request to its sender in the native session', async () => {
+    const conversationId = 'full-imessage:group-1';
+    h.store.getOrCreateTurn.mockReturnValue({ ...baseTurn, conversationId });
+    h.pollTurn.mockResolvedValue({ state: 'pending' });
+
+    const response = await POST(request({ conversationId, context: 'Current plan.' }));
+
+    expect(response.status).toBe(202);
+    expect(h.readPlanner).toHaveBeenCalledOnce();
+    expect(h.generateShared).not.toHaveBeenCalled();
+    expect(h.store.beginExecution).toHaveBeenCalledWith(expect.objectContaining({
+      promptText: expect.stringContaining(`${baseTurn.senderHandle}: ${baseTurn.requestText}`),
+    }));
+    expect(h.store.appendConversation).toHaveBeenCalledWith(expect.objectContaining({
+      entries: [{ role: 'user', text: `${baseTurn.senderHandle}: ${baseTurn.requestText}` }],
+    }));
+  });
+
+  it('returns processing for a replay while the shared provider call is still active', async () => {
+    const conversationId = 'shared-imessage:group-2';
+    h.store.getOrCreateTurn
+      .mockReturnValueOnce({ ...baseTurn, conversationId })
+      .mockReturnValueOnce({ ...baseTurn, conversationId, status: 'processing', executionEpoch: null });
+    let finish!: (text: string) => void;
+    h.generateShared.mockReturnValue(new Promise<string>((resolve) => { finish = resolve; }));
+    const first = POST(request({ conversationId, context: 'Current plan.' }));
+    const replay = await POST(request({ conversationId, context: 'Current plan.' }));
+    expect(replay.status).toBe(202);
+    expect(h.generateShared).toHaveBeenCalledTimes(1);
+    finish('One answer.');
+    expect((await first).status).toBe(200);
   });
 });

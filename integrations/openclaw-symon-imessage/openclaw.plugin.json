@@ -1,0 +1,17 @@
+{
+  "id": "symon-imessage-bridge",
+  "name": "Symon iMessage bridge",
+  "description": "Routes selected iMessage conversations to the local Symon text endpoint.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": []
+  }
+}
