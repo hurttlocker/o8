@@ -2915,6 +2915,14 @@
       ]
     },
     {
+      "path": "tests/review-architecture-attention-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-architecture-delta-lane-real-path.test.ts",
       "reasons": [
         "child-process",

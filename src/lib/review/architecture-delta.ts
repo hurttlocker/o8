@@ -16,6 +16,13 @@ import type {
   ArchitectureDeltaResult,
   ArchitectureModuleState,
 } from '@/lib/review/architecture-delta-types';
+import {
+  architectureSnapshotCacheKey,
+  createExpiringLruCache,
+  mapWithConcurrency,
+  sourceImportSpecifiers,
+  type ParsedSourceImports,
+} from '@/lib/review/architecture-delta-work';
 
 const execFileAsync = promisify(execFile);
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'] as const;
@@ -29,6 +36,9 @@ const MAX_SNAPSHOT_EDGES = 20_000;
 const MAX_REPORTED_PATHS = 200;
 const MAX_RESULT_NODES = 80;
 const MAX_RESULT_EDGES = 160;
+const CURRENT_READ_CONCURRENCY = 32;
+const SNAPSHOT_CACHE_TTL_MS = 60_000;
+const MAX_SNAPSHOT_CACHE_ENTRIES = 24;
 const GIT_TIMEOUT_MS = 15_000;
 const GIT_MAX_BUFFER = 32 * 1024 * 1024;
 
@@ -50,9 +60,15 @@ interface SnapshotGraph {
   truncated: boolean;
 }
 
+const snapshotCache = createExpiringLruCache<ArchitectureDeltaResult>(
+  MAX_SNAPSHOT_CACHE_ENTRIES,
+  SNAPSHOT_CACHE_TTL_MS,
+);
+
 export interface BuildArchitectureDeltaOptions {
   repoPath: string;
   baseRef?: string;
+  afterCacheKeyForTesting?: () => void | Promise<void>;
   afterSnapshotForTesting?: () => void | Promise<void>;
 }
 
@@ -67,8 +83,26 @@ function emptySummary() {
   return { changedModules: 0, addedEdges: 0, removedEdges: 0, contextEdges: 0 };
 }
 
+export function architectureAnalysisId(result: ArchitectureDeltaResult): string {
+  return createHash('sha256').update(JSON.stringify({
+    status: result.status,
+    reason: result.reason,
+    nodes: result.nodes,
+    edges: result.edges,
+    summary: result.summary,
+    unsupportedPaths: result.unsupportedPaths,
+    omittedPaths: result.omittedPaths,
+    resolutionWarnings: result.resolutionWarnings,
+    truncated: result.truncated,
+  })).digest('hex').slice(0, 24);
+}
+
+function withAnalysisId(result: ArchitectureDeltaResult): ArchitectureDeltaResult {
+  return { ...result, analysisId: architectureAnalysisId(result) };
+}
+
 export function unavailableArchitectureDelta(reason: string): ArchitectureDeltaResult {
-  return {
+  return withAnalysisId({
     ok: true,
     status: 'unavailable',
     reason,
@@ -80,7 +114,7 @@ export function unavailableArchitectureDelta(reason: string): ArchitectureDeltaR
     resolutionWarnings: [],
     truncated: false,
     generatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 async function gitOutput(cwd: string, args: string[]) {
@@ -199,21 +233,30 @@ async function readCurrentSources(
   let totalBytes = 0;
   const contents = new Map<string, string>();
   let truncated = ordered.length > limited.length;
-  for (const filePath of limited) {
-    const remainingBytes = Math.min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - totalBytes);
-    if (remainingBytes <= 0) {
+  for (let offset = 0; offset < limited.length; offset += CURRENT_READ_CONCURRENCY) {
+    if (totalBytes >= MAX_TOTAL_BYTES) {
       truncated = true;
-      omittedPaths.push(filePath);
-      continue;
+      omittedPaths.push(...limited.slice(offset));
+      break;
     }
-    const content = await readCurrentFile(repoRoot, filePath, remainingBytes);
-    if (content === null) {
-      truncated = true;
-      omittedPaths.push(filePath);
-      continue;
+    const batch = limited.slice(offset, offset + CURRENT_READ_CONCURRENCY);
+    const maxBytes = Math.min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - totalBytes);
+    const loaded = await mapWithConcurrency(
+      batch,
+      CURRENT_READ_CONCURRENCY,
+      (filePath) => readCurrentFile(repoRoot, filePath, maxBytes),
+    );
+    for (const [index, filePath] of batch.entries()) {
+      const content = loaded[index] ?? null;
+      const size = content === null ? 0 : Buffer.byteLength(content, 'utf8');
+      if (content === null || totalBytes + size > MAX_TOTAL_BYTES) {
+        truncated = true;
+        omittedPaths.push(filePath);
+        continue;
+      }
+      totalBytes += size;
+      contents.set(filePath, content);
     }
-    totalBytes += Buffer.byteLength(content, 'utf8');
-    contents.set(filePath, content);
   }
   return { contents, truncated, omittedPaths };
 }
@@ -280,6 +323,51 @@ function afterAbsentPathSet(changes: LaneFileChange[]) {
     if (change.status === 'renamed' && change.previousPath) paths.add(toPosix(change.previousPath));
   }
   return paths;
+}
+
+function currentSnapshotPaths(changes: LaneFileChange[]) {
+  return [...new Set(changes
+    .map((change) => toPosix(change.path))
+    .filter(isSupportedSource))].sort((left, right) => left.localeCompare(right));
+}
+
+async function exactSnapshotCacheKey(
+  repoRoot: string,
+  baseCommit: string,
+  workspaceState: string,
+  changes: LaneFileChange[],
+) {
+  const currentChangedPaths = currentSnapshotPaths(changes);
+  const contents = new Map<string, string>();
+  let totalBytes = 0;
+  for (let offset = 0; offset < currentChangedPaths.length; offset += CURRENT_READ_CONCURRENCY) {
+    if (totalBytes >= MAX_TOTAL_BYTES) break;
+    const batch = currentChangedPaths.slice(offset, offset + CURRENT_READ_CONCURRENCY);
+    const maxBytes = Math.min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - totalBytes);
+    const loaded = await mapWithConcurrency(
+      batch,
+      CURRENT_READ_CONCURRENCY,
+      (filePath) => readCurrentFile(repoRoot, filePath, maxBytes),
+    );
+    for (const [index, filePath] of batch.entries()) {
+      const content = loaded[index] ?? null;
+      const size = content === null ? 0 : Buffer.byteLength(content, 'utf8');
+      if (content === null || totalBytes + size > MAX_TOTAL_BYTES) continue;
+      contents.set(filePath, content);
+      totalBytes += size;
+    }
+  }
+  const resolver = await loadCurrentResolverConfig(repoRoot);
+  return architectureSnapshotCacheKey({
+    repoRoot,
+    baseCommit,
+    workspaceState,
+    changes,
+    currentChangedPaths,
+    contents,
+    resolver,
+    maxTotalBytes: MAX_TOTAL_BYTES,
+  });
 }
 
 async function buildBeforeContents(
@@ -386,9 +474,15 @@ async function rereadAnalysisContentFingerprint(
   repoRoot: string,
   analyzedContents: Map<string, string>,
 ) {
+  const filePaths = [...analyzedContents.keys()];
+  const loaded = await mapWithConcurrency(
+    filePaths,
+    CURRENT_READ_CONCURRENCY,
+    (filePath) => readCurrentFile(repoRoot, filePath, MAX_FILE_BYTES),
+  );
   const contents = new Map<string, string>();
-  for (const filePath of analyzedContents.keys()) {
-    const content = await readCurrentFile(repoRoot, filePath, MAX_FILE_BYTES);
+  for (const [index, filePath] of filePaths.entries()) {
+    const content = loaded[index] ?? null;
     if (content === null) return null;
     contents.set(filePath, content);
   }
@@ -454,13 +548,14 @@ function buildGraph(
   sourcePaths: Set<string>,
   config: ResolverConfig,
   changedPaths: Set<string>,
+  parsedImports: Map<string, ParsedSourceImports>,
 ): SnapshotGraph {
   const edges = new Set<string>();
   const parsedSources = new Set<string>();
   let importsProcessed = 0;
   let truncated = false;
   for (const [from, content] of contents) {
-    const imported = ts.preProcessFile(content, true, true).importedFiles;
+    const imported = sourceImportSpecifiers(from, content, parsedImports);
     if (
       imported.length > MAX_IMPORTS_PER_FILE
       || importsProcessed + imported.length > MAX_IMPORT_SPECIFIERS
@@ -469,8 +564,8 @@ function buildGraph(
       continue;
     }
     const fileEdges = new Set<string>();
-    for (const entry of imported) {
-      const roots = candidateRoots(entry.fileName, from, config);
+    for (const specifier of imported) {
+      const roots = candidateRoots(specifier, from, config);
       const to = roots.map((root) => resolveCandidate(root, sourcePaths)).find(Boolean) ?? null;
       if (to && to !== from && (changedPaths.has(from) || changedPaths.has(to))) {
         fileEdges.add(edgeKey(from, to));
@@ -519,7 +614,7 @@ function buildResult(
 ): ArchitectureDeltaResult {
   const states = moduleStates(changes);
   if (states.size === 0) {
-    return {
+    return withAnalysisId({
       ok: true,
       status: 'unsupported',
       reason: 'No supported source modules changed.',
@@ -531,7 +626,7 @@ function buildResult(
       resolutionWarnings,
       truncated: sourceTruncated,
       generatedAt: new Date().toISOString(),
-    };
+    });
   }
 
   const changedPaths = new Set(states.keys());
@@ -580,7 +675,7 @@ function buildResult(
     };
   });
 
-  return {
+  return withAnalysisId({
     ok: true,
     status: 'ready',
     reason: null,
@@ -597,12 +692,13 @@ function buildResult(
     resolutionWarnings,
     truncated,
     generatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 export async function buildArchitectureDelta({
   repoPath,
   baseRef = 'HEAD',
+  afterCacheKeyForTesting,
   afterSnapshotForTesting,
 }: BuildArchitectureDeltaOptions): Promise<ArchitectureDeltaResult> {
   const repoRoot = await resolveRepoRoot(repoPath);
@@ -610,6 +706,20 @@ export async function buildArchitectureDelta({
   const firstFingerprint = await workspaceFingerprint(repoRoot);
   const changeSet = await readChanges(repoRoot, baseCommit);
   const { changes, unsupportedPaths } = changeSet;
+  const snapshotCacheKey = afterSnapshotForTesting
+    ? null
+    : await exactSnapshotCacheKey(repoRoot, baseCommit, firstFingerprint, changes);
+  await afterCacheKeyForTesting?.();
+  const cachedResult = snapshotCacheKey ? snapshotCache.read(snapshotCacheKey) : null;
+  if (cachedResult && snapshotCacheKey) {
+    const [confirmedFingerprint, confirmedCacheKey] = await Promise.all([
+      workspaceFingerprint(repoRoot),
+      exactSnapshotCacheKey(repoRoot, baseCommit, firstFingerprint, changes),
+    ]);
+    if (confirmedFingerprint === firstFingerprint && confirmedCacheKey === snapshotCacheKey) {
+      return cachedResult;
+    }
+  }
   const changedPaths = changedPathSet(changes);
   const [listedAfterPaths, beforePathList] = await Promise.all([
     listAfterPaths(repoRoot),
@@ -643,8 +753,9 @@ export async function buildArchitectureDelta({
     ...beforeOmittedPaths,
   ])].sort().slice(0, MAX_REPORTED_PATHS);
   const resolutionWarnings = [...new Set([...beforeResolver.warnings, ...afterResolver.warnings])].sort();
-  const beforeGraph = buildGraph(beforeContents, beforeSourcePaths, beforeResolver, changedPaths);
-  const afterGraph = buildGraph(afterContents, afterSourcePaths, afterResolver, changedPaths);
+  const parsedImports = new Map<string, ParsedSourceImports>();
+  const beforeGraph = buildGraph(beforeContents, beforeSourcePaths, beforeResolver, changedPaths, parsedImports);
+  const afterGraph = buildGraph(afterContents, afterSourcePaths, afterResolver, changedPaths, parsedImports);
   const result = buildResult(
     beforeGraph,
     afterGraph,
@@ -665,6 +776,19 @@ export async function buildArchitectureDelta({
     || lastAnalysisContentFingerprint !== firstAnalysisContentFingerprint
   ) {
     return unavailableArchitectureDelta('The workspace changed during architecture analysis. Refresh Review to retry.');
+  }
+  if (snapshotCacheKey) {
+    const analyzedCacheKey = architectureSnapshotCacheKey({
+      repoRoot,
+      baseCommit,
+      workspaceState: firstFingerprint,
+      changes,
+      currentChangedPaths: currentSnapshotPaths(changes),
+      contents: afterContents,
+      resolver: afterResolver,
+      maxTotalBytes: MAX_TOTAL_BYTES,
+    });
+    snapshotCache.write(analyzedCacheKey, result);
   }
   return result;
 }

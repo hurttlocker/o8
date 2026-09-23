@@ -29,6 +29,7 @@ import { ReviewSkeleton } from './panel/ReviewSkeleton';
 import { MissingWorktreeNotice } from './panel/MissingWorktreeNotice';
 import { WORKTREE_MISSING_CODE } from '@/lib/lane/review-target-codes';
 import { useArchitectureDelta } from './useArchitectureDelta';
+import { useArchitectureAttention } from './useArchitectureAttention';
 import { ArchitectureDeltaCard } from './panel/ArchitectureDeltaCard';
 import { reviewPathCandidates, reviewRowPathForSourcePath } from './panel/review-paths';
 
@@ -191,6 +192,13 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     () => [...new Set(visible.flatMap((file) => reviewPathCandidates(file.path)))],
     [visible],
   );
+  const architectureAttention = useArchitectureAttention({
+    repoPath: diffRepoPath,
+    laneId: reviewLaneId,
+    analysis: architecture.result,
+    scopePaths: architectureScopePaths,
+    enabled: Boolean(architecture.result?.status === 'ready' && architectureScopePaths.length > 0),
+  });
   const jumpFromArchitecture = useCallback((path: string) => {
     const reviewPath = reviewRowPathForSourcePath(path, visible.map((file) => file.path));
     if (reviewPath) jumpToFile(reviewPath);
@@ -440,6 +448,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             ) : null}
             <ArchitectureDeltaCard
               analysis={architecture}
+              attention={architectureAttention}
               scopePaths={architectureScopePaths}
               onSelectFile={jumpFromArchitecture}
             />
