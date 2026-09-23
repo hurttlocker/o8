@@ -8,10 +8,11 @@
  *
  * The check is deliberately dumb. It does not read prose, judge quality, or ask
  * a model anything — it verifies that the review recorded evidence for every
- * requirement id, that the evidence cites a production path the change actually
- * touched, and that the evidence is bound to both the contract version and the
- * reviewed commit. Anything softer than that is an assertion, not a gate, and a
- * gate built on assertions is the failure this exists to prevent.
+ * file-backed requirement id, that the evidence cites a production path the
+ * change actually touched, and that process constraints carry separately typed
+ * reviewer observations. All entries are bound to the contract version and
+ * reviewed commit. The gate verifies the presence and shape of process evidence,
+ * not the truth of the reviewer's observation.
  *
  * Legacy packets are untouched: a packet that never received contract
  * instructions returns `not-applicable` and is judged exactly as before.
@@ -24,7 +25,8 @@ export type CoverageFailureReason =
   | 'requirement-not-evidenced'
   | 'cited-path-not-in-change'
   | 'contract-version-mismatch'
-  | 'evidence-head-mismatch';
+  | 'evidence-head-mismatch'
+  | 'process-constraint-not-evidenced';
 
 export interface RequirementEvidence {
   /** Must match a requirement id in the sealed contract. */
@@ -37,16 +39,26 @@ export interface RequirementEvidence {
   verification?: string;
 }
 
+export interface ProcessConstraintEvidence {
+  /** Must match a process constraint in the sealed contract. */
+  constraintId: string;
+  source: 'transcript' | 'lane-event' | 'command';
+  /** Concrete turn, event, or command observation; reviewer-authored, not independently verified here. */
+  reference: string;
+}
+
 export interface ReviewCoverageEvidence {
   /** Contract version this evidence was produced against. */
   contractVersion: number;
   /** HEAD the evidence was gathered at. */
   headSha: string;
   entries: RequirementEvidence[];
+  processEntries?: ProcessConstraintEvidence[];
 }
 
 export interface RequirementCoverageCheck {
   requirementId: string;
+  kind?: 'file' | 'process';
   covered: boolean;
   citedPath: string | null;
   failureReason: CoverageFailureReason | null;
@@ -90,8 +102,11 @@ function failAll(
   message: string,
   reviewedHeadSha: string | null,
 ): ContractCoverageResult {
-  const checks = contract.requirements.map((requirement) => ({
-    requirementId: requirement.id,
+  const checks = [
+    ...contract.requirements.map((requirement) => requirement.id),
+    ...(contract.processConstraints ?? []).map((constraint) => constraint.id),
+  ].map((requirementId) => ({
+    requirementId,
     covered: false,
     citedPath: null,
     failureReason: reason,
@@ -194,14 +209,30 @@ export function evaluateContractCoverage(input: ContractCoverageInput): Contract
     };
   });
 
+  const processEvidence = new Map((evidence.processEntries ?? []).map((entry) => [entry.constraintId, entry]));
+  for (const constraint of contract.processConstraints ?? []) {
+    const entry = processEvidence.get(constraint.id);
+    const evidenced = entry !== undefined
+      && (entry.source === 'transcript' || entry.source === 'lane-event' || entry.source === 'command')
+      && typeof entry.reference === 'string'
+      && entry.reference.trim().length > 0;
+    checks.push({
+      requirementId: constraint.id,
+      kind: 'process',
+      covered: evidenced,
+      citedPath: null,
+      failureReason: evidenced ? null : 'process-constraint-not-evidenced',
+    });
+  }
+
   const missingRequirementIds = checks.filter((check) => !check.covered).map((check) => check.requirementId);
   const passed = missingRequirementIds.length === 0;
 
   return {
     status: passed ? 'passed' : 'failed',
     reason: passed
-      ? `All ${checks.length} sealed requirements carry production-path evidence at the reviewed HEAD.`
-      : `${missingRequirementIds.length} of ${checks.length} sealed requirements lack production-path evidence: ${missingRequirementIds.join(', ')}.`,
+      ? `All ${checks.length} sealed obligations carry the required file or process evidence at the reviewed HEAD.`
+      : `${missingRequirementIds.length} of ${checks.length} sealed obligations lack the required file or process evidence: ${missingRequirementIds.join(', ')}.`,
     contractVersion: contract.version,
     reviewedHeadSha,
     checks,
@@ -224,5 +255,14 @@ export function readCoverageEvidence(args: unknown): ReviewCoverageEvidence | nu
     && typeof (entry as RequirementEvidence).requirementId === 'string'
     && typeof (entry as RequirementEvidence).productionPath === 'string'
   ));
-  return { contractVersion: candidate.contractVersion, headSha: candidate.headSha, entries };
+  const processEntries = Array.isArray(candidate.processEntries)
+    ? candidate.processEntries.filter((entry): entry is ProcessConstraintEvidence => (
+      !!entry
+      && typeof entry === 'object'
+      && typeof (entry as ProcessConstraintEvidence).constraintId === 'string'
+      && ['transcript', 'lane-event', 'command'].includes((entry as ProcessConstraintEvidence).source)
+      && typeof (entry as ProcessConstraintEvidence).reference === 'string'
+    ))
+    : [];
+  return { contractVersion: candidate.contractVersion, headSha: candidate.headSha, entries, processEntries };
 }

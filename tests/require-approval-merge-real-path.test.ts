@@ -448,7 +448,7 @@ describe('requireApproval merge governance through the real command path', () =>
     });
   }, 30_000);
 
-  it('records one-requirement coverage and merges through the documented CLI review flow', async () => {
+  it('records file and process evidence separately and merges through the CLI review flow', async () => {
     const fixture = await createStandardLane('cli-contract-review', false);
     const taskContract = {
       version: 1 as const,
@@ -463,6 +463,12 @@ describe('requireApproval merge governance through the real command path', () =>
         path: 'file.txt',
         requirements: ['R1'],
         reason: 'The packet changes one file.',
+      }],
+      processConstraints: [{
+        id: 'P1',
+        source: 'Commit the edit before approval.',
+        expectedBehavior: 'The edit is committed at the reviewed HEAD.',
+        verification: 'Inspect git show HEAD.',
       }],
       exclusions: [],
     };
@@ -500,6 +506,8 @@ describe('requireApproval merge governance through the real command path', () =>
         fixture.reviewedHeadSha,
         '--coverage',
         'R1=file.txt',
+        '--process-evidence',
+        'P1=command:git show HEAD includes file.txt',
       ],
     )).resolves.toBe(0);
 
@@ -509,7 +517,10 @@ describe('requireApproval merge governance through the real command path', () =>
         id: fixture.lane.packetId,
         contractCoverage: {
           status: 'passed',
-          checks: [{ requirementId: 'R1', covered: true, citedPath: 'file.txt' }],
+          checks: [
+            { requirementId: 'R1', covered: true, citedPath: 'file.txt' },
+            { requirementId: 'P1', kind: 'process', covered: true, citedPath: null },
+          ],
           missingRequirementIds: [],
         },
         merge: { merged: true },

@@ -2,7 +2,7 @@ import { readCoverageEvidence, type ReviewCoverageEvidence } from '@/lib/orchest
 
 export const CONTRACT_COVERAGE_EVIDENCE_SCHEMA = {
   type: 'object',
-  description: 'Required for contract-armed packets: evidence for every sealed requirement, bound to the reviewed HEAD and contract version.',
+  description: 'Required for contract-armed packets: changed-file evidence for each file requirement and separate process observations, bound to the reviewed HEAD and contract version.',
   properties: {
     contractVersion: { type: 'number' },
     headSha: { type: 'string' },
@@ -17,6 +17,19 @@ export const CONTRACT_COVERAGE_EVIDENCE_SCHEMA = {
           verification: { type: 'string' },
         },
         required: ['requirementId', 'productionPath'],
+      },
+    },
+    processEntries: {
+      type: 'array',
+      description: 'One reviewer observation per process constraint; omit only when the contract has no process constraints.',
+      items: {
+        type: 'object',
+        properties: {
+          constraintId: { type: 'string' },
+          source: { type: 'string', enum: ['transcript', 'lane-event', 'command'] },
+          reference: { type: 'string', description: 'Concrete turn, event, or command observation; do not cite a changed file as proof of an unrelated process action.' },
+        },
+        required: ['constraintId', 'source', 'reference'],
       },
     },
   },

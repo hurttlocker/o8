@@ -26,6 +26,7 @@ const reviewRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-review-rep
 
 const { recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+const { buildPreviewForLane } = await import('@/lib/lane/preview-merge');
 const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } =
   await import('@/lib/orchestrator/control-plane');
@@ -117,10 +118,21 @@ const capturedContract: PacketTaskContract = {
   exclusions: [],
 };
 
+const processContract: PacketTaskContract = {
+  ...capturedContract,
+  processConstraints: [{
+    id: 'P1',
+    source: 'Commit the edit and report the changed file.',
+    expectedBehavior: 'The worker commits the edit and names file.txt in its report.',
+    verification: 'git show HEAD and worker transcript',
+  }],
+};
+
 async function assessPersistedContractPacket(input: {
   source: PacketTaskContractSource;
   taskContract?: PacketTaskContract;
   coveragePath?: string;
+  processEvidence?: string;
 }) {
   const packetId = `pkt-contract-review-${input.source}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const lane = createLane({
@@ -179,6 +191,7 @@ async function assessPersistedContractPacket(input: {
         contractVersion: 1,
         headSha: reviewHeadSha,
         entries: [{ requirementId: 'R1', productionPath: input.coveragePath }],
+        ...(input.processEvidence ? { processEntries: [{ constraintId: 'P1', source: 'command', reference: input.processEvidence }] } : {}),
       },
     } : {}),
   });
@@ -190,6 +203,43 @@ async function assessPersistedContractPacket(input: {
 }
 
 describe('durable approval enforces contract coverage on the real path', () => {
+  it('requires separate process evidence without inventing a changed path', async () => {
+    const absent = await assessPersistedContractPacket({
+      source: 'explicit', taskContract: processContract, coveragePath: 'file.txt',
+    });
+    expect(absent.assessment).toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed', missingRequirementIds: ['P1'] },
+    });
+    const blockedPreview = await buildPreviewForLane(absent.lane, absent.lane.packetId!);
+    expect(blockedPreview).toMatchObject({
+      wouldMerge: false,
+      blockers: expect.arrayContaining(['contract-review']),
+      reviewPrerequisite: expect.stringContaining('process-constraint evidence'),
+    });
+
+    const evidenced = await assessPersistedContractPacket({
+      source: 'explicit', taskContract: processContract, coveragePath: 'file.txt',
+      processEvidence: 'git show HEAD confirms the commit; transcript turn 3 reports file.txt',
+    });
+    expect(evidenced.assessment).toMatchObject({
+      approved: true,
+      contractCoverage: { status: 'passed', missingRequirementIds: [] },
+    });
+    const evidencedPreview = await buildPreviewForLane(evidenced.lane, evidenced.lane.packetId!);
+    expect(evidencedPreview.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'contract-review', verdict: 'pass' }),
+    ]));
+
+    const stale = await assessPersistedContractPacket({
+      source: 'explicit', taskContract: processContract, coveragePath: 'other/file.txt',
+      processEvidence: 'git show HEAD confirms the commit; transcript turn 3 reports file.txt',
+    });
+    expect(stale.assessment).toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed', missingRequirementIds: ['R1'] },
+    });
+  });
   it.each(['other/file.txt', '/file.txt', path.join(reviewRepo, 'file.txt')])(
     'rejects a persisted review citing %s instead of the changed repository path',
     async (coveragePath) => {
@@ -356,6 +406,8 @@ describe('default-armed contract capture fails soft on the durable approval path
     const { lane, assessment } = await assessPersistedContractPacket({ source: 'default' });
 
     expect(assessment).toMatchObject({ approved: true, contractCoverage: null });
+    const preview = await buildPreviewForLane(lane, lane.packetId!);
+    expect(preview.reviewPrerequisite).toContain('Current policy allows review without contract coverage');
     const missingEvents = getLaneEvents(lane.id)
       .filter((event) => event.verb === 'task_contract_missing');
     expect(missingEvents).toHaveLength(1);
@@ -386,5 +438,11 @@ describe('default-armed contract capture fails soft on the durable approval path
       contractCoverage: { status: 'failed' },
     });
     expect(getLaneEvents(lane.id).some((event) => event.verb === 'task_contract_missing')).toBe(false);
+    const preview = await buildPreviewForLane(lane, lane.packetId!);
+    expect(preview).toMatchObject({
+      wouldMerge: false,
+      blockers: expect.arrayContaining(['contract-review']),
+      reviewPrerequisite: expect.stringContaining('explicitly required task contract is missing'),
+    });
   });
 });

@@ -108,7 +108,10 @@ async function assessContractCoverage(
         contractVersion: contract?.version ?? null,
         reviewedHeadSha,
         checks: [],
-        missingRequirementIds: contract?.requirements.map((requirement) => requirement.id) ?? [],
+        missingRequirementIds: [
+          ...(contract?.requirements.map((requirement) => requirement.id) ?? []),
+          ...(contract?.processConstraints?.map((constraint) => constraint.id) ?? []),
+        ],
       };
     }
     return evaluateContractCoverage({
@@ -128,7 +131,10 @@ async function assessContractCoverage(
       contractVersion: contract?.version ?? null,
       reviewedHeadSha,
       checks: [],
-      missingRequirementIds: contract?.requirements.map((requirement) => requirement.id) ?? [],
+      missingRequirementIds: [
+        ...(contract?.requirements.map((requirement) => requirement.id) ?? []),
+        ...(contract?.processConstraints?.map((constraint) => constraint.id) ?? []),
+      ],
     };
   }
 }
