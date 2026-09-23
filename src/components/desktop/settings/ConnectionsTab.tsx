@@ -19,6 +19,7 @@ import {
 } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { PairedDevicesSection } from './PairedDevicesSection';
+import { SymonIMessageAccessSection } from './SymonIMessageAccessSection';
 
 type AttachSettingResponse = {
   ok: boolean;
@@ -255,6 +256,8 @@ export function ConnectionsTab() {
           </label>
         </SettingsGroup>
       </section>
+
+      <SymonIMessageAccessSection />
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup header="Pairing">

@@ -67,6 +67,8 @@ export interface CallOpenRouterOptions {
   timeoutMs?: number;
   /** Require the entitled managed route and fail closed when it is unavailable. */
   managedOnly?: boolean;
+  /** Output budget for longer tool-free text responses. Defaults to 512. */
+  maxTokens?: number;
 }
 
 /**
@@ -197,7 +199,7 @@ export async function callOpenRouter(
     ...(fallbacks.length > 0 ? { models: fallbacks } : {}),
     messages: [{ role: 'user', content: prompt }],
     temperature: 0,
-    max_tokens: 512,
+    max_tokens: Math.min(Math.max(opts.maxTokens ?? 512, 1), 4096),
     // Ask OpenRouter to return the call's cost in the response so the spend
     // ledger records exact figures instead of pricing-table estimates.
     ...(route.via === 'local' ? {} : { usage: { include: true } }),

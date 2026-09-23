@@ -129,4 +129,14 @@ describe('openrouter-adapter circuit breaker', { timeout: 10_000 }, () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://openrouter.ai/api/v1/models');
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'GET' });
   });
+
+  it('bounds a longer text response without adding tool access', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse(200, okBody)));
+    await callOpenRouter('A supplied reference only.', { maxTokens: 2048 });
+    const request = fetchMock.mock.calls.find(([url]) => String(url).includes('/chat/completions'))?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body)) as Record<string, unknown>;
+    expect(body.max_tokens).toBe(2048);
+    expect(body).not.toHaveProperty('tools');
+    expect(body).not.toHaveProperty('tool_choice');
+  });
 });
