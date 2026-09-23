@@ -17,6 +17,7 @@ interface GroupAccess {
 interface AccessResponse {
   ok: boolean;
   configured?: boolean;
+  enabled?: boolean;
   groups?: GroupAccess[];
   group?: GroupAccess;
   error?: string;
@@ -25,6 +26,7 @@ interface AccessResponse {
 export function SymonIMessageAccessSection() {
   const [groups, setGroups] = useState<GroupAccess[]>([]);
   const [configured, setConfigured] = useState(false);
+  const [enabled, setEnabled] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,10 +39,31 @@ export function SymonIMessageAccessSection() {
         if (!response.ok || !data.ok) throw new Error('Could not read iMessage group access.');
         if (cancelled) return;
         setConfigured(data.configured === true);
+        setEnabled(data.enabled === true);
         setGroups(data.groups ?? []);
       })
       .catch(() => { if (!cancelled) setError('Could not read iMessage group access.'); });
     return () => { cancelled = true; };
+  }, []);
+
+  const saveEnabled = useCallback(async (next: boolean) => {
+    setBusyId('master');
+    setError(null);
+    try {
+      const response = await fetch('/api/panel/symon/imessage-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const data = await response.json() as AccessResponse;
+      if (!response.ok || !data.ok || data.enabled !== next) throw new Error('Could not change iMessage routing.');
+      setEnabled(next);
+      if (!next) setPendingId(null);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not change iMessage routing.');
+    } finally {
+      setBusyId(null);
+    }
   }, []);
 
   const save = useCallback(async (group: GroupAccess, fullAccess: boolean) => {
@@ -78,14 +101,22 @@ export function SymonIMessageAccessSection() {
     }
   }, []);
 
-  if (!configured || groups.length === 0) return null;
+  if (!configured) return null;
 
   return (
     <section style={{ marginTop: 28 }}>
       <SettingsGroup
-        header="Symon in iMessage groups"
-        footnote={error ?? 'Limited access is the default. Full access lets every approved member shown here use Symon’s tools on this Mac. New members need separate approval.'}
+        header="Symon via iMessage"
+        footnote={error ?? 'Only approved chats can reach Symon. Group access stays limited unless every approved member is explicitly granted full access.'}
       >
+        <SettingsRow
+          icon={<Smartphone size={14} />}
+          label="Allow Symon on iMessage"
+          subtitle={enabled ? 'Symon is available in approved chats' : 'Symon will not reply to iMessage chats'}
+          checked={enabled}
+          onToggle={(next) => { void saveEnabled(next); }}
+          disabled={busyId !== null}
+        />
         {groups.map((group) => (
           <div key={group.id}>
             <SettingsRow

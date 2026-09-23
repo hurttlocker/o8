@@ -59,6 +59,51 @@ function routedGroup(): { shared: boolean; conversationId: string } {
   ], { encoding: 'utf8', timeout: 5_000 })) as { shared: boolean; conversationId: string };
 }
 
+function bridgeLoads(): boolean {
+  const pluginUrl = pathToFileURL(join(process.cwd(), 'integrations/openclaw-symon-imessage/core.mjs')).href;
+  const script = `
+    const { readBridgeConfig } = await import(process.argv[1]);
+    console.log(Boolean(readBridgeConfig(process.argv[2])));
+  `;
+  return execFileSync(process.execPath, [
+    '--input-type=module', '-e', script, pluginUrl, configPath,
+  ], { encoding: 'utf8', timeout: 5_000 }).trim() === 'true';
+}
+
+function disabledHookResult(): { handled: boolean } {
+  const pluginUrl = pathToFileURL(join(process.cwd(), 'integrations/openclaw-symon-imessage/core.mjs')).href;
+  const script = `
+    const { handleMessage, readBridgeConfig } = await import(process.argv[1]);
+    const result = await handleMessage({ content: 'hello' }, {
+      channelId: 'imessage', senderId: '+15555550101', conversationId: 'direct:1', messageId: 'test-1',
+    }, readBridgeConfig(process.argv[2]));
+    console.log(JSON.stringify(result ?? { handled: false }));
+  `;
+  return JSON.parse(execFileSync(process.execPath, [
+    '--input-type=module', '-e', script, pluginUrl, configPath,
+  ], { encoding: 'utf8', timeout: 5_000 })) as { handled: boolean };
+}
+
+it('switches the persisted bridge routing off and on through the authenticated route', async () => {
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as { directSender: string };
+  config.directSender = 'imessage:+1 (555) 555-0101';
+  writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
+  expect(bridgeLoads()).toBe(true);
+  expect((await (await GET(request('GET'))).json()).configured).toBe(true);
+  const off = await POST(request('POST', { enabled: false }));
+  expect(off.status).toBe(200);
+  expect((await off.json()).enabled).toBe(false);
+  expect((await (await GET(request('GET'))).json()).enabled).toBe(false);
+  expect(bridgeLoads()).toBe(false);
+  expect(disabledHookResult()).toEqual({ handled: false });
+
+  const on = await POST(request('POST', { enabled: true }));
+  expect(on.status).toBe(200);
+  expect((await on.json()).enabled).toBe(true);
+  expect(bridgeLoads()).toBe(true);
+  expect(routedGroup()).toMatchObject({ shared: true, conversationId: 'shared-imessage:imessage:group:68' });
+});
+
 it('grants exactly the verified group members through an authenticated persisted setting', async () => {
   const initial = await GET(request('GET'));
   const initialJson = await initial.json() as { groups: Array<{ memberSuffixes: string[]; fullAccess: boolean; approvalVersion: string }> };
@@ -87,6 +132,7 @@ it('rejects unconfigured groups and unauthenticated callers', async () => {
   h.deny = true;
   expect((await GET(request('GET'))).status).toBe(401);
   expect((await POST(request('POST', { groupId: '68', fullAccess: false }))).status).toBe(401);
+  expect((await POST(request('POST', { enabled: false }))).status).toBe(401);
 });
 
 it('returns the group to limited access when its approved membership changes', async () => {

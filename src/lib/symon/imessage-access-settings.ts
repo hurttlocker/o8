@@ -8,8 +8,14 @@ import { dirname, join } from 'node:path';
 const PHONE = /^\+[1-9]\d{6,14}$/;
 const GROUP_ID = /^[A-Za-z0-9:_-]{1,160}$/;
 
+function normalizedPhone(value: unknown): string {
+  return String(value ?? '').replace(/^imessage:/i, '').replace(/[().\s-]/g, '');
+}
+
 interface BridgeConfig {
   enabled: boolean;
+  directSender: string;
+  knowledgeRepoPath: string;
   groupSenders: string[];
   groupConversationIds: string[];
   groupMembers?: Record<string, string[]>;
@@ -39,7 +45,9 @@ function readConfig(): { path: string; config: BridgeConfig } | null {
   try {
     if (!lstatSync(path).isFile()) return null;
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as BridgeConfig;
-    if (parsed.enabled !== true || !Array.isArray(parsed.groupSenders)
+    if (typeof parsed.enabled !== 'boolean' || !PHONE.test(normalizedPhone(parsed.directSender))
+      || typeof parsed.knowledgeRepoPath !== 'string' || !parsed.knowledgeRepoPath.startsWith('/')
+      || !Array.isArray(parsed.groupSenders)
       || !parsed.groupSenders.every((sender) => typeof sender === 'string' && PHONE.test(sender))
       || !Array.isArray(parsed.groupConversationIds)
       || !parsed.groupConversationIds.every((id) => typeof id === 'string' && GROUP_ID.test(id))) return null;
@@ -63,12 +71,13 @@ function approvalVersion(id: string, members: string[]): string {
 
 export class IMessageMembershipChangedError extends Error {}
 
-export function readIMessageAccessSettings(): { configured: boolean; groups: IMessageGroupAccess[] } {
+export function readIMessageAccessSettings(): { configured: boolean; enabled: boolean; groups: IMessageGroupAccess[] } {
   const loaded = readConfig();
-  if (!loaded) return { configured: false, groups: [] };
+  if (!loaded) return { configured: false, enabled: false, groups: [] };
   const { config } = loaded;
   return {
     configured: true,
+    enabled: config.enabled,
     groups: config.groupConversationIds.map((id) => {
       const members = membersFor(config, id);
       const grants = config.groupFullAccess?.[id] ?? [];
@@ -84,6 +93,25 @@ export function readIMessageAccessSettings(): { configured: boolean; groups: IMe
       };
     }),
   };
+}
+
+function writeConfig(path: string, config: BridgeConfig): void {
+  const temporary = join(dirname(path), `.symon-imessage-bridge.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, path);
+  } catch (error) {
+    try { unlinkSync(temporary); } catch { /* The temporary file was never created or already moved. */ }
+    throw error;
+  }
+}
+
+export function setIMessageBridgeEnabled(enabled: boolean): boolean | null {
+  const loaded = readConfig();
+  if (!loaded) return null;
+  writeConfig(loaded.path, { ...loaded.config, enabled });
+  return readIMessageAccessSettings().enabled;
 }
 
 export function setIMessageGroupFullAccess(
@@ -103,14 +131,6 @@ export function setIMessageGroupFullAccess(
   if (fullAccess) groupFullAccess[id] = members;
   else delete groupFullAccess[id];
   const next: BridgeConfig = { ...config, groupFullAccess };
-  const temporary = join(dirname(path), `.symon-imessage-bridge.${process.pid}.${randomUUID()}.tmp`);
-  try {
-    writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-    chmodSync(temporary, 0o600);
-    renameSync(temporary, path);
-  } catch (error) {
-    try { unlinkSync(temporary); } catch { /* The temporary file was never created or already moved. */ }
-    throw error;
-  }
+  writeConfig(path, next);
   return readIMessageAccessSettings().groups.find((group) => group.id === id) ?? null;
 }

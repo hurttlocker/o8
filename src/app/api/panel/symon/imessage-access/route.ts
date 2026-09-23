@@ -6,6 +6,7 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import {
   IMessageMembershipChangedError,
   readIMessageAccessSettings,
+  setIMessageBridgeEnabled,
   setIMessageGroupFullAccess,
 } from '@/lib/symon/imessage-access-settings';
 
@@ -19,6 +20,15 @@ export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (body && typeof body.enabled === 'boolean' && !('groupId' in body)) {
+    try {
+      const enabled = setIMessageBridgeEnabled(body.enabled);
+      if (enabled === null) return NextResponse.json({ ok: false, error: 'bridge_not_configured' }, { status: 409 });
+      return NextResponse.json({ ok: true, enabled });
+    } catch {
+      return NextResponse.json({ ok: false, error: 'write_failed' }, { status: 500 });
+    }
+  }
   if (!body || typeof body.groupId !== 'string' || typeof body.fullAccess !== 'boolean') {
     return NextResponse.json({ ok: false, error: 'bad_request' }, { status: 400 });
   }
