@@ -4,6 +4,7 @@ import {
   constants as fsConstants,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   realpathSync,
   rmSync,
@@ -85,7 +86,6 @@ function discoverCodexInstallations(binary: string, env: NodeJS.ProcessEnv): {
     binary,
     ...(env.PATH ?? '').split(delimiter).filter(Boolean).map((entry) => join(entry, 'codex')),
     '/Applications/ChatGPT.app/Contents/Resources/codex',
-    '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host',
     '/Applications/Codex.app/Contents/Resources/codex',
     ...(userApplications ? [
       join(userApplications, 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
@@ -107,6 +107,27 @@ function discoverCodexInstallations(binary: string, env: NodeJS.ProcessEnv): {
     denyReadPaths: uniqueStrings(resolved.flatMap((item) => item.denyReadPaths)),
     denyExecPaths: uniqueStrings(resolved.flatMap((item) => item.denyExecPaths)),
   };
+}
+
+function discoverCodexToolHosts(env: NodeJS.ProcessEnv): string[] {
+  const userApplications = env.HOME ? join(env.HOME, 'Applications') : null;
+  const candidates = [
+    '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host',
+    '/Applications/Codex.app/Contents/Resources/codex-code-mode-host',
+    ...(userApplications ? [
+      join(userApplications, 'ChatGPT.app', 'Contents', 'Resources', 'codex-code-mode-host'),
+      join(userApplications, 'Codex.app', 'Contents', 'Resources', 'codex-code-mode-host'),
+    ] : []),
+  ];
+  return candidates.filter((candidate) => {
+    try {
+      // Re-opening a symlink target after the CLI denials would let a forged
+      // helper alias restore execution of the protected Codex binary.
+      return lstatSync(candidate).isFile() && realpathSync(candidate) === candidate;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export async function prepareSingleOrchestratorLaunch(input: {
@@ -156,6 +177,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
 
     const source = resolvePrivateCodexSource(input.binary);
     const installations = discoverCodexInstallations(input.binary, input.env);
+    const toolHosts = discoverCodexToolHosts(input.env);
     copyFileSync(source.nativeBinary, launchBinaryPath, fsConstants.COPYFILE_FICLONE);
     chmodSync(launchBinaryPath, 0o700);
     const blockedPrefixes = [
@@ -243,8 +265,10 @@ export async function prepareSingleOrchestratorLaunch(input: {
       finalDenyReadBasenames: ['codex', 'codex.js'],
       finalDenyWritePaths: [launchesRoot],
       finalImmutableWritePaths: [rulesPath, guardPath],
-      finalAllowReadPaths: [launchBinaryPath],
-      finalAllowExecPaths: [launchBinaryPath],
+      // The signed app's tool host is not a Codex CLI installation. Solo still
+      // denies CLI recursion, but this exact helper must run for workspace tools.
+      finalAllowReadPaths: [launchBinaryPath, ...toolHosts],
+      finalAllowExecPaths: [launchBinaryPath, ...toolHosts],
     });
     const env = singleOrchestratorEnvironment(input.env, overlayHome);
     env.CODEX_SQLITE_HOME = input.codexHome;
