@@ -12,6 +12,7 @@ import {
   type PendingSendStorage,
   type PersistedOrchestratorPendingSend,
 } from './pending-send-store';
+import { pendingSendWirePayload } from './durable-pending-send';
 
 function memoryStorage(): PendingSendStorage {
   const values = new Map<string, string>();
@@ -70,5 +71,26 @@ describe('orchestrator pending-send store', () => {
 
     expect(listPersistedOrchestratorPendingSends(pending.threadId, storage, 1100)).toEqual([pending]);
     expect(listPersistedOrchestratorPendingSends('thoughts-other', storage, 1100)).toEqual([]);
+  });
+
+  it('does not reconstruct an image send as text after storage quota fallback', () => {
+    const storage = memoryStorage();
+    const originalSetItem = storage.setItem;
+    storage.setItem = (key, value) => {
+      if (value.includes('wirePayload')) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      originalSetItem(key, value);
+    };
+    const imagePending = {
+      ...pending,
+      attachmentsRequired: true,
+      wirePayload: JSON.stringify({ type: 'orchestrator-send', attachments: [{ dataUri: 'data:image/png;base64,aW1hZ2U=' }] }),
+    };
+    persistOrchestratorPendingSend(imagePending, storage);
+
+    const [restored] = listPersistedOrchestratorPendingSends(pending.threadId, storage, 1100);
+    expect(restored.attachmentsRequired).toBe(true);
+    expect(restored).not.toHaveProperty('wirePayload');
+    expect(pendingSendWirePayload(restored, '/repo')).toBeNull();
+    expect(pendingSendWirePayload(imagePending, '/repo')).toBe(imagePending.wirePayload);
   });
 });

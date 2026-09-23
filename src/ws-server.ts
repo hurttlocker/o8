@@ -135,6 +135,11 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import {
+  composerBackendSupportsImages,
+  validateComposerImageAttachments,
+  type ComposerImageAttachment,
+} from './lib/mobile/composer-image-validation';
 import { createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
 import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
@@ -4989,6 +4994,19 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
 
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const threadId = resolveMsgThreadId(msg);
+  let attachments: ComposerImageAttachment[] | undefined;
+  try {
+    attachments = 'attachments' in msg ? validateComposerImageAttachments(msg.attachments) : undefined;
+  } catch (error) {
+    send(client, {
+      channel: 'orchestrator', event: 'error',
+      data: {
+        error: error instanceof Error ? error.message : 'Invalid image attachment.',
+        repoPath, threadId, ...orchestratorCommandAckCorrelation(correlationId),
+      },
+    });
+    return;
+  }
   const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
   if (threadId && leadBinding) {
     try {
@@ -5006,7 +5024,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       if ('permissionMode' in msg && msg.permissionMode !== 'full' && msg.permissionMode !== 'plan') {
         throw new Error('permissionMode must be full or plan when supplied.');
       }
-      const attachments = 'attachments' in msg ? validateLeadAttachments(msg.attachments) : undefined;
+      const leadAttachments = attachments ? validateLeadAttachments(attachments) : undefined;
       const transcriptMessage = resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage });
       const leadReceipt = await sendLeadThreadMessage({
         threadId,
@@ -5015,7 +5033,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         displayMessage: transcriptMessage,
         projectId: msg.projectId,
         permissionMode: msg.permissionMode === 'plan' ? 'plan' : 'full',
-        attachments,
+        attachments: leadAttachments,
         idempotencyKey: `ws:${correlationId}`,
         backend: typeof msg.backend === 'string' ? msg.backend : undefined,
         model: typeof msg.model === 'string' ? msg.model : undefined,
@@ -5061,16 +5079,25 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       return;
     }
   }
+  const requestedBackendId = resolveMsgBackendId(msg);
+  const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
+  if (attachments?.length && !composerBackendSupportsImages(backendId)) {
+    send(client, {
+      channel: 'orchestrator', event: 'error',
+      data: {
+        error: `${backendId} cannot receive composer images. Select Codex or Claude, then retry the image turn.`,
+        repoPath, threadId, ...orchestratorCommandAckCorrelation(correlationId),
+      },
+    });
+    return;
+  }
   // Legacy clients did not send a correlation id. Preserve their exact
   // execution behavior; the one-shot handler still emits an uncorrelated
   // accepted ACK at the later, truthful acceptance point.
   if (!correlationId) {
-    await handleOrchestratorSendMsgOnce(client, msg, undefined);
+    await handleOrchestratorSendMsgOnce(client, msg, undefined, attachments);
     return;
   }
-
-  const requestedBackendId = resolveMsgBackendId(msg);
-  const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
   const agentId = backendId === requestedBackendId ? resolveMsgAgentId(msg, backendId) : '';
   const scopeId = orchestratorSendIdempotencyScope({
     repoPath,
@@ -5091,7 +5118,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       scopeId,
       ttlMs: ORCHESTRATOR_SEND_IDEMPOTENCY_TTL_MS,
     }, async () => {
-      await handleOrchestratorSendMsgOnce(client, msg, correlationId);
+      await handleOrchestratorSendMsgOnce(client, msg, correlationId, attachments);
     });
 
     // The first caller receives `accepted` from inside the reserved execution,
@@ -5185,6 +5212,7 @@ async function handleOrchestratorSendMsgOnce(
   client: ClientState,
   msg: Record<string, unknown>,
   correlationId: string | undefined,
+  attachments: ComposerImageAttachment[] | undefined,
 ) {
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
   const message = typeof msg.message === 'string' ? msg.message : null;
@@ -5211,18 +5239,6 @@ async function handleOrchestratorSendMsgOnce(
     ? msg.model.trim()
     : undefined;
   const crossHouseRole = msg.surface === 'canvas-agent' ? 'canvas-agent' : 'orchestrator';
-  // Composer picture pills — validated data URIs only, capped so one send
-  // can't balloon the stdin payload (8 images, ~5MB base64 each).
-  const attachments = Array.isArray(msg.attachments)
-    ? (msg.attachments as Array<{ dataUri?: unknown; name?: unknown }>)
-        .filter((att): att is { dataUri: string; name?: string } =>
-          typeof att?.dataUri === 'string'
-          && /^data:image\/[a-z+.-]+;base64,/i.test(att.dataUri)
-          && att.dataUri.length < 5_000_000)
-        .slice(0, 8)
-        .map((att) => ({ dataUri: att.dataUri, ...(typeof att.name === 'string' ? { name: att.name } : {}) }))
-    : undefined;
-
   const requestedBackendId = resolveMsgBackendId(msg);
   const requestedBackend = getOrchestratorBackend(requestedBackendId);
   const executionBackendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);

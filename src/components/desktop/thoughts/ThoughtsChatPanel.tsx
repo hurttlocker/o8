@@ -2021,8 +2021,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     });
   }, [collideEnabled, isOrchestratorMode, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, thinkingEffort]);
 
-  const { sendBuffer, handleSend: handleComposerSend } = useDefaultComposerSendBuffer({
-    active: isOrchestratorMode,
+  const { sendBuffer, handleSend: handleComposerSend, attachmentError } = useDefaultComposerSendBuffer({
+    active: isOrchestratorMode, backend: orchestratorBackend,
     busy: displayWaiting,
     threadId,
     repoPath: resolvedRepoPath,
@@ -2339,11 +2339,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSubmit={handleComposerSend}
         onStop={sendBuffer.stopOrUndo}
         onSteer={handleComposerSend}
-        sendBufferStatus={isOrchestratorMode ? (
+        sendBufferStatus={isOrchestratorMode || attachmentError ? (
           <ComposerSendBufferStatus
-            undoArmed={sendBuffer.undoArmed}
+            attachmentError={attachmentError} undoArmed={isOrchestratorMode && sendBuffer.undoArmed}
             undoSequence={sendBuffer.undoSequence}
-            queued={sendBuffer.queued}
+            queued={isOrchestratorMode ? sendBuffer.queued : []}
             onUndo={sendBuffer.stopOrUndo}
             onCancelQueued={sendBuffer.cancelQueued}
           />

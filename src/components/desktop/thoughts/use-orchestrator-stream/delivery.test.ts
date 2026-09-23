@@ -88,6 +88,16 @@ describe('orchestrator delivery watchdog', () => {
     expect(h.messages[0]?.text).toContain('ship it');
   });
 
+  it('keeps the pending payload for retry when the server rejects an image before acceptance', () => {
+    const h = makeHarness();
+    expect(settleOrchestratorSendWatchdog(h.pendingRef, {
+      event: 'error',
+      data: { clientMessageId: 'send-1', error: 'Image format is unsupported.' },
+      observedAt: 1001,
+    })).toBe(false);
+    expect(h.pendingRef.current?.clientMessageId).toBe('send-1');
+  });
+
   it('recovers the original clientMessageId from the existing retry entry id', () => {
     expect(deliveryFailureClientMessageId('orch-delivery-error-send-1')).toBe('send-1');
     expect(deliveryFailureClientMessageId('orch-error-send-1')).toBeNull();
