@@ -77,6 +77,7 @@ interface ChatMessageListProps {
   thoughtsElevatedShadow: string;
   emptyStateOverride?: React.ReactNode;
   emptyStateFallback: React.ReactNode;
+  composeFirst?: boolean;
   topContent?: React.ReactNode;
   /** Rendered at the live edge of the transcript — after the last message,
    *  before the thinking indicator. Used for the inline swarm crew card. */
@@ -122,6 +123,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   thoughtsElevatedShadow,
   emptyStateOverride,
   emptyStateFallback,
+  composeFirst = false,
   topContent,
   bottomContent,
   isOrchestratorMode = false,
@@ -201,7 +203,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       onTouchMove={noteUserScroll}
       onScroll={onScroll}
       style={{
-      flex: 1,
+      flex: composeFirst ? '0 1 auto' : 1,
       overflowY: 'auto',
       // THE body-scroll trigger (hunted since 0.1.608, closed 2026-07-16 via
       // frame-by-frame video forensics): without containment, trackpad
@@ -217,7 +219,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       // mask below — so scrolled all the way down, the last item (e.g. the
       // Mission complete card) sits fully in the sharp region above the fade and
       // never dissolves; only the empty padding fades into the composer.
-      paddingBottom: 36,
+      paddingBottom: composeFirst ? 12 : 36,
       paddingLeft: 'var(--cortex-chat-gutter)',
       display: 'flex',
       flexDirection: 'column',
@@ -227,7 +229,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       <div style={{
         width: '100%',
         maxWidth: 'var(--cortex-chat-column-max)',
-        minHeight: '100%',
+        minHeight: composeFirst ? 'auto' : '100%',
         marginRight: 'auto',
         marginLeft: 'auto',
         display: 'flex',
@@ -237,7 +239,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
         {showEmptyWithOverride ? (
           <div style={{
             display: 'flex',
-            flex: 1,
+            flex: composeFirst ? 'none' : 1,
             minHeight: 0,
           }}>
             {emptyStateOverride}

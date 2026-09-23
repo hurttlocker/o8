@@ -9,6 +9,7 @@ import { ComposerArea } from './ComposerArea';
 
 vi.mock('../InputButtons', () => ({
   InputButtons: () => null,
+  RepoTargetChip: () => null,
 }));
 
 vi.mock('./SlashCommandPicker', () => ({
