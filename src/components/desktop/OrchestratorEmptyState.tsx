@@ -4,16 +4,8 @@
  * OrchestratorEmptyState — the compose-first landing for any chat-shaped
  * workspace tab that hasn't received its first message yet.
  *
- * Codex / Antigravity / Cortex pattern: instead of a generic "Good
- * morning" greeting, show the operator a dynamic question title
- * ("What should we build in o8?") + the contextual chip row
- * (Project · Worktree · Branch · Kind) above the existing composer.
- * The chips are editable until the first message lands; after that the
- * tab "promotes" and the regular transcript view takes over.
- *
- * Quick-action prompts moved BELOW the chips as inline links (no card
- * border, no bubble) so the surface reads as compose-first, not menu-
- * first.
+ * Shows a dynamic question title above the ready composer. First-message
+ * context is selected in the composer row below the input.
  */
 
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -26,63 +18,21 @@ import {
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { OrchestratorProjectPicker } from './orchestrator/OrchestratorProjectPicker';
 
-interface QuickAction {
-  id: string;
-  label: string;
-  prompt: string;
-}
-
-// Three prescriptive starting points (operator 2026-07-12): fewer, bigger, clickable pills that teach the tool's core
-// verbs — plan, review, triage — instead of six whisper-weight text links
-// the eye skated past. Each pill sends a real prompt on click.
-const QUICK_ACTIONS: QuickAction[] = [
-  {
-    id: 'plan',
-    label: 'Start with a plan',
-    prompt: 'Help me scope what to build next. Ask me what I want, then draft a tight plan we can dispatch as task packets.',
-  },
-  {
-    id: 'review-pending',
-    label: 'Review pending changes',
-    prompt: 'Walk me through every pending diff waiting for approval. For each one: what repo, what the agent changed, and whether it looks safe to merge.',
-  },
-  {
-    id: 'attention',
-    label: 'What needs my attention?',
-    prompt: 'Surface what needs my attention right now across agents, repos, CI, issues, and stale work. Prioritize blockers first and keep the summary tight.',
-  },
-];
-
 export type WorktreeMode = 'local' | 'new-worktree';
 export type OrchestratorEmptyKind = 'orchestrator' | 'chat';
 
 interface OrchestratorEmptyStateProps {
-  greeting: string;
-  runtimeLabel: string;
-  onActionClick: (prompt: string) => void;
-  // Project picker
   repoPath: string | null;
   repoLabel: string | null;
   workspaceTargets: OrchestratorWorkspaceTarget[];
   onSelectProject?: (target: OrchestratorWorkspaceTarget) => void;
   onAddProject?: (mode?: 'scratch' | 'existing') => void;
   onWorkWithoutProject?: () => void;
-  // Worktree picker
-  worktreeMode: WorktreeMode;
-  onWorktreeModeChange: (mode: WorktreeMode) => void;
-  // Branch picker (stub — main-only for v1)
-  branch: string;
-  onBranchChange?: (branch: string) => void;
-  // Kind picker (orchestrator vs chat). When `kindLocked` is true, the
-  // chip renders read-only — e.g. llm-chat tabs that can't pivot to
-  // orchestrator without spawning a new tab.
   kind: OrchestratorEmptyKind;
-  kindLocked?: boolean;
-  onKindChange?: (kind: OrchestratorEmptyKind) => void;
 }
 
 function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
-  const { onActionClick, repoLabel, repoPath, workspaceTargets, onAddProject, kind } = props;
+  const { repoLabel, repoPath, workspaceTargets, onAddProject, kind } = props;
 
   // No active workspace → the orchestrator has nothing to act on, and sends are
   // silently dropped (useOrchestratorStream bails when repoPath is null). A new
@@ -130,7 +80,6 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: 14,
           width: '100%',
           maxWidth: 640,
           minWidth: 0,
@@ -157,79 +106,8 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
         >
           {title}
         </h1>
-
-        {/* Suggestions remain between the prompt and ready composer. */}
-        <QuickActionPills onActionClick={onActionClick} />
-
-        {/* Worktree and branch intent remain visible before the first send. */}
-        <div style={{ marginTop: 10 }}>
-          <OrchestratorComposerBelow
-            worktreeMode={props.worktreeMode}
-            onWorktreeModeChange={props.onWorktreeModeChange}
-            branch={props.branch}
-            repoPath={repoPath}
-            onBranchChange={props.onBranchChange}
-          />
-        </div>
       </div>
     </div>
-  );
-}
-
-function QuickActionPills({ onActionClick }: { onActionClick: (prompt: string) => void }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        gap: 8,
-        maxWidth: 640,
-        marginTop: 6,
-      }}
-    >
-      {QUICK_ACTIONS.map((action) => (
-        <QuickActionPill key={action.id} label={action.label} onClick={() => onActionClick(action.prompt)} />
-      ))}
-    </div>
-  );
-}
-
-// Pill-shaped suggestion button — same chip vocabulary as ChipShell below
-// (hairline border, full radius, hover fill) but a step larger so it reads
-// as an action, not run-context.
-function QuickActionPill({ label, onClick }: { label: string; onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        paddingTop: 7,
-        paddingBottom: 7,
-        paddingLeft: 14,
-        paddingRight: 14,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-divider-subtle)',
-        borderRadius: 999,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
-        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
-        cursor: 'pointer',
-        fontFamily: 'var(--font-sans-system)',
-        fontSize: 12,
-        fontWeight: 400,
-        letterSpacing: '-0.005em',
-        whiteSpace: 'nowrap',
-        transition: 'background 120ms ease, color 120ms ease',
-      }}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -380,11 +258,10 @@ function NoReposCallout({ onAddProject }: { onAddProject?: (mode?: 'scratch' | '
 export const OrchestratorEmptyState = memo(OrchestratorEmptyStateBase);
 
 /**
- * OrchestratorComposerBelow — the Worktree / Branch / Kind chip row
- * that renders above the composer in the compose-first empty state.
- * Repository selection now lives in the row directly beneath the composer.
+ * First-message location controls live beside repository and permissions
+ * beneath the composer, instead of floating above an empty workspace.
  */
-interface OrchestratorComposerBelowProps {
+interface OrchestratorStartLocationControlsProps {
   worktreeMode: WorktreeMode;
   onWorktreeModeChange: (mode: WorktreeMode) => void;
   branch: string;
@@ -392,76 +269,41 @@ interface OrchestratorComposerBelowProps {
   onBranchChange?: (branch: string) => void;
 }
 
-// Below this available width the chip row collapses every chip to an
-// icon-only trigger (Codex/Cursor adaptive behavior). Measured, not a
-// viewport media query, so it tracks the real panel size.
-const COMPACT_CHIP_ROW_WIDTH = 440;
+const COMPACT_CONTEXT_ROW_WIDTH = 440;
 
-function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
-  // Adaptive chip row (operator pass 2026-06-14): a ResizeObserver on the
-  // row's available width drops every chip's label when the workspace
-  // narrows, so the chips become icons that adapt to split panes / window
-  // resize instead of wrapping. Measurement keeps us on the inline-styles
-  // path (no container-query CSS / classes).
+function OrchestratorStartLocationControlsBase(props: OrchestratorStartLocationControlsProps) {
   const rowRef = useRef<HTMLDivElement | null>(null);
   const [compact, setCompact] = useState(false);
   useEffect(() => {
-    const el = rowRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
-      if (w > 0) setCompact(w < COMPACT_CHIP_ROW_WIDTH);
+    const contextRow = rowRef.current?.parentElement;
+    if (!contextRow || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (width > 0) setCompact(width < COMPACT_CONTEXT_ROW_WIDTH);
     });
-    ro.observe(el);
-    return () => ro.disconnect();
+    observer.observe(contextRow);
+    return () => observer.disconnect();
   }, []);
   return (
     <div
       ref={rowRef}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
+        display: 'inline-flex',
         alignItems: 'center',
-        width: '100%',
-        gap: 14,
-        paddingTop: 8,
-        paddingBottom: 4,
+        flexWrap: 'wrap',
+        gap: 6,
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: 8,
-        }}
-      >
-        <WorktreeChip mode={props.worktreeMode} onChange={props.onWorktreeModeChange} compact={compact} />
-        {/* Branch chip is adaptive: only shown when starting in a NEW
-            worktree (where the branch is the base for the new tree).
-            Working locally inherits the current checkout, which the footer
-            status bar already shows — so we drop the redundant second
-            branch pill (the "two mains" the operator flagged). */}
-        {props.worktreeMode === 'new-worktree' ? (
-          <BranchChip branch={props.branch} repoPath={props.repoPath} onChange={props.onBranchChange} compact={compact} />
-        ) : null}
-      </div>
-      {/* QUICK_ACTIONS pills moved into OrchestratorEmptyState (above the
-          composer) per operator pass 2026-05-27. Composer chip row only
-          carries run-context selectors now. */}
+      <WorktreeChip mode={props.worktreeMode} onChange={props.onWorktreeModeChange} compact={compact} />
+      {props.worktreeMode === 'new-worktree' ? (
+        <BranchChip branch={props.branch} repoPath={props.repoPath} onChange={props.onBranchChange} compact={compact} />
+      ) : null}
     </div>
   );
 }
 
-export const OrchestratorComposerBelow = memo(OrchestratorComposerBelowBase);
-
-export function timeOfDayGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning.';
-  if (hour < 17) return 'Good afternoon.';
-  return 'Good evening.';
-}
+export const OrchestratorStartLocationControls = memo(OrchestratorStartLocationControlsBase);
 
 /* ──────────────────────────────────────────────────────────────────────
  * Chip primitives

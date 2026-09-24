@@ -149,10 +149,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   composerModeStorageId?: string;
   repoLabel?: string | null;
   emptyStateOverride?: React.ReactNode;
-  // Slot rendered BELOW the composer input when no messages have
-  // landed yet. The OrchestratorEmptyState surface uses this for the
-  // Worktree / Branch / Kind chip row (Antigravity / Cortex pattern).
-  // Disappears once the first message renders (handled in caller).
+  // First-message controls in the context row beneath the composer.
   composerBelowSlot?: React.ReactNode;
   // Rail rendered to the RIGHT of the transcript (not the composer), so the
   // composer spans the full panel width even when the rail is up (Q ruling
@@ -2382,9 +2379,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSelectRepoPath={handleSelectComposerRepoPath}
         permissionMode={permissionMode}
         onPermissionModeChange={setPermissionMode}
+        contextLocationSlot={composeFirst ? composerBelowSlot : undefined}
         promptStash={isOrchestratorMode && !isChatMode ? { repoPath: resolvedRepoPath ?? '~', threadId, onRestore: fillInput } : undefined}
       />
-      {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}
       {annotatingIndex !== null && attachedImages[annotatingIndex] ? (() => {
         const idx = annotatingIndex;
         const target = attachedImages[idx];
