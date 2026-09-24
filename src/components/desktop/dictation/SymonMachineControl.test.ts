@@ -121,6 +121,22 @@ describe('SymonMachineControl', () => {
     expect(document.querySelector('button[aria-label="Minimize Symon voice in the sidebar footer"]')).not.toBeNull();
   });
 
+  it('uses one scroll area for the sidebar capability catalog', async () => {
+    await act(async () => root.render(createElement(SymonMachineControl, { placement: 'sidebar' })));
+    await act(async () => {});
+
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon options: This Mac"]');
+    await act(async () => trigger?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="What Symon can do"]')?.click());
+    await act(async () => {});
+
+    const dialog = document.querySelector<HTMLElement>('[aria-label="Symon capabilities"]');
+    expect(dialog?.style.overflowY).toBe('auto');
+    const nestedScrollers = Array.from(dialog?.querySelectorAll<HTMLElement>('*') ?? [])
+      .filter((element) => ['auto', 'scroll'].includes(element.style.overflowY));
+    expect(nestedScrollers).toHaveLength(0);
+  });
+
   it('opens the truthful capability catalog and starts a selected prompt', async () => {
     await act(async () => root.render(createElement(SymonMachineControl)));
     await act(async () => {});

@@ -271,6 +271,7 @@ export function SymonMachineControl({ placement = 'floating' }: { placement?: 'f
               machineDisplayName={active.displayName}
               onBack={() => setView('machine')}
               onStarted={() => { setOpen(false); setView('machine'); }}
+              scrollWithinCatalog={placement !== 'sidebar'}
             />
           ) : (
             <>
