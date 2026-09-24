@@ -275,7 +275,7 @@ function OrchestratorStartLocationControlsBase(props: OrchestratorStartLocationC
   const rowRef = useRef<HTMLDivElement | null>(null);
   const [compact, setCompact] = useState(false);
   useEffect(() => {
-    const contextRow = rowRef.current?.parentElement;
+    const contextRow = rowRef.current?.closest<HTMLElement>('[data-o8-composer-context-row]');
     if (!contextRow || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
