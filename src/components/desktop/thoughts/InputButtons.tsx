@@ -212,10 +212,14 @@ export function RepoTargetChip({
     () => targets.find((target) => target.localPath === selectedRepoPath) ?? null,
     [selectedRepoPath, targets],
   );
-  const label = selectedRepoPath === '~' ? 'Work in a project' : selectedTarget?.label
+  const label = selectedRepoPath === '~' ? 'Project' : selectedTarget?.label
     ?? repoLabel
     ?? repoPathLabel(selectedRepoPath)
-    ?? 'Work in a project';
+    ?? 'Project';
+  const targetName = selectedTarget?.repoName?.trim()
+    || repoLabel?.trim()
+    || (selectedRepoPath && selectedRepoPath !== '~' ? repoPathLabel(selectedRepoPath) : null);
+  const accessibleLabel = targetName ? `Project target: ${targetName}` : 'Project target';
   const canSelect = (targets.length > 0 && Boolean(onSelectRepoPath)) || Boolean(onAddProject);
   const showingAffordance = canSelect && (hovered || focused || open);
 
@@ -232,7 +236,8 @@ export function RepoTargetChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canSelect}
-        title={selectedRepoPath ? `Chat target: ${selectedRepoPath}` : 'Chat target'}
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         style={{
@@ -275,7 +280,7 @@ export function RepoTargetChip({
       <ComposerPopover anchorRef={buttonRef} open={open} onClose={() => setOpen(false)} align="start">
         <div
           role="listbox"
-          aria-label="Chat target repo"
+          aria-label="Project target"
           style={{
             width: REPO_TARGET_MENU_WIDTH,
             maxHeight: REPO_TARGET_MENU_HEIGHT,
