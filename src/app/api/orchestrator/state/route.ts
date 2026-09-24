@@ -12,6 +12,7 @@ import { listApprovals } from '@/lib/approvals/store';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { resolveAgentSummaryStatuses } from '@/lib/orchestrator/operator-status-model';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
+import { hasCanonicalReleaseEvidence } from '@/lib/orchestrator/packet-release-truth';
 import { normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import { listTerminalReviewQueueEvidence } from '@/lib/terminal-status/store';
@@ -203,13 +204,36 @@ function mergeClientMissionUnderLock(
   const packets: OrchestratorPacket[] = Array.isArray(incoming.packets)
     ? incoming.packets.map((packet) => {
         const serverPacket = serverPackets.get(packet.id);
-        const preserveLifecycle = serverPacket && (
+        const staleAdmission = serverPacket
+          && (serverPacket.storageAdmission?.mutationId ?? null)
+            !== (packet.storageAdmission?.mutationId ?? null);
+        const sameAdmissionEpoch = serverPacket
+          && normalizePacketStorageAdmissionEpoch(serverPacket.storageAdmissionEpoch)
+            === normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch);
+        const serverLifecycleTerminal = serverPacket && (
           serverPacket.operatorStopped === true
+          || (serverPacket.releaseState === 'released' && hasCanonicalReleaseEvidence(serverPacket))
+        );
+        const preserveLifecycle = serverPacket && (
+          serverLifecycleTerminal
           || packet.operatorStopped === true
-          || normalizePacketStorageAdmissionEpoch(serverPacket.storageAdmissionEpoch)
-            !== normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch)
+          || staleAdmission
+          || !sameAdmissionEpoch
         );
         const persisted = { ...(preserveLifecycle ? serverPacket : packet) };
+        // Admission is written by the server's reservation/launch path. A
+        // browser snapshot from the same epoch can still contain an older
+        // held attempt after a later launch committed a new generation. Keep
+        // the entire server lifecycle in that case, while accepting a title
+        // or summary edit from the browser only within the same reset epoch.
+        if (serverPacket) {
+          if (staleAdmission && sameAdmissionEpoch && !serverLifecycleTerminal) {
+            if (typeof packet.title === 'string') persisted.title = packet.title;
+            if (typeof packet.summary === 'string') persisted.summary = packet.summary;
+          }
+          persisted.storageAdmission = serverPacket.storageAdmission ?? null;
+          persisted.storageAdmissionEpoch = serverPacket.storageAdmissionEpoch;
+        }
         delete persisted.statusEvidence;
         return persisted;
       })
