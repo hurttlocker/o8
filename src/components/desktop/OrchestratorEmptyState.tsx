@@ -8,8 +8,7 @@
  * context is selected in the composer row below the input.
  */
 
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { memo, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   Computer as IconoirComputer,
   FolderPlus as IconoirFolderPlus,
@@ -17,6 +16,7 @@ import {
 } from 'iconoir-react';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { OrchestratorProjectPicker } from './orchestrator/OrchestratorProjectPicker';
+import { ComposerPopover } from './thoughts/chat-panel/ComposerPopover';
 
 export type WorktreeMode = 'local' | 'new-worktree';
 export type OrchestratorEmptyKind = 'orchestrator' | 'chat';
@@ -316,6 +316,8 @@ export function ChipShell({
   open,
   ariaLabel,
   compact,
+  contextRow,
+  anchorRef,
 }: {
   icon: ReactNode;
   label: string;
@@ -323,11 +325,14 @@ export function ChipShell({
   open?: boolean;
   ariaLabel?: string;
   compact?: boolean;
+  contextRow?: boolean;
+  anchorRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const [hovered, setHovered] = useState(false);
   const isInteractive = Boolean(onClick);
   return (
     <button
+      ref={anchorRef}
       type="button"
       onClick={onClick}
       disabled={!isInteractive}
@@ -340,26 +345,27 @@ export function ChipShell({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: compact ? 4 : 7,
-        paddingTop: 6,
-        paddingBottom: 6,
-        paddingLeft: compact ? 8 : 10,
-        paddingRight: compact ? 8 : 10,
-        borderWidth: 1,
+        gap: compact ? 4 : contextRow ? 5 : 7,
+        height: contextRow ? 24 : undefined,
+        paddingTop: contextRow ? 0 : 6,
+        paddingBottom: contextRow ? 0 : 6,
+        paddingLeft: contextRow ? 6 : compact ? 8 : 10,
+        paddingRight: contextRow ? 6 : compact ? 8 : 10,
+        borderWidth: contextRow ? 0 : 1,
         borderStyle: 'solid',
-        borderColor: 'var(--t-divider-subtle)',
-        borderRadius: 999,
+        borderColor: contextRow ? 'transparent' : 'var(--t-divider-subtle)',
+        borderRadius: contextRow ? 7 : 999,
         background: open || hovered ? 'var(--t-hover)' : 'transparent',
-        color: 'var(--t-text-secondary)',
+        color: contextRow ? 'var(--t-text-muted)' : 'var(--t-text-secondary)',
         cursor: isInteractive ? 'pointer' : 'default',
         fontFamily: 'var(--font-sans-system)',
-        fontSize: 12,
-        fontWeight: 360,
+        fontSize: contextRow ? 10.5 : 12,
+        fontWeight: contextRow ? 300 : 360,
         letterSpacing: '-0.005em',
         transition: 'background 120ms ease, color 120ms ease',
       }}
     >
-      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--t-text-faint)' }}>
+      <span style={{ display: 'inline-flex', flexShrink: 0, color: contextRow ? 'inherit' : 'var(--t-text-faint)' }}>
         {icon}
       </span>
       {compact ? null : <span style={{ whiteSpace: 'nowrap' }}>{label}</span>}
@@ -376,15 +382,7 @@ function Caret() {
   );
 }
 
-/**
- * Popover anchored to the chip below, click-outside dismiss.
- *
- * Rendered through a portal to document.body — the empty-state column
- * inside ThoughtsChatPanel has overflow:hidden, which used to clip the
- * popover to just the first row. With a portal + fixed positioning,
- * the menu always appears at full height regardless of which surface
- * is hosting the chip.
- */
+/** Share the composer's zoom-aware portal and viewport placement. */
 function ChipPopover({
   open,
   onClose,
@@ -393,72 +391,14 @@ function ChipPopover({
 }: {
   open: boolean;
   onClose: () => void;
-  anchorRef: React.RefObject<HTMLDivElement | null>;
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
   children: ReactNode;
 }) {
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-
-  // Recompute the menu's screen position whenever it opens (or the
-  // viewport changes underneath it). Place 6 px below the anchor; if
-  // there's not enough room, flip above. The menu's own width is
-  // measured after first paint and used for right-edge clamping.
-  useEffect(() => {
-    if (!open || !anchorRef.current) return;
-    const compute = () => {
-      const rect = anchorRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const menuHeightEstimate = menuRef.current?.offsetHeight ?? 240;
-      const menuWidthEstimate = menuRef.current?.offsetWidth ?? 232;
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const flipUp = spaceBelow < menuHeightEstimate + 12 && rect.top > menuHeightEstimate + 12;
-      const top = flipUp ? rect.top - menuHeightEstimate - 6 : rect.bottom + 6;
-      const leftMax = window.innerWidth - menuWidthEstimate - 8;
-      const left = Math.min(Math.max(8, rect.left), Math.max(8, leftMax));
-      setCoords({ top, left });
-    };
-    compute();
-    window.addEventListener('resize', compute);
-    window.addEventListener('scroll', compute, true);
-    return () => {
-      window.removeEventListener('resize', compute);
-      window.removeEventListener('scroll', compute, true);
-    };
-  }, [open, anchorRef]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDocDown = (event: MouseEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return;
-      if (anchorRef.current?.contains(event.target as Node)) return;
-      onClose();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('mousedown', onDocDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDocDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open, onClose, anchorRef]);
-
-  if (!open || typeof document === 'undefined') return null;
-
-  return createPortal(
+  return (
+    <ComposerPopover anchorRef={anchorRef} open={open} onClose={onClose} align="start">
     <div
-      ref={menuRef}
       role="menu"
       style={{
-        position: 'fixed',
-        top: coords?.top ?? 0,
-        left: coords?.left ?? 0,
-        opacity: coords ? 1 : 0,
-        // Slide-down entrance — the menu reads as a layer
-        // dropping out from under its chip. Opacity stays gated on `coords`
-        // so the pre-measured frame never flashes at the wrong spot.
-        animation: 'o8ChipPopIn 130ms cubic-bezier(0.22, 1, 0.36, 1)',
         minWidth: 232,
         background: 'var(--t-popover-surface)',
         borderWidth: 1,
@@ -468,14 +408,12 @@ function ChipPopover({
         boxShadow: '0 12px 32px rgba(15, 23, 42, 0.22)',
         paddingTop: 4,
         paddingBottom: 4,
-        zIndex: 1200,
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <style>{`@keyframes o8ChipPopIn { from { transform: translateY(-6px); } to { transform: translateY(0); } }`}</style>
       {children}
-    </div>,
-    document.body,
+    </div>
+    </ComposerPopover>
   );
 }
 
@@ -554,11 +492,12 @@ function WorktreeChip({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
   const label = mode === 'local' ? 'Work locally' : 'New worktree';
   return (
-    <div ref={anchorRef} style={{ position: 'relative', display: 'inline-flex' }}>
+    <div style={{ display: 'inline-flex' }}>
       <ChipShell
+        anchorRef={anchorRef}
         icon={mode === 'local'
           ? <IconoirComputer width={13} height={13} color="currentColor" strokeWidth={1.6} />
           : <IconoirGitBranch width={13} height={13} color="currentColor" strokeWidth={1.6} />}
@@ -567,6 +506,7 @@ function WorktreeChip({
         open={open}
         ariaLabel="Start in"
         compact={compact}
+        contextRow
       />
       <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}>
         <div
@@ -647,17 +587,19 @@ function BranchChip({
   }, [open, repoPath]);
 
   const interactive = Boolean(repoPath && onChange);
-  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <div ref={anchorRef} style={{ position: 'relative', display: 'inline-flex' }}>
+    <div style={{ display: 'inline-flex' }}>
       <ChipShell
+        anchorRef={anchorRef}
         icon={<IconoirGitBranch width={13} height={13} color="currentColor" strokeWidth={1.6} />}
         label={branch}
         onClick={interactive ? () => setOpen((v) => !v) : undefined}
         open={open}
         ariaLabel="Pick branch"
         compact={compact}
+        contextRow
       />
       <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}>
         {loading ? (
