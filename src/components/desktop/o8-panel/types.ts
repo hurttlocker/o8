@@ -4,6 +4,7 @@ export type O8Tab =
   | 'prs'
   | 'activity'
   | 'resources'
+  | 'handoffs'
   | 'inbox'
   | 'spec'
   | 'launcher'

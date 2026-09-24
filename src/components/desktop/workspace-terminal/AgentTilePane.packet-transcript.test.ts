@@ -197,7 +197,7 @@ describe('AgentTilePane structured packet transcript delivery', () => {
     });
     await flushPaneEffects();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/orchestrator/packet-transcript?'))).toHaveLength(2);
     expect(transcriptRenderMock.entries.some((entry) => entry.text === 'Second burst reached the pane.')).toBe(true);
   });
 
@@ -234,7 +234,7 @@ describe('AgentTilePane structured packet transcript delivery', () => {
     const unsupportedReason = 'runtime-transcript-not-supported-yet';
     await renderPacketPane('gemini', unsupportedReason);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/orchestrator/packet-transcript?'))).toBe(false);
     expect(transcriptRenderMock.entries[0]).toMatchObject({
       role: 'system',
       text: expect.stringContaining(unsupportedReason),

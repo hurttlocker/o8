@@ -20,6 +20,7 @@ import {
 import { mergeAdjacentToolOnlyEntries } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import { usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
 import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
+import { useAgentPeerMessages } from '@/components/desktop/workspace-terminal/useAgentPeerMessages';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { agentDisplayLabel, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
@@ -252,6 +253,7 @@ export function canSteerAgentState(
 }
 
 function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus }: AgentTilePaneProps) {
+  const peerExchange = useAgentPeerMessages(sessionKey);
   const slice = useTranscript(sessionKey);
   const transcriptUnsupportedReason = agent?.transcriptUnsupportedReason?.trim() || null;
   const usesStructuredPacketTranscript = Boolean(packet?.id && !transcriptUnsupportedReason);
@@ -285,6 +287,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, packet, sessionKey), [agent, packet, sessionKey]);
+  const displayTitle = peerExchange.self ? `@${peerExchange.self.name} · ${name}` : name;
   const displayEntries = useMemo(() => normalizeAgentTileTranscript(
     entries,
     name,
@@ -308,10 +311,11 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const lastEntryKey = displayEntries.length > 0
     ? `${displayEntries[displayEntries.length - 1]?.id}:${entryContent(displayEntries[displayEntries.length - 1]!)}`
     : '';
+  const lastPeerKey = peerExchange.messages[0]?.id ?? '';
   const { contentRef, handleScroll, scrollRef } = useAgentTileStickToBottom(
     status === 'running',
-    lastEntryKey,
-    displayEntries.length > 0,
+    `${lastEntryKey}:${lastPeerKey}`,
+    displayEntries.length > 0 || peerExchange.messages.length > 0,
   );
 
   // Fix #1: keep a ref in sync with latest agent so submitSteer re-derives
@@ -458,14 +462,14 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 maxWidth reserves the 8px gap plus a 10px status dot floor so long
                 titles stay bounded and the status indicator always survives. */}
             <div
-              title={name}
+              title={peerExchange.self ? `${displayTitle} · ${peerExchange.self.runtime} · ${peerExchange.self.sessionKey}` : name}
               style={{
                 flexShrink: 0, maxWidth: 'calc(100% - 18px)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontSize: 12, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.1px',
               }}
             >
-              {name}
+              {displayTitle}
             </div>
             {/* Metadata row is the only flexible track, and the model is its only
                 shrinkable child: the model yields to zero before the status box can
@@ -550,7 +554,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           background: 'transparent',
         }}
       >
-        {displayEntries.length === 0 ? (
+        {displayEntries.length === 0 && peerExchange.messages.length === 0 ? (
           <div
             ref={contentRef}
             style={{
@@ -570,6 +574,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           >
             <WorkspaceTranscript
               entries={displayEntries}
+              peerMessages={peerExchange.messages}
+              peerName={peerExchange.self?.name}
               markLast={status !== 'running'}
               isStreaming={status === 'running'}
               repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace ?? null}
