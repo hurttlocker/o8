@@ -87,7 +87,7 @@ describe('SymonMachineControl', () => {
     await act(async () => root.render(createElement(SymonMachineControl)));
     await act(async () => {});
 
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose Symon machine: This Mac"]');
     expect(trigger).not.toBeNull();
     expect(trigger?.parentElement?.style.bottom).toBe('120px');
     expect(trigger?.parentElement?.style.zIndex).toBe('50');
@@ -105,7 +105,7 @@ describe('SymonMachineControl', () => {
     await act(async () => root.render(createElement(SymonMachineControl, { placement: 'sidebar' })));
     await act(async () => {});
 
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose Symon machine: This Mac"]');
     expect(trigger).not.toBeNull();
     expect(trigger?.parentElement?.style.position).toBe('relative');
     expect(trigger?.parentElement?.style.right).toBe('');
@@ -113,14 +113,14 @@ describe('SymonMachineControl', () => {
 
     await act(async () => trigger?.click());
     expect(container.querySelector('select[aria-label="Active Symon machine"]')).not.toBeNull();
-    expect(container.querySelector('button[aria-label="Minimize Symon to the sidebar footer"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Minimize Symon voice in the sidebar footer"]')).not.toBeNull();
   });
 
   it('opens the truthful capability catalog and starts a selected prompt', async () => {
     await act(async () => root.render(createElement(SymonMachineControl)));
     await act(async () => {});
 
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose Symon machine: This Mac"]');
     await act(async () => trigger?.click());
     const discover = container.querySelector<HTMLButtonElement>('button[aria-label="What Symon can do"]');
     expect(discover).not.toBeNull();
@@ -150,7 +150,7 @@ describe('SymonMachineControl', () => {
     await act(async () => root.render(createElement(SymonMachineControl)));
     await act(async () => {});
 
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose Symon machine: This Mac"]');
     expect(trigger?.title).toBe('This Mac has the Symon session');
     expect(trigger?.parentElement?.hasAttribute('title')).toBe(false);
 
@@ -199,7 +199,7 @@ describe('SymonMachineControl', () => {
     try {
       await act(async () => root.render(createElement(SymonMachineControl)));
       await act(async () => {});
-      const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+      const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose Symon machine: This Mac"]');
       // innerWidth 1200 − pane.right 800 + 16 inset = 416: the orb sits beside
       // the composer, not over an open right panel.
       expect(trigger?.parentElement?.style.right).toBe('416px');
@@ -212,14 +212,14 @@ describe('SymonMachineControl', () => {
     await act(async () => root.render(createElement(SymonMachineControl)));
     await act(async () => {});
 
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose Symon machine: This Mac"]');
     await act(async () => trigger?.click());
-    const minimize = container.querySelector<HTMLButtonElement>('button[aria-label="Minimize Symon to the sidebar footer"]');
+    const minimize = container.querySelector<HTMLButtonElement>('button[aria-label="Minimize Symon voice in the sidebar footer"]');
     expect(minimize).not.toBeNull();
 
     await act(async () => minimize?.click());
     // The orb is gone…
-    expect(container.querySelector('button[aria-label^="Symon machine:"]')).toBeNull();
+    expect(container.querySelector('button[aria-label^="Choose Symon machine:"]')).toBeNull();
 
     // …and the status-bar line renders and restores him.
     const lineHost = document.createElement('div');
@@ -227,11 +227,11 @@ describe('SymonMachineControl', () => {
     const lineRoot = createRoot(lineHost);
     try {
       await act(async () => lineRoot.render(createElement(SymonOrbStatusLine)));
-      const restore = lineHost.querySelector<HTMLButtonElement>('button[aria-label="Restore Symon"]');
+      const restore = lineHost.querySelector<HTMLButtonElement>('button[aria-label="Restore Symon voice"]');
       expect(restore).not.toBeNull();
       await act(async () => restore?.click());
-      expect(container.querySelector('button[aria-label^="Symon machine:"]')).not.toBeNull();
-      expect(lineHost.querySelector('button[aria-label="Restore Symon"]')).toBeNull();
+      expect(container.querySelector('button[aria-label^="Choose Symon machine:"]')).not.toBeNull();
+      expect(lineHost.querySelector('button[aria-label="Restore Symon voice"]')).toBeNull();
     } finally {
       await act(async () => lineRoot.unmount());
       lineHost.remove();

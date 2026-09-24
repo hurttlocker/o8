@@ -15,7 +15,7 @@ interface ListedMachine extends SymonMachineIdentity {
 }
 
 /**
- * Minimized state: the orb can collapse into a thin line beside Voice in the
+ * Minimized state: the footer controls can collapse into a thin line in the
  * sidebar footer. It survives reloads and stays in sync across both controls.
  */
 const ORB_MINIMIZED_KEY = 'o8:symon-orb:minimized';
@@ -45,8 +45,8 @@ export function useSymonOrbMinimized(): boolean {
 }
 
 /**
- * The thin line the orb collapses into, mounted beside Voice in the sidebar.
- * Click restores the machine selector in that same footer.
+ * The thin line the footer controls collapse into. Click restores voice and
+ * the machine selector in that same footer.
  */
 export function SymonOrbStatusLine() {
   const minimized = useSymonOrbMinimized();
@@ -55,7 +55,7 @@ export function SymonOrbStatusLine() {
   return (
     <button
       type="button"
-      aria-label="Restore Symon"
+        aria-label="Restore Symon voice"
       title="Symon is minimized — click to restore"
       onClick={() => setSymonOrbMinimized(false)}
       onMouseEnter={() => setHovered(true)}
@@ -331,7 +331,7 @@ export function SymonMachineControl({ placement = 'floating' }: { placement?: 'f
                 </button>
                 <button
                   type="button"
-                  aria-label="Minimize Symon to the sidebar footer"
+                  aria-label="Minimize Symon voice in the sidebar footer"
                   onClick={() => { setOpen(false); setSymonOrbMinimized(true); }}
                   onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
                   onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
@@ -369,7 +369,7 @@ export function SymonMachineControl({ placement = 'floating' }: { placement?: 'f
       </AnimatePresence>
       <button
         type="button"
-        aria-label={`Symon machine: ${active.displayName}`}
+        aria-label={`Choose Symon machine: ${active.displayName}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         title={error || `${active.displayName} has the Symon session`}
@@ -378,31 +378,38 @@ export function SymonMachineControl({ placement = 'floating' }: { placement?: 'f
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: placement === 'sidebar' ? 24 : 34,
+          width: placement === 'sidebar' ? 20 : 34,
           height: placement === 'sidebar' ? 24 : 34,
           paddingTop: 0,
           paddingRight: 0,
           paddingBottom: 0,
           paddingLeft: 0,
-          borderWidth: 1,
+          borderWidth: placement === 'sidebar' ? 0 : 1,
           borderStyle: 'solid',
           borderColor: error ? 'var(--t-danger)' : 'var(--t-border)',
           borderRadius: placement === 'sidebar' ? 12 : 17,
           background: placement === 'sidebar' ? 'transparent' : 'var(--t-bg-card)',
+          color: 'var(--t-text-muted)',
           boxShadow: placement === 'sidebar' ? 'none' : '0 6px 20px rgba(0, 0, 0, 0.16)',
           cursor: 'pointer',
         }}
       >
-        <span
-          aria-hidden
-          style={{
-            width: 17,
-            height: 17,
-            borderRadius: '50%',
-            background: 'radial-gradient(circle at 64% 28%, color-mix(in srgb, var(--t-text) 90%, transparent), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
-            boxShadow: error ? '0 0 0 2px var(--t-danger)' : '0 0 9px rgba(136, 209, 241, 0.45)',
-          }}
-        />
+        {placement === 'sidebar' ? (
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m4 6 4 4 4-4" />
+          </svg>
+        ) : (
+          <span
+            aria-hidden
+            style={{
+              width: 17,
+              height: 17,
+              borderRadius: '50%',
+              background: 'radial-gradient(circle at 64% 28%, color-mix(in srgb, var(--t-text) 90%, transparent), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
+              boxShadow: error ? '0 0 0 2px var(--t-danger)' : '0 0 9px rgba(136, 209, 241, 0.45)',
+            }}
+          />
+        )}
       </button>
     </div>
   );
