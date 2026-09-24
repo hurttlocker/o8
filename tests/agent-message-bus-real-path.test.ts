@@ -480,6 +480,51 @@ describe('agent message bus real path', () => {
     });
   });
 
+  it('does not downgrade a read receipt when a slow Codex wake settles afterward', async () => {
+    const agentId = `codex-race-${Date.now()}`;
+    const name = 'RaceReceiver';
+    expect((await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { agentId, name, repo: repoPath, worktreePath: repoPath, runtime: 'codex', sessionKey: `codex:${agentId}` },
+    }))).status).toBe(201);
+
+    let wakeStarted!: () => void;
+    let releaseWake!: () => void;
+    const started = new Promise<void>((resolve) => { wakeStarted = resolve; });
+    const wake = new Promise<void>((resolve) => { releaseWake = resolve; });
+    const delayedPost = createAgentMessagePostHandler({
+      sendClaude,
+      sendCodex: async () => { wakeStarted(); await wake; },
+    }, noLiveSessions);
+    const pending = delayedPost(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { from: 'operator', to: name, repo: repoPath, text: 'Read before the wake settles.' },
+    }));
+    await started;
+    try {
+      const inbox = await inboxRoute.GET(request(
+        `http://localhost:3001/api/agents/inbox?agentId=${encodeURIComponent(agentId)}`,
+        { token: OPERATOR_TOKEN },
+      ));
+      expect(inbox.status).toBe(200);
+      await expect(inbox.json()).resolves.toMatchObject({
+        messages: [expect.objectContaining({ text: 'Read before the wake settles.', delivery: 'native' })],
+      });
+    } finally {
+      releaseWake();
+    }
+    const accepted = await pending;
+    expect(accepted.status).toBe(201);
+    await expect(accepted.json()).resolves.toMatchObject({
+      message: {
+        delivery: 'native',
+        deliveryNote: 'Read from the durable inbox by the target session.',
+      },
+    });
+  });
+
   it('discovers one live runtime session, addresses it by runtime alias, and rejects an ambiguous alias', async () => {
     const discoveredRepo = `/tmp/o8-agent-message-discovered-${Date.now()}`;
     const liveSession = (sessionKey: string) => ({

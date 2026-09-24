@@ -585,11 +585,11 @@ export function updateAgentMessageDelivery(
   sqlite: Database.Database = getSqlite(),
 ): AgentMessage {
   sqlite.prepare(`
-    UPDATE agent_messages SET delivery_status = ?, delivery_note = ? WHERE id = ?
+    UPDATE agent_messages SET delivery_status = ?, delivery_note = ?
+    WHERE id = ? AND (delivery_status <> 'native' OR COALESCE(delivery_note, '') <> 'Read from the durable inbox by the target session.')
   `).run(delivery, note, id);
   return mapMessage(sqlite.prepare('SELECT * FROM agent_messages WHERE id = ?').get(id) as MessageRow, sqlite);
 }
-
 function ensureAgentInboxState(
   agent: AgentPresence,
   sqlite: Database.Database,
