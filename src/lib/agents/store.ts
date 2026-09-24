@@ -1,17 +1,16 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
-import { parse, resolve } from 'node:path';
 
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
 import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migration';
 import type { AgentConversationReceipt, AgentMessage, AgentMessageRefs, AgentPresence } from './types';
+import { normalizeAgentBusRepoPath, reconcilePersistedAgentBusRepoPaths } from './repo-paths';
 
 export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
-
+export { normalizeAgentBusRepoPath } from './repo-paths';
 export const AGENT_MESSAGE_TEXT_MAX_LENGTH = 4_000;
 export const AGENT_CONVERSATION_DEFAULT_LIMIT = 8;
 export const AGENT_CONVERSATION_EXTENSION = 4;
@@ -110,61 +109,6 @@ interface InboxStateRow {
   native_wake_session_key: string | null;
   native_wake_through_sequence: number;
   native_wake_at: string | null;
-}
-
-export function normalizeAgentBusRepoPath(repo: string): string {
-  const absolute = resolve(repo);
-  try {
-    const canonical = realpathSync.native(absolute);
-    return canonical === parse(canonical).root ? canonical : canonical.replace(/\/+$/, '');
-  } catch {
-    return absolute === parse(absolute).root ? absolute : absolute.replace(/\/+$/, '');
-  }
-}
-
-function reconcilePersistedAgentBusRepoPaths(sqlite: Database.Database): void {
-  const rows = sqlite.prepare(`
-    SELECT repo_path FROM agent_presence
-    UNION
-    SELECT repo_path FROM agent_messages
-    UNION
-    SELECT repo_path FROM agent_conversations
-    UNION
-    SELECT repo_path FROM agent_inbox_state
-  `).all() as Array<{ repo_path: string }>;
-  const aliases = rows.map((row) => ({ source: row.repo_path, canonical: normalizeAgentBusRepoPath(row.repo_path) }))
-    .filter(({ source, canonical }) => source !== canonical);
-  if (aliases.length === 0) return;
-
-  const hasPresenceConflict = sqlite.prepare(`
-    SELECT 1
-    FROM agent_presence AS alias
-    JOIN agent_presence AS canonical
-      ON canonical.repo_path = ? AND canonical.name = alias.name COLLATE NOCASE
-    WHERE alias.repo_path = ?
-    LIMIT 1
-  `);
-  const hasInboxConflict = sqlite.prepare(`
-    SELECT 1
-    FROM agent_inbox_state AS alias
-    JOIN agent_inbox_state AS canonical
-      ON canonical.repo_path = ? AND canonical.agent_name = alias.agent_name COLLATE NOCASE
-    WHERE alias.repo_path = ?
-    LIMIT 1
-  `);
-  const rewrite = sqlite.transaction(() => {
-    for (const { source, canonical } of aliases) {
-      // Same display names in the two historical scopes cannot be merged
-      // without changing which session owns that name. Keep every row in the
-      // legacy scope isolated until an operator resolves the collision.
-      if (hasPresenceConflict.get(canonical, source) || hasInboxConflict.get(canonical, source)) continue;
-      sqlite.prepare('UPDATE agent_messages SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
-      sqlite.prepare('UPDATE agent_conversations SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
-      sqlite.prepare('UPDATE agent_presence SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
-      sqlite.prepare('UPDATE agent_inbox_state SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
-    }
-  });
-  rewrite();
 }
 
 function expandBroadcastTextLimit(sqlite: Database.Database): void {
