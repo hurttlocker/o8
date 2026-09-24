@@ -115,13 +115,16 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
 
   if (typeof document === 'undefined') return null;
 
-  const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth;
-  const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight;
+  const configuredZoom = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom'));
+  const zoom = Number.isFinite(configuredZoom) && configuredZoom > 0 ? configuredZoom : 1;
+  const viewportWidth = (typeof window === 'undefined' ? 1440 : window.innerWidth) / zoom;
+  const viewportHeight = (typeof window === 'undefined' ? 900 : window.innerHeight) / zoom;
   // The rail and workspace share this top/right edge. Align the floating card
   // to it so the rail's rounded outline cannot peek out from behind the card.
-  const top = Math.max(0, anchorRect.top);
-  const right = Math.max(0, viewportWidth - anchorRect.right);
-  const maxHeight = Math.max(160, viewportHeight - top - OVERLAY_MARGIN);
+  const top = Math.max(0, anchorRect.top / zoom);
+  const width = Math.min(OVERLAY_WIDTH, Math.max(0, viewportWidth - OVERLAY_MARGIN * 2));
+  const right = Math.max(OVERLAY_MARGIN, Math.min(viewportWidth - anchorRect.right / zoom, viewportWidth - width - OVERLAY_MARGIN));
+  const maxHeight = Math.max(0, viewportHeight - top - OVERLAY_MARGIN);
 
   return createPortal(
     // The positioning lives on THIS wrapper, not on the SmoothCorners element.
@@ -138,7 +141,7 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         position: 'fixed',
         top,
         right,
-        width: OVERLAY_WIDTH,
+        width,
         zIndex: 10000,
         // Morph: scale up out of the capsule's top-right corner on open, and back
         // down into it on close (the capsule cross-fades in the launcher). The
