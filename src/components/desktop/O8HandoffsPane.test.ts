@@ -30,6 +30,10 @@ function enterMessage(host: HTMLElement, value: string): void {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function openComposer(host: HTMLElement): void {
+  Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'New handoff to a live agent')?.click();
+}
+
 describe('O8HandoffsPane', () => {
   let host: HTMLDivElement;
   let root: Root;
@@ -69,6 +73,7 @@ describe('O8HandoffsPane', () => {
     expect(host.textContent).not.toContain('Delivered');
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/agents/message?repo=%2Fworkspace%2Fo8&limit=50')).toBe(true);
 
+    await act(async () => openComposer(host));
     await act(async () => {
       const selector = host.querySelector<HTMLSelectElement>('#o8-handoff-recipient')!;
       selector.value = 'Keen';
@@ -84,9 +89,10 @@ describe('O8HandoffsPane', () => {
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/agents/message' && init?.method === 'POST')).toBe(true));
     const post = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/agents/message' && init?.method === 'POST');
     expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/agents/message' && init?.method === 'POST')).toHaveLength(1);
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ repo: repo.localPath, to: 'Keen', text: 'Please review this.' });
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ repo: repo.localPath, to: 'Keen', text: 'Please review this.', replyToId: null, requestId: expect.any(String) });
     await vi.waitFor(() => expect(host.textContent).toContain('Please review this.'));
-    expect(host.querySelector<HTMLTextAreaElement>('#o8-handoff-message')?.value).toBe('');
+    expect(host.querySelector<HTMLTextAreaElement>('#o8-handoff-message')).toBeNull();
+    expect(host.textContent).toContain('New handoff to a live agent');
   });
 
   it('requires an explicit repository when the shared panel is scoped to all repos', async () => {
@@ -110,6 +116,7 @@ describe('O8HandoffsPane', () => {
     await act(async () => root.render(createElement(O8HandoffsPane, {
       active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
     })));
+    await act(async () => openComposer(host));
     await vi.waitFor(() => expect(host.querySelector<HTMLSelectElement>('#o8-handoff-recipient')?.options.length).toBe(2));
     await act(async () => {
       const selector = host.querySelector<HTMLSelectElement>('#o8-handoff-recipient')!;
@@ -120,5 +127,62 @@ describe('O8HandoffsPane', () => {
     await act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Send message')?.click());
     await vi.waitFor(() => expect(host.textContent).toContain('Agent went offline.'));
     expect(host.querySelector<HTMLTextAreaElement>('#o8-handoff-message')?.value).toBe('Keep this draft.');
+  });
+
+  it('groups linked turns, labels legacy messages, and lets the operator stop a conversation', async () => {
+    const linked: AgentMessage = {
+      ...message,
+      id: 'message-linked',
+      text: 'A linked request.',
+      conversation: {
+        id: 'conversation-one', replyToId: null, turnIndex: 1, turnLimit: 8,
+        remainingTurns: 7, status: 'open', closedReason: null, lastMessageId: 'message-linked',
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/agents/presence?')) return jsonResponse({ agents: [agent] });
+      if (url.startsWith('/api/agents/message?')) return jsonResponse({ messages: [linked, message] });
+      if (url === '/api/agents/conversation' && init?.method === 'POST') {
+        return jsonResponse({ conversation: { id: 'conversation-one', status: 'closed' } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => root.render(createElement(O8HandoffsPane, {
+      active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
+    })));
+    await vi.waitFor(() => expect(host.textContent).toContain('A linked request.'));
+    expect(host.querySelector('[data-agent-conversation-id="conversation-one"]')?.textContent).toContain('7 left · open');
+    expect(host.textContent).toContain('Legacy · unthreaded');
+    await act(async () => {
+      host.querySelector<HTMLElement>('[data-agent-conversation-id="conversation-one"] button')?.click();
+    });
+    const post = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/agents/conversation' && init?.method === 'POST');
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ id: 'conversation-one', repo: repo.localPath, action: 'close' });
+  });
+
+  it('shows a conversation action error while the composer is collapsed', async () => {
+    const linked: AgentMessage = {
+      ...message,
+      id: 'message-linked',
+      conversation: {
+        id: 'conversation-one', replyToId: null, turnIndex: 1, turnLimit: 8,
+        remainingTurns: 7, status: 'open', closedReason: null, lastMessageId: 'message-linked',
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('/api/agents/presence?')) return jsonResponse({ agents: [agent] });
+      if (String(input).startsWith('/api/agents/message?')) return jsonResponse({ messages: [linked] });
+      if (init?.method === 'POST') return jsonResponse({ error: { message: 'Conversation already closed.' } }, 409);
+      throw new Error(`Unexpected request: ${String(input)}`);
+    }));
+    await act(async () => root.render(createElement(O8HandoffsPane, {
+      active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
+    })));
+    await vi.waitFor(() => expect(host.textContent).toContain('7 left · open'));
+    expect(host.querySelector('#o8-handoff-message')).toBeNull();
+    await act(async () => host.querySelector<HTMLElement>('[data-agent-conversation-id="conversation-one"] button')?.click());
+    await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe('Conversation already closed.'));
   });
 });

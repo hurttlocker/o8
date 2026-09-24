@@ -255,7 +255,7 @@ commands:
   browser wait <sel>   poll until a selector resolves (--text, --timeout)
   browser close        end this scope's engine (headless Chrome) session
   broadcast say|automation-say|focus|post|token   speak on demand or from an automation, set focus, post narration, or manage spectator bearers
-  msg send|inbox       send a durable agent message or read this session's inbox
+  msg send|inbox       send a bounded agent message (--reply-to ID, --close) or read this session's inbox
   presence list|join   list live sessions or register an explicit external name
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff

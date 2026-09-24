@@ -24,6 +24,7 @@ import {
 } from './live-presence';
 import {
   AGENT_MESSAGE_TEXT_MAX_LENGTH,
+  AgentConversationError,
   AgentPresenceWriteConflictError,
   type AgentMessageRefs,
   type AgentPresence,
@@ -38,9 +39,11 @@ import {
   listAgentPresenceAcrossRepos,
   listRecentAgentMessages,
   listRecentAgentMessagesAcrossRepos,
+  listAgentConversations,
   persistAgentMessage,
   releaseAgentInboxWake,
   updateAgentMessageDelivery,
+  updateAgentConversation,
   upsertAgentPresence,
 } from './store';
 
@@ -184,6 +187,7 @@ export async function postAgentMessage(
     throw new AgentBusError('The worker packet has no active lane.', 'agent_bus_lane_not_found', 404);
   }
   const to = requiredString(body.to, 'to');
+  const replyToId = optionalString(body.replyToId, 'replyToId', 200);
   let repo = optionalString(body.repo, 'repo', 2_000);
   let sender: AgentPresence | null = null;
   if (lane) {
@@ -200,7 +204,17 @@ export async function postAgentMessage(
     repo = sender.repo;
   }
   if (repo) await reconcileLiveAgentPresence(repo, presenceSeams, sqlite);
-  const target = resolveAgentTarget(to, repo, sqlite);
+  const target = replyToId && to.toLowerCase() === 'operator' && repo ? {
+    agentId: 'operator',
+    name: 'operator',
+    repo: resolve(repo),
+    worktreePath: null,
+    runtime: 'operator',
+    sessionKey: null,
+    laneId: null,
+    packetId: null,
+    lastSeen: new Date().toISOString(),
+  } satisfies AgentPresence : resolveAgentTarget(to, repo, sqlite);
   if (!target) {
     throw new AgentBusError(
       repo ? `No agent named ${to} is registered in that repository.` : `Agent name ${to} is absent or ambiguous.`,
@@ -212,13 +226,36 @@ export async function postAgentMessage(
     throw new AgentBusError('Workers can message only agents in their repository.', 'agent_repo_mismatch', 403);
   }
   const text = requiredString(body.text, 'text', AGENT_MESSAGE_TEXT_MAX_LENGTH);
-  let message = persistAgentMessage({
-    from: sender?.name ?? optionalString(body.from, 'from') ?? 'operator',
-    to: target.name,
-    repo: target.repo,
-    text,
-    refs: messageRefs(body, lane),
-  }, sqlite);
+  const requestId = optionalString(body.requestId, 'requestId', 200);
+  if (body.close !== undefined && typeof body.close !== 'boolean') {
+    throw new AgentBusError('close must be a boolean.', 'invalid_agent_close', 400);
+  }
+  if (replyToId && !sender && body.from !== undefined && body.from !== 'operator') {
+    throw new AgentBusError('Operator replies must use the operator identity.', 'agent_reply_sender_forbidden', 403);
+  }
+  let persisted;
+  try {
+    persisted = persistAgentMessage({
+      from: sender?.name ?? (replyToId ? 'operator' : optionalString(body.from, 'from') ?? 'operator'),
+      to: target.name,
+      repo: target.repo,
+      text,
+      refs: messageRefs(body, lane),
+      replyToId,
+      requestId,
+      close: body.close === true,
+    }, sqlite);
+  } catch (error) {
+    if (error instanceof AgentConversationError) {
+      throw new AgentBusError(error.message, error.code, error.status);
+    }
+    throw error;
+  }
+  let { message } = persisted;
+  if (!persisted.created) return message;
+  if (target.runtime === 'operator') {
+    return updateAgentMessageDelivery(message.id, 'poll', 'Available in the operator Handoffs view.', sqlite);
+  }
   if (!isPresenceLive(target)) return message;
   const wakeSeams: AgentInboxWakeSeams = {
     claimCodexInboxWake: ({ target: wakeTarget, throughSequence }) => (
@@ -238,6 +275,43 @@ export async function postAgentMessage(
     );
   }
   return message;
+}
+
+export function readAgentConversations(
+  input: { repo: string | null; limit: number },
+  principal: RequestPrincipalContext,
+  sqlite: Database.Database = getSqlite(),
+) {
+  if (principal.role !== 'operator') {
+    throw new AgentBusError('Conversation history requires an operator credential.', 'agent_conversations_forbidden', 403);
+  }
+  const repo = requiredString(input.repo, 'repo', 2_000);
+  return { repo: resolve(repo), conversations: listAgentConversations(repo, input.limit, sqlite) };
+}
+
+export function changeAgentConversation(
+  input: unknown,
+  principal: RequestPrincipalContext,
+  sqlite: Database.Database = getSqlite(),
+) {
+  if (principal.role !== 'operator') {
+    throw new AgentBusError('Only the operator can stop or extend a conversation.', 'agent_conversation_operator_required', 403);
+  }
+  const body = objectInput(input, 'invalid_agent_conversation');
+  const id = requiredString(body.id, 'id', 200);
+  const repo = requiredString(body.repo, 'repo', 2_000);
+  if (body.action !== 'close' && body.action !== 'extend') {
+    throw new AgentBusError('action must be close or extend.', 'invalid_agent_conversation_action', 400);
+  }
+  const summary = optionalString(body.summary, 'summary', AGENT_MESSAGE_TEXT_MAX_LENGTH);
+  try {
+    return updateAgentConversation({ id, repo, action: body.action, summary }, sqlite);
+  } catch (error) {
+    if (error instanceof AgentConversationError) {
+      throw new AgentBusError(error.message, error.code, error.status);
+    }
+    throw error;
+  }
 }
 
 export function joinAgentPresence(
