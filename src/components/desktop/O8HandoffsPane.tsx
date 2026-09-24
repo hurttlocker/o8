@@ -67,16 +67,14 @@ export function O8HandoffsPane({
   registeredRepos,
   allRepos,
   onRepoPathChange,
-  selectedConversationId,
-  selectionRequest,
+  selection,
 }: {
   active: boolean;
   repoPath?: string | null;
   registeredRepos: RepoRegistryEntry[];
   allRepos: boolean;
   onRepoPathChange?: (repoPath: string) => void;
-  selectedConversationId?: string | null;
-  selectionRequest?: number;
+  selection?: { id: string | null; request: number };
 }) {
   const scopedRepo = !allRepos && repoPath && registeredRepos.some((repo) => repo.localPath === repoPath)
     ? repoPath : null;
@@ -91,7 +89,7 @@ export function O8HandoffsPane({
   const [error, setError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(selectedConversationId ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(selection?.id ?? null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const sendInFlightRef = useRef(false);
@@ -201,11 +199,11 @@ export function O8HandoffsPane({
 
   const groups = exchangeGroups(messages);
   useEffect(() => {
-    if (selectedConversationId) {
-      setSelectedId(selectedConversationId);
+    if (selection?.id) {
+      setSelectedId(selection.id);
       setDetailOpen(true);
     }
-  }, [selectedConversationId, selectionRequest]);
+  }, [selection?.id, selection?.request]);
   useEffect(() => {
     if (!detailOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
