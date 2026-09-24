@@ -3,14 +3,12 @@
 /**
  * DesktopStatusBar — compact chrome strip pinned to the bottom of the dashboard.
  *
- * Holds sidebar utilities, workspace-centered merge and branch state, and
- * right-edge utilities. Account controls live in AgentPanel.
+ * Holds workspace utilities when no composer is active and places them in the
+ * composer context row when one is active. Account controls live in AgentPanel.
  */
 
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { MergeActionCluster } from './MergeActionCluster';
-import { MergeBeacon } from './merge-beacon/MergeBeacon';
 import type { ParkedLane } from './merge-beacon/derive';
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
@@ -21,15 +19,12 @@ import { useEntitlement } from '@/lib/entitlement/context';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
 
 interface DesktopStatusBarProps {
+  /** Retained for the caller; merge state is no longer displayed in this chrome. */
   branchName: string | null;
   repoName: string | null;
   repoRemoteUrl?: string | null;
-  /** The active repo's default branch — the branch cluster hides while sitting
-   *  on it (Q 2026-07-16). */
   defaultBranch?: string | null;
-  /** Width of the left AgentPanel column, in CSS px. The bottom bar uses
-   *  this to align its left chrome with the column above so the centered
-   *  merge cluster lands directly under the workspace surface. */
+  /** Width of the left AgentPanel column, in CSS px. */
   leftColumnWidth?: number;
   /** Width of the right panel column when visible, in CSS px. */
   rightColumnWidth?: number;
@@ -37,14 +32,10 @@ interface DesktopStatusBarProps {
   compact?: boolean;
   /** Glass surface active: leave the left utility rail transparent. */
   glassSurface?: boolean;
-  /** Lanes parked in the review gate — drives the merge beacon split between
-   *  needs-review and approved-awaiting-merge. */
   parkedLanes?: ParkedLane[];
   onOpenReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
-  /** Contextual bottom-panel (terminal) toggle. Moved from the column
-   *  header per operator request — sits in the status bar's center
-   *  column next to the branch label. */
+  /** Contextual bottom-panel (terminal) toggle. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
   onOpenBottomPanelSurface?: (surface: BottomPanelSurfaceKind) => void;
@@ -53,10 +44,6 @@ interface DesktopStatusBarProps {
 }
 
 function DesktopStatusBarBase({
-  branchName,
-  repoName,
-  repoRemoteUrl = null,
-  defaultBranch = null,
   bottomPanelVisible = false,
   onToggleBottomPanel,
   onOpenBottomPanelSurface,
@@ -64,15 +51,12 @@ function DesktopStatusBarBase({
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
-  parkedLanes = [],
-  onOpenReviewLane,
-  onOpenAwaitingMerge,
 }: DesktopStatusBarProps) {
   const { overrideActive } = useEntitlement();
 
-  // Center the branch cluster on the composer's REAL measured position. The
+  // Center the bottom-panel toggle on the composer's measured position. The
   // column-width props ignored insets/gaps + a hidden right region and drifted
-  // the cluster ~125px off the composer (operator: "not hitting", 2026-06-15).
+  // control ~125px off the composer (operator: "not hitting", 2026-06-15).
   // The composer card registers itself; track it through panel resizes/animations
   // (ResizeObserver — the card is maxWidth:100% so it resizes as the column
   // narrows) and remounts/tab-switches. Null → no composer (e.g. an
@@ -116,8 +100,6 @@ function DesktopStatusBarBase({
   if (composerSlot) {
     return createPortal(
       <div data-o8-composer-chrome="" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-        <MergeBeacon parked={parkedLanes} compact={compact} onOpenNeedsReviewLane={onOpenReviewLane} onOpenAwaitingMerge={onOpenAwaitingMerge} />
-        {repoName ? <MergeActionCluster branchName={branchName} repoName={repoName} repoRemoteUrl={repoRemoteUrl} defaultBranch={defaultBranch} compact={compact} /> : null}
         {!compact && onToggleBottomPanel ? <StatusBottomPanelControl active={bottomPanelVisible} onToggle={onToggleBottomPanel} onOpenSurface={onOpenBottomPanelSurface} /> : null}
         {!compact && overrideActive ? <ViewAsFreeIndicator palette="chrome" /> : null}
         {!compact ? <SymonOrbStatusLine /> : null}
@@ -127,11 +109,8 @@ function DesktopStatusBarBase({
     );
   }
 
-  // Three-column footer that mirrors the dashboard layout above. Left section
-  // takes the AgentPanel's exact width, right section takes the right-panel's
-  // width (or 0 when hidden), so the center section spans the same horizontal
-  // range as the workspace surface — and the merge cluster lands centered
-  // directly under the chat / orchestrator.
+  // Keep the bottom-panel toggle centered under the workspace when no
+  // composer is registered. Merge review lives in the review surfaces.
   return (
     <div
       data-mcp-scope="desktop-status-bar"
@@ -154,27 +133,11 @@ function DesktopStatusBarBase({
         position: 'relative',
       }}
     >
-      {/* The old left footer section (a leftColumnWidth-wide empty anchor) is
-          GONE (2026-07-16): its utilities all moved out earlier that day
-          (pair-mobile → account row, Canvas mode → workspace header, inbox +
-          ports → branch capsule), and the bar itself now renders INSIDE the
-          center+right column (dashboard layout), so the sidebar column runs
-          full-height to the window bottom. The centre merge cluster keeps its
-          position via the FIXED overlay below — viewport coords, same math as
-          when the bar spanned the full window. */}
-
       {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right.
-          The branch/merge cluster itself is lifted into the absolute overlay
-          below so it centers on the true workspace surface. */}
+          The bottom-panel toggle is centered in the overlay below. */}
       <div style={{ flex: 1, minWidth: 0 }} />
 
-      {/* Center cluster — absolutely centered on the true workspace surface
-          (leftColumnWidth .. rightColumnWidth, the real widths, 0 when a panel
-          is collapsed) so the branch/merge cluster sits dead-center under the
-          composer and its chips in EVERY panel state, instead of drifting with
-          the chrome-button section widths (operator: "they look cheap when they
-          don't line up", 2026-06-15). pointerEvents:none lets clicks fall
-          through the empty span; the cluster re-enables them. */}
+      {/* Center the bottom-panel toggle on the workspace surface. */}
       <div
         style={{
           // FIXED, not absolute (2026-07-16): the bar no longer spans the full
@@ -197,19 +160,6 @@ function DesktopStatusBarBase({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
-          <MergeBeacon
-            parked={parkedLanes}
-            compact={compact}
-            onOpenNeedsReviewLane={onOpenReviewLane}
-            onOpenAwaitingMerge={onOpenAwaitingMerge}
-          />
-          <MergeActionCluster
-            branchName={branchName}
-            repoName={repoName}
-            repoRemoteUrl={repoRemoteUrl}
-            defaultBranch={defaultBranch}
-            compact={compact}
-          />
           {!compact && onToggleBottomPanel ? (
             <StatusBottomPanelControl
               active={bottomPanelVisible}
