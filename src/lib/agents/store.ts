@@ -7,7 +7,8 @@ import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
 import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migration';
-import type { AgentConversationReceipt, AgentMessage, AgentMessageIdentity, AgentMessageRefs, AgentPresence } from './types';
+import { parseMessageRefs } from './message-refs';
+import type { AgentConversationReceipt, AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
 export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
@@ -261,26 +262,6 @@ function mapPresence(row: PresenceRow): AgentPresence {
   };
 }
 
-function parseRefs(value: string): AgentMessageRefs {
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    const identities = parsed.identities && typeof parsed.identities === 'object' ? parsed.identities as Record<string, unknown> : null;
-    const identity = (entry: unknown): AgentMessageIdentity | null => {
-      if (!entry || typeof entry !== 'object') return null;
-      const candidate = entry as Record<string, unknown>;
-      return typeof candidate.runtime === 'string' && (typeof candidate.sessionKey === 'string' || candidate.sessionKey === null)
-        ? { runtime: candidate.runtime, sessionKey: candidate.sessionKey } : null;
-    };
-    return {
-      laneId: typeof parsed.laneId === 'string' ? parsed.laneId : null,
-      packetId: typeof parsed.packetId === 'string' ? parsed.packetId : null,
-      ...(identities ? { identities: { from: identity(identities.from), to: identity(identities.to) } } : {}),
-    };
-  } catch {
-    return { laneId: null, packetId: null };
-  }
-}
-
 function mapConversation(row: ConversationRow): AgentConversation {
   return {
     id: row.id,
@@ -341,7 +322,7 @@ function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
     to: row.to_agent,
     repo: row.repo_path,
     text: row.text,
-    refs: parseRefs(row.refs_json),
+    refs: parseMessageRefs(row.refs_json),
     conversation: receipt,
     delivery: row.delivery_status,
     deliveryNote: row.delivery_note,
