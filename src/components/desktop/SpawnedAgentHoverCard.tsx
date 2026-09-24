@@ -102,7 +102,10 @@ export function SpawnedAgentHoverCard({
   onMouseLeave,
 }: SpawnedAgentHoverCardProps) {
   const [now, setNow] = useState(() => Date.now());
-  const query = row.packetId
+  const isPlainCliTerminal = Boolean(row.tmuxSession && !row.packetId);
+  const query = isPlainCliTerminal
+    ? null
+    : row.packetId
     ? `packetId=${encodeURIComponent(row.packetId)}`
     : row.sessionKey
       ? `sessionKey=${encodeURIComponent(row.sessionKey)}`
@@ -281,7 +284,9 @@ export function SpawnedAgentHoverCard({
           : transcript.lastMessage
             ? transcript.lastMessage
             : transcript.status === 'unavailable'
-              ? 'No transcript available for this agent.'
+              ? isPlainCliTerminal
+                ? 'Select this agent to return to its live terminal conversation.'
+                : 'No transcript available for this agent.'
               : 'No messages yet.'}
       </div>
     </div>,

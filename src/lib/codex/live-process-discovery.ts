@@ -37,6 +37,29 @@ export interface CodexProcessDiscoveryOptions {
   execFile?: ProcessCwdExecFile;
 }
 
+async function readOpenCodexThreadId(
+  process: LiveCodexProcess,
+  threadIds: Set<string>,
+  options: CodexProcessDiscoveryOptions,
+): Promise<string | null> {
+  try {
+    const { stdout } = await runProcessCommand(
+      'lsof', ['-p', String(process.pid), '-Fn'],
+      { windowsHide: true, maxBuffer: 512 * 1024, timeout: 4_000 },
+      options.execFile,
+    );
+    const text = typeof stdout === 'string' ? stdout : stdout.toString('utf8');
+    const openIds = new Set(
+      [...text.matchAll(/(?:^|\n)n[^\n]*\/thread-writer-locks\/([0-9a-f-]{36})\.lock(?=\n|$)/g)]
+        .map((match) => match[1])
+        .filter((id) => threadIds.has(id)),
+    );
+    return openIds.size === 1 ? [...openIds][0] : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeFsPath(value?: string | null): string {
   if (!value) return '';
   return path.resolve(value).replace(/\/+$/, '');
@@ -98,7 +121,7 @@ export async function queryLiveCodexProcesses(
       const match = line.match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/);
       if (!match) continue;
       const pid = Number(match[1]);
-      if (!Number.isFinite(pid) || !match[5]?.includes('/codex')) continue;
+      if (!Number.isFinite(pid) || !/\/codex(?:\s|$)/.test(match[5] ?? '') || match[5]?.includes(' app-server ')) continue;
       rows.push({
         pid,
         parentPid: Number(match[2]),
@@ -162,20 +185,22 @@ export async function queryAllLiveCodexProcesses(
     const { stdout } = await runProcessCommand(
       'ps',
       ['-eo', 'pid=', '-o', 'command='],
-      { windowsHide: true, maxBuffer: 256 * 1024, timeout: 3_000 },
+      { windowsHide: true, maxBuffer: 1024 * 1024, timeout: 4_000 },
       options.execFile,
     );
     const text = typeof stdout === 'string' ? stdout : stdout.toString('utf8');
     const pids = text
       .split('\n')
       .map((line) => line.trim())
-      .filter((line) => line.includes('/codex'))
+      .filter((line) => /\/codex(?:\s|$)/.test(line) && !line.includes(' app-server '))
       .map((line) => Number(line.match(/^(\d+)/)?.[1]))
       .filter((pid) => Number.isFinite(pid));
     const allLive = await queryLiveCodexProcesses(pids, options);
-    const livePids = new Set(allLive.keys());
+    const wrapperPids = new Set(
+      [...allLive.values()].map((process) => process.parentPid).filter((pid): pid is number => Boolean(pid)),
+    );
     return new Map(
-      [...allLive.entries()].filter(([, proc]) => !proc.parentPid || !livePids.has(proc.parentPid)),
+      [...allLive.entries()].filter(([pid]) => !wrapperPids.has(pid)),
     );
   } catch {
     return new Map();
@@ -186,6 +211,7 @@ export async function buildCodexActivityMap(
   threads: CodexThreadRow[],
   codexHome: string,
   knownLiveProcesses?: Map<number, LiveCodexProcess>,
+  options: CodexProcessDiscoveryOptions = {},
 ): Promise<Map<string, CodexThreadActivity>> {
   const byThreadId = new Map<string, CodexThreadActivity>();
   const threadIds = new Set(threads.map((thread) => thread.id));
@@ -246,6 +272,28 @@ export async function buildCodexActivityMap(
       pid: proc.pid,
       tty: proc.tty,
       lastLogTs: Math.max(previous?.lastLogTs ?? 0, thread.updated_at),
+    });
+  }
+
+  // Current Codex versions keep the active thread's writer lock open while
+  // its TUI process lives. This is an exact thread-to-pid receipt even when
+  // the older SQLite `logs` table and TERM_SESSION_ID are absent.
+  const candidates = [...allLiveProcesses.values()].filter((process) => (
+    process.tty && process.tty !== '??'
+  ));
+  const openThreads = await Promise.all(candidates.map(async (process) => ({
+    process,
+    threadId: await readOpenCodexThreadId(process, threadIds, options),
+  })));
+  for (const { process, threadId } of openThreads) {
+    if (!threadId || byThreadId.get(threadId)?.active) continue;
+    const previous = byThreadId.get(threadId);
+    byThreadId.set(threadId, {
+      ...previous,
+      active: true,
+      pid: process.pid,
+      tty: process.tty,
+      lastLogTs: Math.max(previous?.lastLogTs ?? 0, threadById.get(threadId)?.updated_at ?? 0),
     });
   }
 

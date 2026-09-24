@@ -12,6 +12,31 @@ import {
 } from './AgentPanelExtraAgentRow';
 
 describe('Agents rail derivation', () => {
+  it('shows a verified o8 terminal CLI without a lane and leaves unbound history out', () => {
+    const live: AgentSummary = {
+      id: 'codex:real-thread',
+      name: 'Project · Codex',
+      squadId: 'squad-codex',
+      sessionKey: 'codex:real-thread',
+      runtime: 'codex',
+      model: 'gpt-5',
+      status: 'running',
+      currentTask: 'CLI process observed',
+      workspace: '/repo',
+      branch: 'main',
+      approvalStatus: 'none',
+      lastEventAt: '2026-09-24T12:00:00Z',
+      context: { usedPercent: 0, trend: 'stable' },
+      alerts: 0,
+      tmuxSession: 'cortex-dash-owned',
+    };
+    const rows = deriveSpawnedAgentRows({
+      lanes: [],
+      agents: [live, { ...live, sessionKey: 'codex:history', tmuxSession: undefined }],
+    });
+    expect(rows.map((row) => row.sessionKey)).toEqual(['codex:real-thread']);
+  });
+
   it('keeps worker packets in one flat list across repositories', () => {
     const lane: LaneSummary = {
       id: 'lane-running',

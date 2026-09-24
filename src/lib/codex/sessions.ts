@@ -9,6 +9,7 @@ import type {
   SquadSummary,
 } from '@/lib/fleet/types';
 import { MODEL_IDS } from '@/lib/models';
+import { listRecentDashboardCliSessions } from '@/lib/runtime/terminal-session-registry';
 import { truncateText } from '@/lib/util/text';
 import {
   codexSessionsRoot,
@@ -32,7 +33,7 @@ const CODEX_DISCOVERED_FLEET_TTL_MS = 15_000;
 const CODEX_DISCOVERED_IDLE_TTL_MS = 30_000;
 
 type CodexDiscoveredFleetAdditions = {
-  agents: AgentSummary[];
+  agents: Array<AgentSummary & { pid?: number }>;
   squads: SquadSummary[];
   events: EventItem[];
   artifacts: ReviewArtifact[];
@@ -254,7 +255,7 @@ function buildCurrentTask(thread: CodexThreadRow, activity?: CodexThreadActivity
   const activityState = classifyActivity(thread, activity);
 
   if (activityState === 'active') {
-    return `Live Codex terminal verified via pid/log mapping${activity?.tty ? ` on ${activity.tty}` : ''}. ${summary}`;
+    return `Live Codex process and thread identity verified${activity?.tty ? ` on ${activity.tty}` : ''}. ${summary}`;
   }
 
   if (activityState === 'recent') {
@@ -304,7 +305,8 @@ export async function getCodexDiscoveredFleetAdditions(
     const cacheTtlMs = hasLiveSession
       ? CODEX_DISCOVERED_FLEET_TTL_MS
       : CODEX_DISCOVERED_IDLE_TTL_MS;
-    if ((!fresh || !hasLiveSession) && (now - discoveredFleetCache.cachedAt) < cacheTtlMs) {
+    const effectiveTtlMs = fresh ? Math.min(cacheTtlMs, 5_000) : cacheTtlMs;
+    if ((now - discoveredFleetCache.cachedAt) < effectiveTtlMs) {
       return discoveredFleetCache.value;
     }
   }
@@ -317,13 +319,27 @@ export async function getCodexDiscoveredFleetAdditions(
   try {
     const homes = await listCodexDiscoveryHomes();
     const liveProcesses = await queryAllLiveCodexProcesses();
-    const agentsBySession = new Map<string, AgentSummary>();
+    const agentsBySession = new Map<string, AgentSummary & { pid?: number }>();
     const ambiguousSessionKeys = new Set<string>();
     const matchedLivePids = new Set<number>();
+    const boundThreadIds = new Set(
+      listRecentDashboardCliSessions('codex')
+        .map(({ sessionKey }) => sessionKey.match(/^codex:([0-9a-f-]{36})$/)?.[1])
+        .filter((id): id is string => Boolean(id)),
+    );
     let discoveredThreadCount = 0;
 
     for (const home of homes) {
-      const threads = await queryCodexThreadsFromHome(home.configHomeRef, 64).catch(() => []);
+      const [recentThreads, boundThreads] = await Promise.all([
+        queryCodexThreadsFromHome(home.configHomeRef, 64).catch(() => []),
+        Promise.all([...boundThreadIds].map((id) => (
+          queryCodexThreadByIdFromHome(home.configHomeRef, id).catch(() => null)
+        ))),
+      ]);
+      const threads = [...new Map(
+        [...recentThreads, ...boundThreads.filter((row): row is CodexThreadRow => Boolean(row))]
+          .map((row) => [row.id, row]),
+      ).values()];
       discoveredThreadCount += threads.length;
       if (!threads.length) continue;
       const activityMap = await buildCodexActivityMap(threads, home.configHomeRef, liveProcesses).catch(
@@ -369,9 +385,10 @@ export async function getCodexDiscoveredFleetAdditions(
           sessionId: thread.id,
           identityId: home.identityId,
           sessionKind: 'terminal',
+          pid: activity?.active ? activity.pid : undefined,
           surfaceLabel: activityState === 'active' ? 'Codex terminal • active' : 'Codex terminal • recent',
           runtimeSurface: surface,
-        } satisfies AgentSummary);
+        } satisfies AgentSummary & { pid?: number });
       }
     }
 
@@ -420,7 +437,7 @@ export async function getCodexDiscoveredFleetAdditions(
         sessionKind: 'terminal',
         surfaceLabel: 'Codex terminal • live',
         runtimeSurface: surface,
-      } satisfies AgentSummary);
+      } satisfies AgentSummary & { pid?: number });
     }
 
     const activeCount = agents.filter((agent) => agent.status === 'running').length;

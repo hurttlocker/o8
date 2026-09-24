@@ -18,6 +18,11 @@ const ideRegistryFixture = vi.hoisted(() => ({
   tabs: [] as IdeRuntimeSessionDescriptor[],
 }));
 
+const terminalFixture = vi.hoisted(() => ({
+  bindings: new Map<string, string>(),
+  registry: new Map<string, { sessionName: string; runtime: 'codex' | 'claude-code'; cwd?: string; source?: 'dashboard-cli-detected'; updatedAt: string }>(),
+}));
+
 vi.mock('@/lib/runtimes', () => ({
   getAllRuntimes: () => registryFixture.runtimes,
 }));
@@ -32,7 +37,15 @@ vi.mock('@/lib/runtime/ide-session-registry', () => ({
 }));
 
 vi.mock('@/lib/runtime/terminal-session-registry', () => ({
-  getRuntimeTerminalSession: () => null,
+  DASHBOARD_CLI_BINDING_TTL_MS: 30 * 60_000,
+  getRuntimeTerminalSession: (key: string) => terminalFixture.registry.get(key) ?? null,
+  registerRuntimeTerminalSession: (key: string, entry: { sessionName: string; runtime: 'codex' | 'claude-code'; cwd?: string; source?: 'dashboard-cli-detected' }) => {
+    terminalFixture.registry.set(key, { ...entry, updatedAt: new Date().toISOString() });
+  },
+}));
+
+vi.mock('@/lib/runtime/dashboard-cli-bindings', () => ({
+  discoverDashboardCliBindings: async () => new Map(terminalFixture.bindings),
 }));
 
 vi.mock('@/lib/lane/registry', () => ({
@@ -111,6 +124,8 @@ describe('canonical runtime inventory discovery', () => {
     registryFixture.runtimes = [];
     ideRegistryFixture.sessions = [];
     ideRegistryFixture.tabs = [];
+    terminalFixture.bindings.clear();
+    terminalFixture.registry.clear();
     invalidateRuntimeInventoryCache();
   });
 
@@ -139,6 +154,44 @@ describe('canonical runtime inventory discovery', () => {
       'aider-identity',
     ]);
     expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
+  });
+
+  it('projects an exact dashboard terminal binding and downgrades an exited CLI to unknown evidence', async () => {
+    const codexRuntime = runtime('codex');
+    const originalDiscovery = codexRuntime.discoverSessions;
+    codexRuntime.discoverSessions = async () => (await originalDiscovery()).map((session) => ({
+      ...session,
+      sessionKey: 'codex:terminal-thread',
+      ownership: 'discovered',
+      pid: 4242,
+    }));
+    registryFixture.runtimes = [codexRuntime];
+    terminalFixture.bindings.set('codex:terminal-thread', 'cortex-dash-real');
+
+    const live = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(live.agents).toHaveLength(1);
+    expect(live.agents[0]).toMatchObject({
+      sessionKey: 'codex:terminal-thread',
+      tmuxSession: 'cortex-dash-real',
+      status: 'running',
+      statusEvidence: { state: 'unknown', authority: 'raw-terminal' },
+    });
+    expect(terminalFixture.registry.get('codex:terminal-thread')?.source).toBe('dashboard-cli-detected');
+
+    terminalFixture.bindings.clear();
+    invalidateRuntimeInventoryCache();
+    const exited = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(exited.agents).toHaveLength(1);
+    expect(exited.agents[0]).toMatchObject({
+      sessionKey: 'codex:terminal-thread',
+      tmuxSession: undefined,
+      status: 'idle',
+      statusEvidence: {
+        state: 'unknown',
+        authority: 'raw-terminal',
+        fallbackReason: expect.stringContaining('no longer verified'),
+      },
+    });
   });
 
   it('serves a cold dashboard snapshot immediately and lets an explicit fresh read expedite discovery', async () => {

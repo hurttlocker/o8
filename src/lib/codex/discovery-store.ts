@@ -93,14 +93,14 @@ export async function queryCodexThreadsFromHome(codexHome: string, limit = 6): P
   const query = [
     'select',
     'id,',
-    'title,',
+    'substr(title, 1, 512) as title,',
     'cwd,',
     'updated_at,',
     'rollout_path,',
     "coalesce(git_branch, '') as git_branch,",
     "coalesce(git_sha, '') as git_sha,",
     "coalesce(git_origin_url, '') as git_origin_url,",
-    "coalesce(first_user_message, '') as first_user_message,",
+    "substr(coalesce(first_user_message, ''), 1, 512) as first_user_message,",
     "coalesce(model, '') as model",
     'from threads',
     'where archived = 0',
@@ -124,14 +124,14 @@ export async function queryCodexThreadByIdFromHome(
   const query = [
     'select',
     'id,',
-    'title,',
+    'substr(title, 1, 512) as title,',
     'cwd,',
     'updated_at,',
     'rollout_path,',
     "coalesce(git_branch, '') as git_branch,",
     "coalesce(git_sha, '') as git_sha,",
     "coalesce(git_origin_url, '') as git_origin_url,",
-    "coalesce(first_user_message, '') as first_user_message,",
+    "substr(coalesce(first_user_message, ''), 1, 512) as first_user_message,",
     "coalesce(model, '') as model",
     'from threads',
     `where archived = 0 and id = '${escapedThreadId}'`,
@@ -157,9 +157,16 @@ export async function queryCodexProcessBindings(codexHome: string): Promise<Code
     'group by thread_id, process_uuid',
     'order by last_ts desc;',
   ].join(' ');
-  const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDb(codexHome), query], {
-    windowsHide: true,
-    maxBuffer: 2 * 1024 * 1024,
-  });
-  return JSON.parse(stdout || '[]') as CodexProcessBinding[];
+  try {
+    const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDb(codexHome), query], {
+      windowsHide: true,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return JSON.parse(stdout || '[]') as CodexProcessBinding[];
+  } catch (error) {
+    // Recent Codex state schemas omit `logs`; live thread identity can still
+    // be recovered from the process's open thread-writer lock.
+    if (error instanceof Error && error.message.includes('no such table: logs')) return [];
+    throw error;
+  }
 }

@@ -7,10 +7,13 @@ interface TerminalSessionRegistryEntry {
   sessionName: string;
   runtime: 'claude-code' | 'codex';
   cwd?: string;
+  source?: 'dashboard-cli-detected';
   updatedAt: string;
 }
 
 type TerminalSessionRegistry = Record<string, TerminalSessionRegistryEntry>;
+
+export const DASHBOARD_CLI_BINDING_TTL_MS = 30 * 60_000;
 
 const STATE_DIR = getDataDir();
 const REGISTRY_PATH = path.join(STATE_DIR, 'runtime-terminal-sessions.json');
@@ -58,6 +61,18 @@ export function registerRuntimeTerminalSession(
 
 export function getRuntimeTerminalSession(sessionKey: string) {
   return readRegistry()[sessionKey] ?? null;
+}
+
+export function listRecentDashboardCliSessions(runtime: TerminalSessionRegistryEntry['runtime']) {
+  const now = Date.now();
+  return Object.entries(readRegistry())
+    .filter(([sessionKey, entry]) => {
+      if (entry.source !== 'dashboard-cli-detected' || entry.runtime !== runtime) return false;
+      if (sessionKey.startsWith('codex-live:')) return false;
+      const observedAt = Date.parse(entry.updatedAt);
+      return Number.isFinite(observedAt) && now - observedAt < DASHBOARD_CLI_BINDING_TTL_MS;
+    })
+    .map(([sessionKey, entry]) => ({ sessionKey, ...entry }));
 }
 
 export function removeRuntimeTerminalSessionsForRepoPath(repoPath: string) {

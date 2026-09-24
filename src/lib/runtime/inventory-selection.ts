@@ -2,10 +2,15 @@ import path from 'node:path';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
-import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { DASHBOARD_CLI_BINDING_TTL_MS, getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 
 export function isRegistryBackedRuntimeSession(sessionKey: string) {
-  return Boolean(getRuntimeTerminalSession(sessionKey));
+  const entry = getRuntimeTerminalSession(sessionKey);
+  if (!entry) return false;
+  if (entry.source !== 'dashboard-cli-detected') return true;
+  if (sessionKey.startsWith('codex-live:')) return false;
+  const observedAt = Date.parse(entry.updatedAt);
+  return Number.isFinite(observedAt) && Date.now() - observedAt < DASHBOARD_CLI_BINDING_TTL_MS;
 }
 
 function normalizeInventoryWorkspacePath(workspace?: string | null) {
