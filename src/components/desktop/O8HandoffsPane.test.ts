@@ -40,6 +40,7 @@ describe('O8HandoffsPane', () => {
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    sessionStorage.clear();
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -154,12 +155,12 @@ describe('O8HandoffsPane', () => {
       active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
     })));
     await vi.waitFor(() => expect(host.textContent).toContain('A linked request.'));
-    expect(host.querySelector('[data-agent-conversation-id="conversation-one"]')?.textContent).toContain('7 turns left · open');
+    expect(host.querySelector('[data-agent-conversation-id="conversation-one"]')?.textContent).toContain('7 turns left');
     expect(host.querySelectorAll('nav[aria-label="Conversations"] button')).toHaveLength(2);
     await act(async () => host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-one"]')?.click());
     expect(document.body.querySelector('[data-agent-conversation-detail="conversation-one"]')?.textContent).toContain('A linked request.');
     expect(host.textContent).toContain('@Keen · Codex · ONKEEN');
-    expect(host.textContent).toContain('Legacy · unthreaded');
+    expect(host.textContent).toContain('Unthreaded');
     await act(async () => {
       host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-one"]')?.click();
       Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Stop')?.click();
@@ -186,10 +187,41 @@ describe('O8HandoffsPane', () => {
     await act(async () => root.render(createElement(O8HandoffsPane, {
       active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
     })));
-    await vi.waitFor(() => expect(host.textContent).toContain('7 turns left · open'));
+    await vi.waitFor(() => expect(host.textContent).toContain('7 turns left'));
     expect(host.querySelector('#o8-handoff-message')).toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-one"]')?.click());
     await act(async () => Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Stop')?.click());
     await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe('Conversation already closed.'));
+  });
+
+  it('restores a selected exchange after remount and reopens an exact transcript link', async () => {
+    const linked: AgentMessage = {
+      ...message,
+      conversation: {
+        id: 'conversation-restore', replyToId: null, turnIndex: 1, turnLimit: 8,
+        remainingTurns: 7, status: 'open', closedReason: null, lastMessageId: message.id,
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith('/api/agents/presence?')) return jsonResponse({ agents: [agent] });
+      if (String(input).startsWith('/api/agents/message?')) return jsonResponse({ messages: [linked] });
+      throw new Error(`Unexpected request: ${String(input)}`);
+    }));
+    const props = { active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false };
+    await act(async () => root.render(createElement(O8HandoffsPane, props)));
+    await vi.waitFor(() => expect(host.querySelector('[data-agent-conversation-id="conversation-restore"]')).not.toBeNull());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-restore"]')?.click());
+    expect(document.body.querySelector('[data-agent-conversation-detail="conversation-restore"]')).not.toBeNull();
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(O8HandoffsPane, props)));
+    await vi.waitFor(() => expect(document.body.querySelector('[data-agent-conversation-detail="conversation-restore"]')).not.toBeNull());
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Back to Handoffs')?.click());
+    expect(document.body.querySelector('[data-agent-conversation-detail="conversation-restore"]')).toBeNull();
+    await act(async () => root.render(createElement(O8HandoffsPane, {
+      ...props, selection: { id: 'conversation-restore', request: 1, repoPath: repo.localPath },
+    })));
+    expect(document.body.querySelector('[data-agent-conversation-detail="conversation-restore"]')).not.toBeNull();
   });
 });

@@ -6,8 +6,8 @@ export function useHandoffSelection(
   onRepoPathChange: ((repoPath: string) => void) | undefined,
   onActiveTabChange: ((tab: O8Tab) => void) | undefined,
   onOpenO8Panel: ((options: { repoPath?: string | null; tab?: 'handoffs' }) => void) | undefined,
-): { id: string | null; request: number } {
-  const [selection, setSelection] = useState<{ id: string | null; request: number }>({ id: null, request: 0 });
+): { id: string | null; request: number; repoPath: string | null } {
+  const [selection, setSelection] = useState<{ id: string | null; request: number; repoPath: string | null }>({ id: null, request: 0, repoPath: null });
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ conversationId?: string | null; repoPath?: string | null }>).detail ?? {};
@@ -15,6 +15,7 @@ export function useHandoffSelection(
       setSelection((current) => ({
         id: typeof detail.conversationId === 'string' ? detail.conversationId : null,
         request: current.request + 1,
+        repoPath: detail.repoPath ?? repoPath ?? null,
       }));
       onOpenO8Panel?.({ tab: 'handoffs', repoPath: detail.repoPath });
       onActiveTabChange?.('handoffs');

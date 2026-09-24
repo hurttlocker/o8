@@ -41,11 +41,31 @@ function agentOptionLabel(agent: AgentPresence): string {
 }
 
 function agentIdentity(name: string, agents: AgentPresence[]): string {
+  if (name === 'operator') return 'Operator';
   const agent = agents.find((entry) => entry.name.toLocaleLowerCase() === name.toLocaleLowerCase());
   if (!agent) return `@${name}`;
   const runtime = agent.runtime === 'claude-code' ? 'Claude' : agent.runtime === 'codex' ? 'Codex' : agent.runtime;
   const shortId = agent.sessionKey?.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase();
   return `@${agent.name} · ${runtime}${shortId ? ` · ${shortId}` : ''}`;
+}
+
+function rememberedSelection(repo: string | null): { id: string; open: boolean } | null {
+  if (!repo || typeof sessionStorage === 'undefined') return null;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`o8:handoffs:${repo}`) ?? 'null') as { id?: unknown; open?: unknown } | null;
+    return typeof value?.id === 'string' ? { id: value.id, open: value.open === true } : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSelection(repo: string | null, id: string | null, open: boolean): void {
+  if (!repo || !id || typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(`o8:handoffs:${repo}`, JSON.stringify({ id, open }));
+  } catch {
+    // Private or restricted webviews can deny storage; navigation still works in memory.
+  }
 }
 
 const fieldStyle: CSSProperties = {
@@ -74,7 +94,7 @@ export function O8HandoffsPane({
   registeredRepos: RepoRegistryEntry[];
   allRepos: boolean;
   onRepoPathChange?: (repoPath: string) => void;
-  selection?: { id: string | null; request: number };
+  selection?: { id: string | null; request: number; repoPath: string | null };
 }) {
   const scopedRepo = !allRepos && repoPath && registeredRepos.some((repo) => repo.localPath === repoPath)
     ? repoPath : null;
@@ -89,12 +109,14 @@ export function O8HandoffsPane({
   const [error, setError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(selection?.id ?? null);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(selection?.id ?? rememberedSelection(scopedRepo)?.id ?? null);
+  const [detailOpen, setDetailOpen] = useState(rememberedSelection(scopedRepo)?.open ?? false);
   const [refreshKey, setRefreshKey] = useState(0);
   const sendInFlightRef = useRef(false);
   const scopedRepoRef = useRef(scopedRepo);
+  const selectionRef = useRef(selection);
   scopedRepoRef.current = scopedRepo;
+  selectionRef.current = selection;
 
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
 
@@ -108,6 +130,10 @@ export function O8HandoffsPane({
     setError(null);
     setSendError(null);
     setActionError(null);
+    const remembered = rememberedSelection(scopedRepo);
+    const requested = selectionRef.current;
+    setSelectedId(requested?.repoPath === scopedRepo && requested.id ? requested.id : remembered?.id ?? null);
+    setDetailOpen(requested?.repoPath === scopedRepo && requested.id ? true : remembered?.open ?? false);
   }, [scopedRepo]);
 
   useEffect(() => {
@@ -199,19 +225,23 @@ export function O8HandoffsPane({
 
   const groups = exchangeGroups(messages);
   useEffect(() => {
-    if (selection?.id) {
+    if (selection?.id && selection.repoPath === scopedRepo) {
       setSelectedId(selection.id);
       setDetailOpen(true);
+      rememberSelection(scopedRepo, selection.id, true);
     }
-  }, [selection?.id, selection?.request]);
+  }, [selection?.id, selection?.request, selection?.repoPath, scopedRepo]);
   useEffect(() => {
     if (!detailOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setDetailOpen(false);
+      if (event.key === 'Escape') {
+        setDetailOpen(false);
+        rememberSelection(scopedRepo, selectedId, false);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [detailOpen]);
+  }, [detailOpen, scopedRepo, selectedId]);
   useEffect(() => {
     if (!groups.length) return;
     if (selectedId && !groups.some((group) => group.id === selectedId)) setSelectedId(groups[0]?.id ?? null);
@@ -261,10 +291,10 @@ export function O8HandoffsPane({
             const conversation = latest.conversation;
             const active = group.id === selectedGroup?.id;
             return (
-              <button key={group.id} type="button" data-agent-conversation-id={conversation?.id ?? group.id} aria-pressed={active} onClick={() => { setSelectedId(group.id); setDetailOpen(true); }} style={{ display: 'block', width: '100%', minHeight: 62, paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, border: 'none', borderBottom: '1px solid var(--t-divider-subtle)', background: active ? 'var(--t-panel-hover)' : 'transparent', color: 'var(--t-text)', textAlign: 'left', cursor: 'pointer' }}>
+              <button key={group.id} type="button" data-agent-conversation-id={conversation?.id ?? group.id} aria-pressed={active} onClick={() => { setSelectedId(group.id); setDetailOpen(true); rememberSelection(scopedRepo, group.id, true); }} style={{ display: 'block', width: '100%', minHeight: 62, paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, border: 'none', borderBottom: '1px solid var(--t-divider-subtle)', background: active ? 'var(--t-panel-hover)' : 'transparent', color: 'var(--t-text)', textAlign: 'left', cursor: 'pointer' }}>
                 <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 400 }}>{agentIdentity(first.from, agents)} → {agentIdentity(first.to, agents)}</strong>
                 <span style={{ display: 'block', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 10.5 }}>{latest.text}</span>
-                <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 10 }}>{conversation ? `${conversation.remainingTurns} turns left · ${conversation.status}` : 'Legacy · unthreaded'} · {group.messages.length} messages</span>
+                <span style={{ display: 'block', marginTop: 4, color: latest.to === 'operator' && conversation?.status === 'open' ? 'var(--t-accent)' : 'var(--t-text-faint)', fontSize: 10 }}>{conversation?.status === 'closed' ? 'Closed' : latest.to === 'operator' ? 'Needs your reply' : `Waiting on @${latest.to}`} · {conversation ? `${conversation.remainingTurns} turns left` : 'Unthreaded'} · {new Date(latest.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
               </button>
             );
           })}
@@ -276,7 +306,7 @@ export function O8HandoffsPane({
               const conversation = latest.conversation;
               return <>
                 <header style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 16, paddingRight: 24, paddingBottom: 16, paddingLeft: 24, borderBottom: '1px solid var(--t-divider)', flexShrink: 0 }}>
-                  <button type="button" onClick={() => setDetailOpen(false)} style={{ minHeight: 36, paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, cursor: 'pointer' }}>Back to Handoffs</button>
+                  <button type="button" onClick={() => { setDetailOpen(false); rememberSelection(scopedRepo, selectedGroup.id, false); }} style={{ minHeight: 36, paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, cursor: 'pointer' }}>Back to Handoffs</button>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <strong style={{ display: 'block', fontSize: 15, fontWeight: 400 }}>{agentIdentity(first.from, agents)} → {agentIdentity(first.to, agents)}</strong>
                     <span style={{ display: 'block', marginTop: 3, color: 'var(--t-text-faint)', fontSize: 11 }}>{conversation ? `${conversation.remainingTurns} turns left · ${conversation.status}` : 'Legacy · unthreaded'} · {scopedRepo}</span>
@@ -296,7 +326,7 @@ export function O8HandoffsPane({
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 11 }}>
                         <span title={message.deliveryNote ?? undefined} style={{ flex: 1, color: message.delivery === 'failed' ? 'var(--t-danger)' : 'var(--t-text-faint)', fontSize: 11 }}>{deliveryLabel(message)} · {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
                         {message.id === latest.id && message.to === 'operator' && conversation?.status === 'open' && agents.some((agent) => agent.name === message.from) ? (
-                          <button type="button" onClick={() => { setTarget(message.from); setReplyToId(message.id); setComposerOpen(true); setDetailOpen(false); }} style={{ minHeight: 34, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-accent)', fontSize: 11.5, cursor: 'pointer' }}>Reply</button>
+                          <button type="button" onClick={() => { setTarget(message.from); setReplyToId(message.id); setComposerOpen(true); setDetailOpen(false); rememberSelection(scopedRepo, selectedGroup.id, false); }} style={{ minHeight: 34, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-accent)', fontSize: 11.5, cursor: 'pointer' }}>Reply</button>
                         ) : null}
                       </div>
                     </article>
