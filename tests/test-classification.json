@@ -2701,6 +2701,15 @@
       ]
     },
     {
+      "path": "tests/realtime-global-bridge-recovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/realtime-protocol-negotiation-real-path.test.ts",
       "reasons": [
         "child-process",
