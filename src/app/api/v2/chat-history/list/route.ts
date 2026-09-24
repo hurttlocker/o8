@@ -12,7 +12,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
+import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 
@@ -160,15 +160,15 @@ export async function GET(request: NextRequest) {
         }
 
         // Placeholder title for empty threads (created via + New but not typed into yet).
-        // Gets replaced by the first user message once the operator types.
+        // Orchestrator threads keep a neutral fallback instead of using prompt text.
         const saved = data.savedAt ? new Date(data.savedAt) : stat.birthtime ?? stat.mtime;
         const placeholderTitle = tabId.startsWith('thoughts-')
           ? stableOrchestratorThreadTitleForId(tabId, saved)
           : stableNewThreadTitle(saved);
 
-        const title = data.title || (tabId.startsWith('thoughts-')
-          ? placeholderTitle
-          : firstUserMsg
+        const title = tabId.startsWith('thoughts-')
+          ? orchestratorDisplayTitle(data.title, placeholderTitle)
+          : data.title || (firstUserMsg
             ? firstUserMsg.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMsg.content.length > 60 ? '...' : '')
             : isEmpty ? placeholderTitle : 'Untitled conversation');
 
