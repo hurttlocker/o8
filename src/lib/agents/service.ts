@@ -240,7 +240,13 @@ export async function postAgentMessage(
       to: target.name,
       repo: target.repo,
       text,
-      refs: messageRefs(body, lane),
+      refs: {
+        ...messageRefs(body, lane),
+        identities: {
+          from: sender ? { runtime: sender.runtime, sessionKey: sender.sessionKey } : null,
+          to: target.runtime === 'operator' ? null : { runtime: target.runtime, sessionKey: target.sessionKey },
+        },
+      },
       replyToId,
       requestId,
       close: body.close === true,
@@ -352,10 +358,14 @@ export function joinAgentPresence(
 export async function readAgentPresence(
   repo: string | null,
   principal: RequestPrincipalContext,
+  includeStale = false,
   sqlite: Database.Database = getSqlite(),
   presenceSeams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
 ): Promise<AgentPresence[]> {
   requireBusPrincipal(principal);
+  if (includeStale && principal.role !== 'operator') {
+    throw new AgentBusError('Presence history requires an operator credential.', 'agent_presence_history_forbidden', 403);
+  }
   const lane = workerLane(principal);
   if (principal.role === 'worker' && !lane) {
     throw new AgentBusError('The worker packet has no active lane.', 'agent_bus_lane_not_found', 404);
@@ -365,7 +375,7 @@ export async function readAgentPresence(
     throw new AgentBusError('Workers can inspect only their repository.', 'agent_repo_mismatch', 403);
   }
   await reconcileLiveAgentPresence(requestedRepo, presenceSeams, sqlite);
-  return listAgentPresence(requestedRepo, {}, sqlite);
+  return listAgentPresence(requestedRepo, { includeStale }, sqlite);
 }
 
 export async function readAllAgentPresence(
