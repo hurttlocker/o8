@@ -43,12 +43,13 @@ function SymonVoiceEntry() {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 5,
-        height: 30,
+        justifyContent: 'center',
+        width: 26,
+        height: 26,
         paddingTop: 0,
-        paddingRight: 5,
+        paddingRight: 0,
         paddingBottom: 0,
-        paddingLeft: 5,
+        paddingLeft: 0,
         borderWidth: 0,
         borderRadius: 7,
         background: active ? 'var(--t-hover)' : 'transparent',
@@ -63,7 +64,6 @@ function SymonVoiceEntry() {
       <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
         <path d="M2 8v4M6 4v12M10 7v6M14 2v16M18 8v4" />
       </svg>
-      Voice
     </button>
   );
 }
@@ -138,6 +138,8 @@ export function AccountBlock({
   return (
     <div
       style={{
+        position: 'relative',
+        zIndex: 60,
         flexShrink: 0,
         borderTopWidth: 1,
         borderTopStyle: 'solid',
@@ -275,7 +277,7 @@ export function AccountBlock({
                 </span>
               </span>
             </button>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, paddingTop: 2, paddingRight: 3, paddingBottom: 2, paddingLeft: 3, borderRadius: 10, background: 'var(--t-hover)', flexShrink: 0 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
               <SymonVoiceEntry />
               <SymonOrbStatusLine />
               <SymonMachineControl placement="sidebar" />
@@ -283,7 +285,7 @@ export function AccountBlock({
             {/* Account settings remain on the account row; the footer actions
                 beside it open voice, Symon's machine, and mobile pairing. */}
             {onOpenMobilePairing ? (
-              <span style={{ marginLeft: 7, display: 'inline-flex', alignItems: 'center' }}>
+              <span style={{ marginLeft: 3, display: 'inline-flex', alignItems: 'center' }}>
                 <ChromeButton
                   icon={<DeviceMobileIcon size={14} color="var(--t-text-muted)" />}
                   label="Pair mobile device"
