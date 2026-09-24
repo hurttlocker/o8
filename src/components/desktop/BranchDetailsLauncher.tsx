@@ -138,6 +138,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   onToggleCollapsed?: () => void;
 }) {
   const data = useOrchestratorData();
+  const hasData = Boolean(data);
   const [progressOpen, setProgressOpen] = useState(false);
   // Spawns closed and stays wherever the operator last put it (Q 2026-07-16).
   const [environmentOpen, setEnvironmentOpen] = useState(readEnvironmentOpen);
@@ -163,14 +164,21 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   useEffect(() => {
     if (typeof window === 'undefined') return;
     measure();
+    // The right panel animates the workspace width without a window resize.
+    // Keep the closed drawer's anchor current too, so its first open frame
+    // starts at the rail instead of jumping from the previous panel position.
+    const workspace = capsuleRef.current?.closest('[data-mcp-scope="workspace"]');
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    if (workspace) observer?.observe(workspace);
     const onScrollResize = () => measure();
     window.addEventListener('scroll', onScrollResize, true);
     window.addEventListener('resize', onScrollResize);
     return () => {
+      observer?.disconnect();
       window.removeEventListener('scroll', onScrollResize, true);
       window.removeEventListener('resize', onScrollResize);
     };
-  }, [measure]);
+  }, [measure, visible, hasData]);
 
   // Panel-divider drags move the capsule WITHOUT firing window scroll/resize —
   // the drag writes widths straight onto the column DOM styles — so the card
