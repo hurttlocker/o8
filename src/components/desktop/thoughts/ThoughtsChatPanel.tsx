@@ -2220,7 +2220,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         }}
       >
         {/* Keep the optional rail beside the transcript and the composer below. */}
-        <div style={{ flex: composeFirst ? '0 1 auto' : 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
           <ChatMessageList
             ref={chatEndRef}
             displayMessages={displayMessages}
