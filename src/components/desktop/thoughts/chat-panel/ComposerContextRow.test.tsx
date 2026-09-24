@@ -51,7 +51,8 @@ describe('composer context row', () => {
     act(() => root?.render(<Harness />));
 
     const project = host.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]');
-    expect(project?.textContent).toContain('Work in a project');
+    expect(project?.textContent).toContain('Project');
+    expect(project?.getAttribute('aria-label')).toBe('Project target');
     expect(project?.disabled).toBe(false);
     act(() => project?.click());
     act(() => host?.querySelector<HTMLButtonElement>('[role="option"]')?.click());
@@ -61,6 +62,24 @@ describe('composer context row', () => {
     act(() => host?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="false"]')?.click());
     expect(onPermissionModeChange).toHaveBeenCalledWith('plan');
     expect(host.querySelector('[aria-label="Permissions: Plan only"]')).not.toBeNull();
+  });
+
+  it('names the selected repository as the project target', () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root?.render(
+      <ComposerContextRow
+        repoLabel="o8"
+        selectedRepoPath="/repo/o8"
+        workspaceTargets={[]}
+        onAddProject={() => {}}
+      />,
+    ));
+
+    const project = host.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]');
+    expect(project?.textContent).toContain('o8');
+    expect(project?.getAttribute('aria-label')).toBe('Project target: o8');
   });
 
   it('groups the left controls together and leaves the status slot on the row', () => {

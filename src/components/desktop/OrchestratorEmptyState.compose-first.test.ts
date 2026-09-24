@@ -34,8 +34,25 @@ describe('empty workspace compose-first layout', () => {
     }));
 
     expect(markup).toContain('data-o8-composer-context-row');
-    expect(markup).toContain('aria-label="Start in"');
-    expect(markup).toContain('Work locally');
-    expect(markup.indexOf('Work in a project')).toBeLessThan(markup.indexOf('aria-label="Start in"'));
+    expect(markup).toContain('aria-label="Start location: Local"');
+    expect(markup).toContain('>Local<');
+    expect(markup.indexOf('>Project<')).toBeLessThan(markup.indexOf('aria-label="Start location: Local"'));
+  });
+
+  it('keeps the worktree start location distinct in its trigger', () => {
+    const markup = renderToStaticMarkup(createElement(ComposerContextRow, {
+      contextLocationSlot: createElement(OrchestratorStartLocationControls, {
+        worktreeMode: 'new-worktree',
+        onWorktreeModeChange: vi.fn(),
+        branch: 'feature',
+        repoPath: '~',
+      }),
+      repoLabel: 'o8',
+      workspaceTargets: [],
+      selectedRepoPath: '~',
+    }));
+
+    expect(markup).toContain('aria-label="Start location: Worktree"');
+    expect(markup).toContain('>Worktree<');
   });
 });
