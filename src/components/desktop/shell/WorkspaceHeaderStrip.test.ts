@@ -95,6 +95,21 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     }
   });
 
+  it('keeps Add available across split panes and toggles the grid layout', async () => {
+    const toggleGrid = vi.fn();
+    await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
+      splitHeaderWorkspaces: [
+        { workspaceId: 'ws-1', tabs: [headerTab(0, 'First')], activeTabId: 'tab-0' },
+        { workspaceId: 'ws-2', tabs: [headerTab(1, 'Second')], activeTabId: 'tab-1' },
+      ],
+      workspaceGridAvailable: true,
+      onToggleWorkspaceGrid: toggleGrid,
+    }))));
+    expect(container.querySelector('button[aria-label="New tab"]')).not.toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Show pane grid"]')?.click());
+    expect(toggleGrid).toHaveBeenCalledOnce();
+  });
+
   it('targets a new chat pane without opening the bottom panel', async () => {
     const toggleBottomPanel = vi.fn();
     const splits: Array<{ kind: string; direction: string; workspaceId: string }> = [];

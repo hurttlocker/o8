@@ -54,6 +54,9 @@ export function WorkspaceHeaderStrip({
   onCloseWorkspacePanel,
   bottomPanelVisible = false,
   onToggleBottomPanel,
+  workspaceGridAvailable = false,
+  workspaceGridMode = false,
+  onToggleWorkspaceGrid,
   rightPanelOpen = false,
   onToggleRightPanel,
   approvalCount = 0,
@@ -126,8 +129,16 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
-            {!isSplit && workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
-            {onCloseWorkspacePanel ? <SplitPaneCloseButton onClick={onCloseWorkspacePanel} paneLabel="active pane" /> : null}
+            {workspaceId && !(workspaceGridMode && workspaceGridAvailable) ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
+            {workspaceGridAvailable && onToggleWorkspaceGrid ? (
+              <HeaderIconPill
+                icon={<svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x={3} y={3} width={7} height={7} rx={1} /><rect x={14} y={3} width={7} height={7} rx={1} /><rect x={3} y={14} width={7} height={7} rx={1} /><rect x={14} y={14} width={7} height={7} rx={1} /></svg>}
+                label={workspaceGridMode ? 'Show split panes' : 'Show pane grid'}
+                onClick={onToggleWorkspaceGrid}
+                yNudge={1.3}
+              />
+            ) : null}
+            {onCloseWorkspacePanel && !(workspaceGridMode && workspaceGridAvailable) ? <SplitPaneCloseButton onClick={onCloseWorkspacePanel} paneLabel="active pane" /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
