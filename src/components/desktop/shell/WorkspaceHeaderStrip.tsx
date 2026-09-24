@@ -54,7 +54,6 @@ export function WorkspaceHeaderStrip({
   onCloseWorkspacePanel,
   bottomPanelVisible = false,
   onToggleBottomPanel,
-  onOpenBottomPanelSurface,
   rightPanelOpen = false,
   onToggleRightPanel,
   approvalCount = 0,
@@ -161,7 +160,6 @@ export function WorkspaceHeaderStrip({
                 <StatusBottomPanelControl
                   active={bottomPanelVisible}
                   onToggle={onToggleBottomPanel}
-                  onOpenSurface={onOpenBottomPanelSurface}
                 />
               </div>
             ) : null}

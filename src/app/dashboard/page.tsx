@@ -33,7 +33,7 @@ import { EntitlementProvider } from '@/lib/entitlement/context';
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { ConfirmToastHost, toast } from '@/components/shared/ConfirmToastHost';
-import type { BottomPanelSurfaceKind, ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
+import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { requestTerminalModeToggle } from '@/components/desktop/shell/TerminalModePill';
@@ -3290,26 +3290,6 @@ function DashboardInner() {
     runCommand();
   }, [ensureTileKind, getPreferredContextualPanelHandle]);
 
-  // ── Open a non-terminal surface in the bottom panel ──
-  const handleOpenBottomPanelSurface = useCallback((surface: BottomPanelSurfaceKind) => {
-    const tileId = ensureTileKind('contextual-panel', {
-      direction: 'horizontal',
-      preferredKinds: ['terminal', 'contextual-panel', 'preview'],
-      ratio: 0.68,
-    });
-    const open = (attempt = 0) => {
-      const handle = getPreferredContextualPanelHandle(tileId);
-      if (handle) {
-        handle.openSurface(surface);
-        return;
-      }
-      if (attempt < 8) {
-        window.setTimeout(() => open(attempt + 1), 50);
-      }
-    };
-    open();
-  }, [ensureTileKind, getPreferredContextualPanelHandle]);
-
   // ── Watch a live o8-owned run session (`o8 run`) in the bottom panel ──
   const handleOpenAgentTerminal = useCallback((session: string, label?: string) => {
     if (!session) return;
@@ -5283,7 +5263,6 @@ function DashboardInner() {
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           bottomPanelVisible={bottomPanelVisible}
           onToggleBottomPanel={toggleContextualPanelTile}
-          onOpenBottomPanelSurface={handleOpenBottomPanelSurface}
           projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
           projectContextRailVisible={workspaceHeaderActive.contextRailVisible}
           onToggleProjectContextRail={compactShell ? undefined : () => {

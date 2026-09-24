@@ -78,7 +78,8 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
       await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
         onToggleBottomPanel: toggleBottomPanel,
       }))));
-      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Toggle bottom panel"]')?.click());
+      expect(container.querySelector('button[aria-label="Choose bottom panel surface"]')).toBeNull();
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open bottom panel"]')?.click());
       expect(toggleBottomPanel).toHaveBeenCalledOnce();
       expect(spawns).toEqual([]);
 

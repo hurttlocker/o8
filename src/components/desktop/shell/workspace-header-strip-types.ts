@@ -13,7 +13,6 @@ export interface WorkspaceHeaderStripProps {
   /** Terminal toggle. Shown only when a handler is provided. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
-  onOpenBottomPanelSurface?: (surface: import('@/components/desktop/ContextualPanel').BottomPanelSurfaceKind) => void;
   /** Split the active workspace tile into a second pane. */
   onSplitWorkspacePanel?: () => void;
   /** Close the focused pane when workspaces are stacked vertically. */
