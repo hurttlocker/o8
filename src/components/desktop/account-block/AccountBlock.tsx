@@ -1,13 +1,14 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- auth avatar URLs are runtime-provided and intentionally render at a fixed 28px */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { ChromeButton } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
 import { WhatsNewCard } from './WhatsNewCard';
+import { SymonMachineControl, SymonOrbStatusLine } from '../dictation/SymonMachineControl';
 
 interface AccountBlockProps {
   onOpenSettings?: () => void;
@@ -19,6 +20,53 @@ interface AccountBlockProps {
 type AccountPopover = 'menu' | 'whats-new' | null;
 
 const NOOP = () => {};
+
+function subscribeToSymonVoice(onChange: () => void) {
+  window.addEventListener('o8:symon-voice-status', onChange);
+  return () => window.removeEventListener('o8:symon-voice-status', onChange);
+}
+
+function symonVoiceActive() {
+  const status = (window as unknown as { __o8RealtimeStatus?: string }).__o8RealtimeStatus;
+  return status === 'requesting-mic' || status === 'connecting' || status === 'live';
+}
+
+function SymonVoiceEntry() {
+  const active = useSyncExternalStore(subscribeToSymonVoice, symonVoiceActive, () => false);
+  return (
+    <button
+      type="button"
+      aria-label={active ? 'Stop Symon voice' : 'Start Symon voice'}
+      aria-pressed={active}
+      title={active ? 'Stop talking to Symon' : 'Talk to Symon'}
+      onClick={() => window.dispatchEvent(new Event('o8:symon-voice-toggle'))}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        height: 30,
+        paddingTop: 0,
+        paddingRight: 5,
+        paddingBottom: 0,
+        paddingLeft: 5,
+        borderWidth: 0,
+        borderRadius: 7,
+        background: active ? 'var(--t-hover)' : 'transparent',
+        color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
+        cursor: 'pointer',
+        fontFamily: 'var(--font-sans-system)',
+        fontSize: 11.5,
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+    >
+      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+        <path d="M2 8v4M6 4v12M10 7v6M14 2v16M18 8v4" />
+      </svg>
+      Voice
+    </button>
+  );
+}
 
 export function AccountBlock({
   onOpenSettings,
@@ -227,17 +275,23 @@ export function AccountBlock({
                 </span>
               </span>
             </button>
-            {/* Pair-mobile is the row's ONLY trailing icon (Q ruling
-                2026-07-16): the gear was a duplicate affordance — clicking
-                the account row itself already opens the settings drawer. */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, paddingTop: 2, paddingRight: 3, paddingBottom: 2, paddingLeft: 3, borderRadius: 10, background: 'var(--t-hover)', flexShrink: 0 }}>
+              <SymonVoiceEntry />
+              <SymonOrbStatusLine />
+              <SymonMachineControl placement="sidebar" />
+            </div>
+            {/* Account settings remain on the account row; the footer actions
+                beside it open voice, Symon's machine, and mobile pairing. */}
             {onOpenMobilePairing ? (
-              <ChromeButton
-                icon={<DeviceMobileIcon size={14} color="var(--t-text-muted)" />}
-                label="Pair mobile device"
-                onClick={onOpenMobilePairing}
-                size={22}
-                radius={6}
-              />
+              <span style={{ marginLeft: 7, display: 'inline-flex', alignItems: 'center' }}>
+                <ChromeButton
+                  icon={<DeviceMobileIcon size={14} color="var(--t-text-muted)" />}
+                  label="Pair mobile device"
+                  onClick={onOpenMobilePairing}
+                  size={22}
+                  radius={6}
+                />
+              </span>
             ) : null}
           </>
         ) : null}
