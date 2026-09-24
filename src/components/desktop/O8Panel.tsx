@@ -12,6 +12,8 @@ import type React from 'react';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { Terminal as TablerTerminal } from '@/components/desktop/tabler-shims';
 import { O8ActivityPane } from './O8ActivityPane';
+import { O8HandoffsPane } from './O8HandoffsPane';
+import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8InboxPane } from './O8InboxPane';
@@ -132,47 +134,6 @@ function XIcon({ size = 12 }: { size?: number }) {
   );
 }
 
-function SurfaceEmptyState({
-  icon,
-  title,
-  detail,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  detail: string;
-}) {
-  return (
-    <div style={{
-      flex: 1,
-      minHeight: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 10,
-      color: 'var(--t-text-muted)',
-      background: 'var(--t-bg)',
-      textAlign: 'center',
-      padding: 24,
-    }}>
-      <div style={{
-        width: 42,
-        height: 42,
-        borderRadius: 14,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--t-text-secondary)',
-        background: 'var(--t-input-bg)',
-        border: '1px solid var(--t-divider-subtle)',
-      }}>
-        {icon}
-      </div>
-      <div style={{ fontSize: 13.5, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{title}</div>
-      <div style={{ maxWidth: 360, fontSize: 13, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)' }}>{detail}</div>
-    </div>
-  );
-}
 
 interface RightUtilityDefinition {
   id: RightUtilityTab;
@@ -831,6 +792,15 @@ export function O8Panel({
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'resources' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8ResourcesPane active={activeTab === 'resources'} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'handoffs' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <O8HandoffsPane
+          active={activeTab === 'handoffs'}
+          repoPath={repoPath}
+          registeredRepos={registeredRepos}
+          allRepos={allRepos ?? false}
+          onRepoPathChange={onRepoPathChange}
+        />
       </div>
       {/* Inbox (Incident Queue) now renders through the closeable utility strip
           above — see renderUtilitySurface('inbox'). No standalone main-tab mount

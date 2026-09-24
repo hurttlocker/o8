@@ -619,6 +619,7 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     || raw === 'browser'
     || raw === 'activity'
     || raw === 'resources'
+    || raw === 'handoffs'
     || raw === 'inbox'
     || raw === 'spec'
     || raw === 'launcher'
@@ -2028,6 +2029,17 @@ function DashboardInner() {
     window.addEventListener('o8:open-inbox-tab', handleOpenInbox);
     return () => window.removeEventListener('o8:open-inbox-tab', handleOpenInbox);
   }, [handleOpenInbox]);
+
+  const handleOpenHandoffs = useCallback(() => {
+    setRightPanelKind('o8');
+    openRightPanelFromUser();
+    setO8ActiveTab('handoffs');
+  }, [openRightPanelFromUser]);
+
+  useEffect(() => {
+    window.addEventListener('o8:open-handoffs', handleOpenHandoffs);
+    return () => window.removeEventListener('o8:open-handoffs', handleOpenHandoffs);
+  }, [handleOpenHandoffs]);
 
   // Automations nav entry (lives in AgentPanel's MiniAgentPanelHeader) dispatches
   // o8:open-automations when clicked. Flip the activeNavSection so the

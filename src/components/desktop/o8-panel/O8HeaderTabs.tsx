@@ -25,6 +25,15 @@ function IconActivity({ size = 16, color = 'currentColor' }: { size?: number; co
   );
 }
 
+function IconHandoffs({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
+      <path d="M3 5h12a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H8l-4 3v-4.2A3 3 0 0 1 3 14z" />
+      <path d="m8 11 2.5 2.5L15 9" />
+    </svg>
+  );
+}
+
 // Gauge — the Resources tab (per-session CPU/RAM Activity Monitor).
 function IconGauge({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
@@ -73,6 +82,7 @@ function IconGlobe({ size = 15, color = 'currentColor' }: { size?: number; color
 const O8_TABS: O8TabDef[] = [
   { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
   { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
+  { id: 'handoffs', label: 'Handoffs', icon: (c) => <IconHandoffs size={15} color={c} /> },
   { id: 'resources', label: 'Resources', icon: (c) => <IconGauge size={15} color={c} /> },
   { id: 'browser', label: 'Browser', icon: (c) => <IconGlobe size={15} color={c} /> },
   { id: 'targets', label: 'Targeting', icon: (c) => <IconTargets size={15} color={c} /> },
