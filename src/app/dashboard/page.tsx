@@ -847,19 +847,21 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:workspace-active-label', handler as EventListener);
   }, []);
 
+  const simpleSideBySideWorkspaceSplit = tileLayout.root.type === 'split'
+    && tileLayout.root.direction === 'vertical'
+    && tileLayout.root.children.every((child) => child.type === 'leaf' && child.content.kind === 'terminal');
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
-    // A stacked split keeps the focused pane's tabs in the global header;
-    // laying both panes side by side there would contradict their positions.
+    // Stacked or nested splits keep the focused pane's tabs in the header.
     if (workspaceActiveMap.size === 1) {
       const [only] = workspaceActiveMap.values();
       return only;
     }
-    if (workspaceActiveMap.size > 1 && tileLayout.root.type === 'split' && tileLayout.root.direction === 'horizontal') {
+    if (workspaceActiveMap.size > 1 && !simpleSideBySideWorkspaceSplit) {
       const workspaces = Array.from(workspaceActiveMap.values());
       return workspaces.find((workspace) => workspace.activeWorkspaceSurface) ?? workspaces[0];
     }
     return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false, terminalModeActive: false, activeWorkspaceSurface: false };
-  }, [tileLayout.root, workspaceActiveMap]);
+  }, [simpleSideBySideWorkspaceSplit, workspaceActiveMap]);
   const toggleActiveTerminalMode = useCallback(() => {
     const workspaces = Array.from(workspaceActiveMap.values());
     const target = workspaces.find((workspace) => workspace.activeWorkspaceSurface)
@@ -878,7 +880,7 @@ function DashboardInner() {
   // Side-by-side header pills mirror side-by-side workspace splits.
   const splitHeaderWorkspaces = useMemo(() => {
     if (workspaceActiveMap.size < 2) return null;
-    if (tileLayout.root.type === 'split' && tileLayout.root.direction === 'horizontal') return null;
+    if (!simpleSideBySideWorkspaceSplit) return null;
     return Array.from(workspaceActiveMap.entries()).map(([workspaceId, payload]) => ({
       workspaceId,
       tabs: payload.tabs,
@@ -888,7 +890,7 @@ function DashboardInner() {
       contextRailVisible: payload.contextRailVisible,
       terminalModeActive: payload.terminalModeActive,
     }));
-  }, [tileLayout.root, workspaceActiveMap]);
+  }, [simpleSideBySideWorkspaceSplit, workspaceActiveMap]);
 
   // Workspace tab id → chat-history thread id map. OrchestratorTab
   // broadcasts 'o8:workspace-thread-id' whenever its loaded thread
@@ -5297,7 +5299,7 @@ function DashboardInner() {
           headerActiveTabId={workspaceHeaderActive.tabId}
           finishedTabCount={workspaceHeaderActive.finishedTabCount}
           splitHeaderWorkspaces={splitHeaderWorkspaces}
-          onCloseWorkspacePanel={tileLayout.root.type === 'split' && tileLayout.root.direction === 'horizontal' && workspaceActiveMap.size > 1 && workspaceHeaderActive.workspaceId ? () => {
+          onCloseWorkspacePanel={!simpleSideBySideWorkspaceSplit && workspaceActiveMap.size > 1 && workspaceHeaderActive.workspaceId ? () => {
             window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId: workspaceHeaderActive.workspaceId } }));
           } : undefined}
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
