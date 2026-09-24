@@ -2184,7 +2184,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         flexDirection: 'column',
         flex: 1,
         minHeight: 0,
-        justifyContent: 'center',
+        justifyContent: 'center', position: 'relative',
       } as React.CSSProperties}
     >
       {displayMessages.length > 0 && showInlineExport ? (
@@ -2202,7 +2202,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           <ThreadExportButton state={exportState} onClick={() => { void handleCopyMarkdown(); }} />
         </div>
       ) : null}
-
       <div
         ref={composerDropHostRef}
         onDragOver={attachmentDragHandlers.onDragOver}
@@ -2258,8 +2257,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             onTaskArtifactDeliver={deliverTaskArtifactAction}
           />
         </div>
-        {transcriptSideRail ?? null}
+        {!composeFirst ? transcriptSideRail : null}
       </div>
+      {composeFirst && transcriptSideRail ? <div style={{ position: 'absolute', top: 0, right: 0, height: 'max-content' }}>{transcriptSideRail}</div> : null}
       <ChatToastStack
         reloadNotice={reloadNotice}
         onDismissReloadNotice={dismissReloadNotice}
