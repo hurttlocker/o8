@@ -1,7 +1,8 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { parse, resolve } from 'node:path';
 
 import type Database from 'better-sqlite3';
 
@@ -111,8 +112,59 @@ interface InboxStateRow {
   native_wake_at: string | null;
 }
 
-function normalizeRepoPath(repo: string): string {
-  return resolve(repo).replace(/\/+$/, '');
+export function normalizeAgentBusRepoPath(repo: string): string {
+  const absolute = resolve(repo);
+  try {
+    const canonical = realpathSync.native(absolute);
+    return canonical === parse(canonical).root ? canonical : canonical.replace(/\/+$/, '');
+  } catch {
+    return absolute === parse(absolute).root ? absolute : absolute.replace(/\/+$/, '');
+  }
+}
+
+function reconcilePersistedAgentBusRepoPaths(sqlite: Database.Database): void {
+  const rows = sqlite.prepare(`
+    SELECT repo_path FROM agent_presence
+    UNION
+    SELECT repo_path FROM agent_messages
+    UNION
+    SELECT repo_path FROM agent_conversations
+    UNION
+    SELECT repo_path FROM agent_inbox_state
+  `).all() as Array<{ repo_path: string }>;
+  const aliases = rows.map((row) => ({ source: row.repo_path, canonical: normalizeAgentBusRepoPath(row.repo_path) }))
+    .filter(({ source, canonical }) => source !== canonical);
+  if (aliases.length === 0) return;
+
+  const hasPresenceConflict = sqlite.prepare(`
+    SELECT 1
+    FROM agent_presence AS alias
+    JOIN agent_presence AS canonical
+      ON canonical.repo_path = ? AND canonical.name = alias.name COLLATE NOCASE
+    WHERE alias.repo_path = ?
+    LIMIT 1
+  `);
+  const hasInboxConflict = sqlite.prepare(`
+    SELECT 1
+    FROM agent_inbox_state AS alias
+    JOIN agent_inbox_state AS canonical
+      ON canonical.repo_path = ? AND canonical.agent_name = alias.agent_name COLLATE NOCASE
+    WHERE alias.repo_path = ?
+    LIMIT 1
+  `);
+  const rewrite = sqlite.transaction(() => {
+    for (const { source, canonical } of aliases) {
+      // Same display names in the two historical scopes cannot be merged
+      // without changing which session owns that name. Keep every row in the
+      // legacy scope isolated until an operator resolves the collision.
+      if (hasPresenceConflict.get(canonical, source) || hasInboxConflict.get(canonical, source)) continue;
+      sqlite.prepare('UPDATE agent_messages SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
+      sqlite.prepare('UPDATE agent_conversations SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
+      sqlite.prepare('UPDATE agent_presence SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
+      sqlite.prepare('UPDATE agent_inbox_state SET repo_path = ? WHERE repo_path = ?').run(canonical, source);
+    }
+  });
+  rewrite();
 }
 
 function expandBroadcastTextLimit(sqlite: Database.Database): void {
@@ -211,6 +263,10 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
       native_wake_at TEXT,
       PRIMARY KEY(repo_path, agent_name)
     );
+
+    CREATE TABLE IF NOT EXISTS agent_bus_migrations (
+      name TEXT PRIMARY KEY
+    );
   `);
   const messageColumns = new Set((sqlite.pragma('table_info(agent_messages)') as Array<{ name: string }>).map((column) => column.name));
   for (const [name, definition] of [
@@ -245,6 +301,16 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
     SET delivery_status = 'poll'
     WHERE delivery_status = 'failed'
   `).run();
+  sqlite.transaction(() => {
+    const applied = sqlite.prepare(`
+      SELECT 1 FROM agent_bus_migrations WHERE name = 'canonical_repo_paths_v1'
+    `).get();
+    if (applied) return;
+    reconcilePersistedAgentBusRepoPaths(sqlite);
+    sqlite.prepare(`
+      INSERT INTO agent_bus_migrations (name) VALUES ('canonical_repo_paths_v1')
+    `).run();
+  })();
 }
 
 function mapPresence(row: PresenceRow): AgentPresence {
@@ -307,7 +373,7 @@ export function listAgentConversations(
   ensureAgentBusSchema(sqlite);
   return (sqlite.prepare(`
     SELECT * FROM agent_conversations WHERE repo_path = ? ORDER BY updated_at DESC LIMIT ?
-  `).all(normalizeRepoPath(repo), limit) as ConversationRow[]).map(mapConversation);
+  `).all(normalizeAgentBusRepoPath(repo), limit) as ConversationRow[]).map(mapConversation);
 }
 
 function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
@@ -346,7 +412,7 @@ export function upsertAgentPresence(
   sqlite: Database.Database = getSqlite(),
 ): AgentPresenceWriteResult {
   ensureAgentBusSchema(sqlite);
-  const repo = normalizeRepoPath(input.repo);
+  const repo = normalizeAgentBusRepoPath(input.repo);
   let adoptedLegacy = false;
   let tookOverStale = false;
   sqlite.transaction(() => {
@@ -400,7 +466,7 @@ export function findAgentPresence(
   sqlite: Database.Database = getSqlite(),
 ): AgentPresence | null {
   ensureAgentBusSchema(sqlite);
-  const repo = input.repo ? normalizeRepoPath(input.repo) : null;
+  const repo = input.repo ? normalizeAgentBusRepoPath(input.repo) : null;
   let row: PresenceRow | undefined;
   if (input.agentId) {
     row = sqlite.prepare('SELECT * FROM agent_presence WHERE agent_id = ?')
@@ -422,7 +488,7 @@ export function listAgentPresence(
   sqlite: Database.Database = getSqlite(),
 ): AgentPresence[] {
   ensureAgentBusSchema(sqlite);
-  const normalizedRepo = normalizeRepoPath(repo);
+  const normalizedRepo = normalizeAgentBusRepoPath(repo);
   const rows = sqlite.prepare(`
     SELECT * FROM agent_presence WHERE repo_path = ? ORDER BY last_seen DESC, name ASC
   `).all(normalizedRepo) as PresenceRow[];
@@ -472,7 +538,7 @@ export function persistAgentMessage(
   ensureAgentBusSchema(sqlite);
   const timestamp = new Date().toISOString();
   const id = `message-${randomUUID()}`;
-  const repo = normalizeRepoPath(input.repo);
+  const repo = normalizeAgentBusRepoPath(input.repo);
   const result = sqlite.transaction((): { id: string; created: boolean } => {
     if (input.requestId) {
       const prior = sqlite.prepare('SELECT * FROM agent_messages WHERE client_request_id = ?')
@@ -584,7 +650,7 @@ function ensureAgentInboxState(
   agent: AgentPresence,
   sqlite: Database.Database,
 ): InboxStateRow {
-  const repo = normalizeRepoPath(agent.repo);
+  const repo = agent.repo;
   sqlite.prepare(`
     INSERT OR IGNORE INTO agent_inbox_state
       (repo_path, agent_name, acknowledged_sequence, native_wake_session_key,
@@ -613,7 +679,7 @@ export function claimAgentInboxWake(
 ): boolean {
   ensureAgentBusSchema(sqlite);
   if (!input.agent.sessionKey || input.throughSequence <= 0) return false;
-  const repo = normalizeRepoPath(input.agent.repo);
+  const repo = input.agent.repo;
   const now = input.now ?? new Date();
   return sqlite.transaction(() => {
     const state = ensureAgentInboxState(input.agent, sqlite);
@@ -656,7 +722,7 @@ export function releaseAgentInboxWake(
     SET native_wake_session_key = NULL, native_wake_through_sequence = 0, native_wake_at = NULL
     WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
       AND native_wake_session_key = ?
-  `).run(normalizeRepoPath(agent.repo), agent.name, agent.sessionKey);
+  `).run(agent.repo, agent.name, agent.sessionKey);
 }
 
 export function listAgentInbox(
@@ -685,7 +751,7 @@ export function acknowledgeAgentInbox(
 ): void {
   ensureAgentBusSchema(sqlite);
   if (input.throughSequence <= 0) return;
-  const repo = normalizeRepoPath(input.agent.repo);
+  const repo = input.agent.repo;
   sqlite.transaction(() => {
     ensureAgentInboxState(input.agent, sqlite);
     sqlite.prepare(`
@@ -738,7 +804,7 @@ export function listRecentAgentMessages(
     SELECT * FROM agent_messages
     WHERE repo_path = ?
     ORDER BY sequence DESC LIMIT ?
-  `).all(normalizeRepoPath(repo), limit) as MessageRow[];
+  `).all(normalizeAgentBusRepoPath(repo), limit) as MessageRow[];
   return rows.map((row) => mapMessage(row, sqlite));
 }
 
@@ -759,7 +825,7 @@ export function updateAgentConversation(
   sqlite: Database.Database = getSqlite(),
 ): AgentConversation {
   ensureAgentBusSchema(sqlite);
-  const repo = normalizeRepoPath(input.repo);
+  const repo = normalizeAgentBusRepoPath(input.repo);
   return sqlite.transaction(() => {
     const row = sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(input.id) as ConversationRow | undefined;
     if (!row || row.repo_path !== repo) {
