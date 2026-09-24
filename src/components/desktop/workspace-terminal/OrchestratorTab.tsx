@@ -34,7 +34,7 @@ import {
 } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import {
   OrchestratorEmptyState,
-  timeOfDayGreeting,
+  OrchestratorStartLocationControls,
   type WorktreeMode,
   type OrchestratorEmptyKind,
 } from '@/components/desktop/OrchestratorEmptyState';
@@ -712,10 +712,6 @@ function OrchestratorTabInner({
     return () => window.removeEventListener('o8:load-history-thread', handleLoadHistoryThread);
   }, [acceptHistoryThreadLoads, active, tabId, publishWorkspaceThread]);
 
-  const handleQuickAction = useCallback((prompt: string) => {
-    chatPanelRef.current?.sendNow(prompt);
-  }, []);
-
   const handlePaletteDraft = useCallback((text: string, sourceId: string) => {
     setPaletteDraft({ id: `${sourceId}-${Date.now()}`, text });
     setTimeout(() => chatPanelRef.current?.focusInput(), 40);
@@ -761,11 +757,6 @@ function OrchestratorTabInner({
     }
   }, []);
 
-  const greeting = useMemo(() => timeOfDayGreeting(), []);
-  const runtimeLabel = lockedMode === 'single'
-    ? orchestratorRuntimeTone(initialSingleRuntime ?? 'codex').label
-    : 'O8 Operator';
-
   // Worktree mode for the compose-first empty state. Defaults to 'local'
   // (operator pass 2026-06-14 — "we only work local really"): the
   // orchestrator drives on the current checkout and the Branch chip stays
@@ -787,29 +778,9 @@ function OrchestratorTabInner({
   // moment the operator picks another project.
   const [scopeCleared, setScopeCleared] = useState(false);
 
-  // Kind toggle on the empty state. lockedMode='chat' = llm-chat tab,
-  // can't pivot. Otherwise: 'chat' if the tab's current mode is chat,
-  // else 'orchestrator'. Flipping kind calls the existing mode
-  // persistence path so the tab state actually moves.
   const emptyKind: OrchestratorEmptyKind = lockedMode === 'chat' || initialMode === 'chat'
     ? 'chat'
     : 'orchestrator';
-  const emptyKindLocked = lockedMode === 'chat';
-  const handleEmptyKindChange = useCallback((next: OrchestratorEmptyKind) => {
-    if (!spawnHandlers || emptyKindLocked) return;
-    const mode: 'fleet' | 'chat' = next === 'chat' ? 'chat' : 'fleet';
-    // Persist on the tab (so restore picks it up) AND dispatch the
-    // event the active ThoughtsChatPanel listens for so its internal
-    // orchestrationMode state flips immediately — otherwise the
-    // composer's model label sticks on the Orchestrator's model
-    // (e.g. "Opus 4.7") after toggling to Chat.
-    spawnHandlers.updateTabMode(tabId, { mode });
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('o8:set-orchestration-mode', {
-        detail: { mode },
-      }));
-    }
-  }, [emptyKindLocked, spawnHandlers, tabId]);
 
   // Resolve the active workspace target for the Project chip label.
   const activeWorkspaceTarget = useMemo(() => (
@@ -926,39 +897,23 @@ function OrchestratorTabInner({
   const emptyStateNode = useMemo(
     () => (
       <OrchestratorEmptyState
-        greeting={greeting}
-        runtimeLabel={runtimeLabel}
-        onActionClick={handleQuickAction}
         repoPath={effectiveRepoPath}
         repoLabel={projectLabel}
         workspaceTargets={data?.workspaceTargets ?? []}
         onSelectProject={handleEmptySelectProject}
         onAddProject={handleEmptyAddProject}
         onWorkWithoutProject={handleEmptyWorkWithoutProject}
-        worktreeMode={worktreeMode}
-        onWorktreeModeChange={setWorktreeMode}
-        branch={branchLabel}
-        onBranchChange={setPickedBranch}
         kind={emptyKind}
-        kindLocked={emptyKindLocked}
-        onKindChange={handleEmptyKindChange}
       />
     ),
     [
-      greeting,
-      runtimeLabel,
-      handleQuickAction,
       effectiveRepoPath,
       projectLabel,
       data?.workspaceTargets,
       handleEmptySelectProject,
       handleEmptyAddProject,
       handleEmptyWorkWithoutProject,
-      worktreeMode,
-      branchLabel,
       emptyKind,
-      emptyKindLocked,
-      handleEmptyKindChange,
     ],
   );
 
@@ -1094,6 +1049,15 @@ function OrchestratorTabInner({
       composerModeStorageId={tabId}
       repoLabel={repoLabel}
       emptyStateOverride={emptyOrShimmerNode}
+      composerBelowSlot={(
+        <OrchestratorStartLocationControls
+          worktreeMode={worktreeMode}
+          onWorktreeModeChange={setWorktreeMode}
+          branch={branchLabel}
+          repoPath={effectiveRepoPath}
+          onBranchChange={setPickedBranch}
+        />
+      )}
       showInlineExport={false}
       lockedMode={lockedMode}
       initialMode={initialMode}

@@ -14,6 +14,7 @@ export function ComposerContextRow({
   onAddProject,
   permissionMode,
   onPermissionModeChange,
+  contextLocationSlot,
 }: {
   repoLabel?: string | null;
   workspaceTargets?: OrchestratorWorkspaceTarget[];
@@ -22,6 +23,7 @@ export function ComposerContextRow({
   onAddProject?: () => void;
   permissionMode?: ThoughtsChatPermissionMode;
   onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
+  contextLocationSlot?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -49,6 +51,7 @@ export function ComposerContextRow({
         onSelectRepoPath={onSelectRepoPath}
         onAddProject={onAddProject}
       />
+      {contextLocationSlot}
       <div style={{ flex: 1, minWidth: 0 }} />
       {permissionMode && onPermissionModeChange ? (
         <>

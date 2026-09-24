@@ -62,8 +62,6 @@ interface ComposerAreaProps {
   codexDefaultDispatchModel?: string;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;
-  /** Clarify-first (#1489) — per-send interview-before-dispatch toggle. */
-  /** Session rules (#1329) — forwarded to InputButtons; undefined hides the chip. */
   sessionRulesThreadId?: string | null;
   repoLabel?: string | null;
   displayMessagesCount: number;
@@ -86,6 +84,7 @@ interface ComposerAreaProps {
   onSelectRepoPath?: (next: string) => void;
   permissionMode?: ThoughtsChatPermissionMode;
   onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
+  contextLocationSlot?: React.ReactNode;
   composerLeadingExtras?: React.ReactNode;
   /** ⌘⏎ or Return while busy routes through the host send buffer. */
   onSteer?: () => void;
@@ -147,6 +146,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSelectRepoPath,
   permissionMode,
   onPermissionModeChange,
+  contextLocationSlot,
   composerLeadingExtras,
   onSteer,
   sendBufferStatus,
@@ -778,6 +778,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       </div>
 
       <ComposerContextRow
+        contextLocationSlot={contextLocationSlot}
         repoLabel={repoLabel}
         workspaceTargets={workspaceTargets}
         selectedRepoPath={selectedRepoPath}
