@@ -263,7 +263,10 @@ export function SymonCapabilitiesPanel({
           Reading this Mac…
         </div>
       ) : (
-        <div style={{ maxHeight: scrollWithinCatalog ? 410 : undefined, overflowY: scrollWithinCatalog ? 'auto' : undefined, paddingRight: 4 }}>
+        <div
+          data-o8-symon-scroll
+          style={{ maxHeight: scrollWithinCatalog ? 410 : undefined, overflowY: scrollWithinCatalog ? 'auto' : undefined, scrollbarWidth: scrollWithinCatalog ? 'none' : undefined, paddingRight: 4 }}
+        >
           {grouped.map(([category, items]) => (
             <div key={category}>
               <div

@@ -132,6 +132,7 @@ describe('SymonMachineControl', () => {
 
     const dialog = document.querySelector<HTMLElement>('[aria-label="Symon capabilities"]');
     expect(dialog?.style.overflowY).toBe('auto');
+    expect(dialog?.style.scrollbarWidth).toBe('none');
     const nestedScrollers = Array.from(dialog?.querySelectorAll<HTMLElement>('*') ?? [])
       .filter((element) => ['auto', 'scroll'].includes(element.style.overflowY));
     expect(nestedScrollers).toHaveLength(0);

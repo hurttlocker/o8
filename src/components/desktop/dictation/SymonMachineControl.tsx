@@ -235,6 +235,7 @@ export function SymonMachineControl({ placement = 'floating' }: { placement?: 'f
       {open ? (
         <motion.div
           ref={popoverRef}
+          data-o8-symon-scroll
           role="dialog"
           aria-label={view === 'capabilities' ? 'Symon capabilities' : 'Symon machine control'}
           initial={{ opacity: 0 }}
@@ -250,6 +251,7 @@ export function SymonMachineControl({ placement = 'floating' }: { placement?: 'f
             width: view === 'capabilities' ? (placement === 'sidebar' ? 'min(360px, calc(100vw - 24px))' : 360) : (placement === 'sidebar' ? 'min(220px, calc(100vw - 24px))' : 220),
             maxHeight: placement === 'sidebar' ? 'min(70vh, 520px)' : undefined,
             overflowY: placement === 'sidebar' ? 'auto' : undefined,
+            scrollbarWidth: placement === 'sidebar' ? 'none' : undefined,
             paddingTop: 10,
             paddingRight: 11,
             paddingBottom: 10,
