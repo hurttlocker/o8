@@ -251,6 +251,7 @@ export function StatusBottomPanelControl({
         <div
           ref={popoverRef}
           role="menu"
+          aria-label="Bottom panel surfaces"
           style={{
             position: 'fixed',
             top: anchorRect.bottom + 8,
@@ -267,6 +268,9 @@ export function StatusBottomPanelControl({
             zIndex: 120,
           }}
         >
+          <div style={{ paddingTop: 5, paddingRight: 9, paddingBottom: 5, paddingLeft: 9, color: 'var(--t-text-muted)', fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Bottom panel
+          </div>
           {BOTTOM_PANEL_OPTIONS.map((option) => (
             <button
               key={option.id}

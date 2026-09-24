@@ -5278,7 +5278,7 @@ function DashboardInner() {
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           bottomPanelVisible={bottomPanelVisible}
-          onToggleBottomPanel={compactShell ? undefined : toggleContextualPanelTile}
+          onToggleBottomPanel={toggleContextualPanelTile}
           onOpenBottomPanelSurface={handleOpenBottomPanelSurface}
           projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
           projectContextRailVisible={workspaceHeaderActive.contextRailVisible}
