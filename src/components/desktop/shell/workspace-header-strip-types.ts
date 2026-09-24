@@ -13,6 +13,7 @@ export interface WorkspaceHeaderStripProps {
   /** Terminal toggle. Shown only when a handler is provided. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
+  onOpenBottomPanelSurface?: (surface: import('@/components/desktop/ContextualPanel').BottomPanelSurfaceKind) => void;
   /** Split the active workspace tile into a second pane. */
   onSplitWorkspacePanel?: () => void;
   /** O8 panel re-open toggle. Rendered as the rightmost icon only when the

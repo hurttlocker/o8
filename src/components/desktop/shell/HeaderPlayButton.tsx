@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 interface HeaderPlayButtonProps {
   onSpawnOrchestrator?: () => void;
@@ -51,13 +52,15 @@ export function HeaderPlayButton({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const menuId = useId();
 
   useEffect(() => {
     if (!open) return;
     const onDocDown = (event: MouseEvent) => {
       if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
+      if (!wrapperRef.current.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
@@ -70,6 +73,17 @@ export function HeaderPlayButton({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const update = () => setAnchorRect(wrapperRef.current?.getBoundingClientRect() ?? null);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
+
   const pick = useCallback((handler?: () => void) => () => {
     setOpen(false);
     handler?.();
@@ -79,14 +93,17 @@ export function HeaderPlayButton({
     <div ref={wrapperRef} data-no-drag style={{ position: 'relative', flexShrink: 0 }}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setAnchorRect(wrapperRef.current?.getBoundingClientRect() ?? null);
+          setOpen((v) => !v);
+        }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label={ariaSuffix ? `New tab (${ariaSuffix})` : 'New tab'}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-controls={menuId}
-        title="New orchestrator tab (⌘T)"
+        aria-controls={open ? menuId : undefined}
+        title="Add a workspace tab"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -98,27 +115,26 @@ export function HeaderPlayButton({
           borderRadius: 7,
           borderWidth: 0,
           background: open || hovered ? 'var(--t-hover)' : 'transparent',
-          color: 'var(--t-accent)',
+          color: 'var(--t-text-secondary)',
           cursor: 'pointer',
           marginTop: -3,
           transition: 'background 120ms ease',
           ['WebkitAppRegion' as string]: 'no-drag',
         }}
       >
-        <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M8 5v14l11-7z" />
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+          <path d="M12 5v14M5 12h14" />
         </svg>
       </button>
-      <div
+      {open && anchorRect && typeof document !== 'undefined' ? createPortal(<div
+        ref={menuRef}
         id={menuId}
         role="menu"
         aria-label={ariaSuffix ? `New tab options (${ariaSuffix})` : 'New tab options'}
         style={{
-          display: open ? 'block' : 'none',
-          position: 'absolute',
-          top: '100%',
-          right: 0,
-          marginTop: 4,
+          position: 'fixed',
+          top: anchorRect.bottom + 4,
+          right: Math.max(8, window.innerWidth - anchorRect.right),
           minWidth: 220,
           borderRadius: 10,
           borderWidth: 1,
@@ -142,7 +158,7 @@ export function HeaderPlayButton({
         {onSpawnTerminal ? (
           <HeaderPlayMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
         ) : null}
-      </div>
+      </div>, document.body) : null}
     </div>
   );
 }

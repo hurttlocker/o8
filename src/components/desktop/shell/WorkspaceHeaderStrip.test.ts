@@ -67,6 +67,33 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     expect(tabs.map((tab) => tab.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
   });
 
+  it('keeps the bottom panel action separate from chat and terminal tabs', async () => {
+    const toggleBottomPanel = vi.fn();
+    const spawns: Array<{ kind: string; workspaceId: string }> = [];
+    const onSpawn = (event: Event) => {
+      spawns.push((event as CustomEvent<{ kind: string; workspaceId: string }>).detail);
+    };
+    window.addEventListener('o8:request-spawn-tab', onSpawn);
+    try {
+      await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
+        onToggleBottomPanel: toggleBottomPanel,
+      }))));
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Toggle bottom panel"]')?.click());
+      expect(toggleBottomPanel).toHaveBeenCalledOnce();
+      expect(spawns).toEqual([]);
+
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="New tab"]')?.click());
+      const menu = document.querySelector('[role="menu"][aria-label="New tab options"]');
+      expect(menu).not.toBeNull();
+      const items = Array.from(menu!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+      await act(async () => items.find((item) => item.textContent === 'Terminal')?.click());
+      expect(spawns).toEqual([{ kind: 'terminal', workspaceId: 'ws-1' }]);
+      expect(toggleBottomPanel).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('o8:request-spawn-tab', onSpawn);
+    }
+  });
+
   it('identifies each tab by session id, not by its user-authored title', async () => {
     const props = stripProps();
     await act(async () => root.render(createElement(WorkspaceHeaderStrip, props)));

@@ -23,8 +23,6 @@ interface DesktopStatusBarProps {
   repoName: string | null;
   repoRemoteUrl?: string | null;
   defaultBranch?: string | null;
-  /** Width of the left AgentPanel column, in CSS px. */
-  leftColumnWidth?: number;
   /** Width of the right panel column when visible, in CSS px. */
   rightColumnWidth?: number;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
@@ -34,50 +32,25 @@ interface DesktopStatusBarProps {
   parkedLanes?: ParkedLane[];
   onOpenReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
-  /** Contextual bottom-panel (terminal) toggle. */
-  bottomPanelVisible?: boolean;
-  onToggleBottomPanel?: () => void;
-  onOpenBottomPanelSurface?: (surface: BottomPanelSurfaceKind) => void;
   /** Open the keyboard-shortcuts reference overlay (also bound to ⌘/). */
   onOpenShortcuts?: () => void;
 }
 
 function DesktopStatusBarBase({
-  bottomPanelVisible = false,
-  onToggleBottomPanel,
-  onOpenBottomPanelSurface,
   onOpenShortcuts,
-  leftColumnWidth,
   rightColumnWidth,
   compact = false,
 }: DesktopStatusBarProps) {
   const { overrideActive } = useEntitlement();
 
-  // Center the bottom-panel toggle on the composer's measured position. The
-  // column-width props ignored insets/gaps + a hidden right region and drifted
-  // control ~125px off the composer (operator: "not hitting", 2026-06-15).
-  // The composer card registers itself; track it through panel resizes/animations
-  // (ResizeObserver — the card is maxWidth:100% so it resizes as the column
-  // narrows) and remounts/tab-switches. Null → no composer (e.g. an
-  // Automations takeover) → fall
-  // back to the column-width centering.
-  const [composerCenterX, setComposerCenterX] = useState<number | null>(null);
+  // The composer card registers its status slot so small utility controls can
+  // follow it without painting a second bar underneath the input.
   const [composerSlot, setComposerSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let raf = 0;
-    let observed: Element | null = null;
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => schedule()) : null;
     const measure = () => {
       const el = getRegisteredComposerCenter();
-      if (ro && el !== observed) {
-        if (observed) ro.unobserve(observed);
-        if (el) ro.observe(el);
-        observed = el;
-      }
-      const rect = el?.getBoundingClientRect();
-      const next = rect && rect.width > 0 ? Math.round(rect.left + rect.width / 2) : null;
-      setComposerCenterX((prev) => (prev === next ? prev : next));
       const slot = el?.closest<HTMLElement>('[data-o8-composer-root]')?.querySelector<HTMLElement>('[data-o8-composer-status-slot]') ?? null;
       setComposerSlot((prev) => prev === slot ? prev : slot);
     };
@@ -91,7 +64,6 @@ function DesktopStatusBarBase({
     return () => {
       window.cancelAnimationFrame(raf);
       window.removeEventListener('resize', schedule);
-      ro?.disconnect();
       unsubscribe();
     };
   }, []);
@@ -99,7 +71,6 @@ function DesktopStatusBarBase({
   if (composerSlot) {
     return createPortal(
       <div data-o8-composer-chrome="" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-        {!compact && onToggleBottomPanel ? <StatusBottomPanelControl active={bottomPanelVisible} onToggle={onToggleBottomPanel} onOpenSurface={onOpenBottomPanelSurface} /> : null}
         {!compact && overrideActive ? <ViewAsFreeIndicator palette="chrome" /> : null}
         {!compact && onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
       </div>,
@@ -107,8 +78,8 @@ function DesktopStatusBarBase({
     );
   }
 
-  // Keep the bottom-panel toggle centered under the workspace when no
-  // composer is registered. Merge review lives in the review surfaces.
+  // Merge review lives in the review surfaces. The bottom-panel control now
+  // lives in the workspace header, so this bar only carries fallback help.
   return (
     <div
       data-mcp-scope="desktop-status-bar"
@@ -131,42 +102,8 @@ function DesktopStatusBarBase({
         position: 'relative',
       }}
     >
-      {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right.
-          The bottom-panel toggle is centered in the overlay below. */}
+      {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right. */}
       <div style={{ flex: 1, minWidth: 0 }} />
-
-      {/* Center the bottom-panel toggle on the workspace surface. */}
-      <div
-        style={{
-          // FIXED, not absolute (2026-07-16): the bar no longer spans the full
-          // window (it lives inside the center+right column so the sidebar can
-          // run full-height), but composerCenterX and the column-width
-          // fallback are both VIEWPORT coordinates. Fixed keeps the original
-          // math byte-for-byte; absolute would offset by the bar's new origin.
-          position: 'fixed',
-          bottom: 0,
-          height: 36,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          pointerEvents: 'none',
-          // Center on the composer's real measured center when present; else
-          // fall back to the column-width span (takeovers with no composer).
-          ...(composerCenterX != null
-            ? { left: composerCenterX, transform: 'translateX(-50%)' }
-            : { left: leftColumnWidth ?? 0, right: rightColumnWidth ?? 0 }),
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
-          {!compact && onToggleBottomPanel ? (
-            <StatusBottomPanelControl
-              active={bottomPanelVisible}
-              onToggle={onToggleBottomPanel}
-              onOpenSurface={onOpenBottomPanelSurface}
-            />
-          ) : null}
-        </div>
-      </div>
 
       <div
         style={{
@@ -204,7 +141,7 @@ const BOTTOM_PANEL_OPTIONS: Array<{
 
 /** Bottom panel control modeled after the Codex bottom-panel affordance:
  *  primary click toggles the drawer, chevron opens the surface picker. */
-function StatusBottomPanelControl({
+export function StatusBottomPanelControl({
   active,
   onToggle,
   onOpenSurface,
@@ -263,7 +200,7 @@ function StatusBottomPanelControl({
       >
         <button
           type="button"
-          onClick={onToggle}
+          onClick={() => { setMenuOpen(false); onToggle(); }}
           aria-label="Toggle bottom panel"
           title="Toggle bottom panel"
           style={{
@@ -316,14 +253,13 @@ function StatusBottomPanelControl({
           role="menu"
           style={{
             position: 'fixed',
-            bottom: typeof window !== 'undefined' ? window.innerHeight - anchorRect.top + 8 : 48,
-            left: anchorRect.left + anchorRect.width / 2,
-            transform: 'translateX(-50%)',
-            width: 520,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 8,
-            padding: 10,
+            top: anchorRect.bottom + 8,
+            right: Math.max(12, window.innerWidth - anchorRect.right),
+            width: 'min(270px, calc(100vw - 24px))',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            padding: 6,
             borderRadius: 14,
             background: 'var(--t-popover-surface)',
             border: '1px solid var(--t-panel-border)',
@@ -339,32 +275,33 @@ function StatusBottomPanelControl({
               onClick={() => openSurface(option.id)}
               style={{
                 display: 'flex',
-                flexDirection: 'column',
                 alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                minHeight: 96,
-                borderRadius: 10,
-                border: '1px solid transparent',
-                background: 'color-mix(in srgb, var(--t-panel) 70%, transparent)',
+                gap: 10,
+                minHeight: 46,
+                borderRadius: 8,
+                borderWidth: 0,
+                background: 'transparent',
                 color: 'var(--t-text)',
                 cursor: 'pointer',
                 fontFamily: 'var(--font-sans-system)',
-                textAlign: 'center',
-                padding: 10,
+                textAlign: 'left',
+                paddingTop: 6,
+                paddingRight: 9,
+                paddingBottom: 6,
+                paddingLeft: 9,
               }}
               onMouseEnter={(event) => {
                 event.currentTarget.style.background = 'var(--t-hover)';
-                event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
               }}
               onMouseLeave={(event) => {
-                event.currentTarget.style.background = 'color-mix(in srgb, var(--t-panel) 70%, transparent)';
-                event.currentTarget.style.borderColor = 'transparent';
+                event.currentTarget.style.background = 'transparent';
               }}
             >
-              <span style={{ color: 'var(--t-text-secondary)' }}>{option.icon(18)}</span>
-              <span style={{ fontSize: 13, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>{option.label}</span>
-              <span style={{ fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-muted)' }}>{option.detail}</span>
+              <span style={{ color: 'var(--t-text-secondary)', display: 'inline-flex', width: 20, flexShrink: 0 }}>{option.icon(16)}</span>
+              <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 13, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>{option.label}</span>
+                <span style={{ fontSize: 10, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.1px', color: 'var(--t-text-muted)' }}>{option.detail}</span>
+              </span>
             </button>
           ))}
         </div>

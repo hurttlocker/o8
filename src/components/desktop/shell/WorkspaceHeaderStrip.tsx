@@ -19,10 +19,12 @@ import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
 import { HeaderPlayButton } from './HeaderPlayButton';
+import { WorkspaceAddTabButton } from './WorkspaceAddTabButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
+import { StatusBottomPanelControl } from '../DesktopStatusBar';
 import { SplitPaneCloseButton } from './SplitPaneCloseButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
@@ -50,6 +52,9 @@ export function WorkspaceHeaderStrip({
   onSidebarHoverEnter,
   onSidebarHoverLeave,
   onSplitWorkspacePanel,
+  bottomPanelVisible = false,
+  onToggleBottomPanel,
+  onOpenBottomPanelSurface,
   rightPanelOpen = false,
   onToggleRightPanel,
   approvalCount = 0,
@@ -122,6 +127,7 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
+            {!isSplit && workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
@@ -144,13 +150,20 @@ export function WorkspaceHeaderStrip({
             <div
               style={{
                 display: 'inline-flex',
-                // Rightmost → carry the rail nudge. Otherwise cancel the cluster
-                // gap so it sits tight against the toggle beside it.
-                marginRight: showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE,
+                marginRight: onToggleBottomPanel ? -HEADER_CLUSTER_GAP : (showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE),
               }}
             >
               <CanvasModeButton onClick={() => { window.location.assign('/preview/canvas-glass'); }} />
             </div>
+            {onToggleBottomPanel ? (
+              <div style={{ display: 'inline-flex', marginRight: showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE }}>
+                <StatusBottomPanelControl
+                  active={bottomPanelVisible}
+                  onToggle={onToggleBottomPanel}
+                  onOpenSurface={onOpenBottomPanelSurface}
+                />
+              </div>
+            ) : null}
             {showRightPanelFallbackToggle ? (
               <div style={{ display: 'inline-flex', marginRight: RAIL_COLUMN_ALIGN_NUDGE }}>
                 <RightPanelMorphButton
