@@ -123,10 +123,15 @@ async function renderPacketPane(
 }
 
 function stubPacketTranscript(events: () => TranscriptEvent[]) {
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ events: events() }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  }));
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).startsWith('/api/agents/presence?')) {
+      return Response.json({ agents: [] });
+    }
+    return new Response(JSON.stringify({ events: events() }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
   globalThis.fetch = fetchMock;
   return fetchMock;
 }
