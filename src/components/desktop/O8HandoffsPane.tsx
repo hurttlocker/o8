@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import type { AgentMessage, AgentPresence } from '@/lib/agents/types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -17,7 +18,7 @@ function errorText(response: Response, body: BusErrorBody | null): string {
 }
 
 function deliveryLabel(message: AgentMessage): string {
-  if (message.to === 'operator') return 'Visible in Handoffs';
+  if (message.to === 'operator') return 'Answered';
   if (message.delivery === 'failed') return 'Delivery failed';
   if (message.delivery === 'poll') return 'Waiting in inbox';
   if (message.deliveryNote?.startsWith('Read from the durable inbox')) return 'Retrieved from inbox';
@@ -35,7 +36,15 @@ function exchangeGroups(messages: AgentMessage[]): Array<{ id: string; messages:
 
 function agentOptionLabel(agent: AgentPresence): string {
   const runtime = agent.runtime === 'claude-code' ? 'Claude' : agent.runtime === 'codex' ? 'Codex' : agent.runtime;
-  const shortId = agent.sessionKey?.replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase();
+  const shortId = agent.sessionKey?.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase();
+  return `@${agent.name} · ${runtime}${shortId ? ` · ${shortId}` : ''}`;
+}
+
+function agentIdentity(name: string, agents: AgentPresence[]): string {
+  const agent = agents.find((entry) => entry.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+  if (!agent) return `@${name}`;
+  const runtime = agent.runtime === 'claude-code' ? 'Claude' : agent.runtime === 'codex' ? 'Codex' : agent.runtime;
+  const shortId = agent.sessionKey?.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase();
   return `@${agent.name} · ${runtime}${shortId ? ` · ${shortId}` : ''}`;
 }
 
@@ -58,12 +67,16 @@ export function O8HandoffsPane({
   registeredRepos,
   allRepos,
   onRepoPathChange,
+  selectedConversationId,
+  selectionRequest,
 }: {
   active: boolean;
   repoPath?: string | null;
   registeredRepos: RepoRegistryEntry[];
   allRepos: boolean;
   onRepoPathChange?: (repoPath: string) => void;
+  selectedConversationId?: string | null;
+  selectionRequest?: number;
 }) {
   const scopedRepo = !allRepos && repoPath && registeredRepos.some((repo) => repo.localPath === repoPath)
     ? repoPath : null;
@@ -78,6 +91,8 @@ export function O8HandoffsPane({
   const [error, setError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(selectedConversationId ?? null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const sendInFlightRef = useRef(false);
   const scopedRepoRef = useRef(scopedRepo);
@@ -185,6 +200,26 @@ export function O8HandoffsPane({
   };
 
   const groups = exchangeGroups(messages);
+  useEffect(() => {
+    if (selectedConversationId) {
+      setSelectedId(selectedConversationId);
+      setDetailOpen(true);
+    }
+  }, [selectedConversationId, selectionRequest]);
+  useEffect(() => {
+    if (!detailOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDetailOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [detailOpen]);
+  useEffect(() => {
+    if (!groups.length) return;
+    if (selectedId && !groups.some((group) => group.id === selectedId)) setSelectedId(groups[0]?.id ?? null);
+    else if (!selectedId && groups.length) setSelectedId(groups[0].id);
+  }, [groups, selectedId]);
+  const selectedGroup = groups.find((group) => group.id === selectedId) ?? groups[0] ?? null;
 
   return (
     <div data-o8-handoffs="true" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: 'var(--t-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
@@ -210,52 +245,69 @@ export function O8HandoffsPane({
         </div>
       </div>
 
-      <div role="log" aria-label="Agent exchanges" style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 14, paddingRight: 18, paddingBottom: 14, paddingLeft: 18 }}>
+      <div role="log" aria-label="Agent exchanges" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {!scopedRepo ? (
-          <div style={{ paddingTop: 44, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 12.5, lineHeight: 1.5 }}>Choose a repository to see its agents and messages.</div>
+          <div style={{ gridColumn: '1 / -1', paddingTop: 44, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 12.5, lineHeight: 1.5 }}>Choose a repository to see its agents and messages.</div>
         ) : error ? (
-          <div role="alert" style={{ padding: 14, borderRadius: 10, background: 'var(--t-input-bg)', color: 'var(--t-text-secondary)', fontSize: 12.5, lineHeight: 1.5 }}>{error}</div>
+          <div role="alert" style={{ gridColumn: '1 / -1', padding: 14, color: 'var(--t-text-secondary)', fontSize: 12.5, lineHeight: 1.5 }}>{error}</div>
         ) : loading && messages.length === 0 ? (
-          <div style={{ color: 'var(--t-text-muted)', fontSize: 12.5 }}>Loading exchanges…</div>
+          <div style={{ gridColumn: '1 / -1', color: 'var(--t-text-muted)', fontSize: 12.5, padding: 18 }}>Loading exchanges…</div>
         ) : messages.length === 0 ? (
-          <div style={{ paddingTop: 44, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 12.5, lineHeight: 1.5 }}>No agent exchanges yet. Select a live agent below to start one.</div>
+          <div style={{ gridColumn: '1 / -1', paddingTop: 44, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 12.5, lineHeight: 1.5 }}>No agent exchanges yet. Select a live agent below to start one.</div>
         ) : (
-          groups.map((group) => {
+          <>
+          <nav aria-label="Conversations" style={{ minHeight: 0, background: 'var(--t-panel)' }}>
+          {groups.map((group) => {
             const first = group.messages[0];
             const latest = group.messages.at(-1)!;
             const conversation = latest.conversation;
+            const active = group.id === selectedGroup?.id;
             return (
-              <section key={group.id} data-agent-conversation-id={conversation?.id} style={{ marginBottom: 14, border: '1px solid var(--t-divider)', borderRadius: 13, background: 'var(--t-panel)', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-                  <strong style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 300 }}>{first.from} with {first.to}</strong>
-                  <span style={{ color: 'var(--t-text-faint)', fontSize: 10.5, whiteSpace: 'nowrap' }}>
-                    {conversation ? `${conversation.remainingTurns} left · ${conversation.status}` : 'Legacy · unthreaded'}
-                  </span>
-                  {conversation ? (
-                    <button type="button" disabled={sending} onClick={() => void changeConversation(conversation.id, conversation.status === 'open' ? 'close' : 'extend')} style={{ border: 'none', background: 'transparent', color: 'var(--t-accent)', fontSize: 10.5, cursor: 'pointer' }}>
-                      {conversation.status === 'open' ? 'Stop' : 'Extend +4'}
-                    </button>
-                  ) : null}
-                </div>
-                {group.messages.map((message) => (
-                  <article key={message.id} data-agent-message-id={message.id} style={{ paddingTop: 11, paddingRight: 12, paddingBottom: 11, paddingLeft: 12, borderTop: message.id === first.id ? 'none' : '1px solid var(--t-divider-subtle)' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
-                      <strong style={{ fontSize: 11.5, fontWeight: 500 }}>{message.from}</strong>
-                      <span style={{ color: 'var(--t-text-faint)', fontSize: 10 }}>→ {message.to}</span>
-                      <span style={{ marginLeft: 'auto', color: 'var(--t-text-faint)', fontSize: 10, whiteSpace: 'nowrap' }}>{message.conversation ? `Turn ${message.conversation.turnIndex}/${message.conversation.turnLimit}` : 'Unthreaded'}</span>
-                    </div>
-                    <div style={{ marginTop: 7, fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message.text}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <span title={message.deliveryNote ?? undefined} style={{ flex: 1, color: message.delivery === 'failed' ? 'var(--t-danger)' : 'var(--t-text-faint)', fontSize: 10.5 }}>{deliveryLabel(message)} · {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-                      {message.id === latest.id && message.to === 'operator' && conversation?.status === 'open' && agents.some((agent) => agent.name === message.from) ? (
-                        <button type="button" onClick={() => { setTarget(message.from); setReplyToId(message.id); setComposerOpen(true); }} style={{ border: 'none', background: 'transparent', color: 'var(--t-accent)', fontSize: 10.5, cursor: 'pointer' }}>Reply</button>
-                      ) : null}
-                    </div>
-                  </article>
-                ))}
-              </section>
+              <button key={group.id} type="button" data-agent-conversation-id={conversation?.id ?? group.id} aria-pressed={active} onClick={() => { setSelectedId(group.id); setDetailOpen(true); }} style={{ display: 'block', width: '100%', minHeight: 62, paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, border: 'none', borderBottom: '1px solid var(--t-divider-subtle)', background: active ? 'var(--t-panel-hover)' : 'transparent', color: 'var(--t-text)', textAlign: 'left', cursor: 'pointer' }}>
+                <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 400 }}>{agentIdentity(first.from, agents)} → {agentIdentity(first.to, agents)}</strong>
+                <span style={{ display: 'block', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 10.5 }}>{latest.text}</span>
+                <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 10 }}>{conversation ? `${conversation.remainingTurns} turns left · ${conversation.status}` : 'Legacy · unthreaded'} · {group.messages.length} messages</span>
+              </button>
             );
-          })
+          })}
+          </nav>
+          {detailOpen && selectedGroup && typeof document !== 'undefined' ? createPortal(<section role="dialog" aria-modal="true" aria-label="Selected conversation" style={{ position: 'fixed', inset: 0, zIndex: 10000, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--t-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
+            {(() => {
+              const first = selectedGroup.messages[0];
+              const latest = selectedGroup.messages.at(-1)!;
+              const conversation = latest.conversation;
+              return <>
+                <header style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 16, paddingRight: 24, paddingBottom: 16, paddingLeft: 24, borderBottom: '1px solid var(--t-divider)', flexShrink: 0 }}>
+                  <button type="button" onClick={() => setDetailOpen(false)} style={{ minHeight: 36, paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, cursor: 'pointer' }}>Back to Handoffs</button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <strong style={{ display: 'block', fontSize: 15, fontWeight: 400 }}>{agentIdentity(first.from, agents)} → {agentIdentity(first.to, agents)}</strong>
+                    <span style={{ display: 'block', marginTop: 3, color: 'var(--t-text-faint)', fontSize: 11 }}>{conversation ? `${conversation.remainingTurns} turns left · ${conversation.status}` : 'Legacy · unthreaded'} · {scopedRepo}</span>
+                  </div>
+                  {conversation?.status === 'open' ? <button type="button" disabled={sending} onClick={() => void changeConversation(conversation.id, 'close')} style={{ minHeight: 36, paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, cursor: sending ? 'default' : 'pointer' }}>{sending ? 'Working…' : 'Stop'}</button> : null}
+                  {conversation?.status === 'closed' ? <button type="button" disabled={sending} onClick={() => void changeConversation(conversation.id, 'extend')} style={{ minHeight: 36, paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, cursor: sending ? 'default' : 'pointer' }}>{sending ? 'Working…' : 'Extend +4'}</button> : null}
+                </header>
+                <div data-agent-conversation-detail={conversation?.id ?? selectedGroup.id} style={{ width: 'min(920px, 100%)', alignSelf: 'center', minHeight: 0, flex: 1, overflowY: 'auto', paddingTop: 24, paddingRight: 32, paddingBottom: 32, paddingLeft: 32 }}>
+                  {selectedGroup.messages.map((message) => (
+                    <article key={message.id} data-agent-message-id={message.id} style={{ paddingTop: 16, paddingRight: 18, paddingBottom: 16, paddingLeft: 18, borderTop: message.id === first.id ? 'none' : '1px solid var(--t-divider-subtle)' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+                        <strong style={{ fontSize: 12.5, fontWeight: 500 }}>{agentIdentity(message.from, agents)}</strong>
+                        <span style={{ color: 'var(--t-text-faint)', fontSize: 11 }}>→ {message.to === 'operator' ? 'Operator' : agentIdentity(message.to, agents)}</span>
+                        <span style={{ marginLeft: 'auto', color: 'var(--t-text-faint)', fontSize: 11, whiteSpace: 'nowrap' }}>{message.conversation ? `Turn ${message.conversation.turnIndex}/${message.conversation.turnLimit}` : 'Unthreaded'}</span>
+                      </div>
+                      <div style={{ marginTop: 9, fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message.text}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 11 }}>
+                        <span title={message.deliveryNote ?? undefined} style={{ flex: 1, color: message.delivery === 'failed' ? 'var(--t-danger)' : 'var(--t-text-faint)', fontSize: 11 }}>{deliveryLabel(message)} · {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                        {message.id === latest.id && message.to === 'operator' && conversation?.status === 'open' && agents.some((agent) => agent.name === message.from) ? (
+                          <button type="button" onClick={() => { setTarget(message.from); setReplyToId(message.id); setComposerOpen(true); setDetailOpen(false); }} style={{ minHeight: 34, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-accent)', fontSize: 11.5, cursor: 'pointer' }}>Reply</button>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>;
+            })()}
+          </section>, document.body) : null}
+          </>
         )}
       </div>
 

@@ -69,8 +69,9 @@ describe('O8HandoffsPane', () => {
       }));
     });
     await vi.waitFor(() => expect(host.textContent).toContain('Check the contract.'));
-    expect(host.textContent).toContain('Waiting in inbox');
-    expect(host.textContent).not.toContain('Delivered');
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="legacy:message-one"]')?.click());
+    expect(document.body.textContent).toContain('Waiting in inbox');
+    expect(document.body.textContent).not.toContain('Delivered');
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/agents/message?repo=%2Fworkspace%2Fo8&limit=50')).toBe(true);
 
     await act(async () => openComposer(host));
@@ -90,7 +91,7 @@ describe('O8HandoffsPane', () => {
     const post = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/agents/message' && init?.method === 'POST');
     expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/agents/message' && init?.method === 'POST')).toHaveLength(1);
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ repo: repo.localPath, to: 'Keen', text: 'Please review this.', replyToId: null, requestId: expect.any(String) });
-    await vi.waitFor(() => expect(host.textContent).toContain('Please review this.'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Please review this.'));
     expect(host.querySelector<HTMLTextAreaElement>('#o8-handoff-message')).toBeNull();
     expect(host.textContent).toContain('New handoff to a live agent');
   });
@@ -153,10 +154,15 @@ describe('O8HandoffsPane', () => {
       active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
     })));
     await vi.waitFor(() => expect(host.textContent).toContain('A linked request.'));
-    expect(host.querySelector('[data-agent-conversation-id="conversation-one"]')?.textContent).toContain('7 left · open');
+    expect(host.querySelector('[data-agent-conversation-id="conversation-one"]')?.textContent).toContain('7 turns left · open');
+    expect(host.querySelectorAll('nav[aria-label="Conversations"] button')).toHaveLength(2);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-one"]')?.click());
+    expect(document.body.querySelector('[data-agent-conversation-detail="conversation-one"]')?.textContent).toContain('A linked request.');
+    expect(host.textContent).toContain('@Keen · Codex · ONKEEN');
     expect(host.textContent).toContain('Legacy · unthreaded');
     await act(async () => {
-      host.querySelector<HTMLElement>('[data-agent-conversation-id="conversation-one"] button')?.click();
+      host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-one"]')?.click();
+      Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Stop')?.click();
     });
     const post = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/agents/conversation' && init?.method === 'POST');
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ id: 'conversation-one', repo: repo.localPath, action: 'close' });
@@ -180,9 +186,10 @@ describe('O8HandoffsPane', () => {
     await act(async () => root.render(createElement(O8HandoffsPane, {
       active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
     })));
-    await vi.waitFor(() => expect(host.textContent).toContain('7 left · open'));
+    await vi.waitFor(() => expect(host.textContent).toContain('7 turns left · open'));
     expect(host.querySelector('#o8-handoff-message')).toBeNull();
-    await act(async () => host.querySelector<HTMLElement>('[data-agent-conversation-id="conversation-one"] button')?.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-one"]')?.click());
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Stop')?.click());
     await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe('Conversation already closed.'));
   });
 });

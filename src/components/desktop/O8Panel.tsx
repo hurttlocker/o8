@@ -444,6 +444,7 @@ export function O8Panel({
   // in one call instead of snapshot/click-hunting. Cleared whenever the parent
   // drives its own navigation so the prop is never shadowed by a stale value.
   const [pendingBrowserNavigation, setPendingBrowserNavigation] = useState<{ baseUrl: string | null | undefined; url: string } | null>(null);
+  const [handoffSelection, setHandoffSelection] = useState<{ id: string | null; request: number }>({ id: null, request: 0 });
   const pendingBrowserUrl = pendingBrowserNavigation?.baseUrl === browserUrl ? pendingBrowserNavigation?.url ?? null : null;
   // The shared O8RepoSelector in the workspace header owns repo switching now,
   // so hide ReviewPanel's built-in dropdown: a single-entry list trips its own
@@ -547,6 +548,21 @@ export function O8Panel({
     window.addEventListener('o8:open-browser', handler);
     return () => window.removeEventListener('o8:open-browser', handler);
   }, [browserUrl, onActiveTabChange]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId?: string | null; repoPath?: string | null }>).detail ?? {};
+      if (typeof detail.repoPath === 'string' && detail.repoPath && detail.repoPath !== repoPath) onRepoPathChange?.(detail.repoPath);
+      setHandoffSelection((current) => ({
+        id: typeof detail.conversationId === 'string' ? detail.conversationId : null,
+        request: current.request + 1,
+      }));
+      orchestratorData?.onOpenO8Panel?.({ tab: 'handoffs', repoPath: detail.repoPath });
+      onActiveTabChange?.('handoffs');
+    };
+    window.addEventListener('o8:open-handoffs', handler);
+    return () => window.removeEventListener('o8:open-handoffs', handler);
+  }, [onActiveTabChange, onRepoPathChange, orchestratorData?.onOpenO8Panel, repoPath]);
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'files') {
@@ -800,6 +816,8 @@ export function O8Panel({
           registeredRepos={registeredRepos}
           allRepos={allRepos ?? false}
           onRepoPathChange={onRepoPathChange}
+          selectedConversationId={handoffSelection.id}
+          selectionRequest={handoffSelection.request}
         />
       </div>
       {/* Inbox (Incident Queue) now renders through the closeable utility strip
