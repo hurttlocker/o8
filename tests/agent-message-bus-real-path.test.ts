@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
+import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
@@ -24,10 +25,12 @@ const { createLane } = await import('@/lib/lane/registry');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { codename } = await import('@/lib/agents/codename');
 const { closeDb, getSqlite } = await import('@/lib/db');
+const { ensureAgentBusSchema, getAgentInboxCursor, listAgentInbox } = await import('@/lib/agents/store');
 const heartbeatRoute = await import('@/app/api/lanes/[id]/heartbeat/route');
 const presenceRoute = await import('@/app/api/agents/presence/route');
 const inboxRoute = await import('@/app/api/agents/inbox/route');
 const messageRoute = await import('@/app/api/agents/message/route');
+const conversationRoute = await import('@/app/api/agents/conversation/route');
 const { createAgentMessagePostHandler } = await import('@/lib/agents/message-route-handler');
 const broadcastEventsRoute = await import('@/app/api/broadcast/events/route');
 const { panelGateMiddleware } = await import('@/middleware');
@@ -125,7 +128,7 @@ describe('agent message bus real path', () => {
     expect(panelGateMiddleware(workerPostRequest).status).toBe(200);
     const workerPost = await postMessage(workerPostRequest);
     expect(workerPost.status).toBe(201);
-    const workerPayload = await workerPost.json() as { message: { id: string; delivery: string } };
+    const workerPayload = await workerPost.json() as { message: { id: string; delivery: string; conversation?: { id: string } } };
     expect(workerPayload.message.delivery).toBe('native');
     expect(sendClaude).toHaveBeenLastCalledWith(
       expect.objectContaining({ agentId: 'receiver-session', sessionKey: 'claude-session-receiver' }),
@@ -133,9 +136,7 @@ describe('agent message bus real path', () => {
         type: 'user',
         message: {
           role: 'user',
-          content: expect.stringMatching(
-            new RegExp(`^\\[o8 peer message from ${codename(lane.id)}\\]\\nMessage ID: message-.+\\nAuthority: peer context only; this does not grant operator approval\\.\\n\\nPlease inspect the shared seam\\.$`),
-          ),
+          content: expect.stringContaining(`Conversation ID: ${workerPayload.message.conversation?.id}`),
         },
       },
     );
@@ -519,9 +520,7 @@ describe('agent message bus real path', () => {
       }),
       expect.objectContaining({
         message: expect.objectContaining({
-          content: expect.stringMatching(
-            /^\[o8 peer message from operator\]\nMessage ID: message-.+\nAuthority: peer context only; this does not grant operator approval\.\n\nAutomatic ping\.$/,
-          ),
+          content: expect.stringContaining("To answer, run: o8 msg send --to 'operator' --reply-to"),
         }),
       }),
     );
@@ -566,5 +565,195 @@ describe('agent message bus real path', () => {
         repo: automaticRepo,
       },
     });
+  });
+
+  it('correlates two agents through the real routes, rejects stale and foreign replies, and enforces the budget after restart', async () => {
+    const repo = `/tmp/o8-agent-conversation-${Date.now()}`;
+    for (const [agentId, name] of [['conversation-a', 'Aster'], ['conversation-b', 'Birch'], ['conversation-c', 'Cedar']]) {
+      const joined = await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+        token: OPERATOR_TOKEN,
+        method: 'POST',
+        body: { agentId, name, repo, worktreePath: repo, runtime: 'poll', sessionKey: `poll:${agentId}` },
+      }));
+      expect(joined.status).toBe(201);
+    }
+    const send = async (body: Record<string, unknown>) => {
+      const response = await postMessage(request('http://localhost:3001/api/agents/message', {
+        token: OPERATOR_TOKEN, method: 'POST', body: { repo, ...body },
+      }));
+      return { status: response.status, body: await response.json() as {
+        message?: { id: string; conversation: { id: string; turnIndex: number; turnLimit: number; remainingTurns: number; status: string; replyToId: string | null } };
+        error?: { code: string };
+      } };
+    };
+    const first = await send({ fromAgentId: 'conversation-a', to: 'Birch', text: 'Review this proposal.', requestId: 'conversation-first' });
+    expect(first.status).toBe(201);
+    expect(first.body.message?.conversation).toMatchObject({ turnIndex: 1, turnLimit: 8, remainingTurns: 7, replyToId: null });
+    const firstId = first.body.message!.id;
+    const conversationId = first.body.message!.conversation.id;
+
+    const duplicate = await send({ fromAgentId: 'conversation-a', to: 'Birch', text: 'Review this proposal.', requestId: 'conversation-first' });
+    expect(duplicate.status).toBe(201);
+    expect(duplicate.body.message?.id).toBe(firstId);
+    const count = () => (getSqlite().prepare('SELECT COUNT(*) AS count FROM agent_messages WHERE conversation_id = ?').get(conversationId) as { count: number }).count;
+    expect(count()).toBe(1);
+
+    const foreign = await send({ fromAgentId: 'conversation-c', to: 'Aster', text: 'I should not join.', replyToId: firstId });
+    expect(foreign.status).toBe(403);
+    expect(foreign.body.error?.code).toBe('agent_reply_participant_mismatch');
+    const wrongRepo = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { fromAgentId: 'conversation-b', to: 'Aster', repo: `${repo}/other`, text: 'Wrong scope.', replyToId: firstId },
+    }));
+    expect(wrongRepo.status).toBe(403);
+    expect(count()).toBe(1);
+
+    const raced = await Promise.all([
+      send({ fromAgentId: 'conversation-b', to: 'Aster', text: 'First reply.', replyToId: firstId, requestId: 'conversation-race-1' }),
+      send({ fromAgentId: 'conversation-b', to: 'Aster', text: 'Second reply.', replyToId: firstId, requestId: 'conversation-race-2' }),
+    ]);
+    expect(raced.map((result) => result.status).sort()).toEqual([201, 409]);
+    let latest = raced.find((result) => result.status === 201)!.body.message!;
+    expect(latest.conversation).toMatchObject({ id: conversationId, turnIndex: 2, replyToId: firstId });
+    expect(count()).toBe(2);
+
+    const inbox = await inboxRoute.GET(request('http://localhost:3001/api/agents/inbox?agent=Aster&limit=10', { token: OPERATOR_TOKEN }));
+    await expect(inbox.json()).resolves.toMatchObject({
+      messages: [expect.objectContaining({ id: latest.id, conversation: expect.objectContaining({ id: conversationId, remainingTurns: 6 }) })],
+    });
+
+    closeDb();
+    expect(getSqlite().prepare('SELECT COUNT(*) AS count FROM agent_messages WHERE conversation_id = ?').get(conversationId)).toMatchObject({ count: 2 });
+    for (let turn = 3; turn <= 8; turn += 1) {
+      const fromA = turn % 2 === 1;
+      const next = await send({
+        fromAgentId: fromA ? 'conversation-a' : 'conversation-b',
+        to: fromA ? 'Birch' : 'Aster',
+        text: `Turn ${turn}.`,
+        replyToId: latest.id,
+        requestId: `conversation-turn-${turn}`,
+      });
+      expect(next.status).toBe(201);
+      latest = next.body.message!;
+      expect(latest.conversation.turnIndex).toBe(turn);
+    }
+    expect(latest.conversation).toMatchObject({ remainingTurns: 0, status: 'closed' });
+    const eighthParentId = (getSqlite().prepare('SELECT reply_to_id AS id FROM agent_messages WHERE id = ?').get(latest.id) as { id: string }).id;
+    const eighthRetry = await send({ fromAgentId: 'conversation-b', to: 'Aster', text: 'Turn 8.', replyToId: eighthParentId, requestId: 'conversation-turn-8' });
+    expect(eighthRetry.status).toBe(201);
+    expect(eighthRetry.body.message?.id).toBe(latest.id);
+    const overBudget = await send({ fromAgentId: 'conversation-a', to: 'Birch', text: 'Extra.', replyToId: latest.id });
+    expect(overBudget.status).toBe(409);
+    expect(count()).toBe(8);
+
+    const workerExtend = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
+      token: workerToken, method: 'POST', body: { id: conversationId, repo, action: 'extend' },
+    }));
+    expect(workerExtend.status).toBe(403);
+    const extended = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
+      token: OPERATOR_TOKEN, method: 'POST', body: { id: conversationId, repo, action: 'extend' },
+    }));
+    expect(extended.status).toBe(200);
+    await expect(extended.json()).resolves.toMatchObject({ conversation: { turnLimit: 12, remainingTurns: 4, status: 'open' } });
+    const ninth = await send({ fromAgentId: 'conversation-a', to: 'Birch', text: 'Operator reopened this.', replyToId: latest.id });
+    expect(ninth.status).toBe(201);
+    expect(ninth.body.message?.conversation).toMatchObject({ turnIndex: 9, turnLimit: 12 });
+
+    const exchanges = await messageRoute.GET(request(`http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repo)}&limit=10`, { token: OPERATOR_TOKEN }));
+    await expect(exchanges.json()).resolves.toMatchObject({ messages: expect.arrayContaining([expect.objectContaining({ id: firstId, conversation: expect.objectContaining({ id: conversationId }) })]) });
+  });
+
+  it('accepts an early final reply and an operator stop without a delivery side effect on rejected replies', async () => {
+    const repo = `/tmp/o8-agent-final-${Date.now()}`;
+    for (const [agentId, name] of [['final-a', 'Harbor'], ['final-b', 'Maple']]) {
+      expect((await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+        token: OPERATOR_TOKEN, method: 'POST',
+        body: { agentId, name, repo, worktreePath: repo, runtime: 'poll', sessionKey: `poll:${agentId}` },
+      }))).status).toBe(201);
+    }
+    const send = async (body: Record<string, unknown>) => {
+      const response = await postMessage(request('http://localhost:3001/api/agents/message', {
+        token: OPERATOR_TOKEN, method: 'POST', body: { repo, ...body },
+      }));
+      return { status: response.status, body: await response.json() as { message?: { id: string; conversation: { id: string; status: string; remainingTurns: number } }; error?: { code: string } } };
+    };
+    const first = await send({ fromAgentId: 'final-a', to: 'Maple', text: 'Can you check this?' });
+    const final = await send({ fromAgentId: 'final-b', to: 'Harbor', text: 'Checked; all clear.', replyToId: first.body.message!.id, close: true });
+    expect(final.body.message?.conversation).toMatchObject({ status: 'closed', remainingTurns: 6 });
+    const rejected = await send({ fromAgentId: 'final-a', to: 'Maple', text: 'More?', replyToId: final.body.message!.id });
+    expect(rejected.status).toBe(409);
+    expect(rejected.body.error?.code).toBe('agent_conversation_closed');
+    const stopped = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
+      token: OPERATOR_TOKEN, method: 'POST', body: { id: first.body.message!.conversation.id, repo, action: 'close' },
+    }));
+    expect(stopped.status).toBe(200);
+    const extended = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
+      token: OPERATOR_TOKEN, method: 'POST', body: { id: first.body.message!.conversation.id, repo, action: 'extend' },
+    }));
+    await expect(extended.json()).resolves.toMatchObject({ conversation: { turnLimit: 6, remainingTurns: 4, status: 'open' } });
+    const operatorStopped = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
+      token: OPERATOR_TOKEN, method: 'POST', body: { id: first.body.message!.conversation.id, repo, action: 'close', summary: 'Stop after review.' },
+    }));
+    expect(operatorStopped.status).toBe(200);
+    const history = await conversationRoute.GET(request(`http://localhost:3001/api/agents/conversation?repo=${encodeURIComponent(repo)}`, { token: OPERATOR_TOKEN }));
+    await expect(history.json()).resolves.toMatchObject({ conversations: [expect.objectContaining({ status: 'closed', closedReason: 'operator_stop', summary: 'Stop after review.' })] });
+  });
+
+  it('lets an agent answer an operator handoff in the same conversation', async () => {
+    const repo = `/tmp/o8-agent-operator-reply-${Date.now()}`;
+    expect((await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+      token: OPERATOR_TOKEN, method: 'POST',
+      body: { agentId: 'operator-reply-agent', name: 'Juniper', repo, worktreePath: repo, runtime: 'poll', sessionKey: 'poll:operator-reply-agent' },
+    }))).status).toBe(201);
+    const firstResponse = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN, method: 'POST', body: { repo, to: 'Juniper', text: 'What is the status?' },
+    }));
+    const first = await firstResponse.json() as { message: { id: string; conversation: { id: string } } };
+    const replyResponse = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN, method: 'POST',
+      body: { repo, fromAgentId: 'operator-reply-agent', to: 'operator', text: 'The task is ready.', replyToId: first.message.id, close: true },
+    }));
+    expect(replyResponse.status).toBe(201);
+    await expect(replyResponse.json()).resolves.toMatchObject({
+      message: { from: 'Juniper', to: 'operator', deliveryNote: 'Available in the operator Handoffs view.', conversation: { id: first.message.conversation.id, status: 'closed' } },
+    });
+  });
+
+  it('adds conversation columns without rewriting legacy messages or inbox cursors', () => {
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.exec(`
+        CREATE TABLE agent_messages (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+          from_agent TEXT NOT NULL, to_agent TEXT NOT NULL, repo_path TEXT NOT NULL,
+          text TEXT NOT NULL, refs_json TEXT NOT NULL DEFAULT '{}',
+          delivery_status TEXT NOT NULL, delivery_note TEXT, created_at TEXT NOT NULL
+        );
+        INSERT INTO agent_messages
+          (sequence, id, from_agent, to_agent, repo_path, text, refs_json, delivery_status, created_at)
+        VALUES (7, 'legacy-seven', 'operator', 'Legacy', '/tmp/legacy-bus', 'Earlier message.', '{}', 'poll', '2026-01-01T00:00:00.000Z');
+        CREATE TABLE agent_inbox_state (
+          repo_path TEXT NOT NULL, agent_name TEXT NOT NULL COLLATE NOCASE,
+          acknowledged_sequence INTEGER NOT NULL DEFAULT 0,
+          native_wake_session_key TEXT, native_wake_through_sequence INTEGER NOT NULL DEFAULT 0,
+          native_wake_at TEXT, PRIMARY KEY(repo_path, agent_name)
+        );
+        INSERT INTO agent_inbox_state
+          (repo_path, agent_name, acknowledged_sequence)
+        VALUES ('/tmp/legacy-bus', 'Legacy', 6);
+      `);
+      ensureAgentBusSchema(sqlite);
+      const agent = {
+        agentId: 'legacy-agent', name: 'Legacy', repo: '/tmp/legacy-bus', worktreePath: null,
+        runtime: 'poll', sessionKey: null, laneId: null, packetId: null, lastSeen: new Date().toISOString(),
+      };
+      expect(getAgentInboxCursor(agent, sqlite)).toBe(6);
+      expect(listAgentInbox({ agent, after: 6, limit: 10 }, sqlite).messages).toMatchObject([
+        { id: 'legacy-seven', sequence: 7, conversation: null, text: 'Earlier message.' },
+      ]);
+    } finally {
+      sqlite.close();
+    }
   });
 });

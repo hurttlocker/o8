@@ -7,11 +7,14 @@ import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
 import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migration';
-import type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
+import type { AgentConversationReceipt, AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
 export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
 export const AGENT_MESSAGE_TEXT_MAX_LENGTH = 4_000;
+export const AGENT_CONVERSATION_DEFAULT_LIMIT = 8;
+export const AGENT_CONVERSATION_EXTENSION = 4;
+export const AGENT_CONVERSATION_MAX_LIMIT = 24;
 export const AGENT_PRESENCE_TTL_MS = 6 * 60_000;
 // Re-wake after a bounded delay so a lost queued turn cannot silence a target indefinitely.
 export const AGENT_NATIVE_WAKE_TTL_MS = 15 * 60_000;
@@ -30,6 +33,13 @@ export class AgentPresenceWriteConflictError extends Error {
       `This status line is owned by @${owner.name} (${owner.sessionKey}); your session is ${attemptedSessionKey}.`,
     );
     this.name = 'AgentPresenceWriteConflictError';
+  }
+}
+
+export class AgentConversationError extends Error {
+  constructor(message: string, readonly code: string, readonly status: number) {
+    super(message);
+    this.name = 'AgentConversationError';
   }
 }
 
@@ -53,9 +63,45 @@ interface MessageRow {
   repo_path: string;
   text: string;
   refs_json: string;
+  conversation_id: string | null;
+  reply_to_id: string | null;
+  turn_index: number | null;
+  closes_conversation: number;
+  requested_close: number;
+  client_request_id: string | null;
   delivery_status: 'native' | 'poll' | 'failed';
   delivery_note: string | null;
   created_at: string;
+}
+
+interface ConversationRow {
+  id: string;
+  repo_path: string;
+  participant_a: string;
+  participant_b: string;
+  turn_count: number;
+  turn_limit: number;
+  last_message_id: string | null;
+  closed_at: string | null;
+  closed_reason: string | null;
+  summary: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentConversation {
+  id: string;
+  repo: string;
+  participants: [string, string];
+  turnCount: number;
+  turnLimit: number;
+  remainingTurns: number;
+  lastMessageId: string | null;
+  status: 'open' | 'closed';
+  closedReason: string | null;
+  summary: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface InboxStateRow {
@@ -124,6 +170,12 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
       repo_path TEXT NOT NULL,
       text TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 4000),
       refs_json TEXT NOT NULL DEFAULT '{}',
+      conversation_id TEXT,
+      reply_to_id TEXT,
+      turn_index INTEGER,
+      closes_conversation INTEGER NOT NULL DEFAULT 0,
+      requested_close INTEGER NOT NULL DEFAULT 0,
+      client_request_id TEXT,
       delivery_status TEXT NOT NULL CHECK (delivery_status IN ('native', 'poll', 'failed')),
       delivery_note TEXT,
       created_at TEXT NOT NULL
@@ -131,6 +183,24 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
 
     CREATE INDEX IF NOT EXISTS idx_agent_messages_inbox
       ON agent_messages(repo_path, to_agent, sequence);
+
+    CREATE TABLE IF NOT EXISTS agent_conversations (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      participant_a TEXT NOT NULL COLLATE NOCASE,
+      participant_b TEXT NOT NULL COLLATE NOCASE,
+      turn_count INTEGER NOT NULL CHECK (turn_count BETWEEN 0 AND 24),
+      turn_limit INTEGER NOT NULL CHECK (turn_limit BETWEEN 1 AND 24),
+      last_message_id TEXT,
+      closed_at TEXT,
+      closed_reason TEXT,
+      summary TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_conversations_repo_updated
+      ON agent_conversations(repo_path, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS agent_inbox_state (
       repo_path TEXT NOT NULL,
@@ -141,6 +211,34 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
       native_wake_at TEXT,
       PRIMARY KEY(repo_path, agent_name)
     );
+  `);
+  const messageColumns = new Set((sqlite.pragma('table_info(agent_messages)') as Array<{ name: string }>).map((column) => column.name));
+  for (const [name, definition] of [
+    ['conversation_id', 'TEXT'],
+    ['reply_to_id', 'TEXT'],
+    ['turn_index', 'INTEGER'],
+    ['closes_conversation', 'INTEGER NOT NULL DEFAULT 0'],
+    ['requested_close', 'INTEGER NOT NULL DEFAULT 0'],
+    ['client_request_id', 'TEXT'],
+  ] as const) {
+    if (!messageColumns.has(name)) sqlite.exec(`ALTER TABLE agent_messages ADD COLUMN ${name} ${definition}`);
+  }
+  if (!messageColumns.has('requested_close')) {
+    sqlite.exec(`
+      UPDATE agent_messages SET requested_close = 1
+      WHERE closes_conversation = 1 AND EXISTS (
+        SELECT 1 FROM agent_conversations AS conversation
+        WHERE conversation.id = agent_messages.conversation_id
+          AND conversation.last_message_id = agent_messages.id
+          AND conversation.closed_reason = 'agent_final'
+      );
+    `);
+  }
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation
+      ON agent_messages(conversation_id, turn_index);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_messages_request
+      ON agent_messages(client_request_id) WHERE client_request_id IS NOT NULL;
   `);
   sqlite.prepare(`
     UPDATE agent_messages
@@ -175,7 +273,57 @@ function parseRefs(value: string): AgentMessageRefs {
   }
 }
 
-function mapMessage(row: MessageRow): AgentMessage {
+function mapConversation(row: ConversationRow): AgentConversation {
+  return {
+    id: row.id,
+    repo: row.repo_path,
+    participants: [row.participant_a, row.participant_b],
+    turnCount: row.turn_count,
+    turnLimit: row.turn_limit,
+    remainingTurns: Math.max(0, row.turn_limit - row.turn_count),
+    lastMessageId: row.last_message_id,
+    status: row.closed_at ? 'closed' : 'open',
+    closedReason: row.closed_reason,
+    summary: row.summary,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function getAgentConversation(
+  id: string,
+  sqlite: Database.Database = getSqlite(),
+): AgentConversation | null {
+  ensureAgentBusSchema(sqlite);
+  const row = sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(id) as ConversationRow | undefined;
+  return row ? mapConversation(row) : null;
+}
+
+export function listAgentConversations(
+  repo: string,
+  limit: number,
+  sqlite: Database.Database = getSqlite(),
+): AgentConversation[] {
+  ensureAgentBusSchema(sqlite);
+  return (sqlite.prepare(`
+    SELECT * FROM agent_conversations WHERE repo_path = ? ORDER BY updated_at DESC LIMIT ?
+  `).all(normalizeRepoPath(repo), limit) as ConversationRow[]).map(mapConversation);
+}
+
+function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
+  const conversation = row.conversation_id
+    ? sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(row.conversation_id) as ConversationRow | undefined
+    : undefined;
+  const receipt: AgentConversationReceipt | null = conversation && row.turn_index !== null ? {
+    id: conversation.id,
+    replyToId: row.reply_to_id,
+    turnIndex: row.turn_index,
+    turnLimit: conversation.turn_limit,
+    remainingTurns: Math.max(0, conversation.turn_limit - conversation.turn_count),
+    status: conversation.closed_at ? 'closed' : 'open',
+    closedReason: conversation.closed_reason,
+    lastMessageId: conversation.last_message_id ?? row.id,
+  } : null;
   return {
     schema: 'o8/agents.message-event/v1',
     kind: 'message',
@@ -186,6 +334,7 @@ function mapMessage(row: MessageRow): AgentMessage {
     repo: row.repo_path,
     text: row.text,
     refs: parseRefs(row.refs_json),
+    conversation: receipt,
     delivery: row.delivery_status,
     deliveryNote: row.delivery_note,
     timestamp: row.created_at,
@@ -314,19 +463,91 @@ export function persistAgentMessage(
     repo: string;
     text: string;
     refs: AgentMessageRefs;
+    replyToId?: string | null;
+    close?: boolean;
+    requestId?: string | null;
   },
   sqlite: Database.Database = getSqlite(),
-): AgentMessage {
+): { message: AgentMessage; created: boolean } {
   ensureAgentBusSchema(sqlite);
   const timestamp = new Date().toISOString();
   const id = `message-${randomUUID()}`;
   const repo = normalizeRepoPath(input.repo);
-  sqlite.transaction(() => {
+  const result = sqlite.transaction((): { id: string; created: boolean } => {
+    if (input.requestId) {
+      const prior = sqlite.prepare('SELECT * FROM agent_messages WHERE client_request_id = ?')
+        .get(input.requestId) as MessageRow | undefined;
+      if (prior) {
+        const same = prior.repo_path === repo
+          && prior.from_agent.toLowerCase() === input.from.toLowerCase()
+          && prior.to_agent.toLowerCase() === input.to.toLowerCase()
+          && prior.text === input.text
+          && prior.reply_to_id === (input.replyToId ?? null)
+          && Boolean(prior.requested_close) === Boolean(input.close);
+        if (!same) throw new AgentConversationError('Request ID was already used for a different message.', 'agent_request_conflict', 409);
+        return { id: prior.id, created: false };
+      }
+    }
+
+    let conversationId: string;
+    let turnIndex: number;
+    let closesConversation = Boolean(input.close);
+    if (input.replyToId) {
+      const prior = sqlite.prepare('SELECT * FROM agent_messages WHERE id = ?')
+        .get(input.replyToId) as MessageRow | undefined;
+      if (!prior || !prior.conversation_id) {
+        throw new AgentConversationError('Reply target is not a threaded agent message.', 'agent_reply_not_found', 404);
+      }
+      const conversation = sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?')
+        .get(prior.conversation_id) as ConversationRow | undefined;
+      if (!conversation || conversation.repo_path !== repo || prior.repo_path !== repo) {
+        throw new AgentConversationError('Reply belongs to a different repository.', 'agent_reply_repo_mismatch', 403);
+      }
+      if (conversation.last_message_id !== prior.id) {
+        throw new AgentConversationError('A newer turn already exists. Reply to the latest message.', 'agent_reply_stale', 409);
+      }
+      if (conversation.closed_at || conversation.turn_count >= conversation.turn_limit) {
+        throw new AgentConversationError('This conversation is closed.', 'agent_conversation_closed', 409);
+      }
+      if (prior.to_agent.toLowerCase() !== input.from.toLowerCase()
+        || prior.from_agent.toLowerCase() !== input.to.toLowerCase()) {
+        throw new AgentConversationError('Only the addressed participant can reply to the previous sender.', 'agent_reply_participant_mismatch', 403);
+      }
+      conversationId = conversation.id;
+      turnIndex = conversation.turn_count + 1;
+      closesConversation ||= turnIndex >= conversation.turn_limit;
+    } else {
+      conversationId = `conversation-${randomUUID()}`;
+      turnIndex = 1;
+      sqlite.prepare(`
+        INSERT INTO agent_conversations
+          (id, repo_path, participant_a, participant_b, turn_count, turn_limit, last_message_id,
+           closed_at, closed_reason, summary, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 0, ?, NULL, NULL, NULL, NULL, ?, ?)
+      `).run(conversationId, repo, input.from, input.to, AGENT_CONVERSATION_DEFAULT_LIMIT, timestamp, timestamp);
+    }
     sqlite.prepare(`
       INSERT INTO agent_messages
-        (id, from_agent, to_agent, repo_path, text, refs_json, delivery_status, delivery_note, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'poll', NULL, ?)
-    `).run(id, input.from, input.to, repo, input.text, JSON.stringify(input.refs), timestamp);
+        (id, from_agent, to_agent, repo_path, text, refs_json, conversation_id, reply_to_id,
+         turn_index, closes_conversation, requested_close, client_request_id, delivery_status, delivery_note, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'poll', NULL, ?)
+    `).run(
+      id, input.from, input.to, repo, input.text, JSON.stringify(input.refs), conversationId,
+      input.replyToId ?? null, turnIndex, closesConversation ? 1 : 0, input.close ? 1 : 0, input.requestId ?? null, timestamp,
+    );
+    sqlite.prepare(`
+      UPDATE agent_conversations
+      SET turn_count = ?, last_message_id = ?, closed_at = ?, closed_reason = ?, summary = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      turnIndex,
+      id,
+      closesConversation ? timestamp : null,
+      closesConversation ? (input.close ? 'agent_final' : 'budget_exhausted') : null,
+      input.close ? input.text : null,
+      timestamp,
+      conversationId,
+    );
     sqlite.prepare(`
       INSERT INTO broadcast_events
         (id, kind, actor, audience, text, lane_id, packet_id, metadata_json, created_at)
@@ -338,12 +559,13 @@ export function persistAgentMessage(
       input.text,
       input.refs.laneId,
       input.refs.packetId,
-      JSON.stringify({ agentMessageId: id, repoPath: repo, from: input.from, to: input.to, refs: input.refs }),
+      JSON.stringify({ agentMessageId: id, conversationId, replyToId: input.replyToId ?? null, turnIndex, repoPath: repo, from: input.from, to: input.to, refs: input.refs }),
       timestamp,
     );
-  })();
-  const row = sqlite.prepare('SELECT * FROM agent_messages WHERE id = ?').get(id) as MessageRow;
-  return mapMessage(row);
+    return { id, created: true };
+  }).immediate();
+  const row = sqlite.prepare('SELECT * FROM agent_messages WHERE id = ?').get(result.id) as MessageRow;
+  return { message: mapMessage(row, sqlite), created: result.created };
 }
 
 export function updateAgentMessageDelivery(
@@ -355,7 +577,7 @@ export function updateAgentMessageDelivery(
   sqlite.prepare(`
     UPDATE agent_messages SET delivery_status = ?, delivery_note = ? WHERE id = ?
   `).run(delivery, note, id);
-  return mapMessage(sqlite.prepare('SELECT * FROM agent_messages WHERE id = ?').get(id) as MessageRow);
+  return mapMessage(sqlite.prepare('SELECT * FROM agent_messages WHERE id = ?').get(id) as MessageRow, sqlite);
 }
 
 function ensureAgentInboxState(
@@ -449,7 +671,7 @@ export function listAgentInbox(
     ORDER BY sequence ASC LIMIT ?
   `).all(input.agent.repo, input.agent.name, input.after, input.limit + 1) as MessageRow[];
   const hasMore = rows.length > input.limit;
-  const messages = rows.slice(0, input.limit).map(mapMessage);
+  const messages = rows.slice(0, input.limit).map((row) => mapMessage(row, sqlite));
   return {
     messages,
     cursor: messages.at(-1)?.sequence ?? input.after,
@@ -517,7 +739,7 @@ export function listRecentAgentMessages(
     WHERE repo_path = ?
     ORDER BY sequence DESC LIMIT ?
   `).all(normalizeRepoPath(repo), limit) as MessageRow[];
-  return rows.map(mapMessage);
+  return rows.map((row) => mapMessage(row, sqlite));
 }
 
 export function listRecentAgentMessagesAcrossRepos(
@@ -529,5 +751,40 @@ export function listRecentAgentMessagesAcrossRepos(
     SELECT * FROM agent_messages
     ORDER BY sequence DESC LIMIT ?
   `).all(limit) as MessageRow[];
-  return rows.map(mapMessage);
+  return rows.map((row) => mapMessage(row, sqlite));
+}
+
+export function updateAgentConversation(
+  input: { id: string; repo: string; action: 'close' | 'extend'; summary?: string | null },
+  sqlite: Database.Database = getSqlite(),
+): AgentConversation {
+  ensureAgentBusSchema(sqlite);
+  const repo = normalizeRepoPath(input.repo);
+  return sqlite.transaction(() => {
+    const row = sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(input.id) as ConversationRow | undefined;
+    if (!row || row.repo_path !== repo) {
+      throw new AgentConversationError('Conversation was not found in this repository.', 'agent_conversation_not_found', 404);
+    }
+    const now = new Date().toISOString();
+    if (input.action === 'close') {
+      if (row.closed_at) return mapConversation(row);
+      sqlite.prepare(`
+        UPDATE agent_conversations SET closed_at = ?, closed_reason = 'operator_stop', summary = ?, updated_at = ? WHERE id = ?
+      `).run(now, input.summary ?? null, now, input.id);
+    } else {
+      if (!row.closed_at) {
+        throw new AgentConversationError('Only a closed conversation can be extended.', 'agent_conversation_open', 409);
+      }
+      const nextLimit = Math.min(AGENT_CONVERSATION_MAX_LIMIT, row.turn_count + AGENT_CONVERSATION_EXTENSION);
+      if (nextLimit <= row.turn_count) {
+        throw new AgentConversationError('This conversation has reached the maximum turn limit.', 'agent_conversation_max_limit', 409);
+      }
+      sqlite.prepare(`
+        UPDATE agent_conversations
+        SET turn_limit = ?, closed_at = NULL, closed_reason = NULL, summary = NULL, updated_at = ?
+        WHERE id = ?
+      `).run(nextLimit, now, input.id);
+    }
+    return mapConversation(sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(input.id) as ConversationRow);
+  }).immediate();
 }

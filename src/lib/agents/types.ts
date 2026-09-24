@@ -15,6 +15,17 @@ export interface AgentMessageRefs {
   packetId: string | null;
 }
 
+export interface AgentConversationReceipt {
+  id: string;
+  replyToId: string | null;
+  turnIndex: number;
+  turnLimit: number;
+  remainingTurns: number;
+  status: 'open' | 'closed';
+  closedReason: string | null;
+  lastMessageId: string;
+}
+
 export interface AgentMessage {
   schema: 'o8/agents.message-event/v1';
   kind: 'message';
@@ -25,6 +36,8 @@ export interface AgentMessage {
   repo: string;
   text: string;
   refs: AgentMessageRefs;
+  /** Missing on older, unthreaded messages. */
+  conversation?: AgentConversationReceipt | null;
   delivery: 'native' | 'poll' | 'failed';
   deliveryNote: string | null;
   timestamp: string;

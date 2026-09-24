@@ -18,8 +18,12 @@ export function AgentPeerMessageCard({ message, selfName }: { message: AgentMess
         <span aria-hidden="true" style={{ width: 20, height: 20, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7, background: 'var(--t-accent-soft)', color: 'var(--t-accent)' }}>
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12 12 3M6 3h6v6" /></svg>
         </span>
-        <strong style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 550 }}>{incoming ? `From ${counterpart}` : `To ${counterpart}`}</strong>
-        <span style={{ color: 'var(--t-text-faint)', fontSize: 10, whiteSpace: 'nowrap' }}>#{message.sequence}</span>
+        <strong style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 300 }}>{incoming ? `From ${counterpart}` : `To ${counterpart}`}</strong>
+        <span style={{ color: 'var(--t-text-faint)', fontSize: 10, whiteSpace: 'nowrap' }}>
+          {message.conversation
+            ? `Turn ${message.conversation.turnIndex}/${message.conversation.turnLimit} · ${message.conversation.remainingTurns} left${message.conversation.status === 'closed' ? ' · Closed' : ''}`
+            : 'Unthreaded'}
+        </span>
       </div>
       <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12.5, lineHeight: 1.5 }}>{message.text}</div>
       <div title={message.deliveryNote ?? undefined} style={{ marginTop: 9, color: message.delivery === 'failed' ? 'var(--t-danger)' : 'var(--t-text-faint)', fontSize: 10 }}>{status(message)} · {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
