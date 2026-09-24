@@ -22,7 +22,7 @@ import {
   subscribeOrchestratorRuntimePreference,
 } from '@/lib/orchestrator/preferences';
 import { loadOrchestratorMissionState } from '@/lib/orchestrator/store';
-import { stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
+import { orchestratorDisplayTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { outsideWorkerSessionKeysForSettledPackets } from '@/lib/orchestrator/outside-worker-split';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
@@ -329,7 +329,7 @@ function OrchestratorTabInner({
         // while the operator is inside it.
         const explicitTitle = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
         const fallbackTitle = lockedMode === 'chat' ? null : stableOrchestratorThreadTitleForId(threadId, data?.savedAt);
-        const title = explicitTitle ?? fallbackTitle;
+        const title = fallbackTitle ? orchestratorDisplayTitle(explicitTitle, fallbackTitle) : explicitTitle;
         if (cancelled) return;
         if (title) {
           // Persist the title alongside the threadId so the next reload
