@@ -9,8 +9,17 @@ export function stableThreadTimestampLabel(value: Date | string | number | null 
   return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
-export function stableOrchestratorThreadTitle(value: Date | string | number | null | undefined): string {
-  return `Orchestrator session · ${stableThreadTimestampLabel(value)}`;
+export function stableOrchestratorThreadTitle(_value: Date | string | number | null | undefined): string {
+  return 'Untitled conversation';
+}
+
+export function isLegacyGeneratedOrchestratorTitle(title: string): boolean {
+  return /^Orchestrator session · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(title.trim());
+}
+
+export function orchestratorDisplayTitle(title: string | null | undefined, fallback: string): string {
+  const trimmed = title?.trim();
+  return trimmed && !isLegacyGeneratedOrchestratorTitle(trimmed) ? trimmed : fallback;
 }
 
 export function stableOrchestratorThreadTitleForId(

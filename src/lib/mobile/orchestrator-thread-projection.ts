@@ -10,7 +10,7 @@ import {
   ORCHESTRATOR_RUNTIME_IDS,
   isOrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
-import { stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
+import { orchestratorDisplayTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 
 const DEFAULT_MODEL = 'claude-code';
@@ -191,7 +191,7 @@ export function projectOrchestratorThread(
 
   return {
     id: tabId,
-    title: trimTitle(record.title, fallbackTitle),
+    title: trimTitle(orchestratorDisplayTitle(record.title, fallbackTitle), fallbackTitle),
     lastMessageAt: lastSpokeMs > 0 ? new Date(lastSpokeMs).toISOString() : (record.savedAt || modifiedAt),
     runtime: inferRuntime(effectiveModel(tabId, record)),
     status: record.orchestratorTerminalStatus === 'failed'

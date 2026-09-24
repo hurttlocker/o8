@@ -26,6 +26,13 @@ describe('orchestrator-thread-restore (per-repo scoping)', () => {
     expect(readLastOrchestratorThreadTitle(REPO_A)).toBe('Repo A thread');
   });
 
+  it('shows a readable title before loading a persisted old generated title', () => {
+    writeLastOrchestratorThread(REPO_A, 'thoughts-a1', 'Orchestrator session · 2026-09-23 15:29');
+    expect(readLastOrchestratorThreadTitle(REPO_A)).toBe('Untitled conversation');
+    expect(window.localStorage.getItem(`${LEGACY_TITLE_KEY}::${REPO_A}`))
+      .toBe('Orchestrator session · 2026-09-23 15:29');
+  });
+
   it('only returns the title when it belongs to the stored id', () => {
     writeLastOrchestratorThread(REPO_A, 'thoughts-a1', 'Repo A thread');
     // A bare id write (no title) leaves the previous title/title-id in place,
