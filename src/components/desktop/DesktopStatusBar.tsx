@@ -13,7 +13,6 @@ import type { ParkedLane } from './merge-beacon/derive';
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { ViewAsFreeIndicator } from './ViewAsFreeIndicator';
-import { SymonOrbStatusLine } from './dictation/SymonMachineControl';
 import { getRegisteredComposerCenter, subscribeToComposerCenter } from './composer-center-registry';
 import { useEntitlement } from '@/lib/entitlement/context';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
@@ -102,7 +101,6 @@ function DesktopStatusBarBase({
       <div data-o8-composer-chrome="" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
         {!compact && onToggleBottomPanel ? <StatusBottomPanelControl active={bottomPanelVisible} onToggle={onToggleBottomPanel} onOpenSurface={onOpenBottomPanelSurface} /> : null}
         {!compact && overrideActive ? <ViewAsFreeIndicator palette="chrome" /> : null}
-        {!compact ? <SymonOrbStatusLine /> : null}
         {!compact && onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
       </div>,
       composerSlot,
@@ -183,7 +181,6 @@ function DesktopStatusBarBase({
         }}
       >
         {overrideActive ? <ViewAsFreeIndicator palette="chrome" /> : null}
-        <SymonOrbStatusLine />
         {onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
       </div>
     </div>

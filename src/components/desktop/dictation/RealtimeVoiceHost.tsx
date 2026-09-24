@@ -22,7 +22,6 @@ import {
 } from '@/lib/voice/realtime-client';
 import { symonReviewGuardId } from '@/lib/mobile/symon-tool-relay';
 import { REALTIME_MODEL, DEFAULT_VOICE } from '@/lib/voice/realtime-session-config';
-import { SymonMachineControl } from './SymonMachineControl';
 
 const LOG = '[realtime-host]';
 
@@ -302,16 +301,20 @@ export function RealtimeVoiceHost() {
   useEffect(() => {
     const w = window as unknown as { __o8SymonRemoteReady?: boolean };
     const onRemote = () => toggle();
+    const onSidebar = () => toggle();
     window.addEventListener('o8:symon-remote-toggle', onRemote);
+    window.addEventListener('o8:symon-voice-toggle', onSidebar);
     w.__o8SymonRemoteReady = true;
     return () => {
       window.removeEventListener('o8:symon-remote-toggle', onRemote);
+      window.removeEventListener('o8:symon-voice-toggle', onSidebar);
       w.__o8SymonRemoteReady = false;
     };
   }, [toggle]);
 
   useEffect(() => {
     (window as unknown as { __o8RealtimeStatus?: RealtimeStatus }).__o8RealtimeStatus = status;
+    window.dispatchEvent(new Event('o8:symon-voice-status'));
   }, [status]);
 
   // Symon Agent Mode (phone-hosted) bridge. The phone hosts the WebRTC session,
@@ -527,7 +530,6 @@ export function RealtimeVoiceHost() {
   // own framer transform (y/scale) never fights a translateX centering hack.
   return (
     <>
-      <SymonMachineControl />
       <div
       style={{
         position: 'fixed',

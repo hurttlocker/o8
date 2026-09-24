@@ -15,9 +15,8 @@ interface ListedMachine extends SymonMachineIdentity {
 }
 
 /**
- * Minimized state (Q 2026-08-05): the orb can collapse into a thin line in
- * the status bar near the "?" — persisted so it survives reloads, synced
- * across the orb and the status-bar line via a window event.
+ * Minimized state: the orb can collapse into a thin line beside Voice in the
+ * sidebar footer. It survives reloads and stays in sync across both controls.
  */
 const ORB_MINIMIZED_KEY = 'o8:symon-orb:minimized';
 const ORB_MINIMIZED_EVENT = 'o8:symon-orb-minimized';
@@ -46,9 +45,8 @@ export function useSymonOrbMinimized(): boolean {
 }
 
 /**
- * The thin status-bar line the orb collapses into — mounted by
- * DesktopStatusBar beside the "?" button. Renders nothing while the orb is
- * expanded. Click restores the orb to his seat by the composer.
+ * The thin line the orb collapses into, mounted beside Voice in the sidebar.
+ * Click restores the machine selector in that same footer.
  */
 export function SymonOrbStatusLine() {
   const minimized = useSymonOrbMinimized();
@@ -91,7 +89,7 @@ export function SymonOrbStatusLine() {
   );
 }
 
-export function SymonMachineControl() {
+export function SymonMachineControl({ placement = 'floating' }: { placement?: 'floating' | 'sidebar' }) {
   // Keep the server render and the client's hydration render identical. Tauri
   // globals only exist in the webview, so reading isTauri() during render made
   // the client insert this control where the server had rendered the voice
@@ -119,6 +117,7 @@ export function SymonMachineControl() {
   // opens/closes/resizes. ResizeObserver catches panel drags; the re-query on
   // each pass survives the pane element being rebuilt across layout changes.
   useEffect(() => {
+    if (placement === 'sidebar') return;
     let observer: ResizeObserver | null = null;
     let observed: Element | null = null;
     const compute = () => {
@@ -142,7 +141,7 @@ export function SymonMachineControl() {
       observer?.disconnect();
       observer = null;
     };
-  }, []);
+  }, [placement]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -207,14 +206,14 @@ export function SymonMachineControl() {
     <div
       ref={rootRef}
       style={{
-        position: 'fixed',
-        bottom: 120,
+        position: placement === 'sidebar' ? 'relative' : 'fixed',
+        bottom: placement === 'sidebar' ? undefined : 120,
         // Anchored to the CENTER pane's right edge, not the viewport — with
         // the right panel open, a viewport anchor floated the orb over the
         // panel instead of his usual seat beside the composer (Q 2026-08-05).
-        right: rightOffset,
+        right: placement === 'sidebar' ? undefined : rightOffset,
         zIndex: 50,
-        transition: 'right 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: placement === 'sidebar' ? undefined : 'right 220ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <AnimatePresence>
@@ -229,8 +228,10 @@ export function SymonMachineControl() {
             style={{
               position: 'absolute',
               right: 0,
-              bottom: 44,
-              width: view === 'capabilities' ? 360 : 220,
+              bottom: placement === 'sidebar' ? 34 : 44,
+              width: view === 'capabilities' ? (placement === 'sidebar' ? 260 : 360) : 220,
+              maxHeight: placement === 'sidebar' ? 'min(70vh, 520px)' : undefined,
+              overflowY: placement === 'sidebar' ? 'auto' : undefined,
               paddingTop: 10,
               paddingRight: 11,
               paddingBottom: 10,
@@ -239,7 +240,7 @@ export function SymonMachineControl() {
               borderStyle: 'solid',
               borderColor: error ? 'var(--t-danger)' : 'var(--t-border)',
               borderRadius: 14,
-              background: 'color-mix(in srgb, var(--t-input-bg) 88%, transparent)',
+              background: 'var(--t-popover-surface)',
               backdropFilter: 'blur(28px) saturate(1.2)',
               WebkitBackdropFilter: 'blur(28px) saturate(1.2)',
               color: 'var(--t-text)',
@@ -330,7 +331,7 @@ export function SymonMachineControl() {
                 </button>
                 <button
                   type="button"
-                  aria-label="Minimize Symon to the status bar"
+                  aria-label="Minimize Symon to the sidebar footer"
                   onClick={() => { setOpen(false); setSymonOrbMinimized(true); }}
                   onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
                   onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
@@ -359,7 +360,7 @@ export function SymonMachineControl() {
                   }}
                 >
                   <span aria-hidden style={{ display: 'inline-flex', width: 12, height: 2.5, borderRadius: 999, background: 'currentColor', opacity: 0.7, flexShrink: 0 }} />
-                  Minimize to status bar
+                  Minimize
                 </button>
               </>
             )}
@@ -377,8 +378,8 @@ export function SymonMachineControl() {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 34,
-          height: 34,
+          width: placement === 'sidebar' ? 24 : 34,
+          height: placement === 'sidebar' ? 24 : 34,
           paddingTop: 0,
           paddingRight: 0,
           paddingBottom: 0,
@@ -386,9 +387,9 @@ export function SymonMachineControl() {
           borderWidth: 1,
           borderStyle: 'solid',
           borderColor: error ? 'var(--t-danger)' : 'var(--t-border)',
-          borderRadius: 17,
-          background: 'var(--t-bg-card)',
-          boxShadow: '0 6px 20px rgba(0, 0, 0, 0.16)',
+          borderRadius: placement === 'sidebar' ? 12 : 17,
+          background: placement === 'sidebar' ? 'transparent' : 'var(--t-bg-card)',
+          boxShadow: placement === 'sidebar' ? 'none' : '0 6px 20px rgba(0, 0, 0, 0.16)',
           cursor: 'pointer',
         }}
       >

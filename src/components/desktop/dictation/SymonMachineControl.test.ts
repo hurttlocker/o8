@@ -101,6 +101,21 @@ describe('SymonMachineControl', () => {
     expect(container.textContent).toContain('Symon on');
   });
 
+  it('keeps the machine selector in the sidebar footer without a floating orb', async () => {
+    await act(async () => root.render(createElement(SymonMachineControl, { placement: 'sidebar' })));
+    await act(async () => {});
+
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    expect(trigger).not.toBeNull();
+    expect(trigger?.parentElement?.style.position).toBe('relative');
+    expect(trigger?.parentElement?.style.right).toBe('');
+    expect(trigger?.parentElement?.style.bottom).toBe('');
+
+    await act(async () => trigger?.click());
+    expect(container.querySelector('select[aria-label="Active Symon machine"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Minimize Symon to the sidebar footer"]')).not.toBeNull();
+  });
+
   it('opens the truthful capability catalog and starts a selected prompt', async () => {
     await act(async () => root.render(createElement(SymonMachineControl)));
     await act(async () => {});
@@ -143,10 +158,10 @@ describe('SymonMachineControl', () => {
     const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog?.closest('[title]')).toBeNull();
-    expect(dialog?.style.background).toBe('color-mix(in srgb, var(--t-input-bg) 88%, transparent)');
+    expect(dialog?.style.background).toBe('var(--t-popover-surface)');
     expect(dialog?.style.backdropFilter).toBe('blur(28px) saturate(1.2)');
     expect(motionState.latest?.style).toMatchObject({
-      background: 'color-mix(in srgb, var(--t-input-bg) 88%, transparent)',
+      background: 'var(--t-popover-surface)',
       backdropFilter: 'blur(28px) saturate(1.2)',
       WebkitBackdropFilter: 'blur(28px) saturate(1.2)',
     });
@@ -199,7 +214,7 @@ describe('SymonMachineControl', () => {
 
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
     await act(async () => trigger?.click());
-    const minimize = container.querySelector<HTMLButtonElement>('button[aria-label="Minimize Symon to the status bar"]');
+    const minimize = container.querySelector<HTMLButtonElement>('button[aria-label="Minimize Symon to the sidebar footer"]');
     expect(minimize).not.toBeNull();
 
     await act(async () => minimize?.click());
