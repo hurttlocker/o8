@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { WORKSPACE_TAB_DRAG_TYPE, type WorkspaceTabDragKind } from '@/lib/tiles/workspace-tab-drag';
 
 interface HeaderPlayButtonProps {
   onSpawnChat?: () => void;
@@ -10,13 +11,25 @@ interface HeaderPlayButtonProps {
   ariaSuffix?: string;
 }
 
-function HeaderPlayMenuItem({ label, onClick }: { label: string; onClick: () => void }) {
+function HeaderPlayMenuItem({ label, onClick, dragKind, onDragEnd }: {
+  label: string;
+  onClick: () => void;
+  dragKind?: WorkspaceTabDragKind;
+  onDragEnd?: () => void;
+}) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
       type="button"
       role="menuitem"
+      draggable={Boolean(dragKind)}
       onClick={onClick}
+      onDragStart={(event) => {
+        if (!dragKind) return;
+        event.dataTransfer.setData(WORKSPACE_TAB_DRAG_TYPE, dragKind);
+        event.dataTransfer.effectAllowed = 'copy';
+      }}
+      onDragEnd={onDragEnd}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -26,7 +39,7 @@ function HeaderPlayMenuItem({ label, onClick }: { label: string; onClick: () => 
         borderWidth: 0,
         background: hovered ? 'var(--t-hover)' : 'transparent',
         color: 'var(--t-text)',
-        cursor: 'pointer',
+        cursor: dragKind ? 'grab' : 'pointer',
         paddingTop: 6,
         paddingBottom: 6,
         paddingLeft: 12,
@@ -150,10 +163,10 @@ export function HeaderPlayButton({
         }}
       >
         {onSpawnChat ? (
-          <HeaderPlayMenuItem label="Chat" onClick={pick(onSpawnChat)} />
+          <HeaderPlayMenuItem label="Chat" onClick={pick(onSpawnChat)} dragKind="chat" onDragEnd={() => setOpen(false)} />
         ) : null}
         {onSpawnTerminal ? (
-          <HeaderPlayMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
+          <HeaderPlayMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} dragKind="terminal" onDragEnd={() => setOpen(false)} />
         ) : null}
         {onSplitTab ? (
           <>
@@ -163,6 +176,7 @@ export function HeaderPlayButton({
             <HeaderPlayMenuItem label="Terminal to right" onClick={pick(() => onSplitTab('terminal', 'right'))} />
             <HeaderPlayMenuItem label="Chat below" onClick={pick(() => onSplitTab('chat', 'below'))} />
             <HeaderPlayMenuItem label="Terminal below" onClick={pick(() => onSplitTab('terminal', 'below'))} />
+            <div style={{ color: 'var(--t-text-muted)', fontSize: 11, paddingTop: 7, paddingBottom: 5, paddingLeft: 12, borderTop: '1px solid var(--t-divider)' }}>Drag Chat or Terminal onto a pane</div>
           </>
         ) : null}
       </div>, document.body) : null}

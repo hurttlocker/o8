@@ -1,7 +1,7 @@
 'use client';
 
 import type React from 'react';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TileHeader } from '@/components/desktop/TileHeader';
 import {
   collectLeafNodes,
@@ -15,6 +15,7 @@ import type {
   TileLayout,
   TileSplitDirection,
 } from '@/lib/tiles/types';
+import { WORKSPACE_TAB_DRAG_TYPE, workspaceTabDropZone, type WorkspaceTabDragKind, type WorkspaceTabDropZone } from '@/lib/tiles/workspace-tab-drag';
 
 export interface TileContentRenderProps<TContent extends TileContent = TileContent> {
   active: boolean;
@@ -42,7 +43,7 @@ interface TileContainerProps {
   onActivateTile: (tileId: string) => void;
   onCloseTile: (tileId: string) => void;
   onResizeSplit: (splitId: string, ratio: number) => void;
-  onSplitTile: (tileId: string, direction: TileSplitDirection) => void;
+  onSplitTile: (tileId: string, direction: TileSplitDirection, initialTab?: WorkspaceTabDragKind, placeBefore?: boolean) => void;
 }
 
 const HANDLE_SIZE = 8;
@@ -75,6 +76,13 @@ export function TileContainer({
   onSplitTile,
 }: TileContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
+
+  useEffect(() => {
+    const clearDropPreview = () => setTabDrop(null);
+    window.addEventListener('dragend', clearDropPreview);
+    return () => window.removeEventListener('dragend', clearDropPreview);
+  }, []);
 
   const { leaves, leafRects, splitFrames } = useMemo(() => {
     const { leafRects, splitFrames } = computeTileLayout(layout.root);
@@ -125,6 +133,9 @@ export function TileContainer({
   return (
     <div
       ref={containerRef}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setTabDrop(null);
+      }}
       // Paint anchor for the pre-ship boot gate: the workspace subtree only
       // carries this once TileContainer actually renders, so a white-screen /
       // empty render can't report healthy. See DashboardHydrationMarker.
@@ -171,6 +182,31 @@ export function TileContainer({
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
             onMouseDown={() => onActivateTile(leaf.id)}
+            onDragOver={(event) => {
+              if (leaf.content.kind !== 'terminal' || !Array.from(event.dataTransfer.types).includes(WORKSPACE_TAB_DRAG_TYPE)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = 'copy';
+              const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
+              setTabDrop((current) => current?.tileId === leaf.id && current.zone === zone
+                ? current : { tileId: leaf.id, zone });
+            }}
+            onDropCapture={(event) => {
+              if (leaf.content.kind !== 'terminal') return;
+              const kind = event.dataTransfer.getData(WORKSPACE_TAB_DRAG_TYPE);
+              if (kind !== 'chat' && kind !== 'terminal') return;
+              event.preventDefault();
+              event.stopPropagation();
+              setTabDrop(null);
+              const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
+              if (zone === 'center') {
+                window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', {
+                  detail: { kind: kind === 'chat' ? 'orchestrator' : 'terminal', tileId: leaf.id },
+                }));
+                return;
+              }
+              onSplitTile(leaf.id, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above');
+            }}
             style={{
               position: 'absolute',
               left: `${rect.left * 100}%`,
@@ -227,6 +263,25 @@ export function TileContainer({
                   tileId: leaf.id,
                 }) : null}
               </div>
+              {tabDrop?.tileId === leaf.id ? (
+                <div aria-hidden style={{
+                  position: 'absolute',
+                  left: tabDrop.zone === 'right' ? '55%' : 0,
+                  top: tabDrop.zone === 'below' ? '55%' : 0,
+                  width: tabDrop.zone === 'left' ? '45%' : tabDrop.zone === 'right' ? '45%' : '100%',
+                  height: tabDrop.zone === 'above' ? '45%' : tabDrop.zone === 'below' ? '45%' : '100%',
+                  background: 'color-mix(in srgb, var(--t-accent) 13%, transparent)',
+                  boxShadow: 'inset 0 0 0 1px var(--t-accent)',
+                  borderRadius: 12,
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--t-text)',
+                  fontSize: 13,
+                  zIndex: 20,
+                }}>Open {tabDrop.zone === 'center' ? 'in this pane' : tabDrop.zone === 'above' ? 'above' : tabDrop.zone}</div>
+              ) : null}
             </div>
           </div>
         );

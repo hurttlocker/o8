@@ -100,7 +100,7 @@ export interface TileRegistryDeps {
   handleSelectCommit: (hash: string, meta?: Record<string, string>) => void;
   handleSelectPreviewTile: (tileId: string, previewId: string) => void;
   handleSelectRegisteredRepo: (repoId: string) => Promise<void>;
-  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'chat' | 'terminal') => void;
+  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'chat' | 'terminal', placeBefore?: boolean) => void;
   handleThoughtsMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
