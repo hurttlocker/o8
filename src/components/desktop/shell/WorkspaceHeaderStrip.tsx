@@ -18,7 +18,6 @@ import { TrafficLightsOrSpacer } from './TrafficLights';
 import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
-import { HeaderPlayButton } from './HeaderPlayButton';
 import { WorkspaceAddTabButton } from './WorkspaceAddTabButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
@@ -52,6 +51,7 @@ export function WorkspaceHeaderStrip({
   onSidebarHoverEnter,
   onSidebarHoverLeave,
   onSplitWorkspacePanel,
+  onCloseWorkspacePanel,
   bottomPanelVisible = false,
   onToggleBottomPanel,
   onOpenBottomPanelSurface,
@@ -128,6 +128,7 @@ export function WorkspaceHeaderStrip({
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
             {!isSplit && workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
+            {onCloseWorkspacePanel ? <SplitPaneCloseButton onClick={onCloseWorkspacePanel} paneLabel="active pane" /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
@@ -198,9 +199,6 @@ function SplitHeaderPillStrips({
     terminalModeActive?: boolean;
   }>;
 }) {
-  const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal') => {
-    window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind, workspaceId } }));
-  }, []);
   const dispatchClose = useCallback((workspaceId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
   }, []);
@@ -253,12 +251,7 @@ function SplitHeaderPillStrips({
                   yNudge={1.3}
                 />
               ) : null}
-              <HeaderPlayButton
-                onSpawnOrchestrator={() => dispatchSpawn(workspace.workspaceId, 'orchestrator')}
-                onSpawnChat={() => dispatchSpawn(workspace.workspaceId, 'chat')}
-                onSpawnTerminal={() => dispatchSpawn(workspace.workspaceId, 'terminal')}
-                ariaSuffix={paneLabel(index)}
-              />
+              <WorkspaceAddTabButton workspaceId={workspace.workspaceId} ariaSuffix={paneLabel(index)} />
               {canClose ? (
                 <SplitPaneCloseButton onClick={() => dispatchClose(workspace.workspaceId)} paneLabel={paneLabel(index)} />
               ) : null}

@@ -668,6 +668,8 @@ function DashboardInner() {
     return () => safeCancelIdleCallback(handle);
   }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
+  const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
+  const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const designMode = useDesignMode();
   // The element grabbed by Design Mode (Cmd+Shift+D click) — shown in a
   // floating O8ElementPanel until dismissed or sent to the agent.
@@ -846,15 +848,18 @@ function DashboardInner() {
   }, []);
 
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
-    // Single workspace mounted → its label / pill strip drives the
-    // global header. Multiple mounted (splits) → fall back to empty
-    // (the split header path below renders both panes side by side).
+    // A stacked split keeps the focused pane's tabs in the global header;
+    // laying both panes side by side there would contradict their positions.
     if (workspaceActiveMap.size === 1) {
       const [only] = workspaceActiveMap.values();
       return only;
     }
+    if (workspaceActiveMap.size > 1 && tileLayout.root.type === 'split' && tileLayout.root.direction === 'horizontal') {
+      const workspaces = Array.from(workspaceActiveMap.values());
+      return workspaces.find((workspace) => workspace.activeWorkspaceSurface) ?? workspaces[0];
+    }
     return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false, terminalModeActive: false, activeWorkspaceSurface: false };
-  }, [workspaceActiveMap]);
+  }, [tileLayout.root, workspaceActiveMap]);
   const toggleActiveTerminalMode = useCallback(() => {
     const workspaces = Array.from(workspaceActiveMap.values());
     const target = workspaces.find((workspace) => workspace.activeWorkspaceSurface)
@@ -870,11 +875,10 @@ function DashboardInner() {
     activeWorkspaceTabIdsRef.current = ids;
   }, [workspaceActiveMap]);
 
-  // Side-by-side header pills for splits — both workspaces' tabs land
-  // in the global header with a divider between them, mirroring the
-  // visual split below. Only populated when split (2+ workspaces).
+  // Side-by-side header pills mirror side-by-side workspace splits.
   const splitHeaderWorkspaces = useMemo(() => {
     if (workspaceActiveMap.size < 2) return null;
+    if (tileLayout.root.type === 'split' && tileLayout.root.direction === 'horizontal') return null;
     return Array.from(workspaceActiveMap.entries()).map(([workspaceId, payload]) => ({
       workspaceId,
       tabs: payload.tabs,
@@ -884,7 +888,7 @@ function DashboardInner() {
       contextRailVisible: payload.contextRailVisible,
       terminalModeActive: payload.terminalModeActive,
     }));
-  }, [workspaceActiveMap]);
+  }, [tileLayout.root, workspaceActiveMap]);
 
   // Workspace tab id → chat-history thread id map. OrchestratorTab
   // broadcasts 'o8:workspace-thread-id' whenever its loaded thread
@@ -1262,8 +1266,6 @@ function DashboardInner() {
     try { window.localStorage.setItem(O8_ACTIVE_TAB_STORAGE_KEY, o8ActiveTab); } catch { /* ignore */ }
   }, [o8ActiveTab]);
 
-  const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
-  const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
   const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
   // Persist the latest-dispatch marker so a reload during an active
@@ -5295,6 +5297,9 @@ function DashboardInner() {
           headerActiveTabId={workspaceHeaderActive.tabId}
           finishedTabCount={workspaceHeaderActive.finishedTabCount}
           splitHeaderWorkspaces={splitHeaderWorkspaces}
+          onCloseWorkspacePanel={tileLayout.root.type === 'split' && tileLayout.root.direction === 'horizontal' && workspaceActiveMap.size > 1 && workspaceHeaderActive.workspaceId ? () => {
+            window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId: workspaceHeaderActive.workspaceId } }));
+          } : undefined}
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />}

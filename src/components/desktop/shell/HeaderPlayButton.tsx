@@ -4,9 +4,9 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 interface HeaderPlayButtonProps {
-  onSpawnOrchestrator?: () => void;
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
+  onSplitTab?: (kind: 'chat' | 'terminal', direction: 'right' | 'below') => void;
   ariaSuffix?: string;
 }
 
@@ -44,9 +44,9 @@ function HeaderPlayMenuItem({ label, onClick }: { label: string; onClick: () => 
 }
 
 export function HeaderPlayButton({
-  onSpawnOrchestrator,
   onSpawnChat,
   onSpawnTerminal,
+  onSplitTab,
   ariaSuffix,
 }: HeaderPlayButtonProps) {
   const [open, setOpen] = useState(false);
@@ -149,14 +149,21 @@ export function HeaderPlayButton({
           fontFamily: 'var(--font-sans-system)',
         }}
       >
-        {onSpawnOrchestrator ? (
-          <HeaderPlayMenuItem label="Orchestrator" onClick={pick(onSpawnOrchestrator)} />
-        ) : null}
         {onSpawnChat ? (
           <HeaderPlayMenuItem label="Chat" onClick={pick(onSpawnChat)} />
         ) : null}
         {onSpawnTerminal ? (
           <HeaderPlayMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
+        ) : null}
+        {onSplitTab ? (
+          <>
+            <div role="separator" style={{ borderTop: '1px solid var(--t-divider)', marginTop: 4, marginBottom: 4 }} />
+            <div style={{ color: 'var(--t-text-muted)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', paddingLeft: 12, paddingBottom: 3 }}>NEW PANE</div>
+            <HeaderPlayMenuItem label="Chat to right" onClick={pick(() => onSplitTab('chat', 'right'))} />
+            <HeaderPlayMenuItem label="Terminal to right" onClick={pick(() => onSplitTab('terminal', 'right'))} />
+            <HeaderPlayMenuItem label="Chat below" onClick={pick(() => onSplitTab('chat', 'below'))} />
+            <HeaderPlayMenuItem label="Terminal below" onClick={pick(() => onSplitTab('terminal', 'below'))} />
+          </>
         ) : null}
       </div>, document.body) : null}
     </div>
