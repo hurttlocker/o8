@@ -2287,7 +2287,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // shrunken 600 px workspace, the same 38cqh shrinks to ~228
         // px so the relationship holds when the bottom panel opens.
         style={{
-          flexShrink: 0,
+          flexShrink: 0, width: '100%', maxWidth: composeFirst ? 900 : undefined, marginRight: 'auto', marginLeft: 'auto',
           // Compose-first positioning is handled by the empty-state flex layout
           // (OrchestratorEmptyState centers the title + quick-actions in the list
           // area; the composer rests at the bottom of the column). The old
