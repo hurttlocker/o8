@@ -9,12 +9,15 @@ import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescr
 import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-catalog';
 import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import { discoverRuntimeSessions } from '@/lib/runtime/inventory-discovery';
+import { projectDashboardCliSession, registerDashboardCliBindings } from '@/lib/runtime/dashboard-cli-inventory';
+import { readDashboardCliTurnEvidence } from '@/lib/runtime/dashboard-cli-status';
 import { isRegistryBackedRuntimeSession, selectRepoFallbackAgents } from '@/lib/runtime/inventory-selection';
 import {
   isDispatchableRuntime,
   ORCHESTRATOR_RUNTIMES,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { addInventoryApprovalEvidence } from '@/lib/runtime/inventory-approval-evidence';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import { debouncedSessionStatus } from '@/lib/terminal-status/debounce';
 import { relativeAge, timestampMillis } from '@/lib/util/relative-age';
@@ -448,8 +451,13 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
     discoveredKeys.add(key);
   }
 
+  const terminalBindings = await registerDashboardCliBindings(discoveredAll);
+  const terminalTurnEvidence = await readDashboardCliTurnEvidence(discoveredAll, terminalBindings);
+
   // resolveTerminalStatusEvidence is the single source for status precedence.
   const resolvedDiscoveredAll = discoveredAll.map(({ runtime, session }) => {
+    const dashboardCli = projectDashboardCliSession(runtime, session, terminalBindings, terminalTurnEvidence);
+    if (dashboardCli) return { runtime, ...dashboardCli };
     const debouncedStatus = debouncedSessionStatus(
       session.sessionKey,
       session.status,
@@ -541,6 +549,9 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
     })
     .map(mapIdeGhostRuntimeTabToAgent);
   visibleAgents.push(...ghostAgents);
+
+  // Shared operator-status resolution supplies terminal approval evidence.
+  addInventoryApprovalEvidence(visibleAgents);
 
   const squads: SquadSummary[] = [];
   for (const runtime of runtimes) {
@@ -638,10 +649,10 @@ export async function getRuntimeInventorySnapshot(
   const generation = runtimeInventoryGeneration;
 
   const cached = runtimeInventoryCache.get(cacheKey);
-  const maxCacheAge = cached?.idle
-    ? RUNTIME_INVENTORY_IDLE_TTL_MS
-    : fresh
-      ? RUNTIME_INVENTORY_FRESH_COALESCE_MS
+  const maxCacheAge = fresh
+    ? RUNTIME_INVENTORY_FRESH_COALESCE_MS
+    : cached?.idle
+      ? RUNTIME_INVENTORY_IDLE_TTL_MS
       : RUNTIME_INVENTORY_TTL_MS;
   if (cached && (now - cached.cachedAt) < maxCacheAge) {
     return cached.snapshot;

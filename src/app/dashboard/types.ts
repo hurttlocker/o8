@@ -58,6 +58,7 @@ export interface PaletteAgentSummary {
   workflowStage?: WorkflowStageBadge | null;
   runtime?: string;
   statusEvidence?: TerminalStatusEvidence;
+  terminalApprovalEligible?: boolean;
   localDiff?: {
     changedFiles?: number;
     additions?: number;

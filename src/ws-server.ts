@@ -303,7 +303,9 @@ import {
 } from './lib/ws-server/pty-support';
 import {
   createDashTmuxSessionSync,
+  claimDashTmuxSessionForCurrentProfile,
   dashSessionNameForOwnerKey,
+  dashTmuxDataProfileTag,
   dashTmuxArgs,
   dashTmuxServerName,
 } from './lib/ws-server/dash-terminal-persistence';
@@ -1521,19 +1523,25 @@ const DASH_GC_MAX_SESSIONS = 64;
 let dashGcTimer: ReturnType<typeof setInterval> | null = null;
 
 /** One `tmux list-sessions` → live `cortex-dash-*` sessions with creation age. */
-function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
+type DashTmuxSessionWithProfile = DashSessionInfo & { profileTag: string | null };
+
+function listDashTmuxSessionsWithAge(): DashTmuxSessionWithProfile[] {
   try {
     const out = execFileSync(
       resolveTmuxBinary(),
-      dashTmuxArgs('list-sessions', '-F', '#{session_name} #{session_created}'),
+      dashTmuxArgs('list-sessions', '-F', '#{session_name}\t#{session_created}\t#{@o8_dashboard_data_profile}'),
       { windowsHide: true, timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
     );
-    const rows: DashSessionInfo[] = [];
+    const rows: DashTmuxSessionWithProfile[] = [];
     for (const line of out.split('\n')) {
-      const [name, created] = line.trim().split(/\s+/);
+      const [name, created, profileTag] = line.split('\t');
       if (!name || !name.startsWith('cortex-dash-')) continue;
       const sec = Number(created);
-      rows.push({ name, createdMs: Number.isFinite(sec) && sec > 0 ? sec * 1000 : 0 });
+      rows.push({
+        name,
+        createdMs: Number.isFinite(sec) && sec > 0 ? sec * 1000 : 0,
+        profileTag: profileTag?.trim() || null,
+      });
     }
     return rows;
   } catch {
@@ -1581,6 +1589,14 @@ function reapOrphanDashSessions() {
   const sessions = listDashTmuxSessionsWithAge();
   if (sessions.length === 0) return;
 
+  // The dashboard tmux server can be shared by data profiles. Only a session
+  // explicitly marked by this profile belongs in its reaper's policy and cap.
+  // Unmarked legacy sessions stay untouched until an explicit reattach adopts
+  // them, so a newer profile cannot clean up a pre-marker session by guesswork.
+  const currentProfileTag = dashTmuxDataProfileTag();
+  const ownedSessions = sessions.filter((session) => session.profileTag === currentProfileTag);
+  if (ownedSessions.length === 0) return;
+
   // Durable reference set FIRST — never reap on a failed read of persisted tabs
   // (after a crash the in-memory map is empty; persisted tabs are the only
   // owner record, so a read failure must abort the sweep, not reap survivors).
@@ -1596,7 +1612,7 @@ function reapOrphanDashSessions() {
     if (att.clientIds.size > 0) referenced.add(name);
   }
 
-  const toKill = selectOrphanDashSessions(sessions, referenced, {
+  const toKill = selectOrphanDashSessions(ownedSessions, referenced, {
     nowMs: Date.now(),
     minAgeMs: DASH_GC_MIN_AGE_MS,
     maxSessions: DASH_GC_MAX_SESSIONS,
@@ -1619,6 +1635,14 @@ function reapOrphanDashSessions() {
     } catch { /* already gone */ }
   }
   console.log(`[ws-server] [persistent-terminals] GC reaped ${toKill.length} orphan dash tmux session(s)`);
+}
+
+function isPersistedDashTmuxSessionForCurrentProfile(sessionName: string): boolean {
+  try {
+    return collectPersistedTmuxSessions().has(sessionName);
+  } catch {
+    return false;
+  }
 }
 
 function startDashSessionGc() {
@@ -6829,6 +6853,7 @@ function materializePendingDashSession(
     cwd,
     shell,
     env,
+    allowLegacySessionReuse: isPersistedDashTmuxSessionForCurrentProfile(sessionName),
   });
   const ptyProcess = tmuxBacked
     ? spawnTmuxAttachPty(sessionName, nextCols, nextRows)
@@ -6889,7 +6914,14 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     && (
       pendingDashSessions.has(ownerSessionName)
       || terminalAttachments.has(ownerSessionName)
-      || (dashPersistentTerminalsEnabled() && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
+      || (
+        dashPersistentTerminalsEnabled()
+        && tmuxSessionExists(ownerSessionName, dashTmuxArgs())
+        && claimDashTmuxSessionForCurrentProfile(
+          ownerSessionName,
+          isPersistedDashTmuxSessionForCurrentProfile(ownerSessionName),
+        )
+      )
     )
   ) {
     console.log(`[ws-server] Reusing owned dashboard PTY session: ${ownerSessionName}`);
@@ -6975,6 +7007,10 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     isDashTerminalSession(sessionName)
     && dashPersistentTerminalsEnabled()
     && tmuxSessionExists(sessionName, dashTmuxArgs())
+    && claimDashTmuxSessionForCurrentProfile(
+      sessionName,
+      isPersistedDashTmuxSessionForCurrentProfile(sessionName),
+    )
   ) {
     try {
       const ptyProcess = spawnTmuxAttachPty(sessionName, cols, rows);
@@ -7357,6 +7393,10 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
 
   // 2. Try killing tmux session directly (if PTY already detached but tmux lives)
   try {
+    if (isDashTerminalSession(sessionName) && !claimDashTmuxSessionForCurrentProfile(
+      sessionName,
+      isPersistedDashTmuxSessionForCurrentProfile(sessionName),
+    )) return;
     const tmuxBin = resolveTmuxBinary();
     const tmuxArgs = isDashTerminalSession(sessionName) ? dashTmuxArgs() : [];
     execFileSync(tmuxBin, [...tmuxArgs, 'has-session', '-t', sessionName], {

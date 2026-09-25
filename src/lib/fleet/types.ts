@@ -96,6 +96,8 @@ export interface AgentSummary {
   status: AgentStatus;
   /** Normalized terminal status explanation for orchestrator runtime sessions. */
   statusEvidence?: TerminalStatusEvidence;
+  /** Dashboard-discovered CLI binding eligible for governed approval actions. */
+  terminalApprovalEligible?: boolean;
   currentTask: string;
   /** Worker-posted implementation plan while the lane is huddling. */
   huddlePlan?: string;

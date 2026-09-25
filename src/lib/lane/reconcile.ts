@@ -7,6 +7,7 @@ import { laneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { getLaneEvents, listLanes, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
 import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
@@ -48,14 +49,19 @@ async function discoverSessionKeysByRuntime(lanes: Lane[]) {
 
 function createSessionLostApproval(lane: Lane) {
   const label = lane.label || lane.branch;
+  const externalCli = isDiscoveredCliSessionKey(lane.runtime, lane.sessionKey);
   return createApproval({
     source: 'runtime',
     runtime: lane.runtime,
     agent: label,
     sessionKey: lane.sessionKey || `lane:${lane.id}`,
     title: 'Agent session lost',
-    description: `The agent session for lane "${label}" was lost during app restart. Resume the task or archive the lane.`,
-    summary: `Lane "${label}" needs a resume after app restart`,
+    description: externalCli
+      ? `The agent session for lane "${label}" was lost during app restart. Check the original CLI, then choose an explicit new run or archive the lane.`
+      : `The agent session for lane "${label}" was lost during app restart. Resume the task or archive the lane.`,
+    summary: externalCli
+      ? `Lane "${label}" needs a continuation decision after app restart`
+      : `Lane "${label}" needs a resume after app restart`,
     risk: 'medium',
     metadata: {
       Lane: lane.id,

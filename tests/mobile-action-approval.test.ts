@@ -159,4 +159,25 @@ describe('mobile /action approve — approvalId is authoritative (stale sessionK
     expect(json.error).toBe('approval_not_found');
     expect(getApproval(fallback.id)?.status).toBe('pending');
   });
+
+  it('keeps a lane continuation pending until the operator chooses a mode in the desktop inbox', async () => {
+    const approval = createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'Lane worker',
+      sessionKey: 'codex:mobile-lane-choice',
+      title: 'Lane continuation',
+      description: 'Choose how to continue.',
+      summary: 'mobile-lane-choice',
+      risk: 'medium',
+      continuation: { kind: 'lane', laneId: 'lane-mobile-choice', verb: 'resume' },
+    });
+
+    const response = await action.POST(post({
+      action: 'approve', sessionKey: approval.sessionKey, approvalId: approval.id,
+    }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe('lane_continuation_choice_required');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+  });
 });

@@ -1,5 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { recordPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
 import { resolveTmuxBinary } from '@/lib/ws-server/pty-support';
 
@@ -8,14 +11,35 @@ export function dashTmuxServerName(): string {
   return process.env.O8_DASH_TMUX_SERVER_NAME?.trim() || 'o8-dashboard';
 }
 const DASH_TERMINAL_OVERRIDE = 'xterm*:indn@';
+const DASH_TERMINAL_PROFILE_OPTION = '@o8_dashboard_data_profile';
 
 export function dashTmuxArgs(...args: string[]): string[] {
   return ['-L', dashTmuxServerName(), ...args];
 }
 
+/** A private, stable identity for the data profile that owns a tmux session. */
+export function dashTmuxDataProfileTag(dataDir = getDataDir()): string {
+  const absoluteDataDir = resolve(dataDir);
+  let existingPath = absoluteDataDir;
+  const missingSegments: string[] = [];
+  let canonicalDataDir = absoluteDataDir;
+  while (true) {
+    try {
+      canonicalDataDir = join(realpathSync.native(existingPath), ...missingSegments.reverse());
+      break;
+    } catch {
+      const parent = dirname(existingPath);
+      if (parent === existingPath) break;
+      missingSegments.push(basename(existingPath));
+      existingPath = parent;
+    }
+  }
+  return createHash('sha256').update(canonicalDataDir).digest('hex').slice(0, 32);
+}
+
 function ensureDashTerminalOverride(
   tmuxBin: string,
-  dependencies: CreateDashTmuxSessionDependencies,
+  dependencies: DashTmuxSessionDependencies,
 ) {
   const configured = String(dependencies.execFileSync(
     tmuxBin,
@@ -43,6 +67,8 @@ export function dashSessionNameForOwnerKey(rawOwnerKey?: string | null): string 
 
 interface CreateDashTmuxSessionInput {
   enabled: boolean;
+  /** An untagged legacy session is safe only when this profile saved its tab. */
+  allowLegacySessionReuse?: boolean;
   sessionName: string;
   cols: number;
   rows: number;
@@ -51,20 +77,20 @@ interface CreateDashTmuxSessionInput {
   env: NodeJS.ProcessEnv;
 }
 
-interface CreateDashTmuxSessionDependencies {
+export interface DashTmuxSessionDependencies {
   resolveTmuxBinary: typeof resolveTmuxBinary;
   execFileSync: typeof execFileSync;
   recordHealth: typeof recordPersistentTerminalHealth;
 }
 
-const DEFAULT_DEPENDENCIES: CreateDashTmuxSessionDependencies = {
+const DEFAULT_DEPENDENCIES: DashTmuxSessionDependencies = {
   resolveTmuxBinary,
   execFileSync,
   recordHealth: recordPersistentTerminalHealth,
 };
 
 function recordHealthSafely(
-  dependencies: CreateDashTmuxSessionDependencies,
+  dependencies: DashTmuxSessionDependencies,
   status: Parameters<typeof recordPersistentTerminalHealth>[0],
   reason: Parameters<typeof recordPersistentTerminalHealth>[1],
 ) {
@@ -77,9 +103,60 @@ function recordHealthSafely(
   }
 }
 
+function readDashTmuxSessionProfileTag(
+  tmuxBin: string,
+  sessionName: string,
+  dependencies: Pick<DashTmuxSessionDependencies, 'execFileSync'>,
+): string | null | undefined {
+  try {
+    const value = String(dependencies.execFileSync(
+      tmuxBin,
+      dashTmuxArgs('show-options', '-qv', '-t', sessionName, DASH_TERMINAL_PROFILE_OPTION),
+      { windowsHide: true, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    )).trim();
+    return value || null;
+  } catch {
+    return undefined;
+  }
+}
+
+function setDashTmuxSessionProfileTag(
+  tmuxBin: string,
+  sessionName: string,
+  dependencies: Pick<DashTmuxSessionDependencies, 'execFileSync'>,
+) {
+  dependencies.execFileSync(
+    tmuxBin,
+    dashTmuxArgs('set-option', '-t', sessionName, DASH_TERMINAL_PROFILE_OPTION, dashTmuxDataProfileTag()),
+    { windowsHide: true, timeout: 3000, stdio: 'ignore' },
+  );
+}
+
+/**
+ * Mark an untagged legacy session when its saved tab explicitly reattaches it.
+ * A session already marked for another data profile is never adopted.
+ */
+export function claimDashTmuxSessionForCurrentProfile(
+  sessionName: string,
+  allowLegacySessionReuse: boolean,
+  dependencies: Pick<DashTmuxSessionDependencies, 'resolveTmuxBinary' | 'execFileSync'> = DEFAULT_DEPENDENCIES,
+): boolean {
+  try {
+    const tmuxBin = dependencies.resolveTmuxBinary();
+    const tag = readDashTmuxSessionProfileTag(tmuxBin, sessionName, dependencies);
+    if (tag === undefined) return false;
+    if (tag && tag !== dashTmuxDataProfileTag()) return false;
+    if (tag === null && !allowLegacySessionReuse) return false;
+    if (tag === null) setDashTmuxSessionProfileTag(tmuxBin, sessionName, dependencies);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createDashTmuxSessionSync(
   input: CreateDashTmuxSessionInput,
-  dependencies: CreateDashTmuxSessionDependencies = DEFAULT_DEPENDENCIES,
+  dependencies: DashTmuxSessionDependencies = DEFAULT_DEPENDENCIES,
 ): boolean {
   if (!input.enabled) {
     recordHealthSafely(dependencies, 'disabled', 'operator_disabled');
@@ -105,6 +182,20 @@ export function createDashTmuxSessionSync(
         timeout: 3000,
         stdio: 'ignore',
       });
+      const profileTag = readDashTmuxSessionProfileTag(tmuxBin, input.sessionName, dependencies);
+      if (profileTag === undefined) {
+        recordHealthSafely(dependencies, 'degraded', 'session_create_failed');
+        return false;
+      }
+      if (profileTag && profileTag !== dashTmuxDataProfileTag()) {
+        recordHealthSafely(dependencies, 'degraded', 'session_create_failed');
+        return false;
+      }
+      if (profileTag === null && !input.allowLegacySessionReuse) {
+        recordHealthSafely(dependencies, 'degraded', 'session_create_failed');
+        return false;
+      }
+      if (profileTag === null) setDashTmuxSessionProfileTag(tmuxBin, input.sessionName, dependencies);
       // Reused sessions may predate #1979. The dedicated dashboard server keeps
       // this server option away from the operator's personal tmux, and the read
       // before append prevents duplicate entries across create/reuse cycles.
@@ -119,6 +210,7 @@ export function createDashTmuxSessionSync(
       input.shell, '-l',
     ), { windowsHide: true, cwd: input.cwd, timeout: 8000, env: input.env });
     created = true;
+    setDashTmuxSessionProfileTag(tmuxBin, input.sessionName, dependencies);
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
       'set-option', '-t', input.sessionName, 'history-limit', '50000',
     ), { windowsHide: true, timeout: 3000, stdio: 'ignore' });

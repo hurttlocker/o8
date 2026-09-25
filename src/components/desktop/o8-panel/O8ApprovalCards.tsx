@@ -1,18 +1,20 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { ApprovalRecord, ApprovalRisk } from '@/lib/approvals/types';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 import { isGateApprovalRow } from '@/lib/approvals/gating';
 import { composeApprovalCardCopy } from '@/lib/inbox/card-copy';
 import { O8RefereeRow, refereeRiskSummary } from './O8RefereeRow';
 
 type ApprovalAction = 'approve' | 'reject';
+type LaneChoice = 'continue_in_terminal' | 'start_fresh';
 
 interface O8ApprovalCardsProps {
   approvals: ApprovalRecord[];
   busyApproval: { id: string; action: ApprovalAction } | null;
   noteById: Record<string, string>;
-  onResolve: (approval: ApprovalRecord, action: ApprovalAction) => void;
+  onResolve: (approval: ApprovalRecord, action: ApprovalAction, laneChoice?: LaneChoice) => void;
 }
 
 const UI_FONT = 'var(--font-sans-system)';
@@ -76,18 +78,28 @@ function ApprovalActionButton({
   busy,
   disabled,
   label,
+  busyLabel,
+  secondary = false,
   onClick,
 }: {
   action: ApprovalAction;
   busy: boolean;
   disabled: boolean;
   label?: string;
+  busyLabel?: string;
+  secondary?: boolean;
   onClick: () => void;
 }) {
   const approve = action === 'approve';
   const buttonLabel = label ?? (approve ? 'Approve' : 'Reject');
-  const busyLabel = approve ? 'Approving...' : 'Rejecting...';
-  const style: CSSProperties = approve
+  const pendingLabel = busyLabel ?? (approve ? 'Approving...' : 'Rejecting...');
+  const style: CSSProperties = approve && secondary
+    ? {
+        borderColor: 'var(--t-divider-subtle)',
+        background: 'var(--t-input-bg)',
+        color: disabled ? 'var(--t-text-faint)' : 'var(--t-text-secondary)',
+      }
+    : approve
     ? {
         borderColor: 'var(--t-brand-orange, #FF5A1F)',
         background: disabled ? 'var(--t-input-bg)' : 'var(--t-brand-orange, #FF5A1F)',
@@ -128,7 +140,7 @@ function ApprovalActionButton({
         ...style,
       }}
     >
-      {busy ? busyLabel : buttonLabel}
+      {busy ? pendingLabel : buttonLabel}
     </button>
   );
 }
@@ -142,8 +154,9 @@ function ApprovalRequestCard({
   approval: ApprovalRecord;
   busyApproval: { id: string; action: ApprovalAction } | null;
   note?: string;
-  onResolve: (approval: ApprovalRecord, action: ApprovalAction) => void;
+  onResolve: (approval: ApprovalRecord, action: ApprovalAction, laneChoice?: LaneChoice) => void;
 }) {
+  const [confirmChoice, setConfirmChoice] = useState<LaneChoice | null>(null);
   const tone = riskTone(approval.risk);
   const busyAction = busyApproval?.id === approval.id ? busyApproval.action : null;
   const continuationUnsettled = approval.resolution?.continuationStatus === 'pending'
@@ -152,6 +165,8 @@ function ApprovalRequestCard({
   const tool = toolLabel(approval);
   const copy = composeApprovalCardCopy(approval);
   const isMerge = approval.continuation?.kind === 'lane' && approval.continuation.verb === 'merge';
+  const isLaneResume = approval.continuation?.kind === 'lane' && approval.continuation.verb === 'resume';
+  const hasOriginalCli = isLaneResume && isDiscoveredCliSessionKey(approval.runtime, approval.sessionKey);
   const isUnreviewedMerge = isMerge && approval.title === 'Review required before merge';
   const reason = isUnreviewedMerge
     ? 'No approved review is recorded for this exact revision. Check the current diff before deciding whether to merge.'
@@ -270,8 +285,17 @@ function ApprovalRequestCard({
         </pre>
       ) : null}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-        <div style={{ flex: 1, minWidth: 0, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', color: note?.toLowerCase().includes('unable') ? 'var(--t-danger)' : 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      {hasOriginalCli ? (
+        <div style={{ marginTop: 9, fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-secondary)' }}>
+          {confirmChoice === 'start_fresh'
+            ? 'Confirm a separate CLI process. o8 checks the original process and session first. Do not restart that CLI elsewhere while this runs.'
+            : confirmChoice === 'continue_in_terminal'
+              ? 'Confirm to open the verified original terminal. You enter the next message there; o8 does not send a turn.'
+              : 'Open the original terminal to continue manually, or start a separate run after the original stops.'}
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+        <div role={note ? 'status' : undefined} title={note} style={{ flex: 1, minWidth: 0, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.35, color: note?.startsWith('Cannot ') ? 'var(--t-danger)' : 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>
           {continuationUnsettled
             ? 'Approval recorded; continuation unconfirmed. Inspect the target before another action.'
             : note}
@@ -282,13 +306,44 @@ function ApprovalRequestCard({
           disabled={disabled}
           onClick={() => onResolve(approval, 'reject')}
         />
-        <ApprovalActionButton
-          action="approve"
-          busy={busyAction === 'approve'}
-          disabled={disabled}
-          label={isMerge ? 'Approve merge' : undefined}
-          onClick={() => onResolve(approval, 'approve')}
-        />
+        {hasOriginalCli ? (
+          <>
+            <ApprovalActionButton
+              action="approve"
+              busy={busyAction === 'approve'}
+              disabled={disabled}
+              label={confirmChoice === 'continue_in_terminal' ? 'Confirm and open' : 'Open original terminal'}
+              busyLabel="Recording choice..."
+              onClick={() => {
+                if (confirmChoice === 'continue_in_terminal') onResolve(approval, 'approve', 'continue_in_terminal');
+                else setConfirmChoice('continue_in_terminal');
+              }}
+            />
+            <ApprovalActionButton
+              action="approve"
+              busy={busyAction === 'approve'}
+              disabled={disabled}
+              label={confirmChoice === 'start_fresh' ? 'Confirm new run' : 'Start new run'}
+              busyLabel="Starting new run..."
+              secondary
+              onClick={() => {
+                if (confirmChoice === 'start_fresh') onResolve(approval, 'approve', 'start_fresh');
+                else setConfirmChoice('start_fresh');
+              }}
+            />
+            {confirmChoice ? (
+              <button type="button" onClick={() => setConfirmChoice(null)} style={{ borderWidth: 0, borderStyle: 'none', background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
+            ) : null}
+          </>
+        ) : (
+          <ApprovalActionButton
+            action="approve"
+            busy={busyAction === 'approve'}
+            disabled={disabled}
+            label={isMerge ? 'Approve merge' : undefined}
+            onClick={() => onResolve(approval, 'approve')}
+          />
+        )}
       </div>
     </article>
   );

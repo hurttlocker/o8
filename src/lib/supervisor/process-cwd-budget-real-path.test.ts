@@ -34,7 +34,9 @@ vi.mock('@/lib/runtime/ide-session-registry', () => ({
 }));
 
 vi.mock('@/lib/runtime/terminal-session-registry', () => ({
+  DASHBOARD_CLI_BINDING_TTL_MS: 30 * 60_000,
   getRuntimeTerminalSession: () => null,
+  listRecentDashboardCliSessions: () => [],
 }));
 
 vi.mock('@/lib/lane/registry', () => ({

@@ -145,4 +145,42 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     expect(sendTerminalDetach).not.toHaveBeenCalled();
     expect(sendTerminalCreate).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps live repo-less shells when the selected repo hydrates after restore', async () => {
+    const sendTerminalCreate = vi.fn<WorkspaceTerminalProps['sendTerminalCreate']>();
+    const sendTerminalAttach = vi.fn<WorkspaceTerminalProps['sendTerminalAttach']>();
+    const controllerRef = { current: null as TerminalTabHandle | null };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'tile-root',
+      defaultTab: 'terminal',
+      autoCreateDefaultTab: false,
+      sendTerminalCreate,
+      sendTerminalAttach,
+      sendTerminalInput: vi.fn(),
+      sendTerminalResize: vi.fn(),
+      sendTerminalVisibility: vi.fn(),
+      sendTerminalDetach: vi.fn(),
+      termWsConnected: true,
+    };
+
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { ref: controllerRef, props })));
+    await act(async () => Promise.resolve());
+    expect(sendTerminalCreate).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      expect(controllerRef.current?.onSessionCreated('cortex-dash-a', sendTerminalCreate.mock.calls[0][2])).toBe(true);
+      expect(controllerRef.current?.onSessionCreated('cortex-dash-b', sendTerminalCreate.mock.calls[1][2])).toBe(true);
+    });
+
+    await act(async () => root.render(createElement(ForwardedControllerHarness, {
+      ref: controllerRef,
+      props: { ...props, preferredRepo: { name: 'project', localPath: '/project' } },
+    })));
+    await act(async () => Promise.resolve());
+
+    expect(JSON.parse(container.firstElementChild?.getAttribute('data-sessions') ?? '[]')).toEqual([
+      ['terminal-a', 'cortex-dash-a'],
+      ['terminal-b', 'cortex-dash-b'],
+    ]);
+    expect(sendTerminalCreate).toHaveBeenCalledTimes(2);
+  });
 });

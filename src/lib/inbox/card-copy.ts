@@ -1,5 +1,6 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 
 export interface InboxCardCopy {
   headline: string;
@@ -224,7 +225,9 @@ export function composeApprovalCardCopy(approval: ApprovalRecord): InboxCardCopy
       };
     }
     return {
-      headline: 'A worker session needs permission to continue; resume it or reject the request.',
+      headline: isDiscoveredCliSessionKey(approval.runtime, approval.sessionKey)
+        ? 'A lane needs your decision: use its original terminal or start a separate run.'
+        : 'A worker session needs permission to continue; resume it or reject the request.',
       subline: approvalMetadata(approval, [approval.title]),
     };
   }

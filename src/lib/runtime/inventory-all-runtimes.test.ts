@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import type {
   RuntimeSession,
 } from '@/lib/runtimes/types';
 import type { IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
+import type { ApprovalRecord } from '@/lib/approvals/types';
 
 const registryFixture = vi.hoisted(() => ({
   runtimes: [] as AgentRuntime[],
@@ -16,6 +17,26 @@ const registryFixture = vi.hoisted(() => ({
 const ideRegistryFixture = vi.hoisted(() => ({
   sessions: [] as IdeRuntimeSessionDescriptor[],
   tabs: [] as IdeRuntimeSessionDescriptor[],
+}));
+
+const terminalFixture = vi.hoisted(() => ({
+  bindings: new Map<string, string>(),
+  registry: new Map<string, { sessionName: string; runtime: 'codex' | 'claude-code'; cwd?: string; source?: 'dashboard-cli-detected'; updatedAt: string }>(),
+}));
+
+const rolloutFixture = vi.hoisted(() => ({ path: null as string | null }));
+
+vi.mock('@/lib/codex/sessions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/codex/sessions')>()),
+  getCodexRolloutPath: async () => rolloutFixture.path,
+}));
+
+const approvalFixture = vi.hoisted(() => ({
+  approvals: [] as ApprovalRecord[],
+}));
+
+vi.mock('@/lib/approvals/store', () => ({
+  listApprovals: () => approvalFixture.approvals,
 }));
 
 vi.mock('@/lib/runtimes', () => ({
@@ -32,7 +53,18 @@ vi.mock('@/lib/runtime/ide-session-registry', () => ({
 }));
 
 vi.mock('@/lib/runtime/terminal-session-registry', () => ({
-  getRuntimeTerminalSession: () => null,
+  DASHBOARD_CLI_BINDING_TTL_MS: 30 * 60_000,
+  getRuntimeTerminalSession: (key: string) => terminalFixture.registry.get(key) ?? null,
+  listRecentDashboardCliSessions: (runtimeId: 'codex' | 'claude-code') => Array.from(terminalFixture.registry.entries())
+    .filter(([, entry]) => entry.runtime === runtimeId && entry.source === 'dashboard-cli-detected')
+    .map(([sessionKey, entry]) => ({ sessionKey, ...entry })),
+  registerRuntimeTerminalSession: (key: string, entry: { sessionName: string; runtime: 'codex' | 'claude-code'; cwd?: string; source?: 'dashboard-cli-detected' }) => {
+    terminalFixture.registry.set(key, { ...entry, updatedAt: new Date().toISOString() });
+  },
+}));
+
+vi.mock('@/lib/runtime/dashboard-cli-bindings', () => ({
+  discoverDashboardCliBindings: async () => new Map(terminalFixture.bindings),
 }));
 
 vi.mock('@/lib/lane/registry', () => ({
@@ -111,6 +143,10 @@ describe('canonical runtime inventory discovery', () => {
     registryFixture.runtimes = [];
     ideRegistryFixture.sessions = [];
     ideRegistryFixture.tabs = [];
+    terminalFixture.bindings.clear();
+    terminalFixture.registry.clear();
+    rolloutFixture.path = null;
+    approvalFixture.approvals = [];
     invalidateRuntimeInventoryCache();
   });
 
@@ -139,6 +175,137 @@ describe('canonical runtime inventory discovery', () => {
       'aider-identity',
     ]);
     expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
+  });
+
+  it('projects an exact dashboard terminal binding and downgrades an exited CLI to unknown evidence', async () => {
+    const codexRuntime = runtime('codex');
+    const originalDiscovery = codexRuntime.discoverSessions;
+    codexRuntime.discoverSessions = async () => (await originalDiscovery()).map((session) => ({
+      ...session,
+      sessionKey: 'codex:terminal-thread',
+      ownership: 'discovered',
+      pid: 4242,
+    }));
+    registryFixture.runtimes = [codexRuntime];
+    terminalFixture.bindings.set('codex:terminal-thread', 'cortex-dash-real');
+
+    const live = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(live.agents).toHaveLength(1);
+    expect(live.agents[0]).toMatchObject({
+      sessionKey: 'codex:terminal-thread',
+      tmuxSession: 'cortex-dash-real',
+      status: 'running',
+      statusEvidence: { state: 'unknown', authority: 'raw-terminal' },
+    });
+    expect(terminalFixture.registry.get('codex:terminal-thread')?.source).toBe('dashboard-cli-detected');
+
+    approvalFixture.approvals = [{
+      id: 'approval-terminal-thread',
+      runtime: 'codex',
+      sessionKey: 'codex:terminal-thread',
+      status: 'pending',
+      updatedAt: Date.now(),
+      title: 'Resume this lane',
+      continuation: { kind: 'lane', laneId: 'lane-terminal-thread', verb: 'resume' },
+    } as ApprovalRecord];
+    invalidateRuntimeInventoryCache();
+    const actionable = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(actionable.agents[0]?.terminalApprovalEligible).toBe(true);
+
+    approvalFixture.approvals = [];
+    terminalFixture.bindings.clear();
+    invalidateRuntimeInventoryCache();
+    const exited = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(exited.agents).toHaveLength(1);
+    expect(exited.agents[0]).toMatchObject({
+      sessionKey: 'codex:terminal-thread',
+      tmuxSession: undefined,
+      status: 'idle',
+      statusEvidence: {
+        state: 'unknown',
+        authority: 'raw-terminal',
+        fallbackReason: expect.stringContaining('no longer verified'),
+      },
+    });
+  });
+
+  it('carries structured turn state from a matched rollout through fresh inventory, then drops it on exit', async () => {
+    const codexRuntime = runtime('codex');
+    const originalDiscovery = codexRuntime.discoverSessions;
+    codexRuntime.discoverSessions = async () => (await originalDiscovery()).map((session) => ({
+      ...session,
+      sessionKey: 'codex:matched-rollout-thread',
+      ownership: 'discovered',
+      pid: 4242,
+    }));
+    registryFixture.runtimes = [codexRuntime];
+    terminalFixture.bindings.set('codex:matched-rollout-thread', 'cortex-dash-real');
+    rolloutFixture.path = join(testRoot, 'matched-rollout.jsonl');
+    writeFileSync(rolloutFixture.path, `${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      type: 'event_msg',
+      payload: { type: 'task_started' },
+    })}\n`);
+
+    const working = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(working.agents[0]).toMatchObject({
+      status: 'running',
+      statusEvidence: {
+        state: 'working',
+        authority: 'runtime-event',
+        evidence: expect.arrayContaining([{ source: 'codex-rollout.lifecycle', value: 'task_started' }]),
+      },
+    });
+
+    writeFileSync(rolloutFixture.path, `${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      type: 'event_msg',
+      payload: { type: 'task_complete' },
+    })}\n`, { flag: 'a' });
+    invalidateRuntimeInventoryCache();
+    const complete = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(complete.agents[0]).toMatchObject({
+      status: 'completed',
+      statusEvidence: { state: 'complete', authority: 'runtime-event' },
+    });
+
+    terminalFixture.bindings.clear();
+    invalidateRuntimeInventoryCache();
+    const exited = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(exited.agents[0]).toMatchObject({
+      status: 'idle',
+      statusEvidence: { state: 'unknown', authority: 'raw-terminal' },
+    });
+  });
+
+  it('lets an explicit fresh read discover a CLI after an idle snapshot was cached', async () => {
+    const codexRuntime = runtime('codex');
+    const originalDiscovery = codexRuntime.discoverSessions;
+    let cliVisible = false;
+    codexRuntime.discoverSessions = async () => cliVisible
+      ? (await originalDiscovery()).map((session) => ({
+          ...session,
+          sessionKey: 'codex:new-terminal-thread',
+          ownership: 'discovered',
+          pid: 4242,
+        }))
+      : [];
+    registryFixture.runtimes = [codexRuntime];
+    expect((await getRuntimeInventorySnapshot({ fresh: true })).agents).toHaveLength(0);
+
+    cliVisible = true;
+    terminalFixture.bindings.set('codex:new-terminal-thread', 'cortex-dash-new');
+    const currentTime = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(currentTime + 3_000);
+    try {
+      const refreshed = await getRuntimeInventorySnapshot({ fresh: true });
+      expect(refreshed.agents[0]).toMatchObject({
+        sessionKey: 'codex:new-terminal-thread',
+        tmuxSession: 'cortex-dash-new',
+      });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('serves a cold dashboard snapshot immediately and lets an explicit fresh read expedite discovery', async () => {
@@ -284,5 +451,35 @@ describe('canonical runtime inventory discovery', () => {
         summary: 'claude-code runtime reports this session as review-ready.',
       },
     });
+  });
+
+  it('projects a pending approval into the actual dashboard inventory while preserving runtime authority', async () => {
+    const codexRuntime = runtime('codex');
+    const discoverSessions = codexRuntime.discoverSessions;
+    codexRuntime.discoverSessions = async () => (await discoverSessions()).map((session) => ({
+      ...session,
+      tmuxSession: 'o8-terminal-inventory-proof',
+    }));
+    registryFixture.runtimes = [codexRuntime];
+    approvalFixture.approvals = [{
+      id: 'approval-inventory-proof',
+      runtime: 'codex',
+      sessionKey: 'codex-owned:inventory-parity',
+      status: 'pending',
+      updatedAt: Date.parse('2026-07-24T12:00:03.000Z'),
+      title: 'Resume this lane',
+      summary: 'The lane needs an operator.',
+      continuation: { kind: 'lane', laneId: 'lane-inventory-proof', verb: 'resume' },
+    } as ApprovalRecord];
+
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+    const agent = snapshot.agents.find((candidate) => candidate.sessionKey === 'codex-owned:inventory-parity');
+
+    expect(agent?.tmuxSession).toBe('o8-terminal-inventory-proof');
+    expect(agent?.terminalApprovalEligible).toBe(false);
+    expect(agent?.statusEvidence).toMatchObject({ authority: 'runtime-event', state: 'working' });
+    expect(agent?.statusEvidence?.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'approval:approval-inventory-proof' }),
+    ]));
   });
 });

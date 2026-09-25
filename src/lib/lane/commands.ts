@@ -57,16 +57,24 @@ import {
 } from '@/lib/lane/spoken-review-snapshot';
 import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
+import { withResourceLease } from '@/lib/leases/resource-lease-guard';
+import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { enqueueLaneReview } from '@/lib/lane/review-queue';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
 import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
+import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { probeLiveClaudeProcesses } from '@/lib/runtimes/claude-code-process-probe';
+import { invalidateCodexDiscoveredFleetCache } from '@/lib/codex/sessions';
 import {
   withWorkspaceMaterializedMutation,
   WorkspaceMutationUnavailableError,
 } from '@/lib/workspace/mutation-materialization-guard';
+
+const freshRunChains = new Map<string, Promise<unknown>>();
 
 /**
  * #2 Stage 5b — worker-context merge governance. A dispatched worker that calls
@@ -101,6 +109,19 @@ export async function dispatch(
     repoActionLeaseMaxWaitMs?: number;
   } = {},
 ): Promise<LaneCommandResult> {
+  if (command.verb === 'start_fresh') {
+    return chainOnKey(freshRunChains, command.laneId, async () => {
+      const guarded = await withResourceLease({
+        resource: `lane-fresh-run:${command.laneId}`,
+        owner: { id: `lane-fresh-run:${process.pid}`, label: 'lane fresh run', pid: process.pid },
+        actor: 'system:lane-fresh-run',
+        maxWaitMs: 30_000,
+      }, () => dispatchUnlocked(command, dependencies));
+      return guarded.state === 'completed'
+        ? guarded.value
+        : { ok: false, laneId: command.laneId, reason: 'fresh_run_lease_unavailable', note: guarded.refusal.message };
+    });
+  }
   if (command.verb === 'merge' || command.verb === 'create_pr') {
     const lane = getLane(command.laneId);
     if (lane) {
@@ -118,6 +139,66 @@ export async function dispatch(
     }
   }
   return dispatchUnlocked(command, dependencies);
+}
+
+export async function validateFreshRunEligibility(
+  laneId: string,
+  expectedSessionKey: string | null,
+): Promise<{ ok: true; lane: Lane } | { ok: false; lane?: Lane; reason: string; note: string }> {
+  const lane = getLane(laneId);
+  if (!lane) return { ok: false, reason: 'lane_missing', note: 'Lane not found.' };
+  if (lane.sessionKey !== expectedSessionKey
+    || !['paused', 'recovering', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human'].includes(lane.status)) {
+    return { ok: false, lane, reason: 'fresh_run_stale', note: 'The lane changed. Refresh before starting a new run.' };
+  }
+  if (!isDiscoveredCliSessionKey(lane.runtime, lane.sessionKey)) {
+    return { ok: false, lane, reason: 'external_cli_required', note: 'This explicit fresh-run path requires a previously bound external CLI.' };
+  }
+  const prior = getRuntimeTerminalSession(lane.sessionKey!);
+  if (prior?.source !== 'dashboard-cli-detected' || prior.runtime !== lane.runtime
+    || !Number.isSafeInteger(prior.pid) || (prior.pid ?? 0) <= 0) {
+    return { ok: false, lane, reason: 'original_stop_unverified', note: 'o8 has no exact process receipt for the original CLI. A new run was not started.' };
+  }
+  try {
+    process.kill(prior.pid!, 0);
+    return { ok: false, lane, reason: 'original_session_live', note: 'The original CLI process is still live. Continue there; a fresh run would duplicate it.' };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+      return { ok: false, lane, reason: 'original_stop_unverified', note: 'The original CLI process could not be verified stopped. No new run was started.' };
+    }
+  }
+  const { getRuntime } = await import('@/lib/runtimes/registry');
+  const runtime = getRuntime(lane.runtime);
+  if (!runtime) return { ok: false, lane, reason: 'runtime_unavailable', note: 'The runtime is unavailable.' };
+  try {
+    // Codex's ordinary `fresh` discovery can reuse a five-second fleet cache.
+    // An operator-authorized new run requires a scan that starts after the PID proof.
+    if (lane.runtime === 'codex') invalidateCodexDiscoveredFleetCache();
+    if (lane.runtime === 'claude-code') {
+      const liveProbe = await probeLiveClaudeProcesses();
+      if (!liveProbe.probed) {
+        return { ok: false, lane, reason: 'session_state_unknown', note: 'The original CLI state could not be confirmed by a live process scan. No new run was started.' };
+      }
+      const sessionId = lane.sessionKey!.replace(/^claude-code(?:-discovered)?:/, '');
+      const possiblySameSession = liveProbe.processes.some((process) => process.sessionId === sessionId
+        || (!process.sessionId && process.cwd === prior.cwd));
+      if (possiblySameSession) {
+        return { ok: false, lane, reason: 'original_session_live', note: 'The original CLI may still be live. Continue there; a fresh run would duplicate it.' };
+      }
+    }
+    const sessions = await runtime.discoverSessions({ fresh: true });
+    const original = sessions.find((session) => session.sessionKey === lane.sessionKey
+      && session.runtimeId === lane.runtime && session.ownership === 'discovered');
+    if (original?.status === 'running') {
+      return { ok: false, lane, reason: 'original_session_live', note: 'The original CLI is still live. Continue there; a fresh run would duplicate it.' };
+    }
+    if (!original || !['idle', 'completed', 'failed'].includes(original.status)) {
+      return { ok: false, lane, reason: 'session_state_unknown', note: 'The original CLI state could not be confirmed by a fresh runtime scan. No new run was started.' };
+    }
+  } catch {
+    return { ok: false, lane, reason: 'session_state_unknown', note: 'The original session could not be checked. No new run was started.' };
+  }
+  return { ok: true, lane };
 }
 
 async function dispatchUnlocked(
@@ -388,12 +469,33 @@ async function dispatchUnlocked(
       };
     }
 
-    case 'resume': {
+    case 'resume':
+    case 'start_fresh': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+      const freshRun = command.verb === 'start_fresh';
+
+      if (freshRun && actor !== 'user') {
+        return { ok: false, laneId: lane.id, reason: 'operator_required', note: 'A fresh lane run requires the operator.', lane };
+      }
+
+      if (!freshRun && isDiscoveredCliSessionKey(lane.runtime, lane.sessionKey)) {
+        return {
+          ok: false,
+          laneId: command.laneId,
+          reason: 'cli_resume_requires_explicit_action',
+          note: 'This lane is bound to an external CLI session. Resume cannot safely continue it or start another run. Inspect the original terminal, then choose an explicit fresh run if needed.',
+          lane,
+        };
+      }
+
+      if (freshRun) {
+        const eligibility = await validateFreshRunEligibility(command.laneId, command.expectedSessionKey);
+        if (!eligibility.ok) return { ...eligibility, laneId: command.laneId };
+      }
 
       // If lane has a live session, resume it with a message
-      if (lane.sessionKey && command.message) {
+      if (!freshRun && lane.sessionKey && command.message) {
         try {
           const { performRuntimeAction } = await import('@/lib/runtime/actions');
           const result = await performRuntimeAction({
@@ -412,8 +514,10 @@ async function dispatchUnlocked(
       }
 
       // No session or session dead — re-launch in the same worktree
-      const prompt = command.message || 'Continue the previous task. Check what was done and what remains.';
-      setLaneStatus(command.laneId, 'launching', actor, 'relaunching');
+      const prompt = freshRun
+        ? 'This is a new run for the existing lane. Inspect previous work and report what remains before making changes.'
+        : command.message || 'Continue the previous task. Check what was done and what remains.';
+      setLaneStatus(command.laneId, 'launching', actor, freshRun ? 'starting_fresh_run' : 'relaunching');
 
       try {
         const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
@@ -435,7 +539,7 @@ async function dispatchUnlocked(
         }
 
         attachSession(command.laneId, result.surfaceId, actor);
-        setLaneStatus(command.laneId, 'running', actor, 'resumed');
+        setLaneStatus(command.laneId, 'running', actor, freshRun ? 'fresh_run_started' : 'resumed');
 
         // Register with supervisor (ws-server process) via HTTP
         try {
@@ -449,7 +553,9 @@ async function dispatchUnlocked(
         } catch { /* best effort */ }
 
         const updated = getLane(command.laneId);
-        return { ok: true, laneId: command.laneId, note: `Resumed in ${lane.worktreePath ?? lane.repoPath}.`, lane: updated ?? undefined };
+        return { ok: true, laneId: command.laneId, note: freshRun
+          ? `Started a new run in ${lane.worktreePath ?? lane.repoPath}. The previous CLI was not resumed.`
+          : `Resumed in ${lane.worktreePath ?? lane.repoPath}.`, lane: updated ?? undefined };
       } catch (err) {
         setLaneStatus(command.laneId, 'paused', 'system', 'relaunch_error');
         const message = err instanceof Error ? err.message : 'Resume failed.';

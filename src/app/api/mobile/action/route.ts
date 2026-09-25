@@ -31,6 +31,7 @@ import { writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmC
 import type { RuntimeId } from '@/lib/runtimes';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
+import { dispatchMobileLaneContinuation, requiresDesktopLaneChoice } from '@/lib/mobile/lane-continuation';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -467,6 +468,12 @@ async function handleMobileActionPost(request: NextRequest) {
       }
 
       const approvalId = currentApproval.id;
+      if (action === 'approve' && currentApproval.continuation?.kind === 'lane'
+        && requiresDesktopLaneChoice(currentApproval.runtime, currentApproval.sessionKey, currentApproval.continuation)) {
+        return actionStructuredError('lane_continuation_choice_required', 409, {
+          message: 'Choose the original terminal or a confirmed new run in the desktop inbox.',
+        });
+      }
       const resolutionClaim = claimApprovalResolution(
         approvalId,
         action === 'approve' ? 'approve' : 'reject',
@@ -493,20 +500,9 @@ async function handleMobileActionPost(request: NextRequest) {
           : rejectLlmApproval(approval, 'mobile');
         decisionNote = decision.note;
       } else if (continuation?.kind === 'lane' && action === 'approve') {
-        try {
-          const { dispatch } = await import('@/lib/lane/commands');
-          const result = await dispatch({
-            verb: continuation.verb,
-            laneId: continuation.laneId,
-            commitMessage: continuation.commitMessage,
-            expectedHeadSha: continuation.expectedHeadSha,
-            actor: 'user',
-          } as Parameters<typeof dispatch>[0]);
-          decisionNote = result.note;
-        } catch (error) {
-          continuationOutcome = 'outcome_unknown';
-          decisionNote = `Lane ${continuation.verb} failed: ${sanitizeErrorMessage(error, 'unknown')}`;
-        }
+        const decision = await dispatchMobileLaneContinuation(continuation);
+        continuationOutcome = decision.outcome;
+        decisionNote = decision.note;
       } else if (continuation?.kind === 'plan' && action === 'approve') {
         try {
           const { dispatchApprovedPlan } = await import('@/lib/intake/plan-dispatch');

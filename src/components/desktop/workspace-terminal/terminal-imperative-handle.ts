@@ -47,6 +47,7 @@ export interface ImperativeHandleDeps {
   }) => string;
   openWorkspaceOrchestratorTab: (repo?: RegisteredRepo | null) => string;
   openWorkspaceTerminalTab: (agentId: string, repo?: RegisteredRepo) => string;
+  attachWorkspaceTerminalSession: (session: Parameters<TerminalTabHandle['openAttachedTerminalSession']>[0], repo: RegisteredRepo | null) => string;
   openWorkspaceInspectorTab: (canvasTab: NonNullable<TerminalTab['canvasTab']>, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
   persistTabsNow: (currentTabs: TerminalTab[], currentActiveId: string) => void;
   sendTerminalDetach: (sessionName: string) => void;
@@ -110,6 +111,19 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     openLlmChatSession: (options) => deps.openWorkspaceLlmChatSession(options ?? {}),
     openOrchestratorTab: (repo) => deps.openWorkspaceOrchestratorTab(repo),
     openTerminalTab: (repo) => deps.openWorkspaceTerminalTab('shell', repo),
+    focusTerminalSession: (sessionName) => {
+      const tab = deps.tabsRef.current.find((candidate) => (
+        candidate.kind === 'terminal' && candidate.tmuxSession === sessionName
+      ));
+      if (!tab) return false;
+      deps.setActiveTabId(tab.id);
+      return true;
+    },
+    openAttachedTerminalSession: (session, repo) => {
+      const tabId = deps.attachWorkspaceTerminalSession(session, repo);
+      if (tabId) deps.setActiveTabId(tabId);
+      return tabId;
+    },
     openHistoryChat: (historyTabId, title, historyRepo) => {
       const currentTab = deps.tabsRef.current.find((tab) => tab.id === deps.activeTabId)
         ?? deps.tabsRef.current.find((tab) => tab.kind === 'llm-chat')

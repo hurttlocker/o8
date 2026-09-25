@@ -2532,7 +2532,7 @@ function DashboardInner() {
 
   const handleSelectSession = useCallback((
     sessionKey: string,
-    hint?: { title?: string; runtime?: OrchestratorRuntime; repoPath?: string | null },
+    hint?: { title?: string; runtime?: OrchestratorRuntime; repoPath?: string | null; tmuxSession?: string },
   ) => {
     // Open the session transcript in a canvas chat tab.
     // `hint.title` is the pass-through (Option D): an archived row already has
@@ -2546,7 +2546,7 @@ function DashboardInner() {
         || session.id === sessionKey
         || session.sessionId === sessionKey
         || session.runtimeSurface?.id === sessionKey
-      ));
+      )) ?? parsedAgents.find((agent) => agent.sessionKey === sessionKey || agent.id === sessionKey);
       const sessionScope = selectedSession?.workspace
         ?? selectedSession?.runtimeSurface?.cwd
         ?? hint?.repoPath
@@ -2557,6 +2557,40 @@ function DashboardInner() {
           || pathBelongsToRepoScope(repo.localPath, sessionScope)
         ))
         : null;
+      const terminalSession = hint?.tmuxSession?.trim()
+        || (selectedSession?.runtimeSurface?.ownership === 'discovered'
+          ? selectedSession.tmuxSession?.trim()
+          : null);
+      if (terminalSession) {
+        for (const [tileId, handle] of workspaceTerminalHandlesRef.current) {
+          if (!handle.focusTerminalSession(terminalSession)) continue;
+          setActiveTileId(tileId);
+          return;
+        }
+        const terminalTarget = await waitForWorkspaceTerminalTarget({
+          repoPath: targetRepo?.localPath ?? sessionScope ?? undefined,
+        });
+        if (!terminalTarget) return;
+        const repo = targetRepo ? {
+          name: targetRepo.name,
+          localPath: targetRepo.localPath,
+          remoteUrl: targetRepo.remoteUrl,
+          branch: targetRepo.branch,
+          readiness: targetRepo.readiness,
+          registryRepoId: targetRepo.registryRepoId,
+          isWorktree: targetRepo.isWorktree,
+          worktreeStatus: targetRepo.worktreeStatus,
+        } : null;
+        terminalTarget.handle.openAttachedTerminalSession({
+          sessionKey,
+          tmuxSession: terminalSession,
+          label: hint?.title ?? selectedSession?.name ?? 'CLI terminal',
+          statusEvidence: selectedSession?.statusEvidence,
+          repo: repo ?? undefined,
+        }, repo);
+        setActiveTileId(terminalTarget.tileId);
+        return;
+      }
       const target = await waitForWorkspaceTerminalTarget({
         repoPath: targetRepo?.localPath ?? sessionScope ?? undefined,
       });
@@ -2597,13 +2631,14 @@ function DashboardInner() {
       setActiveTileId(target.tileId);
 
     })();
-  }, [ideWorkspaceSessionsForSidebar, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
+  }, [ideWorkspaceSessionsForSidebar, parsedAgents, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceScopeEntries, workspaceTerminalHandlesRef]);
 
   useEffect(() => {
     const handleFocusSpawnedAgentLane = (event: Event) => {
       const detail = (event as CustomEvent<{
         packetId?: string | null;
         sessionKey?: string | null;
+        tmuxSession?: string | null;
         laneId?: string | null;
         title?: string | null;
       }>).detail;
@@ -2620,7 +2655,10 @@ function DashboardInner() {
         focusOrchestrationPacketLane(packet);
         return;
       }
-      if (sessionKey) handleSelectSession(sessionKey, detail?.title ? { title: detail.title } : undefined);
+      if (sessionKey) handleSelectSession(sessionKey, {
+        title: detail?.title ?? undefined,
+        tmuxSession: detail?.tmuxSession ?? undefined,
+      });
       if (!sessionKey && (laneId || packetId)) {
         void (async () => {
           const resolvedLane = await resolveFocusableLaneBinding({
@@ -2637,6 +2675,25 @@ function DashboardInner() {
     window.addEventListener('o8:focus-spawned-agent-lane', handleFocusSpawnedAgentLane);
     return () => window.removeEventListener('o8:focus-spawned-agent-lane', handleFocusSpawnedAgentLane);
   }, [focusOrchestrationPacketLane, handleSelectSession]);
+
+  useEffect(() => {
+    const handleFocusVerifiedCliTerminal = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionKey?: string; tmuxSession?: string }>).detail;
+      if (!detail?.sessionKey || !detail.tmuxSession) return;
+      // Terminal Mode pins its original tab over the controller's selection.
+      // Exit any pinned workspace before selecting the verified CLI pane so
+      // the screen follows the tab that the approval actually opens.
+      for (const workspace of workspaceActiveMap.values()) {
+        if (workspace.terminalModeActive && workspace.workspaceId) {
+          requestTerminalModeToggle(workspace.workspaceId);
+        }
+      }
+      setActiveNavSection('agents');
+      handleSelectSession(detail.sessionKey, { tmuxSession: detail.tmuxSession });
+    };
+    window.addEventListener('o8:focus-verified-cli-terminal', handleFocusVerifiedCliTerminal);
+    return () => window.removeEventListener('o8:focus-verified-cli-terminal', handleFocusVerifiedCliTerminal);
+  }, [handleSelectSession, setActiveNavSection, workspaceActiveMap]);
 
   const flashWorkspaceTab = useCallback((tabId: string) => {
     if (!tabId) return;

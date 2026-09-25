@@ -68,8 +68,15 @@ function approvalEvent(
   actor: ApprovalActor,
   note?: string,
   timestamp = Date.now(),
+  terminalAdapter?: ApprovalAuditEvent['terminalAdapter'],
 ): ApprovalAuditEvent {
-  return { type, actor, timestamp, note: note?.trim() || undefined };
+  return {
+    type,
+    actor,
+    timestamp,
+    note: note?.trim() || undefined,
+    terminalAdapter,
+  };
 }
 
 function insertResolutionEvent(
@@ -83,7 +90,10 @@ function insertResolutionEvent(
     eventType: event.type,
     actor: event.actor,
     note: event.note ?? null,
-    detailsJson: event.approvedFromCard ? JSON.stringify({ approvedFromCard: event.approvedFromCard }) : '{}',
+    detailsJson: JSON.stringify({
+      ...(event.approvedFromCard ? { approvedFromCard: event.approvedFromCard } : {}),
+      ...(event.terminalAdapter ? { terminalAdapter: event.terminalAdapter } : {}),
+    }),
     timestamp: event.timestamp,
   }).run();
 }
@@ -102,6 +112,7 @@ export function claimApprovalResolution(
   note?: string,
   expectedUpdatedAt?: number,
   approvedFromCard?: ApprovalAuditEvent['approvedFromCard'],
+  terminalAdapter?: ApprovalAuditEvent['terminalAdapter'],
 ): ApprovalResolutionClaim {
   const existing = readApproval(id);
   if (!existing || existing.status !== 'pending') {
@@ -121,6 +132,7 @@ export function claimApprovalResolution(
     actor,
     note,
     resolvedAt,
+    terminalAdapter,
   );
   if (approvedFromCard && action === 'approve') event.approvedFromCard = approvedFromCard;
   const resolution: NonNullable<ApprovalRecord['resolution']> = {

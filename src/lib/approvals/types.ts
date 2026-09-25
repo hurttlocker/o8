@@ -113,6 +113,15 @@ export interface ApprovalAuditEvent {
   conflictZones?: string[];
   /** Approved from a phone inbox card with referee chips shown (#2439); the chip kinds that were shown. */
   approvedFromCard?: { via: 'chip'; chipsShown: string[] };
+  /** Durable provenance for an approval resolved from the governed terminal adapter. */
+  terminalAdapter?: {
+    schema: 'o8/terminal-approval/v1';
+    authority: 'lane-state';
+    sessionKey: string;
+    tmuxSession: string;
+    actor: 'operator' | 'device';
+    result: 'approved' | 'rejected';
+  };
 }
 
 export interface LlmApprovalContinuation {

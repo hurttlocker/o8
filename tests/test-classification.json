@@ -539,6 +539,12 @@
       ]
     },
     {
+      "path": "src/lib/runtime/dashboard-cli-bindings.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/runtime/interrupt-escalation.test.ts",
       "reasons": [
         "child-process",
@@ -1599,6 +1605,14 @@
       "path": "tests/dash-terminal-indn-isolated-server.test.ts",
       "reasons": [
         "child-process",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/dash-terminal-profile-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
         "terminal-tool"
       ]
     },
