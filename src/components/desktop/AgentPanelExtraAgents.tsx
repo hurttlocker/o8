@@ -29,6 +29,7 @@ import { motion } from 'framer-motion';
 import { deriveParkedLaneBuckets, type ReviewApprovalSummary } from '@/components/desktop/merge-beacon/derive';
 import { AGENT_STATUS_ACCENT } from '@/components/desktop/AgentStatusDot';
 import { RUNTIME_INVENTORY_REFRESHED_EVENT } from '@/lib/runtime/inventory-events';
+import { canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
   ExtraAgentActionMenu,
   ExtraAgentRowView,
@@ -498,21 +499,47 @@ function AgentPanelExtraAgentsBase({
     // Plain terminal CLIs have no lane lifecycle event. Refresh only the
     // inventory between broad reconciles so appear/exit is visible promptly.
     let mounted = true;
-    const refreshInventory = () => {
-      void fetch('/api/runtime/inventory?fresh=1')
-        .then(async (response) => response.ok ? await response.json() as { agents?: AgentSummary[]; meta?: { mode?: string } } : null)
-        .then((snapshot) => {
-          if (!mounted || snapshot?.meta?.mode !== 'live') return;
-          setAgents(snapshot.agents ?? []);
-          window.dispatchEvent(new CustomEvent(RUNTIME_INVENTORY_REFRESHED_EVENT, { detail: snapshot }));
-        })
-        .catch(() => undefined);
+    let inventoryInFlight = false;
+    const pageVisible = () => document.visibilityState !== 'hidden';
+    const refreshInventory = async () => {
+      if (!mounted || inventoryInFlight || !pageVisible()) return;
+      if (canUseTauriEvents()) {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          if (!mounted || !await getCurrentWindow().isVisible()) return;
+        } catch {
+          // A native visibility check must succeed before expensive discovery.
+          return;
+        }
+      }
+      if (!mounted || inventoryInFlight || !pageVisible()) return;
+      inventoryInFlight = true;
+      try {
+        const response = await fetch('/api/runtime/inventory?fresh=1');
+        const snapshot = response.ok
+          ? await response.json() as { agents?: AgentSummary[]; meta?: { mode?: string } }
+          : null;
+        if (!mounted || snapshot?.meta?.mode !== 'live') return;
+        setAgents(snapshot.agents ?? []);
+        window.dispatchEvent(new CustomEvent(RUNTIME_INVENTORY_REFRESHED_EVENT, { detail: snapshot }));
+      } catch {
+        // Discovery remains best-effort while runtimes are starting or exiting.
+      } finally {
+        inventoryInFlight = false;
+      }
     };
-    refreshInventory();
-    const inventoryId = window.setInterval(refreshInventory, 10_000);
+    void refreshInventory();
+    const inventoryId = window.setInterval(() => { void refreshInventory(); }, 10_000);
+    const onVisibilityChange = () => {
+      if (pageVisible()) void refreshInventory();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onVisibilityChange);
     return () => {
       mounted = false;
       window.removeEventListener('o8:lifecycle-reconcile', onLifecycle);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onVisibilityChange);
       window.clearInterval(fallbackId);
       window.clearInterval(inventoryId);
       abortRef.current?.abort();
