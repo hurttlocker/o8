@@ -6,6 +6,7 @@ import type { CanvasTab } from '@/components/desktop/Canvas';
 import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
 import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
+import { TerminalApprovalAction } from '@/components/desktop/workspace-terminal/TerminalApprovalAction';
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
@@ -125,10 +126,8 @@ function WorkspaceTerminalPanelsBase({
   }
   const hasEverHadTabs = nextResidentState.hasEverHadTabs;
   const residentTabIdSet = new Set(nextResidentState.tabIds);
-  const statusEvidenceByTmuxSession = useMemo(() => new Map(
-    attachedTerminalSessions.flatMap((session) => (
-      session.statusEvidence ? [[session.tmuxSession, session.statusEvidence] as const] : []
-    )),
+  const attachedSessionByTmuxSession = useMemo(() => new Map(
+    attachedTerminalSessions.map((session) => [session.tmuxSession, session] as const),
   ), [attachedTerminalSessions]);
   const effectiveActiveTerminalSession = visibleTabs.find((tab) => (
     tab.id === effectiveActiveTabId && tab.kind === 'terminal'
@@ -240,8 +239,11 @@ function WorkspaceTerminalPanelsBase({
             sendTerminalVisibility={sendTerminalVisibility}
             sendTerminalDetach={sendTerminalDetach}
             statusEvidence={tab.id === effectiveActiveTabId
-              ? terminalModeStatusEvidence ?? statusEvidenceByTmuxSession.get(tab.tmuxSession)
-              : statusEvidenceByTmuxSession.get(tab.tmuxSession)}
+              ? terminalModeStatusEvidence ?? attachedSessionByTmuxSession.get(tab.tmuxSession)?.statusEvidence
+              : attachedSessionByTmuxSession.get(tab.tmuxSession)?.statusEvidence}
+            attachedSessionKey={attachedSessionByTmuxSession.get(tab.tmuxSession)?.terminalApprovalEligible
+              ? attachedSessionByTmuxSession.get(tab.tmuxSession)?.sessionKey
+              : undefined}
             active={tab.id === effectiveActiveTabId}
           />
         ) : (
@@ -511,6 +513,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   sendTerminalVisibility,
   sendTerminalDetach,
   statusEvidence,
+  attachedSessionKey,
   active,
 }: {
   tabId: string;
@@ -522,6 +525,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   sendTerminalVisibility: WorkspaceTerminalPanelsProps['sendTerminalVisibility'];
   sendTerminalDetach: WorkspaceTerminalPanelsProps['sendTerminalDetach'];
   statusEvidence?: TerminalStatusEvidence;
+  attachedSessionKey?: string;
   active: boolean;
 }) {
   useEffect(() => {
@@ -557,6 +561,14 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
       }}
     >
       {statusEvidence ? <TerminalStatusEvidenceDisclosure evidence={statusEvidence} /> : null}
+      {statusEvidence && attachedSessionKey ? (
+        <TerminalApprovalAction
+          active={active}
+          sessionKey={attachedSessionKey}
+          tmuxSession={tmuxSession}
+          evidence={statusEvidence}
+        />
+      ) : null}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
         <XtermPanel
           ref={(handle) => {

@@ -17,6 +17,7 @@ import {
   ORCHESTRATOR_RUNTIMES,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { addInventoryApprovalEvidence } from '@/lib/runtime/inventory-approval-evidence';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import { debouncedSessionStatus } from '@/lib/terminal-status/debounce';
 import { relativeAge, timestampMillis } from '@/lib/util/relative-age';
@@ -548,6 +549,9 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
     })
     .map(mapIdeGhostRuntimeTabToAgent);
   visibleAgents.push(...ghostAgents);
+
+  // Shared operator-status resolution supplies terminal approval evidence.
+  addInventoryApprovalEvidence(visibleAgents);
 
   const squads: SquadSummary[] = [];
   for (const runtime of runtimes) {

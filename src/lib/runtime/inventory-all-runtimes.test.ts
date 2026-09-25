@@ -8,6 +8,7 @@ import type {
   RuntimeSession,
 } from '@/lib/runtimes/types';
 import type { IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
+import type { ApprovalRecord } from '@/lib/approvals/types';
 
 const registryFixture = vi.hoisted(() => ({
   runtimes: [] as AgentRuntime[],
@@ -30,6 +31,14 @@ vi.mock('@/lib/codex/sessions', async (importOriginal) => ({
   getCodexRolloutPath: async () => rolloutFixture.path,
 }));
 
+const approvalFixture = vi.hoisted(() => ({
+  approvals: [] as ApprovalRecord[],
+}));
+
+vi.mock('@/lib/approvals/store', () => ({
+  listApprovals: () => approvalFixture.approvals,
+}));
+
 vi.mock('@/lib/runtimes', () => ({
   getAllRuntimes: () => registryFixture.runtimes,
 }));
@@ -46,6 +55,9 @@ vi.mock('@/lib/runtime/ide-session-registry', () => ({
 vi.mock('@/lib/runtime/terminal-session-registry', () => ({
   DASHBOARD_CLI_BINDING_TTL_MS: 30 * 60_000,
   getRuntimeTerminalSession: (key: string) => terminalFixture.registry.get(key) ?? null,
+  listRecentDashboardCliSessions: (runtimeId: 'codex' | 'claude-code') => Array.from(terminalFixture.registry.entries())
+    .filter(([, entry]) => entry.runtime === runtimeId && entry.source === 'dashboard-cli-detected')
+    .map(([sessionKey, entry]) => ({ sessionKey, ...entry })),
   registerRuntimeTerminalSession: (key: string, entry: { sessionName: string; runtime: 'codex' | 'claude-code'; cwd?: string; source?: 'dashboard-cli-detected' }) => {
     terminalFixture.registry.set(key, { ...entry, updatedAt: new Date().toISOString() });
   },
@@ -134,6 +146,7 @@ describe('canonical runtime inventory discovery', () => {
     terminalFixture.bindings.clear();
     terminalFixture.registry.clear();
     rolloutFixture.path = null;
+    approvalFixture.approvals = [];
     invalidateRuntimeInventoryCache();
   });
 
@@ -186,6 +199,20 @@ describe('canonical runtime inventory discovery', () => {
     });
     expect(terminalFixture.registry.get('codex:terminal-thread')?.source).toBe('dashboard-cli-detected');
 
+    approvalFixture.approvals = [{
+      id: 'approval-terminal-thread',
+      runtime: 'codex',
+      sessionKey: 'codex:terminal-thread',
+      status: 'pending',
+      updatedAt: Date.now(),
+      title: 'Resume this lane',
+      continuation: { kind: 'lane', laneId: 'lane-terminal-thread', verb: 'resume' },
+    } as ApprovalRecord];
+    invalidateRuntimeInventoryCache();
+    const actionable = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(actionable.agents[0]?.terminalApprovalEligible).toBe(true);
+
+    approvalFixture.approvals = [];
     terminalFixture.bindings.clear();
     invalidateRuntimeInventoryCache();
     const exited = await getRuntimeInventorySnapshot({ fresh: true });
@@ -424,5 +451,35 @@ describe('canonical runtime inventory discovery', () => {
         summary: 'claude-code runtime reports this session as review-ready.',
       },
     });
+  });
+
+  it('projects a pending approval into the actual dashboard inventory while preserving runtime authority', async () => {
+    const codexRuntime = runtime('codex');
+    const discoverSessions = codexRuntime.discoverSessions;
+    codexRuntime.discoverSessions = async () => (await discoverSessions()).map((session) => ({
+      ...session,
+      tmuxSession: 'o8-terminal-inventory-proof',
+    }));
+    registryFixture.runtimes = [codexRuntime];
+    approvalFixture.approvals = [{
+      id: 'approval-inventory-proof',
+      runtime: 'codex',
+      sessionKey: 'codex-owned:inventory-parity',
+      status: 'pending',
+      updatedAt: Date.parse('2026-07-24T12:00:03.000Z'),
+      title: 'Resume this lane',
+      summary: 'The lane needs an operator.',
+      continuation: { kind: 'lane', laneId: 'lane-inventory-proof', verb: 'resume' },
+    } as ApprovalRecord];
+
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+    const agent = snapshot.agents.find((candidate) => candidate.sessionKey === 'codex-owned:inventory-parity');
+
+    expect(agent?.tmuxSession).toBe('o8-terminal-inventory-proof');
+    expect(agent?.terminalApprovalEligible).toBe(false);
+    expect(agent?.statusEvidence).toMatchObject({ authority: 'runtime-event', state: 'working' });
+    expect(agent?.statusEvidence?.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'approval:approval-inventory-proof' }),
+    ]));
   });
 });

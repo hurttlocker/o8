@@ -3,6 +3,8 @@
 import { act, createElement, Fragment, type ForwardedRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ApprovalRecord } from '@/lib/approvals/types';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 import type { TerminalTab } from './types';
 import {
   queueOutsideWorkerSplit,
@@ -145,6 +147,7 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
     resetOutsideWorkerSplitsForTest();
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('mounts at most three heavy tab surfaces from a large restored workspace', async () => {
@@ -203,6 +206,71 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
     expect(container.querySelector('[data-chat-tab="chat-before-mode"]')?.getAttribute('data-active')).toBe('true');
     expect(props.sendTerminalAttach).not.toHaveBeenCalled();
     expect(props.sendTerminalDetach).not.toHaveBeenCalled();
+  });
+
+  it('shows a bound approval while raw view and PTY identity remain available', async () => {
+    const updatedAt = Date.parse('2026-09-25T01:00:00.000Z');
+    const approval = {
+      id: 'approval-terminal-resume',
+      runtime: 'codex',
+      sessionKey: 'codex:terminal-resume',
+      status: 'pending',
+      updatedAt,
+      title: 'Resume the lane',
+      description: 'The lane is waiting for an operator.',
+      continuation: { kind: 'lane', laneId: 'lane-terminal-resume', verb: 'resume' },
+    } as ApprovalRecord;
+    const evidence: TerminalStatusEvidence = {
+      sessionId: approval.sessionKey,
+      runtime: 'codex',
+      state: 'blocked',
+      authority: 'lane-state',
+      observedAt: new Date(updatedAt).toISOString(),
+      summary: 'Approval pending.',
+      evidence: [{ source: `approval:${approval.id}`, value: 'pending · Resume the lane' }],
+    };
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ approvals: [approval] }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const props = panelProps([terminalTab(0)]);
+
+    await act(async () => {
+      root.render(createElement(WorkspaceTerminalPanels, {
+        ...props,
+        attachedTerminalSessions: [{
+          sessionKey: approval.sessionKey,
+          tmuxSession: 'tmux-0',
+          statusEvidence: evidence,
+        }],
+      }));
+    });
+
+    expect(container.querySelector('[data-terminal-approval-action="approval-terminal-resume"]')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => {
+      root.render(createElement(WorkspaceTerminalPanels, {
+        ...props,
+        attachedTerminalSessions: [{
+          sessionKey: approval.sessionKey,
+          tmuxSession: 'tmux-0',
+          statusEvidence: evidence,
+          terminalApprovalEligible: true,
+        }],
+      }));
+    });
+
+    expect(container.querySelector('[data-terminal-approval-action="approval-terminal-resume"]')).not.toBeNull();
+    expect(container.querySelector('[data-tmux-session="tmux-0"]')).not.toBeNull();
+    expect(container.textContent).toContain('A lane resume would start another run.');
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Approve resume')).toBe(false);
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Reject')).toBe(true);
+    const rawButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Show raw terminal');
+    expect(rawButton).toBeDefined();
+    await act(async () => rawButton!.click());
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Approve resume')).toBe(false);
+    expect(container.querySelector('[data-tmux-session="tmux-0"]')).not.toBeNull();
+    expect(xtermMockState.mounts).toBe(1);
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('refits a terminal after its hidden container takes the active pane height', async () => {
