@@ -569,7 +569,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
           evidence={statusEvidence}
         />
       ) : null}
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, position: 'relative' }}>
         <XtermPanel
           ref={(handle) => {
             if (handle) panelRefs.current.set(tmuxSession, handle);
