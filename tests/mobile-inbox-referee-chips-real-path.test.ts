@@ -55,6 +55,9 @@ vi.mock('@/lib/lane/commands', async (importOriginal) => {
     ...actual,
     dispatch: vi.fn(async (command: Parameters<typeof actual.dispatch>[0]) => {
       laneDispatch.calls.push({ ...command } as Record<string, unknown>);
+      if ('laneId' in command && typeof command.laneId === 'string' && command.laneId.startsWith('route-parity-')) {
+        return { ok: true, laneId: command.laneId, note: 'Route parity merge completed.' };
+      }
       return actual.dispatch(command);
     }),
   };
@@ -70,6 +73,7 @@ const { clearInboxUrgencyCacheForTests, setInboxUrgencyTransportForTests, waitFo
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const inboxRoute = await import('@/app/api/mobile/inbox/route');
 const approvalsRoute = await import('@/app/api/panel/approvals/route');
+const mobileActionRoute = await import('@/app/api/mobile/action/route');
 const { createLane, getLane } = await import('@/lib/lane/registry');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
 
@@ -157,6 +161,14 @@ function approveRequest(body: Record<string, unknown>): NextRequest {
     method: 'POST',
     headers: { host: 'localhost:3001', authorization: `Bearer ${operatorToken}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+function mobileApproveRequest(sessionKey: string, approvalId: string): NextRequest {
+  return new NextRequest('http://localhost:3001/api/mobile/action', {
+    method: 'POST',
+    headers: { host: 'localhost:3001', 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'approve', sessionKey, approvalId }),
   });
 }
 
@@ -367,6 +379,54 @@ describe('approve from a card with chips through the route every card uses', () 
     expect({ ...chipRow, details_json: '<fact>' }).toEqual({ ...plainRow, details_json: '<fact>' });
     expect(JSON.parse(chipRow.details_json)).toEqual({ approvedFromCard: { via: 'chip', chipsShown: ['docs-only'] } });
   }, 120_000);
+
+  it('forwards a persisted lane strategy and records the same actor through both approval routes', async () => {
+    const continuation = (laneId: string) => ({
+      kind: 'lane' as const,
+      laneId,
+      verb: 'merge' as const,
+      strategy: 'theirs' as const,
+      commitMessage: 'docs: route parity',
+    });
+    const panelApproval = createApproval({
+      source: 'test',
+      runtime: 'codex',
+      agent: 'Route parity',
+      sessionKey: 'codex:route-parity-panel',
+      title: 'Merge through panel approval route',
+      description: 'Persisted route parity fixture.',
+      summary: 'route-parity-panel',
+      risk: 'low',
+      continuation: continuation('route-parity-panel'),
+    });
+    const mobileApproval = createApproval({
+      source: 'test',
+      runtime: 'codex',
+      agent: 'Route parity',
+      sessionKey: 'codex:route-parity-mobile',
+      title: 'Merge through mobile action route',
+      description: 'Persisted route parity fixture.',
+      summary: 'route-parity-mobile',
+      risk: 'low',
+      continuation: continuation('route-parity-mobile'),
+    });
+
+    laneDispatch.calls.length = 0;
+    const panelResponse = await approvalsRoute.POST(approveRequest({ action: 'approve', id: panelApproval.id }));
+    const mobileResponse = await mobileActionRoute.POST(mobileApproveRequest(mobileApproval.sessionKey, mobileApproval.id));
+    expect(panelResponse.status).toBe(200);
+    expect(mobileResponse.status).toBe(200);
+    expect(laneDispatch.calls).toEqual([
+      expect.objectContaining({ laneId: 'route-parity-panel', verb: 'merge', strategy: 'theirs', actor: 'user' }),
+      expect.objectContaining({ laneId: 'route-parity-mobile', verb: 'merge', strategy: 'theirs', actor: 'user' }),
+    ]);
+
+    const panelAfter = getApproval(panelApproval.id)!;
+    const mobileAfter = getApproval(mobileApproval.id)!;
+    expect(panelAfter.resolution).toMatchObject({ action: 'approved', actor: 'desktop', continuationStatus: 'completed' });
+    expect(mobileAfter.resolution).toMatchObject({ action: 'approved', actor: 'desktop', continuationStatus: 'completed' });
+    expect(mobileAfter.audit.find((event) => event.type === 'approved')).toMatchObject({ type: 'approved', actor: 'desktop' });
+  });
 
   it('ignores an unknown via value', async () => {
     const card = await createDocsMergeCard('o8-chips-unknown', 0.97);
