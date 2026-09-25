@@ -223,11 +223,8 @@ export function maybeQueueThreadAutoTitle(filePath: string): void {
 
       const tabId = filePath.split('/').pop()?.replace(/\.json$/, '');
       if (!tabId) return;
-      const generatedResponse = getOperatorDefaultsSync().values.autoTitleInferenceEnabled
-        ? await llmTitle(firstUser, lastAssistant, tabId)
-        : null;
-      const generated = getOperatorDefaultsSync().values.autoTitleInferenceEnabled
-        ? generatedResponse : null;
+      const inferenceEnabled = getOperatorDefaultsSync().values.autoTitleInferenceEnabled;
+      const generated = inferenceEnabled ? await llmTitle(firstUser, lastAssistant, tabId) : null;
       const fallback = compactTitleFromMessage(firstUser);
       const nextTitle = generated ?? fallback;
       if (!nextTitle) return;
