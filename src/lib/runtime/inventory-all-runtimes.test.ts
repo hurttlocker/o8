@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +21,13 @@ const ideRegistryFixture = vi.hoisted(() => ({
 const terminalFixture = vi.hoisted(() => ({
   bindings: new Map<string, string>(),
   registry: new Map<string, { sessionName: string; runtime: 'codex' | 'claude-code'; cwd?: string; source?: 'dashboard-cli-detected'; updatedAt: string }>(),
+}));
+
+const rolloutFixture = vi.hoisted(() => ({ path: null as string | null }));
+
+vi.mock('@/lib/codex/sessions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/codex/sessions')>()),
+  getCodexRolloutPath: async () => rolloutFixture.path,
 }));
 
 vi.mock('@/lib/runtimes', () => ({
@@ -126,6 +133,7 @@ describe('canonical runtime inventory discovery', () => {
     ideRegistryFixture.tabs = [];
     terminalFixture.bindings.clear();
     terminalFixture.registry.clear();
+    rolloutFixture.path = null;
     invalidateRuntimeInventoryCache();
   });
 
@@ -192,6 +200,85 @@ describe('canonical runtime inventory discovery', () => {
         fallbackReason: expect.stringContaining('no longer verified'),
       },
     });
+  });
+
+  it('carries structured turn state from a matched rollout through fresh inventory, then drops it on exit', async () => {
+    const codexRuntime = runtime('codex');
+    const originalDiscovery = codexRuntime.discoverSessions;
+    codexRuntime.discoverSessions = async () => (await originalDiscovery()).map((session) => ({
+      ...session,
+      sessionKey: 'codex:matched-rollout-thread',
+      ownership: 'discovered',
+      pid: 4242,
+    }));
+    registryFixture.runtimes = [codexRuntime];
+    terminalFixture.bindings.set('codex:matched-rollout-thread', 'cortex-dash-real');
+    rolloutFixture.path = join(testRoot, 'matched-rollout.jsonl');
+    writeFileSync(rolloutFixture.path, `${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      type: 'event_msg',
+      payload: { type: 'task_started' },
+    })}\n`);
+
+    const working = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(working.agents[0]).toMatchObject({
+      status: 'running',
+      statusEvidence: {
+        state: 'working',
+        authority: 'runtime-event',
+        evidence: expect.arrayContaining([{ source: 'codex-rollout.lifecycle', value: 'task_started' }]),
+      },
+    });
+
+    writeFileSync(rolloutFixture.path, `${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      type: 'event_msg',
+      payload: { type: 'task_complete' },
+    })}\n`, { flag: 'a' });
+    invalidateRuntimeInventoryCache();
+    const complete = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(complete.agents[0]).toMatchObject({
+      status: 'completed',
+      statusEvidence: { state: 'complete', authority: 'runtime-event' },
+    });
+
+    terminalFixture.bindings.clear();
+    invalidateRuntimeInventoryCache();
+    const exited = await getRuntimeInventorySnapshot({ fresh: true });
+    expect(exited.agents[0]).toMatchObject({
+      status: 'idle',
+      statusEvidence: { state: 'unknown', authority: 'raw-terminal' },
+    });
+  });
+
+  it('lets an explicit fresh read discover a CLI after an idle snapshot was cached', async () => {
+    const codexRuntime = runtime('codex');
+    const originalDiscovery = codexRuntime.discoverSessions;
+    let cliVisible = false;
+    codexRuntime.discoverSessions = async () => cliVisible
+      ? (await originalDiscovery()).map((session) => ({
+          ...session,
+          sessionKey: 'codex:new-terminal-thread',
+          ownership: 'discovered',
+          pid: 4242,
+        }))
+      : [];
+    registryFixture.runtimes = [codexRuntime];
+    expect((await getRuntimeInventorySnapshot({ fresh: true })).agents).toHaveLength(0);
+
+    cliVisible = true;
+    terminalFixture.bindings.set('codex:new-terminal-thread', 'cortex-dash-new');
+    const currentTime = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(currentTime + 3_000);
+    try {
+      const refreshed = await getRuntimeInventorySnapshot({ fresh: true });
+      expect(refreshed.agents[0]).toMatchObject({
+        sessionKey: 'codex:new-terminal-thread',
+        tmuxSession: 'cortex-dash-new',
+      });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('serves a cold dashboard snapshot immediately and lets an explicit fresh read expedite discovery', async () => {

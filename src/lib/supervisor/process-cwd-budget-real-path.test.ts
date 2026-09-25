@@ -20,6 +20,10 @@ vi.mock('@/lib/db', () => ({
   }),
 }));
 
+vi.mock('@/lib/approvals/store', () => ({
+  listApprovals: () => [],
+}));
+
 vi.mock('@/lib/runtimes', () => ({
   getAllRuntimes: () => registryFixture.runtimes,
 }));
@@ -212,20 +216,20 @@ describe('supervisor process cwd probe budget', () => {
     expect(readProcessCwdProbeDiagnostics().lsofInvocations).toBe(0);
   });
 
-  it('backs fresh inventory requests off for 30 seconds after an empty discovery', async () => {
+  it('coalesces fresh inventory requests for 2 seconds after an empty discovery', async () => {
     const execFile = fakeExecFile();
     const emptyRuntime = runtime(execFile);
     emptyRuntime.discoverSessions = vi.fn(async () => []);
     registryFixture.runtimes = [emptyRuntime];
 
     await getRuntimeInventorySnapshot({ fresh: true });
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     await getRuntimeInventorySnapshot({ fresh: true });
 
     expect(emptyRuntime.discoverSessions).toHaveBeenCalledTimes(1);
     expect(execFile).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(20_001);
+    await vi.advanceTimersByTimeAsync(1_001);
     await getRuntimeInventorySnapshot({ fresh: true });
     expect(emptyRuntime.discoverSessions).toHaveBeenCalledTimes(2);
   });
