@@ -169,11 +169,6 @@ export function O8Panel({
   const splitUtilityTabs = secondaryTab
     ? [activeTab, secondaryTab].filter((tab): tab is RightUtilityTab => isRightUtilityTab(tab) && tab !== 'browser')
     : [];
-  // One-time sweep: browser left the utility system (Q 2026-07-12) — drop
-  // any lingering strip membership from earlier in the session.
-  useEffect(() => {
-    setUtilityTabs((prev) => (prev.includes('browser') ? prev.filter((t) => t !== 'browser') : prev));
-  }, []);
   useEffect(() => {
     if (!activeUtilityTab) return;
     queueMicrotask(() => {
