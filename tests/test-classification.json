@@ -2587,6 +2587,13 @@
       ]
     },
     {
+      "path": "tests/panel-repos-add-response.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/panel-repos-clone.test.ts",
       "reasons": [
         "child-process",
