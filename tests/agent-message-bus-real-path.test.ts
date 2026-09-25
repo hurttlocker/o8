@@ -213,6 +213,17 @@ describe('agent message bus real path', () => {
       ]),
     });
 
+    const storedPresence = await presenceRoute.GET(request(
+      'http://localhost:3001/api/agents/presence?scope=stored',
+      { token: OPERATOR_TOKEN },
+    ));
+    expect(storedPresence.status).toBe(200);
+    await expect(storedPresence.json()).resolves.toMatchObject({
+      agents: expect.arrayContaining([
+        expect.objectContaining({ agentId: 'receiver-session', repo: repoPath }),
+      ]),
+    });
+
     const workerExchanges = await messageRoute.GET(request(
       `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repoPath)}`,
       { token: workerToken },
@@ -230,6 +241,12 @@ describe('agent message bus real path', () => {
     await expect(workerFleetPresence.json()).resolves.toMatchObject({
       error: { code: 'agent_presence_fleet_forbidden' },
     });
+
+    const workerStoredPresence = await presenceRoute.GET(request(
+      'http://localhost:3001/api/agents/presence?scope=stored',
+      { token: workerToken },
+    ));
+    expect(workerStoredPresence.status).toBe(403);
 
     const broadcast = await broadcastEventsRoute.GET(request(
       `http://localhost:3001/api/broadcast/events?limit=100&repo=${encodeURIComponent(repoPath)}&kinds=conversation`,

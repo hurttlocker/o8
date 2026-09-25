@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { AgentMessage, AgentPresence } from '@/lib/agents/types';
+import { isOperatorWindowVisible } from '@/lib/tauri/window-visibility';
 
 const POLL_MS = 15_000;
 
@@ -29,9 +30,13 @@ export function useAgentPeerMessages(sessionKey: string): {
 
   useEffect(() => {
     const controller = new AbortController();
+    let inFlight = false;
     const load = async () => {
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
       try {
-        const presenceResponse = await fetch('/api/agents/presence?scope=all', {
+        if (!await isOperatorWindowVisible() || controller.signal.aborted) return;
+        const presenceResponse = await fetch('/api/agents/presence?scope=stored', {
           signal: controller.signal, cache: 'no-store',
         });
         if (!presenceResponse.ok) return;
@@ -51,16 +56,22 @@ export function useAgentPeerMessages(sessionKey: string): {
         });
       } catch {
         // Keep the last known exchange while the local control plane reconnects.
+      } finally {
+        inFlight = false;
       }
     };
     void load();
     const interval = window.setInterval(() => void load(), POLL_MS);
-    const onReconcile = () => void load();
+    const onReconcile = () => { void load(); };
     window.addEventListener('o8:lifecycle-reconcile', onReconcile);
+    window.addEventListener('focus', onReconcile);
+    document.addEventListener('visibilitychange', onReconcile);
     return () => {
       controller.abort();
       window.clearInterval(interval);
       window.removeEventListener('o8:lifecycle-reconcile', onReconcile);
+      window.removeEventListener('focus', onReconcile);
+      document.removeEventListener('visibilitychange', onReconcile);
     };
   }, [sessionKey]);
 
