@@ -14,7 +14,7 @@ vi.mock('@/lib/repos/readiness', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/repos/readiness')>();
   return {
     ...actual,
-    enrichRepoReadiness: async <T extends { localPath: string }>(repo: T) => {
+    enrichRepoReadiness: async (repo: Parameters<typeof actual.enrichRepoReadiness>[0]) => {
       if (readinessGate.hold) {
         await new Promise<void>((resolve) => { readinessGate.release = resolve; });
       }
