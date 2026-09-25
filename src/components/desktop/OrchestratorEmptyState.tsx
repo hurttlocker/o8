@@ -493,7 +493,8 @@ function WorktreeChip({
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
-  const label = mode === 'local' ? 'Work locally' : 'New worktree';
+  const label = mode === 'local' ? 'Local' : 'Worktree';
+  const accessibleLabel = `Start location: ${label}`;
   return (
     <div style={{ display: 'inline-flex' }}>
       <ChipShell
@@ -504,12 +505,14 @@ function WorktreeChip({
         label={label}
         onClick={() => setOpen((v) => !v)}
         open={open}
-        ariaLabel="Start in"
+        ariaLabel={accessibleLabel}
         compact={compact}
         contextRow
       />
       <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}>
         <div
+          role="menu"
+          aria-label="Start location"
           style={{
             paddingTop: 6,
             paddingBottom: 4,
@@ -522,11 +525,11 @@ function WorktreeChip({
             color: 'var(--t-text-faint)',
           }}
         >
-          Start in
+          Start location
         </div>
         <PopoverItem
           icon={<IconoirComputer width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-          label="Work locally"
+          label="Local checkout"
           selected={mode === 'local'}
           onClick={() => {
             onChange('local');

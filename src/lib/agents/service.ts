@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { resolve } from 'node:path';
-
 import type Database from 'better-sqlite3';
 
 import type { RequestPrincipalContext } from '@/lib/auth/principal';
@@ -40,6 +38,7 @@ import {
   listRecentAgentMessages,
   listRecentAgentMessagesAcrossRepos,
   listAgentConversations,
+  normalizeAgentBusRepoPath,
   persistAgentMessage,
   releaseAgentInboxWake,
   updateAgentMessageDelivery,
@@ -191,14 +190,17 @@ export async function postAgentMessage(
   let repo = optionalString(body.repo, 'repo', 2_000);
   let sender: AgentPresence | null = null;
   if (lane) {
-    repo = lane.repoPath;
+    repo = normalizeAgentBusRepoPath(lane.repoPath);
     sender = upsertAgentPresence(lanePresence(lane, new Date().toISOString()), sqlite);
   } else if (typeof body.fromAgentId === 'string') {
     sender = findAgentPresence({ agentId: body.fromAgentId }, sqlite);
     if (!sender) {
       throw new AgentBusError('Sender has not joined presence.', 'agent_sender_not_found', 404);
     }
-    if (repo && sender.repo !== repo) {
+    if (sender.repo !== normalizeAgentBusRepoPath(sender.repo)) {
+      throw new AgentBusError('Sender repository scope needs collision resolution.', 'agent_sender_repo_mismatch', 403);
+    }
+    if (repo && sender.repo !== repo && sender.repo !== normalizeAgentBusRepoPath(repo)) {
       throw new AgentBusError('Sender is not present in that repository.', 'agent_sender_repo_mismatch', 403);
     }
     repo = sender.repo;
@@ -207,7 +209,7 @@ export async function postAgentMessage(
   const target = replyToId && to.toLowerCase() === 'operator' && repo ? {
     agentId: 'operator',
     name: 'operator',
-    repo: resolve(repo),
+    repo: normalizeAgentBusRepoPath(repo),
     worktreePath: null,
     runtime: 'operator',
     sessionKey: null,
@@ -222,7 +224,7 @@ export async function postAgentMessage(
       404,
     );
   }
-  if (lane && target.repo !== lane.repoPath) {
+  if (lane && target.repo !== normalizeAgentBusRepoPath(lane.repoPath)) {
     throw new AgentBusError('Workers can message only agents in their repository.', 'agent_repo_mismatch', 403);
   }
   const text = requiredString(body.text, 'text', AGENT_MESSAGE_TEXT_MAX_LENGTH);
@@ -292,7 +294,7 @@ export function readAgentConversations(
     throw new AgentBusError('Conversation history requires an operator credential.', 'agent_conversations_forbidden', 403);
   }
   const repo = requiredString(input.repo, 'repo', 2_000);
-  return { repo: resolve(repo), conversations: listAgentConversations(repo, input.limit, sqlite) };
+  return { repo: normalizeAgentBusRepoPath(repo), conversations: listAgentConversations(repo, input.limit, sqlite) };
 }
 
 export function changeAgentConversation(
@@ -333,7 +335,7 @@ export function joinAgentPresence(
   const repo = requiredString(body.repo, 'repo', 2_000);
   const automatic = body.automatic === true;
   const name = automatic
-    ? optionalString(body.name, 'name') ?? availableAutomaticAgentName(agentId, resolve(repo), sqlite)
+    ? optionalString(body.name, 'name') ?? availableAutomaticAgentName(agentId, normalizeAgentBusRepoPath(repo), sqlite)
     : requiredString(body.name, 'name');
   try {
     return upsertAgentPresence({
@@ -370,8 +372,8 @@ export async function readAgentPresence(
   if (principal.role === 'worker' && !lane) {
     throw new AgentBusError('The worker packet has no active lane.', 'agent_bus_lane_not_found', 404);
   }
-  const requestedRepo = lane?.repoPath ?? requiredString(repo, 'repo', 2_000);
-  if (lane && repo && resolve(repo) !== resolve(lane.repoPath)) {
+  const requestedRepo = normalizeAgentBusRepoPath(lane?.repoPath ?? requiredString(repo, 'repo', 2_000));
+  if (lane && repo && normalizeAgentBusRepoPath(repo) !== normalizeAgentBusRepoPath(lane.repoPath)) {
     throw new AgentBusError('Workers can inspect only their repository.', 'agent_repo_mismatch', 403);
   }
   await reconcileLiveAgentPresence(requestedRepo, presenceSeams, sqlite);
@@ -463,7 +465,7 @@ export function readAgentExchanges(
   }
   const repo = requiredString(input.repo, 'repo', 2_000);
   return {
-    repo: resolve(repo),
+    repo: normalizeAgentBusRepoPath(repo),
     messages: listRecentAgentMessages(repo, input.limit, sqlite),
   };
 }

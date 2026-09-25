@@ -3035,9 +3035,14 @@ function deriveRuntimeHealth(fleet: CommandCenterSnapshot['fleet']): RealtimeHea
 }
 
 async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?: string } = {}) {
-  // Backoff gate: after consecutive bridge failures, skip attempts until the
-  // retry window opens — the periodic caller re-invokes, so no reschedule needed.
-  if (!canAttemptRealtimeBridge(globalSnapshotBridgeBackoff)) return;
+  // A failed global fetch must wake itself: workspace mutations are not periodic.
+  if (!canAttemptRealtimeBridge(globalSnapshotBridgeBackoff)) {
+    scheduleRealtimeRuntimeRefresh({
+      reason: 'global-bridge.retry',
+      delayMs: Math.max(1_000, getRealtimeBridgeRetryDelay(globalSnapshotBridgeBackoff)),
+    });
+    return;
+  }
   // Single-flight: fold an overlapping call into one trailing re-fire instead of
   // launching a second concurrent fetch (which is how the timeout spiral started).
   if (globalSnapshotInFlight) {
@@ -3134,7 +3139,10 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
     const msg = error instanceof Error ? error.message : 'unknown';
     // Silently skip transient 404s during startup / packet transitions — the route
     // exists but Next.js may not have compiled/rendered it yet.
-    if (typeof msg === 'string' && msg.includes('(404)')) return;
+    if (typeof msg === 'string' && msg.includes('(404)')) {
+      scheduleRealtimeRuntimeRefresh({ reason: 'global-bridge.retry', delayMs: 1_000 });
+      return;
+    }
     const failure = recordRealtimeBridgeFailure(globalSnapshotBridgeBackoff);
     if (failure.transition === 'down') {
       if (await shouldOverrideBridgeDown('global-snapshot')) {
@@ -3145,6 +3153,10 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
         publishRealtimeBridgeConnectionState('global-snapshot', 'down', msg);
       }
     }
+    scheduleRealtimeRuntimeRefresh({
+      reason: 'global-bridge.retry',
+      delayMs: Math.max(1_000, getRealtimeBridgeRetryDelay(globalSnapshotBridgeBackoff)),
+    });
   } finally {
     globalSnapshotInFlight = false;
     if (globalSnapshotRerequest) {

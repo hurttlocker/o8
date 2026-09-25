@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { DELETE, PATCH, POST } from '@/app/api/v2/chat-history/route';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { getSqlite } from '@/lib/db';
+import { updateOperatorDefaults } from '@/lib/operator/defaults';
 
 let tabId: string;
 const fetchMock = vi.fn<typeof fetch>();
@@ -17,6 +19,14 @@ const messages = (count: number) => Array.from({ length: count }, (_, index) => 
 }));
 const filePath = () => join(getDataDir(), 'chat-history', `${tabId}.json`);
 const stored = (): Record<string, unknown> => JSON.parse(readFileSync(filePath(), 'utf8'));
+const receipts = () => getSqlite().prepare(`
+  SELECT model, provider, run_id AS runId, input_tokens AS inputTokens, output_tokens AS outputTokens,
+    cost_usd AS costUsd, attempt, metadata_json AS metadataJson
+  FROM usage_logs WHERE session_key = ? ORDER BY attempt
+`).all(`chat-title:${tabId}`) as Array<{
+  model: string; provider: string; runId: string; inputTokens: number; outputTokens: number;
+  costUsd: number; attempt: number; metadataJson: string;
+}>;
 const response = (title: string) => ({
   ok: true,
   json: async () => ({ choices: [{ message: { content: title } }] }),
@@ -40,7 +50,8 @@ async function rename(title: string) {
   expect(result.status).toBe(200);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await updateOperatorDefaults({ autoTitleInferenceEnabled: true });
   tabId = `title2530-${randomUUID()}`;
   fetchMock.mockReset().mockImplementation(async () => response('Initial sorting topic'));
   vi.stubEnv('OPENROUTER_API_KEY', 'test-only');
@@ -56,6 +67,85 @@ afterEach(async () => {
 });
 
 describe('chat-history auto-title state through real routes (#2530)', () => {
+  it('persists provider usage and the save trigger in one receipt for a successful request', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'Sorting array topic' } }],
+        usage: { prompt_tokens: 32, completion_tokens: 5, cost: 0 },
+      }),
+    } as Response);
+    await save({ messages: messages(2) });
+    await vi.waitFor(() => expect(stored().title).toBe('Sorting array topic'));
+    expect(receipts()).toMatchObject([{
+      provider: 'openrouter', inputTokens: 32, outputTokens: 5, costUsd: 0, attempt: 1,
+    }]);
+    expect(JSON.parse(receipts()[0]!.metadataJson)).toMatchObject({
+      trigger: 'chat-history-save', outcome: 'success',
+      inputTokenUsage: 'provider-reported', outputTokenUsage: 'provider-reported', costUsage: 'provider-reported',
+    });
+  });
+
+  it('records each failed provider attempt and preserves unavailable usage through code fallback', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false } as Response)
+      .mockRejectedValueOnce(new Error('transport failed'));
+    await save({ messages: messages(2) });
+    await vi.waitFor(() => expect(stored().titleSource).toBe('code'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(receipts()).toHaveLength(2);
+    expect(receipts()[0]!.runId).toBe(receipts()[1]!.runId);
+    expect(receipts().map((row) => JSON.parse(row.metadataJson))).toMatchObject([
+      { outcome: 'http-error', inputTokenUsage: 'unavailable', outputTokenUsage: 'unavailable', costUsage: 'unavailable' },
+      { outcome: 'transport-error', inputTokenUsage: 'unavailable', outputTokenUsage: 'unavailable', costUsage: 'unavailable' },
+    ]);
+  });
+
+  it('keeps partial provider usage without inventing missing output tokens or cost', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'Partial usage topic' } }],
+        usage: { prompt_tokens: 14 },
+      }),
+    } as Response);
+    await save({ messages: messages(2) });
+    await vi.waitFor(() => expect(stored().title).toBe('Partial usage topic'));
+    expect(receipts()[0]).toMatchObject({ inputTokens: 14, outputTokens: 0, costUsd: 0 });
+    expect(JSON.parse(receipts()[0]!.metadataJson)).toMatchObject({
+      inputTokenUsage: 'provider-reported', outputTokenUsage: 'unavailable', costUsage: 'unavailable',
+      reportedInputTokens: 14, reportedOutputTokens: null, reportedCostUsd: null,
+    });
+  });
+
+  it('uses code fallback without a provider call when the key is missing or the persisted control is disabled', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '');
+    await save({ messages: messages(2) });
+    await vi.waitFor(() => expect(stored().titleSource).toBe('code'));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(receipts()).toHaveLength(0);
+
+    await DELETE(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${tabId}`));
+    tabId = `title2531-${randomUUID()}`;
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-only');
+    await updateOperatorDefaults({ autoTitleInferenceEnabled: false });
+    await save({ messages: messages(2) });
+    await vi.waitFor(() => expect(stored().titleSource).toBe('code'));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(receipts()).toHaveLength(0);
+  });
+
+  it('coalesces concurrent saves into one provider attempt and one receipt', async () => {
+    let finish!: () => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      finish = () => resolve(response('Concurrent sorting title'));
+      pendingResponses.push(finish);
+    }));
+    await Promise.all([save({ messages: messages(2) }), save({ messages: messages(2) })]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    finish();
+    await vi.waitFor(() => expect(stored().title).toBe('Concurrent sorting title'));
+    expect(receipts()).toHaveLength(1);
+  });
   it('generates at two messages, refreshes once at eight, and ignores repeat saves', async () => {
     fetchMock
       .mockResolvedValueOnce(response('Initial sorting topic'))
@@ -75,6 +165,7 @@ describe('chat-history auto-title state through real routes (#2530)', () => {
     await save({ messages: messages(8) });
     await settle();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(receipts()).toHaveLength(2);
     expect(stored()).toMatchObject({
       title: 'Refined sorting topic', titleSource: 'llm', autoTitledAtCount: 8,
     });
