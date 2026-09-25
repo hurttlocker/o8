@@ -1016,7 +1016,7 @@ function OrchestratorTabInner({
   const thoughtsChatPanel = (
     <ThoughtsChatPanel
       ref={chatPanelRef}
-      transcriptSideRail={branchRail}
+      transcriptSideRail={projectContextRailVisible ? branchRail : null}
       open={active}
       // The panel's #1459 crash-recovery auto-restore (adopt the latest thread
       // when it was modified <60s ago) belongs ONLY to the boot-restore tab.
