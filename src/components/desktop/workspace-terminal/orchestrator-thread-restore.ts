@@ -19,6 +19,8 @@
  * a different repo later.
  */
 
+import { isLegacyGeneratedOrchestratorTitle, stableOrchestratorThreadTitle } from '@/lib/orchestrator/thread-title';
+
 const LEGACY_ID_KEY = 'o8:last-orchestrator-thread-id';
 const LEGACY_TITLE_KEY = 'o8:last-orchestrator-thread-title';
 const LEGACY_TITLE_ID_KEY = 'o8:last-orchestrator-thread-title-id';
@@ -72,7 +74,10 @@ export function readLastOrchestratorThreadTitle(repoScope?: string | null): stri
     const tKey = fromLegacy ? LEGACY_TITLE_KEY : titleKey(scope);
     const titleThreadId = window.localStorage.getItem(tIdKey);
     if (titleThreadId !== threadId) return null;
-    return window.localStorage.getItem(tKey);
+    const title = window.localStorage.getItem(tKey);
+    return title && isLegacyGeneratedOrchestratorTitle(title)
+      ? stableOrchestratorThreadTitle(null)
+      : title;
   } catch {
     return null;
   }

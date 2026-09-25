@@ -2587,6 +2587,13 @@
       ]
     },
     {
+      "path": "tests/panel-repos-add-response.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/panel-repos-clone.test.ts",
       "reasons": [
         "child-process",
@@ -2697,6 +2704,15 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/realtime-global-bridge-recovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },

@@ -27,7 +27,8 @@ export function ConnectionPill() {
   const connectionState = useWsConnectionState();
   const everConnectedRef = useRef(false);
   const [visible, setVisible] = useState(false);
-  const [bridgeDown, setBridgeDown] = useState(false);
+  const [downBridges, setDownBridges] = useState<Set<string>>(() => new Set());
+  const bridgeDown = downBridges.size > 0;
   const downSinceRef = useRef<number | null>(null);
 
   useSharedDesktopWs(undefined, useMemo(() => ({
@@ -35,7 +36,13 @@ export function ConnectionPill() {
       if (event.channel !== 'mutation' || event.event !== 'mutation.record') return;
       const mutation = (event.data as { mutation?: RealtimeMutationRecord }).mutation;
       if (mutation?.action !== 'realtime-bridge-connection') return;
-      setBridgeDown(mutation.status === 'failed');
+      setDownBridges((current) => {
+        const next = new Set(current);
+        const channel = mutation.runtime ?? 'realtime';
+        if (mutation.status === 'failed') next.add(channel);
+        else if (mutation.status === 'completed') next.delete(channel);
+        return next.size === current.size && [...next].every((entry) => current.has(entry)) ? current : next;
+      });
     },
   }), []));
 
@@ -77,17 +84,16 @@ export function ConnectionPill() {
   const isBridgeOnly = bridgeDown && connectionState === 'connected';
   const isOffline = connectionState === 'disconnected';
   const accent = isOffline ? '#ef4444' : '#f97316';
-  const label = isBridgeOnly ? 'Realtime bridge reconnecting…' : isOffline ? 'Backend offline' : 'Reconnecting…';
-  const detail = isBridgeOnly ? 'updates paused · backing off' : 'tabs preserved · retrying';
+  const label = isBridgeOnly ? 'Updates reconnecting…' : isOffline ? 'Backend offline' : 'Reconnecting…';
 
   const cardStyle: CSSProperties = {
     flexShrink: 0,
     marginLeft: 8,
     marginRight: 8,
     marginBottom: 6,
-    paddingTop: 9,
+    paddingTop: 6,
     paddingRight: 10,
-    paddingBottom: 9,
+    paddingBottom: 6,
     paddingLeft: 11,
     display: 'flex',
     alignItems: 'center',
@@ -112,7 +118,7 @@ export function ConnectionPill() {
           flexShrink: 0,
         }}
       />
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <span
           style={{
             fontSize: 11.5,
@@ -126,28 +132,15 @@ export function ConnectionPill() {
         >
           {label}
         </span>
-        <span
-          style={{
-            fontSize: 9.5,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-            color: 'var(--t-text-muted)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {detail}
-        </span>
       </div>
       <button
         type="button"
         onClick={handleReload}
         style={{
           flexShrink: 0,
-          height: 22,
-          paddingLeft: 10,
-          paddingRight: 10,
+          height: 20,
+          paddingLeft: 6,
+          paddingRight: 6,
           paddingTop: 0,
           paddingBottom: 0,
           display: 'inline-flex',
@@ -155,8 +148,8 @@ export function ConnectionPill() {
           justifyContent: 'center',
           lineHeight: 1,
           borderRadius: 6,
-          border: `1px solid ${accent}`,
-          background: `${accent}14`, // ~8% alpha
+          border: 'none',
+          background: 'transparent',
           color: accent,
           fontSize: 11,
           fontWeight: 400,

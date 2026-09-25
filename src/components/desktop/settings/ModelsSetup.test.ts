@@ -10,6 +10,7 @@ vi.mock('@/lib/entitlement/context', () => ({ useEntitlement: () => ({ isFounder
 import { ModelsTab } from './ModelsTab';
 import { OperatorDefaultsTab } from './OperatorDefaultsTab';
 import { LocalModelsTab } from './LocalModelsTab';
+import { GeneralTab } from './GeneralTab';
 import { SETTINGS_SEARCH_REGISTRY, searchSettings } from './settings-search';
 
 const defaults = {
@@ -94,5 +95,22 @@ describe('model setup navigation', () => {
     const preset = [...container.querySelectorAll('button')].find(button => button.textContent === 'Ollama')!;
     await act(async () => preset.click());
     expect(defaultsFetch).toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', body: JSON.stringify({ defaultDispatchModel: 'ollama:qwen2.5-coder:32b' }) }));
+  });
+
+  it('shows the title inference control on the free plan and saves an off choice', async () => {
+    defaultsFetch.mockResolvedValue(Response.json({
+      ...defaults,
+      values: { ...defaults.values, autoTitleInferenceEnabled: true },
+    }));
+    await act(async () => root.render(createElement(GeneralTab)));
+    const conversations = container.querySelector('[data-settings-section="Conversations"]')?.parentElement;
+    expect(conversations?.textContent).toContain('Model-generated titles');
+    expect(conversations?.textContent).toContain('On by default');
+    const control = conversations?.querySelector<HTMLButtonElement>('[role="switch"]');
+    expect(control?.getAttribute('aria-checked')).toBe('true');
+    await act(async () => control?.click());
+    expect(defaultsFetch).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ autoTitleInferenceEnabled: false }),
+    }));
   });
 });

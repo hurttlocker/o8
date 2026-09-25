@@ -251,7 +251,7 @@ describe('orchestrator thread history persistence', () => {
     expect(history.listMobileOrchestratorThreads()[0]?.title).toBe('Charlie');
   });
 
-  it('does not derive missing orchestrator titles from prompt text', async () => {
+  it('uses a human-readable fallback without deriving an orchestrator title from prompt text', async () => {
     const history = await loadHistoryModule();
     const tabId = 'thoughts-1783108800000';
 
@@ -264,7 +264,7 @@ describe('orchestrator thread history persistence', () => {
     });
 
     const listed = history.listMobileOrchestratorThreads()[0];
-    expect(listed?.title).toContain('2026-07-03');
+    expect(listed?.title).toBe('Untitled conversation');
     expect(listed?.title).not.toContain('hygiene packet');
   });
 

@@ -77,6 +77,7 @@ export interface OperatorDefaults {
   requireApproval: RequireApproval;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
+  autoTitleInferenceEnabled: boolean;
   orchestratorModel: string;
   /**
    * opencode ACP model pins. Null = unset, meaning the agent's own default.

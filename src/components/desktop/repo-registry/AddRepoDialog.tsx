@@ -174,6 +174,9 @@ export function AddRepoDialog({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationResult, setValidationResult] = useState<ValidatedRepoCandidate | null>(null);
   const [adding, setAdding] = useState(false);
+  const [registeredRepo, setRegisteredRepo] = useState<RepoRegistryEntry | null>(null);
+  const [linkedToProject, setLinkedToProject] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedRole, setSelectedRole] = useState<ProjectRole>('fullstack');
 
@@ -199,6 +202,9 @@ export function AddRepoDialog({
     setValidationResult(null);
     setValidating(false);
     setAdding(false);
+    setRegisteredRepo(null);
+    setLinkedToProject(false);
+    setAddError(null);
     setSelectedProjectId(null);
     setSelectedRole('fullstack');
   }, []);
@@ -219,6 +225,7 @@ export function AddRepoDialog({
     setValidating(true);
     setValidationError(null);
     setValidationResult(null);
+    setAddError(null);
 
     try {
       const data = await requestJson<{ repo: ValidatedRepoCandidate }>('/api/panel/repos', {
@@ -303,30 +310,71 @@ export function AddRepoDialog({
 
     setAdding(true);
     setValidationError(null);
+    setAddError(null);
 
     try {
-      const validated = validationResult ?? await validateRepoPath(localPath);
-      if (!validated) return;
-      const data = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'add', localPath: validated.localPath }),
-      });
-      await linkRepoToProject(data.repo);
-      await onProjectsChanged?.();
-      await onRepoAdded?.(data.repo);
+      let repo = registeredRepo;
+      if (!repo) {
+        const validated = validationResult ?? await validateRepoPath(localPath);
+        if (!validated) return;
+
+        try {
+          const data = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'add', localPath: validated.localPath }),
+          });
+          repo = data.repo;
+        } catch (error) {
+          // A lost response can follow a durable registry write. Look up the
+          // canonical path before offering another registration attempt.
+          try {
+            const data = await requestJson<{ repos: RepoRegistryEntry[] }>('/api/panel/repos');
+            repo = data.repos.find((entry) => entry.localPath === validated.localPath) ?? null;
+          } catch {
+            repo = null;
+          }
+          if (!repo) {
+            const reason = error instanceof Error ? error.message : 'The request failed.';
+            setAddError(`${reason} Could not confirm whether this folder was registered. Retry adding it; an existing entry will be reused.`);
+            return;
+          }
+        }
+        setRegisteredRepo(repo);
+      }
+
+      if (!linkedToProject) {
+        try {
+          await linkRepoToProject(repo);
+          setLinkedToProject(true);
+        } catch (error) {
+          setAddError(`Repository registered, but ${selectedProject ? `linking to ${selectedProject.name}` : 'project linking'} failed: ${error instanceof Error ? error.message : 'Request failed.'} Retry the project link.`);
+          return;
+        }
+      }
+
+      try {
+        await onProjectsChanged?.();
+        await onRepoAdded?.(repo);
+      } catch (error) {
+        setAddError(`Repository added, but the workspace did not refresh: ${error instanceof Error ? error.message : 'Request failed.'} Retry the refresh.`);
+        return;
+      }
       close();
     } catch (error) {
-      setValidationError(error instanceof Error ? error.message : 'Unable to add repository.');
+      setAddError(error instanceof Error ? error.message : 'Unable to add repository.');
     } finally {
       setAdding(false);
     }
   }, [
     close,
     linkRepoToProject,
+    linkedToProject,
     onProjectsChanged,
     onRepoAdded,
+    registeredRepo,
     repoPathInput,
+    selectedProject,
     validateRepoPath,
     validationResult,
   ]);
@@ -372,9 +420,10 @@ export function AddRepoDialog({
               setRepoPathInput(event.currentTarget.value);
               setValidationResult(null);
               setValidationError(null);
+              setAddError(null);
             }}
             placeholder="Path to a project folder"
-            disabled={adding}
+            disabled={adding || !!registeredRepo}
             style={{
               ...fieldStyle(),
               paddingTop: 8,
@@ -387,8 +436,8 @@ export function AddRepoDialog({
           <button
             type="button"
             onClick={() => { void browse(); }}
-            disabled={validating || adding}
-            style={smallButtonStyle(validating || adding)}
+            disabled={validating || adding || !!registeredRepo}
+            style={smallButtonStyle(validating || adding || !!registeredRepo)}
           >
             <FolderOpen size={13} strokeWidth={2} />
             Browse
@@ -401,9 +450,9 @@ export function AddRepoDialog({
             <button
               type="button"
               onClick={() => { void validateRepoPath(repoPathInput); }}
-              disabled={validating || adding}
+              disabled={validating || adding || !!registeredRepo}
               title="Detect git repo metadata for this folder"
-              style={smallButtonStyle(validating || adding)}
+              style={smallButtonStyle(validating || adding || !!registeredRepo)}
             >
               {validating ? (
                 <Loader2 size={13} strokeWidth={2.2} style={{ animation: 'spin 900ms linear infinite' }} />
@@ -536,7 +585,7 @@ export function AddRepoDialog({
             <select
               value={effectiveProjectId}
               onChange={(event) => setSelectedProjectId(event.currentTarget.value)}
-              disabled={adding}
+              disabled={adding || !!registeredRepo}
               style={{
                 ...fieldStyle(),
                 paddingRight: 10,
@@ -558,7 +607,7 @@ export function AddRepoDialog({
             <select
               value={selectedRole}
               onChange={(event) => setSelectedRole(event.currentTarget.value as ProjectRole)}
-              disabled={adding || effectiveProjectId === 'none'}
+              disabled={adding || !!registeredRepo || effectiveProjectId === 'none'}
               style={{
                 ...fieldStyle(),
                 paddingRight: 10,
@@ -597,6 +646,13 @@ export function AddRepoDialog({
         </div>
       ) : null}
 
+      {addError ? (
+        <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, paddingTop: 9, paddingRight: 10, paddingBottom: 9, paddingLeft: 10, borderRadius: 10, border: '1px solid var(--t-danger-border, var(--t-divider-subtle))', background: 'var(--t-danger-soft, var(--t-input-bg))', color: 'var(--t-danger, var(--t-text-secondary))', fontSize: 12, lineHeight: '16px' }}>
+          <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>{addError}</span>
+        </div>
+      ) : null}
+
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9 }}>
         <button
           type="button"
@@ -629,7 +685,11 @@ export function AddRepoDialog({
           disabled={!repoPathInput.trim() || validating || adding || !!validationError}
           style={primaryButtonStyle(!repoPathInput.trim() || validating || adding || !!validationError)}
         >
-          {adding ? 'Adding…' : selectedProject ? `Add to ${selectedProject.name}` : 'Add'}
+          {adding
+            ? 'Adding…'
+            : registeredRepo
+              ? linkedToProject ? 'Refresh workspace' : 'Retry project link'
+              : selectedProject ? `Add to ${selectedProject.name}` : 'Add'}
         </button>
       </div>
     </GlassModal>
