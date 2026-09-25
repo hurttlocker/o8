@@ -55,6 +55,9 @@ vi.mock('@/lib/lane/commands', async (importOriginal) => {
     ...actual,
     dispatch: vi.fn(async (command: Parameters<typeof actual.dispatch>[0]) => {
       laneDispatch.calls.push({ ...command } as Record<string, unknown>);
+      if ('laneId' in command && typeof command.laneId === 'string' && command.laneId.startsWith('route-parity-')) {
+        return { ok: true, laneId: command.laneId, note: 'Route parity merge completed.' };
+      }
       return actual.dispatch(command);
     }),
   };
@@ -70,6 +73,7 @@ const { clearInboxUrgencyCacheForTests, setInboxUrgencyTransportForTests, waitFo
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const inboxRoute = await import('@/app/api/mobile/inbox/route');
 const approvalsRoute = await import('@/app/api/panel/approvals/route');
+const mobileActionRoute = await import('@/app/api/mobile/action/route');
 const { createLane, getLane } = await import('@/lib/lane/registry');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
 
@@ -160,6 +164,14 @@ function approveRequest(body: Record<string, unknown>): NextRequest {
   });
 }
 
+function mobileApproveRequest(sessionKey: string, approvalId: string): NextRequest {
+  return new NextRequest('http://localhost:3001/api/mobile/action', {
+    method: 'POST',
+    headers: { host: 'localhost:3001', 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'approve', sessionKey, approvalId }),
+  });
+}
+
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
@@ -195,8 +207,7 @@ function makeDocsLane(name: string) {
     branch: `inline/${name}`,
     baseBranch: 'main',
     runtime: 'codex',
-    packetId: `pkt-${name}`,
-    sessionKey: `codex:pkt-${name}`,
+    sessionKey: `codex:${name}`,
   });
 }
 
@@ -319,41 +330,56 @@ describe('approve from a card with chips through the route every card uses', () 
   it('resolves a lane-merge card exactly as the plain approve, plus the chips-shown fact on the event', async () => {
     const plain = await createDocsMergeCard('o8-chips-plain', 0.97);
     const chip = await createDocsMergeCard('o8-chips-chip', 0.97);
+    const mobile = await createDocsMergeCard('o8-chips-mobile-action', 0.97);
 
     // Both cards are the chip shape: the phone inbox shows the chip on each.
     const { items } = await readInbox();
     await waitForInboxUrgency();
-    for (const id of [plain.approval.id, chip.approval.id]) {
+    for (const id of [plain.approval.id, chip.approval.id, mobile.approval.id]) {
       expect(items.find((item) => item.approvalId === id)?.refereeChips?.map((c) => c.kind)).toEqual(['docs-only']);
     }
 
     laneDispatch.calls.length = 0;
     const plainRes = await approvalsRoute.POST(approveRequest({ action: 'approve', id: plain.approval.id }));
     const chipRes = await approvalsRoute.POST(approveRequest({ action: 'approve', id: chip.approval.id, via: 'chip' }));
+    const mobileRes = await mobileActionRoute.POST(mobileApproveRequest(mobile.approval.sessionKey, mobile.approval.id));
     expect(chipRes.status).toBe(plainRes.status);
+    expect(mobileRes.status).toBe(plainRes.status);
     const plainBody = await plainRes.json() as { ok: boolean; note?: string };
     const chipBody = await chipRes.json() as { ok: boolean; note?: string };
+    const mobileBody = await mobileRes.json() as { ok: boolean; note?: string };
     expect(chipBody.ok).toBe(plainBody.ok);
+    expect(mobileBody.ok).toBe(plainBody.ok);
 
     // Continuation handling: the same lane command, strategy included, for both.
-    expect(laneDispatch.calls).toHaveLength(2);
-    const [plainCall, chipCall] = laneDispatch.calls;
+    expect(laneDispatch.calls).toHaveLength(3);
+    const [plainCall, chipCall, mobileCall] = laneDispatch.calls;
     expect(plainCall).toMatchObject({ verb: 'merge', laneId: plain.lane.id, strategy: 'theirs', commitMessage: 'docs: notes', actor: 'user' });
     expect({ ...chipCall, laneId: '<lane>' }).toEqual({ ...plainCall, laneId: '<lane>' });
+    expect({ ...mobileCall, laneId: '<lane>' }).toEqual({ ...plainCall, laneId: '<lane>' });
     expect(getLane(chip.lane.id)?.status).toBe(getLane(plain.lane.id)?.status);
+    expect(getLane(mobile.lane.id)?.status).toBe(getLane(plain.lane.id)?.status);
+    expect(getLane(plain.lane.id)?.status).toBe('completed');
 
     const plainAfter = getApproval(plain.approval.id)!;
     const chipAfter = getApproval(chip.approval.id)!;
+    const mobileAfter = getApproval(mobile.approval.id)!;
     expect(plainAfter.status).toBe('approved');
     expect(chipAfter.status).toBe(plainAfter.status);
+    expect(mobileAfter.status).toBe(plainAfter.status);
     const resolution = (approval: typeof plainAfter) => ({ ...approval.resolution, claimId: '<claim>', note: undefined });
     expect(resolution(chipAfter)).toEqual(resolution(plainAfter));
+    expect(resolution(mobileAfter)).toEqual(resolution(plainAfter));
     expect(plainAfter.resolution).toMatchObject({ action: 'approved', actor: 'desktop' });
+    expect(plainAfter.resolution).toMatchObject({ continuationStatus: 'completed' });
+    expect(mobileAfter.resolution).toMatchObject({ action: 'approved', actor: 'desktop', continuationStatus: 'completed' });
 
     const decision = (approval: typeof plainAfter) => approval.audit.find((event) => event.type === 'approved')!;
     const plainEvent = decision(plainAfter);
     const chipEvent = decision(chipAfter);
+    const mobileEvent = decision(mobileAfter);
     expect(chipEvent).toMatchObject({ type: 'approved', actor: 'desktop', approvedFromCard: { via: 'chip', chipsShown: ['docs-only'] } });
+    expect({ ...mobileEvent, timestamp: 0 }).toEqual({ ...plainEvent, timestamp: 0 });
     const { approvedFromCard: _fact, ...chipEventRest } = chipEvent;
     expect({ ...chipEventRest, timestamp: 0 }).toEqual({ ...plainEvent, timestamp: 0 });
     expect(plainEvent).not.toHaveProperty('approvedFromCard');
@@ -367,6 +393,54 @@ describe('approve from a card with chips through the route every card uses', () 
     expect({ ...chipRow, details_json: '<fact>' }).toEqual({ ...plainRow, details_json: '<fact>' });
     expect(JSON.parse(chipRow.details_json)).toEqual({ approvedFromCard: { via: 'chip', chipsShown: ['docs-only'] } });
   }, 120_000);
+
+  it('forwards a persisted lane strategy and records the same actor through both approval routes', async () => {
+    const continuation = (laneId: string) => ({
+      kind: 'lane' as const,
+      laneId,
+      verb: 'merge' as const,
+      strategy: 'theirs' as const,
+      commitMessage: 'docs: route parity',
+    });
+    const panelApproval = createApproval({
+      source: 'test',
+      runtime: 'codex',
+      agent: 'Route parity',
+      sessionKey: 'codex:route-parity-panel',
+      title: 'Merge through panel approval route',
+      description: 'Persisted route parity fixture.',
+      summary: 'route-parity-panel',
+      risk: 'low',
+      continuation: continuation('route-parity-panel'),
+    });
+    const mobileApproval = createApproval({
+      source: 'test',
+      runtime: 'codex',
+      agent: 'Route parity',
+      sessionKey: 'codex:route-parity-mobile',
+      title: 'Merge through mobile action route',
+      description: 'Persisted route parity fixture.',
+      summary: 'route-parity-mobile',
+      risk: 'low',
+      continuation: continuation('route-parity-mobile'),
+    });
+
+    laneDispatch.calls.length = 0;
+    const panelResponse = await approvalsRoute.POST(approveRequest({ action: 'approve', id: panelApproval.id }));
+    const mobileResponse = await mobileActionRoute.POST(mobileApproveRequest(mobileApproval.sessionKey, mobileApproval.id));
+    expect(panelResponse.status).toBe(200);
+    expect(mobileResponse.status).toBe(200);
+    expect(laneDispatch.calls).toEqual([
+      expect.objectContaining({ laneId: 'route-parity-panel', verb: 'merge', strategy: 'theirs', actor: 'user' }),
+      expect.objectContaining({ laneId: 'route-parity-mobile', verb: 'merge', strategy: 'theirs', actor: 'user' }),
+    ]);
+
+    const panelAfter = getApproval(panelApproval.id)!;
+    const mobileAfter = getApproval(mobileApproval.id)!;
+    expect(panelAfter.resolution).toMatchObject({ action: 'approved', actor: 'desktop', continuationStatus: 'completed' });
+    expect(mobileAfter.resolution).toMatchObject({ action: 'approved', actor: 'desktop', continuationStatus: 'completed' });
+    expect(mobileAfter.audit.find((event) => event.type === 'approved')).toMatchObject({ type: 'approved', actor: 'desktop' });
+  });
 
   it('ignores an unknown via value', async () => {
     const card = await createDocsMergeCard('o8-chips-unknown', 0.97);

@@ -100,11 +100,10 @@ function releaseAgeLabel(value: number | null): string {
   return value === 1 ? '1 release' : `${value} releases`;
 }
 
+// Review and input waits stay in activeLanes, but no worker is executing there.
 const RUNNING_STATUSES = new Set([
   'running',
   'launching',
-  'reviewing',
-  'awaiting_input',
   'merging',
 ]);
 

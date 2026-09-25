@@ -192,6 +192,8 @@ interface PanelHeaderStripProps {
   onToggleO8Panel?: () => void;
   o8ActiveTab?: O8Tab;
   onO8TabChange?: (tab: O8Tab) => void;
+  splitEnabled?: boolean;
+  onToggleSplit?: () => void;
   approvalCount?: number;
   onOpenInbox?: () => void;
   /** Portal target for the browser's page tabs + URL well (Cursor header
@@ -209,6 +211,8 @@ export function PanelHeaderStrip({
   onToggleO8Panel,
   o8ActiveTab = 'workspace',
   onO8TabChange,
+  splitEnabled = false,
+  onToggleSplit,
   approvalCount = 0,
   onOpenInbox,
   browserTabsSlotRef,
@@ -219,7 +223,24 @@ export function PanelHeaderStrip({
       drag
       left={
         onO8TabChange ? (
-          <O8HeaderTabs activeTab={o8ActiveTab} onTabChange={onO8TabChange} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <O8HeaderTabs activeTab={o8ActiveTab} onTabChange={onO8TabChange} />
+            {onToggleSplit ? (
+              <button
+                type="button"
+                onClick={onToggleSplit}
+                aria-label={splitEnabled ? 'Close right panel split' : 'Split right panel'}
+                aria-pressed={splitEnabled}
+                title={splitEnabled ? 'Show one panel view' : 'Show two panel views'}
+                data-no-drag
+                style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: splitEnabled ? '1px solid var(--t-divider)' : '1px solid transparent', borderRadius: 7, background: splitEnabled ? 'var(--t-panel-hover)' : 'transparent', color: splitEnabled ? 'var(--t-text)' : 'var(--t-text-muted)', cursor: 'pointer', marginTop: -3, ['WebkitAppRegion' as string]: 'no-drag' }}
+              >
+                <span aria-hidden style={{ display: 'block', position: 'relative', width: 16, height: 16, flexShrink: 0, border: '1.8px solid currentColor', borderRadius: 4 }}>
+                  <span style={{ position: 'absolute', top: '50%', left: 0, right: 0, borderTop: '1.8px solid currentColor' }} />
+                </span>
+              </button>
+            ) : null}
+          </div>
         ) : null
       }
       center={

@@ -13,8 +13,13 @@ export interface WorkspaceHeaderStripProps {
   /** Terminal toggle. Shown only when a handler is provided. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
+  workspaceGridAvailable?: boolean;
+  workspaceGridMode?: boolean;
+  onToggleWorkspaceGrid?: () => void;
   /** Split the active workspace tile into a second pane. */
   onSplitWorkspacePanel?: () => void;
+  /** Close the focused pane when workspaces are stacked vertically. */
+  onCloseWorkspacePanel?: () => void;
   /** O8 panel re-open toggle. Rendered as the rightmost icon only when the
    *  panel is collapsed, because the open panel owns its toggle. */
   rightPanelOpen?: boolean;

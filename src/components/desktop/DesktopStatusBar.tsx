@@ -7,15 +7,13 @@
  * composer context row when one is active. Account controls live in AgentPanel.
  */
 
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ParkedLane } from './merge-beacon/derive';
 import { Terminal as TablerTerminal } from './tabler-shims';
-import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { ViewAsFreeIndicator } from './ViewAsFreeIndicator';
 import { getRegisteredComposerCenter, subscribeToComposerCenter } from './composer-center-registry';
 import { useEntitlement } from '@/lib/entitlement/context';
-import type { BottomPanelSurfaceKind } from './ContextualPanel';
 
 interface DesktopStatusBarProps {
   /** Retained for the caller; merge state is no longer displayed in this chrome. */
@@ -23,8 +21,6 @@ interface DesktopStatusBarProps {
   repoName: string | null;
   repoRemoteUrl?: string | null;
   defaultBranch?: string | null;
-  /** Width of the left AgentPanel column, in CSS px. */
-  leftColumnWidth?: number;
   /** Width of the right panel column when visible, in CSS px. */
   rightColumnWidth?: number;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
@@ -34,50 +30,25 @@ interface DesktopStatusBarProps {
   parkedLanes?: ParkedLane[];
   onOpenReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
-  /** Contextual bottom-panel (terminal) toggle. */
-  bottomPanelVisible?: boolean;
-  onToggleBottomPanel?: () => void;
-  onOpenBottomPanelSurface?: (surface: BottomPanelSurfaceKind) => void;
   /** Open the keyboard-shortcuts reference overlay (also bound to ⌘/). */
   onOpenShortcuts?: () => void;
 }
 
 function DesktopStatusBarBase({
-  bottomPanelVisible = false,
-  onToggleBottomPanel,
-  onOpenBottomPanelSurface,
   onOpenShortcuts,
-  leftColumnWidth,
   rightColumnWidth,
   compact = false,
 }: DesktopStatusBarProps) {
   const { overrideActive } = useEntitlement();
 
-  // Center the bottom-panel toggle on the composer's measured position. The
-  // column-width props ignored insets/gaps + a hidden right region and drifted
-  // control ~125px off the composer (operator: "not hitting", 2026-06-15).
-  // The composer card registers itself; track it through panel resizes/animations
-  // (ResizeObserver — the card is maxWidth:100% so it resizes as the column
-  // narrows) and remounts/tab-switches. Null → no composer (e.g. an
-  // Automations takeover) → fall
-  // back to the column-width centering.
-  const [composerCenterX, setComposerCenterX] = useState<number | null>(null);
+  // The composer card registers its status slot so small utility controls can
+  // follow it without painting a second bar underneath the input.
   const [composerSlot, setComposerSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let raf = 0;
-    let observed: Element | null = null;
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => schedule()) : null;
     const measure = () => {
       const el = getRegisteredComposerCenter();
-      if (ro && el !== observed) {
-        if (observed) ro.unobserve(observed);
-        if (el) ro.observe(el);
-        observed = el;
-      }
-      const rect = el?.getBoundingClientRect();
-      const next = rect && rect.width > 0 ? Math.round(rect.left + rect.width / 2) : null;
-      setComposerCenterX((prev) => (prev === next ? prev : next));
       const slot = el?.closest<HTMLElement>('[data-o8-composer-root]')?.querySelector<HTMLElement>('[data-o8-composer-status-slot]') ?? null;
       setComposerSlot((prev) => prev === slot ? prev : slot);
     };
@@ -91,7 +62,6 @@ function DesktopStatusBarBase({
     return () => {
       window.cancelAnimationFrame(raf);
       window.removeEventListener('resize', schedule);
-      ro?.disconnect();
       unsubscribe();
     };
   }, []);
@@ -99,7 +69,6 @@ function DesktopStatusBarBase({
   if (composerSlot) {
     return createPortal(
       <div data-o8-composer-chrome="" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-        {!compact && onToggleBottomPanel ? <StatusBottomPanelControl active={bottomPanelVisible} onToggle={onToggleBottomPanel} onOpenSurface={onOpenBottomPanelSurface} /> : null}
         {!compact && overrideActive ? <ViewAsFreeIndicator palette="chrome" /> : null}
         {!compact && onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
       </div>,
@@ -107,8 +76,8 @@ function DesktopStatusBarBase({
     );
   }
 
-  // Keep the bottom-panel toggle centered under the workspace when no
-  // composer is registered. Merge review lives in the review surfaces.
+  // Merge review lives in the review surfaces. The bottom-panel control now
+  // lives in the workspace header, so this bar only carries fallback help.
   return (
     <div
       data-mcp-scope="desktop-status-bar"
@@ -131,42 +100,8 @@ function DesktopStatusBarBase({
         position: 'relative',
       }}
     >
-      {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right.
-          The bottom-panel toggle is centered in the overlay below. */}
+      {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right. */}
       <div style={{ flex: 1, minWidth: 0 }} />
-
-      {/* Center the bottom-panel toggle on the workspace surface. */}
-      <div
-        style={{
-          // FIXED, not absolute (2026-07-16): the bar no longer spans the full
-          // window (it lives inside the center+right column so the sidebar can
-          // run full-height), but composerCenterX and the column-width
-          // fallback are both VIEWPORT coordinates. Fixed keeps the original
-          // math byte-for-byte; absolute would offset by the bar's new origin.
-          position: 'fixed',
-          bottom: 0,
-          height: 36,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          pointerEvents: 'none',
-          // Center on the composer's real measured center when present; else
-          // fall back to the column-width span (takeovers with no composer).
-          ...(composerCenterX != null
-            ? { left: composerCenterX, transform: 'translateX(-50%)' }
-            : { left: leftColumnWidth ?? 0, right: rightColumnWidth ?? 0 }),
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
-          {!compact && onToggleBottomPanel ? (
-            <StatusBottomPanelControl
-              active={bottomPanelVisible}
-              onToggle={onToggleBottomPanel}
-              onOpenSurface={onOpenBottomPanelSurface}
-            />
-          ) : null}
-        </div>
-      </div>
 
       <div
         style={{
@@ -189,187 +124,34 @@ function DesktopStatusBarBase({
 
 export const DesktopStatusBar = memo(DesktopStatusBarBase);
 
-const BOTTOM_PANEL_OPTIONS: Array<{
-  id: BottomPanelSurfaceKind;
-  label: string;
-  detail: string;
-  icon: (size?: number) => ReactNode;
-}> = [
-  { id: 'files', label: 'Files', detail: 'Browse project files', icon: (size = 14) => <FilesGlyph size={size} /> },
-  { id: 'side-chat', label: 'Side chat', detail: 'Start a side conversation', icon: (size = 14) => <ChatGlyph size={size} /> },
-  { id: 'browser', label: 'Browser', detail: 'Open a website', icon: (size = 14) => <BrowserGlyph size={size} /> },
-  { id: 'review', label: 'Review', detail: 'View code changes', icon: (size = 14) => <ReviewGlyph size={size} /> },
-  { id: 'terminal', label: 'Terminal', detail: 'Start an interactive shell', icon: (size = 14) => <TerminalGlyph size={size} /> },
-];
-
-/** Bottom panel control modeled after the Codex bottom-panel affordance:
- *  primary click toggles the drawer, chevron opens the surface picker. */
-function StatusBottomPanelControl({
-  active,
-  onToggle,
-  onOpenSurface,
-}: {
-  active: boolean;
-  onToggle: () => void;
-  onOpenSurface?: (surface: BottomPanelSurfaceKind) => void;
-}) {
+/** Open or close the bottom utility panel. Surfaces are added inside the panel. */
+export function StatusBottomPanelControl({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   const [hovered, setHovered] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  // Portaled popover (escapes the chrome-surface subtree so it inherits base
-  // content tokens — dark ink on light glass — instead of the chrome flip's
-  // white-on-transparent). Track its node + the anchor rect for positioning.
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handlePointer = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (menuRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
-      setMenuOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handlePointer);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handlePointer);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [menuOpen]);
-
-  const openSurface = (surface: BottomPanelSurfaceKind) => {
-    setMenuOpen(false);
-    onOpenSurface?.(surface);
-  };
-
   return (
-    <div ref={menuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-      <div
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          height: 26,
-          borderRadius: 8,
-          background: hovered || menuOpen ? 'var(--t-hover)' : 'transparent',
-          color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
-          transition: 'background 120ms ease, color 120ms ease',
-          overflow: 'hidden',
-        }}
-      >
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label="Toggle bottom panel"
-          title="Toggle bottom panel"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 26,
-            borderWidth: 0,
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          <TerminalGlyph size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setMenuOpen((open) => {
-            const next = !open;
-            if (next && menuRef.current) setAnchorRect(menuRef.current.getBoundingClientRect());
-            return next;
-          })}
-          aria-label="Choose bottom panel surface"
-          title="Choose bottom panel surface"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 22,
-            height: 26,
-            borderWidth: 0,
-            borderLeft: '1px solid var(--t-divider-subtle)',
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
-      </div>
-
-      {menuOpen && anchorRect && typeof document !== 'undefined' ? createPortal((
-        <div
-          ref={popoverRef}
-          role="menu"
-          style={{
-            position: 'fixed',
-            bottom: typeof window !== 'undefined' ? window.innerHeight - anchorRect.top + 8 : 48,
-            left: anchorRect.left + anchorRect.width / 2,
-            transform: 'translateX(-50%)',
-            width: 520,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 8,
-            padding: 10,
-            borderRadius: 14,
-            background: 'var(--t-popover-surface)',
-            border: '1px solid var(--t-panel-border)',
-            boxShadow: 'var(--t-panel-shadow), 0 18px 44px rgba(15, 23, 42, 0.20)',
-            zIndex: 120,
-          }}
-        >
-          {BOTTOM_PANEL_OPTIONS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              role="menuitem"
-              onClick={() => openSurface(option.id)}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                minHeight: 96,
-                borderRadius: 10,
-                border: '1px solid transparent',
-                background: 'color-mix(in srgb, var(--t-panel) 70%, transparent)',
-                color: 'var(--t-text)',
-                cursor: 'pointer',
-                fontFamily: 'var(--font-sans-system)',
-                textAlign: 'center',
-                padding: 10,
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.background = 'var(--t-hover)';
-                event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.background = 'color-mix(in srgb, var(--t-panel) 70%, transparent)';
-                event.currentTarget.style.borderColor = 'transparent';
-              }}
-            >
-              <span style={{ color: 'var(--t-text-secondary)' }}>{option.icon(18)}</span>
-              <span style={{ fontSize: 13, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>{option.label}</span>
-              <span style={{ fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-muted)' }}>{option.detail}</span>
-            </button>
-          ))}
-        </div>
-      ), document.body) : null}
-    </div>
+    <button
+      type="button"
+      onClick={onToggle}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label={active ? 'Close bottom panel' : 'Open bottom panel'}
+      title={active ? 'Close bottom panel' : 'Open bottom panel'}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 28,
+        height: 26,
+        borderRadius: 8,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        padding: 0,
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      <TerminalGlyph size={14} />
+    </button>
   );
 }
 
@@ -377,25 +159,6 @@ function TerminalGlyph({ size = 14 }: { size?: number }) {
   // Tabler Terminal2 — operator-locked icon for the bottom-area
   // terminal affordance. See Hurttlocker.md§"Icon vocabulary".
   return <TablerTerminal size={size} strokeWidth={2} />;
-}
-
-// Locked Iconoir picks per hurttlocker.md — same set used in O8Panel's
-// RightUtilityLauncher so both surfaces share an icon vocabulary.
-
-function FilesGlyph({ size = 14 }: { size?: number }) {
-  return <Folder width={size} height={size} color="currentColor" strokeWidth={1.6} />;
-}
-
-function ChatGlyph({ size = 14 }: { size?: number }) {
-  return <CircleSpark width={size} height={size} color="currentColor" strokeWidth={1.6} />;
-}
-
-function BrowserGlyph({ size = 14 }: { size?: number }) {
-  return <Internet width={size} height={size} color="currentColor" strokeWidth={1.6} />;
-}
-
-function ReviewGlyph({ size = 14 }: { size?: number }) {
-  return <DoubleCheck width={size} height={size} color="currentColor" strokeWidth={1.6} />;
 }
 
 /** `?` button — opens the keyboard-shortcuts reference. Sits at the

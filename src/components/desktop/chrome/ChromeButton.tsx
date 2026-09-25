@@ -35,6 +35,9 @@ const SHADOW_HOVER = 'none';
 const SHADOW_ACTIVE = 'none';
 const TEXT_COLOR = 'var(--t-text)';
 
+/** The footer row is one control high; each action owns a full touch target. */
+export const SIDEBAR_FOOTER_HIT_SIZE = 44;
+
 export function chromeNeoStyle(active: boolean, size = 32, radius = 10): CSSProperties {
   return {
     width: size,
@@ -85,6 +88,8 @@ interface ChromeButtonProps {
   active?: boolean;
   badge?: number;
   size?: number;
+  /** Clickable outer square; the icon surface keeps its compact `size`. */
+  hitSize?: number;
   radius?: number;
   /** Tooltip override — defaults to `label`. Pass this to surface a keybind
    *  hint (e.g. "Settings (⌘,)") in the title without bloating aria-label. */
@@ -103,6 +108,7 @@ export function ChromeButton({
   // sites that pass `size={22} radius={6}` (DesktopStatusBar footer) still
   // win via prop overrides.
   size = 26,
+  hitSize,
   radius = 7,
   title,
   noDrag = false,
@@ -133,6 +139,9 @@ export function ChromeButton({
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         position: 'relative',
+        width: hitSize ?? size,
+        height: hitSize ?? size,
+        flexShrink: 0,
         ...(noDrag ? { ['WebkitAppRegion' as string]: 'no-drag' } : {}),
       }}
       onMouseEnter={(event) => {

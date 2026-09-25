@@ -56,6 +56,17 @@ function IconTargets({ size = 16, color = 'currentColor' }: { size?: number; col
   );
 }
 
+function IconUtility({ kind, color }: { kind: 'review' | 'inbox' | 'files' | 'side-chat' | 'terminal'; color: string }) {
+  const paths: Record<typeof kind, React.ReactNode> = {
+    review: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="m8 12 2 2 5-5" /></>,
+    inbox: <><path d="M4 5h16l2 12H2L4 5Z" /><path d="M2 13h6l2 3h4l2-3h6" /></>,
+    files: <><path d="M3 7h7l2 2h9v11H3V7Z" /><path d="M3 7V4h7" /></>,
+    'side-chat': <path d="M4 4h16v13H9l-5 4V4Z" />,
+    terminal: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M12 16h5" /></>,
+  };
+  return <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>{paths[kind]}</svg>;
+}
+
 // Icon colors track the palette text color (dark on paper, light on graphite).
 const O8_ICON_ACTIVE = 'var(--t-text)';
 const O8_ICON_INACTIVE = 'var(--t-text-muted)';
@@ -89,6 +100,11 @@ const O8_TABS: O8TabDef[] = [
   // Iconoir PageEdit — operator-locked for the o8.md spec tab. Document
   // with a pencil reads as "the spec the agent is annotating."
   { id: 'spec', label: 'o8.md', icon: (c) => <PageEdit width={15} height={15} color={c} strokeWidth={2} /> },
+  { id: 'review', label: 'Review', icon: (c) => <IconUtility kind="review" color={c} /> },
+  { id: 'inbox', label: 'Inbox', icon: (c) => <IconUtility kind="inbox" color={c} /> },
+  { id: 'files', label: 'Files', icon: (c) => <IconUtility kind="files" color={c} /> },
+  { id: 'side-chat', label: 'Agent chat', icon: (c) => <IconUtility kind="side-chat" color={c} /> },
+  { id: 'terminal', label: 'Terminal', icon: (c) => <IconUtility kind="terminal" color={c} /> },
 ];
 
 /**
@@ -101,9 +117,11 @@ const O8_TABS: O8TabDef[] = [
 export function O8HeaderTabs({
   activeTab,
   onTabChange,
+  ariaLabelPrefix = 'Panel view',
 }: {
   activeTab: O8Tab;
   onTabChange: (tab: O8Tab) => void;
+  ariaLabelPrefix?: string;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement | null>(null);
@@ -120,9 +138,14 @@ export function O8HeaderTabs({
   useEffect(() => {
     if (!open || !anchorRef.current) return;
     const rect = anchorRef.current.getBoundingClientRect();
-    const menuWidth = menuRef.current?.offsetWidth ?? 172;
+    const menuWidth = menuRef.current?.offsetWidth ?? 340;
     const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - menuWidth - 8));
-    setCoords({ top: rect.bottom + 6, left });
+    const menuHeight = menuRef.current?.offsetHeight ?? 240;
+    const below = rect.bottom + 6;
+    const top = below + menuHeight <= window.innerHeight - 8
+      ? below
+      : Math.max(8, rect.top - menuHeight - 6);
+    setCoords({ top, left });
   }, [open]);
 
   useEffect(() => {
@@ -147,7 +170,7 @@ export function O8HeaderTabs({
         type="button"
         onClick={() => setOpen((v) => !v)}
         title="Switch panel view"
-        aria-label={`Panel view: ${activeDef.label}`}
+        aria-label={`${ariaLabelPrefix}: ${activeDef.label}`}
         aria-haspopup="menu"
         aria-expanded={open}
         data-no-drag
@@ -203,7 +226,8 @@ export function O8HeaderTabs({
             top: coords?.top ?? 0,
             left: coords?.left ?? 0,
             opacity: coords ? 1 : 0,
-            minWidth: 172,
+            width: 340,
+            maxWidth: 'calc(100vw - 16px)',
             background: 'var(--t-popover-surface)',
             borderWidth: 1,
             borderStyle: 'solid',
@@ -216,20 +240,24 @@ export function O8HeaderTabs({
             fontFamily: 'var(--font-sans-system)',
           }}
         >
-          {O8_TABS.map((def) => {
-            const selected = def.id === visualActiveTab;
-            return (
-              <O8DrawerItem
-                key={def.id}
-                def={def}
-                selected={selected}
-                onClick={() => {
-                  onTabChange(def.id);
-                  setOpen(false);
-                }}
-              />
-            );
-          })}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            {[O8_TABS.slice(0, 7), O8_TABS.slice(7)].map((group, index) => (
+              <div key={index} style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)', paddingTop: 5, paddingBottom: 3, paddingLeft: 11, paddingRight: 11 }}>{index === 0 ? 'Views' : 'Tools'}</div>
+                {group.map((def) => (
+                  <O8DrawerItem
+                    key={def.id}
+                    def={def}
+                    selected={def.id === visualActiveTab}
+                    onClick={() => {
+                      onTabChange(def.id);
+                      setOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
         </div>,
         document.body,
       ) : null}

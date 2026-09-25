@@ -103,15 +103,18 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     const activeRepo = controller.activeRepo;
     const preferredRepo = props.preferredRepo;
     const onCloseTile = props.onCloseTile;
+    const onSplitVertical = props.onSplitVertical;
+    const onSplitHorizontal = props.onSplitHorizontal;
     useEffect(() => {
       if (typeof window === 'undefined') return;
-      const matchWorkspace = (eventWorkspaceId: string | null | undefined) => {
+      const matchWorkspace = (eventWorkspaceId: string | null | undefined, eventTileId?: string) => {
+        if (eventTileId) return eventTileId === props.stateScope;
         if (!eventWorkspaceId) return props.canCloseTile !== true;
         return eventWorkspaceId === workspaceInstanceId;
       };
       const onSpawn = (event: Event) => {
-        const detail = (event as CustomEvent<{ kind?: string; workspaceId?: string }>).detail;
-        if (!matchWorkspace(detail?.workspaceId)) return;
+        const detail = (event as CustomEvent<{ kind?: string; workspaceId?: string; tileId?: string }>).detail;
+        if (!matchWorkspace(detail?.workspaceId, detail?.tileId)) return;
         const repo = preferredRepo ?? activeRepo ?? undefined;
         if (detail?.kind === 'orchestrator') spawnOrchestratorTab?.();
         else if (detail?.kind === 'chat') handleNewLLMChatTab(repo ?? undefined);
@@ -123,13 +126,22 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         if (detail?.workspaceId !== workspaceInstanceId) return;
         onCloseTile?.();
       };
+      const onSplitWorkspace = (event: Event) => {
+        const detail = (event as CustomEvent<{ workspaceId?: string; direction?: string; kind?: string }>).detail;
+        if (detail?.workspaceId !== workspaceInstanceId) return;
+        if (detail.kind !== 'chat' && detail.kind !== 'terminal') return;
+        if (detail.direction === 'right') onSplitVertical?.(detail.kind);
+        if (detail.direction === 'below') onSplitHorizontal?.(detail.kind);
+      };
       window.addEventListener('o8:request-spawn-tab', onSpawn as EventListener);
       window.addEventListener('o8:request-close-workspace', onCloseWorkspace as EventListener);
+      window.addEventListener('o8:request-split-workspace-tab', onSplitWorkspace as EventListener);
       return () => {
         window.removeEventListener('o8:request-spawn-tab', onSpawn as EventListener);
         window.removeEventListener('o8:request-close-workspace', onCloseWorkspace as EventListener);
+        window.removeEventListener('o8:request-split-workspace-tab', onSplitWorkspace as EventListener);
       };
-    }, [props.canCloseTile, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, spawnFleetCanvasTab, activeRepo, preferredRepo, onCloseTile, workspaceInstanceId]);
+    }, [props.canCloseTile, props.stateScope, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, spawnFleetCanvasTab, activeRepo, preferredRepo, onCloseTile, onSplitVertical, onSplitHorizontal, workspaceInstanceId]);
 
     // Broadcast the active-tab label + tabId + kind + workspaceId + full
     // tabs list so the dashboard can route the title to the column-level
