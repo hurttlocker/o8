@@ -22,7 +22,7 @@ interface DesktopStatusBarProps {
   repoRemoteUrl?: string | null;
   defaultBranch?: string | null;
   /** Width of the right panel column when visible, in CSS px. */
-  rightColumnWidth?: number;
+  rightColumnWidth?: number | string;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
   compact?: boolean;
   /** Glass surface active: leave the left utility rail transparent. */

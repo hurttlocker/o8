@@ -4770,6 +4770,11 @@ function DashboardInner() {
 
   const showSidebarColumn = sidebarVisible && !compactShell;
   const showRightPanelColumn = chatVisible && !compactShell;
+  const rightPanelContentMaxWidth = 'max(200px, calc(100vw - 360px))';
+  const rightPanelColumnMaxWidth = 'max(210px, calc(100vw - 350px))';
+  const rightPanelRenderWidth = showRightPanelColumn
+    ? `min(${rightPanelKind === 'o8' ? o8Width : rightWidth}px, ${rightPanelContentMaxWidth})`
+    : 0;
   const workspaceInset = compactShell ? 2 : 4;
 
   // History-row focus follows the thread bound to the actually focused
@@ -5505,14 +5510,8 @@ function DashboardInner() {
       <motion.div
             aria-hidden={!showRightPanelColumn}
             inert={!showRightPanelColumn}
-            // Animate the LAYOUT WIDTH (not just opacity/x) so the center
-            // column reflows smoothly as the panel collapses — instead of
-            // the panel holding its full footprint through a cosmetic
-            // fade/slide and then snapping the center when it unmounts.
-            // overflow:hidden clips the fixed-width content during the
-            // collapse; the inner keeps its own drag-resize width animation.
-            // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
-            // + the inner's 4px right margin so nothing clips when open.
+            // Animate layout width; the viewport cap preserves a usable canvas
+            // beside the panel in narrow windows. +10 covers the handle/gap.
             initial={false}
             animate={{ width: showRightPanelColumn ? 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
@@ -5524,6 +5523,7 @@ function DashboardInner() {
               height: '100%',
               flexShrink: 0,
               overflow: 'hidden',
+              maxWidth: rightPanelColumnMaxWidth,
             }}
           >
             <div
@@ -5566,6 +5566,7 @@ function DashboardInner() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
+                maxWidth: rightPanelContentMaxWidth,
                 // borderRadius:0 — the corner shape is owned by the inner Lisse
                 // SmoothCorners below (same squircle as the center workspace card).
                 // A plain rounded-rect clip here would shave the squircle's bulge
@@ -5871,7 +5872,7 @@ function DashboardInner() {
         onOpenReviewLane={handleOpenReviewLane}
         onOpenAwaitingMerge={handleOpenAwaitingMerge}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
+        rightColumnWidth={rightPanelRenderWidth}
       />
       </div>{/* end center+right column */}
       </div>{/* end main layout */}
