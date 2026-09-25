@@ -1026,7 +1026,7 @@ function DashboardInner() {
   // SSR-safe defaults; hydrate from localStorage in an effect so the
   // visibility/kind survives a reload but server and first client render
   // match (no hydration mismatch).
-  const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false, right: false });
+  const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false });
   const [chatVisible, setChatVisible] = useState(false);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
   useRightPanelPersistence({
@@ -1034,7 +1034,6 @@ function DashboardInner() {
     rightPanelKind,
     setChatVisible,
     setRightPanelKind,
-    suspendVisiblePersistence: responsiveAutoCollapsed.right,
   });
   // Keep each expensive panel instance alive after its first visit. Presentation
   // can collapse or crossfade, but reopening must not repay its chunk, queries,
@@ -1052,7 +1051,7 @@ function DashboardInner() {
   // threshold BANDS live in state; the functional setState returns the previous
   // object between crossings so React bails out of the render entirely. The raw
   // number lives in viewportWidthRef for imperative reads.
-  const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean } | null>(null);
+  const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean; belowRightCollapse: boolean } | null>(null);
   const viewportWidthRef = useRef<number | null>(null);
   const responsiveManualOpenRef = useRef({ left: false, right: false });
   useEffect(() => {
@@ -1062,12 +1061,14 @@ function DashboardInner() {
       viewportWidthRef.current = next;
       const compact = next < RESPONSIVE_COMPACT_SHELL_WIDTH;
       const belowLeftCollapse = next < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
+      const belowRightCollapse = next < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH;
       setViewportBands((current) => (
         current !== null
           && current.compact === compact
           && current.belowLeftCollapse === belowLeftCollapse
+          && current.belowRightCollapse === belowRightCollapse
           ? current
-          : { compact, belowLeftCollapse }
+          : { compact, belowLeftCollapse, belowRightCollapse }
       ));
     };
     update();
@@ -1144,9 +1145,6 @@ function DashboardInner() {
   const noteRightPanelManualIntent = useCallback((nextVisible: boolean) => {
     responsiveManualOpenRef.current.right = nextVisible
       && getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH;
-    setResponsiveAutoCollapsed((current) => (
-      current.right ? { ...current, right: false } : current
-    ));
   }, [getResponsiveViewportWidth]);
   const openRightPanelFromUser = useCallback(() => {
     if (typeof window !== 'undefined') {
@@ -1160,22 +1158,16 @@ function DashboardInner() {
     noteRightPanelManualIntent(false);
     setChatVisible(false);
   }, [noteRightPanelManualIntent]);
-  // Responsive auto-minimize — LEFT AgentPanel only (restored 2026-07-14 by
-  // operator request; the blanket removal was Q ruling 2026-07-11). Narrowing
-  // the window past RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH folds the AgentPanel to
-  // width 0 (showSidebarColumn === false) so the center workspace stays usable
-  // all the way down to a terminal-narrow window; widening back out restores it.
-  // A manual open while narrow (responsiveManualOpenRef.left, set by
-  // noteSidebarManualIntent) suppresses the auto-collapse so resize never fights
-  // the operator's toggle. The RIGHT panel stays a purely manual choice (per the
-  // 2026-07-11 ruling) — this effect only heals a stale right auto-collapse a
-  // prior build may have left set.
+  // Fold side panels as the viewport narrows. A manual open at a narrow width
+  // wins until the window grows again. The right panel stays closed after
+  // widening, so only an operator action reopens it.
   useEffect(() => {
     if (viewportBands === null) return;
 
-    if (responsiveAutoCollapsed.right) {
-      setChatVisible(true);
-      setResponsiveAutoCollapsed((current) => ({ ...current, right: false }));
+    if (viewportBands.belowRightCollapse) {
+      if (chatVisible && !responsiveManualOpenRef.current.right) setChatVisible(false);
+    } else {
+      responsiveManualOpenRef.current.right = false;
     }
 
     if (viewportBands.belowLeftCollapse) {
@@ -1196,7 +1188,7 @@ function DashboardInner() {
     }
   }, [
     responsiveAutoCollapsed.left,
-    responsiveAutoCollapsed.right,
+    chatVisible,
     setSidebarVisible,
     sidebarVisible,
     viewportBands,
@@ -4769,12 +4761,8 @@ function DashboardInner() {
   }, []);
 
   const showSidebarColumn = sidebarVisible && !compactShell;
-  const showRightPanelColumn = chatVisible && !compactShell;
-  const rightPanelContentMaxWidth = 'max(200px, calc(100vw - 360px))';
-  const rightPanelColumnMaxWidth = 'max(210px, calc(100vw - 350px))';
-  const rightPanelRenderWidth = showRightPanelColumn
-    ? `min(${rightPanelKind === 'o8' ? o8Width : rightWidth}px, ${rightPanelContentMaxWidth})`
-    : 0;
+  const showRightPanelColumn = chatVisible && !compactShell
+    && (!viewportBands?.belowRightCollapse || responsiveManualOpenRef.current.right);
   const workspaceInset = compactShell ? 2 : 4;
 
   // History-row focus follows the thread bound to the actually focused
@@ -5510,8 +5498,14 @@ function DashboardInner() {
       <motion.div
             aria-hidden={!showRightPanelColumn}
             inert={!showRightPanelColumn}
-            // Animate layout width; the viewport cap preserves a usable canvas
-            // beside the panel in narrow windows. +10 covers the handle/gap.
+            // Animate the LAYOUT WIDTH (not just opacity/x) so the center
+            // column reflows smoothly as the panel collapses — instead of
+            // the panel holding its full footprint through a cosmetic
+            // fade/slide and then snapping the center when it unmounts.
+            // overflow:hidden clips the fixed-width content during the
+            // collapse; the inner keeps its own drag-resize width animation.
+            // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
+            // + the inner's 4px right margin so nothing clips when open.
             initial={false}
             animate={{ width: showRightPanelColumn ? 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
@@ -5523,7 +5517,6 @@ function DashboardInner() {
               height: '100%',
               flexShrink: 0,
               overflow: 'hidden',
-              maxWidth: rightPanelColumnMaxWidth,
             }}
           >
             <div
@@ -5566,7 +5559,6 @@ function DashboardInner() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                maxWidth: rightPanelContentMaxWidth,
                 // borderRadius:0 — the corner shape is owned by the inner Lisse
                 // SmoothCorners below (same squircle as the center workspace card).
                 // A plain rounded-rect clip here would shave the squircle's bulge
