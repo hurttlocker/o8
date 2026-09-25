@@ -31,6 +31,7 @@ import { approvedFromCardFact } from '@/lib/mobile/inbox-referee-chips';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { findLaneBySession, getLane } from '@/lib/lane/registry';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 import { discoverDashboardCliBindings } from '@/lib/runtime/dashboard-cli-bindings';
 import { TERMINAL_APPROVAL_ADAPTER_SCHEMA } from '@/lib/terminal-status/action-adapter';
 import type { ApprovalAuditEvent } from '@/lib/approvals/types';
@@ -150,31 +151,15 @@ async function validateTerminalApprovalAdapter(
   };
 }
 
-async function liveDiscoveredLaneResumeConflict(
+function discoveredCliLaneResumeConflict(
   approval: NonNullable<ReturnType<typeof getApproval>>,
-): Promise<string | null> {
+): string | null {
   const continuation = approval.continuation;
   if (continuation?.kind !== 'lane' || continuation.verb !== 'resume') return null;
   const lane = getLane(continuation.laneId);
   if (!lane || !lane.sessionKey) return null;
-  const sessionKey = lane.sessionKey;
-  const isDiscoveredCli = (lane.runtime === 'codex' && sessionKey.startsWith('codex:'))
-    || (lane.runtime === 'claude-code' && sessionKey.startsWith('claude-code:'));
-  if (!isDiscoveredCli) return null;
-  const runtimeAdapter = getRuntime(lane.runtime);
-  if (!runtimeAdapter) return 'The CLI session could not be verified. Refresh the lane before resuming.';
-  try {
-    const sessions = await runtimeAdapter.discoverSessions({ fresh: true });
-    if (sessions.some((session) => session.sessionKey === sessionKey
-      && session.runtimeId === lane.runtime
-      && session.ownership === 'discovered'
-      && session.status === 'running')) {
-      return 'This CLI is still running in its original terminal. A lane resume would start another run.';
-    }
-  } catch {
-    return 'The CLI session could not be verified. Refresh the lane before resuming.';
-  }
-  return null;
+  if (!isDiscoveredCliSessionKey(lane.runtime, lane.sessionKey)) return null;
+  return 'This lane is bound to an external CLI session. A lane resume could start another run. Inspect the original terminal before choosing an explicit fresh run.';
 }
 
 /**
@@ -399,7 +384,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === 'approve') {
-    const conflict = await liveDiscoveredLaneResumeConflict(current);
+    const conflict = discoveredCliLaneResumeConflict(current);
     if (conflict) {
       return NextResponse.json({ ok: false, error: conflict }, {
         status: 409,

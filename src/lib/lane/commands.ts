@@ -63,6 +63,7 @@ import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
 import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 import {
   withWorkspaceMaterializedMutation,
   WorkspaceMutationUnavailableError,
@@ -391,6 +392,16 @@ async function dispatchUnlocked(
     case 'resume': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+
+      if (isDiscoveredCliSessionKey(lane.runtime, lane.sessionKey)) {
+        return {
+          ok: false,
+          laneId: command.laneId,
+          reason: 'cli_resume_requires_explicit_action',
+          note: 'This lane is bound to an external CLI session. Resume cannot safely continue it or start another run. Inspect the original terminal, then choose an explicit fresh run if needed.',
+          lane,
+        };
+      }
 
       // If lane has a live session, resume it with a message
       if (lane.sessionKey && command.message) {
