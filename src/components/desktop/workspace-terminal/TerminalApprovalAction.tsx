@@ -41,7 +41,7 @@ export function TerminalApprovalAction({
   const [approval, setApproval] = useState<ApprovalRecord | null>(null);
   const [showStructured, setShowStructured] = useState(true);
   const [confirmReject, setConfirmReject] = useState(false);
-  const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
+  const [busy, setBusy] = useState<'reject' | null>(null);
   const [notice, setNotice] = useState('');
 
   const loadApproval = useCallback(async (signal?: AbortSignal) => {
@@ -87,16 +87,16 @@ export function TerminalApprovalAction({
     tmuxSession,
   });
 
-  const resolve = async (action: 'approve' | 'reject') => {
+  const resolve = async () => {
     if (!adapter || busy) return;
-    setBusy(action);
+    setBusy('reject');
     setNotice('Recording the decision…');
     try {
       const response = await fetch('/api/panel/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action,
+          action: 'reject',
           id: adapter.approvalId,
           terminalAdapter: {
             schema: adapter.schema,
@@ -110,7 +110,7 @@ export function TerminalApprovalAction({
       const result = await response.json() as { ok?: boolean; error?: string; note?: string };
       if (!response.ok || !result.ok) throw new Error(result.error ?? result.note ?? 'Decision was not recorded.');
       setApproval(null);
-      setNotice(result.note ?? (action === 'approve' ? 'Resume approved.' : 'Request rejected.'));
+      setNotice(result.note ?? 'Request rejected.');
       setConfirmReject(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Decision was not recorded.');
@@ -153,13 +153,14 @@ export function TerminalApprovalAction({
         <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span style={{ flex: 1, minWidth: 180, fontSize: 11, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-secondary)' }}>
             {approval?.description || approval?.summary}
+            <span style={{ display: 'block', marginTop: 3 }}>Continue this live CLI in its terminal. A lane resume would start another run.</span>
           </span>
           {confirmReject ? (
             <span style={{ fontSize: 10.5, color: 'var(--t-danger)' }}>Reject this request?</span>
           ) : null}
           <button type="button" disabled={busy !== null} style={{ ...actionStyle, border: '1px solid var(--t-danger-border)', background: 'var(--t-danger-soft)', color: 'var(--t-danger)' }} onClick={() => {
             if (!confirmReject) setConfirmReject(true);
-            else void resolve('reject');
+            else void resolve();
           }}>
             {busy === 'reject' ? 'Rejecting…' : confirmReject ? 'Confirm reject' : 'Reject'}
           </button>
@@ -167,11 +168,7 @@ export function TerminalApprovalAction({
             <button type="button" disabled={busy !== null} style={{ ...actionStyle, border: '1px solid var(--t-divider-subtle)', background: 'transparent', color: 'var(--t-text-secondary)' }} onClick={() => setConfirmReject(false)}>
               Cancel
             </button>
-          ) : (
-            <button type="button" disabled={busy !== null} style={{ ...actionStyle, border: '1px solid var(--t-brand-orange)', background: 'var(--t-brand-orange)', color: 'var(--t-brand-orange-contrast)' }} onClick={() => void resolve('approve')}>
-              {busy === 'approve' ? 'Resuming…' : 'Approve resume'}
-            </button>
-          )}
+          ) : null}
         </div>
       ) : null}
       {notice ? <div role="status" style={{ marginTop: 5, fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)' }}>{notice}</div> : null}

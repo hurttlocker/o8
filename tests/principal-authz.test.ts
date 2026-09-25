@@ -630,7 +630,7 @@ describe('principal-authz — governed terminal approval adapter', () => {
     expect(getApproval(approval.id)?.status).toBe('pending');
   });
 
-  it('records terminal adapter provenance atomically with the operator approval', async () => {
+  it('refuses to approve a lane relaunch while the original CLI is live', async () => {
     const { approval, sessionKey } = pendingTerminalResume('terminal adapter accepted provenance');
     registerRuntimeTerminalSession(sessionKey, {
       runtime: 'codex',
@@ -648,27 +648,11 @@ describe('principal-authz — governed terminal approval adapter', () => {
         terminalAdapter: terminalAdapter(approval, 'o8-terminal-authz-accepted'),
       },
     }));
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('start another run');
     const persisted = getApproval(approval.id);
-    expect(persisted?.status).toBe('approved');
-    const approvedEvent = persisted?.audit.find((event) => event.type === 'approved');
-    expect(approvedEvent).toMatchObject({
-      type: 'approved',
-      actor: 'desktop',
-      terminalAdapter: {
-        schema: 'o8/terminal-approval/v1',
-        authority: 'lane-state',
-        sessionKey,
-        tmuxSession: 'o8-terminal-authz-accepted',
-        actor: 'operator',
-        result: 'approved',
-      },
-    });
-    expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toMatchObject({
-      type: 'approved',
-      actor: 'desktop',
-      terminalAdapter: approvedEvent?.terminalAdapter,
-    });
+    expect(persisted?.status).toBe('pending');
+    expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toBeUndefined();
 
     const staleReplay = await approvals.POST(req(url, {
       principal: 'operator',
@@ -679,8 +663,23 @@ describe('principal-authz — governed terminal approval adapter', () => {
       },
     }));
     expect(staleReplay.status).toBe(409);
-    expect(getApproval(approval.id)?.audit.filter((event) => event.type === 'approved')).toHaveLength(1);
+    expect(getApproval(approval.id)?.audit.filter((event) => event.type === 'approved')).toHaveLength(0);
   }, 20_000);
+
+  it('also refuses the ordinary approval route while a discovered CLI is live', async () => {
+    const { approval, sessionKey } = pendingTerminalResume('ordinary approval live CLI');
+    mockLiveTerminal(sessionKey, 'o8-terminal-authz-original');
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id },
+    }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('start another run');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toBeUndefined();
+  });
 
   it('records a terminal rejection from an awaiting-human lane without dispatching the resume', async () => {
     const { approval, sessionKey } = pendingTerminalResume(

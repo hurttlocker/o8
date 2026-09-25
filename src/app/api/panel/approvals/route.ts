@@ -130,6 +130,13 @@ async function validateTerminalApprovalAdapter(
   } catch {
     return { ok: false, error: 'The live terminal binding could not be verified. Refresh the terminal status before approving.', status: 409 };
   }
+  if (action === 'approve') {
+    return {
+      ok: false,
+      error: 'This CLI is still running in the original terminal. Continue it there; a lane resume would start another run.',
+      status: 409,
+    };
+  }
   return {
     ok: true,
     audit: {
@@ -138,9 +145,36 @@ async function validateTerminalApprovalAdapter(
       sessionKey: adapter.sessionKey,
       tmuxSession: adapter.tmuxSession,
       actor: principal,
-      result: action === 'approve' ? 'approved' : 'rejected',
+      result: 'rejected',
     },
   };
+}
+
+async function liveDiscoveredLaneResumeConflict(
+  approval: NonNullable<ReturnType<typeof getApproval>>,
+): Promise<string | null> {
+  const continuation = approval.continuation;
+  if (continuation?.kind !== 'lane' || continuation.verb !== 'resume') return null;
+  const lane = getLane(continuation.laneId);
+  if (!lane || !lane.sessionKey) return null;
+  const sessionKey = lane.sessionKey;
+  const isDiscoveredCli = (lane.runtime === 'codex' && sessionKey.startsWith('codex:'))
+    || (lane.runtime === 'claude-code' && sessionKey.startsWith('claude-code:'));
+  if (!isDiscoveredCli) return null;
+  const runtimeAdapter = getRuntime(lane.runtime);
+  if (!runtimeAdapter) return 'The CLI session could not be verified. Refresh the lane before resuming.';
+  try {
+    const sessions = await runtimeAdapter.discoverSessions({ fresh: true });
+    if (sessions.some((session) => session.sessionKey === sessionKey
+      && session.runtimeId === lane.runtime
+      && session.ownership === 'discovered'
+      && session.status === 'running')) {
+      return 'This CLI is still running in its original terminal. A lane resume would start another run.';
+    }
+  } catch {
+    return 'The CLI session could not be verified. Refresh the lane before resuming.';
+  }
+  return null;
 }
 
 /**
@@ -362,6 +396,16 @@ export async function POST(request: NextRequest) {
       });
     }
     terminalAdapterAudit = adapterValidation.audit;
+  }
+
+  if (action === 'approve') {
+    const conflict = await liveDiscoveredLaneResumeConflict(current);
+    if (conflict) {
+      return NextResponse.json({ ok: false, error: conflict }, {
+        status: 409,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
   }
 
   try {
