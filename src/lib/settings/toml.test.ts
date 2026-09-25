@@ -67,6 +67,16 @@ backend = "codex"
     expect((await getOperatorDefaults()).values.orchestratorBackend).toBe('codex');
   });
 
+  it('persists the enabled-by-default background title inference control', async () => {
+    expect((await getOperatorDefaults()).values.autoTitleInferenceEnabled).toBe(true);
+    const result = await POST(postDefaults({ autoTitleInferenceEnabled: false }));
+    expect(result.status).toBe(200);
+    expect((await getOperatorDefaults()).values.autoTitleInferenceEnabled).toBe(false);
+    expect(parseOperatorDefaultsToml(readFileSync(tomlPath, 'utf8')).autoTitleInferenceEnabled).toBe(false);
+    const read = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
+    expect((await read.json()).values.autoTitleInferenceEnabled).toBe(false);
+  });
+
   it('persists the subscription-only Symon voice setting at its documented path', async () => {
     const response = await POST(postDefaults({
       settingsToml: `
