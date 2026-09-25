@@ -51,6 +51,8 @@ How each concept actually shows up across audiences. Cells marked **(divergent)*
 | Review | `o8_review_state`, `submit_review`, `approve_and_merge`, `o8_merge_preview` | `review` | PR panel "Changes" / Review surface | approval card | `session_outcomes`, `approvals` |
 | Approval | (none — UI/lane only) | `approval` | ApprovalStack | ApprovalStack | `approvals` |
 
+Approval audit records use `desktop` for operator approval resolution, including phone approvals that use either operator approval route. The actor identifies the operator approval surface, not the device that submitted the request.
+
 ### Documented divergences
 
 - **"Packets" tab id is `'agents'`** — `LeftPanelProjectFocus.tsx` and `RepoTabs.tsx` carry `{ id: 'agents', label: 'Packets' }`. The id is unchanged for localStorage state-key compatibility; only the visible label was relabeled (May 2026). Future cleanup may align the id, but it requires a state-migration.

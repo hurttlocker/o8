@@ -1,3 +1,6 @@
+import { mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runMsg, runPresence } from './agents';
@@ -87,5 +90,27 @@ describe('agent conversation CLI', () => {
       .resolves.toBe(0);
     expect(write.mock.calls.map(([value]) => String(value)).join(''))
       .toContain("--to 'Peer'\"'\"'s Runner' --reply-to 'message-one'");
+  });
+
+  it('uses the physical path for a symlinked explicit repository', async () => {
+    workerEnvironment();
+    const physicalRepo = mkdtempSync(join(os.tmpdir(), 'o8-cli-repo-scope-'));
+    const aliasRepo = `${physicalRepo}-alias`;
+    symlinkSync(physicalRepo, aliasRepo);
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      message: {
+        id: 'message-repo-scope', from: 'Aster', to: 'Birch', repo: realpathSync.native(aliasRepo),
+        text: 'Canonical.', delivery: 'poll', deliveryNote: null, timestamp: '2026-09-24T00:00:00.000Z',
+      },
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(runMsg({ human: false, verbose: false }, 'send', [
+      '--repo', aliasRepo, '--to', 'Birch', 'Canonical.',
+    ])).resolves.toBe(0);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({ repo: realpathSync.native(aliasRepo) });
   });
 });
