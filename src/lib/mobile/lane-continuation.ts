@@ -17,6 +17,7 @@ export async function dispatchMobileLaneContinuation(continuation: LaneApprovalC
       laneId: continuation.laneId,
       commitMessage: continuation.commitMessage,
       expectedHeadSha: continuation.expectedHeadSha,
+      strategy: continuation.strategy,
       actor: 'user',
     } as Parameters<typeof dispatch>[0]);
     return { outcome: result.ok ? 'completed' : 'failed', note: result.note };

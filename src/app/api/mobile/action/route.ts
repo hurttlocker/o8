@@ -46,20 +46,17 @@ function invalidateMutationCaches() {
   invalidateCommandCenterSnapshotCaches();
   invalidateInboxCache();
 }
-
 function buildLlmImagesMarkdown(attachments: MobileActionRequest['attachments']) {
   const images = (attachments ?? []).filter((item) => item?.mimeType?.startsWith('image/') && item?.content);
   if (!images.length) return '';
   return images.map((item, index) => `![Image ${index + 1}](${item.content})`).join('\n');
 }
-
 function actionErrorResponse(error: string, status: number, detail?: unknown) {
   return NextResponse.json(buildErrorPayload(error, detail), {
     status,
     headers: NO_STORE_HEADERS,
   });
 }
-
 function actionOutcomeUnknownResponse(
   message: string,
   clientMutationId: string,
@@ -76,7 +73,6 @@ function actionOutcomeUnknownResponse(
     headers: { ...NO_STORE_HEADERS, 'x-o8-terminal-outcome': 'unknown' },
   });
 }
-
 /**
  * Structured, machine-readable error for approval-addressing failures — carries
  * an explicit `ok:false` + a stable `error` code (and optional extra fields like
@@ -477,7 +473,7 @@ async function handleMobileActionPost(request: NextRequest) {
       const resolutionClaim = claimApprovalResolution(
         approvalId,
         action === 'approve' ? 'approve' : 'reject',
-        'mobile', payload.message?.trim(),
+        'desktop', payload.message?.trim(),
         currentApproval.updatedAt,
       );
       const approval = resolutionClaim.approval;
