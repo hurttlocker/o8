@@ -1158,16 +1158,14 @@ export function resolveDefaultWorkerEffortSync(
   });
 }
 
-/** Default worker model ('' = runtime's own default). Applied at the Codex
- *  launch chokepoint so every dispatched worker inherits it; per-mission model
- *  still wins. Set to `ollama:<model>` / `lmstudio:<model>` to dispatch local. */
+/** Default worker model ('' = runtime default) at the Codex launch chokepoint.
+ * Per-mission wins; use `ollama:<model>` or `lmstudio:<model>` for local workers. */
 export function resolveDefaultDispatchModelSync(): string {
   return getOperatorDefaultsSync().values.defaultDispatchModel;
 }
 
-/** Local inference endpoint base URL ('' = use cloud). Read by the Brain
- *  embeddings path to route to a local OpenAI-compatible server (Ollama /
- *  LM Studio). NO trailing /v1 — consumers append the path. */
+/** Local OpenAI-compatible inference base URL ('' = cloud) for Brain embeddings.
+ * No trailing /v1; consumers append paths. */
 export function resolveLocalInferenceBaseUrlSync(): string {
   return getOperatorDefaultsSync().values.localInferenceBaseUrl;
 }
@@ -1182,29 +1180,31 @@ export function resolveLocalChatModelSync(): string {
   return getOperatorDefaultsSync().values.localChatModel;
 }
 
-export function resolveExperimentalOpencodeSync(): boolean { return getOperatorDefaultsSync().values.experimentalOpencode; }
+export function resolveExperimentalOpencodeSync(): boolean {
+  return getOperatorDefaultsSync().values.experimentalOpencode;
+}
 
-export function resolveInAppOrchestratorEnabledSync(): boolean { return getOperatorDefaultsSync().values.inAppOrchestratorEnabled; }
+export function resolveInAppOrchestratorEnabledSync(): boolean {
+  return getOperatorDefaultsSync().values.inAppOrchestratorEnabled;
+}
 
-export function resolveWorkersUseBrainSync(): WorkersUseBrain { return getOperatorDefaultsSync().values.workersUseBrain; }
+export function resolveWorkersUseBrainSync(): WorkersUseBrain {
+  return getOperatorDefaultsSync().values.workersUseBrain;
+}
 
-export function resolveCrossHouseWorkerFallbackSync(): boolean { return getOperatorDefaultsSync().values.crossHouseWorkerFallback; }
+export function resolveCrossHouseWorkerFallbackSync(): boolean {
+  return getOperatorDefaultsSync().values.crossHouseWorkerFallback;
+}
 
-/**
- * Which backend drives the in-app Orchestrator. 'auto' means "defer to
- * {@link resolveInAppOrchestratorEnabledSync}" — the registry's
- * `resolveOrchestratorBackendId` applies that fallback so 'auto' is byte-identical
- * to the pre-setting derivation.
- */
+/** In-app orchestrator backend. 'auto' defers to
+ * {@link resolveInAppOrchestratorEnabledSync} through the registry, preserving
+ * the pre-setting derivation. */
 export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
   return getOperatorDefaultsSync().values.orchestratorBackend;
 }
 
-/**
- * The operator's pinned model for the opencode ACP orchestrator, or null to run
- * on whatever the agent boots with. Discovered ids, so no SUPPORTED_MODEL_IDS
- * check — see acp-model-id.ts for why that is shape-only.
- */
+/** Pinned opencode ACP model, or null for its boot model. Discovered ids have
+ * shape-only validation; see acp-model-id.ts. */
 export function resolveOpencodeOrchestratorModelSync(): string | null {
   return getOperatorDefaultsSync().values.opencodeOrchestratorModel;
 }
