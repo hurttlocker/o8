@@ -282,6 +282,7 @@ export function splitTile(
   direction: TileSplitDirection,
   nextContent: TileContent,
   ratio = 0.5,
+  placeBefore = false,
 ): { root: TileNode; newTileId: string | null } {
   let newTileId: string | null = null;
 
@@ -292,7 +293,7 @@ export function splitTile(
       }
       const nextLeaf = createLeaf(nextContent);
       newTileId = nextLeaf.id;
-      return createSplit(direction, ratio, [current, nextLeaf]);
+      return createSplit(direction, ratio, placeBefore ? [nextLeaf, current] : [current, nextLeaf]);
     }
 
     const firstChild = walk(current.children[0]);
@@ -439,6 +440,10 @@ function normalizeNode(node: TileNode): TileNode {
           repoPath: typeof node.content.repoPath === 'string' && node.content.repoPath.trim()
             ? node.content.repoPath
             : null,
+          ...(node.content.createdFromSplit === true ? { createdFromSplit: true } : {}),
+          ...(node.content.initialTab === 'chat' || node.content.initialTab === 'terminal'
+            ? { initialTab: node.content.initialTab }
+            : {}),
         },
       };
     }
@@ -510,13 +515,14 @@ function migrateNode(node: any): any {
     // retired-kind migration above turns old thoughts/mission-control leaves
     // into terminal leaves, which can leave a persisted split rendering TWO
     // full WorkspaceTerminals side by side — two tab strips, two composers.
-    // The workspace is ONE surface with tabs; a stale split of two terminal
-    // leaves self-heals to the first leaf. Splits involving canvas/preview
-    // stay — those are live, intentional layouts.
+    // Older unmarked terminal splits self-heal. A deliberate split made from
+    // the workspace Add menu carries createdFromSplit on its new leaf and
+    // must survive reload. Canvas/preview splits also remain intact.
     if (
       node.type === 'split'
       && node.children.length === 2
-      && node.children.every((child: { type?: string; content?: { kind?: string } }) => child?.type === 'leaf' && child.content?.kind === 'terminal')
+      && node.children.every((child: { type?: string; content?: { kind?: string; createdFromSplit?: boolean } }) => child?.type === 'leaf' && child.content?.kind === 'terminal')
+      && node.children.every((child: { content?: { createdFromSplit?: boolean } }) => child.content?.createdFromSplit !== true)
     ) {
       return node.children[0];
     }

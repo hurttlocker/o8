@@ -18,11 +18,12 @@ import { TrafficLightsOrSpacer } from './TrafficLights';
 import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
-import { HeaderPlayButton } from './HeaderPlayButton';
+import { WorkspaceAddTabButton } from './WorkspaceAddTabButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
+import { StatusBottomPanelControl } from '../DesktopStatusBar';
 import { SplitPaneCloseButton } from './SplitPaneCloseButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
@@ -50,6 +51,9 @@ export function WorkspaceHeaderStrip({
   onSidebarHoverEnter,
   onSidebarHoverLeave,
   onSplitWorkspacePanel,
+  onCloseWorkspacePanel,
+  bottomPanelVisible = false,
+  onToggleBottomPanel,
   rightPanelOpen = false,
   onToggleRightPanel,
   approvalCount = 0,
@@ -122,6 +126,8 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
+            {!isSplit && workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
+            {onCloseWorkspacePanel ? <SplitPaneCloseButton onClick={onCloseWorkspacePanel} paneLabel="active pane" /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
@@ -144,13 +150,19 @@ export function WorkspaceHeaderStrip({
             <div
               style={{
                 display: 'inline-flex',
-                // Rightmost → carry the rail nudge. Otherwise cancel the cluster
-                // gap so it sits tight against the toggle beside it.
-                marginRight: showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE,
+                marginRight: onToggleBottomPanel ? -HEADER_CLUSTER_GAP : (showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE),
               }}
             >
               <CanvasModeButton onClick={() => { window.location.assign('/preview/canvas-glass'); }} />
             </div>
+            {onToggleBottomPanel ? (
+              <div style={{ display: 'inline-flex', marginRight: showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE }}>
+                <StatusBottomPanelControl
+                  active={bottomPanelVisible}
+                  onToggle={onToggleBottomPanel}
+                />
+              </div>
+            ) : null}
             {showRightPanelFallbackToggle ? (
               <div style={{ display: 'inline-flex', marginRight: RAIL_COLUMN_ALIGN_NUDGE }}>
                 <RightPanelMorphButton
@@ -185,9 +197,6 @@ function SplitHeaderPillStrips({
     terminalModeActive?: boolean;
   }>;
 }) {
-  const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal') => {
-    window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind, workspaceId } }));
-  }, []);
   const dispatchClose = useCallback((workspaceId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
   }, []);
@@ -240,12 +249,7 @@ function SplitHeaderPillStrips({
                   yNudge={1.3}
                 />
               ) : null}
-              <HeaderPlayButton
-                onSpawnOrchestrator={() => dispatchSpawn(workspace.workspaceId, 'orchestrator')}
-                onSpawnChat={() => dispatchSpawn(workspace.workspaceId, 'chat')}
-                onSpawnTerminal={() => dispatchSpawn(workspace.workspaceId, 'terminal')}
-                ariaSuffix={paneLabel(index)}
-              />
+              <WorkspaceAddTabButton workspaceId={workspace.workspaceId} ariaSuffix={paneLabel(index)} />
               {canClose ? (
                 <SplitPaneCloseButton onClick={() => dispatchClose(workspace.workspaceId)} paneLabel={paneLabel(index)} />
               ) : null}

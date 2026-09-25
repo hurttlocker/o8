@@ -33,7 +33,7 @@ import { EntitlementProvider } from '@/lib/entitlement/context';
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { ConfirmToastHost, toast } from '@/components/shared/ConfirmToastHost';
-import type { BottomPanelSurfaceKind, ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
+import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { requestTerminalModeToggle } from '@/components/desktop/shell/TerminalModePill';
@@ -269,49 +269,6 @@ const O8_ACTIVE_TAB_PREF_VERSION = '2';
  *  (source, config, docs, svg) opens in the 'file' viewer, which itself routes
  *  .html/.htm to HtmlPreview. */
 const WORKSPACE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
-
-/** Floating terminal toggle sitting at the bottom-center of the
- *  workspace card. Moved here from the column header per operator
- *  request — "put the terminal button down under the input where main
- *  is like centered below the composer first that will free up the
- *  header". No background, just the icon; active state tints it. */
-function BottomCenterTerminalToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-label="Toggle terminal"
-      title="Toggle terminal"
-      style={{
-        position: 'absolute',
-        bottom: 8,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 28,
-        height: 28,
-        borderRadius: 8,
-        borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
-        color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
-        cursor: 'pointer',
-        padding: 0,
-        zIndex: 30,
-        transition: 'background 120ms ease, color 120ms ease',
-      }}
-    >
-      <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m4 17 6-6-6-6" />
-        <line x1="12" x2="20" y1="19" y2="19" />
-      </svg>
-    </button>
-  );
-}
 
 /**
  * SidebarHoverPreviewBody — content shown inside the drop-from-top overlay
@@ -711,6 +668,8 @@ function DashboardInner() {
     return () => safeCancelIdleCallback(handle);
   }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
+  const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
+  const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const designMode = useDesignMode();
   // The element grabbed by Design Mode (Cmd+Shift+D click) — shown in a
   // floating O8ElementPanel until dismissed or sent to the agent.
@@ -888,16 +847,21 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:workspace-active-label', handler as EventListener);
   }, []);
 
+  const simpleSideBySideWorkspaceSplit = tileLayout.root.type === 'split'
+    && tileLayout.root.direction === 'vertical'
+    && tileLayout.root.children.every((child) => child.type === 'leaf' && child.content.kind === 'terminal');
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
-    // Single workspace mounted → its label / pill strip drives the
-    // global header. Multiple mounted (splits) → fall back to empty
-    // (the split header path below renders both panes side by side).
+    // Stacked or nested splits keep the focused pane's tabs in the header.
     if (workspaceActiveMap.size === 1) {
       const [only] = workspaceActiveMap.values();
       return only;
     }
+    if (workspaceActiveMap.size > 1 && !simpleSideBySideWorkspaceSplit) {
+      const workspaces = Array.from(workspaceActiveMap.values());
+      return workspaces.find((workspace) => workspace.activeWorkspaceSurface) ?? workspaces[0];
+    }
     return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false, terminalModeActive: false, activeWorkspaceSurface: false };
-  }, [workspaceActiveMap]);
+  }, [simpleSideBySideWorkspaceSplit, workspaceActiveMap]);
   const toggleActiveTerminalMode = useCallback(() => {
     const workspaces = Array.from(workspaceActiveMap.values());
     const target = workspaces.find((workspace) => workspace.activeWorkspaceSurface)
@@ -913,11 +877,10 @@ function DashboardInner() {
     activeWorkspaceTabIdsRef.current = ids;
   }, [workspaceActiveMap]);
 
-  // Side-by-side header pills for splits — both workspaces' tabs land
-  // in the global header with a divider between them, mirroring the
-  // visual split below. Only populated when split (2+ workspaces).
+  // Side-by-side header pills mirror side-by-side workspace splits.
   const splitHeaderWorkspaces = useMemo(() => {
     if (workspaceActiveMap.size < 2) return null;
+    if (!simpleSideBySideWorkspaceSplit) return null;
     return Array.from(workspaceActiveMap.entries()).map(([workspaceId, payload]) => ({
       workspaceId,
       tabs: payload.tabs,
@@ -927,7 +890,7 @@ function DashboardInner() {
       contextRailVisible: payload.contextRailVisible,
       terminalModeActive: payload.terminalModeActive,
     }));
-  }, [workspaceActiveMap]);
+  }, [simpleSideBySideWorkspaceSplit, workspaceActiveMap]);
 
   // Workspace tab id → chat-history thread id map. OrchestratorTab
   // broadcasts 'o8:workspace-thread-id' whenever its loaded thread
@@ -1305,8 +1268,6 @@ function DashboardInner() {
     try { window.localStorage.setItem(O8_ACTIVE_TAB_STORAGE_KEY, o8ActiveTab); } catch { /* ignore */ }
   }, [o8ActiveTab]);
 
-  const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
-  const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
   const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
   // Persist the latest-dispatch marker so a reload during an active
@@ -3329,26 +3290,6 @@ function DashboardInner() {
     runCommand();
   }, [ensureTileKind, getPreferredContextualPanelHandle]);
 
-  // ── Open a non-terminal surface in the bottom panel ──
-  const handleOpenBottomPanelSurface = useCallback((surface: BottomPanelSurfaceKind) => {
-    const tileId = ensureTileKind('contextual-panel', {
-      direction: 'horizontal',
-      preferredKinds: ['terminal', 'contextual-panel', 'preview'],
-      ratio: 0.68,
-    });
-    const open = (attempt = 0) => {
-      const handle = getPreferredContextualPanelHandle(tileId);
-      if (handle) {
-        handle.openSurface(surface);
-        return;
-      }
-      if (attempt < 8) {
-        window.setTimeout(() => open(attempt + 1), 50);
-      }
-    };
-    open();
-  }, [ensureTileKind, getPreferredContextualPanelHandle]);
-
   // ── Watch a live o8-owned run session (`o8 run`) in the bottom panel ──
   const handleOpenAgentTerminal = useCallback((session: string, label?: string) => {
     if (!session) return;
@@ -5320,6 +5261,8 @@ function DashboardInner() {
           onSidebarHoverLeave={!showSidebarColumn && !compactShell ? scheduleSidebarPreviewClose : undefined}
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
+          bottomPanelVisible={bottomPanelVisible}
+          onToggleBottomPanel={toggleContextualPanelTile}
           projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
           projectContextRailVisible={workspaceHeaderActive.contextRailVisible}
           onToggleProjectContextRail={compactShell ? undefined : () => {
@@ -5335,6 +5278,9 @@ function DashboardInner() {
           headerActiveTabId={workspaceHeaderActive.tabId}
           finishedTabCount={workspaceHeaderActive.finishedTabCount}
           splitHeaderWorkspaces={splitHeaderWorkspaces}
+          onCloseWorkspacePanel={!simpleSideBySideWorkspaceSplit && workspaceActiveMap.size > 1 && workspaceHeaderActive.workspaceId ? () => {
+            window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId: workspaceHeaderActive.workspaceId } }));
+          } : undefined}
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />}
@@ -5797,11 +5743,7 @@ function DashboardInner() {
         parkedLanes={parkedLanes}
         onOpenReviewLane={handleOpenReviewLane}
         onOpenAwaitingMerge={handleOpenAwaitingMerge}
-        bottomPanelVisible={bottomPanelVisible}
-        onToggleBottomPanel={toggleContextualPanelTile}
-        onOpenBottomPanelSurface={handleOpenBottomPanelSurface}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
       />
       </div>{/* end center+right column */}
