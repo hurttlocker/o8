@@ -20,6 +20,7 @@ export async function registerDashboardCliBindings(
       runtime: runtime.id === 'codex' ? 'codex' : 'claude-code',
       cwd: session.cwd,
       source: 'dashboard-cli-detected',
+      pid: session.pid,
     });
   }
   return bindings;

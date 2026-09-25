@@ -29,7 +29,8 @@ import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { approvedFromCardFact } from '@/lib/mobile/inbox-referee-chips';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { findLaneBySession, getLane } from '@/lib/lane/registry';
+import { appendEvent, findLaneBySession, getLane } from '@/lib/lane/registry';
+import type { LaneCommandResult } from '@/lib/lane/types';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 import { discoverDashboardCliBindings } from '@/lib/runtime/dashboard-cli-bindings';
@@ -85,6 +86,7 @@ async function validateTerminalApprovalAdapter(
   approval: NonNullable<ReturnType<typeof getApproval>>,
   action: string,
   principal: 'operator' | 'device',
+  laneChoice?: 'continue_in_terminal' | 'start_fresh',
 ): Promise<{ ok: true; audit: ApprovalAuditEvent['terminalAdapter'] } | { ok: false; error: string; status: number }> {
   if (action !== 'approve' && action !== 'reject') {
     return { ok: false, error: 'The terminal approval adapter can only resolve a pending lane resume.', status: 400 };
@@ -106,7 +108,7 @@ async function validateTerminalApprovalAdapter(
   if (!lane || lane.sessionKey !== approval.sessionKey || lane.runtime !== approval.runtime) {
     return { ok: false, error: 'The lane session no longer matches this approval.', status: 409 };
   }
-  if (!['awaiting_input', 'awaiting_human', 'awaiting_orchestrator'].includes(lane.status)) {
+  if (!['awaiting_input', 'awaiting_human', 'awaiting_orchestrator', 'recovering'].includes(lane.status)) {
     return { ok: false, error: 'The lane is no longer awaiting this approval. Refresh the terminal status before approving.', status: 409 };
   }
   const terminal = getRuntimeTerminalSession(approval.sessionKey);
@@ -131,7 +133,7 @@ async function validateTerminalApprovalAdapter(
   } catch {
     return { ok: false, error: 'The live terminal binding could not be verified. Refresh the terminal status before approving.', status: 409 };
   }
-  if (action === 'approve') {
+  if (action === 'approve' && laneChoice !== 'continue_in_terminal') {
     return {
       ok: false,
       error: 'This CLI is still running in the original terminal. Continue it there; a lane resume would start another run.',
@@ -146,19 +148,21 @@ async function validateTerminalApprovalAdapter(
       sessionKey: adapter.sessionKey,
       tmuxSession: adapter.tmuxSession,
       actor: principal,
-      result: 'rejected',
+      result: action === 'approve' ? 'approved' : 'rejected',
     },
   };
 }
 
 function discoveredCliLaneResumeConflict(
   approval: NonNullable<ReturnType<typeof getApproval>>,
+  laneChoice?: 'continue_in_terminal' | 'start_fresh',
 ): string | null {
   const continuation = approval.continuation;
   if (continuation?.kind !== 'lane' || continuation.verb !== 'resume') return null;
   const lane = getLane(continuation.laneId);
   if (!lane || !lane.sessionKey) return null;
   if (!isDiscoveredCliSessionKey(lane.runtime, lane.sessionKey)) return null;
+  if (laneChoice) return null;
   return 'This lane is bound to an external CLI session. A lane resume could start another run. Inspect the original terminal before choosing an explicit fresh run.';
 }
 
@@ -342,12 +346,19 @@ export async function POST(request: NextRequest) {
     && (body.strategy === 'ours' || body.strategy === 'theirs' || body.strategy === 'manual')
     ? body.strategy
     : undefined;
+  const rawLaneChoice = body.laneChoice;
+  const laneChoice = rawLaneChoice === 'continue_in_terminal' || rawLaneChoice === 'start_fresh'
+    ? rawLaneChoice
+    : undefined;
+  if (rawLaneChoice !== undefined && !laneChoice) {
+    return NextResponse.json({ ok: false, error: 'Unknown lane continuation choice.' }, { status: 400 });
+  }
   const current = getApproval(id);
   if (!current) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
   }
   if (current.status !== 'pending') {
-    if (Object.prototype.hasOwnProperty.call(body, 'terminalAdapter')) {
+    if (Object.prototype.hasOwnProperty.call(body, 'terminalAdapter') || laneChoice) {
       return NextResponse.json({
         ok: false,
         error: 'The terminal approval is no longer pending. Refresh the terminal status.',
@@ -373,7 +384,7 @@ export async function POST(request: NextRequest) {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
     }
-    const adapterValidation = await validateTerminalApprovalAdapter(adapter, current, action, principal);
+    const adapterValidation = await validateTerminalApprovalAdapter(adapter, current, action, principal, laneChoice);
     if (!adapterValidation.ok) {
       return NextResponse.json({ ok: false, error: adapterValidation.error }, {
         status: adapterValidation.status,
@@ -383,8 +394,49 @@ export async function POST(request: NextRequest) {
     terminalAdapterAudit = adapterValidation.audit;
   }
 
+  if (action === 'approve' && current.continuation?.kind === 'lane' && current.continuation.verb === 'resume'
+    && isDiscoveredCliSessionKey(current.runtime, current.sessionKey)) {
+    if (!laneChoice) {
+      return NextResponse.json({ ok: false, error: 'Choose whether to continue in the original terminal or start another run.' }, { status: 409 });
+    }
+    if (body.approvalUpdatedAt !== current.updatedAt) {
+      return NextResponse.json({ ok: false, error: 'This approval changed. Refresh it before choosing a continuation.' }, { status: 409 });
+    }
+    const lane = getLane(current.continuation.laneId);
+    if (!lane || lane.sessionKey !== current.sessionKey || lane.runtime !== current.runtime) {
+      return NextResponse.json({ ok: false, error: 'The lane binding changed. Refresh before choosing a continuation.' }, { status: 409 });
+    }
+    if (laneChoice === 'start_fresh') {
+      const { validateFreshRunEligibility } = await import('@/lib/lane/commands');
+      const eligibility = await validateFreshRunEligibility(lane.id, lane.sessionKey);
+      if (!eligibility.ok) {
+        return NextResponse.json({ ok: false, error: eligibility.note }, { status: 409 });
+      }
+    } else if (!isDiscoveredCliSessionKey(lane.runtime, lane.sessionKey)) {
+      return NextResponse.json({ ok: false, error: 'This lane has no original external CLI to continue in.' }, { status: 409 });
+    }
+  } else if (laneChoice) {
+    return NextResponse.json({ ok: false, error: 'This approval does not accept a lane continuation choice.' }, { status: 400 });
+  }
+
+  if (action === 'approve' && laneChoice === 'continue_in_terminal' && !terminalAdapterAudit) {
+    const terminal = getRuntimeTerminalSession(current.sessionKey);
+    if (!terminal) {
+      return NextResponse.json({ ok: false, error: 'The original CLI terminal could not be verified.' }, { status: 409 });
+    }
+    const validation = await validateTerminalApprovalAdapter({
+      schema: TERMINAL_APPROVAL_ADAPTER_SCHEMA,
+      authority: 'lane-state',
+      sessionKey: current.sessionKey,
+      tmuxSession: terminal.sessionName,
+      approvalUpdatedAt: current.updatedAt,
+    }, current, action, principal, laneChoice);
+    if (!validation.ok) return NextResponse.json({ ok: false, error: validation.error }, { status: validation.status });
+    terminalAdapterAudit = validation.audit;
+  }
+
   if (action === 'approve') {
-    const conflict = discoveredCliLaneResumeConflict(current);
+    const conflict = discoveredCliLaneResumeConflict(current, laneChoice);
     if (conflict) {
       return NextResponse.json({ ok: false, error: conflict }, {
         status: 409,
@@ -555,20 +607,53 @@ export async function POST(request: NextRequest) {
       // Accept optional merge strategy from the operator's approval action
       const strategy = requestedStrategy ?? continuation.strategy;
       const { dispatch } = await import('@/lib/lane/commands');
-      const result = await dispatch({
-        verb: continuation.verb,
-        laneId: continuation.laneId,
-        commitMessage: continuation.commitMessage,
-        expectedHeadSha: spokenReviewEvidence?.reviewedHeadSha ?? continuation.expectedHeadSha,
-        expectedDiffFingerprint: spokenReviewEvidence?.reviewedDiffFingerprint,
-        expectedGovernanceFingerprint: spokenReviewEvidence?.reviewedGovernanceFingerprint,
-        spokenReviewApprovalId: spokenReviewEvidence?.approvalId,
-        spokenReviewClaimId: spokenReviewEvidence ? resolutionClaim.claimId : undefined,
-        spokenReviewUpdatedAt: spokenReviewEvidence ? current.updatedAt : undefined,
-        spokenReviewLaneStatus: spokenReviewEvidence ? reviewedLaneStatus : undefined,
-        strategy,
-        actor: 'user',
-      } as Parameters<typeof dispatch>[0]);
+      const result: LaneCommandResult = continuation.verb === 'resume' && laneChoice === 'continue_in_terminal'
+        ? (() => {
+          const latestLane = getLane(continuation.laneId);
+          const latestTerminal = getRuntimeTerminalSession(approval.sessionKey);
+          if (!latestLane || latestLane.sessionKey !== approval.sessionKey || latestLane.runtime !== approval.runtime
+            || !['awaiting_input', 'awaiting_human', 'awaiting_orchestrator', 'recovering'].includes(latestLane.status)
+            || !latestTerminal || latestTerminal.sessionName !== terminalAdapterAudit?.tmuxSession) {
+            return { ok: false, laneId: continuation.laneId, reason: 'terminal_binding_changed', note: 'The lane or terminal changed before your choice was recorded. Inspect the current session.' };
+          }
+          appendEvent(continuation.laneId, 'terminal_continuation_selected', 'user', {
+            approvalId: approval.id,
+            sessionKey: approval.sessionKey,
+            note: 'Operator chose the original terminal; no turn was sent and no run was started.',
+          });
+          return { ok: true, laneId: continuation.laneId, note: 'Continue in the original CLI terminal. No turn was sent and no new run was started.' };
+        })()
+        : continuation.verb === 'resume' && laneChoice === 'start_fresh'
+          ? await dispatch({ verb: 'start_fresh', laneId: continuation.laneId, expectedSessionKey: approval.sessionKey, actor: 'user' })
+          : await dispatch({
+            verb: continuation.verb,
+            laneId: continuation.laneId,
+            commitMessage: continuation.commitMessage,
+            expectedHeadSha: spokenReviewEvidence?.reviewedHeadSha ?? continuation.expectedHeadSha,
+            expectedDiffFingerprint: spokenReviewEvidence?.reviewedDiffFingerprint,
+            expectedGovernanceFingerprint: spokenReviewEvidence?.reviewedGovernanceFingerprint,
+            spokenReviewApprovalId: spokenReviewEvidence?.approvalId,
+            spokenReviewClaimId: spokenReviewEvidence ? resolutionClaim.claimId : undefined,
+            spokenReviewUpdatedAt: spokenReviewEvidence ? current.updatedAt : undefined,
+            spokenReviewLaneStatus: spokenReviewEvidence ? reviewedLaneStatus : undefined,
+            strategy,
+            actor: 'user',
+          } as Parameters<typeof dispatch>[0]);
+      const preActionRefusal = !result.ok && laneChoice && (
+        result.reason === 'terminal_binding_changed'
+        || (laneChoice === 'start_fresh' && [
+          'lane_missing', 'fresh_run_stale', 'external_cli_required', 'original_stop_unverified',
+          'original_session_live', 'session_state_unknown', 'runtime_unavailable', 'fresh_run_lease_unavailable',
+        ].includes(result.reason ?? ''))
+      );
+      if (preActionRefusal) {
+        const reopened = reopenApprovalAfterEvidenceDrift(approval.id, resolutionClaim.claimId!, result.note);
+        invalidateApprovalCaches();
+        return NextResponse.json({ ok: false, error: result.note, approval: reopened }, {
+          status: 409,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        });
+      }
       const spokenReviewDrift = result.reason === 'diff_changed_since_spoken_review'
         || result.reason === 'governance_changed_since_spoken_review'
         || result.reason === 'head_moved_since_review'

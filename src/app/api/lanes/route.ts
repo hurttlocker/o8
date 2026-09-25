@@ -153,6 +153,12 @@ export async function POST(req: NextRequest) {
       { status: 403 },
     );
   }
+  if (body.verb === 'start_fresh' && principal.role !== 'operator') {
+    return NextResponse.json(
+      { ok: false, error: { code: 'operator_required', message: 'Starting a fresh lane run requires the operator.' } },
+      { status: 403 },
+    );
+  }
   const command: LaneCommand = {
     ...body,
     actor: principal.role === 'operator' ? (body.actor ?? 'user') : 'orchestrator',

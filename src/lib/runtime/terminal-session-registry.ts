@@ -8,6 +8,8 @@ interface TerminalSessionRegistryEntry {
   runtime: 'claude-code' | 'codex';
   cwd?: string;
   source?: 'dashboard-cli-detected';
+  /** PID observed while this exact CLI was bound to the dashboard pane. */
+  pid?: number;
   updatedAt: string;
 }
 
