@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 // Realtime publisher fans out over WS + touches the network; stub it so the
@@ -82,7 +82,11 @@ const broadcastAutomationSay = await import('@/app/api/broadcast/automation-say/
 const broadcastWhy = await import('@/app/api/broadcast/why/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
 const broadcastTokens = await import('@/app/api/broadcast/tokens/route');
-const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
+const { createTestApproval, getApproval, createApproval, listApprovalEvents } = await import('@/lib/approvals/store');
+const { createLane, updateLane } = await import('@/lib/lane/registry');
+const { registerRuntimeTerminalSession } = await import('@/lib/runtime/terminal-session-registry');
+const runtimeRegistry = await import('@/lib/runtimes/registry');
+const dashboardBindings = await import('@/lib/runtime/dashboard-cli-bindings');
 const { panelGateMiddleware } = await import('@/middleware');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -465,6 +469,254 @@ describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-ap
   it('unauthenticated REMOTE → denied at the middleware entry point (401)', () => {
     // /api/panel/approvals has no in-handler auth; the middleware IS its gate.
     expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+  });
+});
+
+describe('principal-authz — governed terminal approval adapter', () => {
+  const url = 'http://localhost:3001/api/panel/approvals';
+
+  afterEach(() => vi.restoreAllMocks());
+
+  function mockLiveTerminal(sessionKey: string, tmuxSession: string) {
+    const runtime = runtimeRegistry.getRuntime('codex');
+    expect(runtime).toBeDefined();
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey,
+      runtimeId: 'codex',
+      status: 'running',
+      ownership: 'discovered',
+      pid: 42,
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings')
+      .mockResolvedValue(new Map([[sessionKey, tmuxSession]]));
+  }
+
+  function terminalAdapter(approval: { sessionKey: string; updatedAt: number }, tmuxSession: string) {
+    return {
+      schema: 'o8/terminal-approval/v1',
+      authority: 'lane-state',
+      sessionKey: approval.sessionKey,
+      tmuxSession,
+      approvalUpdatedAt: approval.updatedAt,
+    };
+  }
+
+  function pendingTerminalResume(
+    label: string,
+    status: 'awaiting_input' | 'awaiting_human' | 'awaiting_orchestrator' = 'awaiting_input',
+  ) {
+    const sessionKey = `codex:terminal-approval-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const lane = createLane({
+      label,
+      repoPath: '/tmp/terminal-approval-authz',
+      branch: `agent/${sessionKey.slice(-12)}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      sessionKey,
+    });
+    updateLane(lane.id, { status }, 'orchestrator', { reason: 'approval required' });
+    const approval = createApproval({
+      projectId: null,
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'Terminal approval fixture',
+      sessionKey,
+      title: 'Resume the lane',
+      description: 'A verified terminal action may resume this lane.',
+      summary: 'Resume lane from terminal status.',
+      risk: 'medium',
+      continuation: { kind: 'lane', laneId: lane.id, verb: 'resume' },
+    });
+    return { lane, approval, sessionKey };
+  }
+
+  it('fails closed on a stale or mismatched terminal binding before it claims the persisted approval', async () => {
+    const { approval, sessionKey } = pendingTerminalResume('terminal adapter mismatch');
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex',
+      sessionName: 'o8-terminal-authz-real',
+      cwd: '/tmp/terminal-approval-authz',
+      source: 'dashboard-cli-detected',
+    });
+
+    const malformed = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'approve',
+        id: approval.id,
+        terminalAdapter: { ...terminalAdapter(approval, 'o8-terminal-authz-real'), extra: 'rejected' },
+      },
+    }));
+    expect(malformed.status).toBe(400);
+    expect(getApproval(approval.id)?.status).toBe('pending');
+
+    const stale = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'approve',
+        id: approval.id,
+        terminalAdapter: {
+          ...terminalAdapter(approval, 'o8-terminal-authz-real'),
+          approvalUpdatedAt: approval.updatedAt - 1,
+        },
+      },
+    }));
+    expect(stale.status).toBe(409);
+    expect(getApproval(approval.id)?.status).toBe('pending');
+
+    const mismatch = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'approve',
+        id: approval.id,
+        terminalAdapter: terminalAdapter(approval, 'o8-terminal-authz-other'),
+      },
+    }));
+    expect(mismatch.status).toBe(409);
+    expect(getApproval(approval.id)?.status).toBe('pending');
+
+    const sessionMismatch = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'approve',
+        id: approval.id,
+        terminalAdapter: { ...terminalAdapter(approval, 'o8-terminal-authz-real'), sessionKey: 'codex:other-session' },
+      },
+    }));
+    expect(sessionMismatch.status).toBe(409);
+    expect(getApproval(approval.id)?.status).toBe('pending');
+  });
+
+  it('refuses a saved terminal row when its CLI process is no longer discoverable', async () => {
+    const { approval, sessionKey } = pendingTerminalResume('terminal adapter expired process');
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex',
+      sessionName: 'o8-terminal-authz-expired',
+      cwd: '/tmp/terminal-approval-authz',
+      source: 'dashboard-cli-detected',
+    });
+    const runtime = runtimeRegistry.getRuntime('codex');
+    expect(runtime).toBeDefined();
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([]);
+    const paneProbe = vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings');
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'approve',
+        id: approval.id,
+        terminalAdapter: terminalAdapter(approval, 'o8-terminal-authz-expired'),
+      },
+    }));
+    expect(response.status).toBe(409);
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(paneProbe).not.toHaveBeenCalled();
+  });
+
+  it('keeps a worker from resolving through the terminal adapter', async () => {
+    const { approval, sessionKey } = pendingTerminalResume('terminal adapter worker refusal');
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex',
+      sessionName: 'o8-terminal-authz-worker',
+      cwd: '/tmp/terminal-approval-authz',
+      source: 'dashboard-cli-detected',
+    });
+
+    const response = await approvals.POST(req(url, {
+      principal: 'worker',
+      body: { action: 'approve', id: approval.id, terminalAdapter: terminalAdapter(approval, 'o8-terminal-authz-worker') },
+    }));
+    expect(response.status).toBe(403);
+    expect(getApproval(approval.id)?.status).toBe('pending');
+  });
+
+  it('records terminal adapter provenance atomically with the operator approval', async () => {
+    const { approval, sessionKey } = pendingTerminalResume('terminal adapter accepted provenance');
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex',
+      sessionName: 'o8-terminal-authz-accepted',
+      cwd: '/tmp/terminal-approval-authz',
+      source: 'dashboard-cli-detected',
+    });
+    mockLiveTerminal(sessionKey, 'o8-terminal-authz-accepted');
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'approve',
+        id: approval.id,
+        terminalAdapter: terminalAdapter(approval, 'o8-terminal-authz-accepted'),
+      },
+    }));
+    expect(response.status).toBe(200);
+    const persisted = getApproval(approval.id);
+    expect(persisted?.status).toBe('approved');
+    const approvedEvent = persisted?.audit.find((event) => event.type === 'approved');
+    expect(approvedEvent).toMatchObject({
+      type: 'approved',
+      actor: 'desktop',
+      terminalAdapter: {
+        schema: 'o8/terminal-approval/v1',
+        authority: 'lane-state',
+        sessionKey,
+        tmuxSession: 'o8-terminal-authz-accepted',
+        actor: 'operator',
+        result: 'approved',
+      },
+    });
+    expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toMatchObject({
+      type: 'approved',
+      actor: 'desktop',
+      terminalAdapter: approvedEvent?.terminalAdapter,
+    });
+
+    const staleReplay = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'approve',
+        id: approval.id,
+        terminalAdapter: terminalAdapter(approval, 'o8-terminal-authz-accepted'),
+      },
+    }));
+    expect(staleReplay.status).toBe(409);
+    expect(getApproval(approval.id)?.audit.filter((event) => event.type === 'approved')).toHaveLength(1);
+  }, 20_000);
+
+  it('records a terminal rejection from an awaiting-human lane without dispatching the resume', async () => {
+    const { approval, sessionKey } = pendingTerminalResume(
+      'terminal adapter rejected provenance',
+      'awaiting_human',
+    );
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex',
+      sessionName: 'o8-terminal-authz-rejected',
+      cwd: '/tmp/terminal-approval-authz',
+      source: 'dashboard-cli-detected',
+    });
+    mockLiveTerminal(sessionKey, 'o8-terminal-authz-rejected');
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: {
+        action: 'reject',
+        id: approval.id,
+        terminalAdapter: terminalAdapter(approval, 'o8-terminal-authz-rejected'),
+      },
+    }));
+    expect(response.status).toBe(200);
+    const persisted = getApproval(approval.id);
+    expect(persisted?.status).toBe('rejected');
+    expect(persisted?.audit.find((event) => event.type === 'rejected')).toMatchObject({
+      type: 'rejected',
+      actor: 'desktop',
+      terminalAdapter: {
+        authority: 'lane-state',
+        sessionKey,
+        tmuxSession: 'o8-terminal-authz-rejected',
+        actor: 'operator',
+        result: 'rejected',
+      },
+    });
   });
 });
 

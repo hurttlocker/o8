@@ -8,6 +8,7 @@ export interface WorkspaceAttachedTerminalSession {
   label?: string;
   repo?: RegisteredRepo;
   statusEvidence?: TerminalStatusEvidence;
+  terminalApprovalEligible?: boolean;
 }
 
 export interface TerminalModeSnapshot {

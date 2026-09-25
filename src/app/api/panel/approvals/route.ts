@@ -30,6 +30,10 @@ import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { approvedFromCardFact } from '@/lib/mobile/inbox-referee-chips';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { findLaneBySession, getLane } from '@/lib/lane/registry';
+import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { discoverDashboardCliBindings } from '@/lib/runtime/dashboard-cli-bindings';
+import { TERMINAL_APPROVAL_ADAPTER_SCHEMA } from '@/lib/terminal-status/action-adapter';
+import type { ApprovalAuditEvent } from '@/lib/approvals/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,6 +48,99 @@ function mergeDecisionNotes(...notes: Array<string | null | undefined>) {
     .map((note) => note?.trim())
     .filter((note): note is string => Boolean(note))
     .join(' ');
+}
+
+type TerminalApprovalAdapterRequest = {
+  schema: typeof TERMINAL_APPROVAL_ADAPTER_SCHEMA;
+  authority: 'lane-state';
+  sessionKey: string;
+  tmuxSession: string;
+  approvalUpdatedAt: number;
+};
+
+function parseTerminalApprovalAdapter(value: unknown): TerminalApprovalAdapterRequest | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate).sort();
+  const expectedKeys = ['approvalUpdatedAt', 'authority', 'schema', 'sessionKey', 'tmuxSession'];
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) return null;
+  if (candidate.schema !== TERMINAL_APPROVAL_ADAPTER_SCHEMA || candidate.authority !== 'lane-state') return null;
+  if (typeof candidate.sessionKey !== 'string' || !candidate.sessionKey.trim()) return null;
+  if (typeof candidate.tmuxSession !== 'string' || !candidate.tmuxSession.trim()) return null;
+  if (typeof candidate.approvalUpdatedAt !== 'number'
+    || !Number.isSafeInteger(candidate.approvalUpdatedAt)
+    || candidate.approvalUpdatedAt < 0) return null;
+  return {
+    schema: candidate.schema,
+    authority: candidate.authority,
+    sessionKey: candidate.sessionKey,
+    tmuxSession: candidate.tmuxSession,
+    approvalUpdatedAt: candidate.approvalUpdatedAt,
+  };
+}
+
+async function validateTerminalApprovalAdapter(
+  adapter: TerminalApprovalAdapterRequest,
+  approval: NonNullable<ReturnType<typeof getApproval>>,
+  action: string,
+  principal: 'operator' | 'device',
+): Promise<{ ok: true; audit: ApprovalAuditEvent['terminalAdapter'] } | { ok: false; error: string; status: number }> {
+  if (action !== 'approve' && action !== 'reject') {
+    return { ok: false, error: 'The terminal approval adapter can only resolve a pending lane resume.', status: 400 };
+  }
+  if (adapter.approvalUpdatedAt !== approval.updatedAt) {
+    return { ok: false, error: 'The terminal approval view is stale. Refresh the terminal status before approving.', status: 409 };
+  }
+  if (adapter.sessionKey !== approval.sessionKey) {
+    return { ok: false, error: 'The terminal approval session does not match this approval.', status: 409 };
+  }
+  if (approval.runtime !== 'codex' && approval.runtime !== 'claude-code') {
+    return { ok: false, error: 'The terminal approval adapter only supports codex and claude-code lanes.', status: 409 };
+  }
+  const continuation = approval.continuation;
+  if (continuation?.kind !== 'lane' || continuation.verb !== 'resume') {
+    return { ok: false, error: 'The terminal approval adapter only supports a lane resume continuation.', status: 409 };
+  }
+  const lane = getLane(continuation.laneId);
+  if (!lane || lane.sessionKey !== approval.sessionKey || lane.runtime !== approval.runtime) {
+    return { ok: false, error: 'The lane session no longer matches this approval.', status: 409 };
+  }
+  if (!['awaiting_input', 'awaiting_human', 'awaiting_orchestrator'].includes(lane.status)) {
+    return { ok: false, error: 'The lane is no longer awaiting this approval. Refresh the terminal status before approving.', status: 409 };
+  }
+  const terminal = getRuntimeTerminalSession(approval.sessionKey);
+  if (!terminal || terminal.source !== 'dashboard-cli-detected'
+    || terminal.runtime !== approval.runtime || terminal.sessionName !== adapter.tmuxSession) {
+    return { ok: false, error: 'The terminal binding no longer matches this approval. Refresh the terminal status before approving.', status: 409 };
+  }
+  try {
+    const runtime = getRuntime(approval.runtime);
+    const sessions = runtime ? await runtime.discoverSessions({ fresh: true }) : [];
+    const currentSession = sessions.find((session) => session.sessionKey === approval.sessionKey
+      && session.runtimeId === approval.runtime
+      && session.ownership === 'discovered'
+      && session.status === 'running');
+    if (!currentSession) {
+      return { ok: false, error: 'The CLI session is no longer live. Refresh the terminal status before approving.', status: 409 };
+    }
+    const liveBindings = await discoverDashboardCliBindings([currentSession]);
+    if (liveBindings.get(approval.sessionKey) !== adapter.tmuxSession) {
+      return { ok: false, error: 'The CLI is no longer in this terminal pane. Refresh the terminal status before approving.', status: 409 };
+    }
+  } catch {
+    return { ok: false, error: 'The live terminal binding could not be verified. Refresh the terminal status before approving.', status: 409 };
+  }
+  return {
+    ok: true,
+    audit: {
+      schema: adapter.schema,
+      authority: adapter.authority,
+      sessionKey: adapter.sessionKey,
+      tmuxSession: adapter.tmuxSession,
+      actor: principal,
+      result: action === 'approve' ? 'approved' : 'rejected',
+    },
+  };
 }
 
 /**
@@ -231,9 +328,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
   }
   if (current.status !== 'pending') {
+    if (Object.prototype.hasOwnProperty.call(body, 'terminalAdapter')) {
+      return NextResponse.json({
+        ok: false,
+        error: 'The terminal approval is no longer pending. Refresh the terminal status.',
+      }, {
+        status: 409,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
     return NextResponse.json({ ok: true, approval: current, resolved: action, note: 'Approval was already resolved.' }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
+  }
+
+  let terminalAdapterAudit: ApprovalAuditEvent['terminalAdapter'] | undefined;
+  if (Object.prototype.hasOwnProperty.call(body, 'terminalAdapter')) {
+    const adapter = parseTerminalApprovalAdapter(body.terminalAdapter);
+    if (!adapter) {
+      return NextResponse.json({
+        ok: false,
+        error: 'The terminal approval adapter payload is malformed or unsupported.',
+      }, {
+        status: 400,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+    const adapterValidation = await validateTerminalApprovalAdapter(adapter, current, action, principal);
+    if (!adapterValidation.ok) {
+      return NextResponse.json({ ok: false, error: adapterValidation.error }, {
+        status: adapterValidation.status,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+    terminalAdapterAudit = adapterValidation.audit;
   }
 
   try {
@@ -284,6 +412,7 @@ export async function POST(request: NextRequest) {
       rejectReason,
       current.updatedAt,
       action === 'approve' ? approvedFromCardFact(body.via, current) : undefined,
+      terminalAdapterAudit,
     );
     const approval = resolutionClaim.approval;
     if (!approval) {
