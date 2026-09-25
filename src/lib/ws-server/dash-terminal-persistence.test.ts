@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import {
   createDashTmuxSessionSync,
   dashSessionNameForOwnerKey,
   dashTmuxDataProfileTag,
+  type DashTmuxSessionDependencies,
 } from './dash-terminal-persistence';
 
 function input(enabled = true) {
@@ -173,7 +173,7 @@ describe('dashboard tmux data-profile ownership', () => {
     });
     const dependencies = {
       resolveTmuxBinary: () => '/usr/bin/tmux',
-      execFileSync: exec as unknown as typeof execFileSync,
+      execFileSync: exec as unknown as DashTmuxSessionDependencies['execFileSync'],
     };
 
     expect(claimDashTmuxSessionForCurrentProfile('legacy', false, dependencies)).toBe(false);
