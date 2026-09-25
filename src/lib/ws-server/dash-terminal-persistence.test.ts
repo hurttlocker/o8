@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -170,7 +171,10 @@ describe('dashboard tmux data-profile ownership', () => {
       if (sessionName === 'foreign') return Buffer.from(foreign);
       return Buffer.from('');
     });
-    const dependencies = { resolveTmuxBinary: () => '/usr/bin/tmux', execFileSync: exec };
+    const dependencies = {
+      resolveTmuxBinary: () => '/usr/bin/tmux',
+      execFileSync: exec as unknown as typeof execFileSync,
+    };
 
     expect(claimDashTmuxSessionForCurrentProfile('legacy', false, dependencies)).toBe(false);
     expect(claimDashTmuxSessionForCurrentProfile('legacy', true, dependencies)).toBe(true);
