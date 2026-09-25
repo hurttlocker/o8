@@ -7,6 +7,7 @@ import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
 import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migration';
+import { parseMessageRefs } from './message-refs';
 import type { AgentConversationReceipt, AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
 export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
@@ -261,18 +262,6 @@ function mapPresence(row: PresenceRow): AgentPresence {
   };
 }
 
-function parseRefs(value: string): AgentMessageRefs {
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    return {
-      laneId: typeof parsed.laneId === 'string' ? parsed.laneId : null,
-      packetId: typeof parsed.packetId === 'string' ? parsed.packetId : null,
-    };
-  } catch {
-    return { laneId: null, packetId: null };
-  }
-}
-
 function mapConversation(row: ConversationRow): AgentConversation {
   return {
     id: row.id,
@@ -333,7 +322,7 @@ function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
     to: row.to_agent,
     repo: row.repo_path,
     text: row.text,
-    refs: parseRefs(row.refs_json),
+    refs: parseMessageRefs(row.refs_json),
     conversation: receipt,
     delivery: row.delivery_status,
     deliveryNote: row.delivery_note,

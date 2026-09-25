@@ -567,6 +567,68 @@ describe('agent message bus real path', () => {
     });
   });
 
+  it('shows stale repository identity only to the operator and marks it offline', async () => {
+    const agentId = `history-agent-${Date.now()}`;
+    expect((await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: {
+        agentId, name: 'HistoryAgent', repo: repoPath, worktreePath: repoPath,
+        runtime: 'codex', sessionKey: `codex:${agentId}`,
+      },
+    }))).status).toBe(201);
+    getSqlite().prepare('UPDATE agent_presence SET last_seen = ? WHERE agent_id = ?')
+      .run('2000-01-01T00:00:00.000Z', agentId);
+
+    const normal = await presenceRoute.GET(request(
+      `http://localhost:3001/api/agents/presence?repo=${encodeURIComponent(repoPath)}`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(normal.json()).resolves.toMatchObject({
+      agents: expect.not.arrayContaining([expect.objectContaining({ agentId })]),
+    });
+    const history = await presenceRoute.GET(request(
+      `http://localhost:3001/api/agents/presence?repo=${encodeURIComponent(repoPath)}&includeStale=true`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(history.json()).resolves.toMatchObject({
+      agents: expect.arrayContaining([expect.objectContaining({ agentId, runtime: 'codex', live: false })]),
+    });
+    const denied = await presenceRoute.GET(request(
+      `http://localhost:3001/api/agents/presence?repo=${encodeURIComponent(repoPath)}&includeStale=true`,
+      { token: workerToken },
+    ));
+    expect(denied.status).toBe(403);
+    await expect(denied.json()).resolves.toMatchObject({ error: { code: 'agent_presence_history_forbidden' } });
+  });
+
+  it('keeps message identities from send time after a stale codename takeover', async () => {
+    const repo = `/tmp/o8-agent-identity-${Date.now()}`;
+    const join = (sessionKey: string) => presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+      token: OPERATOR_TOKEN, method: 'POST',
+      body: { agentId: 'identity-agent', name: 'Cedar', repo, worktreePath: repo, runtime: 'codex', sessionKey },
+    }));
+    expect((await join('codex:original-session')).status).toBe(201);
+    const sent = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN, method: 'POST', body: { repo, to: 'Cedar', text: 'Check this record.' },
+    }));
+    expect(sent.status).toBe(201);
+    await expect(sent.json()).resolves.toMatchObject({ message: {
+      refs: { identities: { from: null, to: { runtime: 'codex', sessionKey: 'codex:original-session' } } },
+    } });
+    getSqlite().prepare('UPDATE agent_presence SET last_seen = ? WHERE agent_id = ?')
+      .run('2000-01-01T00:00:00.000Z', 'identity-agent');
+    expect((await join('codex:replacement-session')).status).toBe(200);
+    const history = await messageRoute.GET(request(
+      `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repo)}`,
+      { token: OPERATOR_TOKEN },
+    ));
+    const historyBody = await history.json() as { messages: Array<{ refs: { identities?: unknown } }> };
+    expect(historyBody.messages[0].refs.identities).toEqual({
+      from: null, to: { runtime: 'codex', sessionKey: 'codex:original-session' },
+    });
+  });
+
   it('correlates two agents through the real routes, rejects stale and foreign replies, and enforces the budget after restart', async () => {
     const repo = `/tmp/o8-agent-conversation-${Date.now()}`;
     for (const [agentId, name] of [['conversation-a', 'Aster'], ['conversation-b', 'Birch'], ['conversation-c', 'Cedar']]) {
