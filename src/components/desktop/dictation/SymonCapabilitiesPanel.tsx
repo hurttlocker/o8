@@ -18,6 +18,7 @@ interface SymonCapabilitiesPanelProps {
   machineDisplayName: string;
   onBack: () => void;
   onStarted: () => void;
+  scrollWithinCatalog?: boolean;
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
@@ -166,6 +167,7 @@ export function SymonCapabilitiesPanel({
   machineDisplayName,
   onBack,
   onStarted,
+  scrollWithinCatalog = true,
 }: SymonCapabilitiesPanelProps) {
   const [capabilities, setCapabilities] = useState<SymonCapability[] | null>(null);
   const [error, setError] = useState('');
@@ -261,7 +263,10 @@ export function SymonCapabilitiesPanel({
           Reading this Mac…
         </div>
       ) : (
-        <div style={{ maxHeight: 410, overflowY: 'auto', paddingRight: 4 }}>
+        <div
+          data-o8-symon-scroll
+          style={{ maxHeight: scrollWithinCatalog ? 410 : undefined, overflowY: scrollWithinCatalog ? 'auto' : undefined, scrollbarWidth: scrollWithinCatalog ? 'none' : undefined, paddingRight: 4 }}
+        >
           {grouped.map(([category, items]) => (
             <div key={category}>
               <div

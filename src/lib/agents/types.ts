@@ -13,6 +13,13 @@ export interface AgentPresence {
 export interface AgentMessageRefs {
   laneId: string | null;
   packetId: string | null;
+  /** Immutable identities recorded when the message was accepted. Older messages omit this. */
+  identities?: { from: AgentMessageIdentity | null; to: AgentMessageIdentity | null };
+}
+
+export interface AgentMessageIdentity {
+  runtime: string;
+  sessionKey: string | null;
 }
 
 export interface AgentConversationReceipt {

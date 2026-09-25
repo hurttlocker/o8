@@ -287,6 +287,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),
   thinkingEffort: enumField('models', 'thinking_effort', 'a valid thinking effort', isThinkingEffort),
   promptCachingEnabled: booleanField('models', 'prompt_caching_enabled'),
+  autoTitleInferenceEnabled: booleanField('chat', 'auto_title_inference_enabled'),
   mergeTestReplayEnabled: booleanField('review', 'merge_test_replay_enabled'),
   requireApproval: enumField('review', 'require_approval', 'one of "high-risk", "surface", "always", or "never"', (value): value is OperatorDefaults['requireApproval'] => value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'),
   orchestratorModel: orchestratorModelField('models', 'orchestrator_model'),
