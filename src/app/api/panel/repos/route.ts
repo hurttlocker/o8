@@ -378,7 +378,11 @@ export async function POST(request: Request) {
         if (isOrchestratorHomePath(body.localPath)) {
           return NextResponse.json({ error: 'Home mode is not a registered repository.' }, { status: 400 });
         }
-        const repo = await appendExistence(await enrichRepoReadiness(await addRepo(body.localPath)));
+        // Registration is durable once addRepo resolves. A cold readiness probe
+        // can spawn several Git checks, so leave it to the explicit selected-repo
+        // GET rather than holding this POST (and the subsequent project link).
+        const registered = await addRepo(body.localPath);
+        const repo = { ...enrichRepoReadinessFromCache(registered), exists: true };
         // Auto-scan skeleton for newly added repo + start change polling
         triggerScan(repo.localPath);
         startChangePolling(repo.localPath);
