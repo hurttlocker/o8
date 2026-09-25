@@ -367,6 +367,17 @@ describe('repository dispatch admission stays consistent across registration and
         localPath: canonicalRepoPath,
         exists: true,
         isGitRepo: false,
+      });
+
+      // Add responds after persistence; the selected-repo GET supplies the
+      // slower readiness verdict used for dispatch admission.
+      const readinessResponse = await reposRoute.GET(new Request(
+        `http://localhost/api/panel/repos?readiness=${encodeURIComponent(addedRepoId!)}`,
+      ));
+      expect(readinessResponse.status).toBe(200);
+      const readinessData = await readinessResponse.json();
+      const selected = readinessData.repos.find((repo: { id: string }) => repo.id === addedRepoId);
+      expect(selected).toMatchObject({
         readiness: {
           state: 'blocked',
           dispatchable: false,
@@ -396,9 +407,9 @@ describe('repository dispatch admission stays consistent across registration and
         ok: false,
         error: {
           code: 'repo_dispatch_blocked',
-          failedCheck: added.repo.readiness.failedCheck,
-          correctiveAction: added.repo.readiness.correctiveAction,
-          nextAction: added.repo.readiness.correctiveAction,
+          failedCheck: selected.readiness.failedCheck,
+          correctiveAction: selected.readiness.correctiveAction,
+          nextAction: selected.readiness.correctiveAction,
         },
       });
     } finally {

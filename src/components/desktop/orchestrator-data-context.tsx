@@ -58,7 +58,7 @@ export interface OrchestratorDataValue {
    * Recent Work click-routing so a NEEDS YOU click lands the operator on
    * the workspace tab AND auto-pops the diff view for that worktree.
    */
-  onOpenO8Panel?: (options: { repoPath?: string | null; tab?: 'workspace' | 'prs' | 'inbox' | 'activity' | 'spec' | 'browser' | 'review' | 'compare'; reviewLaneId?: string | null }) => void;
+  onOpenO8Panel?: (options: { repoPath?: string | null; tab?: 'workspace' | 'prs' | 'inbox' | 'activity' | 'spec' | 'browser' | 'review' | 'compare' | 'handoffs'; reviewLaneId?: string | null }) => void;
   /** Toggle a lightweight workspace preview without opening the wide panel. */
   onToggleWorkspacePip?: (surface: 'browser' | 'spec', repoPath?: string | null) => void;
   /**
