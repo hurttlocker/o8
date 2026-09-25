@@ -1765,6 +1765,10 @@ button.workflow-file-item.workflow-file-item-active {
   display: none;
 }
 
+[data-o8-symon-scroll]::-webkit-scrollbar {
+  display: none;
+}
+
 .thoughts-scroll {
   scrollbar-width: none;
 }

@@ -8,7 +8,7 @@ import { ChromeButton } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
 import { WhatsNewCard } from './WhatsNewCard';
-import { SymonMachineControl, SymonOrbStatusLine } from '../dictation/SymonMachineControl';
+import { SymonMachineControl, SymonOrbStatusLine, useSymonOrbMinimized } from '../dictation/SymonMachineControl';
 
 interface AccountBlockProps {
   onOpenSettings?: () => void;
@@ -33,6 +33,8 @@ function symonVoiceActive() {
 
 function SymonVoiceEntry() {
   const active = useSyncExternalStore(subscribeToSymonVoice, symonVoiceActive, () => false);
+  const minimized = useSymonOrbMinimized();
+  if (minimized) return null;
   return (
     <button
       type="button"
@@ -43,16 +45,16 @@ function SymonVoiceEntry() {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 5,
-        height: 30,
+        justifyContent: 'center',
+        width: 26,
+        height: 26,
         paddingTop: 0,
-        paddingRight: 5,
+        paddingRight: 0,
         paddingBottom: 0,
-        paddingLeft: 5,
+        paddingLeft: 0,
         borderWidth: 0,
         borderRadius: 7,
         background: active ? 'var(--t-hover)' : 'transparent',
-        color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
         cursor: 'pointer',
         fontFamily: 'var(--font-sans-system)',
         fontSize: 11.5,
@@ -60,10 +62,16 @@ function SymonVoiceEntry() {
         flexShrink: 0,
       }}
     >
-      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
-        <path d="M2 8v4M6 4v12M10 7v6M14 2v16M18 8v4" />
-      </svg>
-      Voice
+      <span
+        aria-hidden="true"
+        style={{
+          width: 17,
+          height: 17,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle at 64% 28%, color-mix(in srgb, var(--t-text) 90%, transparent), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
+          boxShadow: active ? '0 0 0 2px var(--t-accent), 0 0 9px rgba(136, 209, 241, 0.45)' : '0 0 9px rgba(136, 209, 241, 0.45)',
+        }}
+      />
     </button>
   );
 }
@@ -138,6 +146,8 @@ export function AccountBlock({
   return (
     <div
       style={{
+        position: 'relative',
+        zIndex: 60,
         flexShrink: 0,
         borderTopWidth: 1,
         borderTopStyle: 'solid',
@@ -275,15 +285,15 @@ export function AccountBlock({
                 </span>
               </span>
             </button>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, paddingTop: 2, paddingRight: 3, paddingBottom: 2, paddingLeft: 3, borderRadius: 10, background: 'var(--t-hover)', flexShrink: 0 }}>
-              <SymonVoiceEntry />
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
               <SymonOrbStatusLine />
+              <SymonVoiceEntry />
               <SymonMachineControl placement="sidebar" />
             </div>
             {/* Account settings remain on the account row; the footer actions
                 beside it open voice, Symon's machine, and mobile pairing. */}
             {onOpenMobilePairing ? (
-              <span style={{ marginLeft: 7, display: 'inline-flex', alignItems: 'center' }}>
+              <span style={{ marginLeft: 3, display: 'inline-flex', alignItems: 'center' }}>
                 <ChromeButton
                   icon={<DeviceMobileIcon size={14} color="var(--t-text-muted)" />}
                   label="Pair mobile device"
