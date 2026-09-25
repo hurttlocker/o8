@@ -8,7 +8,58 @@ afterEach(() => {
   delete process.env.O8_API_PORT;
 });
 
-describe('o8 status storage holds', () => {
+describe('o8 status', () => {
+  it('keeps review and input-blocked lanes out of the running group', async () => {
+    process.env.O8_API_PORT = '47120';
+    const lanes = ['running', 'reviewing', 'awaiting_input'].map((status) => ({
+      id: `lane-${status}`,
+      label: `${status} work`,
+      status,
+      runtime: 'codex',
+      branch: `work/${status}`,
+      baseBranch: 'main',
+      repoPath: '/tmp/status-fixture',
+      worktreePath: null,
+      packetId: `packet-${status}`,
+      updatedAt: '2026-09-24T12:00:00.000Z',
+      lastEventAt: '2026-09-24T12:00:00.000Z',
+      lastEventLabel: status,
+    }));
+    vi.stubGlobal('fetch', vi.fn(async (input: Request | URL) => {
+      const url = String(input);
+      if (url.includes('/api/lanes')) return Response.json({ lanes });
+      if (url.includes('/api/panel/approvals')) return Response.json({ approvals: [] });
+      if (url.includes('/api/orchestrator/status')) return Response.json({ ok: true, result: { packets: [] } });
+      return Response.json({});
+    }));
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+
+    await expect(runStatus({ human: false, verbose: false })).resolves.toBe(0);
+    const payload = JSON.parse(writes.join('')) as {
+      counts: { runningPackets: number; awaitingReview: number; activeLanes: number };
+      runningPackets: Array<{ id: string; status: string }>;
+      awaitingReview: Array<{ id: string; status: string }>;
+      activeLanes: Array<{ id: string; status: string }>;
+    };
+    expect(payload.counts).toMatchObject({ runningPackets: 1, awaitingReview: 1, activeLanes: 3 });
+    expect(payload.runningPackets.map((lane) => lane.id)).toEqual(['lane-running']);
+    expect(payload.awaitingReview.map((lane) => lane.id)).toEqual(['lane-reviewing']);
+    expect(payload.activeLanes).toContainEqual(expect.objectContaining({
+      id: 'lane-awaiting_input', status: 'awaiting_input',
+    }));
+
+    writes.length = 0;
+    await expect(runStatus({ human: true, verbose: false })).resolves.toBe(0);
+    const output = writes.join('');
+    expect(output).toMatch(/running 1\s+review 1\s+active 3/);
+    expect(output).toMatch(/running[\s\S]*running work[\s\S]*awaiting review/);
+    expect(output).not.toMatch(/running work[\s\S]*reviewing work[\s\S]*awaiting review/);
+  });
+
   it('includes a packet storage hold and its operator-visible reason', async () => {
     process.env.O8_API_PORT = '47120';
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
