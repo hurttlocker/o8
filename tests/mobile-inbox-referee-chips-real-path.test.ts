@@ -55,7 +55,7 @@ vi.mock('@/lib/lane/commands', async (importOriginal) => {
     ...actual,
     dispatch: vi.fn(async (command: Parameters<typeof actual.dispatch>[0]) => {
       laneDispatch.calls.push({ ...command } as Record<string, unknown>);
-      if (command.laneId.startsWith('route-parity-')) {
+      if ('laneId' in command && typeof command.laneId === 'string' && command.laneId.startsWith('route-parity-')) {
         return { ok: true, laneId: command.laneId, note: 'Route parity merge completed.' };
       }
       return actual.dispatch(command);
