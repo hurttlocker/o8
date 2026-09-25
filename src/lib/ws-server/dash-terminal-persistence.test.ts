@@ -1,5 +1,13 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createDashTmuxSessionSync, dashSessionNameForOwnerKey } from './dash-terminal-persistence';
+import {
+  claimDashTmuxSessionForCurrentProfile,
+  createDashTmuxSessionSync,
+  dashSessionNameForOwnerKey,
+  dashTmuxDataProfileTag,
+} from './dash-terminal-persistence';
 
 function input(enabled = true) {
   return {
@@ -91,6 +99,7 @@ describe('dashboard terminal persistence real fallback path', () => {
       .mockReturnValueOnce(Buffer.from(''))
       .mockReturnValueOnce(Buffer.from(''))
       .mockReturnValueOnce(Buffer.from(''))
+      .mockReturnValueOnce(Buffer.from(''))
       .mockReturnValueOnce(Buffer.from('xterm*:XT'))
       .mockReturnValue(Buffer.from(''));
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -103,6 +112,7 @@ describe('dashboard terminal persistence real fallback path', () => {
     expect(exec.mock.calls.map((call) => call[1])).toEqual([
       ['-L', 'o8-dashboard', 'has-session', '-t', 'cortex-dash-test'],
       ['-L', 'o8-dashboard', 'new-session', '-d', '-s', 'cortex-dash-test', '-x', '120', '-y', '30', '/bin/zsh', '-l'],
+      ['-L', 'o8-dashboard', 'set-option', '-t', 'cortex-dash-test', '@o8_dashboard_data_profile', dashTmuxDataProfileTag()],
       ['-L', 'o8-dashboard', 'set-option', '-t', 'cortex-dash-test', 'history-limit', '50000'],
       ['-L', 'o8-dashboard', 'set-option', '-t', 'cortex-dash-test', 'status', 'off'],
       ['-L', 'o8-dashboard', 'show-options', '-gv', 'terminal-overrides'],
@@ -115,6 +125,7 @@ describe('dashboard terminal persistence real fallback path', () => {
     const recordHealth = vi.fn();
     const exec = vi.fn()
       .mockReturnValueOnce(Buffer.from(''))
+      .mockReturnValueOnce(Buffer.from(dashTmuxDataProfileTag()))
       .mockReturnValueOnce(Buffer.from('xterm*:XT,xterm*:indn@'));
 
     expect(createDashTmuxSessionSync(input(), {
@@ -124,9 +135,58 @@ describe('dashboard terminal persistence real fallback path', () => {
     })).toBe(true);
     expect(exec.mock.calls.map((call) => call[1])).toEqual([
       ['-L', 'o8-dashboard', 'has-session', '-t', 'cortex-dash-test'],
+      ['-L', 'o8-dashboard', 'show-options', '-qv', '-t', 'cortex-dash-test', '@o8_dashboard_data_profile'],
       ['-L', 'o8-dashboard', 'show-options', '-gv', 'terminal-overrides'],
     ]);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_reused');
+  });
+
+  it('does not reuse a session marked for another data profile', () => {
+    const recordHealth = vi.fn();
+    const exec = vi.fn()
+      .mockReturnValueOnce(Buffer.from(''))
+      .mockReturnValueOnce(Buffer.from(dashTmuxDataProfileTag('/tmp/another-profile')));
+
+    expect(createDashTmuxSessionSync(input(), {
+      resolveTmuxBinary: () => '/usr/bin/tmux',
+      execFileSync: exec,
+      recordHealth,
+    })).toBe(false);
+    expect(exec.mock.calls.map((call) => call[1])).toEqual([
+      ['-L', 'o8-dashboard', 'has-session', '-t', 'cortex-dash-test'],
+      ['-L', 'o8-dashboard', 'show-options', '-qv', '-t', 'cortex-dash-test', '@o8_dashboard_data_profile'],
+    ]);
+    expect(recordHealth).toHaveBeenCalledWith('degraded', 'session_create_failed');
+  });
+});
+
+describe('dashboard tmux data-profile ownership', () => {
+  it('does not claim an untagged session without a saved current-profile reference', () => {
+    const current = dashTmuxDataProfileTag();
+    const foreign = dashTmuxDataProfileTag('/tmp/foreign-profile');
+    const exec = vi.fn((_: string, args: string[]) => {
+      const sessionName = args.at(-2);
+      if (sessionName === 'current') return Buffer.from(current);
+      if (sessionName === 'foreign') return Buffer.from(foreign);
+      return Buffer.from('');
+    });
+    const dependencies = { resolveTmuxBinary: () => '/usr/bin/tmux', execFileSync: exec };
+
+    expect(claimDashTmuxSessionForCurrentProfile('legacy', false, dependencies)).toBe(false);
+    expect(claimDashTmuxSessionForCurrentProfile('legacy', true, dependencies)).toBe(true);
+    expect(exec.mock.calls.at(-1)?.[1]).toEqual([
+      '-L', 'o8-dashboard', 'set-option', '-t', 'legacy', '@o8_dashboard_data_profile', current,
+    ]);
+    expect(claimDashTmuxSessionForCurrentProfile('foreign', false, dependencies)).toBe(false);
+  });
+
+  it('does not claim a session when its tmux ownership read fails', () => {
+    const exec = vi.fn(() => { throw new Error('tmux read failed'); });
+    expect(claimDashTmuxSessionForCurrentProfile('legacy', true, {
+      resolveTmuxBinary: () => '/usr/bin/tmux',
+      execFileSync: exec,
+    })).toBe(false);
+    expect(exec).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -149,5 +209,22 @@ describe('dashSessionNameForOwnerKey', () => {
     expect(dashSessionNameForOwnerKey()).toBeNull();
     expect(dashSessionNameForOwnerKey('   ')).toBeNull();
     expect(dashSessionNameForOwnerKey('x'.repeat(513))).toBeNull();
+  });
+});
+
+describe('dashTmuxDataProfileTag', () => {
+  it('keeps a missing child stable when its parent is reached through a symlink', () => {
+    const actualParent = mkdtempSync(join(tmpdir(), 'o8-profile-tag-'));
+    const linkedParent = `${actualParent}-link`;
+    const dataDir = join(linkedParent, 'profile');
+    try {
+      symlinkSync(actualParent, linkedParent);
+      const beforeCreation = dashTmuxDataProfileTag(dataDir);
+      mkdirSync(join(actualParent, 'profile'));
+      expect(dashTmuxDataProfileTag(dataDir)).toBe(beforeCreation);
+    } finally {
+      rmSync(linkedParent, { force: true });
+      rmSync(actualParent, { recursive: true, force: true });
+    }
   });
 });
