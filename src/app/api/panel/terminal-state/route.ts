@@ -76,6 +76,7 @@ function stripChatTabsWithMissingLane(data: unknown): unknown {
   if (!data || typeof data !== 'object') return data;
   const tabs = (data as { tabs?: Array<{ kind?: string; id?: string; orchestrationPacket?: { packetId?: string } | null }> }).tabs;
   if (!Array.isArray(tabs) || tabs.length === 0) return data;
+  if (!tabs.some((tab) => tab?.kind === 'chat' && tab.orchestrationPacket?.packetId)) return data;
   let livePacketIds: Set<string>;
   try {
     livePacketIds = new Set(listLanes().map((lane) => lane.packetId).filter((id): id is string => Boolean(id)));
@@ -118,6 +119,10 @@ function filterStateToRegisteredRepos(data: unknown, repoRoots: Set<string>) {
   };
 }
 
+function sanitizeRestoredState(data: unknown, repoRoots: Set<string>) {
+  return stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(data, repoRoots)));
+}
+
 function stateMatchesRepoPath(data: unknown, repoPath: string) {
   return Array.isArray((data as { tabs?: Array<{ repoPath?: string }> })?.tabs)
     && (data as { tabs: Array<{ repoPath?: string }> }).tabs.some((tab) => tab.repoPath === repoPath);
@@ -147,7 +152,7 @@ function repoStateStats(data: unknown, repoPath: string) {
   };
 }
 
-function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
+function findLatestRepoState(repoPath: string, repoRoots: Set<string>, excludeFile?: string | null) {
   if (!existsSync(STATE_SCOPE_DIR)) {
     return null;
   }
@@ -160,7 +165,8 @@ function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
         return null;
       }
       try {
-        const parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
+        const parsed = sanitizeRestoredState(JSON.parse(readFileSync(fullPath, 'utf-8')), repoRoots) as { savedAt?: string } | null;
+        if (!parsed) return null;
         const stats = repoStateStats(parsed, repoPath);
         if (stats.matchingCount === 0) {
           return null;
@@ -177,7 +183,7 @@ function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
         return null;
       }
     })
-    .filter((entry): entry is { matchingCount: number; savedAt: number; data: unknown } => Boolean(entry))
+    .filter((entry): entry is { matchingCount: number; savedAt: number; data: { savedAt?: string } } => Boolean(entry))
     .sort((a, b) => {
       if (b.matchingCount !== a.matchingCount) return b.matchingCount - a.matchingCount;
       return b.savedAt - a.savedAt;
@@ -186,7 +192,7 @@ function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
   return candidates[0]?.data ?? null;
 }
 
-function findLatestNonEmptyState(excludeFile?: string | null) {
+function findLatestNonEmptyState(repoRoots: Set<string>, excludeFile?: string | null) {
   if (!existsSync(STATE_SCOPE_DIR)) {
     return null;
   }
@@ -199,9 +205,8 @@ function findLatestNonEmptyState(excludeFile?: string | null) {
         return null;
       }
       try {
-        const parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
-        const tabs = Array.isArray(parsed?.tabs) ? parsed.tabs : [];
-        if (tabs.length === 0) {
+        const parsed = sanitizeRestoredState(JSON.parse(readFileSync(fullPath, 'utf-8')), repoRoots) as { tabs?: unknown[]; savedAt?: string } | null;
+        if (!parsed || !Array.isArray(parsed.tabs) || parsed.tabs.length === 0) {
           return null;
         }
         const savedAt = typeof parsed?.savedAt === 'string'
@@ -215,7 +220,7 @@ function findLatestNonEmptyState(excludeFile?: string | null) {
         return null;
       }
     })
-    .filter((entry): entry is { savedAt: number; data: unknown } => Boolean(entry))
+    .filter((entry): entry is { savedAt: number; data: { tabs?: unknown[]; savedAt?: string } } => Boolean(entry))
     .sort((a, b) => b.savedAt - a.savedAt);
 
   return candidates[0]?.data ?? null;
@@ -228,19 +233,19 @@ export async function GET(request: Request) {
     const scope = sanitizeScope(url.searchParams.get('scope'));
     const repoPath = url.searchParams.get('repoPath');
     const repoRoots = new Set((await listRepos()).map((repo) => normalizeScopePath(repo.localPath)).filter((value): value is string => Boolean(value)));
-    if (repoRoots.size === 0) {
+    if (repoPath && !pathBelongsToRegisteredRepo(repoPath, repoRoots)) {
       return noSavedState();
     }
     const stateFile = getStateFile(scope);
 
     if (existsSync(stateFile)) {
-      const data = stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots)));
+      const data = sanitizeRestoredState(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots);
       if (!data) {
         return noSavedState();
       }
       if (scope === 'tile-root') {
         if (Array.isArray((data as { tabs?: unknown[] })?.tabs) && ((data as { tabs?: unknown[] }).tabs?.length ?? 0) === 0) {
-          const latestNonEmpty = findLatestNonEmptyState(stateFile);
+          const latestNonEmpty = findLatestNonEmptyState(repoRoots, stateFile);
           if (latestNonEmpty) {
             return NextResponse.json(latestNonEmpty);
           }
@@ -249,7 +254,7 @@ export async function GET(request: Request) {
         if (canonicalScope && canonicalScope !== scope) {
           const canonicalFile = getStateFile(canonicalScope);
           if (existsSync(canonicalFile)) {
-            const canonicalData = filterStateToRegisteredRepos(JSON.parse(readFileSync(canonicalFile, 'utf-8')), repoRoots);
+            const canonicalData = sanitizeRestoredState(JSON.parse(readFileSync(canonicalFile, 'utf-8')), repoRoots);
             if (canonicalData) {
               return NextResponse.json(canonicalData);
             }
@@ -261,7 +266,7 @@ export async function GET(request: Request) {
       }
       if (stateMatchesRepoPath(data, repoPath)) {
         const currentStats = repoStateStats(data, repoPath);
-        const fallback = findLatestRepoState(repoPath, stateFile);
+        const fallback = findLatestRepoState(repoPath, repoRoots, stateFile);
         if (fallback) {
           const fallbackStats = repoStateStats(fallback, repoPath);
           const shouldPreferFallback = currentStats.llmChatOnly && fallbackStats.matchingCount > currentStats.matchingCount;
@@ -274,7 +279,7 @@ export async function GET(request: Request) {
     }
 
     if (scope === 'tile-root' && existsSync(LEGACY_STATE_FILE)) {
-      const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(LEGACY_STATE_FILE, 'utf-8')), repoRoots);
+      const data = sanitizeRestoredState(JSON.parse(readFileSync(LEGACY_STATE_FILE, 'utf-8')), repoRoots);
       if (!data) {
         return noSavedState();
       }
@@ -282,14 +287,14 @@ export async function GET(request: Request) {
     }
 
     if (scope === 'tile-root' && !repoPath) {
-      const latestNonEmpty = findLatestNonEmptyState();
+      const latestNonEmpty = findLatestNonEmptyState(repoRoots);
       if (latestNonEmpty) {
         return NextResponse.json(latestNonEmpty);
       }
     }
 
     if (repoPath) {
-      const fallback = findLatestRepoState(repoPath);
+      const fallback = findLatestRepoState(repoPath, repoRoots);
       if (fallback) {
         return NextResponse.json(fallback);
       }

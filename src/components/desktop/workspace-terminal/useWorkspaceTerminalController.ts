@@ -336,7 +336,7 @@ export function useWorkspaceTerminalController(
       return;
     }
 
-    const shouldPreserve = canPreserveScopedTabs(tabsRef.current, preferredRepo?.localPath ?? null);
+    const shouldPreserve = canPreserveScopedTabs(tabsRef.current, preferredRepo?.localPath ?? null, previousKey?.endsWith('::no-repo') === true);
     resetControllerRefs({
       restoredRef, restoreSettledRef, previousWsConnectedRef, initialTerminalBootstrapRef,
       reportedRepoScopeRef, reportedChatSessionsSignatureRef, reportedActiveChatSessionKeyRef,
