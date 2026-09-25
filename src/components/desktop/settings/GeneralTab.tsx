@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * GeneralTab — the General settings page (Cursor-parity pass).
+ * GeneralTab is the General settings page.
  *
  * Collects app-level settings that don't belong to Dispatch, Voice, or
  * Account: startup, conversation titles, and privacy choices.
