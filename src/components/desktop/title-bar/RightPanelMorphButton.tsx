@@ -8,10 +8,12 @@ export function RightPanelMorphButton({
   workspacePanelVisible,
   o8PanelVisible,
   onToggleO8Panel,
+  disabledReason,
 }: {
   workspacePanelVisible: boolean;
   o8PanelVisible: boolean;
   onToggleO8Panel?: () => void;
+  disabledReason?: string;
 }) {
   // 3-state model kept for visual transitions, but the click action is now
   // a 2-state toggle: O8 ⇄ collapsed. The review/workspace side panel
@@ -23,12 +25,12 @@ export function RightPanelMorphButton({
     : workspacePanelVisible
       ? 'review'
       : 'collapsed';
-  const label = state === 'collapsed' ? 'Open O8 panel' : 'Close panel';
+  const label = disabledReason ?? (state === 'collapsed' ? 'Open O8 panel' : 'Close panel');
   const handleClick = onToggleO8Panel;
 
   const { ref: btnRef, handlers: tipHandlers, close: closeTip, tooltip } = useChromeTooltip({
     label,
-    keybind: '⌘⌥B',
+    keybind: disabledReason ? undefined : '⌘⌥B',
   });
 
   return (
@@ -36,12 +38,13 @@ export function RightPanelMorphButton({
       ref={btnRef}
       type="button"
       aria-label={label}
-      onClick={() => { closeTip(); handleClick?.(); }}
+      aria-disabled={Boolean(disabledReason)}
+      onClick={() => { closeTip(); if (!disabledReason) handleClick?.(); }}
       {...tipHandlers}
       data-no-drag
       initial={false}
       animate="rest"
-      whileHover="hover"
+      whileHover={disabledReason ? undefined : 'hover'}
       variants={{
         rest: {
           background: 'var(--t-pill-rest-bg, transparent)',
@@ -66,7 +69,8 @@ export function RightPanelMorphButton({
         paddingRight: 7,
         borderRadius: 7,
         borderWidth: 0,
-        cursor: 'pointer',
+        cursor: disabledReason ? 'not-allowed' : 'pointer',
+        opacity: disabledReason ? 0.45 : 1,
         flexShrink: 0,
         marginTop: -3,
         WebkitTapHighlightColor: 'transparent',

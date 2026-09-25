@@ -1072,7 +1072,7 @@ function DashboardInner() {
   // number lives in viewportWidthRef for imperative reads.
   const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean; belowRightCollapse: boolean } | null>(null);
   const viewportWidthRef = useRef<number | null>(null);
-  const responsiveManualOpenRef = useRef({ left: false, right: false });
+  const responsiveManualOpenRef = useRef({ left: false });
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const update = () => {
@@ -1161,32 +1161,24 @@ function DashboardInner() {
     noteSidebarManualIntent(true);
     setSidebarVisible(true);
   }, [noteSidebarManualIntent, setSidebarVisible]);
-  const noteRightPanelManualIntent = useCallback((nextVisible: boolean) => {
-    responsiveManualOpenRef.current.right = nextVisible
-      && getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH;
-  }, [getResponsiveViewportWidth]);
   const openRightPanelFromUser = useCallback(() => {
+    if (getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH) return;
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(BROWSER_PIP_EVENT, { detail: { open: false } }));
       window.dispatchEvent(new CustomEvent(O8_SPEC_PIP_EVENT, { detail: { open: false } }));
     }
-    noteRightPanelManualIntent(true);
     setChatVisible(true);
-  }, [noteRightPanelManualIntent]);
+  }, [getResponsiveViewportWidth]);
   const closeRightPanelFromUser = useCallback(() => {
-    noteRightPanelManualIntent(false);
     setChatVisible(false);
-  }, [noteRightPanelManualIntent]);
-  // Fold side panels as the viewport narrows. A manual open at a narrow width
-  // wins until the window grows again. The right panel stays closed after
-  // widening, so only an operator action reopens it.
+  }, []);
+  // Fold side panels as the viewport narrows. The right panel stays closed
+  // after widening, so only an operator action reopens it.
   useEffect(() => {
     if (viewportBands === null) return;
 
     if (viewportBands.belowRightCollapse) {
-      if (chatVisible && !responsiveManualOpenRef.current.right) setChatVisible(false);
-    } else {
-      responsiveManualOpenRef.current.right = false;
+      if (chatVisible) setChatVisible(false);
     }
 
     if (viewportBands.belowLeftCollapse) {
@@ -4701,8 +4693,7 @@ function DashboardInner() {
   }, []);
 
   const showSidebarColumn = sidebarVisible && !compactShell;
-  const showRightPanelColumn = chatVisible && !compactShell
-    && (!viewportBands?.belowRightCollapse || responsiveManualOpenRef.current.right);
+  const showRightPanelColumn = chatVisible && !compactShell && !viewportBands?.belowRightCollapse;
   const workspaceInset = compactShell ? 2 : 4;
 
   // History-row focus follows the thread bound to the actually focused
@@ -5312,6 +5303,7 @@ function DashboardInner() {
           onSidebarHoverEnter={!showSidebarColumn && !compactShell ? openSidebarPreview : undefined}
           onSidebarHoverLeave={!showSidebarColumn && !compactShell ? scheduleSidebarPreviewClose : undefined}
           rightPanelOpen={showRightPanelColumn}
+          rightPanelDisabled={viewportBands?.belowRightCollapse ?? false}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
           projectContextRailVisible={workspaceHeaderActive.contextRailVisible}

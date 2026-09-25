@@ -158,4 +158,21 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     });
     expect(document.activeElement).toBe(tabs[0]);
   });
+
+  it('keeps the narrow-window panel toggle visible but unavailable until widening', async () => {
+    const onToggleRightPanel = vi.fn();
+    const props = stripProps({ headerTabs: [], onToggleRightPanel, rightPanelDisabled: true });
+    await act(async () => root.render(createElement(WorkspaceHeaderStrip, props)));
+
+    const narrowToggle = container.querySelector<HTMLButtonElement>('[aria-label="Widen the window to open the side panel"]');
+    expect(narrowToggle?.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { narrowToggle?.click(); });
+    expect(onToggleRightPanel).not.toHaveBeenCalled();
+
+    await act(async () => root.render(createElement(WorkspaceHeaderStrip, { ...props, rightPanelDisabled: false })));
+    const wideToggle = container.querySelector<HTMLButtonElement>('[aria-label="Open O8 panel"]');
+    expect(wideToggle?.getAttribute('aria-disabled')).toBe('false');
+    await act(async () => { wideToggle?.click(); });
+    expect(onToggleRightPanel).toHaveBeenCalledOnce();
+  });
 });
