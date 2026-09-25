@@ -539,6 +539,12 @@
       ]
     },
     {
+      "path": "src/lib/runtime/dashboard-cli-bindings.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/runtime/interrupt-escalation.test.ts",
       "reasons": [
         "child-process",

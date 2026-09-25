@@ -765,19 +765,17 @@ export const claudeCodeRuntime: AgentRuntime = {
       fresh ? probeLiveClaudeProcesses() : Promise.resolve({ processes: [], probed: false }),
     ]);
     const liveProcesses = liveProbe.processes;
-    // Sort by most recent first
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
     const matchesLiveSession = createLiveClaudeSessionMatcher(liveProcesses);
 
     const results: RuntimeSession[] = allSessions.map((meta): RuntimeSession => {
       const normalizedCwd = normalizeFsPath(meta.cwd ?? meta.projectPath);
       const isLiveSession = matchesLiveSession(meta.sessionId, normalizedCwd);
+      const exactLiveProcess = liveProcesses.find((candidate) => candidate.sessionId === meta.sessionId
+        && normalizeFsPath(candidate.cwd) === normalizedCwd);
       const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta, liveProbe.probed);
       const name = `${projectDisplayName(meta.projectPath)}${meta.gitBranch ? ` • ${meta.gitBranch}` : ''}`;
-      // #658 — Orchestrator-dispatched lanes spawn `claude` with cwd inside
-      // `.cortex-worktrees/packet-*`. Mark them as 'owned' so the runtime
-      // inventory filter surfaces them on the desktop SessionVisualizer.
-      // User-launched terminal sessions stay 'discovered'.
+      // #658: packet worktrees are owned; user-started terminals are discovered.
       const ownership: RuntimeSession['ownership'] = isOrchestratorWorktreeCwd(meta.cwd ?? meta.projectPath)
         ? 'owned'
         : 'discovered';
@@ -789,6 +787,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         cwd: meta.cwd ?? meta.projectPath,
         branch: meta.gitBranch,
         status,
+        pid: isLiveSession ? exactLiveProcess?.pid : undefined,
         ownership,
         sessionCapabilities: {
           canSendInput: false,
@@ -889,6 +888,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         cwd: proc.cwd,
         branch: gitBranch,
         status: 'running',
+        pid: !realSessionId || proc.sessionId === realSessionId ? proc.pid : undefined,
         ownership,
         sessionCapabilities: {
           canSendInput: false,

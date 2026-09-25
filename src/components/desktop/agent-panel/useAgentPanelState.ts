@@ -12,6 +12,7 @@ import {
   type CorrelatedActionReceipt,
 } from '@/lib/orchestrator/action-receipt';
 import type { RepoReadiness } from '@/lib/repos/types';
+import { RUNTIME_INVENTORY_REFRESHED_EVENT } from '@/lib/runtime/inventory-events';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
 import {
@@ -128,6 +129,20 @@ export function createWarmingInventoryScheduler(
   };
 }
 
+function filterAgentsToRegisteredRepos(agents: AgentDetail[], repoPaths: Set<string> | null) {
+  if (!repoPaths) return agents;
+  return agents.filter((agent) => {
+    const repoScopedPath = agent.worktree?.path?.trim().replace(/\/+$/, '')
+      || agent.runtimeSurface?.cwd?.trim().replace(/\/+$/, '')
+      || null;
+    if (!repoScopedPath) return true;
+    for (const repoPath of repoPaths) {
+      if (repoScopedPath === repoPath || repoScopedPath.startsWith(`${repoPath}/`)) return true;
+    }
+    return false;
+  });
+}
+
 export function useAgentPanelState({
   selectedRepo,
   selectedRepoLocalPath,
@@ -151,6 +166,7 @@ export function useAgentPanelState({
   const fetchNowRef = useRef<() => void>(() => {});
   const inventoryLoadedRef = useRef(false);
   const inventoryGenerationRef = useRef(0);
+  const registeredRepoPathsRef = useRef<Set<string> | null>(null);
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
   const panelSnapshotKey = `panel:agents:${selectedRepoLocalPath ?? selectedRepo ?? 'all'}`;
 
@@ -409,19 +425,9 @@ export function useAgentPanelState({
           };
         });
 
-        const filteredAgents = enrichedAgents.filter((agent) => {
-          if (!hasRegisteredRepoSnapshot) return true;
-          const repoScopedPath = agent.worktree?.path?.trim().replace(/\/+$/, '')
-            || agent.runtimeSurface?.cwd?.trim().replace(/\/+$/, '')
-            || null;
-          if (!repoScopedPath) return true;
-          for (const repoPath of registeredRepoPaths) {
-            if (repoScopedPath === repoPath || repoScopedPath.startsWith(`${repoPath}/`)) {
-              return true;
-            }
-          }
-          return false;
-        });
+        const repoPaths = hasRegisteredRepoSnapshot ? registeredRepoPaths : null;
+        registeredRepoPathsRef.current = repoPaths;
+        const filteredAgents = filterAgentsToRegisteredRepos(enrichedAgents, repoPaths);
 
         if (generation !== inventoryGenerationRef.current) return;
         commitAgents(filteredAgents, generation);
@@ -445,10 +451,20 @@ export function useAgentPanelState({
     const handler = () => { fetchNowRef.current?.(); };
     const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
+    const onInventoryRefresh = (event: Event) => {
+      const snapshot = (event as CustomEvent<{ agents?: AgentDetail[]; meta?: AgentPanelFleetMeta | null }>).detail;
+      if (snapshot?.meta?.mode !== 'live' || !Array.isArray(snapshot.agents)) return;
+      const generation = ++inventoryGenerationRef.current;
+      setFleetMeta(snapshot.meta);
+      commitAgents(filterAgentsToRegisteredRepos(snapshot.agents, registeredRepoPathsRef.current), generation);
+      finishInitialInventoryLoad(generation);
+    };
+    window.addEventListener(RUNTIME_INVENTORY_REFRESHED_EVENT, onInventoryRefresh);
     const fallbackId = setInterval(fetchAll, 300_000); // 5min resilience fallback
     return () => {
       clearInterval(fallbackId);
       for (const e of wsEvents) window.removeEventListener(e, handler);
+      window.removeEventListener(RUNTIME_INVENTORY_REFRESHED_EVENT, onInventoryRefresh);
       if (debounceTimer) clearTimeout(debounceTimer);
       warmingScheduler.dispose();
     };

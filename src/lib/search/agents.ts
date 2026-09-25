@@ -38,6 +38,12 @@ export async function searchAgents(query: string, browse = false): Promise<Searc
       )) continue;
 
       const detailParts = [agent.status, agent.runtime, agent.branch].filter(Boolean).map(String);
+      const exitedTerminalReason = agent.statusEvidence?.fallbackReason?.startsWith('The CLI process is no longer verified')
+        ? agent.statusEvidence.fallbackReason
+        : null;
+      if (exitedTerminalReason) {
+        detailParts.push(`Last verified ${agent.statusEvidence?.observedAt ?? 'unknown'} · ${exitedTerminalReason}`);
+      }
       out.push({
         kind: 'agent',
         id: `agent:${sessionKey}`,

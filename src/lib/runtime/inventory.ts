@@ -9,6 +9,7 @@ import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescr
 import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-catalog';
 import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import { discoverRuntimeSessions } from '@/lib/runtime/inventory-discovery';
+import { projectDashboardCliSession, registerDashboardCliBindings } from '@/lib/runtime/dashboard-cli-inventory';
 import { isRegistryBackedRuntimeSession, selectRepoFallbackAgents } from '@/lib/runtime/inventory-selection';
 import {
   isDispatchableRuntime,
@@ -448,8 +449,12 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
     discoveredKeys.add(key);
   }
 
+  const terminalBindings = await registerDashboardCliBindings(discoveredAll);
+
   // resolveTerminalStatusEvidence is the single source for status precedence.
   const resolvedDiscoveredAll = discoveredAll.map(({ runtime, session }) => {
+    const dashboardCli = projectDashboardCliSession(runtime, session, terminalBindings);
+    if (dashboardCli) return { runtime, ...dashboardCli };
     const debouncedStatus = debouncedSessionStatus(
       session.sessionKey,
       session.status,

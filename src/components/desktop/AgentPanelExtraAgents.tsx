@@ -28,6 +28,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { deriveParkedLaneBuckets, type ReviewApprovalSummary } from '@/components/desktop/merge-beacon/derive';
 import { AGENT_STATUS_ACCENT } from '@/components/desktop/AgentStatusDot';
+import { RUNTIME_INVENTORY_REFRESHED_EVENT } from '@/lib/runtime/inventory-events';
+import { canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
   ExtraAgentActionMenu,
   ExtraAgentRowView,
@@ -156,6 +158,7 @@ function buildRows(
       subtitle: `${runtimeModelDisplayLabel(lane.runtime, lane.model)} · ${lane.branch}`,
       lastActivityAt: parseTimestamp(lane.lastEventAt),
       sessionKey: lane.sessionKey,
+      tmuxSession: matchingAgent?.tmuxSession,
       repoPath: normalizePath(lane.repoPath),
       packetId: lane.packetId,
       laneId: lane.id,
@@ -172,7 +175,9 @@ function buildRows(
   for (const agent of agents) {
     if (seenSessionKeys.has(agent.sessionKey)) continue;
     const origin = classifyOrigin(agent.runtime, undefined);
-    if (origin === 'CLI') continue;
+    // A CLI verified inside an o8 terminal has an exact return path even
+    // without a governed lane. Unbound local CLI history stays out of the rail.
+    if (origin === 'CLI' && !agent.tmuxSession) continue;
     const status = classifyStatus(agent.status);
     rows.push({
       key: `agent:${agent.sessionKey}`,
@@ -184,6 +189,7 @@ function buildRows(
       subtitle: [runtimeModelDisplayLabel(agent.runtime, agent.model), agent.currentTask].filter(Boolean).join(' · '),
       lastActivityAt: parseTimestamp(agent.lastEventAt),
       sessionKey: agent.sessionKey,
+      tmuxSession: agent.tmuxSession,
       repoPath: normalizePath(agent.workspace),
       packetId: null,
       laneId: null,
@@ -475,6 +481,7 @@ function AgentPanelExtraAgentsBase({
         detail: {
           packetId: row.packetId,
           sessionKey: row.sessionKey,
+          tmuxSession: row.tmuxSession,
           laneId: row.laneId,
           title: row.name,
         },
@@ -489,9 +496,52 @@ function AgentPanelExtraAgentsBase({
     const onLifecycle = () => { void fetchData(); };
     window.addEventListener('o8:lifecycle-reconcile', onLifecycle);
     const fallbackId = window.setInterval(fetchData, 300_000);
+    // Plain terminal CLIs have no lane lifecycle event. Refresh only the
+    // inventory between broad reconciles so appear/exit is visible promptly.
+    let mounted = true;
+    let inventoryInFlight = false;
+    const pageVisible = () => document.visibilityState !== 'hidden';
+    const refreshInventory = async () => {
+      if (!mounted || inventoryInFlight || !pageVisible()) return;
+      if (canUseTauriEvents()) {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          if (!mounted || !await getCurrentWindow().isVisible()) return;
+        } catch {
+          // A native visibility check must succeed before expensive discovery.
+          return;
+        }
+      }
+      if (!mounted || inventoryInFlight || !pageVisible()) return;
+      inventoryInFlight = true;
+      try {
+        const response = await fetch('/api/runtime/inventory?fresh=1');
+        const snapshot = response.ok
+          ? await response.json() as { agents?: AgentSummary[]; meta?: { mode?: string } }
+          : null;
+        if (!mounted || snapshot?.meta?.mode !== 'live') return;
+        setAgents(snapshot.agents ?? []);
+        window.dispatchEvent(new CustomEvent(RUNTIME_INVENTORY_REFRESHED_EVENT, { detail: snapshot }));
+      } catch {
+        // Discovery remains best-effort while runtimes are starting or exiting.
+      } finally {
+        inventoryInFlight = false;
+      }
+    };
+    void refreshInventory();
+    const inventoryId = window.setInterval(() => { void refreshInventory(); }, 10_000);
+    const onVisibilityChange = () => {
+      if (pageVisible()) void refreshInventory();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onVisibilityChange);
     return () => {
+      mounted = false;
       window.removeEventListener('o8:lifecycle-reconcile', onLifecycle);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onVisibilityChange);
       window.clearInterval(fallbackId);
+      window.clearInterval(inventoryId);
       abortRef.current?.abort();
       cancelHoverClose();
     };

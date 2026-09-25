@@ -21,6 +21,7 @@ export interface ExtraAgentRow {
   subtitle: string;
   lastActivityAt: number;
   sessionKey: string | null;
+  tmuxSession?: string;
   repoPath: string | null;
   packetId: string | null;
   laneId: string | null;
