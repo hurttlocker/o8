@@ -83,7 +83,7 @@ const broadcastWhy = await import('@/app/api/broadcast/why/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
 const broadcastTokens = await import('@/app/api/broadcast/tokens/route');
 const { createTestApproval, getApproval, createApproval, listApprovalEvents } = await import('@/lib/approvals/store');
-const { createLane, updateLane } = await import('@/lib/lane/registry');
+const { createLane, getLane, updateLane } = await import('@/lib/lane/registry');
 const { registerRuntimeTerminalSession } = await import('@/lib/runtime/terminal-session-registry');
 const runtimeRegistry = await import('@/lib/runtimes/registry');
 const dashboardBindings = await import('@/lib/runtime/dashboard-cli-bindings');
@@ -679,6 +679,49 @@ describe('principal-authz — governed terminal approval adapter', () => {
     expect((await response.json()).error).toContain('start another run');
     expect(getApproval(approval.id)?.status).toBe('pending');
     expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toBeUndefined();
+  });
+
+  it.each([
+    ['codex', 'codex:stale-thread'],
+    ['codex', 'codex-discovered:stale-thread'],
+    ['codex', 'codex-live:67890'],
+    ['claude-code', 'claude-code:stale-thread'],
+    ['claude-code', 'claude-code-discovered:stale-thread'],
+  ] as const)('refuses ordinary %s resume when %s cannot be discovered', async (runtimeId, sessionKey) => {
+    const lane = createLane({
+      label: 'Undiscoverable terminal approval',
+      repoPath: '/tmp/terminal-approval-authz',
+      branch: `agent/${sessionKey.replaceAll(':', '-')}`,
+      runtime: runtimeId,
+      sessionKey,
+    });
+    updateLane(lane.id, { status: 'awaiting_input' }, 'orchestrator');
+    const approval = createApproval({
+      source: 'runtime',
+      runtime: runtimeId,
+      agent: 'Undiscoverable terminal approval',
+      sessionKey,
+      title: 'Resume the lane',
+      description: 'The agent session needs a decision.',
+      summary: 'Resume lane from approval.',
+      risk: 'medium',
+      continuation: { kind: 'lane', laneId: lane.id, verb: 'resume' },
+    });
+    const runtime = runtimeRegistry.getRuntime(runtimeId);
+    expect(runtime).toBeDefined();
+    const discover = vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([]);
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id },
+    }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('start another run');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toBeUndefined();
+    expect(getLane(lane.id)?.sessionKey).toBe(sessionKey);
+    expect(discover).not.toHaveBeenCalled();
   });
 
   it('records a terminal rejection from an awaiting-human lane without dispatching the resume', async () => {
