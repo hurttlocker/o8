@@ -1,12 +1,10 @@
 'use client';
 
 /**
- * GeneralTab — the General settings page (Cursor-parity pass).
+ * GeneralTab is the General settings page.
  *
- * Collects the app-level, non-domain-specific settings that don't belong to
- * Dispatch, Voice, or Account: launch-at-login (native autostart) and the
- * crash/error-report privacy toggles. Both surfaces already had a real
- * backend elsewhere; this tab is where an operator expects to find them.
+ * Collects app-level settings that don't belong to Dispatch, Voice, or
+ * Account: startup, conversation titles, and privacy choices.
  *
  * - Launch at login persists through the Tauri bridge (autostart_set), so the
  *   Startup group only renders in the desktop shell.
@@ -67,6 +65,15 @@ function PresentIcon() {
       <rect x="3" y="4" width="18" height="12" rx="2" />
       <path d="M12 16v4" />
       <path d="M8 20h8" />
+    </svg>
+  );
+}
+
+function ChatIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H5l-2 2v-8.5A8.5 8.5 0 0 1 11.5 5H13" />
+      <path d="M17 2v6M14 5h6" />
     </svg>
   );
 }
@@ -253,7 +260,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
     }}>
       <TabHeading
         title="general"
-        subtitle="App-level basics: whether o8 launches with your machine, and what leaves it when something breaks."
+        subtitle="Startup, conversation titles, and what o8 shares when something breaks."
       />
 
       {notice ? (
@@ -346,6 +353,22 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
           </SettingsGroup>
         </section>
       ) : null}
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Conversations"
+          footnote="On by default. When this is off, o8 still makes a short title from your first message."
+        >
+          <SettingsRow
+            icon={<ChatIcon />}
+            label="Model-generated titles"
+            subtitle="Allow a background model call to give new conversations a more useful title"
+            checked={values?.autoTitleInferenceEnabled !== false}
+            disabled={!values || busyField === 'autoTitleInferenceEnabled'}
+            onToggle={(next) => { void updateField('autoTitleInferenceEnabled', next); }}
+          />
+        </SettingsGroup>
+      </section>
 
       <section style={{ marginTop: tauri ? 28 : 0 }}>
         <SettingsGroup
