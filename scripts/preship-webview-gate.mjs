@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -500,6 +500,15 @@ async function main() {
   const wsPort = await findFreePortFrom(apiPort + 1);
   const client = new WebviewSocketClient(socketPath);
   const webkitBaseline = webkitPids(snapshotProcesses());
+  // Tauri starts its sidecars with the bundle's server directory as cwd. A
+  // build bundle inside a Git checkout would otherwise inherit that checkout
+  // and make the idle conflict probe scan every linked worktree. A real install
+  // lives outside the checkout, so launch an exact copy from a temporary root.
+  // Tauri's macOS resource resolver rejects copies under the per-user
+  // /var/folders temporary root. Resolve /tmp to its physical /private/tmp
+  // location, where the same signed bundle boots normally.
+  const stagedAppDir = mkdtempSync(path.join(realpathSync('/tmp'), 'o8-preship-app-'));
+  const stagedAppPath = path.join(stagedAppDir, 'o8.app');
   let child;
   let stdout = '';
   let stderr = '';
@@ -507,9 +516,20 @@ async function main() {
   let capturedConsoleErrors = [];
   let footprintReceipt;
   let preserveDataDir = false;
+  let artifactDigest;
 
   try {
-    child = spawn(machO, [], {
+    signalFailed = 'stage-app';
+    artifactDigest = computeArtifactDigest(resolved.appPath, {
+      version: info.version,
+      gitSha: info.gitSha,
+    });
+    execFileSync('ditto', [resolved.appPath, stagedAppPath], { stdio: 'pipe', timeout: 120_000 });
+    execFileSync('codesign', ['--verify', '--deep', '--strict', stagedAppPath], { stdio: 'pipe', timeout: 120_000 });
+    if (computeArtifactDigest(stagedAppPath, { version: info.version, gitSha: info.gitSha }) !== artifactDigest) {
+      throw new Error('staged app executable differs from the signed release bundle');
+    }
+    child = spawn(path.join(stagedAppPath, 'Contents', 'MacOS', 'o8'), [], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
@@ -547,10 +567,7 @@ async function main() {
       version: info.version,
       gitSha: info.gitSha,
       mode,
-      artifactDigest: computeArtifactDigest(resolved.appPath, {
-        version: info.version,
-        gitSha: info.gitSha,
-      }),
+      artifactDigest,
     };
     await sleep(FOOTPRINT_COOLDOWN_MS);
     const idleSamples = await collectFootprintSamples(footprintContext, sampleCount, 'idle-hidden');
@@ -650,7 +667,11 @@ async function main() {
     console.error(`[preship-webview-gate] child stdout tail:\n${tail(stdout)}`);
     process.exitCode = 1;
   } finally {
-    await cleanupGate({ client, child, dataDir, socketPath, preserveDataDir });
+    try {
+      await cleanupGate({ client, child, dataDir, socketPath, preserveDataDir });
+    } finally {
+      rmSync(stagedAppDir, { recursive: true, force: true });
+    }
   }
 }
 
