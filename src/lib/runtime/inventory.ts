@@ -10,6 +10,7 @@ import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-cat
 import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import { discoverRuntimeSessions } from '@/lib/runtime/inventory-discovery';
 import { projectDashboardCliSession, registerDashboardCliBindings } from '@/lib/runtime/dashboard-cli-inventory';
+import { readDashboardCliTurnEvidence } from '@/lib/runtime/dashboard-cli-status';
 import { isRegistryBackedRuntimeSession, selectRepoFallbackAgents } from '@/lib/runtime/inventory-selection';
 import {
   isDispatchableRuntime,
@@ -450,10 +451,11 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
   }
 
   const terminalBindings = await registerDashboardCliBindings(discoveredAll);
+  const terminalTurnEvidence = await readDashboardCliTurnEvidence(discoveredAll, terminalBindings);
 
   // resolveTerminalStatusEvidence is the single source for status precedence.
   const resolvedDiscoveredAll = discoveredAll.map(({ runtime, session }) => {
-    const dashboardCli = projectDashboardCliSession(runtime, session, terminalBindings);
+    const dashboardCli = projectDashboardCliSession(runtime, session, terminalBindings, terminalTurnEvidence);
     if (dashboardCli) return { runtime, ...dashboardCli };
     const debouncedStatus = debouncedSessionStatus(
       session.sessionKey,
@@ -643,10 +645,10 @@ export async function getRuntimeInventorySnapshot(
   const generation = runtimeInventoryGeneration;
 
   const cached = runtimeInventoryCache.get(cacheKey);
-  const maxCacheAge = cached?.idle
-    ? RUNTIME_INVENTORY_IDLE_TTL_MS
-    : fresh
-      ? RUNTIME_INVENTORY_FRESH_COALESCE_MS
+  const maxCacheAge = fresh
+    ? RUNTIME_INVENTORY_FRESH_COALESCE_MS
+    : cached?.idle
+      ? RUNTIME_INVENTORY_IDLE_TTL_MS
       : RUNTIME_INVENTORY_TTL_MS;
   if (cached && (now - cached.cachedAt) < maxCacheAge) {
     return cached.snapshot;

@@ -2,7 +2,7 @@ import type { AgentRuntime, RuntimeSession } from '@/lib/runtimes/types';
 import { discoverDashboardCliBindings } from '@/lib/runtime/dashboard-cli-bindings';
 import { isRegistryBackedRuntimeSession } from '@/lib/runtime/inventory-selection';
 import { getRuntimeTerminalSession, registerRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
-import { unknownTerminalStatusEvidence, type TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import { runtimeSessionStatusFromTerminalState, unknownTerminalStatusEvidence, type TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
 type DiscoveredSession = { runtime: AgentRuntime; session: RuntimeSession };
 type CliProjection = { session: RuntimeSession; statusEvidence: TerminalStatusEvidence };
@@ -29,11 +29,19 @@ export function projectDashboardCliSession(
   runtime: AgentRuntime,
   session: RuntimeSession,
   bindings: Map<string, string>,
+  turnEvidence: Map<string, TerminalStatusEvidence> = new Map(),
 ): CliProjection | null {
   if (bindings.has(session.sessionKey) && session.ownership === 'discovered') {
+    const structured = turnEvidence.get(session.sessionKey);
     return {
-      session,
-      statusEvidence: unknownTerminalStatusEvidence({
+      session: structured?.authority === 'runtime-event'
+        ? {
+            ...session,
+            status: runtimeSessionStatusFromTerminalState(structured.state, session.status),
+            lastActivityAt: new Date(structured.observedAt),
+          }
+        : session,
+      statusEvidence: structured ?? unknownTerminalStatusEvidence({
         sessionId: session.sessionKey,
         runtime: runtime.id,
         observedAt: new Date(),
