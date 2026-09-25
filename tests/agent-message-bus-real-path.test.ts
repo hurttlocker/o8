@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -480,6 +480,51 @@ describe('agent message bus real path', () => {
     });
   });
 
+  it('does not downgrade a read receipt when a slow Codex wake settles afterward', async () => {
+    const agentId = `codex-race-${Date.now()}`;
+    const name = 'RaceReceiver';
+    expect((await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { agentId, name, repo: repoPath, worktreePath: repoPath, runtime: 'codex', sessionKey: `codex:${agentId}` },
+    }))).status).toBe(201);
+
+    let wakeStarted!: () => void;
+    let releaseWake!: () => void;
+    const started = new Promise<void>((resolve) => { wakeStarted = resolve; });
+    const wake = new Promise<void>((resolve) => { releaseWake = resolve; });
+    const delayedPost = createAgentMessagePostHandler({
+      sendClaude,
+      sendCodex: async () => { wakeStarted(); await wake; },
+    }, noLiveSessions);
+    const pending = delayedPost(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { from: 'operator', to: name, repo: repoPath, text: 'Read before the wake settles.' },
+    }));
+    await started;
+    try {
+      const inbox = await inboxRoute.GET(request(
+        `http://localhost:3001/api/agents/inbox?agentId=${encodeURIComponent(agentId)}`,
+        { token: OPERATOR_TOKEN },
+      ));
+      expect(inbox.status).toBe(200);
+      await expect(inbox.json()).resolves.toMatchObject({
+        messages: [expect.objectContaining({ text: 'Read before the wake settles.', delivery: 'native' })],
+      });
+    } finally {
+      releaseWake();
+    }
+    const accepted = await pending;
+    expect(accepted.status).toBe(201);
+    await expect(accepted.json()).resolves.toMatchObject({
+      message: {
+        delivery: 'native',
+        deliveryNote: 'Read from the durable inbox by the target session.',
+      },
+    });
+  });
+
   it('discovers one live runtime session, addresses it by runtime alias, and rejects an ambiguous alias', async () => {
     const discoveredRepo = `/tmp/o8-agent-message-discovered-${Date.now()}`;
     const liveSession = (sessionKey: string) => ({
@@ -565,6 +610,162 @@ describe('agent message bus real path', () => {
         repo: automaticRepo,
       },
     });
+  });
+
+  it('migrates an alias send into one canonical scope after restart and keeps retries idempotent', async () => {
+    const physicalRepo = mkdtempSync(join(os.tmpdir(), 'o8-agent-message-repo-scope-'));
+    const aliasRepo = `${physicalRepo}-alias`;
+    symlinkSync(physicalRepo, aliasRepo);
+    const canonicalRepo = realpathSync.native(aliasRepo);
+    const senderId = `alias-sender-${Date.now()}`;
+    const receiverId = `alias-receiver-${Date.now()}`;
+
+    for (const [agentId, name] of [[senderId, 'AliasSender'], [receiverId, 'AliasReceiver']]) {
+      const joined = await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+        token: OPERATOR_TOKEN,
+        method: 'POST',
+        body: { agentId, name, repo: canonicalRepo, worktreePath: aliasRepo, runtime: 'poll', sessionKey: `poll:${agentId}` },
+      }));
+      expect(joined.status).toBe(201);
+    }
+
+    getSqlite().transaction(() => {
+      getSqlite().prepare('UPDATE agent_presence SET repo_path = ? WHERE agent_id IN (?, ?)').run(aliasRepo, senderId, receiverId);
+      getSqlite().prepare("DELETE FROM agent_bus_migrations WHERE name = 'canonical_repo_paths_v1'").run();
+    })();
+    closeDb();
+
+    const sentViaAlias = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: {
+        fromAgentId: senderId,
+        to: 'AliasReceiver',
+        repo: aliasRepo,
+        text: 'Canonical message.',
+        requestId: 'alias-scope-idempotency',
+      },
+    }));
+    expect(sentViaAlias.status).toBe(201);
+    const first = await sentViaAlias.json() as { message: { id: string; repo: string } };
+    expect(first.message.repo).toBe(canonicalRepo);
+    closeDb();
+
+    const retriedCanonical = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: {
+        fromAgentId: senderId,
+        to: 'AliasReceiver',
+        repo: canonicalRepo,
+        text: 'Canonical message.',
+        requestId: 'alias-scope-idempotency',
+      },
+    }));
+    expect(retriedCanonical.status).toBe(201);
+    await expect(retriedCanonical.json()).resolves.toMatchObject({ message: { id: first.message.id, repo: canonicalRepo } });
+    const listed = await messageRoute.GET(request(
+      `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(canonicalRepo)}&limit=20`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(listed.json()).resolves.toMatchObject({
+      messages: [expect.objectContaining({ id: first.message.id, repo: canonicalRepo })],
+    });
+  });
+
+  it('fails closed when legacy and canonical scopes assign one name to different agents', async () => {
+    const physicalRepo = mkdtempSync(join(os.tmpdir(), 'o8-agent-message-repo-collision-'));
+    const aliasRepo = `${physicalRepo}-alias`;
+    symlinkSync(physicalRepo, aliasRepo);
+    const canonicalRepo = realpathSync.native(aliasRepo);
+    const legacyId = `legacy-shared-${Date.now()}`;
+    const canonicalId = `canonical-shared-${Date.now()}`;
+    for (const [agentId, repo] of [[legacyId, canonicalRepo], [canonicalId, canonicalRepo]]) {
+      const joined = await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+        token: OPERATOR_TOKEN,
+        method: 'POST',
+        body: { agentId, name: 'SharedAlias', repo, worktreePath: repo, runtime: 'poll', sessionKey: `poll:${agentId}` },
+      }));
+      expect(joined.status).toBe(201);
+      if (agentId === legacyId) getSqlite().prepare('UPDATE agent_presence SET repo_path = ? WHERE agent_id = ?').run(aliasRepo, legacyId);
+    }
+    getSqlite().transaction(() => {
+      getSqlite().prepare(`
+        INSERT INTO agent_messages
+          (id, from_agent, to_agent, repo_path, text, refs_json, delivery_status, created_at)
+        VALUES (?, 'SharedAlias', 'operator', ?, 'private legacy message', '{}', 'poll', ?)
+      `).run(`legacy-message-${legacyId}`, aliasRepo, new Date().toISOString());
+      getSqlite().prepare(`
+        INSERT INTO agent_messages
+          (id, from_agent, to_agent, repo_path, text, refs_json, delivery_status, created_at)
+        VALUES (?, 'operator', 'SharedAlias', ?, 'canonical inbox message', '{}', 'poll', ?)
+      `).run(`canonical-inbox-${canonicalId}`, canonicalRepo, new Date().toISOString());
+      getSqlite().prepare(`
+        INSERT INTO agent_messages
+          (id, from_agent, to_agent, repo_path, text, refs_json, delivery_status, created_at)
+        VALUES (?, 'operator', 'SharedAlias', ?, 'legacy inbox message', '{}', 'poll', ?)
+      `).run(`legacy-inbox-${legacyId}`, aliasRepo, new Date().toISOString());
+      getSqlite().prepare(`
+        INSERT INTO agent_inbox_state (repo_path, agent_name, acknowledged_sequence)
+        VALUES (?, 'SharedAlias', 0), (?, 'SharedAlias', 0)
+      `).run(aliasRepo, canonicalRepo);
+      getSqlite().prepare("DELETE FROM agent_bus_migrations WHERE name = 'canonical_repo_paths_v1'").run();
+    })();
+    closeDb();
+
+    const listed = await messageRoute.GET(request(
+      `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(canonicalRepo)}&limit=20`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(listed.json()).resolves.toMatchObject({
+      messages: expect.not.arrayContaining([expect.objectContaining({ id: `legacy-message-${legacyId}` })]),
+    });
+    const legacyInbox = await inboxRoute.GET(request(
+      `http://localhost:3001/api/agents/inbox?agentId=${encodeURIComponent(legacyId)}&limit=20`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(legacyInbox.json()).resolves.toMatchObject({
+      messages: expect.arrayContaining([expect.objectContaining({ id: `legacy-inbox-${legacyId}` })]),
+    });
+    const inboxState = getSqlite().prepare(`
+      SELECT repo_path, acknowledged_sequence FROM agent_inbox_state
+      WHERE agent_name = 'SharedAlias' ORDER BY repo_path
+    `).all() as Array<{ repo_path: string; acknowledged_sequence: number }>;
+    expect(inboxState).toEqual(expect.arrayContaining([
+      expect.objectContaining({ repo_path: canonicalRepo, acknowledged_sequence: 0 }),
+      expect.objectContaining({ repo_path: aliasRepo, acknowledged_sequence: expect.any(Number) }),
+    ]));
+    const denied = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { fromAgentId: legacyId, to: 'SharedAlias', repo: aliasRepo, text: 'Do not cross scopes.' },
+    }));
+    expect(denied.status).toBe(403);
+    await expect(denied.json()).resolves.toMatchObject({ error: { code: 'agent_sender_repo_mismatch' } });
+  });
+
+  it('records the repository-alias reconciliation version across database restarts', () => {
+    const physicalRepo = mkdtempSync(join(os.tmpdir(), 'o8-agent-message-repo-version-'));
+    const aliasRepo = `${physicalRepo}-alias`;
+    symlinkSync(physicalRepo, aliasRepo);
+    const databasePath = join(mkdtempSync(join(os.tmpdir(), 'o8-agent-message-db-version-')), 'state.db');
+    let sqlite = new Database(databasePath);
+    ensureAgentBusSchema(sqlite);
+    sqlite.prepare(`
+      INSERT INTO agent_presence
+        (agent_id, name, repo_path, worktree_path, runtime, session_key, lane_id, packet_id, last_seen)
+      VALUES ('late-alias-row', 'LateAlias', ?, NULL, 'poll', NULL, NULL, NULL, ?)
+    `).run(aliasRepo, new Date().toISOString());
+    ensureAgentBusSchema(sqlite);
+    expect(sqlite.prepare('SELECT repo_path FROM agent_presence WHERE agent_id = ?').get('late-alias-row'))
+      .toMatchObject({ repo_path: aliasRepo });
+    sqlite.close();
+
+    sqlite = new Database(databasePath);
+    ensureAgentBusSchema(sqlite);
+    expect(sqlite.prepare('SELECT repo_path FROM agent_presence WHERE agent_id = ?').get('late-alias-row'))
+      .toMatchObject({ repo_path: aliasRepo });
+    sqlite.close();
   });
 
   it('correlates two agents through the real routes, rejects stale and foreign replies, and enforces the budget after restart', async () => {
