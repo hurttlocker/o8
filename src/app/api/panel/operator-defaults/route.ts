@@ -306,6 +306,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     update.promptCachingEnabled = body.promptCachingEnabled;
   }
+  if (body.autoTitleInferenceEnabled !== undefined) {
+    if (typeof body.autoTitleInferenceEnabled !== 'boolean') {
+      throw new Error('autoTitleInferenceEnabled must be boolean.');
+    }
+    update.autoTitleInferenceEnabled = body.autoTitleInferenceEnabled;
+  }
 
   if (body.requireApproval !== undefined) {
     if (!isRequireApproval(body.requireApproval)) {

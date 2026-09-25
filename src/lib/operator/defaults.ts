@@ -133,6 +133,7 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
   supervisorAutoEscalate: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
+  autoTitleInferenceEnabled: boolean; // Optional background inference; code fallback remains available.
   /** Opt-in: replay the repo's test command against a rebased branch in the
    *  merge gate (in addition to typecheck). Default off — tests can be slow. */
   mergeTestReplayEnabled: boolean;
@@ -333,6 +334,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Operator-pinned subscription model; not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
+  autoTitleInferenceEnabled: true,
   mergeTestReplayEnabled: false,
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
@@ -400,6 +402,7 @@ interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partia
   supervisorAutoEscalate?: boolean;
   thinkingEffort?: ThinkingEffort;
   promptCachingEnabled?: boolean;
+  autoTitleInferenceEnabled?: boolean;
   mergeTestReplayEnabled?: boolean;
   requireApproval?: RequireApproval;
   orchestratorModel?: string;
@@ -482,6 +485,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.promptCachingEnabled === 'boolean') {
     result.promptCachingEnabled = stored.promptCachingEnabled;
   }
+  if (typeof stored.autoTitleInferenceEnabled === 'boolean') result.autoTitleInferenceEnabled = stored.autoTitleInferenceEnabled;
   if (typeof stored.mergeTestReplayEnabled === 'boolean') {
     result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
   }
@@ -691,6 +695,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
+    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoTitleInferenceEnabled,
     mergeTestReplayEnabled:
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
@@ -768,6 +773,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
+    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled !== undefined ? 'file' : 'default',
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
@@ -899,6 +905,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   if (update.promptCachingEnabled !== undefined) {
     stored.promptCachingEnabled = Boolean(update.promptCachingEnabled);
   }
+  if (update.autoTitleInferenceEnabled !== undefined) stored.autoTitleInferenceEnabled = Boolean(update.autoTitleInferenceEnabled);
   if (update.mergeTestReplayEnabled !== undefined) {
     stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
   }
@@ -1151,16 +1158,14 @@ export function resolveDefaultWorkerEffortSync(
   });
 }
 
-/** Default worker model ('' = runtime's own default). Applied at the Codex
- *  launch chokepoint so every dispatched worker inherits it; per-mission model
- *  still wins. Set to `ollama:<model>` / `lmstudio:<model>` to dispatch local. */
+/** Default worker model ('' = runtime default) at the Codex launch chokepoint.
+ * Per-mission wins; use `ollama:<model>` or `lmstudio:<model>` for local workers. */
 export function resolveDefaultDispatchModelSync(): string {
   return getOperatorDefaultsSync().values.defaultDispatchModel;
 }
 
-/** Local inference endpoint base URL ('' = use cloud). Read by the Brain
- *  embeddings path to route to a local OpenAI-compatible server (Ollama /
- *  LM Studio). NO trailing /v1 — consumers append the path. */
+/** Local OpenAI-compatible inference base URL ('' = cloud) for Brain embeddings.
+ * No trailing /v1; consumers append paths. */
 export function resolveLocalInferenceBaseUrlSync(): string {
   return getOperatorDefaultsSync().values.localInferenceBaseUrl;
 }
@@ -1191,21 +1196,15 @@ export function resolveCrossHouseWorkerFallbackSync(): boolean {
   return getOperatorDefaultsSync().values.crossHouseWorkerFallback;
 }
 
-/**
- * Which backend drives the in-app Orchestrator. 'auto' means "defer to
- * {@link resolveInAppOrchestratorEnabledSync}" — the registry's
- * `resolveOrchestratorBackendId` applies that fallback so 'auto' is byte-identical
- * to the pre-setting derivation.
- */
+/** In-app orchestrator backend. 'auto' defers to
+ * {@link resolveInAppOrchestratorEnabledSync} through the registry, preserving
+ * the pre-setting derivation. */
 export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
   return getOperatorDefaultsSync().values.orchestratorBackend;
 }
 
-/**
- * The operator's pinned model for the opencode ACP orchestrator, or null to run
- * on whatever the agent boots with. Discovered ids, so no SUPPORTED_MODEL_IDS
- * check — see acp-model-id.ts for why that is shape-only.
- */
+/** Pinned opencode ACP model, or null for its boot model. Discovered ids have
+ * shape-only validation; see acp-model-id.ts. */
 export function resolveOpencodeOrchestratorModelSync(): string | null {
   return getOperatorDefaultsSync().values.opencodeOrchestratorModel;
 }
