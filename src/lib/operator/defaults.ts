@@ -133,6 +133,7 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
   supervisorAutoEscalate: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
+  autoTitleInferenceEnabled: boolean; // Optional background inference; code fallback remains available.
   /** Opt-in: replay the repo's test command against a rebased branch in the
    *  merge gate (in addition to typecheck). Default off — tests can be slow. */
   mergeTestReplayEnabled: boolean;
@@ -333,6 +334,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // Operator-pinned subscription model; not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
+  autoTitleInferenceEnabled: true,
   mergeTestReplayEnabled: false,
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
@@ -400,6 +402,7 @@ interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partia
   supervisorAutoEscalate?: boolean;
   thinkingEffort?: ThinkingEffort;
   promptCachingEnabled?: boolean;
+  autoTitleInferenceEnabled?: boolean;
   mergeTestReplayEnabled?: boolean;
   requireApproval?: RequireApproval;
   orchestratorModel?: string;
@@ -482,6 +485,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.promptCachingEnabled === 'boolean') {
     result.promptCachingEnabled = stored.promptCachingEnabled;
   }
+  if (typeof stored.autoTitleInferenceEnabled === 'boolean') result.autoTitleInferenceEnabled = stored.autoTitleInferenceEnabled;
   if (typeof stored.mergeTestReplayEnabled === 'boolean') {
     result.mergeTestReplayEnabled = stored.mergeTestReplayEnabled;
   }
@@ -691,6 +695,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
+    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled ?? OPERATOR_DEFAULTS_FALLBACK.autoTitleInferenceEnabled,
     mergeTestReplayEnabled:
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
@@ -768,6 +773,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
+    autoTitleInferenceEnabled: fileValues.autoTitleInferenceEnabled !== undefined ? 'file' : 'default',
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
@@ -899,6 +905,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   if (update.promptCachingEnabled !== undefined) {
     stored.promptCachingEnabled = Boolean(update.promptCachingEnabled);
   }
+  if (update.autoTitleInferenceEnabled !== undefined) stored.autoTitleInferenceEnabled = Boolean(update.autoTitleInferenceEnabled);
   if (update.mergeTestReplayEnabled !== undefined) {
     stored.mergeTestReplayEnabled = Boolean(update.mergeTestReplayEnabled);
   }
@@ -1175,21 +1182,13 @@ export function resolveLocalChatModelSync(): string {
   return getOperatorDefaultsSync().values.localChatModel;
 }
 
-export function resolveExperimentalOpencodeSync(): boolean {
-  return getOperatorDefaultsSync().values.experimentalOpencode;
-}
+export function resolveExperimentalOpencodeSync(): boolean { return getOperatorDefaultsSync().values.experimentalOpencode; }
 
-export function resolveInAppOrchestratorEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.inAppOrchestratorEnabled;
-}
+export function resolveInAppOrchestratorEnabledSync(): boolean { return getOperatorDefaultsSync().values.inAppOrchestratorEnabled; }
 
-export function resolveWorkersUseBrainSync(): WorkersUseBrain {
-  return getOperatorDefaultsSync().values.workersUseBrain;
-}
+export function resolveWorkersUseBrainSync(): WorkersUseBrain { return getOperatorDefaultsSync().values.workersUseBrain; }
 
-export function resolveCrossHouseWorkerFallbackSync(): boolean {
-  return getOperatorDefaultsSync().values.crossHouseWorkerFallback;
-}
+export function resolveCrossHouseWorkerFallbackSync(): boolean { return getOperatorDefaultsSync().values.crossHouseWorkerFallback; }
 
 /**
  * Which backend drives the in-app Orchestrator. 'auto' means "defer to
