@@ -10,12 +10,31 @@ process.env.O8_DATA_DIR = dataDir;
 vi.resetModules();
 
 afterEach(() => {
+  vi.restoreAllMocks();
   if (previousDataDir === undefined) delete process.env.O8_DATA_DIR;
   else process.env.O8_DATA_DIR = previousDataDir;
   rmSync(dataDir, { recursive: true, force: true });
 });
 
 describe('dashboard CLI inventory persistence', () => {
+  it('persists the exact live process ID with the terminal binding', async () => {
+    const bindings = await import('./dashboard-cli-bindings');
+    const sessionKey = 'codex:exact-bound-process';
+    vi.spyOn(bindings, 'discoverDashboardCliBindings')
+      .mockResolvedValue(new Map([[sessionKey, 'cortex-dash-exact-bound']]));
+    const { registerDashboardCliBindings } = await import('./dashboard-cli-inventory');
+    const session = {
+      sessionKey, runtimeId: 'codex', displayName: 'Codex', cwd: '/repo',
+      status: 'running', ownership: 'discovered', pid: process.pid,
+      sessionCapabilities: { canSendInput: true, canInterrupt: false, canReviewDiffs: true },
+      lastActivityAt: new Date(),
+    } as RuntimeSession;
+
+    await registerDashboardCliBindings([{ runtime: { id: 'codex' } as AgentRuntime, session }]);
+    const persisted = JSON.parse(readFileSync(path.join(dataDir, 'runtime-terminal-sessions.json'), 'utf8'));
+    expect(persisted[sessionKey]).toMatchObject({ sessionName: 'cortex-dash-exact-bound', pid: process.pid, source: 'dashboard-cli-detected' });
+  });
+
   it('retains the last exact terminal observation after the CLI process exits', async () => {
     const { registerRuntimeTerminalSession, listRecentDashboardCliSessions } = await import('./terminal-session-registry');
     const { projectDashboardCliSession } = await import('./dashboard-cli-inventory');

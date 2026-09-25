@@ -167,8 +167,8 @@ function raiseWedgeCard(lane: Lane, action: WedgeAction): void {
         ? 'Parked lane still waiting on you'
         : 'Lane escalated to you (orchestrator did not respond)',
       description: isReminder
-        ? `Lane "${label}" has been ${action.from} for ${elapsedMin} min with no activity. Resume it, reassign it, or archive it.`
-        : `Lane "${label}" waited ${elapsedMin} min for the orchestrator without a decision and was escalated to you. Steer it, retry it, or archive it.`,
+        ? `Lane "${label}" has been ${action.from} for ${elapsedMin} min with no activity. Inspect its session before deciding how to continue or archive it.`
+        : `Lane "${label}" waited ${elapsedMin} min for the orchestrator without a decision and was escalated to you. Inspect its session before deciding how to continue or archive it.`,
       // Stable per lane+kind so repeat ticks in the same episode dedup on the
       // approval-store fingerprint (belt-and-suspenders on top of edge-trigger).
       summary: `Wedge ${action.kind} on lane ${lane.id}`,

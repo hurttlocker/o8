@@ -202,6 +202,13 @@ export type LaneCommand =
       actor?: LaneEventActor;
     }
   | {
+      /** Explicit operator choice to replace a stopped session with a new run. */
+      verb: 'start_fresh';
+      laneId: string;
+      expectedSessionKey: string | null;
+      actor?: LaneEventActor;
+    }
+  | {
       verb: 'request_review';
       laneId: string;
       actor?: LaneEventActor;
@@ -275,6 +282,7 @@ export type LaneEventVerb =
   | 'status_change'
   | 'update'
   | 'session_lost'
+  | 'terminal_continuation_selected'
   | 'detach_session'
   | 'auto_archive'
   | 'merge_cleanup'

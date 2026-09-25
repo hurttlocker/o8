@@ -82,8 +82,9 @@ const broadcastAutomationSay = await import('@/app/api/broadcast/automation-say/
 const broadcastWhy = await import('@/app/api/broadcast/why/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
 const broadcastTokens = await import('@/app/api/broadcast/tokens/route');
-const { createTestApproval, getApproval, createApproval, listApprovalEvents } = await import('@/lib/approvals/store');
-const { createLane, getLane, updateLane } = await import('@/lib/lane/registry');
+const { createTestApproval, getApproval, createApproval, listApprovalEvents, listApprovalsForContext } = await import('@/lib/approvals/store');
+const { createLane, getLane, getLaneEvents, updateLane } = await import('@/lib/lane/registry');
+const { enforceWedgeTimeouts, WEDGE_AWAITING_ORCHESTRATOR_MS } = await import('@/lib/lane/wedge-timeouts');
 const { registerRuntimeTerminalSession } = await import('@/lib/runtime/terminal-session-registry');
 const runtimeRegistry = await import('@/lib/runtimes/registry');
 const dashboardBindings = await import('@/lib/runtime/dashboard-cli-bindings');
@@ -530,6 +531,126 @@ describe('principal-authz — governed terminal approval adapter', () => {
     return { lane, approval, sessionKey };
   }
 
+  it.each([
+    ['codex', 'codex:'],
+    ['claude-code', 'claude-code:'],
+  ] as const)('records a natural %s wedge choice without sending a turn or launching another run', async (runtimeId, prefix) => {
+    const sessionKey = `${prefix}wedge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const lane = createLane({
+      label: 'Wedge continuation choice',
+      repoPath: process.cwd(),
+      branch: `agent/wedge-${runtimeId}-${sessionKey.slice(-10)}`,
+      runtime: runtimeId,
+      sessionKey,
+      packetId: `packet-wedge-${sessionKey.slice(-10)}`,
+    });
+    const now = Date.now();
+    updateLane(lane.id, {
+      status: 'awaiting_orchestrator',
+      lastEventAt: new Date(now - WEDGE_AWAITING_ORCHESTRATOR_MS - 60_000).toISOString(),
+    }, 'system');
+    expect(enforceWedgeTimeouts(now).some((outcome) => outcome.laneId === lane.id)).toBe(true);
+    const approval = listApprovalsForContext({ laneId: lane.id, sessionKey })
+      .find((item) => item.status === 'pending' && item.continuation?.kind === 'lane' && item.continuation.verb === 'resume');
+    expect(approval).toBeDefined();
+    const tmuxSession = `o8-wedge-${runtimeId}`;
+    registerRuntimeTerminalSession(sessionKey, { runtime: runtimeId, sessionName: tmuxSession, cwd: process.cwd(), source: 'dashboard-cli-detected' });
+    const runtime = runtimeRegistry.getRuntime(runtimeId);
+    expect(runtime).toBeDefined();
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey, runtimeId, status: 'running', ownership: 'discovered', pid: 42,
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings').mockResolvedValue(new Map([[sessionKey, tmuxSession]]));
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval!.id, laneChoice: 'continue_in_terminal', approvalUpdatedAt: approval!.updatedAt },
+    }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.note).toContain('No turn was sent');
+    expect(body.terminalHandoff).toEqual({ sessionKey, tmuxSession, laneId: lane.id });
+    expect(getApproval(approval!.id)).toMatchObject({ status: 'approved', resolution: { continuationStatus: 'completed' } });
+    expect(getLane(lane.id)).toMatchObject({ sessionKey, status: 'awaiting_human' });
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'terminal_continuation_selected')).toBe(true);
+  });
+
+  it('reopens a claimed terminal handoff if the live pane disappears before navigation', async () => {
+    const { lane, approval, sessionKey } = pendingTerminalResume('terminal disappears after claim');
+    const tmuxSession = 'cortex-dash-claim-race';
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex', sessionName: tmuxSession, cwd: process.cwd(), source: 'dashboard-cli-detected',
+    });
+    const runtime = runtimeRegistry.getRuntime('codex');
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey, runtimeId: 'codex', status: 'running', ownership: 'discovered', pid: 42,
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings')
+      .mockResolvedValueOnce(new Map([[sessionKey, tmuxSession]]))
+      .mockResolvedValueOnce(new Map());
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id, laneChoice: 'continue_in_terminal', approvalUpdatedAt: approval.updatedAt },
+    }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('no longer in this terminal pane');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'terminal_continuation_selected')).toBe(false);
+  });
+
+  it('reopens a claimed terminal handoff if the lane rebinds during the second live probe', async () => {
+    const { lane, approval, sessionKey } = pendingTerminalResume('terminal rebinds after claim');
+    const tmuxSession = 'cortex-dash-claim-rebind';
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex', sessionName: tmuxSession, cwd: process.cwd(), source: 'dashboard-cli-detected',
+    });
+    const runtime = runtimeRegistry.getRuntime('codex');
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey, runtimeId: 'codex', status: 'running', ownership: 'discovered', pid: 42,
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings')
+      .mockResolvedValueOnce(new Map([[sessionKey, tmuxSession]]))
+      .mockImplementationOnce(async () => {
+        updateLane(lane.id, { sessionKey: 'codex:replacement' }, 'system');
+        return new Map([[sessionKey, tmuxSession]]);
+      });
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id, laneChoice: 'continue_in_terminal', approvalUpdatedAt: approval.updatedAt },
+    }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('lane or terminal changed');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'terminal_continuation_selected')).toBe(false);
+  });
+
+  it('reopens the approval when its lane rebinds during live terminal validation', async () => {
+    const { lane, approval, sessionKey } = pendingTerminalResume('terminal changed during validation');
+    const tmuxSession = 'cortex-dash-stale-approval';
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex', sessionName: tmuxSession, cwd: process.cwd(), source: 'dashboard-cli-detected',
+    });
+    const runtime = runtimeRegistry.getRuntime('codex');
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey, runtimeId: 'codex', status: 'running', ownership: 'discovered', pid: 42,
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings').mockImplementation(async () => {
+      updateLane(lane.id, { sessionKey: 'codex:new-session' }, 'system');
+      return new Map([[sessionKey, tmuxSession]]);
+    });
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id, laneChoice: 'continue_in_terminal', approvalUpdatedAt: approval.updatedAt },
+    }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('changed');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'terminal_continuation_selected')).toBe(false);
+  });
+
   it('fails closed on a stale or mismatched terminal binding before it claims the persisted approval', async () => {
     const { approval, sessionKey } = pendingTerminalResume('terminal adapter mismatch');
     registerRuntimeTerminalSession(sessionKey, {
@@ -679,6 +800,51 @@ describe('principal-authz — governed terminal approval adapter', () => {
     expect((await response.json()).error).toContain('start another run');
     expect(getApproval(approval.id)?.status).toBe('pending');
     expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toBeUndefined();
+  });
+
+  it('refuses an explicit fresh run while the original CLI is live before claiming approval', async () => {
+    const { approval, sessionKey } = pendingTerminalResume('fresh run live CLI refusal');
+    mockLiveTerminal(sessionKey, 'o8-terminal-fresh-refusal');
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex', sessionName: 'o8-terminal-fresh-refusal', cwd: process.cwd(), source: 'dashboard-cli-detected', pid: process.pid,
+    });
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id, laneChoice: 'start_fresh', approvalUpdatedAt: approval.updatedAt },
+    }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('original CLI process is still live');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(listApprovalEvents(approval.id).find((event) => event.type === 'approved')).toBeUndefined();
+  });
+
+  it('persists a confirmed fresh run only after the prior bound CLI process has exited', async () => {
+    const { lane, approval, sessionKey } = pendingTerminalResume('fresh run stopped CLI');
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex', sessionName: 'cortex-dash-stopped-approval', cwd: process.cwd(), source: 'dashboard-cli-detected', pid: 999_999,
+    });
+    const runtime = runtimeRegistry.getRuntime('codex');
+    expect(runtime).toBeDefined();
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey, runtimeId: 'codex', status: 'idle', ownership: 'discovered',
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    const actions = await import('@/lib/runtime/actions');
+    const launch = vi.spyOn(actions, 'launchRuntimeSurface')
+      .mockResolvedValue({
+        ok: true, runtime: 'codex', surfaceId: 'codex-owned:approved-fresh-run', note: 'Launched.',
+        cwd: process.cwd(), repoPath: process.cwd(), worktree: null, laneId: lane.id,
+      });
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id, laneChoice: 'start_fresh', approvalUpdatedAt: approval.updatedAt },
+    }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).note).toContain('Started a new run');
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(getApproval(approval.id)).toMatchObject({ status: 'approved', resolution: { continuationStatus: 'completed' } });
+    expect(getLane(lane.id)).toMatchObject({ status: 'running', sessionKey: 'codex-owned:approved-fresh-run' });
   });
 
   it.each([
@@ -1233,6 +1399,30 @@ describe('principal-authz — /api/lanes actor comes from the credential, never 
   // route now clamps: only the operator credential may act as 'user'; workers
   // are forced to 'orchestrator', and other principals are refused. Proven
   // through the REAL route handler against a persisted lane and its events.
+  it('lets only the operator request a fresh run through the lane command route', async () => {
+    const lane = createLane({
+      label: 'Fresh run principal gate',
+      repoPath: process.cwd(),
+      branch: `agent/fresh-principal-${Date.now()}`,
+      runtime: 'codex',
+      sessionKey: 'codex:fresh-principal-old',
+      packetId: `packet-fresh-principal-${Date.now()}`,
+    });
+    updateLane(lane.id, { status: 'recovering' }, 'system');
+    const body = { verb: 'start_fresh', laneId: lane.id, expectedSessionKey: lane.sessionKey, actor: 'user' };
+    const worker = await lanes.POST(req('http://localhost:3001/api/lanes', {
+      principal: 'worker', workerToken: mintPacketWorkerToken(lane.packetId!), body,
+    }));
+    expect(worker.status).toBe(403);
+    expect((await worker.json()).error.code).toBe('operator_required');
+    expect(getLane(lane.id)).toMatchObject({ status: 'recovering', sessionKey: lane.sessionKey });
+
+    const operator = await lanes.POST(req('http://localhost:3001/api/lanes', {
+      principal: 'operator', body: { ...body, expectedSessionKey: 'codex:stale' },
+    }));
+    expect(operator.status).toBe(422);
+    expect((await operator.json()).reason).toBe('fresh_run_stale');
+  });
   it('worker token archiving a lane is recorded as orchestrator even when the body claims user', async () => {
     const lanesRoute = await import('@/app/api/lanes/route');
     const { createLane, getLaneEvents } = await import('@/lib/lane/registry');

@@ -260,7 +260,8 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
 
     expect(container.querySelector('[data-terminal-approval-action="approval-terminal-resume"]')).not.toBeNull();
     expect(container.querySelector('[data-tmux-session="tmux-0"]')).not.toBeNull();
-    expect(container.textContent).toContain('A lane resume would start another run.');
+    expect(container.textContent).toContain('Recording that choice sends no turn and starts no new run.');
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Handle here')).toBe(true);
     expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Approve resume')).toBe(false);
     expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Reject')).toBe(true);
     const rawButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Show raw terminal');

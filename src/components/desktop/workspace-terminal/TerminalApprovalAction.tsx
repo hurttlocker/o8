@@ -41,7 +41,8 @@ export function TerminalApprovalAction({
   const [approval, setApproval] = useState<ApprovalRecord | null>(null);
   const [showStructured, setShowStructured] = useState(true);
   const [confirmReject, setConfirmReject] = useState(false);
-  const [busy, setBusy] = useState<'reject' | null>(null);
+  const [confirmContinue, setConfirmContinue] = useState(false);
+  const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
   const [notice, setNotice] = useState('');
 
   const loadApproval = useCallback(async (signal?: AbortSignal) => {
@@ -87,17 +88,18 @@ export function TerminalApprovalAction({
     tmuxSession,
   });
 
-  const resolve = async () => {
+  const resolve = async (action: 'approve' | 'reject') => {
     if (!adapter || busy) return;
-    setBusy('reject');
+    setBusy(action);
     setNotice('Recording the decision…');
     try {
       const response = await fetch('/api/panel/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'reject',
+          action,
           id: adapter.approvalId,
+          ...(action === 'approve' ? { laneChoice: 'continue_in_terminal', approvalUpdatedAt: adapter.approvalUpdatedAt } : {}),
           terminalAdapter: {
             schema: adapter.schema,
             authority: adapter.authority,
@@ -110,8 +112,9 @@ export function TerminalApprovalAction({
       const result = await response.json() as { ok?: boolean; error?: string; note?: string };
       if (!response.ok || !result.ok) throw new Error(result.error ?? result.note ?? 'Decision was not recorded.');
       setApproval(null);
-      setNotice(result.note ?? 'Request rejected.');
+      setNotice(result.note ?? (action === 'approve' ? 'Continue in this terminal.' : 'Request rejected.'));
       setConfirmReject(false);
+      setConfirmContinue(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Decision was not recorded.');
       await loadApproval();
@@ -153,19 +156,31 @@ export function TerminalApprovalAction({
         <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span style={{ flex: 1, minWidth: 180, fontSize: 11, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-secondary)' }}>
             {approval?.description || approval?.summary}
-            <span style={{ display: 'block', marginTop: 3 }}>Continue this live CLI in its terminal. A lane resume would start another run.</span>
+            <span style={{ display: 'block', marginTop: 3 }}>Continue this live CLI here. Recording that choice sends no turn and starts no new run.</span>
           </span>
+          {confirmContinue ? <span style={{ fontSize: 10.5, color: 'var(--t-text-secondary)' }}>Record that you will continue here?</span> : null}
+          <button type="button" disabled={busy !== null} style={{ ...actionStyle, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-brand-orange)', background: 'var(--t-brand-orange)', color: 'var(--t-brand-orange-contrast)' }} onClick={() => {
+            if (!confirmContinue) {
+              setConfirmReject(false);
+              setConfirmContinue(true);
+            } else void resolve('approve');
+          }}>
+            {busy === 'approve' ? 'Recording…' : confirmContinue ? 'Confirm terminal' : 'Handle here'}
+          </button>
           {confirmReject ? (
             <span style={{ fontSize: 10.5, color: 'var(--t-danger)' }}>Reject this request?</span>
           ) : null}
           <button type="button" disabled={busy !== null} style={{ ...actionStyle, border: '1px solid var(--t-danger-border)', background: 'var(--t-danger-soft)', color: 'var(--t-danger)' }} onClick={() => {
-            if (!confirmReject) setConfirmReject(true);
-            else void resolve();
+            if (!confirmReject) {
+              setConfirmContinue(false);
+              setConfirmReject(true);
+            }
+            else void resolve('reject');
           }}>
             {busy === 'reject' ? 'Rejecting…' : confirmReject ? 'Confirm reject' : 'Reject'}
           </button>
-          {confirmReject ? (
-            <button type="button" disabled={busy !== null} style={{ ...actionStyle, border: '1px solid var(--t-divider-subtle)', background: 'transparent', color: 'var(--t-text-secondary)' }} onClick={() => setConfirmReject(false)}>
+          {confirmReject || confirmContinue ? (
+            <button type="button" disabled={busy !== null} style={{ ...actionStyle, border: '1px solid var(--t-divider-subtle)', background: 'transparent', color: 'var(--t-text-secondary)' }} onClick={() => { setConfirmReject(false); setConfirmContinue(false); }}>
               Cancel
             </button>
           ) : null}

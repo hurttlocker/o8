@@ -158,36 +158,49 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
     }, 2500);
   }, []);
 
-  const setApprovalNote = useCallback((id: string, note: string) => {
+  const setApprovalNote = useCallback((id: string, note: string, clearAfterMs = 3000) => {
     setApprovalNoteById((current) => ({ ...current, [id]: note }));
+    if (clearAfterMs === 0) return;
     window.setTimeout(() => {
       setApprovalNoteById((current) => {
+        if (current[id] !== note) return current;
         const next = { ...current };
         delete next[id];
         return next;
       });
-    }, 3000);
+    }, clearAfterMs);
   }, []);
 
-  const resolveApproval = useCallback(async (approval: ApprovalRecord, action: 'approve' | 'reject') => {
+  const resolveApproval = useCallback(async (approval: ApprovalRecord, action: 'approve' | 'reject', laneChoice?: 'continue_in_terminal' | 'start_fresh') => {
     setBusyApproval({ id: approval.id, action });
     setApprovalNote(approval.id, action === 'approve' ? 'Approving...' : 'Rejecting...');
     try {
       const response = await fetch('/api/panel/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, id: approval.id }),
+        body: JSON.stringify({ action, id: approval.id, ...(laneChoice ? { laneChoice, approvalUpdatedAt: approval.updatedAt } : {}) }),
       });
-      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string; note?: string } | null;
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        error?: string;
+        note?: string;
+        terminalHandoff?: { sessionKey: string; tmuxSession: string; laneId: string };
+      } | null;
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.error ?? `Unable to ${action} approval.`);
+      }
+      if (laneChoice === 'continue_in_terminal' && payload?.terminalHandoff) {
+        window.dispatchEvent(new CustomEvent('o8:focus-verified-cli-terminal', {
+          detail: payload.terminalHandoff,
+        }));
       }
       setApprovalNote(approval.id, payload?.note ?? (action === 'approve' ? 'Approved.' : 'Rejected.'));
       fireInvalidation('invalidate', ['approvals', 'all']);
       window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
       await refresh();
     } catch (error) {
-      setApprovalNote(approval.id, error instanceof Error ? error.message : `Unable to ${action} approval.`);
+      const detail = error instanceof Error ? error.message : `Unable to ${action} approval.`;
+      setApprovalNote(approval.id, `Cannot ${laneChoice === 'start_fresh' ? 'start new run' : laneChoice === 'continue_in_terminal' ? 'record terminal choice' : `${action} request`}: ${detail}`, 0);
     } finally {
       setBusyApproval(null);
     }
