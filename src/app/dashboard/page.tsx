@@ -212,6 +212,7 @@ import {
 } from '@/lib/panel/preview';
 import {
   closeTile,
+  collectLeafNodes,
   createDefaultTileLayout,
   createTileContent,
   deserializeTileLayout,
@@ -669,6 +670,17 @@ function DashboardInner() {
   }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
+  const [workspaceGridMode, setWorkspaceGridMode] = useState(false);
+  useEffect(() => {
+    try { setWorkspaceGridMode(window.localStorage.getItem('o8:workspace-grid:v1') === '1'); } catch { /* private storage */ }
+  }, []);
+  const toggleWorkspaceGridMode = useCallback(() => {
+    setWorkspaceGridMode((current) => {
+      const next = !current;
+      try { window.localStorage.setItem('o8:workspace-grid:v1', next ? '1' : '0'); } catch { /* private storage */ }
+      return next;
+    });
+  }, []);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const designMode = useDesignMode();
   // The element grabbed by Design Mode (Cmd+Shift+D click) — shown in a
@@ -850,6 +862,8 @@ function DashboardInner() {
   const simpleSideBySideWorkspaceSplit = tileLayout.root.type === 'split'
     && tileLayout.root.direction === 'vertical'
     && tileLayout.root.children.every((child) => child.type === 'leaf' && child.content.kind === 'terminal');
+  const workspaceLeaves = collectLeafNodes(tileLayout.root);
+  const workspaceGridAvailable = workspaceLeaves.length > 1 && workspaceLeaves.every((leaf) => leaf.content.kind === 'terminal');
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
     // Stacked or nested splits keep the focused pane's tabs in the header.
     if (workspaceActiveMap.size === 1) {
@@ -862,6 +876,10 @@ function DashboardInner() {
     }
     return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false, terminalModeActive: false, activeWorkspaceSurface: false };
   }, [simpleSideBySideWorkspaceSplit, workspaceActiveMap]);
+  const workspaceAddTargetId = workspaceHeaderActive.workspaceId
+    ?? Array.from(workspaceActiveMap.values()).find((workspace) => workspace.activeWorkspaceSurface)?.workspaceId
+    ?? workspaceActiveMap.values().next().value?.workspaceId
+    ?? null;
   const toggleActiveTerminalMode = useCallback(() => {
     const workspaces = Array.from(workspaceActiveMap.values());
     const target = workspaces.find((workspace) => workspace.activeWorkspaceSurface)
@@ -5273,7 +5291,10 @@ function DashboardInner() {
           }}
           headerLabel={workspaceHeaderActive.label}
           headerTabs={workspaceHeaderActive.tabs}
-          workspaceId={workspaceHeaderActive.workspaceId}
+          workspaceId={workspaceAddTargetId}
+          workspaceGridAvailable={workspaceGridAvailable}
+          workspaceGridMode={workspaceGridMode}
+          onToggleWorkspaceGrid={toggleWorkspaceGridMode}
           terminalModeActive={workspaceHeaderActive.terminalModeActive}
           headerActiveTabId={workspaceHeaderActive.tabId}
           finishedTabCount={workspaceHeaderActive.finishedTabCount}
@@ -5364,6 +5385,7 @@ function DashboardInner() {
           >
             <TileContainer
               layout={tileLayout}
+              gridMode={workspaceGridMode}
               activeTileId={activeTileId}
               registry={tileRegistry}
               onActivateTile={setActiveTileId}
