@@ -5856,7 +5856,7 @@ function DashboardInner() {
         onOpenReviewLane={handleOpenReviewLane}
         onOpenAwaitingMerge={handleOpenAwaitingMerge}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        rightColumnWidth={rightPanelRenderWidth}
+        rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
       />
       </div>{/* end center+right column */}
       </div>{/* end main layout */}
