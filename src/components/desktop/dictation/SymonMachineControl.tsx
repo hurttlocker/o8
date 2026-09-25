@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { isTauri } from '@/lib/tauri/bridge';
+import { SIDEBAR_FOOTER_HIT_SIZE } from '../chrome/ChromeButton';
 import {
   DEFAULT_SYMON_MACHINE,
   parseSymonMachineIdentity,
@@ -56,7 +57,7 @@ export function SymonOrbStatusLine() {
   return (
     <button
       type="button"
-        aria-label="Restore Symon voice"
+      aria-label="Restore Symon voice"
       title="Symon is minimized — click to restore"
       onClick={() => setSymonOrbMinimized(false)}
       onMouseEnter={() => setHovered(true)}
@@ -65,11 +66,11 @@ export function SymonOrbStatusLine() {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 22,
-        height: 22,
+        width: SIDEBAR_FOOTER_HIT_SIZE,
+        height: SIDEBAR_FOOTER_HIT_SIZE,
         borderRadius: 6,
         borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
+        background: 'transparent',
         cursor: 'pointer',
         padding: 0,
         transition: 'background 120ms ease',
@@ -78,14 +79,17 @@ export function SymonOrbStatusLine() {
       <span
         aria-hidden
         style={{
-          width: 14,
-          height: 3,
-          borderRadius: 999,
-          background: 'conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
-          opacity: hovered ? 1 : 0.75,
-          transition: 'opacity 120ms ease',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 22,
+          borderRadius: 6,
+          background: hovered ? 'var(--t-hover)' : 'transparent',
         }}
-      />
+      >
+        <span style={{ width: 14, height: 3, borderRadius: 999, background: 'conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)', opacity: hovered ? 1 : 0.75, transition: 'opacity 120ms ease' }} />
+      </span>
     </button>
   );
 }
@@ -416,8 +420,8 @@ export function SymonMachineControl({ placement = 'floating' }: { placement?: 'f
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: placement === 'sidebar' ? 20 : 34,
-          height: placement === 'sidebar' ? 24 : 34,
+          width: placement === 'sidebar' ? SIDEBAR_FOOTER_HIT_SIZE : 34,
+          height: placement === 'sidebar' ? SIDEBAR_FOOTER_HIT_SIZE : 34,
           paddingTop: 0,
           paddingRight: 0,
           paddingBottom: 0,

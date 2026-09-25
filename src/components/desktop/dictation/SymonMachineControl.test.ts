@@ -94,6 +94,8 @@ describe('SymonMachineControl', () => {
     expect(trigger?.parentElement?.style.top).toBe('');
     // No center pane in jsdom — the anchor falls back to the viewport inset.
     expect(trigger?.parentElement?.style.right).toBe('16px');
+    expect(trigger?.style.width).toBe('34px');
+    expect(trigger?.style.height).toBe('34px');
     expect(document.querySelector('select[aria-label="Active Symon machine"]')).toBeNull();
 
     await act(async () => trigger?.click());
@@ -110,6 +112,8 @@ describe('SymonMachineControl', () => {
     expect(trigger?.parentElement?.style.position).toBe('relative');
     expect(trigger?.parentElement?.style.right).toBe('');
     expect(trigger?.parentElement?.style.bottom).toBe('');
+    expect(trigger?.style.width).toBe('44px');
+    expect(trigger?.style.height).toBe('44px');
 
     await act(async () => trigger?.click());
     const dialog = document.querySelector<HTMLElement>('[aria-label="Symon machine control"]');
@@ -251,6 +255,8 @@ describe('SymonMachineControl', () => {
       await act(async () => lineRoot.render(createElement(SymonOrbStatusLine)));
       const restore = lineHost.querySelector<HTMLButtonElement>('button[aria-label="Restore Symon voice"]');
       expect(restore).not.toBeNull();
+      expect(restore?.style.width).toBe('44px');
+      expect(restore?.style.height).toBe('44px');
       await act(async () => restore?.click());
       expect(container.querySelector('button[aria-label^="Symon options:"]')).not.toBeNull();
       expect(lineHost.querySelector('button[aria-label="Restore Symon voice"]')).toBeNull();

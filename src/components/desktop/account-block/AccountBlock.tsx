@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
-import { ChromeButton } from '../chrome/ChromeButton';
+import { ChromeButton, SIDEBAR_FOOTER_HIT_SIZE } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
 import { WhatsNewCard } from './WhatsNewCard';
@@ -46,15 +46,15 @@ function SymonVoiceEntry() {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 26,
-        height: 26,
+        width: SIDEBAR_FOOTER_HIT_SIZE,
+        height: SIDEBAR_FOOTER_HIT_SIZE,
         paddingTop: 0,
         paddingRight: 0,
         paddingBottom: 0,
         paddingLeft: 0,
         borderWidth: 0,
         borderRadius: 7,
-        background: active ? 'var(--t-hover)' : 'transparent',
+        background: 'transparent',
         cursor: 'pointer',
         fontFamily: 'var(--font-sans-system)',
         fontSize: 11.5,
@@ -65,13 +65,25 @@ function SymonVoiceEntry() {
       <span
         aria-hidden="true"
         style={{
-          width: 17,
-          height: 17,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle at 64% 28%, color-mix(in srgb, var(--t-text) 90%, transparent), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
-          boxShadow: active ? '0 0 0 2px var(--t-accent), 0 0 9px rgba(136, 209, 241, 0.45)' : '0 0 9px rgba(136, 209, 241, 0.45)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 26,
+          height: 26,
+          borderRadius: 7,
+          background: active ? 'var(--t-hover)' : 'transparent',
         }}
-      />
+      >
+        <span
+          style={{
+            width: 17,
+            height: 17,
+            borderRadius: '50%',
+            background: 'radial-gradient(circle at 64% 28%, color-mix(in srgb, var(--t-text) 90%, transparent), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
+            boxShadow: active ? '0 0 0 2px var(--t-accent), 0 0 9px rgba(136, 209, 241, 0.45)' : '0 0 9px rgba(136, 209, 241, 0.45)',
+          }}
+        />
+      </span>
     </button>
   );
 }
@@ -299,6 +311,7 @@ export function AccountBlock({
                   label="Pair mobile device"
                   onClick={onOpenMobilePairing}
                   size={22}
+                  hitSize={SIDEBAR_FOOTER_HIT_SIZE}
                   radius={6}
                 />
               </span>
