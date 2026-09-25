@@ -1203,6 +1203,28 @@ function DashboardInner() {
   ]);
   const { rightWidth, setRightWidth, o8Width, setO8Width } = useRightPanelWidths();
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
+  const [o8ActiveTabHydrated, setO8ActiveTabHydrated] = useState(false);
+  const [o8SplitEnabled, setO8SplitEnabled] = useState(false);
+  const [o8SecondaryTab, setO8SecondaryTab] = useState<O8Tab>('spec');
+  const [o8SplitPrefsHydrated, setO8SplitPrefsHydrated] = useState(false);
+  useEffect(() => {
+    try {
+      setO8SplitEnabled(window.localStorage.getItem('o8:right-panel:split') === 'true');
+      const savedTab = normalizeO8ActiveTab(window.localStorage.getItem('o8:right-panel:secondary-tab'));
+      if (savedTab) setO8SecondaryTab(savedTab);
+    } catch { /* ignore */ }
+    setO8SplitPrefsHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (!o8SplitPrefsHydrated) return;
+    try {
+      window.localStorage.setItem('o8:right-panel:split', String(o8SplitEnabled));
+      window.localStorage.setItem('o8:right-panel:secondary-tab', o8SecondaryTab);
+    } catch { /* ignore */ }
+  }, [o8SplitEnabled, o8SecondaryTab, o8SplitPrefsHydrated]);
+  const visibleSecondaryTab = o8SplitEnabled
+    ? (o8SecondaryTab === o8ActiveTab ? (o8ActiveTab === 'browser' ? 'spec' : 'browser') : o8SecondaryTab)
+    : null;
   const [o8ReviewLaneId, setO8ReviewLaneId] = useState<string | null>(null);
   const o8SpecAutoWidenedRef = useRef(false);
   const o8CompareAutoWidenedRef = useRef(false);
@@ -1226,6 +1248,26 @@ function DashboardInner() {
     if (tab !== 'review') setO8ReviewLaneId(null);
     setO8ActiveTab(tab);
   }, [setO8Width]);
+  const handlePrimaryPanelTabChange = useCallback((tab: O8Tab) => {
+    if (o8SplitEnabled && tab === visibleSecondaryTab) setO8SecondaryTab(o8ActiveTab);
+    handleO8TabChange(tab);
+  }, [handleO8TabChange, o8ActiveTab, o8SplitEnabled, visibleSecondaryTab]);
+  const handleSecondaryPanelTabChange = useCallback((tab: O8Tab) => {
+    if (tab === o8ActiveTab) {
+      setO8SecondaryTab(o8ActiveTab);
+      handleO8TabChange(visibleSecondaryTab ?? (o8ActiveTab === 'browser' ? 'spec' : 'browser'));
+      return;
+    }
+    if (tab === 'spec') setO8Width((width) => Math.max(width, O8_SPEC_PANEL_TARGET_WIDTH));
+    if (tab === 'compare') setO8Width((width) => Math.max(width, O8_COMPARE_PANEL_TARGET_WIDTH));
+    setO8SecondaryTab(tab);
+  }, [handleO8TabChange, o8ActiveTab, setO8Width, visibleSecondaryTab]);
+  const toggleO8PanelSplit = useCallback(() => {
+    if (!o8SplitEnabled && o8SecondaryTab === o8ActiveTab) {
+      setO8SecondaryTab(o8ActiveTab === 'browser' ? 'spec' : 'browser');
+    }
+    setO8SplitEnabled((enabled) => !enabled);
+  }, [o8ActiveTab, o8SecondaryTab, o8SplitEnabled]);
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
@@ -1281,10 +1323,12 @@ function DashboardInner() {
         window.localStorage.setItem(O8_ACTIVE_TAB_STORAGE_KEY, migrated);
       }
     } catch { /* ignore */ }
+    finally { setO8ActiveTabHydrated(true); }
   }, []);
   useEffect(() => {
+    if (!o8ActiveTabHydrated) return;
     try { window.localStorage.setItem(O8_ACTIVE_TAB_STORAGE_KEY, o8ActiveTab); } catch { /* ignore */ }
-  }, [o8ActiveTab]);
+  }, [o8ActiveTab, o8ActiveTabHydrated]);
 
   const [latestDispatchedTabId, setLatestDispatchedTabId] = useState<string | null>(null);
   const [latestDispatchedAt, setLatestDispatchedAt] = useState<number | null>(null);
@@ -5487,11 +5531,13 @@ function DashboardInner() {
                 workspacePanelVisible={rightPanelKind === 'review'}
                 onToggleO8Panel={handleToggleO8Panel}
                 o8ActiveTab={o8ActiveTab}
-                onO8TabChange={rightPanelKind === 'o8' ? handleO8TabChange : undefined}
+                onO8TabChange={rightPanelKind === 'o8' ? handlePrimaryPanelTabChange : undefined}
+                splitEnabled={o8SplitEnabled}
+                onToggleSplit={rightPanelKind === 'o8' ? toggleO8PanelSplit : undefined}
                 approvalCount={approvalCount}
                 onOpenInbox={handleOpenInbox}
                 browserTabsSlotRef={setBrowserHeaderTabSlot}
-                showBrowserTabs={rightPanelKind === 'o8' && (o8ActiveTab === 'browser' || Boolean(o8BrowserHoverUrl))}
+                showBrowserTabs={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
               />
                 {mountedRightPanels.o8 && (
                   <motion.div
@@ -5532,7 +5578,9 @@ function DashboardInner() {
                           onSelectAllRepos={handleSelectO8AllRepos}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
-                          onActiveTabChange={handleO8TabChange}
+                          onActiveTabChange={handlePrimaryPanelTabChange}
+                          secondaryTab={visibleSecondaryTab}
+                          onSecondaryTabChange={handleSecondaryPanelTabChange}
                           selectedFile={scopedO8SelectedFile}
                           reviewLaneId={o8ReviewLaneId}
                           onSelectedFileChange={handleO8SelectedFileChange}
