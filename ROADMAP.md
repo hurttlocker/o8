@@ -16,9 +16,9 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 
 ## Now
 
-The effort-compatibility fixes found by [#2520](https://github.com/hurttlocker/o8/issues/2520) shipped in version 0.1.761. The remaining inference-consumption repair is [#2531](https://github.com/hurttlocker/o8/issues/2531), found by the audit [#2522](https://github.com/hurttlocker/o8/issues/2522).
+The effort-compatibility fixes found by [#2520](https://github.com/hurttlocker/o8/issues/2520) shipped in version 0.1.761. The remaining inference-consumption repair found by the audit [#2522](https://github.com/hurttlocker/o8/issues/2522) has merged and awaits the next release.
 
-After that batch, run the correctness and reliability queue: mobile approval-route parity [#2479](https://github.com/hurttlocker/o8/issues/2479) and its completed-merge equality test [#2480](https://github.com/hurttlocker/o8/issues/2480), remaining dispatch and lifecycle findings, then the dedicated Symon review [#2534](https://github.com/hurttlocker/o8/issues/2534). That review is queued, not claimed or started. Its scope is existing session, payer, model, tool-result, interruption, reconnect, and approval behavior; feature work stays in its separate program.
+Mobile approval-route parity and its completed-merge equality test have merged and await release. The next correctness and reliability queue is the remaining dispatch and lifecycle findings, then the dedicated Symon review [#2534](https://github.com/hurttlocker/o8/issues/2534). That review is queued, not claimed or started. Its scope is existing session, payer, model, tool-result, interruption, reconnect, and approval behavior; feature work stays in its separate program.
 
 The typed judgment program measures and replays recorded answers before it adds a surface or promotes one. The replay labels shipped in 0.1.760; recorded labels do not establish a promotion decision. Managed judgment is a separately gated hosted-service change, and the bring-your-own-key path remains the current free path. [#2481](https://github.com/hurttlocker/o8/issues/2481)
 
