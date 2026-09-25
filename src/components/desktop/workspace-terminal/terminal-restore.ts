@@ -649,6 +649,7 @@ export function shouldSkipRestoreKeyChange(
 export function canPreserveScopedTabs(
   currentTabs: TerminalTab[],
   nextPreferredRepoPath: string | null,
+  isRepoHydration = false,
 ): boolean {
   if (currentTabs.length === 0) return false;
   const hasOrchestratedTabs = currentTabs.some((tab) => Boolean(tab.orchestrationPacket));
@@ -676,6 +677,15 @@ export function canPreserveScopedTabs(
   ));
   if (hasLiveOrchestratorTabs) return true;
   if (!nextPreferredRepoPath) return false;
+  // A restored global shell may acquire its first preferred repo only after
+  // the repo registry hydrates. Keep its tmux attachment across that startup
+  // scope change, while a deliberate switch between known repos still loads
+  // the destination workspace.
+  if (
+    isRepoHydration
+    && currentTabs.some((tab) => tab.kind === 'terminal' && Boolean(tab.tmuxSession) && !tab.repo?.localPath)
+    && currentTabs.every((tab) => !tab.repo?.localPath || tab.repo.localPath === nextPreferredRepoPath)
+  ) return true;
   return (
     currentTabs.some((tab) => tab.repo?.localPath === nextPreferredRepoPath)
     && currentTabs.every((tab) => !tab.repo?.localPath || tab.repo.localPath === nextPreferredRepoPath)

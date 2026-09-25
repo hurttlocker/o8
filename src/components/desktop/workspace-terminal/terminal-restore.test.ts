@@ -72,6 +72,14 @@ describe('canPreserveScopedTabs — orchestrator conversations survive repo-scop
     expect(canPreserveScopedTabs([], '/repo')).toBe(false);
     expect(canPreserveScopedTabs([tab({ kind: 'chat' })], '/repo')).toBe(true);
   });
+
+  it('preserves live global shells only during initial repo hydration', () => {
+    const shell = tab({ tmuxSession: 'cortex-dash-live' });
+    expect(canPreserveScopedTabs([shell], '/repo', true)).toBe(true);
+    expect(canPreserveScopedTabs([shell], '/repo', false)).toBe(false);
+    expect(canPreserveScopedTabs([tab({ tmuxSession: null })], '/repo', true)).toBe(false);
+    expect(canPreserveScopedTabs([shell, tab({ repo: { name: 'other', localPath: '/other' } })], '/repo', true)).toBe(false);
+  });
 });
 
 describe('mergeUserSpawnedTabs — restore landing never eats an in-flight user spawn', () => {
