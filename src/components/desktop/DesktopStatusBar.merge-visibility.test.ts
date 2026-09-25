@@ -49,7 +49,6 @@ async function renderStatusBar() {
     root?.render(createElement(DesktopStatusBar, {
       branchName: 'feature',
       repoName: 'project',
-      onToggleBottomPanel: vi.fn(),
     }));
   });
   await act(async () => {
@@ -63,7 +62,7 @@ describe('bottom chrome merge visibility', () => {
     expect(host?.textContent).not.toContain('escalated');
     expect(host?.textContent).not.toContain('Review merge');
     expect(host?.textContent).not.toContain('Merge PR');
-    expect(host?.querySelector('[aria-label="Toggle bottom panel"]')).not.toBeNull();
+    expect(host?.querySelector('[aria-label="Toggle bottom panel"]')).toBeNull();
   });
 
   it('keeps merge widgets out of the active composer row', async () => {
@@ -82,7 +81,7 @@ describe('bottom chrome merge visibility', () => {
       expect(slot.textContent).not.toContain('escalated');
       expect(slot.textContent).not.toContain('Review merge');
       expect(slot.textContent).not.toContain('Merge PR');
-      expect(slot.querySelector('[aria-label="Toggle bottom panel"]')).not.toBeNull();
+      expect(slot.querySelector('[aria-label="Toggle bottom panel"]')).toBeNull();
     } finally {
       composer.remove();
     }

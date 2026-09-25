@@ -1,8 +1,9 @@
 'use client';
 
 import type React from 'react';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TileHeader } from '@/components/desktop/TileHeader';
+import { HeaderPlayButton } from '@/components/desktop/shell/HeaderPlayButton';
 import {
   collectLeafNodes,
   computeTileLayout,
@@ -15,6 +16,7 @@ import type {
   TileLayout,
   TileSplitDirection,
 } from '@/lib/tiles/types';
+import { WORKSPACE_TAB_DRAG_TYPE, workspaceTabDropZone, type WorkspaceTabDragKind, type WorkspaceTabDropZone } from '@/lib/tiles/workspace-tab-drag';
 
 export interface TileContentRenderProps<TContent extends TileContent = TileContent> {
   active: boolean;
@@ -37,12 +39,13 @@ export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>
 
 interface TileContainerProps {
   activeTileId: string | null;
+  gridMode?: boolean;
   layout: TileLayout;
   registry: TileContentRegistry;
   onActivateTile: (tileId: string) => void;
   onCloseTile: (tileId: string) => void;
   onResizeSplit: (splitId: string, ratio: number) => void;
-  onSplitTile: (tileId: string, direction: TileSplitDirection) => void;
+  onSplitTile: (tileId: string, direction: TileSplitDirection, initialTab?: WorkspaceTabDragKind, placeBefore?: boolean) => void;
 }
 
 const HANDLE_SIZE = 8;
@@ -67,6 +70,7 @@ const LEAF_RADIUS = 14;
  */
 export function TileContainer({
   activeTileId,
+  gridMode = false,
   layout,
   registry,
   onActivateTile,
@@ -75,6 +79,13 @@ export function TileContainer({
   onSplitTile,
 }: TileContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
+
+  useEffect(() => {
+    const clearDropPreview = () => setTabDrop(null);
+    window.addEventListener('dragend', clearDropPreview);
+    return () => window.removeEventListener('dragend', clearDropPreview);
+  }, []);
 
   const { leaves, leafRects, splitFrames } = useMemo(() => {
     const { leafRects, splitFrames } = computeTileLayout(layout.root);
@@ -83,6 +94,7 @@ export function TileContainer({
   }, [layout.root]);
 
   const totalLeaves = leaves.length;
+  const showGrid = gridMode && totalLeaves > 1 && leaves.every((leaf) => leaf.content.kind === 'terminal');
 
   const makeResizeStart = useCallback(
     (splitId: string, direction: TileSplitDirection, containerRect: TileRect) =>
@@ -125,24 +137,35 @@ export function TileContainer({
   return (
     <div
       ref={containerRef}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setTabDrop(null);
+      }}
       // Paint anchor for the pre-ship boot gate: the workspace subtree only
       // carries this once TileContainer actually renders, so a white-screen /
       // empty render can't report healthy. See DashboardHydrationMarker.
       data-o8-workspace="1"
+      data-pane-layout={showGrid ? 'grid' : 'split'}
       style={{
         position: 'relative',
+        display: showGrid ? 'grid' : 'block',
+        gridTemplateColumns: showGrid ? 'repeat(auto-fit, minmax(min(560px, 100%), 1fr))' : undefined,
+        gridAutoRows: showGrid ? (totalLeaves === 2 ? 'minmax(360px, 1fr)' : 'minmax(360px, 55vh)') : undefined,
+        alignContent: showGrid ? 'start' : undefined,
+        gap: showGrid ? LEAF_GAP : undefined,
+        padding: showGrid ? LEAF_GAP : undefined,
         flexGrow: 1,
         flexShrink: 1,
         flexBasis: '0%',
         minWidth: 0,
         minHeight: 0,
-        overflow: 'hidden',
+        overflowX: 'hidden',
+        overflowY: showGrid ? 'auto' : 'hidden',
         // Transparent so the dashboard chrome shows through any unclaimed
         // pixels (e.g. the hair-width handle strip between two leaves).
         backgroundColor: 'transparent',
       }}
     >
-      {leaves.map((leaf) => {
+      {leaves.map((leaf, index) => {
         const rect = leafRects.get(leaf.id);
         if (!rect) return null;
         const definition = registry[leaf.content.kind];
@@ -171,16 +194,41 @@ export function TileContainer({
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
             onMouseDown={() => onActivateTile(leaf.id)}
+            onDragOver={(event) => {
+              if (leaf.content.kind !== 'terminal' || !Array.from(event.dataTransfer.types).includes(WORKSPACE_TAB_DRAG_TYPE)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = 'copy';
+              const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
+              setTabDrop((current) => current?.tileId === leaf.id && current.zone === zone
+                ? current : { tileId: leaf.id, zone });
+            }}
+            onDropCapture={(event) => {
+              if (leaf.content.kind !== 'terminal') return;
+              const kind = event.dataTransfer.getData(WORKSPACE_TAB_DRAG_TYPE);
+              if (kind !== 'chat' && kind !== 'terminal') return;
+              event.preventDefault();
+              event.stopPropagation();
+              setTabDrop(null);
+              const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
+              if (zone === 'center') {
+                window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', {
+                  detail: { kind: kind === 'chat' ? 'orchestrator' : 'terminal', tileId: leaf.id },
+                }));
+                return;
+              }
+              onSplitTile(leaf.id, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above');
+            }}
             style={{
-              position: 'absolute',
-              left: `${rect.left * 100}%`,
-              top: `${rect.top * 100}%`,
-              width: `${rect.width * 100}%`,
-              height: `${rect.height * 100}%`,
-              paddingLeft: padLeft,
-              paddingRight: padRight,
-              paddingTop: padTop,
-              paddingBottom: padBottom,
+              position: showGrid ? 'relative' : 'absolute',
+              left: showGrid ? undefined : `${rect.left * 100}%`,
+              top: showGrid ? undefined : `${rect.top * 100}%`,
+              width: showGrid ? '100%' : `${rect.width * 100}%`,
+              height: showGrid ? '100%' : `${rect.height * 100}%`,
+              paddingLeft: showGrid ? 0 : padLeft,
+              paddingRight: showGrid ? 0 : padRight,
+              paddingTop: showGrid ? 0 : padTop,
+              paddingBottom: showGrid ? 0 : padBottom,
               boxSizing: 'border-box',
               backgroundColor: 'transparent',
             }}
@@ -192,14 +240,28 @@ export function TileContainer({
                 width: '100%',
                 height: '100%',
                 overflow: 'hidden',
-                borderTopLeftRadius: radiusTL,
-                borderTopRightRadius: radiusTR,
-                borderBottomLeftRadius: radiusBL,
-                borderBottomRightRadius: radiusBR,
+                borderTopLeftRadius: showGrid ? LEAF_RADIUS : radiusTL,
+                borderTopRightRadius: showGrid ? LEAF_RADIUS : radiusTR,
+                borderBottomLeftRadius: showGrid ? LEAF_RADIUS : radiusBL,
+                borderBottomRightRadius: showGrid ? LEAF_RADIUS : radiusBR,
                 backgroundColor: 'var(--t-bg, transparent)',
               }}
             >
-              {!definition?.hideHeader && (
+              {showGrid ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, minHeight: 34, paddingLeft: 12, paddingRight: 8, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-secondary)', fontSize: 11, fontFamily: 'var(--font-sans-system)' }}>
+                  <span style={{ flex: 1, minWidth: 0, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)' }}>Pane {index + 1}</span>
+                  <HeaderPlayButton
+                    ariaSuffix={`pane ${index + 1}`}
+                    gridMode
+                    onSpawnChat={() => window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind: 'orchestrator', tileId: leaf.id } }))}
+                    onSpawnTerminal={() => window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind: 'terminal', tileId: leaf.id } }))}
+                    onSplitTab={(kind, direction) => onSplitTile(leaf.id, direction === 'right' ? 'vertical' : 'horizontal', kind)}
+                  />
+                  <button type="button" aria-label={`Close pane ${index + 1}`} title="Close pane" onClick={() => onCloseTile(leaf.id)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}>
+                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden><path d="M5 5l14 14M19 5 5 19" /></svg>
+                  </button>
+                </div>
+              ) : !definition?.hideHeader && (
                 <TileHeader
                   label={definition?.label ?? 'Tile'}
                   active={isActive}
@@ -227,12 +289,31 @@ export function TileContainer({
                   tileId: leaf.id,
                 }) : null}
               </div>
+              {tabDrop?.tileId === leaf.id ? (
+                <div aria-hidden style={{
+                  position: 'absolute',
+                  left: tabDrop.zone === 'right' ? '55%' : 0,
+                  top: tabDrop.zone === 'below' ? '55%' : 0,
+                  width: tabDrop.zone === 'left' ? '45%' : tabDrop.zone === 'right' ? '45%' : '100%',
+                  height: tabDrop.zone === 'above' ? '45%' : tabDrop.zone === 'below' ? '45%' : '100%',
+                  background: 'color-mix(in srgb, var(--t-accent) 13%, transparent)',
+                  boxShadow: 'inset 0 0 0 1px var(--t-accent)',
+                  borderRadius: 12,
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--t-text)',
+                  fontSize: 13,
+                  zIndex: 20,
+                }}>Open {tabDrop.zone === 'center' ? 'in this pane' : tabDrop.zone === 'above' ? 'above' : tabDrop.zone}</div>
+              ) : null}
             </div>
           </div>
         );
       })}
 
-      {splitFrames.map((frame) => (
+      {!showGrid && splitFrames.map((frame) => (
         <ResizeHandle
           key={frame.id}
           frame={frame}

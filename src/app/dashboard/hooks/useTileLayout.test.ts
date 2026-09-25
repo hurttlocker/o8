@@ -108,7 +108,7 @@ function LayoutRestoreHarness({
 }: {
   onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
   onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
-  onSplitTile?: (split: (tileId: string) => void) => void;
+  onSplitTile?: (split: (tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal') => void) => void;
   onResizeSplit?: (resize: (splitId: string, ratio: number) => void) => void;
   onUnverifiedIds?: (ids: ReadonlySet<string>) => void;
   registeredRepos: RepoRegistryEntry[];
@@ -153,7 +153,7 @@ function LayoutRestoreHarness({
   }, [onReplaceLayout]);
 
   useEffect(() => {
-    onSplitTile?.((tileId) => handleSplitTile(tileId, 'horizontal'));
+    onSplitTile?.((tileId, direction = 'horizontal', initialTab) => handleSplitTile(tileId, direction, initialTab));
   }, [onSplitTile, handleSplitTile]);
 
   useEffect(() => {
@@ -209,6 +209,28 @@ describe('useTileLayout browser-origin restore', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('places the requested chat or terminal in a newly split workspace pane', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ repos: [], validatedRestorePaths: [] })));
+    let latestLayout = createDefaultTileLayout();
+    let splitTile: ((tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal') => void) | null = null;
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout: (layout) => { latestLayout = layout; },
+      onSplitTile: (split) => { splitTile = split; },
+      registeredRepos: [],
+    })));
+    await act(async () => splitTile?.('tile-root', 'horizontal', 'chat'));
+    expect(latestLayout.root).toMatchObject({
+      type: 'split',
+      direction: 'horizontal',
+      children: [{ content: { kind: 'terminal' } }, { content: { kind: 'terminal', initialTab: 'chat' } }],
+    });
+    const chatPaneId = latestLayout.root.type === 'split' ? latestLayout.root.children[1].id : '';
+    await act(async () => splitTile?.(chatPaneId, 'vertical', 'terminal'));
+    expect(collectLeafNodes(latestLayout.root).map((leaf) => leaf.content)).toContainEqual(expect.objectContaining({
+      kind: 'terminal', initialTab: 'terminal',
+    }));
   });
 
   it('keeps the real registry consumer blocked from the first hydrated render through an unresolved split', async () => {

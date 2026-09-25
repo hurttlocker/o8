@@ -368,8 +368,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 
-  // Auto-title (2026-07-13): once the thread has a real exchange, a free
-  // model names it properly — fire-and-forget, never blocks the persist.
+  // Once the thread has a real exchange, queue optional model titling with a
+  // deterministic code fallback. This never blocks the history save.
   if (consumed.messages.length >= 2) maybeQueueThreadAutoTitle(filePath);
 
   return NextResponse.json({ ok: true });

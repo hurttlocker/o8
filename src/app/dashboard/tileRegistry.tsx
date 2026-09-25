@@ -100,7 +100,7 @@ export interface TileRegistryDeps {
   handleSelectCommit: (hash: string, meta?: Record<string, string>) => void;
   handleSelectPreviewTile: (tileId: string, previewId: string) => void;
   handleSelectRegisteredRepo: (repoId: string) => Promise<void>;
-  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal') => void;
+  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'chat' | 'terminal', placeBefore?: boolean) => void;
   handleThoughtsMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -344,8 +344,8 @@ export function createTileRegistry({
             ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
             stateScope={tileId}
             activeWorkspaceSurface={activeTileId === tileId}
-            defaultTab={isPrimaryWorkspaceTile ? 'llm-chat' : 'terminal'}
-            autoCreateDefaultTab={isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0}
+            defaultTab={isPrimaryWorkspaceTile || (content.kind === 'terminal' && content.initialTab === 'chat') ? 'llm-chat' : 'terminal'}
+            autoCreateDefaultTab={isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0 || (content.kind === 'terminal' && Boolean(content.initialTab))}
             conversationNavigation={isPrimaryWorkspaceTile ? 'sidebar' : 'tabs'}
             preferredRepo={tilePreferredRepo}
             selectedRepo={workspaceTerminalPreferredRepo}
@@ -441,8 +441,8 @@ export function createTileRegistry({
             onInjectChatContext={handleAgentPanelChatInjection}
             onSelectCommit={handleSelectCommit}
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-            onSplitVertical={() => handleSplitTile(tileId, 'vertical')}
-            onSplitHorizontal={() => handleSplitTile(tileId, 'horizontal')}
+            onSplitVertical={(initialTab) => handleSplitTile(tileId, 'vertical', initialTab)}
+            onSplitHorizontal={(initialTab) => handleSplitTile(tileId, 'horizontal', initialTab)}
             onCloseTile={() => handleCloseTile(tileId)}
             sendTerminalCreate={sendTerminalCreate}
             sendTerminalAttach={sendTerminalAttach}

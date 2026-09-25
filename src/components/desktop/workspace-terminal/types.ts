@@ -282,8 +282,8 @@ export interface WorkspaceTerminalProps {
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
-  onSplitVertical?: () => void;
-  onSplitHorizontal?: () => void;
+  onSplitVertical?: (initialTab?: 'chat' | 'terminal') => void;
+  onSplitHorizontal?: (initialTab?: 'chat' | 'terminal') => void;
   canCloseTile?: boolean;
   onCloseTile?: () => void;
   conversationNavigation?: 'tabs' | 'sidebar';

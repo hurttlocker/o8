@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { deserializeTileLayout } from './operations';
+import { createDefaultTileLayout, deserializeTileLayout, serializeTileLayout, splitTile } from './operations';
 
 const leaf = (id: string, kind: string) => ({ type: 'leaf', id, content: { kind } });
 const split = (id: string, children: unknown[]) => ({
@@ -64,5 +64,34 @@ describe('deserializeTileLayout — stale split collapse', () => {
   it('a plain single terminal leaf passes through untouched', () => {
     const layout = deserializeTileLayout(serialize(leaf('root', 'terminal')));
     expect(layout?.root.type).toBe('leaf');
+  });
+
+  it('keeps a deliberate chat pane and its initial tab after saving and loading', () => {
+    const initial = createDefaultTileLayout();
+    const result = splitTile(initial.root, 'tile-root', 'horizontal', {
+      kind: 'terminal', repoPath: null, createdFromSplit: true, initialTab: 'chat',
+    });
+    const restored = deserializeTileLayout(serializeTileLayout({ ...initial, root: result.root }));
+    expect(restored?.root.type).toBe('split');
+    if (restored?.root.type === 'split') {
+      expect(restored.root.children[1].type).toBe('leaf');
+      if (restored.root.children[1].type === 'leaf') {
+        expect(restored.root.children[1].content).toMatchObject({
+          kind: 'terminal', createdFromSplit: true, initialTab: 'chat',
+        });
+      }
+    }
+  });
+
+  it('places a dropped terminal before its target on left or above drops', () => {
+    const initial = createDefaultTileLayout();
+    const result = splitTile(initial.root, 'tile-root', 'vertical', {
+      kind: 'terminal', createdFromSplit: true, initialTab: 'terminal',
+    }, 0.5, true);
+    expect(result.root.type).toBe('split');
+    if (result.root.type === 'split') {
+      expect(result.root.children[0].id).toBe(result.newTileId);
+      expect(result.root.children[1].id).toBe('tile-root');
+    }
   });
 });

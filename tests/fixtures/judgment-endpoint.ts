@@ -61,6 +61,11 @@ export async function startJudgmentEndpointFixture(): Promise<JudgmentEndpointFi
   };
   const server: Server = createServer(async (request, response) => {
     const raw = await readBody(request);
+    if (!raw.trim()) {
+      response.writeHead(400, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ detail: { error_type: 'empty_request' } }));
+      return;
+    }
     fixture.seen.push({
       method: request.method,
       url: request.url,
@@ -79,7 +84,6 @@ export async function startJudgmentEndpointFixture(): Promise<JudgmentEndpointFi
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   fixture.endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/systemone`;
   fixture.close = () => new Promise<void>((resolve) => {
-    server.closeAllConnections();
     server.close(() => resolve());
   });
   return fixture;

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
+import { realpathSync } from 'node:fs';
+import path, { parse } from 'node:path';
 
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
@@ -108,12 +109,22 @@ function gitOutput(args: string[]): string {
   }
 }
 
+function normalizeRepoPath(value: string): string {
+  const absolute = path.resolve(value);
+  try {
+    const canonical = realpathSync.native(absolute);
+    return canonical === parse(canonical).root ? canonical : canonical.replace(/[\\/]+$/, '');
+  } catch {
+    return absolute === parse(absolute).root ? absolute : absolute.replace(/[\\/]+$/, '');
+  }
+}
+
 function repoContext(explicitRepo: string | null): { repo: string; worktreePath: string } {
-  const worktreePath = explicitRepo ? path.resolve(explicitRepo) : gitOutput(['rev-parse', '--show-toplevel']);
+  const worktreePath = normalizeRepoPath(explicitRepo ?? gitOutput(['rev-parse', '--show-toplevel']));
   if (explicitRepo) return { repo: worktreePath, worktreePath };
   const commonDir = gitOutput(['rev-parse', '--path-format=absolute', '--git-common-dir']);
   return {
-    repo: path.basename(commonDir) === '.git' ? path.dirname(commonDir) : worktreePath,
+    repo: normalizeRepoPath(path.basename(commonDir) === '.git' ? path.dirname(commonDir) : worktreePath),
     worktreePath,
   };
 }

@@ -11,6 +11,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type React from 'react';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8HandoffsPane } from './O8HandoffsPane';
+import { useHandoffSelection } from './o8-panel/useHandoffSelection';
 import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
@@ -34,8 +35,6 @@ import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityL
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
-// O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
-
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
 interface O8PanelProps {
@@ -151,6 +150,7 @@ export function O8Panel({
   // in one call instead of snapshot/click-hunting. Cleared whenever the parent
   // drives its own navigation so the prop is never shadowed by a stale value.
   const [pendingBrowserNavigation, setPendingBrowserNavigation] = useState<{ baseUrl: string | null | undefined; url: string } | null>(null);
+  const handoffSelection = useHandoffSelection(repoPath, onRepoPathChange, onActiveTabChange, orchestratorData?.onOpenO8Panel);
   const pendingBrowserUrl = pendingBrowserNavigation?.baseUrl === browserUrl ? pendingBrowserNavigation?.url ?? null : null;
   // The shared O8RepoSelector in the workspace header owns repo switching now,
   // so hide ReviewPanel's built-in dropdown: a single-entry list trips its own
@@ -523,6 +523,7 @@ export function O8Panel({
           registeredRepos={registeredRepos}
           allRepos={allRepos ?? false}
           onRepoPathChange={onRepoPathChange}
+          selection={handoffSelection}
         />
       </div>
       {/* Inbox (Incident Queue) now renders through the closeable utility strip

@@ -3,6 +3,7 @@
 import type { AgentMessage } from '@/lib/agents/types';
 
 function status(message: AgentMessage): string {
+  if (message.to === 'operator') return 'Answered';
   if (message.delivery === 'poll') return 'Waiting in inbox';
   if (message.delivery === 'failed') return 'Live delivery failed';
   if (message.deliveryNote?.startsWith('Read from the durable inbox')) return 'Retrieved from inbox';
@@ -12,6 +13,7 @@ function status(message: AgentMessage): string {
 export function AgentPeerMessageCard({ message, selfName }: { message: AgentMessage; selfName: string }) {
   const incoming = message.to.toLocaleLowerCase() === selfName.toLocaleLowerCase();
   const counterpart = incoming ? message.from : message.to;
+  const conversationId = message.conversation?.id;
   return (
     <article data-agent-peer-message-id={message.id} style={{ width: '100%', maxWidth: 'min(540px, 100%)', alignSelf: incoming ? 'flex-start' : 'flex-end', paddingTop: 11, paddingRight: 13, paddingBottom: 11, paddingLeft: 13, border: '1px solid var(--t-divider)', borderRadius: 12, background: incoming ? 'var(--t-input-bg)' : 'var(--t-panel)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
@@ -26,7 +28,10 @@ export function AgentPeerMessageCard({ message, selfName }: { message: AgentMess
         </span>
       </div>
       <div style={{ marginTop: 8, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12.5, lineHeight: 1.5 }}>{message.text}</div>
-      <div title={message.deliveryNote ?? undefined} style={{ marginTop: 9, color: message.delivery === 'failed' ? 'var(--t-danger)' : 'var(--t-text-faint)', fontSize: 10 }}>{status(message)} · {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9 }}>
+        <span title={message.deliveryNote ?? undefined} style={{ flex: 1, color: message.delivery === 'failed' ? 'var(--t-danger)' : 'var(--t-text-faint)', fontSize: 10 }}>{status(message)} · {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('o8:open-handoffs', { detail: { conversationId: conversationId ?? null, repoPath: message.repo } }))} style={{ minHeight: 30, paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, border: '1px solid var(--t-divider)', borderRadius: 7, background: 'transparent', color: 'var(--t-accent)', fontSize: 10.5, cursor: 'pointer' }}>{conversationId ? 'Open conversation' : 'Open Handoffs'}</button>
+      </div>
     </article>
   );
 }
