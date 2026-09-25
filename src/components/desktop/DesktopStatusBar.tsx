@@ -26,7 +26,7 @@ interface DesktopStatusBarProps {
   /** Width of the left AgentPanel column, in CSS px. */
   leftColumnWidth?: number;
   /** Width of the right panel column when visible, in CSS px. */
-  rightColumnWidth?: number | string;
+  rightColumnWidth?: number;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
   compact?: boolean;
   /** Glass surface active: leave the left utility rail transparent. */
