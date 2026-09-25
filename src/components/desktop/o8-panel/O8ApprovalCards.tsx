@@ -290,8 +290,8 @@ function ApprovalRequestCard({
           {confirmChoice === 'start_fresh'
             ? 'Confirm a separate CLI process. o8 checks the original process and session first. Do not restart that CLI elsewhere while this runs.'
             : confirmChoice === 'continue_in_terminal'
-              ? 'Confirm you will continue in the original terminal. This records your choice without sending a turn.'
-              : 'Choose how to continue. A new run does not continue the original CLI process.'}
+              ? 'Confirm to open the verified original terminal. You enter the next message there; o8 does not send a turn.'
+              : 'Open the original terminal to continue manually, or start a separate run after the original stops.'}
         </div>
       ) : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
@@ -312,7 +312,7 @@ function ApprovalRequestCard({
               action="approve"
               busy={busyAction === 'approve'}
               disabled={disabled}
-              label={confirmChoice === 'continue_in_terminal' ? 'Confirm terminal' : 'Handle in terminal'}
+              label={confirmChoice === 'continue_in_terminal' ? 'Confirm and open' : 'Open original terminal'}
               busyLabel="Recording choice..."
               onClick={() => {
                 if (confirmChoice === 'continue_in_terminal') onResolve(approval, 'approve', 'continue_in_terminal');

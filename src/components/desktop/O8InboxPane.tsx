@@ -180,9 +180,19 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, id: approval.id, ...(laneChoice ? { laneChoice, approvalUpdatedAt: approval.updatedAt } : {}) }),
       });
-      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string; note?: string } | null;
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        error?: string;
+        note?: string;
+        terminalHandoff?: { sessionKey: string; tmuxSession: string; laneId: string };
+      } | null;
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.error ?? `Unable to ${action} approval.`);
+      }
+      if (laneChoice === 'continue_in_terminal' && payload?.terminalHandoff) {
+        window.dispatchEvent(new CustomEvent('o8:focus-verified-cli-terminal', {
+          detail: payload.terminalHandoff,
+        }));
       }
       setApprovalNote(approval.id, payload?.note ?? (action === 'approve' ? 'Approved.' : 'Rejected.'));
       fireInvalidation('invalidate', ['approvals', 'all']);

@@ -2653,6 +2653,25 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:focus-spawned-agent-lane', handleFocusSpawnedAgentLane);
   }, [focusOrchestrationPacketLane, handleSelectSession]);
 
+  useEffect(() => {
+    const handleFocusVerifiedCliTerminal = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionKey?: string; tmuxSession?: string }>).detail;
+      if (!detail?.sessionKey || !detail.tmuxSession) return;
+      // Terminal Mode pins its original tab over the controller's selection.
+      // Exit any pinned workspace before selecting the verified CLI pane so
+      // the screen follows the tab that the approval actually opens.
+      for (const workspace of workspaceActiveMap.values()) {
+        if (workspace.terminalModeActive && workspace.workspaceId) {
+          requestTerminalModeToggle(workspace.workspaceId);
+        }
+      }
+      setActiveNavSection('agents');
+      handleSelectSession(detail.sessionKey, { tmuxSession: detail.tmuxSession });
+    };
+    window.addEventListener('o8:focus-verified-cli-terminal', handleFocusVerifiedCliTerminal);
+    return () => window.removeEventListener('o8:focus-verified-cli-terminal', handleFocusVerifiedCliTerminal);
+  }, [handleSelectSession, setActiveNavSection, workspaceActiveMap]);
+
   const flashWorkspaceTab = useCallback((tabId: string) => {
     if (!tabId) return;
     window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));

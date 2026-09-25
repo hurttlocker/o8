@@ -567,10 +567,63 @@ describe('principal-authz — governed terminal approval adapter', () => {
       body: { action: 'approve', id: approval!.id, laneChoice: 'continue_in_terminal', approvalUpdatedAt: approval!.updatedAt },
     }));
     expect(response.status).toBe(200);
-    expect((await response.json()).note).toContain('No turn was sent');
+    const body = await response.json();
+    expect(body.note).toContain('No turn was sent');
+    expect(body.terminalHandoff).toEqual({ sessionKey, tmuxSession, laneId: lane.id });
     expect(getApproval(approval!.id)).toMatchObject({ status: 'approved', resolution: { continuationStatus: 'completed' } });
     expect(getLane(lane.id)).toMatchObject({ sessionKey, status: 'awaiting_human' });
     expect(getLaneEvents(lane.id).some((event) => event.verb === 'terminal_continuation_selected')).toBe(true);
+  });
+
+  it('reopens a claimed terminal handoff if the live pane disappears before navigation', async () => {
+    const { lane, approval, sessionKey } = pendingTerminalResume('terminal disappears after claim');
+    const tmuxSession = 'cortex-dash-claim-race';
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex', sessionName: tmuxSession, cwd: process.cwd(), source: 'dashboard-cli-detected',
+    });
+    const runtime = runtimeRegistry.getRuntime('codex');
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey, runtimeId: 'codex', status: 'running', ownership: 'discovered', pid: 42,
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings')
+      .mockResolvedValueOnce(new Map([[sessionKey, tmuxSession]]))
+      .mockResolvedValueOnce(new Map());
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id, laneChoice: 'continue_in_terminal', approvalUpdatedAt: approval.updatedAt },
+    }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('no longer in this terminal pane');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'terminal_continuation_selected')).toBe(false);
+  });
+
+  it('reopens a claimed terminal handoff if the lane rebinds during the second live probe', async () => {
+    const { lane, approval, sessionKey } = pendingTerminalResume('terminal rebinds after claim');
+    const tmuxSession = 'cortex-dash-claim-rebind';
+    registerRuntimeTerminalSession(sessionKey, {
+      runtime: 'codex', sessionName: tmuxSession, cwd: process.cwd(), source: 'dashboard-cli-detected',
+    });
+    const runtime = runtimeRegistry.getRuntime('codex');
+    vi.spyOn(runtime!, 'discoverSessions').mockResolvedValue([{
+      sessionKey, runtimeId: 'codex', status: 'running', ownership: 'discovered', pid: 42,
+    } as import('@/lib/runtimes/types').RuntimeSession]);
+    vi.spyOn(dashboardBindings, 'discoverDashboardCliBindings')
+      .mockResolvedValueOnce(new Map([[sessionKey, tmuxSession]]))
+      .mockImplementationOnce(async () => {
+        updateLane(lane.id, { sessionKey: 'codex:replacement' }, 'system');
+        return new Map([[sessionKey, tmuxSession]]);
+      });
+
+    const response = await approvals.POST(req(url, {
+      principal: 'operator',
+      body: { action: 'approve', id: approval.id, laneChoice: 'continue_in_terminal', approvalUpdatedAt: approval.updatedAt },
+    }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('lane or terminal changed');
+    expect(getApproval(approval.id)?.status).toBe('pending');
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'terminal_continuation_selected')).toBe(false);
   });
 
   it('reopens the approval when its lane rebinds during live terminal validation', async () => {

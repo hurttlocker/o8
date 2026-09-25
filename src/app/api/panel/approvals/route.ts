@@ -591,9 +591,9 @@ export async function POST(request: NextRequest) {
     let assistantMessage: unknown = undefined;
     let nextApproval: unknown = undefined;
     let continuationOutcome: 'completed' | 'failed' | 'outcome_unknown' = 'completed';
+    let terminalHandoff: { sessionKey: string; tmuxSession: string; laneId: string } | undefined;
 
     const continuation = approval.continuation;
-
     if (continuation?.kind === 'llm-chat') {
       // LLM chat continuation
       const decision = action === 'approve'
@@ -608,7 +608,7 @@ export async function POST(request: NextRequest) {
       const strategy = requestedStrategy ?? continuation.strategy;
       const { dispatch } = await import('@/lib/lane/commands');
       const result: LaneCommandResult = continuation.verb === 'resume' && laneChoice === 'continue_in_terminal'
-        ? (() => {
+        ? await (async () => {
           const latestLane = getLane(continuation.laneId);
           const latestTerminal = getRuntimeTerminalSession(approval.sessionKey);
           if (!latestLane || latestLane.sessionKey !== approval.sessionKey || latestLane.runtime !== approval.runtime
@@ -616,6 +616,28 @@ export async function POST(request: NextRequest) {
             || !latestTerminal || latestTerminal.sessionName !== terminalAdapterAudit?.tmuxSession) {
             return { ok: false, laneId: continuation.laneId, reason: 'terminal_binding_changed', note: 'The lane or terminal changed before your choice was recorded. Inspect the current session.' };
           }
+          const rechecked = await validateTerminalApprovalAdapter({
+            schema: TERMINAL_APPROVAL_ADAPTER_SCHEMA,
+            authority: 'lane-state',
+            sessionKey: approval.sessionKey,
+            tmuxSession: latestTerminal.sessionName,
+            approvalUpdatedAt: current.updatedAt,
+          }, current, action, principal, laneChoice);
+          if (!rechecked.ok) {
+            return { ok: false, laneId: continuation.laneId, reason: 'terminal_binding_changed', note: rechecked.error };
+          }
+          const finalLane = getLane(continuation.laneId);
+          const finalTerminal = getRuntimeTerminalSession(approval.sessionKey);
+          if (!finalLane || finalLane.sessionKey !== approval.sessionKey || finalLane.runtime !== approval.runtime
+            || !['awaiting_input', 'awaiting_human', 'awaiting_orchestrator', 'recovering'].includes(finalLane.status)
+            || !finalTerminal || finalTerminal.sessionName !== latestTerminal.sessionName) {
+            return { ok: false, laneId: continuation.laneId, reason: 'terminal_binding_changed', note: 'The lane or terminal changed before your choice was recorded. Inspect the current session.' };
+          }
+          terminalHandoff = {
+            sessionKey: approval.sessionKey,
+            tmuxSession: latestTerminal.sessionName,
+            laneId: continuation.laneId,
+          };
           appendEvent(continuation.laneId, 'terminal_continuation_selected', 'user', {
             approvalId: approval.id,
             sessionKey: approval.sessionKey,
@@ -758,6 +780,7 @@ export async function POST(request: NextRequest) {
       approval: settledApproval,
       resolved: action,
       note: decisionNote,
+      terminalHandoff,
       assistantMessage,
       nextApproval,
       appliedEdit,

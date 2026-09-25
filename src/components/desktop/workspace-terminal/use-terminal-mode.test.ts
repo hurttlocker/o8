@@ -144,6 +144,24 @@ describe('useTerminalMode event toggle path', () => {
     terminalFocus.remove();
   });
 
+  it('reveals a different selected CLI terminal after exiting a pinned terminal', async () => {
+    const destination = terminalTab('terminal-approved', 'approved-session');
+    await act(async () => requestTerminalModeToggle('workspace-a'));
+    expect(modeOutput().getAttribute('data-effective-tab-id')).toBe('terminal-existing');
+
+    await act(async () => {
+      requestTerminalModeToggle('workspace-a');
+      render({
+        activeTab: destination,
+        activeTabId: destination.id,
+        tabs: [...props.tabs, destination],
+      });
+    });
+
+    expect(modeOutput().getAttribute('data-active')).toBe('false');
+    expect(modeOutput().getAttribute('data-effective-tab-id')).toBe('terminal-approved');
+  });
+
   it('fits and focuses once when a new shell receives its tmux session', async () => {
     const activeTab = chatTab();
     const pendingTerminal = terminalTab('terminal-new', null);
