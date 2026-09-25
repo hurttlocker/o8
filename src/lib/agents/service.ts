@@ -396,6 +396,21 @@ export async function readAllAgentPresence(
   return listAgentPresenceAcrossRepos({}, sqlite);
 }
 
+/** Read persisted identities for transcript decoration without probing runtimes. */
+export function readStoredAgentPresence(
+  principal: RequestPrincipalContext,
+  sqlite: Database.Database = getSqlite(),
+): AgentPresence[] {
+  if (principal.role !== 'operator') {
+    throw new AgentBusError(
+      'Fleet agent presence requires an operator credential.',
+      'agent_presence_fleet_forbidden',
+      403,
+    );
+  }
+  return listAgentPresenceAcrossRepos({ includeStale: true }, sqlite);
+}
+
 function parseCursor(cursor: string | null): number {
   if (!cursor) return 0;
   try {

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import type { AgentMessage, AgentMessageIdentity, AgentPresence } from '@/lib/agents/types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+import { isOperatorWindowVisible } from '@/lib/tauri/window-visibility';
 
 const POLL_MS = 15_000;
 const MESSAGE_LIMIT = 50;
@@ -141,9 +142,15 @@ export function O8HandoffsPane({
     if (!active || !scopedRepo) return;
 
     const controller = new AbortController();
+    let inFlight = false;
     const load = async () => {
-      setLoading(true);
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
+      let requested = false;
       try {
+        if (!await isOperatorWindowVisible() || controller.signal.aborted) return;
+        requested = true;
+        setLoading(true);
         const query = encodeURIComponent(scopedRepo);
         const [presenceResponse, messageResponse] = await Promise.all([
           fetch(`/api/agents/presence?repo=${query}&includeStale=true`, { signal: controller.signal, cache: 'no-store' }),
@@ -161,17 +168,22 @@ export function O8HandoffsPane({
       } catch (caught) {
         if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'Agent handoffs are unavailable.');
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (requested && !controller.signal.aborted) setLoading(false);
+        inFlight = false;
       }
     };
     void load();
     const interval = window.setInterval(() => void load(), POLL_MS);
-    const onReconcile = () => void load();
+    const onReconcile = () => { void load(); };
     window.addEventListener('o8:lifecycle-reconcile', onReconcile);
+    window.addEventListener('focus', onReconcile);
+    document.addEventListener('visibilitychange', onReconcile);
     return () => {
       controller.abort();
       window.clearInterval(interval);
       window.removeEventListener('o8:lifecycle-reconcile', onReconcile);
+      window.removeEventListener('focus', onReconcile);
+      document.removeEventListener('visibilitychange', onReconcile);
     };
   }, [active, scopedRepo, refreshKey]);
 
