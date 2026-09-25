@@ -58,6 +58,7 @@ export function WorkspaceHeaderStrip({
   workspaceGridMode = false,
   onToggleWorkspaceGrid,
   rightPanelOpen = false,
+  rightPanelDisabled = false,
   onToggleRightPanel,
   approvalCount = 0,
   onOpenInbox,
@@ -180,6 +181,7 @@ export function WorkspaceHeaderStrip({
                   workspacePanelVisible={false}
                   o8PanelVisible={false}
                   onToggleO8Panel={onToggleRightPanel}
+                  disabledReason={rightPanelDisabled ? 'Widen the window to open the side panel' : undefined}
                 />
               </div>
             ) : null}

@@ -23,6 +23,7 @@ export interface WorkspaceHeaderStripProps {
   /** O8 panel re-open toggle. Rendered as the rightmost icon only when the
    *  panel is collapsed, because the open panel owns its toggle. */
   rightPanelOpen?: boolean;
+  rightPanelDisabled?: boolean;
   onToggleRightPanel?: () => void;
   /** Pending approvals badge shown only when the right panel header is absent. */
   approvalCount?: number;

@@ -1026,7 +1026,7 @@ function DashboardInner() {
   // SSR-safe defaults; hydrate from localStorage in an effect so the
   // visibility/kind survives a reload but server and first client render
   // match (no hydration mismatch).
-  const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false, right: false });
+  const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false });
   const [chatVisible, setChatVisible] = useState(false);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
   useRightPanelPersistence({
@@ -1034,7 +1034,6 @@ function DashboardInner() {
     rightPanelKind,
     setChatVisible,
     setRightPanelKind,
-    suspendVisiblePersistence: responsiveAutoCollapsed.right,
   });
   // Keep each expensive panel instance alive after its first visit. Presentation
   // can collapse or crossfade, but reopening must not repay its chunk, queries,
@@ -1052,9 +1051,9 @@ function DashboardInner() {
   // threshold BANDS live in state; the functional setState returns the previous
   // object between crossings so React bails out of the render entirely. The raw
   // number lives in viewportWidthRef for imperative reads.
-  const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean } | null>(null);
+  const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean; belowRightCollapse: boolean } | null>(null);
   const viewportWidthRef = useRef<number | null>(null);
-  const responsiveManualOpenRef = useRef({ left: false, right: false });
+  const responsiveManualOpenRef = useRef({ left: false });
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const update = () => {
@@ -1062,12 +1061,14 @@ function DashboardInner() {
       viewportWidthRef.current = next;
       const compact = next < RESPONSIVE_COMPACT_SHELL_WIDTH;
       const belowLeftCollapse = next < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
+      const belowRightCollapse = next < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH;
       setViewportBands((current) => (
         current !== null
           && current.compact === compact
           && current.belowLeftCollapse === belowLeftCollapse
+          && current.belowRightCollapse === belowRightCollapse
           ? current
-          : { compact, belowLeftCollapse }
+          : { compact, belowLeftCollapse, belowRightCollapse }
       ));
     };
     update();
@@ -1141,41 +1142,24 @@ function DashboardInner() {
     noteSidebarManualIntent(true);
     setSidebarVisible(true);
   }, [noteSidebarManualIntent, setSidebarVisible]);
-  const noteRightPanelManualIntent = useCallback((nextVisible: boolean) => {
-    responsiveManualOpenRef.current.right = nextVisible
-      && getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH;
-    setResponsiveAutoCollapsed((current) => (
-      current.right ? { ...current, right: false } : current
-    ));
-  }, [getResponsiveViewportWidth]);
   const openRightPanelFromUser = useCallback(() => {
+    if (getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH) return;
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(BROWSER_PIP_EVENT, { detail: { open: false } }));
       window.dispatchEvent(new CustomEvent(O8_SPEC_PIP_EVENT, { detail: { open: false } }));
     }
-    noteRightPanelManualIntent(true);
     setChatVisible(true);
-  }, [noteRightPanelManualIntent]);
+  }, [getResponsiveViewportWidth]);
   const closeRightPanelFromUser = useCallback(() => {
-    noteRightPanelManualIntent(false);
     setChatVisible(false);
-  }, [noteRightPanelManualIntent]);
-  // Responsive auto-minimize — LEFT AgentPanel only (restored 2026-07-14 by
-  // operator request; the blanket removal was Q ruling 2026-07-11). Narrowing
-  // the window past RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH folds the AgentPanel to
-  // width 0 (showSidebarColumn === false) so the center workspace stays usable
-  // all the way down to a terminal-narrow window; widening back out restores it.
-  // A manual open while narrow (responsiveManualOpenRef.left, set by
-  // noteSidebarManualIntent) suppresses the auto-collapse so resize never fights
-  // the operator's toggle. The RIGHT panel stays a purely manual choice (per the
-  // 2026-07-11 ruling) — this effect only heals a stale right auto-collapse a
-  // prior build may have left set.
+  }, []);
+  // Fold side panels as the viewport narrows. The right panel stays closed
+  // after widening, so only an operator action reopens it.
   useEffect(() => {
     if (viewportBands === null) return;
 
-    if (responsiveAutoCollapsed.right) {
-      setChatVisible(true);
-      setResponsiveAutoCollapsed((current) => ({ ...current, right: false }));
+    if (viewportBands.belowRightCollapse) {
+      if (chatVisible) setChatVisible(false);
     }
 
     if (viewportBands.belowLeftCollapse) {
@@ -1196,7 +1180,7 @@ function DashboardInner() {
     }
   }, [
     responsiveAutoCollapsed.left,
-    responsiveAutoCollapsed.right,
+    chatVisible,
     setSidebarVisible,
     sidebarVisible,
     viewportBands,
@@ -4712,7 +4696,7 @@ function DashboardInner() {
   }, []);
 
   const showSidebarColumn = sidebarVisible && !compactShell;
-  const showRightPanelColumn = chatVisible && !compactShell;
+  const showRightPanelColumn = chatVisible && !compactShell && !viewportBands?.belowRightCollapse;
   const workspaceInset = compactShell ? 2 : 4;
 
   // History-row focus follows the thread bound to the actually focused
@@ -5322,6 +5306,7 @@ function DashboardInner() {
           onSidebarHoverEnter={!showSidebarColumn && !compactShell ? openSidebarPreview : undefined}
           onSidebarHoverLeave={!showSidebarColumn && !compactShell ? scheduleSidebarPreviewClose : undefined}
           rightPanelOpen={showRightPanelColumn}
+          rightPanelDisabled={viewportBands?.belowRightCollapse ?? false}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           bottomPanelVisible={bottomPanelVisible}
           onToggleBottomPanel={toggleContextualPanelTile}
