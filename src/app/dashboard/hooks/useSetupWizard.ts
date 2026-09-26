@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { hasPermissionsResume } from '@/components/desktop/onboarding/permissions-check';
+import { browserProgressStorage } from '@/components/desktop/onboarding/onboarding-progress';
 import type { DetectionResult } from '@/components/desktop/setup-wizard/types';
 
 export function useSetupWizard() {
@@ -11,6 +13,11 @@ export function useSetupWizard() {
   useEffect(() => {
     if (setupCheckedRef.current) return;
     setupCheckedRef.current = true;
+    if (hasPermissionsResume(browserProgressStorage())) {
+      setSetupWizardOpen(true);
+      setSetupCheckComplete(true);
+      return;
+    }
     (async () => {
       try {
         const configRes = await fetch('/api/setup/config');

@@ -1,4 +1,4 @@
-export const ONBOARDING_STEPS = ['open', 'repos', 'dispatch', 'privacy'] as const;
+export const ONBOARDING_STEPS = ['open', 'repos', 'dispatch', 'privacy', 'permissions'] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export interface OnboardingProject { id: string; name: string; localPath: string; defaultBranch?: string; remoteUrl?: string }
 export interface OnboardingTask { project: OnboardingProject; text: string }
