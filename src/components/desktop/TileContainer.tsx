@@ -3,7 +3,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TileHeader } from '@/components/desktop/TileHeader';
-import { HeaderPillStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { SplitPaneCloseButton } from '@/components/desktop/shell/SplitPaneCloseButton';
 import {
   collectLeafNodes,
@@ -41,12 +40,8 @@ export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>
 interface TileContainerProps {
   activeTileId: string | null;
   paneLabels?: ReadonlyMap<string, string>;
-  paneSessions?: ReadonlyMap<string, {
-    workspaceId: string;
-    tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
-    activeTabId: string | null;
-    finishedTabCount: number;
-  }>;
+  keepPrimarySessionAlive?: boolean;
+  interactionDisabled?: boolean;
   layout: TileLayout;
   registry: TileContentRegistry;
   onActivateTile: (tileId: string) => void;
@@ -78,7 +73,8 @@ const LEAF_RADIUS = 14;
 export function TileContainer({
   activeTileId,
   paneLabels,
-  paneSessions,
+  keepPrimarySessionAlive = false,
+  interactionDisabled = false,
   layout,
   registry,
   onActivateTile,
@@ -88,6 +84,7 @@ export function TileContainer({
 }: TileContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
+  const [paneFocus, setPaneFocus] = useState<{ tileId: string; leaves: string } | null>(null);
 
   useEffect(() => {
     const clearDropPreview = () => setTabDrop(null);
@@ -102,8 +99,44 @@ export function TileContainer({
   }, [layout.root]);
 
   const totalLeaves = leaves.length;
+  const leafSignature = leaves.map((leaf) => leaf.id).join('|');
+  const focusedPaneId = paneFocus?.leaves === leafSignature && leaves.some((leaf) => leaf.id === paneFocus.tileId)
+    ? paneFocus.tileId : null;
   const allTerminalPanes = leaves.every((leaf) => leaf.content.kind === 'terminal');
   const showPaneHeader = allTerminalPanes && totalLeaves > 1;
+  const primaryLeaf = leaves.find((leaf) => leaf.id === 'tile-root' && leaf.content.kind === 'terminal');
+  const primaryRect = focusedPaneId && focusedPaneId !== 'tile-root'
+    ? null : focusedPaneId === 'tile-root'
+      ? { left: 0, top: 0, width: 1, height: 1 }
+      : leafRects.get('tile-root');
+  const primaryPadLeft = primaryRect && primaryRect.left > 0.001 ? LEAF_GAP / 2 : 0;
+  const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? LEAF_GAP / 2 : 0;
+  const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? LEAF_GAP / 2 : 0;
+  const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? LEAF_GAP / 2 : 0;
+
+  const handlePaneDragOver = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
+    if (!Array.from(event.dataTransfer.types).includes(WORKSPACE_TAB_DRAG_TYPE)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
+    setTabDrop((current) => current?.tileId === tileId && current.zone === zone
+      ? current : { tileId, zone });
+  };
+
+  const handlePaneDrop = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
+    const kind = event.dataTransfer.getData(WORKSPACE_TAB_DRAG_TYPE);
+    if (kind !== 'chat' && kind !== 'terminal') return;
+    event.preventDefault();
+    event.stopPropagation();
+    setTabDrop(null);
+    const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
+    if (zone === 'center') {
+      onSplitTile(tileId, 'vertical', kind, false, true);
+      return;
+    }
+    onSplitTile(tileId, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above', true);
+  };
 
   const makeResizeStart = useCallback(
     (splitId: string, direction: TileSplitDirection, containerRect: TileRect) =>
@@ -164,17 +197,20 @@ export function TileContainer({
         minHeight: 0,
         overflowX: 'hidden',
         overflowY: 'hidden',
+        pointerEvents: interactionDisabled ? 'none' : 'auto',
         // Transparent so the dashboard chrome shows through any unclaimed
         // pixels (e.g. the hair-width handle strip between two leaves).
         backgroundColor: 'transparent',
       }}
     >
       {leaves.map((leaf, index) => {
-        const rect = leafRects.get(leaf.id);
+        const hiddenByFocus = Boolean(focusedPaneId && focusedPaneId !== leaf.id);
+        const rect = focusedPaneId === leaf.id
+          ? { left: 0, top: 0, width: 1, height: 1 }
+          : leafRects.get(leaf.id);
         if (!rect) return null;
         const definition = registry[leaf.content.kind];
-        const isActive = leaf.id === activeTileId;
-        const paneSession = paneSessions?.get(leaf.id);
+        const isActive = !hiddenByFocus && leaf.id === activeTileId;
         // Per-edge: half the gap on edges facing siblings; zero on edges
         // flush with the workspace boundary. Adjacent leaves contribute
         // half + half = LEAF_GAP visible in the middle, fully transparent
@@ -199,31 +235,8 @@ export function TileContainer({
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
             onMouseDown={() => onActivateTile(leaf.id)}
-            onDragOver={(event) => {
-              if (leaf.content.kind !== 'terminal' || !Array.from(event.dataTransfer.types).includes(WORKSPACE_TAB_DRAG_TYPE)) return;
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = 'copy';
-              const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
-              setTabDrop((current) => current?.tileId === leaf.id && current.zone === zone
-                ? current : { tileId: leaf.id, zone });
-            }}
-            onDropCapture={(event) => {
-              if (leaf.content.kind !== 'terminal') return;
-              const kind = event.dataTransfer.getData(WORKSPACE_TAB_DRAG_TYPE);
-              if (kind !== 'chat' && kind !== 'terminal') return;
-              event.preventDefault();
-              event.stopPropagation();
-              setTabDrop(null);
-              const zone = workspaceTabDropZone(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY);
-              if (zone === 'center') {
-                window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', {
-                  detail: { kind: kind === 'chat' ? 'orchestrator' : 'terminal', tileId: leaf.id },
-                }));
-                return;
-              }
-              onSplitTile(leaf.id, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above', true);
-            }}
+            onDragOver={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDragOver(event, leaf.id) : undefined}
+            onDropCapture={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDrop(event, leaf.id) : undefined}
             style={{
               position: 'absolute',
               left: `${rect.left * 100}%`,
@@ -236,6 +249,9 @@ export function TileContainer({
               paddingBottom: padBottom,
               boxSizing: 'border-box',
               backgroundColor: 'transparent',
+              visibility: hiddenByFocus ? 'hidden' : 'visible',
+              pointerEvents: hiddenByFocus ? 'none' : 'auto',
+              zIndex: focusedPaneId === leaf.id ? 2 : undefined,
             }}
           >
             <div
@@ -255,17 +271,21 @@ export function TileContainer({
               {showPaneHeader ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, minHeight: 34, paddingLeft: 12, paddingRight: 8, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-secondary)', fontSize: 11, fontFamily: 'var(--font-sans-system)' }}>
                   <span style={{ flexShrink: 0, fontWeight: isActive ? 500 : 300, color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)' }}>Pane {index + 1}</span>
-                  {paneSession && paneSession.tabs.length > 1 ? (
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <HeaderPillStrip
-                        tabs={paneSession.tabs}
-                        activeTabId={paneSession.activeTabId}
-                        workspaceId={paneSession.workspaceId}
-                        finishedTabCount={paneSession.finishedTabCount}
-                        ariaLabel={`Open sessions in pane ${index + 1}`}
-                      />
-                    </div>
-                  ) : <span title={paneLabels?.get(leaf.id) ?? undefined} style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontWeight: 300 }}>· {paneLabels?.get(leaf.id) ?? 'New session'}</span>}
+                  <span title={paneLabels?.get(leaf.id) ?? undefined} style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontWeight: 300 }}>· {paneLabels?.get(leaf.id) ?? 'New session'}</span>
+                  <button
+                    type="button"
+                    data-no-drag
+                    aria-label={focusedPaneId === leaf.id ? `Restore panes from pane ${index + 1}` : `Focus pane ${index + 1}`}
+                    title={focusedPaneId === leaf.id ? 'Restore split' : 'Focus this pane'}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={() => {
+                      setPaneFocus(focusedPaneId === leaf.id ? null : { tileId: leaf.id, leaves: leafSignature });
+                      onActivateTile(leaf.id);
+                    }}
+                    style={{ border: 0, borderRadius: 6, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', font: 'inherit', fontWeight: 500, paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 8, minHeight: 24 }}
+                  >
+                    {focusedPaneId === leaf.id ? 'Restore' : 'Focus'}
+                  </button>
                   <SplitPaneCloseButton onClick={() => onCloseTile(leaf.id)} paneLabel={`pane ${index + 1}`} />
                 </div>
               ) : !definition?.hideHeader && (
@@ -290,7 +310,7 @@ export function TileContainer({
                   overflow: 'hidden',
                 }}
               >
-                {definition ? definition.render({
+                {definition && !(keepPrimarySessionAlive && leaf.id === 'tile-root') ? definition.render({
                   active: isActive,
                   content: leaf.content,
                   tileId: leaf.id,
@@ -313,14 +333,45 @@ export function TileContainer({
                   color: 'var(--t-text)',
                   fontSize: 13,
                   zIndex: 20,
-                }}>Open {tabDrop.zone === 'center' ? 'in this pane' : tabDrop.zone === 'above' ? 'above' : tabDrop.zone}</div>
+                }}>Open {tabDrop.zone === 'center' ? 'beside this pane' : tabDrop.zone === 'above' ? 'above' : tabDrop.zone}</div>
               ) : null}
             </div>
           </div>
         );
       })}
 
-      {splitFrames.map((frame) => (
+      {keepPrimarySessionAlive ? (
+        <div
+          data-testid="primary-session-host"
+          aria-hidden={!primaryRect}
+          inert={!primaryRect}
+          onMouseDown={primaryRect ? () => onActivateTile('tile-root') : undefined}
+          onDragOver={primaryRect ? (event) => handlePaneDragOver(event, 'tile-root') : undefined}
+          onDropCapture={primaryRect ? (event) => handlePaneDrop(event, 'tile-root') : undefined}
+          style={primaryRect ? {
+            position: 'absolute',
+            left: `${primaryRect.left * 100}%`,
+            top: `${primaryRect.top * 100}%`,
+            width: `${primaryRect.width * 100}%`,
+            height: `${primaryRect.height * 100}%`,
+            boxSizing: 'border-box',
+            paddingLeft: primaryPadLeft,
+            paddingRight: primaryPadRight,
+            paddingTop: primaryPadTop + (showPaneHeader ? 34 : 0),
+            paddingBottom: primaryPadBottom,
+            display: 'flex',
+            flexDirection: 'column',
+            minWidth: 0,
+            minHeight: 0,
+            overflow: 'hidden',
+            zIndex: focusedPaneId === 'tile-root' ? 3 : 1,
+          } : { position: 'absolute', left: -10000, top: 0, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none' }}
+        >
+          {registry.terminal.render({ active: Boolean(primaryRect && activeTileId === 'tile-root'), content: primaryLeaf?.content ?? { kind: 'terminal' }, tileId: 'tile-root' })}
+        </div>
+      ) : null}
+
+      {!focusedPaneId && splitFrames.map((frame) => (
         <ResizeHandle
           key={frame.id}
           frame={frame}

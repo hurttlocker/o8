@@ -200,6 +200,8 @@ import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data
 import { useMissionCompleteDetector } from '@/components/desktop/thoughts/mission-complete-detector';
 const LazyReviewPanel = retryingLazy(() => import('@/components/desktop/review/ReviewPanel').then(m => ({ default: m.ReviewPanel })), { label: 'Review panel' });
 import { TileContainer } from '@/components/desktop/TileContainer';
+import { useWorkspacePageLayouts } from './hooks/useWorkspacePageLayouts';
+import { waitForWorkspaceTerminalHandle } from './hooks/workspace-terminal-readiness';
 import { DashboardHydrationMarker } from './DashboardHydrationMarker';
 import {
   selectRepoOrchestratorConversation,
@@ -863,24 +865,7 @@ function DashboardInner() {
     }
     return labels;
   }, [workspaceActiveMap]);
-  const workspacePaneSessions = useMemo(() => {
-    const sessions = new Map<string, {
-      workspaceId: string;
-      tabs: WorkspaceActivePayload['tabs'];
-      activeTabId: string | null;
-      finishedTabCount: number;
-    }>();
-    for (const payload of workspaceActiveMap.values()) {
-      if (!payload.tileId || !payload.workspaceId) continue;
-      sessions.set(payload.tileId, {
-        workspaceId: payload.workspaceId,
-        tabs: payload.tabs,
-        activeTabId: payload.tabId,
-        finishedTabCount: payload.finishedTabCount,
-      });
-    }
-    return sessions;
-  }, [workspaceActiveMap]);
+  const primaryWorkspace = Array.from(workspaceActiveMap.values()).find((workspace) => workspace.tileId === 'tile-root') ?? null;
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
     const workspaces = Array.from(workspaceActiveMap.values());
     return workspaces.find((workspace) => workspace.tileId === activeTileId)
@@ -1677,13 +1662,14 @@ function DashboardInner() {
     setActiveSessionKey(requestedSessionKey);
     void (async () => {
       try {
-        const target = await waitForWorkspaceTerminalTarget({
-          repoPath: repo?.localPath ?? null,
-          preferredTileId: activeTileId,
-          fallbackToAnyExisting: true,
+        const primaryHandle = await waitForWorkspaceTerminalHandle({
+          read: () => workspaceTerminalHandlesRef.current.get('tile-root') ?? null,
+          wait: (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs)),
+          attempts: 20,
         });
+        if (!primaryHandle) throw new Error('Primary workspace is unavailable');
         if (!isLatestHistoryOpenRequest(requestId, historyOpenRequestRef.current)) return;
-        const snapshot = target.handle.getTabsSnapshot();
+        const snapshot = primaryHandle.getTabsSnapshot();
         // Reuse a tab that MATCHES the thread's kind — orchestrator threads
         // (thoughts-*) reuse only an orchestrator tab (Claude); never load them
         // into the free o8-Default casual chat. Falling through to historyTabId
@@ -1694,7 +1680,7 @@ function DashboardInner() {
           : snapshot.tabs.find((tab) => tab.kind === 'llm-chat' && tab.id !== historyTabId)
               ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat')
               ?? null;
-        const tabId = target.handle.openHistoryChat(primaryConversationTab?.id ?? historyTabId, title, repo);
+        const tabId = primaryHandle.openHistoryChat(primaryConversationTab?.id ?? historyTabId, title, repo);
         if (tabId) {
           window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
           const loadThread = () => {
@@ -1725,7 +1711,7 @@ function DashboardInner() {
         ));
       }
     })();
-  }, [activeTileId, setActiveSessionKey, waitForWorkspaceTerminalTarget]);
+  }, [setActiveSessionKey, workspaceTerminalHandlesRef]);
 
   useEffect(() => {
     const supersedePendingHistoryOpen = () => {
@@ -1815,8 +1801,8 @@ function DashboardInner() {
   // ── Workspace tab hotkeys ──
   // Cmd+1..Cmd+9 jump to the Nth workspace tab, Cmd+Opt+Left / Right cycle
   // previous / next with wrap, Cmd+W closes the active tab. All dispatches
-  // hit the active workspace terminal's imperative handle, which points the
-  // store-backed panes to the target tab. Flash is driven off a custom event
+  // hit the primary workspace page owner even when a split pane has focus.
+  // Flash is driven off a custom event
   // that TabBar listens for and pulses an accent shadow on the target label.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1829,12 +1815,7 @@ function DashboardInner() {
         || tagName === 'SELECT';
       const resolveHandle = () => {
         const handles = workspaceTerminalHandlesRef.current;
-        if (handles.size === 0) return null;
-        if (activeTileId) {
-          const matched = handles.get(activeTileId);
-          if (matched) return matched;
-        }
-        return handles.values().next().value ?? null;
+        return handles.get('tile-root') ?? null;
       };
       const flash = (tabId: string) => {
         window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
@@ -1882,7 +1863,7 @@ function DashboardInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTileId, workspaceTerminalHandlesRef]);
+  }, [workspaceTerminalHandlesRef]);
 
   // ── ⌘/ (and bare `?`) opens the keyboard-shortcuts reference overlay ──
   // ⌘/ is the macOS-convention "show shortcuts" binding; `?` is a fallback
@@ -1989,6 +1970,14 @@ function DashboardInner() {
     workspaceTerminalHandlesRef,
     workspaceTerminalPreferredRepo,
     waitForWorkspaceTerminalTarget,
+  });
+
+  const { switching: workspacePageSwitching } = useWorkspacePageLayouts({
+    activeTabId: primaryWorkspace?.tabId ?? null,
+    hydrated: tileLayoutHydrated,
+    layout: tileLayout,
+    setActiveTileId,
+    setLayout: setTileLayout,
   });
 
   // Cmd/Ctrl+J toggles the orchestrator chat tile. Global shortcut,
@@ -2538,10 +2527,15 @@ function DashboardInner() {
           || pathBelongsToRepoScope(repo.localPath, sessionScope)
         ))
         : null;
-      const target = await waitForWorkspaceTerminalTarget({
-        repoPath: targetRepo?.localPath ?? sessionScope ?? undefined,
+      // A left-rail chat is a workspace page, never a replacement for the
+      // focused terminal pane. The primary session owner remains mounted even
+      // when its pane is absent from the current split layout.
+      const primaryHandle = await waitForWorkspaceTerminalHandle({
+        read: () => workspaceTerminalHandlesRef.current.get('tile-root') ?? null,
+        wait: (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs)),
+        attempts: 20,
       });
-      if (!target) return;
+      if (!primaryHandle) return;
       const runtime = hint?.runtime ?? (selectedSession?.runtime === 'claude-code'
         || selectedSession?.runtime === 'gemini'
         || selectedSession?.runtime === 'opencode'
@@ -2560,7 +2554,7 @@ function DashboardInner() {
         title: selectedSession?.surfaceLabel?.trim() || selectedSession?.currentTask?.trim(),
         runtime,
       });
-      target.handle.openCliChatSession({
+      primaryHandle.openCliChatSession({
         runtime,
         repo: targetRepo ? {
           name: targetRepo.name,
@@ -2575,10 +2569,8 @@ function DashboardInner() {
         targetSessionKey: sessionKey,
         label,
       });
-      setActiveTileId(target.tileId);
-
     })();
-  }, [ideWorkspaceSessionsForSidebar, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
+  }, [ideWorkspaceSessionsForSidebar, workspaceScopeEntries, workspaceTerminalHandlesRef]);
 
   useEffect(() => {
     const handleFocusSpawnedAgentLane = (event: Event) => {
@@ -2663,11 +2655,11 @@ function DashboardInner() {
     void (async () => {
       recordSpawnEvent(`orchestrator:requested activeTile=${activeTileId ?? 'none'}`);
       try {
-        const target = await waitForWorkspaceTerminalTarget({
-          preferredTileId: activeTileId,
-          fallbackToAnyExisting: true,
-        });
-        setActiveTileId(target.tileId);
+        const primaryHandle = workspaceTerminalHandlesRef.current.get('tile-root');
+        const target = primaryHandle
+          ? { tileId: 'tile-root', handle: primaryHandle }
+          : await waitForWorkspaceTerminalTarget({ preferredTileId: 'tile-root', fallbackToAnyExisting: true, activate: false });
+        if (findTile(tileLayout.root, target.tileId)) setActiveTileId(target.tileId);
         const tabId = target.handle.openOrchestratorTab(repo ?? undefined);
         recordSpawnEvent(`orchestrator:done tile=${target.tileId} tab=${tabId}`);
         flashWorkspaceTab(tabId);
@@ -2675,18 +2667,17 @@ function DashboardInner() {
         reportSpawnFailure('orchestrator', error);
       }
     })();
-  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget]);
+  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, tileLayout.root, waitForWorkspaceTerminalTarget, workspaceTerminalHandlesRef]);
 
   const handleCreateWorkspaceChat = useCallback(() => {
     void (async () => {
       recordSpawnEvent(`chat:requested activeTile=${activeTileId ?? 'none'}`);
       try {
-        const target = await waitForWorkspaceTerminalTarget({
-          repoPath: workspaceTerminalPreferredRepo?.localPath ?? null,
-          preferredTileId: activeTileId,
-          fallbackToAnyExisting: true,
-        });
-        setActiveTileId(target.tileId);
+        const primaryHandle = workspaceTerminalHandlesRef.current.get('tile-root');
+        const target = primaryHandle
+          ? { tileId: 'tile-root', handle: primaryHandle }
+          : await waitForWorkspaceTerminalTarget({ repoPath: workspaceTerminalPreferredRepo?.localPath ?? null, preferredTileId: 'tile-root', fallbackToAnyExisting: true, activate: false });
+        if (findTile(tileLayout.root, target.tileId)) setActiveTileId(target.tileId);
         const tabId = target.handle.openLlmChatSession({
           repo: workspaceTerminalPreferredRepo ?? undefined,
           label: 'Chat',
@@ -2698,18 +2689,17 @@ function DashboardInner() {
         reportSpawnFailure('chat', error);
       }
     })();
-  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
+  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, tileLayout.root, waitForWorkspaceTerminalTarget, workspaceTerminalHandlesRef, workspaceTerminalPreferredRepo]);
 
   const handleCreateWorkspaceTerminal = useCallback(() => {
     void (async () => {
       recordSpawnEvent(`terminal:requested activeTile=${activeTileId ?? 'none'}`);
       try {
-        const target = await waitForWorkspaceTerminalTarget({
-          repoPath: workspaceTerminalPreferredRepo?.localPath ?? null,
-          preferredTileId: activeTileId,
-          fallbackToAnyExisting: true,
-        });
-        setActiveTileId(target.tileId);
+        const primaryHandle = workspaceTerminalHandlesRef.current.get('tile-root');
+        const target = primaryHandle
+          ? { tileId: 'tile-root', handle: primaryHandle }
+          : await waitForWorkspaceTerminalTarget({ repoPath: workspaceTerminalPreferredRepo?.localPath ?? null, preferredTileId: 'tile-root', fallbackToAnyExisting: true, activate: false });
+        if (findTile(tileLayout.root, target.tileId)) setActiveTileId(target.tileId);
         const tabId = target.handle.openTerminalTab(workspaceTerminalPreferredRepo ?? undefined);
         recordSpawnEvent(`terminal:done tile=${target.tileId} tab=${tabId}`);
         flashWorkspaceTab(tabId);
@@ -2717,7 +2707,7 @@ function DashboardInner() {
         reportSpawnFailure('terminal', error);
       }
     })();
-  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
+  }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, tileLayout.root, waitForWorkspaceTerminalTarget, workspaceTerminalHandlesRef, workspaceTerminalPreferredRepo]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     setRightPanelKind('review');
@@ -5315,12 +5305,14 @@ function DashboardInner() {
               detail: { workspaceId: workspaceHeaderActive.workspaceId },
             }));
           }}
-          headerLabel={multiTerminalPaneLayout ? `${workspaceLeaves.length} panes` : workspaceHeaderActive.label}
-          headerTabs={multiTerminalPaneLayout ? [] : workspaceHeaderActive.tabs}
-          workspaceId={workspaceAddTargetId}
+          headerLabel={primaryWorkspace?.label ?? workspaceHeaderActive.label}
+          headerTabs={primaryWorkspace?.tabs ?? workspaceHeaderActive.tabs}
+          tabWorkspaceId={primaryWorkspace?.workspaceId ?? workspaceHeaderActive.workspaceId}
+          paneCount={multiTerminalPaneLayout ? workspaceLeaves.length : undefined}
+          workspaceId={workspacePageSwitching ? null : workspaceAddTargetId}
           terminalModeActive={workspaceHeaderActive.terminalModeActive}
-          headerActiveTabId={workspaceHeaderActive.tabId}
-          finishedTabCount={workspaceHeaderActive.finishedTabCount}
+          headerActiveTabId={primaryWorkspace?.tabId ?? workspaceHeaderActive.tabId}
+          finishedTabCount={primaryWorkspace?.finishedTabCount ?? workspaceHeaderActive.finishedTabCount}
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />}
@@ -5405,7 +5397,8 @@ function DashboardInner() {
             <TileContainer
               layout={tileLayout}
               paneLabels={workspacePaneLabels}
-              paneSessions={workspacePaneSessions}
+              keepPrimarySessionAlive
+              interactionDisabled={workspacePageSwitching}
               activeTileId={activeTileId}
               registry={tileRegistry}
               onActivateTile={setActiveTileId}

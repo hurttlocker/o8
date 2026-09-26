@@ -33,6 +33,10 @@ export interface WorkspaceHeaderStripProps {
     runtime: string | null;
     packetStatus: string | null;
   }>;
+  /** Session owner for the tabs, which may differ from the active pane. */
+  tabWorkspaceId?: string | null;
+  /** Number of visible panes in this workspace page. */
+  paneCount?: number;
   /** Stable workspace id for routing header pill events back to the owning tile. */
   workspaceId?: string | null;
   terminalModeActive?: boolean;

@@ -79,28 +79,15 @@ describe('multiple terminal panes', () => {
     expect(onResizeSplit).toHaveBeenCalledWith(expect.any(String), expect.closeTo(1 / 3 + 0.05));
   });
 
-  it('keeps each pane’s own sessions reachable after the top header becomes a count', async () => {
-    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  it('keeps pane headers focused on their own surface instead of drawing a local tab strip', async () => {
     const initial = createDefaultTileLayout();
     const second = insertBalancedTerminalTile(initial.root, 'tile-root', 'vertical', terminal);
-    const selections: Array<{ tabId: string; workspaceId: string }> = [];
-    const onSelect = (event: Event) => selections.push((event as CustomEvent<{ tabId: string; workspaceId: string }>).detail);
-    window.addEventListener('o8:request-select-tab', onSelect);
-    try {
       container = document.createElement('div');
       document.body.appendChild(container);
       await act(async () => { root = createRoot(container); });
       await act(async () => root.render(createElement(TileContainer, {
         activeTileId: 'tile-root',
-        paneSessions: new Map([['tile-root', {
-          workspaceId: 'workspace-1',
-          activeTabId: 'tab-1',
-          finishedTabCount: 0,
-          tabs: [
-            { id: 'tab-1', label: 'Terminal 1', kind: 'terminal', runtime: null, packetStatus: null },
-            { id: 'tab-2', label: 'Orchestrator', kind: 'orchestrator', runtime: null, packetStatus: null },
-          ],
-        }]]),
+        paneLabels: new Map([['tile-root', 'Terminal 1'], [second.newTileId!, 'Shell']]),
         layout: { ...initial, root: second.root },
         registry,
         onActivateTile: vi.fn(),
@@ -108,14 +95,9 @@ describe('multiple terminal panes', () => {
         onResizeSplit: vi.fn(),
         onSplitTile: vi.fn(),
       })));
-      expect(container.querySelector('[role="tablist"][aria-label="Open sessions in pane 1"]')).not.toBeNull();
+      expect(container.querySelector('[role="tablist"]')).toBeNull();
+      expect(container.querySelector('[data-tile-id="tile-root"]')?.textContent).toContain('Pane 1· Terminal 1');
       expect(container.querySelectorAll('button[aria-label^="Close pane"]')).toHaveLength(2);
-      await act(async () => container.querySelector<HTMLElement>('[data-o8-workspace-tab="tab-2"]')?.click());
-      expect(selections).toEqual([{ tabId: 'tab-2', workspaceId: 'workspace-1' }]);
-    } finally {
-      window.removeEventListener('o8:request-select-tab', onSelect);
-      vi.unstubAllGlobals();
-    }
   });
 
   it('closes the selected fourth pane without relying on a top-header close action', async () => {
@@ -140,5 +122,36 @@ describe('multiple terminal panes', () => {
     expect([...container.querySelectorAll('button[aria-label^="Close pane"]')].every((button) => button.textContent?.trim() === 'Close')).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Close pane 4"]')?.click());
     expect(onCloseTile).toHaveBeenCalledExactlyOnceWith(fourth.newTileId);
+  });
+
+  it('focuses a narrow terminal without unmounting its neighbors, then restores the split', async () => {
+    const initial = createDefaultTileLayout();
+    const second = insertBalancedTerminalTile(initial.root, 'tile-root', 'vertical', terminal);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    await act(async () => { root = createRoot(container); });
+    await act(async () => root.render(createElement(TileContainer, {
+      activeTileId: second.newTileId,
+      layout: { ...initial, root: second.root },
+      registry,
+      onActivateTile: vi.fn(),
+      onCloseTile: vi.fn(),
+      onResizeSplit: vi.fn(),
+      onSplitTile: vi.fn(),
+    })));
+
+    const firstPane = container.querySelector<HTMLElement>('[data-tile-id="tile-root"]')!;
+    const secondPane = container.querySelector<HTMLElement>(`[data-tile-id="${second.newTileId}"]`)!;
+    const originalWidth = secondPane.style.width;
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Focus pane 2"]')?.click());
+    expect(secondPane.style.width).toBe('100%');
+    expect(firstPane.style.visibility).toBe('hidden');
+    expect(container.querySelectorAll('[data-tile-kind="terminal"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[role="separator"]')).toHaveLength(0);
+
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Restore panes from pane 2"]')?.click());
+    expect(secondPane.style.width).toBe(originalWidth);
+    expect(firstPane.style.visibility).toBe('visible');
+    expect(container.querySelectorAll('[role="separator"]')).toHaveLength(1);
   });
 });
