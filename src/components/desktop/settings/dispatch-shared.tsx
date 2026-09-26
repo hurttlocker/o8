@@ -241,12 +241,14 @@ export const CLAUDE_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label:
 export const BRAIN_CODEX_MODEL_OPTIONS: Array<{ value: string; label: string; detail: string }> = [
   { value: MODEL_IDS.raw.openAiGpt6Astra, label: 'Astra', detail: 'Most capable model for complex, demanding work.' },
   { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'Terra', detail: 'Balanced Brain answers and repo reasoning.' },
-  { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'Sol', detail: 'Frontier reasoning for the hardest questions.' },
+  { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', detail: 'Frontier reasoning for the hardest questions.' },
   { value: MODEL_IDS.raw.openAiGpt56Luna, label: 'Luna', detail: 'Fast, inexpensive factual lookup.' },
   { value: MODEL_IDS.raw.openAiGpt55, label: 'GPT-5.5', detail: 'Previous-generation compatibility route.' },
 ];
 
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: MODEL_IDS.raw.anthropicClaudeOpus55, label: 'Opus 5.5' },
+  { value: MODEL_IDS.raw.anthropicClaudeFable51, label: 'Fable 5.1' },
   { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5' },
   { value: MODEL_IDS.raw.anthropicClaudeOpus5, label: 'Opus 5' },
   { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8' },

@@ -57,7 +57,7 @@ const CLAUDE_CLI_MODELS = {
   // Opus 5 is already accepted as a Claude model hint by runtime routing, but
   // is intentionally not the repository-wide orchestrator default yet.
   'claude-opus': MODEL_IDS.raw.anthropicClaudeOpus5,
-  'claude-fable': MODEL_IDS.fableDefault,
+  'claude-fable': MODEL_IDS.raw.anthropicClaudeFable5,
 } as const;
 
 const CODEX_CLI_MODELS = {

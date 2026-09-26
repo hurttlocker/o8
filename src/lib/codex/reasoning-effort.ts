@@ -20,6 +20,9 @@ const HIGH_END_EFFORTS = ['max', 'ultra'] as const satisfies readonly ManualThin
  */
 export const CODEX_HIGH_END_EFFORT_CATALOG: Readonly<Record<string, readonly ManualThinkingEffort[]>> = Object.freeze({
   'gpt-6-astra': HIGH_END_EFFORTS,
+  // Provider model metadata, checked 2026-09-26. This is an effort bound for
+  // explicit configurations, not proof of availability on a CLI account.
+  'gpt-6-sol': ['max'],
   'gpt-5.6-sol': HIGH_END_EFFORTS,
   'gpt-5.6-terra': HIGH_END_EFFORTS,
 });

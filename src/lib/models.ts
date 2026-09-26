@@ -1,6 +1,8 @@
 // Keep in sync with src-tauri/src/models.rs.
 
 export const RAW_MODEL_IDS = {
+  anthropicClaudeFable51: 'claude-fable-5-1',
+  anthropicClaudeOpus55: 'claude-opus-5-5',
   anthropicClaudeFable5: 'claude-fable-5',
   anthropicClaudeFable5OneMillion: 'claude-fable-5[1m]',
   anthropicClaudeOpus5: 'claude-opus-5',
@@ -12,6 +14,7 @@ export const RAW_MODEL_IDS = {
   anthropicClaudeSonnet45: 'claude-sonnet-4-5',
   anthropicClaudeHaiku45: 'claude-haiku-4-5',
   anthropicClaudeHaiku45Dated: 'claude-haiku-4-5-20251001',
+  openAiGpt6Sol: 'gpt-6-sol',
   openAiGpt6Astra: 'gpt-6-astra',
   openAiGpt56Sol: 'gpt-5.6-sol',
   openAiGpt56Terra: 'gpt-5.6-terra',
@@ -34,6 +37,7 @@ export const SUPPORTED_MODEL_IDS = Object.freeze(
 
 export const CODEX_MODEL_IDS = Object.freeze([
   RAW_MODEL_IDS.openAiGpt6Astra,
+  RAW_MODEL_IDS.openAiGpt6Sol,
   RAW_MODEL_IDS.openAiGpt56Sol,
   RAW_MODEL_IDS.openAiGpt56Terra,
   RAW_MODEL_IDS.openAiGpt56Luna,
@@ -52,7 +56,7 @@ export function isCodexModelId(value: unknown): value is ModelId {
 }
 
 export const MODEL_IDS = {
-  orchestratorDefault: RAW_MODEL_IDS.anthropicClaudeOpus48,
+  orchestratorDefault: RAW_MODEL_IDS.anthropicClaudeOpus55,
   // Codex ORCHESTRATOR default. Worker and generic CLI defaults stay on the
   // 5.6 family; gpt-5.6-sol remains pickable.
   codexDefault: RAW_MODEL_IDS.openAiGpt6Astra,
@@ -65,7 +69,7 @@ export const MODEL_IDS = {
   claudeQaDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
   claudeReviewDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
   claudeHaikuQaDefault: RAW_MODEL_IDS.anthropicClaudeHaiku45Dated,
-  fableDefault: RAW_MODEL_IDS.anthropicClaudeFable5,
+  fableDefault: RAW_MODEL_IDS.anthropicClaudeFable51,
   opencodeDefault: RAW_MODEL_IDS.opencodeDeepseekV4FlashFree,
   // Grok Build CLI worker default (Opus-class, cheaper for context) — sub-billed
   // via SuperGrok through the CLI adapter, not a metered API route.
@@ -78,7 +82,7 @@ export const MODEL_IDS = {
 
 export const CROSS_HOUSE_MODEL_TIERS = {
   frontierOrchestrator: {
-    anthropic: RAW_MODEL_IDS.anthropicClaudeOpus48,
+    anthropic: RAW_MODEL_IDS.anthropicClaudeOpus55,
     openai: RAW_MODEL_IDS.openAiGpt6Astra,
   },
   reviewMechanical: {

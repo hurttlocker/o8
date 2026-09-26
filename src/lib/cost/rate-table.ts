@@ -13,14 +13,28 @@ export interface ModelRateTable {
 }
 
 /**
- * The first dated snapshot centralizes the exact values that were already
- * checked into the runtime parsers and Brain spend guard. `observedOn` is the
- * consolidation date, not a claim that provider prices were refreshed.
+ * Original rates were consolidated on 2026-08-28. Opus 5.5 and Fable 5.1
+ * were added from https://platform.claude.com/docs/en/about-claude/pricing
+ * on 2026-09-26; this does not claim the older entries were refreshed.
  */
 export const modelRateTable = {
-  rateTableVersion: '2026-08-28.1',
-  observedOn: '2026-08-28',
+  rateTableVersion: '2026-09-26.1',
+  observedOn: '2026-09-26',
   rates: {
+    'claude-opus-5-5': {
+      inputUsdPerMillion: 4,
+      outputUsdPerMillion: 20,
+      cacheReadUsdPerMillion: 0.2,
+      cacheWriteUsdPerMillion: 5,
+      cacheWrite1hUsdPerMillion: 8,
+    },
+    'claude-fable-5-1': {
+      inputUsdPerMillion: 10,
+      outputUsdPerMillion: 50,
+      cacheReadUsdPerMillion: 0.25,
+      cacheWriteUsdPerMillion: 12.5,
+      cacheWrite1hUsdPerMillion: 20,
+    },
     'claude-opus-4-8': {
       inputUsdPerMillion: 5,
       outputUsdPerMillion: 25,
@@ -195,6 +209,8 @@ function resolveAnthropicRate(model: string): ResolvedRate | null {
   const normalized = model.trim().toLowerCase();
   if (!normalized || normalized === '<synthetic>') return null;
   const fast = normalized.includes('fast');
+  if (normalized.includes('opus-5-5')) return fast ? null : resolved('claude-opus-5-5');
+  if (normalized.includes('fable-5-1')) return fast ? null : resolved('claude-fable-5-1');
   if (normalized.includes('opus-4-8')) return resolved(fast ? 'claude-opus-4-8-fast' : 'claude-opus-4-8');
   if (normalized.includes('opus-4-7')) return resolved(fast ? 'claude-opus-4-7-fast' : 'claude-opus-4-7');
   if (normalized.includes('opus-4-6')) return resolved(fast ? 'claude-opus-4-6-fast' : 'claude-opus-4-6');
