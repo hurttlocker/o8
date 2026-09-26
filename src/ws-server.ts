@@ -56,7 +56,8 @@ import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 import { TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
 import { TerminalHiddenBuffer } from '@/lib/ws-server/terminal-hidden-buffer';
 import { resizeTerminalIfChanged } from '@/lib/ws-server/terminal-resize';
-import { waitForTerminalResyncBarrier } from '@/lib/ws-server/terminal-resync-barrier';
+import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/ws-server/terminal-resync-barrier';
+import { formatTmuxResyncSnapshot, parseTmuxSnapshotCursor } from '@/lib/ws-server/terminal-resync-snapshot';
 import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
 
 migrateDataDirOnce();
@@ -1550,12 +1551,12 @@ function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
  * Empty on any failure. Caller trims the trailing visible rows because the
  * attach repaints them.
  */
-function captureTmuxPaneResult(sessionName: string): { ok: boolean; data: string } {
+function captureTmuxPaneResult(sessionName: string, includeCursor = false): TerminalResyncCapture {
   try {
-    return {
-      ok: true,
-      data: execFileSync(
-      resolveTmuxBinary(),
+    const tmuxBinary = resolveTmuxBinary();
+    const tmuxEnv = sanitizePtyEnv() as NodeJS.ProcessEnv;
+    const data = execFileSync(
+      tmuxBinary,
       dashTmuxArgs('capture-pane', '-p', '-e', '-S', `-${TERMINAL_SCROLLBACK_LINES}`, '-t', sessionName),
       {
         windowsHide: true,
@@ -1563,9 +1564,26 @@ function captureTmuxPaneResult(sessionName: string): { ok: boolean; data: string
         encoding: 'utf-8',
         maxBuffer: TERMINAL_TMUX_SNAPSHOT_MAX_BYTES,
         stdio: ['ignore', 'pipe', 'ignore'],
-        env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+        env: tmuxEnv,
       },
-      ),
+    );
+    let cursor = null;
+    if (includeCursor) {
+      try {
+        const position = execFileSync(
+          tmuxBinary,
+          dashTmuxArgs('display-message', '-p', '-t', sessionName, '#{cursor_x} #{cursor_y} #{pane_width} #{pane_height}'),
+          { windowsHide: true, timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: tmuxEnv },
+        );
+        cursor = parseTmuxSnapshotCursor(position);
+      } catch {
+        // Keep the captured screen even if tmux cannot report its cursor.
+      }
+    }
+    return {
+      ok: true,
+      data,
+      cursor,
     };
   } catch {
     return { ok: false, data: '' };
@@ -6691,7 +6709,7 @@ async function sendTerminalResync(
     getBatchBuffer: () => attachment.batchBuffer,
     getScrollbackChunks: () => attachment.scrollbackChunks,
     capture: () => attachment.snapshotSource === 'tmux'
-      ? captureTmuxPaneResult(attachment.sessionName)
+      ? captureTmuxPaneResult(attachment.sessionName, true)
       : { ok: true, data: attachment.scrollbackChunks.join('') },
     isCancelled: () => !terminalResyncIsCurrent(client, attachment, view, epoch),
     onUnsettled: (waitedMs) => {
@@ -6710,10 +6728,11 @@ async function sendTerminalResync(
   let snapshot = '';
   if (attachment.snapshotSource === 'tmux') {
     if (barrier.fallbackReason == null) {
-      // capture-pane separates display rows with LF. xterm's convertEol is
-      // intentionally off for live PTY fidelity, so replay rows need an
-      // explicit carriage return or each row resumes at the prior column.
-      snapshot = barrier.capture.data.replace(/\r?\n$/u, '').replace(/\r?\n/g, '\r\n');
+      snapshot = formatTmuxResyncSnapshot(
+        barrier.capture.data,
+        barrier.capture.cursor,
+        { cols: attachment.cols, rows: attachment.rows },
+      );
     } else {
       snapshotSource = 'scrollback';
       historyTruncated = true;
