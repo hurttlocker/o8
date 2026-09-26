@@ -130,8 +130,13 @@ it('keeps saved routing and consent, and prevents duplicate workspace openings',
 
 it('returns from optional tool settings without starting work', async () => {
   const { complete } = await render();
+  const content = document.querySelector<HTMLElement>('[aria-label="Setup content"]');
+  expect(content).not.toBeNull();
+  content!.scrollTop = 240;
   await click('Change');
   expect(document.body.textContent).toContain('Your setup');
+  expect(content!.scrollTop).toBe(0);
+  expect(document.activeElement?.tagName).toBe('H1');
   await click('Use this setup');
   expect(document.body.textContent).toContain('Open a project');
   expect(document.body.textContent).toContain('Using Codex');

@@ -63,6 +63,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   }, [request, revision]);
 
   useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
     const heading = contentRef.current?.querySelector<HTMLElement>('h1, h2');
     heading?.setAttribute('tabindex', '-1');
     heading?.focus({ preventScroll: true });
@@ -131,9 +132,9 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   </div>;
   const renderButton = ({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) => <button type="button" onClick={onClick} disabled={disabled} style={{ ...onboardingButtonStyle, background: 'var(--t-text)', color: 'var(--t-onboarding-bg)', opacity: disabled ? 0.5 : 1 }}>{label}</button>;
   const home = progress.step === 'open';
-  return <div style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-onboarding-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
+  return <div data-o8-onboarding="" style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-onboarding-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
     <div data-tauri-drag-region="" style={{ height: 52, flexShrink: 0 }} />
-    <div ref={contentRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 24, paddingBottom: 24, paddingLeft: 32, paddingRight: 32 }}>
+    <div ref={contentRef} role="region" aria-label="Setup content" tabIndex={0} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 24, paddingBottom: 24, paddingLeft: 32, paddingRight: 32 }}>
       <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center', gap: 20 }}>
         {!home ? <div style={{ width: '100%', maxWidth: progress.step === 'privacy' ? 760 : 640 }}><button type="button" disabled={busy} onClick={() => { continueAfterTools.current = false; navigate('open'); }} style={{ ...onboardingQuietButtonStyle, paddingLeft: 0 }}>← Projects</button></div> : null}
         {home ? <OnboardingOpen projects={projects} loading={loading} busy={busy} status={status} tools={tools} error={error ?? discoveryError ?? completionError ?? null} onRetry={() => setRevision((value) => value + 1)} onOpenFolder={() => void enter(null, true)} onOpenProject={(project) => void enter(project)} onClone={() => navigate('repos')} onExplore={() => void enter(null)} /> : null}

@@ -1765,6 +1765,17 @@ button.workflow-file-item.workflow-file-item-active {
   display: none;
 }
 
+/* Setup keeps native scrolling without tracks on the page or nested lists. */
+[data-o8-onboarding],
+[data-o8-onboarding] * {
+  scrollbar-width: none;
+}
+
+[data-o8-onboarding]::-webkit-scrollbar,
+[data-o8-onboarding] *::-webkit-scrollbar {
+  display: none;
+}
+
 [data-o8-symon-scroll]::-webkit-scrollbar {
   display: none;
 }
