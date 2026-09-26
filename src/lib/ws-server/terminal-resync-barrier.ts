@@ -1,9 +1,11 @@
+import type { TmuxSnapshotCursor } from './terminal-resync-snapshot';
+
 export const TERMINAL_RESYNC_IDLE_MS = 40;
 export const TERMINAL_RESYNC_POLL_MS = 10;
 export const TERMINAL_RESYNC_MAX_WAIT_MS = 500;
 export const TERMINAL_RESYNC_FRESHNESS_RETRY_MS = 25;
 
-export type TerminalResyncCapture = { ok: boolean; data: string };
+export type TerminalResyncCapture = { ok: boolean; data: string; cursor?: TmuxSnapshotCursor | null };
 
 export type TerminalResyncBarrierResult =
   | { status: 'cancelled'; waitedMs: number }
