@@ -23,9 +23,11 @@
  *           `silent_exit_but_work_present` (informational).
  *        d. Verification fails → mark lane `awaiting_input`, enqueue
  *           `silent_exit_verification_failed` (human review).
- *        e. Clean worktree + zero commits → mark lane `awaiting_input`,
+ *        e. Clean read-only packet + zero commits → settle its latest finding
+ *           receipt, then complete it or hold it for missing evidence.
+ *        f. Other clean worktree + zero commits → mark lane `awaiting_input`,
  *           enqueue `silent_exit_no_work` (agent spawned but never built anything).
- *        f. Clean worktree + has commits → mark lane `reviewing`, enqueue
+ *        g. Clean worktree + has commits → mark lane `reviewing`, enqueue
  *           `silent_exit_but_work_present` (lower priority — work exists).
  *
  * The detector is idempotent: once a silent_exit_* label sits on the lane,
@@ -471,6 +473,28 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
 
   // Clean worktree branch.
   if (state.commitsAhead === 0) {
+    const {
+      captureSettledReadOnlyCompletionContext,
+      completeReadOnlyZeroDiffLane,
+      isReadOnlyPacketLane,
+    } = await import('@/lib/orchestrator/read-only-completion');
+    if (isReadOnlyPacketLane(lane)) {
+      const packetId = lane.packetId!.trim();
+      let context = null;
+      if (lane.sessionKey) {
+        try {
+          const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+          context = await captureSettledReadOnlyCompletionContext(
+            () => capturePacketCompletionContext(packetId, lane.sessionKey!),
+          );
+        } catch (error) {
+          console.error(`[silent-exit] Failed to capture read-only completion context for packet ${packetId}:`, error);
+        }
+      }
+      const completion = await completeReadOnlyZeroDiffLane(lane, context);
+      if (completion.completed || completion.blocked) return true;
+      return false;
+    }
     const { parkHuddleReadyZeroDiffLane } = await import('@/lib/orchestrator/huddle-zero-diff');
     const huddlePark = await parkHuddleReadyZeroDiffLane(lane);
     if (huddlePark.parked) {
