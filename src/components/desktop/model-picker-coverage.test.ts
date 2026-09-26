@@ -17,6 +17,7 @@ const CURRENT_CLAUDE_FLAGSHIPS = [
 
 const CURRENT_CODEX_FLAGSHIPS = [
   MODEL_IDS.raw.openAiGpt6Astra,
+  MODEL_IDS.raw.openAiGpt6Sol,
   MODEL_IDS.raw.openAiGpt56Sol,
 ] as const;
 
@@ -44,7 +45,7 @@ describe('Claude model picker coverage', () => {
 });
 
 describe('Codex model picker coverage', () => {
-  it('offers Astra and Sol in settings and both CLI pickers', () => {
+  it('offers current Codex models in settings and both CLI pickers', () => {
     const settingsIds = BRAIN_CODEX_MODEL_OPTIONS.map((option) => option.value);
     const workspaceIds = CODEX_CLI_MODELS.map((option) => option.id);
     const chatIds = CLI_RUNTIME_MODELS.codex.map((option) => option.id.replace('cli:codex:', ''));

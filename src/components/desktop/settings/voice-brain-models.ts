@@ -11,6 +11,7 @@ export const VOICE_BRAIN_MODELS: Record<string, { value: string; label: string }
     { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5' },
   ],
   codex: [
+    { value: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol' },
     { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol' },
     { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra' },
   ],
