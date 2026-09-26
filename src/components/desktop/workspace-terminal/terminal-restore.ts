@@ -694,7 +694,9 @@ export async function loadInitialTabState(
     ? buildRepoStateScope(options.preferredRepoPath)
     : null;
   const [rootSaved, repoSaved] = await Promise.all([
-    options.splitCreated ? Promise.resolve(null) : loadTabState(options.stateScope, null),
+    // Split panes have their own tile scope. Restore that exact pane, but do
+    // not fall back to a shared repo scope and clone another pane's tabs.
+    loadTabState(options.stateScope, null),
     currentStableRepoScope ? loadTabState(currentStableRepoScope, options.preferredRepoPath) : Promise.resolve(null),
   ]);
   if (cancelled()) return null;

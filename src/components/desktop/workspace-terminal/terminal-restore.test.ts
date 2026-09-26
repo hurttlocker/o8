@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, mergeUserSpawnedTabs, needsRuntimeSessionLivenessCheck, reconcileValidatedTabs, resetControllerRefs } from './terminal-restore';
+import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, mergeUserSpawnedTabs, needsRuntimeSessionLivenessCheck, reconcileValidatedTabs, resetControllerRefs } from './terminal-restore';
 import type { TerminalTab } from './types';
 
 function tab(overrides: Partial<TerminalTab>): TerminalTab {
@@ -14,6 +14,32 @@ function tab(overrides: Partial<TerminalTab>): TerminalTab {
     ...overrides,
   };
 }
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('loadInitialTabState', () => {
+  it('restores a split pane from its own tile scope without reading a shared repo state', async () => {
+    const saved = {
+      version: 1,
+      activeTabId: 'terminal-2',
+      savedAt: new Date(0).toISOString(),
+      tabs: [{ id: 'terminal-2', label: 'Terminal 2', kind: 'terminal', tmuxSession: 'cortex-dash-2' }],
+    };
+    const fetchState = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify(saved), { status: 200 }));
+    vi.stubGlobal('fetch', fetchState);
+
+    const restored = await loadInitialTabState({
+      stateScope: 'tile-2',
+      defaultTab: 'terminal',
+      splitCreated: true,
+      preferredRepoPath: '/repo',
+    }, () => false);
+
+    expect(restored).toEqual(saved);
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(String(fetchState.mock.calls[0][0])).toContain('scope=tile-2');
+  });
+});
 
 describe('needsRuntimeSessionLivenessCheck', () => {
   it('skips fleet discovery for terminal-only and packet-owned restore state', () => {

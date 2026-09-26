@@ -8,8 +8,8 @@ interface HeaderPlayButtonProps {
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
   onSplitTab?: (kind: 'chat' | 'terminal', direction: 'right' | 'below') => void;
-  gridMode?: boolean;
   ariaSuffix?: string;
+  paneMode?: boolean;
 }
 
 function HeaderPlayMenuItem({ label, onClick, dragKind, onDragEnd }: {
@@ -61,8 +61,8 @@ export function HeaderPlayButton({
   onSpawnChat,
   onSpawnTerminal,
   onSplitTab,
-  gridMode = false,
   ariaSuffix,
+  paneMode = false,
 }: HeaderPlayButtonProps) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -114,11 +114,11 @@ export function HeaderPlayButton({
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        aria-label={ariaSuffix ? `New tab (${ariaSuffix})` : 'New tab'}
+        aria-label={paneMode ? `Add pane (${ariaSuffix ?? 'workspace'})` : ariaSuffix ? `New tab (${ariaSuffix})` : 'New tab'}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        title="Add a workspace tab"
+        title={paneMode ? 'Add a pane' : 'Add a workspace tab'}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -145,7 +145,7 @@ export function HeaderPlayButton({
         ref={menuRef}
         id={menuId}
         role="menu"
-        aria-label={ariaSuffix ? `New tab options (${ariaSuffix})` : 'New tab options'}
+        aria-label={paneMode ? `Add pane options (${ariaSuffix ?? 'workspace'})` : ariaSuffix ? `New tab options (${ariaSuffix})` : 'New tab options'}
         style={{
           position: 'fixed',
           top: anchorRect.bottom + 4,
@@ -170,14 +170,17 @@ export function HeaderPlayButton({
         {onSpawnTerminal ? (
           <HeaderPlayMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} dragKind="terminal" onDragEnd={() => setOpen(false)} />
         ) : null}
+        {paneMode ? (
+          <div style={{ color: 'var(--t-text-muted)', fontSize: 11, paddingTop: 7, paddingBottom: 5, paddingLeft: 12, borderTop: '1px solid var(--t-divider)' }}>Drag to place on a pane edge</div>
+        ) : null}
         {onSplitTab ? (
           <>
             <div role="separator" style={{ borderTop: '1px solid var(--t-divider)', marginTop: 4, marginBottom: 4 }} />
             <div style={{ color: 'var(--t-text-muted)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', paddingLeft: 12, paddingBottom: 3 }}>NEW PANE</div>
-            <HeaderPlayMenuItem label={gridMode ? 'Chat pane' : 'Chat to right'} onClick={pick(() => onSplitTab('chat', 'right'))} />
-            <HeaderPlayMenuItem label={gridMode ? 'Terminal pane' : 'Terminal to right'} onClick={pick(() => onSplitTab('terminal', 'right'))} />
-            {!gridMode ? <HeaderPlayMenuItem label="Chat below" onClick={pick(() => onSplitTab('chat', 'below'))} /> : null}
-            {!gridMode ? <HeaderPlayMenuItem label="Terminal below" onClick={pick(() => onSplitTab('terminal', 'below'))} /> : null}
+            <HeaderPlayMenuItem label="Chat to right" onClick={pick(() => onSplitTab('chat', 'right'))} />
+            <HeaderPlayMenuItem label="Terminal to right" onClick={pick(() => onSplitTab('terminal', 'right'))} />
+            <HeaderPlayMenuItem label="Chat below" onClick={pick(() => onSplitTab('chat', 'below'))} />
+            <HeaderPlayMenuItem label="Terminal below" onClick={pick(() => onSplitTab('terminal', 'below'))} />
             <div style={{ color: 'var(--t-text-muted)', fontSize: 11, paddingTop: 7, paddingBottom: 5, paddingLeft: 12, borderTop: '1px solid var(--t-divider)' }}>Drag Chat or Terminal onto a pane</div>
           </>
         ) : null}

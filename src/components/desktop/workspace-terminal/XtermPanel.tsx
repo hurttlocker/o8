@@ -52,11 +52,11 @@ export interface XtermPanelProps {
   /** Render with no background so the host surface (canvas glass) reads
    *  through. The host owns legibility (its own tint/veil behind the text). */
   transparent?: boolean;
-  /** Override the terminal font size (default 12). */
+  /** Override the terminal font size (default 13). */
   fontSize?: number;
-  /** Override the line-height multiplier (default 1.35). The canvas passes 1.0
+  /** Override the line-height multiplier (default 1.45). The canvas passes 1.0
    *  so xterm's DOM-renderer selection overlay aligns with the glyph baseline —
-   *  1.35 offsets the highlight ~½ line up from the text under CSS zoom (#1245). */
+   *  a taller line offsets the highlight ~½ line up from the text under CSS zoom (#1245). */
   lineHeight?: number;
   /** Bump on every WebSocket (re)connect. Terminal sends drop silently on a
    *  closed socket and the server never re-attaches us — without this, any
@@ -452,8 +452,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
         const term = new Terminal({
           fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
-          fontSize: fontSize ?? 12,
-          lineHeight: lineHeight ?? 1.35,
+          fontSize: fontSize ?? 13,
+          lineHeight: lineHeight ?? 1.45,
           cursorBlink: true,
           cursorStyle: 'block',
           allowTransparency: transparent === true,

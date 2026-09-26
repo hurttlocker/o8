@@ -194,6 +194,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
         detail: {
           workspaceId: workspaceInstanceId,
+          tileId: props.stateScope,
           label: conversationHeaderLabel,
           tabId: activeTabId,
           kind: activeTabKind,
@@ -223,7 +224,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         }));
       };
 
-    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible, terminalMode.active, props.activeWorkspaceSurface]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible, terminalMode.active, props.activeWorkspaceSurface, props.stateScope]);
 
     // Listen for chat-history rename so the workspace tab's label
     // refreshes in sync with the chat-history PATCH. The header strip
@@ -276,6 +277,11 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         if (!matchWorkspace(detail?.workspaceId)) return;
         if (detail?.tabId) handleCloseTab(detail.tabId);
       };
+      const onRename = (event: Event) => {
+        const detail = (event as CustomEvent<{ tabId?: string; label?: string; workspaceId?: string }>).detail;
+        if (!matchWorkspace(detail?.workspaceId)) return;
+        if (detail?.tabId && detail.label) handleUpdateTabLabel(detail.tabId, detail.label, { source: 'user' });
+      };
       const onCleanup = (event: Event) => {
         const detail = (event as CustomEvent<{ workspaceId?: string | null }>).detail;
         if (!matchWorkspace(detail?.workspaceId)) return;
@@ -289,13 +295,15 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       };
       window.addEventListener('o8:request-select-tab', onSelect as EventListener);
       window.addEventListener('o8:request-close-tab', onClose as EventListener);
+      window.addEventListener('o8:request-rename-tab', onRename as EventListener);
       window.addEventListener('o8:request-cleanup-tabs', onCleanup as EventListener);
       return () => {
         window.removeEventListener('o8:request-select-tab', onSelect as EventListener);
         window.removeEventListener('o8:request-close-tab', onClose as EventListener);
+        window.removeEventListener('o8:request-rename-tab', onRename as EventListener);
         window.removeEventListener('o8:request-cleanup-tabs', onCleanup as EventListener);
       };
-    }, [props.canCloseTile, handleSelectTab, handleCloseTab, cleanupFinishedTabs, workspaceInstanceId]);
+    }, [props.canCloseTile, handleSelectTab, handleCloseTab, handleUpdateTabLabel, cleanupFinishedTabs, workspaceInstanceId]);
 
     useEffect(() => {
       if (!cleanupToast) return;

@@ -67,13 +67,37 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     expect(tabs.map((tab) => tab.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
   });
 
-  it('keeps the bottom panel action separate from chat and terminal tabs', async () => {
-    const toggleBottomPanel = vi.fn();
-    const spawns: Array<{ kind: string; workspaceId: string }> = [];
-    const onSpawn = (event: Event) => {
-      spawns.push((event as CustomEvent<{ kind: string; workspaceId: string }>).detail);
+  it('renames a workspace tab without changing its identity or pane selection', async () => {
+    const renames: Array<{ tabId: string; label: string; workspaceId: string }> = [];
+    const onRename = (event: Event) => {
+      renames.push((event as CustomEvent<{ tabId: string; label: string; workspaceId: string }>).detail);
     };
-    window.addEventListener('o8:request-spawn-tab', onSpawn);
+    window.addEventListener('o8:request-rename-tab', onRename);
+    try {
+      await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({ tabWorkspaceId: 'primary-owner' }))));
+      const tab = container.querySelector<HTMLElement>('[data-o8-workspace-tab="tab-1"]')!;
+      await act(async () => tab.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+      const input = container.querySelector<HTMLInputElement>('input[aria-label="Rename Rename me later"]')!;
+      expect(input).not.toBeNull();
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'My research desk');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+      expect(renames).toEqual([{ tabId: 'tab-1', label: 'My research desk', workspaceId: 'primary-owner' }]);
+      expect(tab.getAttribute('aria-selected')).toBe('true');
+    } finally {
+      window.removeEventListener('o8:request-rename-tab', onRename);
+    }
+  });
+
+  it('keeps the bottom panel action separate from a new terminal pane', async () => {
+    const toggleBottomPanel = vi.fn();
+    const splits: Array<{ kind: string; direction: string; workspaceId: string }> = [];
+    const onSplit = (event: Event) => {
+      splits.push((event as CustomEvent<{ kind: string; direction: string; workspaceId: string }>).detail);
+    };
+    window.addEventListener('o8:request-split-workspace-tab', onSplit);
     try {
       await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
         onToggleBottomPanel: toggleBottomPanel,
@@ -81,33 +105,48 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
       expect(container.querySelector('button[aria-label="Choose bottom panel surface"]')).toBeNull();
       await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open bottom panel"]')?.click());
       expect(toggleBottomPanel).toHaveBeenCalledOnce();
-      expect(spawns).toEqual([]);
+      expect(splits).toEqual([]);
 
-      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="New tab"]')?.click());
-      const menu = document.querySelector('[role="menu"][aria-label="New tab options"]');
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add pane (workspace)"]')?.click());
+      const menu = document.querySelector('[role="menu"][aria-label="Add pane options (workspace)"]');
       expect(menu).not.toBeNull();
       const items = Array.from(menu!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
       await act(async () => items.find((item) => item.textContent === 'Terminal')?.click());
-      expect(spawns).toEqual([{ kind: 'terminal', workspaceId: 'ws-1' }]);
+      expect(splits).toEqual([{ kind: 'terminal', direction: 'right', workspaceId: 'ws-1' }]);
       expect(toggleBottomPanel).toHaveBeenCalledOnce();
     } finally {
-      window.removeEventListener('o8:request-spawn-tab', onSpawn);
+      window.removeEventListener('o8:request-split-workspace-tab', onSplit);
     }
   });
 
-  it('keeps Add available across split panes and toggles the grid layout', async () => {
-    const toggleGrid = vi.fn();
+  it.each([2, 4])('keeps one Add and no Close in the top header for %i panes', async (count) => {
     await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
-      splitHeaderWorkspaces: [
-        { workspaceId: 'ws-1', tabs: [headerTab(0, 'First')], activeTabId: 'tab-0' },
-        { workspaceId: 'ws-2', tabs: [headerTab(1, 'Second')], activeTabId: 'tab-1' },
-      ],
-      workspaceGridAvailable: true,
-      onToggleWorkspaceGrid: toggleGrid,
+      paneCount: count,
+      tabWorkspaceId: 'primary-session-owner',
     }))));
-    expect(container.querySelector('button[aria-label="New tab"]')).not.toBeNull();
-    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Show pane grid"]')?.click());
-    expect(toggleGrid).toHaveBeenCalledOnce();
+    expect(container.querySelectorAll('button[aria-label="Add pane (workspace)"]')).toHaveLength(1);
+    expect(container.querySelector('button[aria-label="Show pane grid"]')).toBeNull();
+    expect(container.textContent).toContain(`${count} panes`);
+    expect(container.querySelector('button[aria-label^="Close pane"]')).toBeNull();
+    expect(container.querySelectorAll('[role="tablist"] [role="tab"]')).toHaveLength(3);
+  });
+
+  it('routes top page tabs to their owner while Add targets the active pane', async () => {
+    const selections: Array<{ tabId: string; workspaceId: string }> = [];
+    const onSelect = (event: Event) => selections.push((event as CustomEvent<{ tabId: string; workspaceId: string }>).detail);
+    window.addEventListener('o8:request-select-tab', onSelect);
+    try {
+      await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
+        paneCount: 4,
+        workspaceId: 'active-pane',
+        tabWorkspaceId: 'primary-session-owner',
+      }))));
+      await act(async () => container.querySelector<HTMLElement>('[data-o8-workspace-tab="tab-2"]')?.click());
+      expect(selections).toEqual([{ tabId: 'tab-2', workspaceId: 'primary-session-owner' }]);
+      expect(container.querySelector('button[aria-label="Add pane (workspace)"]')).not.toBeNull();
+    } finally {
+      window.removeEventListener('o8:request-select-tab', onSelect);
+    }
   });
 
   it('targets a new chat pane without opening the bottom panel', async () => {
@@ -121,31 +160,21 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
       await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
         onToggleBottomPanel: toggleBottomPanel,
       }))));
-      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="New tab"]')?.click());
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add pane (workspace)"]')?.click());
       const items = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
-      await act(async () => items.find((item) => item.textContent === 'Chat below')?.click());
-      expect(splits).toEqual([{ kind: 'chat', direction: 'below', workspaceId: 'ws-1' }]);
+      await act(async () => items.find((item) => item.textContent === 'Chat')?.click());
+      expect(splits).toEqual([{ kind: 'chat', direction: 'right', workspaceId: 'ws-1' }]);
       expect(toggleBottomPanel).not.toHaveBeenCalled();
     } finally {
       window.removeEventListener('o8:request-split-workspace-tab', onSplit);
     }
   });
 
-  it('opens the visible conversation when Chat is chosen', async () => {
-    const spawns: Array<{ kind: string; workspaceId: string }> = [];
-    const onSpawn = (event: Event) => {
-      spawns.push((event as CustomEvent<{ kind: string; workspaceId: string }>).detail);
-    };
-    window.addEventListener('o8:request-spawn-tab', onSpawn);
-    try {
-      await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps())));
-      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="New tab"]')?.click());
-      const items = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
-      await act(async () => items.find((item) => item.textContent === 'Chat')?.click());
-      expect(spawns).toEqual([{ kind: 'orchestrator', workspaceId: 'ws-1' }]);
-    } finally {
-      window.removeEventListener('o8:request-spawn-tab', onSpawn);
-    }
+  it('keeps the header Chat and Terminal choices draggable for exact placement', async () => {
+    await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps())));
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add pane (workspace)"]')?.click());
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    expect(items.filter((item) => item.textContent === 'Chat' || item.textContent === 'Terminal').every((item) => item.draggable)).toBe(true);
   });
 
   it('identifies each tab by session id, not by its user-authored title', async () => {
