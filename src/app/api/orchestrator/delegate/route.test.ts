@@ -112,4 +112,36 @@ describe('orchestrator Fast delegation entry', () => {
     expect((await launch('thoughts-fast-route', fastCapability, 'wrong-mode')).status).toBe(403);
     expect(launchRuntimeSurface).not.toHaveBeenCalled();
   });
+
+  it('refuses overlapping Fast worker scopes before launching a second runtime surface', async () => {
+    const { repoPath, state } = fixture();
+    vi.stubEnv('O8_DATA_DIR', state);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    const { fastDelegationCapability } = await import('@/lib/orchestrator/fast-delegation-auth');
+    const { POST } = await import('./route');
+    const fastCapability = fastDelegationCapability(repoPath, 'thoughts-fast-route');
+    const dispatch = (clientMutationId: string, assignedPaths: string[]) => POST(new NextRequest(
+      'http://localhost/api/orchestrator/delegate', {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt: 'Edit assigned files', repoPath, taskName: clientMutationId, runtime: 'codex',
+          checkoutMode: 'shared', parentThreadId: 'thoughts-fast-route', fastCapability,
+          assignedPaths, clientMutationId,
+        }),
+      },
+    ));
+    expect((await dispatch('first', ['src/shared.ts'])).status).toBe(200);
+    const overlap = await dispatch('second', ['src/shared.ts']);
+    expect(overlap.status).toBe(422);
+    expect((await overlap.json()).error).toMatch(/overlaps worker first/);
+    expect(launchRuntimeSurface).toHaveBeenCalledTimes(1);
+    const teamFiles = (await import('node:fs')).readdirSync(join(state, 'shared-checkout-teams'))
+      .filter((file) => file.endsWith('.json'));
+    const team = JSON.parse(readFileSync(join(state, 'shared-checkout-teams', teamFiles[0]!), 'utf8')) as {
+      members: Array<{ taskName: string; paths: string[]; surfaceId: string }>;
+    };
+    expect(team.members).toEqual([expect.objectContaining({
+      taskName: 'first', paths: ['src/shared.ts'], surfaceId: 'codex-owned:first',
+    })]);
+  });
 });
