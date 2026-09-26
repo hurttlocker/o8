@@ -7,7 +7,6 @@ import { useEntitlement } from '@/lib/entitlement/context';
 import { ChromeButton, SIDEBAR_FOOTER_HIT_SIZE } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
-import { WhatsNewCard } from './WhatsNewCard';
 import { SymonMachineControl, SymonOrbStatusLine, useSymonOrbMinimized } from '../dictation/SymonMachineControl';
 
 interface AccountBlockProps {
@@ -17,7 +16,7 @@ interface AccountBlockProps {
   onOpenMobilePairing?: () => void;
 }
 
-type AccountPopover = 'menu' | 'whats-new' | null;
+type AccountPopover = 'menu' | null;
 
 const NOOP = () => {};
 
@@ -97,7 +96,6 @@ export function AccountBlock({
   const accountRowRef = useRef<HTMLDivElement | null>(null);
   const [popover, setPopover] = useState<AccountPopover>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const [anchorElement, setAnchorElement] = useState<HTMLElement | null>(null);
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   // Clerk can fail to finish loading (offline boot, dev-bridge localhost
   // origin) — after a grace window, stop waiting and show the signed-out row
@@ -129,7 +127,6 @@ export function AccountBlock({
 
   const syncAnchor = useCallback(() => {
     const element = accountRowRef.current;
-    setAnchorElement(element);
     setAnchorRect(element?.getBoundingClientRect() ?? null);
   }, []);
   const closePopover = useCallback(() => {
@@ -139,11 +136,6 @@ export function AccountBlock({
     syncAnchor();
     setPopover((current) => current === 'menu' ? null : 'menu');
   }, [syncAnchor]);
-  const openWhatsNew = useCallback(() => {
-    syncAnchor();
-    setPopover('whats-new');
-  }, [syncAnchor]);
-
   useEffect(() => {
     if (!popover) return;
     const handleViewportChange = () => syncAnchor();
@@ -320,11 +312,9 @@ export function AccountBlock({
         ) : null}
       </div>
 
-      {/* The account click opens the FULL quick-settings drawer (operator
-          ruling 2026-07-13: "we still wanted our settings modal from old") —
-          account section, Settings ⌘,, theme, usage, updates, What's new,
-          Get help, MCP setup. The slimmer AccountMenu is retired in favor of
-          this superset; sign in/out live in the drawer's account section. */}
+      {/* The account click opens the full quick-settings drawer: account,
+          Settings, theme, usage, updates, Help, and MCP setup. Sign in/out
+          live in the drawer's account section. */}
       <SettingsQuickDrawer
         open={popover === 'menu' && anchorRect !== null}
         anchorRect={anchorRect}
@@ -333,15 +323,7 @@ export function AccountBlock({
           closePopover();
           openSettings();
         }}
-        onWhatsNew={openWhatsNew}
       />
-      {popover === 'whats-new' && anchorRect ? (
-        <WhatsNewCard
-          anchorRect={anchorRect}
-          anchorElement={anchorElement}
-          onClose={closePopover}
-        />
-      ) : null}
     </div>
   );
 }
