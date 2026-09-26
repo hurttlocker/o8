@@ -16,12 +16,17 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 import {
   closeTile,
   collectLeafContentKinds,
+  collectLeafNodes,
+  computeTileLayout,
   countLeaves,
   createTileContent,
   findLeafByContentKind,
   findSiblingLeaf,
   findTile,
   getFirstLeaf,
+  hasUserArrangedSplit,
+  insertBalancedTerminalTile,
+  rebalanceTerminalTiles,
   replaceTileContent,
   resizeTile,
   serializeTileLayout,
@@ -334,9 +339,12 @@ export function useTileLayout({
     if (!result.closed) {
       return;
     }
+    const allTerminalPanes = collectLeafNodes(tileLayout.root).every((leaf) => leaf.content.kind === 'terminal');
     setTileLayout({
       ...tileLayout,
-      root: result.root,
+      root: allTerminalPanes && !hasUserArrangedSplit(tileLayout.root)
+        ? rebalanceTerminalTiles(result.root, tileLayout.root.type === 'split' ? tileLayout.root.direction : 'vertical')
+        : result.root,
     });
     if (tile?.type === 'leaf' && tile.content.kind === 'canvas') {
       setCanvasStateByTileId((prev) => {
@@ -360,7 +368,7 @@ export function useTileLayout({
     });
   }, [setTileLayout, tileLayout]);
 
-  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal', placeBefore = false) => {
+  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal', placeBefore = false, exactPlacement = false) => {
     const ratio = direction === 'vertical' ? 0.55 : 0.62;
     // Split creates the same type: workspace splits → new terminal (chat), contextual splits → new contextual (shell)
     const sourceTile = findTile(tileLayout.root, tileId);
@@ -373,10 +381,26 @@ export function useTileLayout({
           kind: 'terminal' as const,
           repoPath: null,
           createdFromSplit: true,
-          ...(initialTab ? { initialTab } : {}),
+          initialTab: initialTab ?? 'terminal',
         }
       : createTileContent(newKind);
-    const result = splitTile(tileLayout.root, tileId, direction, nextContent, ratio, placeBefore);
+    const allTerminalPanes = collectLeafNodes(tileLayout.root).every((leaf) => leaf.content.kind === 'terminal');
+    const userArranged = hasUserArrangedSplit(tileLayout.root);
+    const largestPane = allTerminalPanes && userArranged && !exactPlacement
+      ? Array.from(computeTileLayout(tileLayout.root).leafRects.entries())
+          .sort((first, second) => second[1].width * second[1].height - first[1].width * first[1].height)[0]
+      : null;
+    const result = allTerminalPanes && newKind === 'terminal' && !exactPlacement && !userArranged
+      ? insertBalancedTerminalTile(tileLayout.root, tileId, direction, nextContent, placeBefore)
+      : splitTile(
+          tileLayout.root,
+          largestPane?.[0] ?? tileId,
+          largestPane ? (largestPane[1].width >= largestPane[1].height ? 'vertical' : 'horizontal') : direction,
+          nextContent,
+          exactPlacement || largestPane ? 0.5 : ratio,
+          placeBefore,
+          exactPlacement || Boolean(largestPane),
+        );
     if (!result.newTileId) {
       return;
     }

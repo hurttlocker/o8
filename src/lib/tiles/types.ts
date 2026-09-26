@@ -51,6 +51,8 @@ export interface TileSplitNode {
   id: string;
   direction: TileSplitDirection;
   ratio: number;
+  /** Preserve an operator-placed split through auto-add, close, and reload. */
+  userArranged?: boolean;
   children: [TileNode, TileNode];
 }
 

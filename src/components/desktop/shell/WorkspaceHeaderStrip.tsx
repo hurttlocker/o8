@@ -24,7 +24,6 @@ import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
 import { StatusBottomPanelControl } from '../DesktopStatusBar';
-import { SplitPaneCloseButton } from './SplitPaneCloseButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
 /** Right-edge inset that lands the header's rightmost control on the branch rail
@@ -51,12 +50,8 @@ export function WorkspaceHeaderStrip({
   onSidebarHoverEnter,
   onSidebarHoverLeave,
   onSplitWorkspacePanel,
-  onCloseWorkspacePanel,
   bottomPanelVisible = false,
   onToggleBottomPanel,
-  workspaceGridAvailable = false,
-  workspaceGridMode = false,
-  onToggleWorkspaceGrid,
   rightPanelOpen = false,
   rightPanelDisabled = false,
   onToggleRightPanel,
@@ -64,18 +59,16 @@ export function WorkspaceHeaderStrip({
   onOpenInbox,
   headerLabel,
   headerTabs,
+  tabWorkspaceId,
+  paneCount,
   workspaceId,
   headerActiveTabId,
   finishedTabCount = 0,
-  splitHeaderWorkspaces,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   const showApprovalBadge = approvalCount > 0 && Boolean(onOpenInbox);
   const tabs = headerTabs ?? [];
-  const isSplit = Boolean(splitHeaderWorkspaces && splitHeaderWorkspaces.length >= 2);
-  // Split mode → side-by-side pill strips. Single 2+ tabs → pill strip.
-  // Single 1 or 0 tabs → title + `…` menu.
-  const usePillStrip = !isSplit && tabs.length > 1;
+  const usePillStrip = tabs.length > 0;
   return (
     <ColumnHeaderStrip
       drag
@@ -108,21 +101,19 @@ export function WorkspaceHeaderStrip({
           ) : null}
         </>
       }
-      center={isSplit && splitHeaderWorkspaces ? (
-        <SplitHeaderPillStrips workspaces={splitHeaderWorkspaces} />
-      ) : usePillStrip ? (
-        <HeaderPillStrip
-          tabs={tabs}
-          activeTabId={headerActiveTabId ?? null}
-          workspaceId={workspaceId}
-          finishedTabCount={finishedTabCount}
-        />
-      ) : headerLabel ? (
-        // Just the name. Rename / archive / delete live on the
-        // left session list's right-click menu (operator 2026-07-14), so the
-        // header needs no `…` actions button.
-        <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-          <HeaderLabelText label={headerLabel} />
+      center={usePillStrip || headerLabel || paneCount ? (
+        <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
+          {usePillStrip ? (
+            <HeaderPillStrip
+              tabs={tabs}
+              activeTabId={headerActiveTabId ?? null}
+              workspaceId={tabWorkspaceId ?? workspaceId}
+              finishedTabCount={finishedTabCount}
+            />
+          ) : headerLabel ? <HeaderLabelText label={headerLabel} /> : null}
+          {paneCount && paneCount > 1 ? (
+            <span style={{ flexShrink: 0, color: 'var(--t-text-muted)', fontSize: 11, fontFamily: 'var(--font-sans-system)' }}>{paneCount} panes</span>
+          ) : null}
         </div>
       ) : null}
       right={
@@ -130,16 +121,7 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
-            {workspaceId && !(workspaceGridMode && workspaceGridAvailable) ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
-            {workspaceGridAvailable && onToggleWorkspaceGrid ? (
-              <HeaderIconPill
-                icon={<svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x={3} y={3} width={7} height={7} rx={1} /><rect x={14} y={3} width={7} height={7} rx={1} /><rect x={3} y={14} width={7} height={7} rx={1} /><rect x={14} y={14} width={7} height={7} rx={1} /></svg>}
-                label={workspaceGridMode ? 'Show split panes' : 'Show pane grid'}
-                onClick={onToggleWorkspaceGrid}
-                yNudge={1.3}
-              />
-            ) : null}
-            {onCloseWorkspacePanel && !(workspaceGridMode && workspaceGridAvailable) ? <SplitPaneCloseButton onClick={onCloseWorkspacePanel} paneLabel="active pane" /> : null}
+            {workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
@@ -191,119 +173,17 @@ export function WorkspaceHeaderStrip({
   );
 }
 
-/** Split-mode header — two HeaderPillStrips side by side, with a small
- *  vertical divider between them mirroring the visual split below.
- *  Each strip dispatches with its own workspaceId so the right
- *  WorkspaceTerminalRoot claims the click. Per-pane ▶ play sits at the
- *  right edge of each section; × close-pane shows on non-first panes
- *  only (closing the first/primary doesn't make sense). */
-function SplitHeaderPillStrips({
-  workspaces,
-}: {
-  workspaces: Array<{
-    workspaceId: string;
-    tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
-    activeTabId: string | null;
-    finishedTabCount?: number;
-    contextRailAvailable?: boolean;
-    contextRailVisible?: boolean;
-    terminalModeActive?: boolean;
-  }>;
-}) {
-  const dispatchClose = useCallback((workspaceId: string) => {
-    window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
-  }, []);
-  const dispatchToggleProjectContextRail = useCallback((workspaceId: string) => {
-    window.dispatchEvent(new CustomEvent('o8:request-toggle-context-rail', { detail: { workspaceId } }));
-  }, []);
-  // Human-readable pane name for aria-labels so split-mode controls
-  // don't collide ("New tab (left pane)" vs "New tab (right pane)").
-  const paneLabel = (index: number) => (
-    workspaces.length === 2
-      ? (index === 0 ? 'left pane' : 'right pane')
-      : `pane ${index + 1}`
-  );
-
-  return (
-    // No blanket data-no-drag here (Q ruling 2026-07-12): every pill guards
-    // itself, so the strip's NEGATIVE SPACE stays a window-drag region even
-    // when tabs are present over the workspace.
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
-      {workspaces.map((workspace, index) => {
-        const canClose = index !== 0;
-        return (
-          <div
-            key={workspace.workspaceId}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              display: 'flex',
-              alignItems: 'center',
-              borderLeftWidth: index === 0 ? 0 : 1,
-              borderLeftStyle: 'solid',
-              borderLeftColor: 'var(--t-divider)',
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
-              <HeaderPillStrip
-                tabs={workspace.tabs}
-                activeTabId={workspace.activeTabId}
-                workspaceId={workspace.workspaceId}
-                finishedTabCount={workspace.finishedTabCount ?? 0}
-              />
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
-              {workspace.contextRailAvailable ? (
-                <HeaderIconPill
-                  icon={<IconInfoCircle />}
-                  label={workspace.contextRailVisible === false ? `Show project context (${paneLabel(index)})` : `Hide project context (${paneLabel(index)})`}
-                  title={workspace.contextRailVisible === false ? 'Show project context' : 'Hide project context'}
-                  onClick={() => dispatchToggleProjectContextRail(workspace.workspaceId)}
-                  yNudge={1.3}
-                />
-              ) : null}
-              <WorkspaceAddTabButton workspaceId={workspace.workspaceId} ariaSuffix={paneLabel(index)} />
-              {canClose ? (
-                <SplitPaneCloseButton onClick={() => dispatchClose(workspace.workspaceId)} paneLabel={paneLabel(index)} />
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function IconInfoCircle({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ display: 'block', flexShrink: 0 }}
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 10v6" />
-      <path d="M12 7.5h.01" />
-    </svg>
-  );
-}
-
 /** Pill strip — renders in the WorkspaceHeaderStrip's
  *  center slot when 2+ tabs are open. Active pill is a filled dark
  *  rounded rect; inactive pills are icon + label only. Horizontal
  *  scroll when overflowing. Click → dispatches a window event the
  *  workspace listens for. */
-function HeaderPillStrip({
+export function HeaderPillStrip({
   tabs,
   activeTabId,
   workspaceId,
   finishedTabCount = 0,
+  ariaLabel = 'Open sessions',
 }: {
   tabs: Array<{
     id: string;
@@ -318,6 +198,7 @@ function HeaderPillStrip({
    *  in split mode without selecting on the wrong pane. */
   workspaceId?: string | null;
   finishedTabCount?: number;
+  ariaLabel?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
@@ -393,6 +274,9 @@ function HeaderPillStrip({
   }, [workspaceId]);
   const handleClose = useCallback((tabId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
+  }, [workspaceId]);
+  const handleRename = useCallback((tabId: string, label: string) => {
+    window.dispatchEvent(new CustomEvent('o8:request-rename-tab', { detail: { tabId, label, workspaceId: workspaceId ?? null } }));
   }, [workspaceId]);
   const handleCleanup = useCallback(() => {
     window.dispatchEvent(new CustomEvent('o8:request-cleanup-tabs', { detail: { workspaceId: workspaceId ?? null } }));
@@ -473,7 +357,7 @@ function HeaderPillStrip({
       <div
         ref={scrollRef}
         role="tablist"
-        aria-label="Open sessions"
+        aria-label={ariaLabel}
         aria-orientation="horizontal"
         onKeyDown={handleStripKeyDown}
         style={{
@@ -520,6 +404,7 @@ function HeaderPillStrip({
               crowdedLabel={crowdedLabels.get(tab.id) ?? null}
               onSelect={handleSelect}
               onClose={handleClose}
+              onRename={handleRename}
               onFocusTab={setFocusedTabId}
             />
           </motion.div>
@@ -557,6 +442,7 @@ function HeaderPill({
   crowdedLabel,
   onSelect,
   onClose,
+  onRename,
   onFocusTab,
 }: {
   tab: {
@@ -573,9 +459,23 @@ function HeaderPill({
   crowdedLabel: string | null;
   onSelect: (tabId: string) => void;
   onClose: (tabId: string) => void;
+  onRename: (tabId: string, label: string) => void;
   onFocusTab: (tabId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(tab.label);
+  const cancelRenameRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+  const saveRename = () => {
+    if (cancelRenameRef.current) return;
+    setEditing(false);
+    const next = draft.trim();
+    if (next && next !== tab.label) onRename(tab.id, next);
+  };
   // The close glyph is keyboard-reachable at all times (#2146): it stays in the
   // accessibility tree with a stable label, and reveals itself on focus exactly
   // as it does on hover so a keyboard user can see what they are about to hit.
@@ -591,6 +491,13 @@ function HeaderPill({
       tabIndex={tabStop ? 0 : -1}
       onFocus={() => onFocusTab(tab.id)}
       onKeyDown={(event) => {
+        if (event.key === 'F2' && event.target === event.currentTarget) {
+          event.preventDefault();
+          cancelRenameRef.current = false;
+          setDraft(tab.label);
+          setEditing(true);
+          return;
+        }
         if (event.key !== 'Enter' && event.key !== ' ') return;
         // Only the pill itself activates — the close button owns its own keys.
         if (event.target !== event.currentTarget) return;
@@ -599,14 +506,20 @@ function HeaderPill({
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onContextMenu={(event) => {
-        // Right-click → context menu hook. Real menu lands in a later
-        // phase; for now we just suppress the native menu so the host
-        // is ready for the wired version.
+      onDoubleClick={(event) => {
         event.preventDefault();
-        window.dispatchEvent(new CustomEvent('o8:request-pill-menu', {
-          detail: { tabId: tab.id, x: event.clientX, y: event.clientY },
-        }));
+        event.stopPropagation();
+        cancelRenameRef.current = false;
+        setDraft(tab.label);
+        setEditing(true);
+      }}
+      title="Double-click, right-click, or press F2 to rename workspace tab"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelRenameRef.current = false;
+        setDraft(tab.label);
+        setEditing(true);
       }}
       style={{
         position: 'relative',
@@ -677,16 +590,29 @@ function HeaderPill({
           <PillRuntimeGlyph kind={tab.kind} runtime={tab.runtime} />
         )}
       </button>
-      <span
-        style={{
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          maxWidth: crowded ? 80 : 140,
-        }}
-      >
-        {display}
-      </span>
+      {editing ? (
+        <input
+          ref={inputRef}
+          aria-label={`Rename ${tab.label}`}
+          value={draft}
+          maxLength={80}
+          onChange={(event) => setDraft(event.target.value)}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onBlur={saveRename}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') saveRename();
+            if (event.key === 'Escape') {
+              cancelRenameRef.current = true;
+              setEditing(false);
+            }
+          }}
+          style={{ width: Math.min(220, Math.max(100, draft.length * 7)), minWidth: 0, border: 0, outline: 'none', background: 'transparent', color: 'var(--t-text)', font: 'inherit' }}
+        />
+      ) : (
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: crowded ? 80 : 140 }}>{display}</span>
+      )}
     </div>
   );
 }

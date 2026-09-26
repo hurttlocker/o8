@@ -2,21 +2,18 @@
 
 import { HeaderPlayButton } from './HeaderPlayButton';
 
-/** Route a new tab to the current workspace, leaving the bottom panel alone. */
+/** Add a pane to the workspace; dragging its menu items selects an exact edge. */
 export function WorkspaceAddTabButton({ workspaceId, ariaSuffix }: { workspaceId: string; ariaSuffix?: string }) {
-  const spawn = (kind: 'orchestrator' | 'terminal') => {
-    window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind, workspaceId } }));
-  };
-  const split = (kind: 'chat' | 'terminal', direction: 'right' | 'below') => {
-    window.dispatchEvent(new CustomEvent('o8:request-split-workspace-tab', { detail: { kind, direction, workspaceId } }));
+  const addPane = (kind: 'chat' | 'terminal') => {
+    window.dispatchEvent(new CustomEvent('o8:request-split-workspace-tab', { detail: { kind, direction: 'right', workspaceId } }));
   };
 
   return (
     <HeaderPlayButton
-      onSpawnChat={() => spawn('orchestrator')}
-      onSpawnTerminal={() => spawn('terminal')}
-      onSplitTab={split}
+      onSpawnChat={() => addPane('chat')}
+      onSpawnTerminal={() => addPane('terminal')}
       ariaSuffix={ariaSuffix}
+      paneMode
     />
   );
 }
