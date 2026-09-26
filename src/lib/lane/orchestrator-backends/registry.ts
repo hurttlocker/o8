@@ -22,6 +22,7 @@ import { collideBackend } from './moa';
 import { fableBackend } from './fable';
 import { o8Backend } from './o8';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
+import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { applyOrchestrationMode } from './orchestration-mode';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ export function withOrchestrationMode(
     ...backend,
     sendTurn(repoPath, message, onEvent, options) {
       const resolved = applyOrchestrationMode(message, options);
-      return backend.sendTurn(repoPath, resolved.message, onEvent, resolved.options);
+      return backend.sendTurn(repoPath, withOperatingAgreement(resolved.message), onEvent, resolved.options);
     },
   };
 }
