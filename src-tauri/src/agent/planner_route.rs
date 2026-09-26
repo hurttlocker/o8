@@ -240,6 +240,8 @@ const CODEX_ADAPTER: PlannerAdapter = PlannerAdapter {
     default_tier: PlannerTier::Builder,
     effort: PlannerEffort::CodexReasoningEffort,
     pinnable_models: &[
+        crate::models::CODEX_GPT_6_SOL,
+        crate::models::CODEX_GPT_6_LUNA,
         crate::models::CODEX_GPT_5_6_SOL,
         crate::models::CODEX_GPT_5_6_TERRA,
     ],

@@ -1,7 +1,7 @@
-export type ComposerWireMode = 'solo' | 'multitask' | 'moa' | 'fusion';
+export type ComposerWireMode = 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
 
 export function isComposerWireMode(value: unknown): value is ComposerWireMode {
-  return value === 'solo' || value === 'multitask' || value === 'moa' || value === 'fusion';
+  return value === 'solo' || value === 'multitask' || value === 'fast' || value === 'moa' || value === 'fusion';
 }
 
 /**
@@ -20,6 +20,7 @@ const DISPATCH_IMPERATIVE = `Dispatch means calling the \`${LAUNCH_TOOL_NAME}\` 
 export const COMPOSER_MODE_DIRECTIVES: Readonly<Record<ComposerWireMode, string>> = {
   solo: '[Mode: Solo] Work directly in this session yourself — do NOT dispatch worker agents or create missions. Edit, run, and verify with your own tools.',
   multitask: `[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. ${DISPATCH_IMPERATIVE}`,
+  fast: '[Mode: Fast] Decompose independent work by file ownership. Call `cortex_launch_agent` once per worker in parallel in this turn with `checkoutMode: "shared"` and non-overlapping relative `assignedPaths`. Each worker edits the same current checkout. Tell them not to commit, reset, stash, or switch branches. Track each surface and resolve overlap before accepting edits. Call `cortex_shared_team_status` to inspect all changed and committed paths, review the combined diff and run checks, then make one orchestrator-owned commit. Finally call `cortex_finish_shared_team` with review and verification receipts to release checkout ownership. Never claim a worker was launched without a tool receipt.',
   moa: `[Mode: Mixture of Agents] After the proposal round, decompose the work into parallel worker packets and dispatch them into isolated worktrees. ${DISPATCH_IMPERATIVE}`,
   fusion: `[Mode: Fusion] Run a deep parallel pass with native sub-agents and workers across every available runtime. ${DISPATCH_IMPERATIVE}`,
 };

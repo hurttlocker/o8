@@ -2,7 +2,8 @@
 
 import { act, createElement, useCallback, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useOutsideWorkerLaunchBridge } from '@/app/dashboard/hooks/useOutsideWorkerLaunchBridge';
 import {
   queueOutsideWorkerSplit,
   resetOutsideWorkerSplitsForTest,
@@ -10,6 +11,30 @@ import {
 import type { RegisteredRepo, TerminalTab } from './types';
 import { useOutsideWorkerSplitMount } from './use-outside-worker-split-mount';
 import { useSessionTiles } from './use-session-tiles';
+
+function FastTeamConsumer({ repoPath }: { repoPath: string }) {
+  useOutsideWorkerLaunchBridge(async (lane) => {
+    queueOutsideWorkerSplit({
+      sessionKey: lane.sessionKey,
+      runtime: lane.runtime,
+      repoPath: lane.repoPath,
+      title: lane.packetTitle,
+      launchContext: lane.launchContext,
+    });
+  }, [repoPath]);
+  const tiles = useSessionTiles({
+    tabId: 'fast-parent-tab',
+    active: true,
+    repoPath,
+    workspaceId: 'fast-workspace',
+    threadId: 'thoughts-fast-parent',
+    liveSessionKeys: [],
+  });
+  return createElement('output', {
+    'data-fast-sessions': tiles.tiledSessions.join(','),
+    'data-fast-layout': JSON.stringify(tiles.layout.root),
+  });
+}
 
 function Consumer(props: {
   repoPath: string;
@@ -175,8 +200,79 @@ describe('outside worker split hook consumer path', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    vi.unstubAllGlobals();
     resetOutsideWorkerSplitsForTest();
     container.remove();
+  });
+
+  it('restores the active Fast team beside its full-height parent without duplicate panes', async () => {
+    const members = Array.from({ length: 10 }, (_, index) => ({
+      surfaceId: `codex-owned:fast-${index + 1}`,
+      runtime: 'codex',
+      taskName: `Worker ${index + 1}`,
+      state: 'running',
+    }));
+    const fetchTeam = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ team: {
+        repoPath: '/repo/fast',
+        parentThreadId: 'thoughts-fast-parent',
+        members: members.slice(0, 1),
+      } }),
+    }));
+    vi.stubGlobal('fetch', fetchTeam);
+    await act(async () => root.render(createElement(FastTeamConsumer, { repoPath: '/repo/fast' })));
+    await act(async () => {});
+    const first = JSON.parse(container.querySelector('output')?.getAttribute('data-fast-layout') ?? '{}') as {
+      direction?: string; children?: Array<{ kind?: string }>;
+    };
+    expect(first.direction).toBe('vertical');
+    expect(first.children?.[0]?.kind).toBe('chat');
+    expect(container.querySelector('output')?.getAttribute('data-fast-sessions')).toBe('codex-owned:fast-1');
+
+    for (const count of [4, 10]) {
+      await act(async () => {
+        for (const member of members.slice(1, count)) {
+          queueOutsideWorkerSplit({
+            sessionKey: member.surfaceId,
+            runtime: 'codex',
+            repoPath: '/repo/fast',
+            title: member.taskName,
+            launchContext: {
+              source: 'agent', presentation: 'split', repoContext: 'registered',
+              parentThreadId: 'thoughts-fast-parent', checkoutMode: 'shared',
+            },
+          });
+        }
+      });
+      const sessions = container.querySelector('output')?.getAttribute('data-fast-sessions')?.split(',');
+      expect(sessions).toHaveLength(count);
+      expect(new Set(sessions).size).toBe(count);
+    }
+
+    // Rebuild the browser-side broker and React tree. The durable team read
+    // must repopulate the same panes without multiplying the saved layout.
+    await act(async () => root.unmount());
+    resetOutsideWorkerSplitsForTest();
+    root = createRoot(container);
+    fetchTeam.mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ team: {
+        repoPath: '/repo/fast',
+        parentThreadId: 'thoughts-fast-parent',
+        members,
+      } }),
+    }));
+    await act(async () => root.render(createElement(FastTeamConsumer, { repoPath: '/repo/fast' })));
+    await act(async () => {});
+    const restored = container.querySelector('output')?.getAttribute('data-fast-sessions')?.split(',');
+    expect(restored).toHaveLength(10);
+    expect(new Set(restored).size).toBe(10);
+    const layout = JSON.parse(container.querySelector('output')?.getAttribute('data-fast-layout') ?? '{}') as {
+      direction?: string; children?: Array<{ kind?: string }>;
+    };
+    expect(layout.direction).toBe('vertical');
+    expect(layout.children?.[0]?.kind).toBe('chat');
   });
 
   it('passes the live repo, workspace, and thread through before adopting a split', async () => {
@@ -314,6 +410,38 @@ describe('outside worker split hook consumer path', () => {
       ?.getAttribute('data-visible-sessions')).toBe('');
     expect(container.querySelector('[data-mounted-tab="active-chat"] output')
       ?.getAttribute('data-visible-sessions')).toBe('codex-owned:active-chat');
+  });
+
+  it('does not steal focus from another tab while restoring a Fast parent', async () => {
+    const repo = { localPath: '/repo/fast', name: 'fast' };
+    const initialTabs = [
+      { id: 'fast-parent', label: 'Fast parent', kind: 'orchestrator', tmuxSession: null,
+        repo, orchestratorThreadId: 'thoughts-fast-parent', createdAt: 1, lastActivity: 1 },
+      { id: 'other-chat', label: 'Other chat', kind: 'orchestrator', tmuxSession: null,
+        repo, orchestratorThreadId: 'thoughts-other', createdAt: 2, lastActivity: 2 },
+    ] satisfies TerminalTab[];
+    await act(async () => root.render(createElement(MountingSurface, {
+      activeTabId: 'other-chat', initialTabs, workspaceId: 'workspace-fast',
+    })));
+    await act(async () => queueOutsideWorkerSplit({
+      sessionKey: 'codex-owned:fast-inactive',
+      runtime: 'codex',
+      repoPath: repo.localPath,
+      launchContext: {
+        source: 'agent', presentation: 'split', repoContext: 'registered',
+        parentThreadId: 'thoughts-fast-parent', checkoutMode: 'shared',
+      },
+    }));
+    expect(container.querySelector('[data-mounted-tab="other-chat"] output')
+      ?.getAttribute('data-visible-sessions')).toBe('');
+    expect(container.querySelector('[data-mounted-tab="fast-parent"] output')
+      ?.getAttribute('data-visible-sessions')).toBe('');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-mounted-tab="fast-parent"] button')?.click();
+    });
+    expect(container.querySelector('[data-mounted-tab="fast-parent"] output')
+      ?.getAttribute('data-visible-sessions')).toBe('codex-owned:fast-inactive');
   });
 
   it('mounts a parentless unopened repo beside the active workspace', async () => {

@@ -41,6 +41,8 @@ export interface WorkerLaunchContext {
   parentWorkspaceId?: string | null;
   /** Durable orchestrator thread that launched the worker. */
   parentThreadId?: string | null;
+  /** Shared workers stay in one checkout and must not be auto-relaunched. */
+  checkoutMode?: 'shared' | 'isolated';
 }
 
 export interface WorkerRouting {

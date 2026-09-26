@@ -192,7 +192,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         brainCodexModel: {
           type: 'string',
-          enum: ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'],
+          enum: ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'],
           description: 'Codex subscription model used for Engineering Brain classification and cited answers.',
         },
         brainCodexEffort: {

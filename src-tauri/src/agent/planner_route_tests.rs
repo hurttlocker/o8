@@ -350,6 +350,24 @@ fn brain_state_reports_the_resolved_seat_and_names_a_missing_pick() {
 #[test]
 fn bound_selection_accepts_catalog_models_and_rejects_raw_cli_values() {
     assert_eq!(
+        resolve_bound_with("codex", crate::models::CODEX_GPT_6_SOL, "medium", all_installed),
+        PlannerRouting::Selected(PlannerSelection {
+            provider: codex(),
+            binary: "/mock/codex".to_string(),
+            model: Some(crate::models::CODEX_GPT_6_SOL.to_string()),
+            effort: "medium",
+        })
+    );
+    assert_eq!(
+        resolve_bound_with("codex", crate::models::CODEX_GPT_6_LUNA, "medium", all_installed),
+        PlannerRouting::Selected(PlannerSelection {
+            provider: codex(),
+            binary: "/mock/codex".to_string(),
+            model: Some(crate::models::CODEX_GPT_6_LUNA.to_string()),
+            effort: "medium",
+        })
+    );
+    assert_eq!(
         resolve_bound_with("codex", crate::models::CODEX_GPT_5_6_SOL, "xhigh", all_installed),
         PlannerRouting::Selected(PlannerSelection {
             provider: codex(),

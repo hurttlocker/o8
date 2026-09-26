@@ -661,7 +661,7 @@ async function handleStatusChange(
   }
 
   if (status === 'failed') {
-    if (watched.retryCount < MAX_RETRIES) {
+    if (watched.launchContext?.checkoutMode !== 'shared' && watched.retryCount < MAX_RETRIES) {
       await retryWatchedAgent(watched, callbacks, {
         persist: persistWatchedAgent,
         scheduleCleanup: () => setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS),
@@ -688,7 +688,7 @@ async function handleStatusChange(
         name: watched.name,
         status: 'failed',
         duration,
-        detail: `Agent "${watched.name}" failed after ${watched.retryCount + 1} attempts — escalating`,
+        detail: watched.launchContext?.checkoutMode === 'shared' ? `Shared worker "${watched.name}" failed; the orchestrator must decide whether to relaunch it.` : `Agent "${watched.name}" failed after ${watched.retryCount + 1} attempts — escalating`,
       });
       callbacks.onAgentCompletion?.(watched.surfaceId, 'failed');
 

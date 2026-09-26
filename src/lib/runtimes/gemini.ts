@@ -200,7 +200,7 @@ const dispatchCapability: DispatchCapability = {
 
 export const geminiRuntime: AgentRuntime = {
   id: 'gemini',
-  displayName: 'Gemini',
+  displayName: 'Gemini CLI',
   capabilities,
   dispatchCapability,
 

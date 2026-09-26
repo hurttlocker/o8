@@ -606,7 +606,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 && document.activeElement === event.currentTarget
               ) {
                 event.preventDefault();
-                selectorControls.onModeChange(cycleComposerSelectorMode(selectorControls.state.mode));
+                selectorControls.onModeChange(cycleComposerSelectorMode(selectorControls.state.mode, 1, selectorControls.state.leadBackend));
                 return;
               }
               if (

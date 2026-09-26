@@ -5,6 +5,7 @@ import { ComposerPopover } from '../chat-panel/ComposerPopover';
 import { useComposerChipCompact } from '../composer-compact-context';
 import {
   COMPOSER_SELECTOR_MODES,
+  composerSupportsFastMode,
   type ResolvedComposerSelectorState,
   type ComposerSelectorMode,
 } from './state';
@@ -104,7 +105,7 @@ export function ModeChip({
         </span>
       </button>
       <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => setPopoverOpen(false)} align="start">
-        <ModeSelectorModeMenu mode={state.mode} onSelect={(next) => {
+        <ModeSelectorModeMenu mode={state.mode} leadBackend={state.leadBackend} onSelect={(next) => {
           onModeChange(next);
           setPopoverOpen(false);
         }} />
@@ -115,9 +116,11 @@ export function ModeChip({
 
 function ModeSelectorModeMenu({
   mode,
+  leadBackend,
   onSelect,
 }: {
   mode: ComposerSelectorMode;
+  leadBackend: ResolvedComposerSelectorState['leadBackend'];
   onSelect: (mode: ComposerSelectorMode) => void;
 }) {
   return (
@@ -140,10 +143,13 @@ function ModeSelectorModeMenu({
       </div>
       {COMPOSER_SELECTOR_MODES.map((spec) => {
         const selected = spec.id === mode;
+        const unavailable = spec.id === 'fast' && !composerSupportsFastMode(leadBackend);
         return (
           <button
             key={spec.id}
             type="button"
+            disabled={unavailable}
+            title={unavailable ? 'Fast requires a Codex, Claude, or Fable lead.' : undefined}
             onClick={() => onSelect(spec.id)}
             style={{
               display: 'flex',
@@ -158,8 +164,8 @@ function ModeSelectorModeMenu({
               borderRadius: 8,
               borderWidth: 0,
               background: selected ? 'var(--t-hover)' : 'transparent',
-              color: 'var(--t-text-secondary)',
-              cursor: 'pointer',
+              color: unavailable ? 'var(--t-text-faint)' : 'var(--t-text-secondary)',
+              cursor: unavailable ? 'not-allowed' : 'pointer',
               textAlign: 'left',
               fontFamily: 'var(--font-sans-system)',
             }}
@@ -167,7 +173,7 @@ function ModeSelectorModeMenu({
             <span style={{ width: 13, flexShrink: 0, color: spec.id === 'fusion' ? FUSION_ACCENT : 'var(--t-accent)', visibility: selected ? 'visible' : 'hidden' }}><CheckGlyph /></span>
             <span style={{ display: 'flex', flexDirection: 'column', gap: 1, lineHeight: 1.2 }}>
               <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{spec.long}</span>
-              <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)' }}>{spec.sublabel}</span>
+              <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)' }}>{unavailable ? 'Use a Codex, Claude, or Fable lead' : spec.sublabel}</span>
             </span>
           </button>
         );

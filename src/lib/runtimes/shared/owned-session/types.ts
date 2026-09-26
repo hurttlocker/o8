@@ -249,6 +249,7 @@ export type OwnedCodexFleetAdditions = OwnedFleetAdditions;
 export interface OwnedLaunchRequest {
   cwd: string;
   prompt: string;
+  taskName?: string;
   clientMutationId?: string;
   laneId?: string;
   packetId?: string;

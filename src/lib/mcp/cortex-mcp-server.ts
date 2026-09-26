@@ -24,7 +24,7 @@ import './neutralize-server-only';
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_API_PORT, DEFAULT_WS_PORT } from '@/lib/panel/api-port';
+import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { parseMcpConfigInput, type ParsedMcpServer } from './parse-config';
 import { getOrCreateWsToken } from '../ws-auth';
 import {
@@ -45,6 +45,7 @@ import {
 import { getDataDir } from '@/lib/data-dir-migration';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
+import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -99,8 +100,17 @@ interface McpToolResult {
 
 const API_BASE = resolveApiBase();
 const REPO_PATH = process.env.CORTEX_REPO_PATH || '';
+const PARENT_THREAD_ID = process.env.CORTEX_THREAD_ID || '';
+const FAST_CAPABILITY = process.env.CORTEX_FAST_CAPABILITY || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
 const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
+const { handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam } = createCortexDelegationHandlers({
+  apiBase: API_BASE,
+  repoPath: REPO_PATH,
+  parentThreadId: PARENT_THREAD_ID,
+  fastCapability: FAST_CAPABILITY,
+  wsToken: WS_TOKEN,
+});
 
 // ── Read-only profile (Collide proposer / #1075 dispatch lockout) ──
 //
@@ -122,6 +132,7 @@ const CORTEX_READONLY_TOOLS = new Set<string>([
   'cortex_list_prs',
   'cortex_list_projects',
   'cortex_ci_status',
+  'cortex_shared_team_status',
 ]);
 
 // ── Tool Definitions ──
@@ -306,7 +317,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_launch_agent',
     description:
-      'Launch a governed worker session with a task prompt. The agent runs autonomously in its own workspace tab. ' +
+      'Launch a worker session with a task prompt. Isolated workers use governed packets; Fast workers share this chat’s checkout and appear beside the orchestrator. ' +
       'When runtime/model are omitted, the operator\'s saved dispatch defaults are used. Returns the selected routing receipt ' +
       'plus a surfaceId you can use with cortex_steer_agent and cortex_read_transcript.',
     inputSchema: {
@@ -315,7 +326,9 @@ const TOOLS: McpTool[] = [
         prompt: { type: 'string', description: 'The task for the agent to complete. Be specific and actionable.' },
         repoPath: { type: 'string', description: 'Absolute repo path. Defaults to the current repo.' },
         taskName: { type: 'string', description: 'Short task name shown in the UI.' },
-        isolate: { type: 'boolean', description: 'Create an isolated worktree. Defaults to true.' },
+        isolate: { type: 'boolean', description: 'Legacy isolation flag. False is accepted only with checkoutMode: "shared" from an o8 orchestrator chat.' },
+        checkoutMode: { type: 'string', enum: ['isolated', 'shared'], description: 'Use shared only when the operator selected Fast mode. Workers then edit the orchestrator checkout together; the orchestrator owns the final review and commit.' },
+        assignedPaths: { type: 'array', items: { type: 'string' }, description: 'Required in Fast mode: exact non-overlapping relative files or directories this worker owns.' },
         runtime: { type: 'string', description: 'Optional worker runtime override.' },
         model: { type: 'string', description: 'Optional runtime-specific model id.' },
         workerIntent: { type: 'string', enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'], description: 'Optional routing intent.' },
@@ -325,6 +338,23 @@ const TOOLS: McpTool[] = [
         },
       },
       required: ['prompt'],
+    },
+  },
+  {
+    name: 'cortex_shared_team_status',
+    description: 'Inspect this orchestrator chat’s Fast team: shared checkout, members, initial dirty paths, changed and committed paths, and edits outside assigned scopes. Read this before a group commit.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'cortex_finish_shared_team',
+    description: 'After all Fast workers settle, review and commit their combined scoped changes, run verification, then archive the team receipt and release checkout ownership. Refuses live workers, uncommitted team edits, and changes outside scopes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reviewSummary: { type: 'string', description: 'Concise summary of the combined diff and review findings.' },
+        verification: { type: 'string', description: 'Commands and outcomes used to verify the combined result.' },
+      },
+      required: ['reviewSummary', 'verification'],
     },
   },
   {
@@ -868,83 +898,6 @@ async function handleResolveApproval(args: Record<string, unknown>): Promise<Mcp
 
 // ── Delegation Handlers ──
 
-async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const prompt = args.prompt as string;
-    if (!prompt) return textResult('prompt is required', true);
-
-    const repoPath = (args.repoPath as string) || REPO_PATH;
-    if (!repoPath) return textResult('repoPath is required (not available from env either)', true);
-
-    // Route through the orchestrator delegation endpoint — this creates a lane
-    // with governance coverage before launching the Codex session.
-    const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
-      url: `${API_BASE}/api/orchestrator/delegate`,
-      authorization: `Bearer ${WS_TOKEN}`,
-      correlationField: 'clientMutationId',
-      body: {
-        prompt,
-        repoPath,
-        taskName: args.taskName || undefined,
-        isolate: args.isolate !== false, // Default true for delegated work
-        runtime: args.runtime || undefined,
-        model: args.model || undefined,
-        workerIntent: args.workerIntent || undefined,
-        readOnly: args.readOnly === true,
-      },
-    });
-
-    if (result.approvalId) {
-      // Policy engine requires approval before this delegation can proceed
-      return jsonResult({
-        ok: false,
-        laneId: result.laneId,
-        approvalId: result.approvalId,
-        note: result.note ?? 'Approval required before this agent can be launched.',
-        status: 'awaiting_approval',
-      });
-    }
-
-    if (result.ok) {
-      // Register with the supervisor for automatic monitoring
-      const surfaceId = result.surfaceId as string;
-      try {
-        const wsPort = process.env.O8_WS_PORT || process.env.WS_PORT || String(DEFAULT_WS_PORT);
-        await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${WS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            surfaceId,
-            repoPath,
-            laneId: result.laneId,
-            name: (args.taskName as string) || prompt.slice(0, 60),
-            prompt,
-          }),
-          signal: AbortSignal.timeout(3000),
-        });
-      } catch {
-        // Best-effort — supervisor may not be running
-      }
-
-      return jsonResult({
-        ok: true,
-        laneId: result.laneId,
-        surfaceId,
-        branch: result.branch,
-        worktreePath: result.worktreePath ?? null,
-        workerRouting: result.workerRouting ?? null,
-        note: result.note,
-      });
-    }
-    return textResult(`Delegation failed: ${result.error ?? result.note ?? 'unknown error'}`, true);
-  } catch (err) {
-    return textResult(`Failed to launch agent: ${err}`, true);
-  }
-}
-
 async function handleSteerAgent(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const surfaceId = args.surfaceId as string;
@@ -1416,6 +1369,8 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_propose_spec: handleProposeSpec,
   lane_touches: handleLaneTouches,
   cortex_launch_agent: handleLaunchAgent,
+  cortex_shared_team_status: handleSharedTeamStatus,
+  cortex_finish_shared_team: handleFinishSharedTeam,
   cortex_steer_agent: handleSteerAgent,
   cortex_read_transcript: handleReadTranscript,
   cortex_interrupt_agent: handleInterruptAgent,

@@ -86,7 +86,9 @@ export function useOutsideWorkerSplitMount({
       const current = stateRef.current;
       const existing = matchingOrchestratorTab(current.tabs, request, current.activeTabId);
       if (existing) {
-        current.selectTab(existing.id);
+        // Restoring a Fast team must not switch the operator away from the
+        // tab they were reading. The parent claims its panes when selected.
+        if (request.launchContext?.checkoutMode !== 'shared') current.selectTab(existing.id);
         return existing.id;
       }
       const placementKey = outsideWorkerPlacementKey(request);

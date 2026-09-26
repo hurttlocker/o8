@@ -57,8 +57,8 @@ export function resolveSubscriptionProfileHouseDefaults(profile: SubscriptionPro
     return {
       orchestratorBackend: 'codex',
       defaultDispatchRuntime: 'codex',
-      // Codex-only workers ride the cheaper Terra tier; the orchestrator runs
-      // Astra. Cheap→Sol worker escalation is wired below.
+      // Codex-only workers ride the cheaper Terra tier. The orchestrator model
+      // remains operator-selectable; cheap→Sol worker escalation is below.
       defaultDispatchModel: MODEL_IDS.codexWorkerDefault,
       reviewerBackend: 'codex',
     };
@@ -89,10 +89,12 @@ export function isCodexFrontierModel(model: string): boolean {
   return model.trim().toLowerCase().includes('gpt-5.6-sol');
 }
 
-/** Codex cheap tier — gpt-5.6-terra / gpt-5.6-luna (Sonnet/Haiku-class). */
+/** Codex cheap tier — Terra and Luna models, including GPT-6 Luna. */
 export function isCodexCheapTierModel(model: string): boolean {
   const normalized = model.trim().toLowerCase();
-  return normalized.includes('gpt-5.6-terra') || normalized.includes('gpt-5.6-luna');
+  return normalized.includes('gpt-5.6-terra')
+    || normalized.includes('gpt-5.6-luna')
+    || normalized.includes('gpt-6-luna');
 }
 
 export function isSingleSubCheapTierWorker(input: CheapTierWorkerInput): boolean {

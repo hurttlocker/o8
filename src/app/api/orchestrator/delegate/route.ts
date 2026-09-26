@@ -23,6 +23,9 @@ import {
 } from '@/lib/orchestrator/idempotency-store';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listLanes } from '@/lib/lane/registry';
+import { launchSharedCheckoutWorker } from '@/lib/orchestrator/shared-checkout-launch';
+import { findSharedCheckoutMemberByMutation, readSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { authorizeFastDelegation } from '@/lib/orchestrator/fast-delegation-auth';
 import {
   buildPacketSelfReviewInstructions,
   buildReadOnlyPacketSelfReviewInstructions,
@@ -62,6 +65,11 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
   const taskName = (body.taskName as string)?.trim() || prompt?.slice(0, 60);
   const isolate = body.isolate !== false; // Default true for delegated work
   const readOnly = body.readOnly === true;
+  const checkoutMode = body.checkoutMode === 'shared' ? 'shared' : 'isolated';
+  const parentThreadId = typeof body.parentThreadId === 'string' ? body.parentThreadId.trim() : '';
+  const assignedPaths = Array.isArray(body.assignedPaths)
+    ? body.assignedPaths.filter((path): path is string => typeof path === 'string')
+    : [];
 
   // #530 — Option A. Caller may override the base branch so a fix dispatch
   // forks off a feature branch instead of main. Absent / blank → 'main' so
@@ -75,7 +83,9 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
   if (!repoPath) {
     return NextResponse.json({ ok: false, error: 'repoPath is required' }, { status: 400 });
   }
-
+  if (!isolate && checkoutMode !== 'shared') {
+    return NextResponse.json({ ok: false, error: 'Shared checkout dispatch requires Fast mode and a parent orchestrator chat.' }, { status: 400 });
+  }
   // Generate a branch name from the task
   const slug = taskName
     .toLowerCase()
@@ -173,6 +183,43 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       taskBody: prompt,
     });
     const launchPrompt = buildProjectBriefPromptV1(projectBrief, prompt);
+    if (checkoutMode === 'shared') {
+      const shared = await launchSharedCheckoutWorker({
+        repoPath,
+        parentThreadId,
+        prompt: launchPrompt,
+        taskName,
+        runtime: workerRouting.selectedRuntime,
+        model: workerRouting.selectedModel,
+        readOnly,
+        clientMutationId,
+        repoInProject: projectContext.repoInProject,
+        assignedPaths,
+      });
+      if (!shared.ok) return NextResponse.json(shared, { status: 422 });
+      invalidateCommandCenterSnapshotCaches();
+      invalidateInboxCache();
+      await publishRealtimeMutation({
+        mutation: {
+          mutationId: `shared-delegate-${shared.surfaceId}-${Date.now()}`,
+          source: 'desktop',
+          action: 'launch',
+          runtime: workerRouting.selectedRuntime,
+          repoPath,
+          surfaceId: shared.surfaceId,
+          sessionKey: shared.surfaceId,
+          status: 'queued',
+          note: `Shared worker: ${taskName}`,
+          launchContext: shared.launchContext,
+          createdAt: new Date().toISOString(),
+          settledAt: new Date().toISOString(),
+        },
+        refreshTargets: ['global', 'mobileInbox'],
+        sessionKeys: [shared.surfaceId],
+        fresh: true,
+      });
+      return NextResponse.json({ ...shared, workerRouting });
+    }
     const launchContext = {
       source: 'agent' as const,
       presentation: 'split' as const,
@@ -340,12 +387,22 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     return NextResponse.json({
       ok: false,
       error: err instanceof Error ? err.message : 'Delegation failed',
-    }, { status: 500 });
+    }, { status: checkoutMode === 'shared' ? 422 : 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
+  if (body?.checkoutMode === 'shared') {
+    const authorization = authorizeFastDelegation({
+      repoPath: typeof body.repoPath === 'string' ? body.repoPath.trim() : '',
+      parentThreadId: typeof body.parentThreadId === 'string' ? body.parentThreadId.trim() : '',
+      capability: typeof body.fastCapability === 'string' ? body.fastCapability.trim() : '',
+    });
+    if (!authorization.ok) {
+      return NextResponse.json({ ok: false, error: authorization.error }, { status: authorization.status });
+    }
+  }
   const clientMutationId = typeof body?.clientMutationId === 'string'
     ? body.clientMutationId.trim()
     : '';
@@ -357,6 +414,9 @@ export async function POST(request: NextRequest) {
     repoPath: typeof body?.repoPath === 'string' ? body.repoPath.trim() : '',
     taskName: typeof body?.taskName === 'string' ? body.taskName.trim() : '',
     isolate: body?.isolate !== false,
+    checkoutMode: body?.checkoutMode === 'shared' ? 'shared' : 'isolated',
+    parentThreadId: typeof body?.parentThreadId === 'string' ? body.parentThreadId.trim() : '',
+    assignedPaths: Array.isArray(body?.assignedPaths) ? body.assignedPaths : [],
     baseBranch: typeof body?.baseBranch === 'string' ? body.baseBranch.trim() : '',
     runtime: body?.runtime ?? null,
     model: body?.model ?? null,
@@ -391,6 +451,39 @@ export async function POST(request: NextRequest) {
     verb: 'orchestrator_delegate',
     scopeId: String(body?.repoPath ?? ''),
     reconcileUnresolved: async () => {
+      if (body?.checkoutMode === 'shared' && typeof body.repoPath === 'string' && typeof body.parentThreadId === 'string') {
+        const teamInput = { repoPath: body.repoPath, parentThreadId: body.parentThreadId };
+        const member = findSharedCheckoutMemberByMutation(teamInput, clientMutationId);
+        const team = member ? readSharedCheckoutTeam(teamInput) : null;
+        if (member?.state === 'failed') return {
+          status: 422,
+          payload: { ok: false, error: 'The shared worker launch failed; inspect its team receipt before retrying.' },
+        };
+        if (member?.surfaceId && member.state === 'running' && team) return {
+          status: 200,
+          payload: {
+            ok: true,
+            teamId: team.id,
+            laneId: null,
+            packetId: null,
+            surfaceId: member.surfaceId,
+            worktreePath: team.path,
+            branch: team.branch,
+            checkoutMode: 'shared',
+            launchContext: {
+              source: 'agent',
+              presentation: 'split',
+              repoContext: 'transient',
+              workMode: body?.readOnly === true ? 'read-only' : 'edit',
+              caller: 'orchestrator',
+              parentThreadId: team.parentThreadId,
+              checkoutMode: 'shared',
+            },
+            note: 'Recovered the shared worker from its durable team receipt.',
+          },
+        };
+        return null;
+      }
       const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId);
       const lane = listLanes().find((candidate) => candidate.packetId === packetId && candidate.sessionKey);
       if (!packet || !lane?.sessionKey) return null;

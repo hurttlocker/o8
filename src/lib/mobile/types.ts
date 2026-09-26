@@ -338,8 +338,8 @@ export interface MobileTranscriptCommand {
 export interface MobileTurnReceipt {
   leadModel: string;
   effort: ThinkingEffort;
-  mode: 'solo' | 'multitask' | 'moa' | 'fusion';
-  pickedMode?: 'solo' | 'multitask' | 'moa' | 'fusion';
+  mode: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
+  pickedMode?: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   workers?: Array<{
     packetId: string;
     runtime: OrchestratorRuntime;

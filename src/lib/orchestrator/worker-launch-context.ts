@@ -32,6 +32,8 @@ export function normalizeWorkerLaunchContext(value: unknown): WorkerLaunchContex
     : '';
   const parentWorkspaceId = normalizePlacementId(candidate.parentWorkspaceId);
   const parentThreadId = normalizePlacementId(candidate.parentThreadId);
+  const checkoutMode = candidate.checkoutMode === 'shared' || candidate.checkoutMode === 'isolated'
+    ? candidate.checkoutMode : undefined;
   return {
     source: source as WorkerLaunchContext['source'],
     presentation: presentation as WorkerLaunchContext['presentation'],
@@ -40,6 +42,7 @@ export function normalizeWorkerLaunchContext(value: unknown): WorkerLaunchContex
     ...(caller ? { caller } : {}),
     ...(parentWorkspaceId ? { parentWorkspaceId } : {}),
     ...(parentThreadId ? { parentThreadId } : {}),
+    ...(checkoutMode ? { checkoutMode } : {}),
   };
 }
 

@@ -19,7 +19,7 @@ export const COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY = 'o8:orchestrator:thinking-ef
 export const COMPOSER_EFFORT_MIGRATION_STORAGE_KEY = `${COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY}:migrated`;
 export const LEGACY_COMPOSER_EFFORT_STORAGE_KEY = 'o8:orchestrator:thinking-effort';
 
-export type ComposerSelectorMode = 'solo' | 'multitask' | 'moa' | 'fusion';
+export type ComposerSelectorMode = 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
 export type ComposerEffortMap = Partial<Record<string, ThinkingEffort>>;
 export type ComposerProviderMark = 'anthropic' | 'openai' | 'gemini' | 'x' | 'deepseek' | 'copilot' | 'ollama' | 'o8' | 'terminal';
 
@@ -127,6 +127,14 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
     sublabel: 'Parallel packets in isolated worktrees',
     placeholder: 'Parallel packets in isolated worktrees…',
     directive: COMPOSER_MODE_DIRECTIVES.multitask,
+  },
+  {
+    id: 'fast',
+    long: 'Fast · shared checkout',
+    short: 'Fast',
+    sublabel: 'Workers edit one checkout; orchestrator reviews and commits',
+    placeholder: 'Parallel workers in this checkout…',
+    directive: COMPOSER_MODE_DIRECTIVES.fast,
   },
   {
     id: 'moa',
@@ -268,11 +276,23 @@ export function composerSelectorModeSpec(mode: ComposerSelectorMode): ComposerSe
   return COMPOSER_SELECTOR_MODES.find((entry) => entry.id === mode) ?? COMPOSER_SELECTOR_MODES[0];
 }
 
-export function cycleComposerSelectorMode(mode: ComposerSelectorMode, direction = 1): ComposerSelectorMode {
+export function composerSupportsFastMode(backend: OrchestratorBackendSetting): boolean {
+  return backend === 'codex' || backend === 'claude' || backend === 'fable';
+}
+
+export function cycleComposerSelectorMode(
+  mode: ComposerSelectorMode,
+  direction = 1,
+  backend?: OrchestratorBackendSetting,
+): ComposerSelectorMode {
   const index = Math.max(0, COMPOSER_SELECTOR_MODES.findIndex((entry) => entry.id === mode));
-  return COMPOSER_SELECTOR_MODES[
-    (index + direction + COMPOSER_SELECTOR_MODES.length) % COMPOSER_SELECTOR_MODES.length
-  ].id;
+  for (let step = 1; step <= COMPOSER_SELECTOR_MODES.length; step += 1) {
+    const candidate = COMPOSER_SELECTOR_MODES[
+      (index + direction * step + COMPOSER_SELECTOR_MODES.length * step) % COMPOSER_SELECTOR_MODES.length
+    ].id;
+    if (candidate !== 'fast' || !backend || composerSupportsFastMode(backend)) return candidate;
+  }
+  return mode;
 }
 
 export function resolveComposerSelectorExecutionMode(mode: ComposerSelectorMode): 'single' | 'fleet' | 'fusion' {
@@ -362,7 +382,8 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     workerModel: resolveSelectorSetting('workerModel', ...settingSources) ?? null,
     workerStartMode: resolveSelectorSetting('workerStartMode', ...settingSources) ?? null,
   };
-  const mode = composerSelectorModeSpec(resolvedSettings.mode);
+  const mode = composerSelectorModeSpec(resolvedSettings.mode === 'fast' && !composerSupportsFastMode(input.leadBackend)
+    ? 'multitask' : resolvedSettings.mode);
   const workerRuntimeLabel = resolvedSettings.workerRuntime
     ? composerRuntimeLabel(resolvedSettings.workerRuntime)
     : input.workerRuntimeLabel?.trim() || '';

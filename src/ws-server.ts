@@ -5645,7 +5645,7 @@ async function handleOrchestratorSendMsgOnce(
               leadModel: event.leadModel,
               effort: event.effort,
               mode,
-              ...(pickedMode && pickedMode !== mode ? { pickedMode } : {}),
+              ...(pickedMode ? { pickedMode } : {}),
             };
             // The effective settings are known before the backend can launch a
             // worker. Create the durable turn row now; text fills it in later.

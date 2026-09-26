@@ -122,7 +122,7 @@ describe('mobile full runtime inventory projection', () => {
       label: session.runtimeLabel,
       accent: session.runtimeAccent,
     }))).toEqual([
-      { runtime: 'gemini', label: 'Gemini', accent: '#4285f4' },
+      { runtime: 'gemini', label: 'Gemini CLI', accent: '#4285f4' },
       { runtime: 'aider', label: 'Aider', accent: '#dc2626' },
     ]);
     expect(getWorkspaceReviewSnapshotMock).toHaveBeenCalledWith({ fresh: false });

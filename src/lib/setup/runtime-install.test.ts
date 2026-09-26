@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { getRuntimeInstallInfo } from './runtime-install';
 
 describe('runtime install metadata', () => {
+  it('routes free Google accounts to Antigravity instead of the Gemini npm package', () => {
+    expect(getRuntimeInstallInfo('antigravity')).toMatchObject({
+      label: 'Antigravity CLI',
+      link: 'https://antigravity.google/docs/getting-started?tab=cli',
+    });
+    expect(getRuntimeInstallInfo('gemini')?.hint).toContain('enterprise and paid API access');
+  });
+
   it('routes missing 3code users to the official setup page', () => {
     expect(getRuntimeInstallInfo('3code')).toEqual({
       id: '3code',

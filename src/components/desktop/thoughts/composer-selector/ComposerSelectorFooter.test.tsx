@@ -310,6 +310,8 @@ describe('ComposerSelectorFooter', () => {
 
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
     expect(container.querySelector('[data-testid="lead-row-gpt-6-astra"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="lead-row-gpt-6-sol"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="lead-row-gpt-6-luna"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="lead-row-claude-opus-5"]')).toBeNull();
     expect(container.querySelector('[data-testid="composer-selector-lead-step"]')).toBeNull();
     expect(container.querySelector('[data-testid="composer-selector-lead-scroll"]')?.previousElementSibling?.textContent).toBe('Codex models');
@@ -327,6 +329,24 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="lead-row-gpt-6-astra"]')).not.toBeNull();
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead-back"]')!.click());
     expect(container.querySelector('[data-testid="lead-house-codex"]')).not.toBeNull();
+  });
+
+  it('lets the operator select GPT-6 Sol as the lead', async () => {
+    await act(async () => { root.render(<Harness initialEffort="medium" />); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-gpt-6-sol"]')!.click());
+    expect(container.querySelector('[data-testid="composer-selector-lead-step"]')?.textContent).toContain('GPT-6 Sol');
+    expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('Medium');
+  });
+
+  it('lets the operator select GPT-6 Luna as the lead', async () => {
+    await act(async () => { root.render(<Harness initialEffort="medium" />); });
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-gpt-6-luna"]')!.click());
+    expect(container.querySelector('[data-testid="composer-selector-lead-step"]')?.textContent).toContain('GPT-6 Luna');
+    expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('Medium');
   });
 
   it('renders effort labels from the shared label table', async () => {
@@ -482,13 +502,13 @@ describe('ComposerSelectorFooter', () => {
       .toEqual({ 'o8-free': 'high' });
   });
 
-  it('cycles all four modes with Shift+Tab and keeps textarea focus', async () => {
+  it('cycles all five modes with Shift+Tab and keeps textarea focus', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const textarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
     textarea.focus();
-    for (const label of ['Multitask', 'MoA', 'Fusion', 'Solo']) {
+    for (const label of ['Multitask', 'Fast', 'MoA', 'Fusion', 'Solo']) {
       await act(async () => {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, shiftKey: true, bubbles: true, cancelable: true }));
       });
@@ -681,7 +701,7 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-footer"]')).toBeNull();
     expect(container.querySelector('button[aria-label^="Mode:"]')).not.toBeNull();
     expect([...container.querySelectorAll<HTMLButtonElement>('button')]
-      .some((button) => button.title.startsWith('Sol ·'))).toBe(true);
+      .some((button) => button.title.startsWith('5.6 Sol ·'))).toBe(true);
   });
 
   it('keeps classic mode labels aligned when the top effort and Fusion are picked', async () => {
@@ -690,7 +710,7 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const modeTrigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Mode:"]')!;
     const modelTrigger = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.title.startsWith('Sol ·'))!;
+      .find((button) => button.title.startsWith('5.6 Sol ·'))!;
     expect(modelTrigger.title).toContain(modeTrigger.getAttribute('aria-label')!.replace('Mode: ', ''));
 
     const effortTrigger = [...container.querySelectorAll<HTMLButtonElement>('button')]

@@ -203,7 +203,7 @@ export function createOwnedSessionStore(
       repoSlug: repo.repoSlug,
       branch: repo.branch,
       head: repo.head,
-      title: repo.title,
+      title: request.taskName?.trim().slice(0, 120) || repo.title,
       createdAt,
       updatedAt: createdAt,
       latestPrompt: prompt,

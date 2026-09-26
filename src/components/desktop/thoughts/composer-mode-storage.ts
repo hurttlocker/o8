@@ -12,7 +12,7 @@ export function legacySwarmStorageKey(tabId: string): string {
 }
 
 function isComposerMode(value: string | null): value is ComposerMode {
-  return value === 'solo' || value === 'multitask' || value === 'moa' || value === 'fusion';
+  return value === 'solo' || value === 'multitask' || value === 'fast' || value === 'moa' || value === 'fusion';
 }
 
 export function readStoredComposerMode(tabId: string): ComposerMode {

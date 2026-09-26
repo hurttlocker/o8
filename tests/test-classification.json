@@ -30,6 +30,20 @@
       ]
     },
     {
+      "path": "src/app/api/orchestrator/delegate/route.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/app/api/orchestrator/shared-team/active/route.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/app/api/panel/prs/route.test.ts",
       "reasons": [
         "child-process",
@@ -248,7 +262,10 @@
     {
       "path": "src/lib/lane/codex-orchestrator-config.test.ts",
       "reasons": [
-        "executable-fixture"
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal"
       ]
     },
     {
@@ -395,6 +412,13 @@
       ]
     },
     {
+      "path": "src/lib/mcp/tool-spine/build-mcp-resolution.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/mobile/inbox.test.ts",
       "reasons": [
         "worktree-api"
@@ -500,6 +524,20 @@
     },
     {
       "path": "src/lib/orchestrator/scheduling.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/shared-checkout-launch.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/shared-checkout-team.test.ts",
       "reasons": [
         "child-process",
         "git-cli"

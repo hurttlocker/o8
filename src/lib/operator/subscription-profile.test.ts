@@ -83,6 +83,7 @@ describe('subscription profile resolver', () => {
     expect(isCodexFrontierModel('gpt-5.6-terra')).toBe(false);
     expect(isCodexCheapTierModel('gpt-5.6-terra')).toBe(true);
     expect(isCodexCheapTierModel('gpt-5.6-luna')).toBe(true);
+    expect(isCodexCheapTierModel('gpt-6-luna')).toBe(true);
     expect(isCodexCheapTierModel('gpt-5.6-sol')).toBe(false);
   });
 

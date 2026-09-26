@@ -130,7 +130,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     description: 'Claude Code CLI worker via interactive stream-json. Uses the existing Claude account by default or an explicitly selected API gateway model; never --print.',
   },
   gemini: {
-    label: 'Gemini',
+    label: 'Gemini CLI',
     shortLabel: 'Gemini',
     dispatchable: true,
     requiresModel: false,
@@ -147,7 +147,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     modelIdPattern: /^(gemini|google\/)/i,
     reasoningEffort: false,
     tier: 'standard',
-    description: 'Google Gemini CLI worker via headless stream-json with owned-session resume and review support.',
+    description: 'Legacy Gemini CLI worker for enterprise or paid API access via headless stream-json, with owned-session resume and review support. Free and AI Pro/Ultra use Antigravity CLI.',
   },
   antigravity: {
     label: 'Antigravity',
@@ -161,7 +161,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     authHouse: 'antigravity',
     reasoningEffort: false,
     tier: 'standard',
-    description: 'Google account CLI worker with streaming output and conversation resume. Uses existing permissions and quota settings.',
+    description: 'Google Antigravity CLI (agy) worker with streaming output and conversation resume. Uses existing permissions and quota settings.',
     declarative: {
       launchArgs: ['--print', 'Workspace directory: {{cwd}}\n\n{{prompt}}', '--add-dir', '{{cwd}}', '--output-format', 'stream-json', '--sandbox', '--print-timeout', '15m', { when: 'model', args: ['--model', '{{model}}'] }],
       resumeArgs: ['--print', '{{prompt}}', '--output-format', 'stream-json', '--sandbox', '--print-timeout', '15m', '--conversation', '{{threadId}}', { when: 'model', args: ['--model', '{{model}}'] }],

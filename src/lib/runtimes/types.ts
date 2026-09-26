@@ -271,6 +271,8 @@ export interface RuntimeSessionTransformProviderResult {
 export interface LaunchOptions {
   cwd: string;
   prompt: string;
+  /** Operator-facing task name for an owned worker surface. */
+  taskName?: string;
   /** Stable caller correlation persisted before an owned process is spawned. */
   clientMutationId?: string;
   model?: string;
