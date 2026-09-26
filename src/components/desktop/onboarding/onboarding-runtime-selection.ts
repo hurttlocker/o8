@@ -4,7 +4,7 @@ import type {
   OrchestratorBackendSetting,
 } from '@/components/desktop/settings/dispatch-shared';
 
-import { recommendRuntimeSetup, type RuntimeSetupRecommendation, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
+import { recommendRuntimeSetup, runtimeForLead, type RuntimeSetupRecommendation, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
 import { invalidateRuntimeInventory } from './useRuntimeInventory';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
@@ -99,4 +99,13 @@ export async function persistOnboardingRuntimeSelection(
   }
   invalidateOperatorDefaultsValuesSnapshot();
   invalidateRuntimeInventory();
+}
+
+export function onboardingSetupIsReady(setup: OnboardingRuntimeSelection): boolean {
+  const backend = setup.recommendation.backend;
+  const runtime = runtimeForLead(backend);
+  const leadReady = runtime ? canSelectOnboardingRuntime(setup.inventory, runtime)
+    : backend === 'o8' || Boolean(backend && setup.recommendation.preserved);
+  return leadReady && setup.workerRuntimes.length > 0
+    && setup.workerRuntimes.every((id) => canSelectOnboardingRuntime(setup.inventory, id));
 }

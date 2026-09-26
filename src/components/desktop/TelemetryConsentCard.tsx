@@ -166,7 +166,7 @@ export function TelemetryConsentCard({
 }: {
   blocked?: boolean;
   embedded?: boolean;
-  onContinue?: () => void;
+  onContinue?: () => void | Promise<void>;
   onBusyChange?: (busy: boolean) => void;
   request?: typeof fetchOperatorDefaults;
 }) {
@@ -257,7 +257,7 @@ export function TelemetryConsentCard({
       if (!response.ok || payload.values?.telemetryConsentAnswered !== true) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Your choices could not be saved.');
       }
-      if (embedded) onContinue?.();
+      if (embedded) await onContinue?.();
       else setLoadState('hidden');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Your choices could not be saved.');

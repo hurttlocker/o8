@@ -2689,7 +2689,7 @@ function DashboardInner() {
       const previous = onboardingTargetRef.current;
       const tabId = previous?.projectId === task.project.id && previous.text === task.text && previous.tileId === target.tileId && target.handle.focusTab(previous.tabId)
         ? previous.tabId : target.handle.openOrchestratorTab({ ...task.project, branch: task.project.defaultBranch });
-      if ((previous?.tabId !== tabId || previous.text !== task.text) && !target.handle.injectIntoOrchestrator(tabId, task.text, { autoSend: false })) throw new Error('Could not prepare the lead conversation. Try again.');
+      if (task.text.trim() && (previous?.tabId !== tabId || previous.text !== task.text) && !target.handle.injectIntoOrchestrator(tabId, task.text, { autoSend: false })) throw new Error('Could not prepare the lead conversation. Try again.');
       onboardingTargetRef.current = { projectId: task.project.id, tileId: target.tileId, tabId, text: task.text };
       target.handle.focusTab(tabId);
       setActiveTileId(target.tileId);

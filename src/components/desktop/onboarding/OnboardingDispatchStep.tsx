@@ -122,7 +122,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
   request = fetch, onContinue, onSkip, renderButton, onBusyChange,
 }: {
   request?: OnboardingRequest;
-  onContinue: () => void;
+  onContinue: () => void | Promise<void>;
   onBusyChange?: (busy: boolean) => void;
   onSkip: () => void;
   renderButton: (props: { label: string; onClick: () => void; disabled?: boolean }) => ReactNode;
@@ -173,6 +173,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     .filter((id) => id === 'o8' || inventory.some((item) => item.id === id && item.available));
   if (selection?.recommendation.preserved && !leadOptions.includes(orchestratorRuntime)) leadOptions.push(orchestratorRuntime);
   const options = leadOptions.map((value) => ({ value, label: ORCHESTRATOR_LABELS[value] ?? value }));
+  const needsConnection = !loading && options.length === 0;
   const shownWorkers = visibleRuntimeInventory(inventory, workerRuntimes);
 
   const handleContinue = useCallback(async () => {
@@ -181,7 +182,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     setError(null);
     try {
       await persistOnboardingRuntimeSelection({ orchestratorRuntime, workerRuntimes, leadModel, workerModel }, request);
-      onContinue();
+      await onContinue();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save your setup.');
     } finally { setSaving(false); }
@@ -200,8 +201,8 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
       <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
         {loading ? 'Checking installed tools and recent local activity…' : selection?.recommendation.reason}
       </div>
-      <div style={{ border: '1px solid var(--t-glass-border-strong)', borderRadius: 12, padding: 16, background: 'var(--t-bg-card)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: 18, fontWeight: 400, color: 'var(--t-text)' }}>Your setup</div>
+      {needsConnection ? <div><h1 style={{ margin: 0, fontSize: 28, fontWeight: 300 }}>Connect a coding tool</h1><p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>Choose one to get started. You can add others whenever you need them.</p><button type="button" onClick={() => setCustomize(true)} style={{ minHeight: 44, border: 0, background: 'transparent', color: 'var(--t-accent)', font: 'inherit', cursor: 'pointer' }}>Other configurations</button></div> : <div style={{ border: '1px solid var(--t-glass-border-strong)', borderRadius: 12, padding: 16, background: 'var(--t-bg-card)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 300, color: 'var(--t-text)' }}>Your setup</h1>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)' }}>
             Lead
@@ -217,7 +218,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
         <button type="button" aria-expanded={customize} onClick={() => setCustomize((current) => !current)} style={{ alignSelf: 'flex-start', border: 0, background: 'transparent', color: 'var(--t-accent)', fontFamily: FONT, fontSize: 12, fontWeight: 300, padding: 0, cursor: 'pointer' }}>
           {customize ? 'Keep it simple' : 'Customize'}
         </button>
-      </div>
+      </div>}
       {customize ? <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Choose the tools allowed to receive work. The first selected tool is the default worker. OpenCode starts with its detected configuration or a supported preset; choose another model in the composer.</div>
         {shownWorkers.map((item) => <RuntimeInventoryRow key={item.id} runtime={item} selected={workerRuntimes.includes(item.id)} isDefault={workerRuntimes[0] === item.id} disabled={saving || workersLocked || loading} onToggle={() => {
@@ -225,10 +226,10 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
           if (!saving && !workersLocked) setWorkerRuntimes((current) => toggleOnboardingWorkerRuntime(current, item.id, inventory));
         }} />)}
       </div> : null}
-      {!loading && !leadReady ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Connect a primary lead, or customize to choose a supported alternative.</div> : null}
+      {!loading && !leadReady && !needsConnection ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Connect a primary lead, or customize to choose a supported alternative.</div> : null}
       {!loading && !readyToSave && workerRuntimes.length > 0 ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Some selected tools need attention. Connect them below or customize your setup.</div> : null}
-      <RuntimeToolsPanel inventory={inventory} loading={loading} error={error} onRefresh={() => setRevision((current) => current + 1)} />
-      <div style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-faint)' }}>Recommendations use session file activity from the past seven days. Conversation contents stay unread. Messaging and other optional features can be connected later.</div>
+      <RuntimeToolsPanel key={needsConnection ? 'connect' : 'additional'} initiallyExpanded={needsConnection} inventory={needsConnection ? inventory.filter((item) => item.id === 'codex' || item.id === 'claude-code') : inventory} loading={loading} error={error} onRefresh={() => setRevision((current) => current + 1)} />
+      {!needsConnection ? <div style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-faint)' }}>Recommendations use session file activity from the past seven days. Conversation contents stay unread. Messaging and other optional features can be connected later.</div> : null}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <button type="button" disabled={saving} onClick={onSkip} style={{ border: 0, background: 'transparent', color: 'var(--t-text-faint)', fontFamily: FONT, fontSize: 12, fontWeight: 300, cursor: 'pointer', padding: 8 }}>Set up later</button>
         {renderButton({ label: saving ? 'Saving setup…' : 'Use this setup', onClick: handleContinue, disabled: loading || saving || !readyToSave })}
