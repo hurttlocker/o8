@@ -34,12 +34,10 @@ describe('shared checkout team', () => {
   it('gives two workers from one orchestrator one durable checkout and distinct members', async () => {
     const { root, repoPath } = fixture();
     const input = { repoPath, parentThreadId: 'thoughts-team-a', dataDir: join(root, 'state') };
-    const [first, second] = await Promise.all([
-      ensureSharedCheckoutTeam(input),
-      ensureSharedCheckoutTeam(input),
-    ]);
+    const teams = await Promise.all(Array.from({ length: 10 }, () => ensureSharedCheckoutTeam(input)));
+    const first = teams[0]!;
     expect(first.path).toBe(realpathSync(repoPath));
-    expect(first.path).toBe(second.path);
+    expect(teams.every((team) => team.path === first.path && team.baseHead === first.baseHead)).toBe(true);
     expect(first.branch).toBe('main');
     expect(git(first.path, 'rev-parse', '--show-toplevel')).toBe(first.path);
     expect(git(first.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(first.branch);

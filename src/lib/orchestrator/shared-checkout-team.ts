@@ -104,7 +104,13 @@ async function withLock<T>(lock: string, operation: () => Promise<T>): Promise<T
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const age = Date.now() - (await stat(lock)).mtimeMs;
+      let age: number;
+      try {
+        age = Date.now() - (await stat(lock)).mtimeMs;
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw statError;
+      }
       if (age > 30_000) throw new Error('Shared checkout lock is stale; inspect the owner before retrying.');
       if (Date.now() - started > 10_000) throw new Error('Shared checkout is busy; retry after its current operation.');
       await new Promise((resolve) => setTimeout(resolve, 50));
