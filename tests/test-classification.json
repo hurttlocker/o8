@@ -1030,6 +1030,15 @@
       ]
     },
     {
+      "path": "tests/agent-setup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/agent-tile-header-layout-real-path.test.ts",
       "reasons": [
         "real-path"

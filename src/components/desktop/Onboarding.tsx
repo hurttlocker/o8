@@ -6,6 +6,8 @@ import { TelemetryConsentCard } from './TelemetryConsentCard';
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
 import { OnboardingReposStep } from './onboarding/OnboardingReposStep';
 import { OnboardingOpen } from './onboarding/OnboardingOpen';
+import { useAgentSetupRequest } from './onboarding/useAgentSetupRequest';
+import type { AgentSetupRequest, SetupRequestStatus } from '@/lib/setup/agent-request';
 import { useOnboardingGithub } from './onboarding/useOnboardingGithub';
 import { PROGRESS_KEY, browserProgressStorage, emptyProgress, readProgress, writeProgress, type OnboardingProgress, type OnboardingStep, type OnboardingTask, type OnboardingProject, type ProgressStorage } from './onboarding/onboarding-progress';
 import { onboardingButtonStyle, onboardingQuietButtonStyle } from './onboarding/onboarding-style';
@@ -33,6 +35,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   const [childBusy, setChildBusy] = useState(false);
   const [status, setStatus] = useState('');
   const actionLock = useRef(false);
+  const agentRequest = useRef<AgentSetupRequest | null>(null);
   const continueAfterTools = useRef(false);
   const [storageError, setStorageError] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
@@ -69,19 +72,57 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
     heading?.focus({ preventScroll: true });
   }, [progress.step]);
 
+  const acknowledgeAgent = async (project: OnboardingProject | null, result: SetupRequestStatus, message?: string) => {
+    const pending = agentRequest.current;
+    if (!pending || pending.project.id !== project?.id) return;
+    const response = await request('/api/setup/agent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'ack', requestId: pending.id, status: result, claimId: pending.claimId, ...(message ? { error: message.slice(0, 1000) } : {}) }),
+    });
+    if (!response.ok) throw new Error('The workspace result could not be confirmed to your agent. Read setup status before retrying.');
+    if (result === 'opened') agentRequest.current = null;
+  };
+
   // Opening and consent are user actions. Discovery itself never saves settings.
-  const enter = async (project: OnboardingProject | null, fromPicker = false) => {
+  const enter = async (project: OnboardingProject | null, fromPicker = false, incoming?: AgentSetupRequest) => {
     if (actionLock.current) return;
     actionLock.current = true;
     setActionBusy(true);
     setError(null);
     setDiscoveryError(null);
     setStatus(fromPicker ? 'Choosing a folder…' : 'Checking your workspace…');
+    let renewal: ReturnType<typeof setInterval> | undefined;
+    const renewClaim = async () => {
+      const current = agentRequest.current;
+      if (!current) return;
+      const response = await request('/api/setup/agent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'renew', requestId: current.id, claimId: current.claimId }),
+      });
+      if (!response.ok) throw new Error('Your agent’s setup request was interrupted. Read status before retrying.');
+    };
     try {
       if (fromPicker) {
         project = await chooseOnboardingProject(request, pickFolder);
         if (!project) return;
         setProjects((current) => [project!, ...current.filter((item) => item.id !== project!.id)]);
+      }
+      agentRequest.current = null;
+      if (project) {
+        const receipt = incoming ?? await request('/api/setup/agent?view=request', { cache: 'no-store' })
+          .then(async (response) => {
+            if (!response.ok) throw new Error('Could not check your agent’s setup request. Try again.');
+            return (await response.json() as { request?: AgentSetupRequest }).request;
+          });
+        if (receipt?.project.id === project.id && !['opened', 'cancelled'].includes(receipt.status)) {
+          const response = await request('/api/setup/agent', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'claim', requestId: receipt.id }),
+          });
+          if (!response.ok) throw new Error('This setup request changed or is already being handled. Read its status before retrying.');
+          agentRequest.current = (await response.json() as { request: AgentSetupRequest }).request;
+          renewal = setInterval(() => { void renewClaim().catch(() => {}); }, 15_000);
+        }
       }
       update({ project });
       setStatus('Checking project and tools…');
@@ -99,6 +140,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
         if (!onboardingSetupIsReady(currentSetup)) {
           continueAfterTools.current = true;
           update({ step: 'dispatch' });
+          await acknowledgeAgent(project, 'needs_tools');
           return;
         }
         if (!currentSetup.recommendation.preserved) {
@@ -107,19 +149,28 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
         }
         update({ toolsConfigured: true });
       }
-      if (!currentSetup.consentAnswered) { update({ step: 'privacy' }); return; }
+      if (!currentSetup.consentAnswered) { update({ step: 'privacy' }); await acknowledgeAgent(project, 'needs_privacy'); return; }
+      await renewClaim();
       setStatus('Opening workspace…');
       const completed = await onComplete(project ? { project, text: progressRef.current.task } : undefined);
       if (completed === false) throw new Error('Could not open the workspace. Try again.');
+      await acknowledgeAgent(project, 'opened');
       try { progressStorage?.removeItem(PROGRESS_KEY); } catch { /* Completion is already saved on the server. */ }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not open the workspace. Try again.');
+      const message = cause instanceof Error ? cause.message : 'Could not open the workspace. Try again.';
+      setError(message);
+      await acknowledgeAgent(project, 'error', message).catch(() => {});
     } finally {
+      clearInterval(renewal);
       actionLock.current = false;
       setActionBusy(false);
       setStatus('');
     }
   };
+
+  useAgentSetupRequest(request, async (pending) => {
+    if (!childBusy) await enter(pending.project, false, pending);
+  });
 
   const ready = setup && onboardingSetupIsReady(setup);
   const leadLabel = setup?.inventory.find((item) => item.id === setup.orchestratorRuntime)?.label ?? setup?.orchestratorRuntime;
