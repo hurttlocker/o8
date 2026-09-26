@@ -30,6 +30,19 @@ describe('detected runtime recommendation', () => {
     expect(setup.reason).toContain('saved');
   });
 
+  it('does not recommend a saved model from a different lead runtime', () => {
+    const sources = { orchestratorBackend: 'file', orchestratorModel: 'file' };
+    expect(recommendRuntimeSetup({ inventory, activity, sources, values: {
+      orchestratorBackend: 'codex', orchestratorModel: 'claude-opus-5',
+    } }).leadModel).toBe('gpt-6-astra');
+    expect(recommendRuntimeSetup({ inventory, activity, sources, values: {
+      orchestratorBackend: 'claude', orchestratorModel: 'gpt-6-astra',
+    } }).leadModel).toBe('claude-opus-5-5');
+    expect(recommendRuntimeSetup({ inventory, activity, sources, values: {
+      orchestratorBackend: 'fable', orchestratorModel: 'claude-opus-5',
+    } }).leadModel).toBe('claude-fable-5-1');
+  });
+
   it('keeps the saved default worker when the pool was ordered differently', () => {
     const setup = recommendRuntimeSetup({ inventory, activity, values: {
       defaultDispatchRuntime: 'codex', workerRuntimes: ['claude-code', 'codex'],

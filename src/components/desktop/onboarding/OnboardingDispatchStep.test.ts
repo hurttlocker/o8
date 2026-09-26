@@ -75,3 +75,27 @@ describe('one recommended runtime setup', () => {
     expect(button('Set up later').disabled).toBe(false);
   });
 });
+
+
+it('offers Fable through a ready Claude tool and saves the selected lead', async () => {
+  const { request } = await render();
+  await act(async () => button('Customize').click());
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!.click());
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent?.includes('Fable'));
+  expect(option).toBeTruthy();
+  await act(async () => option!.click());
+  await act(async () => button('Keep it simple').click());
+  expect(document.querySelector('[aria-haspopup="listbox"]')?.textContent).toContain('Fable');
+  await act(async () => button('Use this setup').click());
+  const write = request.mock.calls.find(([, init]) => init?.method === 'POST');
+  expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({ orchestratorBackend: 'fable', defaultDispatchModel: 'claude-sonnet-5' });
+});
+
+it('keeps a failed setup save visible and retryable', async () => {
+  const { request, onContinue } = await render();
+  request.mockImplementation(async () => new Response(JSON.stringify({ error: 'Could not save settings' }), { status: 503 }));
+  await act(async () => button('Use this setup').click());
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not save settings');
+  expect(button('Use this setup').disabled).toBe(false);
+  expect(onContinue).not.toHaveBeenCalled();
+});
