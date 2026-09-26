@@ -186,7 +186,7 @@ export function OnboardingReposStep({
     }
     setAddingFolder(true);
     try {
-      const folderPath = await (pickFolder ? pickFolder() : pickFolderPath(request));
+      const folderPath = await (pickFolder ? pickFolder() : pickFolderPath());
       if (!folderPath) return;
       // Folder chosen — registration is now in flight. Pin the pending state so
       // the empty state doesn't re-flash before the repo row renders (#1344).
