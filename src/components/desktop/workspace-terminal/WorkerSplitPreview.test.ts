@@ -51,6 +51,8 @@ describe('native worker split preview', () => {
     expect(host.querySelectorAll('[data-real-chat]')).toHaveLength(1);
     expect(host.querySelector('[data-real-chat]')).toBe(chat);
     expect(host.querySelectorAll('[data-preview-worker]')).toHaveLength(4);
+    expect(host.querySelectorAll('[data-preview-worker-model]')).toHaveLength(4);
+    expect(host.textContent).toContain('To @Cosmo · simulated steer');
     expect(host.querySelectorAll('[data-session-resize-handle]')).toHaveLength(4);
 
     await act(async () => host.querySelector<HTMLButtonElement>('[data-worker-split-preview] button:nth-of-type(2)')!.click());

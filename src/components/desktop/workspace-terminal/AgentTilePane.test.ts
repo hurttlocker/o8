@@ -219,6 +219,26 @@ describe('AgentTilePane live transcript scrolling', () => {
   });
 });
 
+describe('AgentTilePane worker identity', () => {
+  it('shows the actual model, current task, and steer recipient in the pane', () => {
+    act(() => {
+      root?.render(createElement(AgentTilePane, {
+        sessionKey: 'codex-owned:worker',
+        agent: { name: 'Worker', status: 'running', runtime: 'codex', model: 'gpt-6-sol', currentTask: 'Trace the handoff' },
+        focused: true,
+        onClose: () => {},
+        onFocus: () => {},
+      }));
+    });
+
+    expect(host?.querySelector('[data-worker-model]')?.textContent).toBe('· gpt-6-sol');
+    expect(host?.querySelector('[data-worker-model]')?.parentElement?.parentElement?.textContent).toContain('Worker');
+    expect(host?.querySelector('[data-worker-task]')?.textContent).toContain('Trace the handoff');
+    expect(host?.textContent).toContain('To @Worker · Steer');
+    expect(host?.querySelector('textarea')?.getAttribute('placeholder')).toBe('Message @Worker…');
+  });
+});
+
 describe('classifyAgentTileStatus', () => {
   it('shows completed worker output as ready for review', () => {
     expect(classifyAgentTileStatus('awaiting_review')).toBe('review');

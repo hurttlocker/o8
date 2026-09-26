@@ -294,10 +294,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
   ), [entries, name, packet?.id, packet?.issue?.body]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
-  const runtimeModelLabel = runtimeModelDisplayLabel(
-    runtime,
-    agent?.model ?? packet?.lane?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel,
-  );
+  const resolvedModel = agent?.model ?? packet?.lane?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel;
+  const runtimeModelLabel = runtimeModelDisplayLabel(runtime, resolvedModel);
+  const modelLabel = resolvedModel?.trim() || null;
+  const taskLabel = agent?.currentTask?.trim() || packet?.title?.trim() || packet?.summary?.trim() || null;
+  const recipientName = peerExchange.self?.name?.trim() || agent?.name?.trim();
+  const recipientLabel = recipientName ? `@${recipientName.replace(/^@/, '')}` : name;
   const statusEvidence = packet?.statusEvidence ?? agent?.statusEvidence;
   const status = useMemo(
     () => statusEvidence
@@ -464,26 +466,15 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             <div
               title={peerExchange.self ? `${displayTitle} · ${peerExchange.self.runtime} · ${peerExchange.self.sessionKey}` : name}
               style={{
-                flexShrink: 0, maxWidth: 'calc(100% - 18px)',
+                flexShrink: 1, minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontSize: 12, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.1px',
               }}
             >
               {displayTitle}
             </div>
-            {/* Metadata row is the only flexible track, and the model is its only
-                shrinkable child: the model yields to zero before the status box can
-                shrink at all. The zone clips so nothing paints over the controls. */}
             <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-              <span
-                title={runtimeModelLabel}
-                style={{
-                  minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1000,
-                  color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, lineHeight: 1,
-                }}
-              >
-                {runtimeModelLabel}
-              </span>
+              {modelLabel ? <span data-worker-model title={runtimeModelLabel} style={{ minWidth: 0, maxWidth: '45%', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-faint)', fontSize: 10.5, fontWeight: 400 }}>· {modelLabel}</span> : null}
               <span
                 title={statusEvidence?.summary ?? STATUS_META[status].label}
                 style={{
@@ -554,6 +545,10 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           background: 'transparent',
         }}
       >
+        {taskLabel ? <div data-worker-task title={taskLabel} style={{ width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginRight: 'auto', marginBottom: 16, marginLeft: 'auto' }}>
+          <div style={{ color: 'var(--t-text-faint)', fontSize: 10, marginBottom: 5 }}>TASK</div>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text)', fontSize: 12.5, fontWeight: 500 }}>{taskLabel}</div>
+        </div> : null}
         {displayEntries.length === 0 && peerExchange.messages.length === 0 ? (
           <div
             ref={contentRef}
@@ -608,6 +603,9 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               flexShrink: 0,
             }}
           >
+            <div style={{ color: 'var(--t-text-secondary)', fontSize: 10.5, fontWeight: 400, paddingLeft: 2 }}>
+              To {recipientLabel} · {status === 'waiting' ? 'Reply' : 'Steer'}
+            </div>
             <div
               style={{
                 display: 'flex',
@@ -629,7 +627,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleTextareaKeyDown}
-                placeholder={status === 'waiting' ? 'Reply to continue…' : 'Steer this agent…'}
+                placeholder={status === 'waiting' ? `Reply to ${recipientLabel}…` : `Message ${recipientLabel}…`}
                 rows={1}
                 disabled={sending}
                 aria-label={`Steer ${name}`}

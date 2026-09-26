@@ -93,9 +93,10 @@ function MockWorkerPane({
         borderBottomStyle: 'solid',
         borderBottomColor: 'var(--t-divider-subtle, var(--t-border))',
       }}>
-        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--t-text)' }}>
+        <span style={{ minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--t-text)' }}>
           @{worker.name} · Codex
         </span>
+        <span data-preview-worker-model style={{ maxWidth: '35%', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, color: 'var(--t-text-faint)' }}>· GPT-6 Sol</span>
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 10, color: 'var(--t-text-secondary)' }}>
           <span style={{ width: 5, height: 5, borderRadius: 999, background: statusColor }} />
           {worker.status}
@@ -110,7 +111,7 @@ function MockWorkerPane({
         </div>
       </div>
       <div style={{ paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider-subtle, var(--t-border))', color: 'var(--t-text-faint)', fontSize: 11 }}>
-        Steer this agent…
+        To @{worker.name} · simulated steer
       </div>
     </div>
   );
