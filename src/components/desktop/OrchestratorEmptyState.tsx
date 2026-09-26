@@ -106,6 +106,14 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
         >
           {title}
         </h1>
+        {kind === 'orchestrator' ? <details style={{ marginTop: 16, width: '100%', maxWidth: 420, fontSize: 12, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>
+          <summary style={{ minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--t-text-muted)' }}>How work happens</summary>
+          <div style={{ paddingTop: 8, paddingRight: 16, paddingBottom: 12, paddingLeft: 16, border: '1px solid var(--t-divider)', borderRadius: 10 }}>
+            <p><strong style={{ fontWeight: 400 }}>Start with your goal.</strong> Describe what you want in the message box below. Add details or files when they help.</p>
+            <p><strong style={{ fontWeight: 400 }}>Follow the work.</strong> Your lead can work directly or delegate tasks to workers. Their progress appears in the conversation.</p>
+            <p style={{ marginBottom: 0 }}><strong style={{ fontWeight: 400 }}>Review the result.</strong> Check the changed files and verification before accepting the work. You can ask the lead for changes.</p>
+          </div>
+        </details> : null}
       </div>
     </div>
   );

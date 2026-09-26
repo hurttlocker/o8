@@ -176,3 +176,14 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
     expect(toggleOnboardingWorkerRuntime([], 'codex', loaded.inventory)).toEqual([]);
   });
 });
+
+
+it('keeps the Claude model setting when saving an Astra and Terra setup', async () => {
+  const before = await (await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
+  await persistOnboardingRuntimeSelection({ orchestratorRuntime: 'codex', workerRuntimes: ['codex'],
+    leadModel: 'gpt-6-astra', workerModel: 'gpt-5.6-terra' }, routeFetch);
+  const persisted = await (await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
+  expect(persisted.values.orchestratorBackend).toBe('codex');
+  expect(persisted.values.defaultDispatchModel).toBe('gpt-5.6-terra');
+  expect(persisted.values.orchestratorModel).toBe(before.values.orchestratorModel);
+});

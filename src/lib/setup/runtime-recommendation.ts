@@ -57,6 +57,7 @@ export function runtimeForLead(backend: OrchestratorBackendSetting | null): Orch
 export function leadModelPreset(backend: OrchestratorBackendSetting | null): string {
   if (backend === 'codex') return MODEL_IDS.codexDefault;
   if (backend === 'claude') return MODEL_IDS.orchestratorDefault;
+  if (backend === 'fable') return MODEL_IDS.fableDefault;
   return '';
 }
 
@@ -103,9 +104,12 @@ export function recommendRuntimeSetup({ inventory, activity, values = {}, source
     if (index > 0) workerRuntimes.unshift(...workerRuntimes.splice(index, 1));
     if (index < 0) workerRuntimes.unshift(values.defaultDispatchRuntime);
   }
-  const leadModel = explicit('orchestratorModel') && values.orchestratorModel
-    ? values.orchestratorModel
-    : (backend === 'codex' || backend === 'claude' ? localLeadModels[backend] : null) ?? leadModelPreset(backend);
+  // orchestratorModel belongs to the Claude backend. Codex starts with its
+  // own model default; Fable owns a separate fixed model configuration.
+  const leadModel = backend === 'claude'
+    ? explicit('orchestratorModel') && values.orchestratorModel?.startsWith('claude-')
+      ? values.orchestratorModel : localLeadModels.claude ?? leadModelPreset(backend)
+    : backend === 'opencode' ? values.opencodeOrchestratorModel ?? '' : leadModelPreset(backend);
   return {
     backend, leadModel, workerRuntimes,
     opencodeModel: values.opencodeWorkerModel ?? opencodeModel,

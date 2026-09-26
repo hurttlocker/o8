@@ -87,7 +87,7 @@ export async function persistOnboardingRuntimeSelection(
       orchestratorBackend: orchestratorBackendForRuntime(selection.orchestratorRuntime),
       defaultDispatchRuntime: selection.workerRuntimes[0],
       workerRuntimes: selection.workerRuntimes,
-      ...(selection.leadModel && (selection.orchestratorRuntime === 'codex' || selection.orchestratorRuntime === 'claude-code') ? { orchestratorModel: selection.leadModel } : {}),
+      ...(selection.leadModel && selection.orchestratorRuntime === 'claude-code' ? { orchestratorModel: selection.leadModel } : {}),
       ...(selection.workerModel !== undefined ? selection.workerRuntimes[0] === 'opencode'
         ? { opencodeWorkerModel: selection.workerModel || null }
         : { defaultDispatchModel: selection.workerModel } : {}),
