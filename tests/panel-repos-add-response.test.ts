@@ -97,3 +97,27 @@ it('returns after persistence without waiting for readiness, then retries and li
   const persistedAfterRetry = JSON.parse(readFileSync(registryPath, 'utf8')) as { repos: Array<{ id: string }> };
   expect(persistedAfterRetry.repos).toHaveLength(1);
 }, 30_000);
+
+it('persists a native onboarding selection through the repository route and leaves cancel unchanged', async () => {
+  const selectedPath = path.join(home, 'onboarding-project');
+  mkdirSync(selectedPath);
+  execFileSync('git', ['init', '-q', '-b', 'main', selectedPath]);
+  const invoke = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(selectedPath);
+  vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke } });
+  try {
+    const { chooseOnboardingProject } = await import('@/components/desktop/onboarding/onboarding-projects');
+    const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/panel/repos');
+      return reposRoute.POST(new Request(`http://localhost${String(input)}`, init));
+    });
+    await expect(chooseOnboardingProject(request)).resolves.toBeNull();
+    expect(request).not.toHaveBeenCalled();
+    const project = await chooseOnboardingProject(request);
+    expect(project?.localPath).toBe(selectedPath);
+    expect(invoke).toHaveBeenCalledWith('plugin:dialog|open', { options: { directory: true, title: 'Select project folder' } }, undefined);
+    const persisted = JSON.parse(readFileSync(path.join(dataDir, 'repos.json'), 'utf8')) as { repos: Array<{ id: string; localPath: string }> };
+    expect(persisted.repos).toContainEqual(expect.objectContaining({ id: project?.id, localPath: selectedPath }));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}, 30_000);
