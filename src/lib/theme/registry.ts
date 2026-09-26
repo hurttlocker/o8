@@ -162,6 +162,8 @@ const LIGHT_BASE: Record<string, string> = {
   // Chat surface — pinned solid paper in both surface modes (always content,
   // never chrome). --t-canvas-bg is split per-surface below so the o8.md
   // editor and other canvas surfaces can be translucent in glass mode.
+  // Full-screen setup stacks above existing content, including all-glass mode.
+  '--t-onboarding-bg': '#F4F2ED',
   '--t-chat-surface-bg': '#F4F2ED',
   '--t-chat-surface-text': '#0f172a',
   '--t-chat-surface-text-secondary': '#475569',
@@ -369,6 +371,7 @@ const DARK_BASE: Record<string, string> = {
   '--t-glass-border-strong': 'rgba(255, 255, 255, 0.08)',
   '--t-tab-active-text': '#f5f8fc',
   '--t-tab-text': '#8b95a3',
+  '--t-onboarding-bg': '#242424',
   '--t-chat-surface-bg': '#242424',
   '--t-chat-surface-text': '#e8ecf2',
   '--t-chat-surface-text-secondary': '#8b95a3',
