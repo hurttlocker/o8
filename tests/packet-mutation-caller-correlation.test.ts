@@ -296,8 +296,13 @@ describe('desktop and preview packet mutation callers construct correlated bodie
     expect(source).toContain("from '@/lib/orchestrator/action-receipt'");
     expect(source).toContain("'/api/runtime/action'");
     expect(source).toContain('clientMutationId: crypto.randomUUID()');
-    expect(source).toMatch(/requestBody\s*[:=]\s*JSON\.stringify/);
-    expect(source).toMatch(/body: (?:pending\.)?requestBody/);
+    if (file.endsWith('AgentTilePane.tsx')) {
+      expect(source).toMatch(/request\s*=\s*\{\s*body:\s*JSON\.stringify/);
+      expect(source).toContain('body: request.body');
+    } else {
+      expect(source).toMatch(/requestBody\s*[:=]\s*JSON\.stringify/);
+      expect(source).toMatch(/body: (?:pending\.)?requestBody/);
+    }
     expect(source).toContain('fetchCorrelatedActionReceipt');
   });
 
@@ -315,8 +320,10 @@ describe('desktop and preview packet mutation callers construct correlated bodie
 
   it('keeps uncertain desktop runtime mutations latched to their original identities', () => {
     const agentTile = readFileSync(join(ROOT, 'src/components/desktop/workspace-terminal/AgentTilePane.tsx'), 'utf8');
-    expect(agentTile).toContain('receiptUnsettled = true');
-    expect(agentTile).toContain('if (!receiptUnsettled)');
+    expect(agentTile).toContain("setSteerReceipt('unknown')");
+    expect(agentTile).toContain('pendingSteerRef.current = request');
+    expect(agentTile).toContain('const request = pendingSteerRef.current');
+    expect(agentTile).toContain('void resolveSteer(request)');
 
     const workspaceChat = readFileSync(join(ROOT, 'src/components/desktop/workspace-terminal/useWorkspaceChatPane.ts'), 'utf8');
     expect(workspaceChat).toContain('ownedDeliveryUnsettled = true');

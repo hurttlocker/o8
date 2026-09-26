@@ -38,6 +38,7 @@ import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
 import { SessionTransformMenu } from './SessionTransformMenu';
+import { WorkerPaneSummary } from './WorkerPaneSummary';
 import type { TerminalStatusState } from '@/lib/terminal-status/resolve';
 
 interface AgentTilePaneProps {
@@ -47,6 +48,7 @@ interface AgentTilePaneProps {
   focused: boolean;
   onClose: (sessionKey: string) => void;
   onFocus: (sessionKey: string) => void;
+  onOpenReview?: () => void;
 }
 
 type VisualStatus = 'running' | 'waiting' | 'review' | 'idle' | 'error';
@@ -252,7 +254,7 @@ export function canSteerAgentState(
   return packetStatus === 'blocked' && (blockedReason === 'huddle_ready' || blockedReason === 'worker_question');
 }
 
-function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus }: AgentTilePaneProps) {
+function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus, onOpenReview }: AgentTilePaneProps) {
   const peerExchange = useAgentPeerMessages(sessionKey);
   const slice = useTranscript(sessionKey);
   const transcriptUnsupportedReason = agent?.transcriptUnsupportedReason?.trim() || null;
@@ -284,6 +286,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const [sending, setSending] = useState(false);
   // Fix #4: synchronous guard so held-Enter can't double-fire before setState flushes
   const sendingRef = useRef(false);
+  const pendingSteerRef = useRef<{ body: string; message: string } | null>(null);
+  const [steerReceipt, setSteerReceipt] = useState<'sending' | 'accepted' | 'unknown' | 'failed' | null>(null);
   const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, packet, sessionKey), [agent, packet, sessionKey]);
@@ -309,7 +313,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   );
   const canSteer = canSteerAgentState(agent, packet);
   const trimmedDraft = draft.trim();
-  const canSend = canSteer && !sending && trimmedDraft.length > 0;
+  const canSend = canSteer && !sending && steerReceipt !== 'unknown' && trimmedDraft.length > 0;
   const lastEntryKey = displayEntries.length > 0
     ? `${displayEntries[displayEntries.length - 1]?.id}:${entryContent(displayEntries[displayEntries.length - 1]!)}`
     : '';
@@ -333,24 +337,11 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     loadingFallbackRef.current = null;
   }, []);
 
-  const submitSteer = useCallback(async () => {
-    const message = trimmedDraft;
-    // Fix #1: re-derive canSteer from the latest agent ref to avoid stale closure
-    const canSteerNow = canSteerAgentState(agentRef.current, packetRef.current);
-    // Fix #4: check sendingRef synchronously before any setState to prevent held-Enter race
-    if (!message || !canSteerNow || sendingRef.current) return;
-    sendingRef.current = true;
+  const resolveSteer = useCallback(async (request: { body: string; message: string }) => {
     setSending(true);
+    setSteerReceipt('sending');
     setSendError(null);
-    setDraft('');
-    let receiptUnsettled = false;
     try {
-      const requestBody = JSON.stringify({
-        action: 'steer',
-        surfaceId: sessionKey,
-        clientMutationId: crypto.randomUUID(),
-        message,
-      });
       const { response, payload } = await fetchCorrelatedActionReceipt<{
         ok?: boolean;
         note?: string;
@@ -360,13 +351,18 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       }>('/api/runtime/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: requestBody,
+        body: request.body,
       });
       if (!response.ok || payload?.ok === false) {
         const note = payload?.error ?? payload?.note ?? response.statusText ?? 'Unable to send steer.';
         setSendError(note);
+        setSteerReceipt('failed');
+        setDraft(request.message);
+        pendingSteerRef.current = null;
         return;
       }
+      setSteerReceipt('accepted');
+      pendingSteerRef.current = null;
       // Fix #5: set transcript to loading but fall back to idle after 10s if WS push never arrives
       clearTranscriptLoadingFallback();
       transcriptStore.setStatus(sessionKey, 'loading');
@@ -377,20 +373,41 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       }, TRANSCRIPT_STEER_LOADING_TIMEOUT_MS);
     } catch (err) {
       if (correlatedActionIsUnsettled(err)) {
-        receiptUnsettled = true;
-        setSendError(err.message);
+        setSteerReceipt('unknown');
+        setSendError('Final receipt unavailable. Check the same action before sending again.');
       } else {
-        // Draft already cleared above; just surface the error
+        setSteerReceipt('failed');
+        setDraft(request.message);
+        pendingSteerRef.current = null;
         setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
       }
     } finally {
-      if (!receiptUnsettled) {
-        sendingRef.current = false;
-        setSending(false);
-        requestAnimationFrame(() => textareaRef.current?.focus());
-      }
+      sendingRef.current = false;
+      setSending(false);
+      requestAnimationFrame(() => textareaRef.current?.focus());
     }
-  }, [clearTranscriptLoadingFallback, sessionKey, trimmedDraft]);
+  }, [clearTranscriptLoadingFallback, sessionKey]);
+
+  const submitSteer = useCallback(() => {
+    const message = trimmedDraft;
+    // Re-derive the latest lane state and synchronously guard duplicate submits.
+    if (!message || !canSteerAgentState(agentRef.current, packetRef.current)
+      || sendingRef.current || pendingSteerRef.current) return;
+    sendingRef.current = true;
+    const request = { body: JSON.stringify({
+      action: 'steer', surfaceId: sessionKey, clientMutationId: crypto.randomUUID(), message,
+    }), message };
+    pendingSteerRef.current = request;
+    setDraft('');
+    void resolveSteer(request);
+  }, [resolveSteer, sessionKey, trimmedDraft]);
+
+  const checkSteerReceipt = useCallback(() => {
+    const request = pendingSteerRef.current;
+    if (!request || sendingRef.current) return;
+    sendingRef.current = true;
+    void resolveSteer(request);
+  }, [resolveSteer]);
 
   const handleTextareaKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -414,8 +431,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   // When the lane stops accepting input, drop any error so the composer
   // doesn't carry stale state into the next live run.
   useEffect(() => {
-    if (!canSteer) setSendError(null);
-  }, [canSteer]);
+    if (!canSteer && steerReceipt !== 'unknown') setSendError(null);
+  }, [canSteer, steerReceipt]);
 
   useEffect(() => {
     if (slice.status !== 'fresh') return;
@@ -534,6 +551,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
       ) : null}
 
+      <WorkerPaneSummary packet={packet} onOpenReview={onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />
+
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -580,7 +599,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       </div>
 
       <AnimatePresence initial={false}>
-        {canSteer ? (
+        {canSteer || steerReceipt === 'unknown' ? (
           <motion.form
             key="steer-composer"
             onSubmit={handleFormSubmit}
@@ -625,11 +644,17 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               <textarea
                 ref={textareaRef}
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  if (steerReceipt === 'accepted' || steerReceipt === 'failed') {
+                    setSteerReceipt(null);
+                    setSendError(null);
+                  }
+                }}
                 onKeyDown={handleTextareaKeyDown}
                 placeholder={status === 'waiting' ? `Reply to ${recipientLabel}…` : `Message ${recipientLabel}…`}
                 rows={1}
-                disabled={sending}
+                disabled={!canSteer || sending || steerReceipt === 'unknown'}
                 aria-label={`Steer ${name}`}
                 style={{
                   flex: 1,
@@ -687,20 +712,10 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 )}
               </button>
             </div>
-            {sendError ? (
-              <div
-                role="alert"
-                style={{
-                  fontSize: 11,
-                  fontWeight: 400,
-                  color: '#ef4444',
-                  paddingTop: 0,
-                  paddingRight: 4,
-                  paddingBottom: 0,
-                  paddingLeft: 4,
-                }}
-              >
-                {sendError}
+            {steerReceipt ? (
+              <div data-worker-steer-receipt role={steerReceipt === 'failed' ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, color: steerReceipt === 'failed' ? '#ef4444' : 'var(--t-text-secondary)', fontSize: 10.5, paddingLeft: 4, paddingRight: 4 }}>
+                <span>{steerReceipt === 'sending' ? 'Checking steer receipt…' : steerReceipt === 'accepted' ? 'Steer accepted' : steerReceipt === 'unknown' ? 'Receipt unavailable' : 'Not sent'}{sendError ? ` · ${sendError}` : ''}</span>
+                {steerReceipt === 'unknown' ? <button type="button" onClick={checkSteerReceipt} style={{ border: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', fontSize: 10.5, fontWeight: 500 }}>Check receipt</button> : null}
               </div>
             ) : (
               <div

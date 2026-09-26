@@ -4,6 +4,8 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import * as actionReceipt from '@/lib/orchestrator/action-receipt';
 
 const transcriptMock = vi.hoisted(() => ({
   slice: {
@@ -25,6 +27,9 @@ vi.mock('framer-motion', () => ({
 }));
 
 vi.mock('./SessionTransformMenu', () => ({ SessionTransformMenu: () => null }));
+vi.mock('./use-packet-transcript-poll', () => ({
+  usePacketTranscriptPoll: () => ({ entries: [], activity: null }),
+}));
 vi.mock('./WorkspaceTranscript', () => ({
   WorkspaceTranscript: ({ entries }: { entries: MobileTranscriptEntry[] }) => createElement(
     'div',
@@ -85,6 +90,7 @@ afterEach(() => {
   root = null;
   host = null;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('normalizeAgentTileTranscript', () => {
@@ -236,6 +242,106 @@ describe('AgentTilePane worker identity', () => {
     expect(host?.querySelector('[data-worker-task]')?.textContent).toContain('Trace the handoff');
     expect(host?.textContent).toContain('To @Worker · Steer');
     expect(host?.querySelector('textarea')?.getAttribute('placeholder')).toBe('Message @Worker…');
+  });
+
+  it('names the actual operator decision and opens the bound review', () => {
+    const openReview = vi.fn();
+    act(() => {
+      root?.render(createElement(AgentTilePane, {
+        sessionKey: 'codex-owned:review-worker',
+        agent: { name: 'Worker', status: 'idle', runtime: 'codex' },
+        packet: {
+          id: 'packet-review', status: 'awaiting_review', title: 'Review the change',
+          completionSummary: 'The implementation is ready.',
+          explainer: { status: 'ready', changedFileCount: 3 },
+        } as OrchestratorPacket,
+        focused: true,
+        onClose: () => {},
+        onFocus: () => {},
+        onOpenReview: openReview,
+      }));
+    });
+
+    expect(host?.querySelector('[data-worker-attention]')?.textContent).toContain('Review the finished work');
+    expect(host?.querySelector('[data-worker-outcome]')?.textContent).toContain('3 files');
+    act(() => host?.querySelector<HTMLButtonElement>('[data-worker-open-review]')?.click());
+    expect(openReview).toHaveBeenCalledOnce();
+  });
+
+  it('restores the steer text and shows a failed receipt when delivery is refused', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/runtime/action') {
+        return new Response(JSON.stringify({ ok: false, error: 'Session unavailable.' }), { status: 409 });
+      }
+      return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+    }));
+    vi.stubGlobal('crypto', { randomUUID: () => 'steer-test-id' });
+    act(() => {
+      root?.render(createElement(AgentTilePane, {
+        sessionKey: 'codex-owned:steer-worker',
+        agent: { name: 'Worker', status: 'running', runtime: 'codex' },
+        focused: true,
+        onClose: () => {},
+        onFocus: () => {},
+      }));
+    });
+    const textarea = host?.querySelector('textarea');
+    const form = host?.querySelector('form');
+    expect(textarea).not.toBeNull();
+    expect(form).not.toBeNull();
+    if (!textarea || !form) return;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    await act(async () => {
+      setValue?.call(textarea, 'Check the failing test.');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+
+    expect(textarea.value).toBe('Check the failing test.');
+    expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Not sent');
+    expect(host?.textContent).toContain('Session unavailable.');
+  });
+
+  it('checks an uncertain steer using the original mutation body', async () => {
+    const receipt = vi.spyOn(actionReceipt, 'fetchCorrelatedActionReceipt')
+      .mockRejectedValueOnce(new actionReceipt.CorrelatedActionUnsettledError())
+      .mockResolvedValueOnce({
+        response: new Response(JSON.stringify({ ok: true }), { status: 200 }),
+        payload: { ok: true },
+      });
+    const randomUUID = vi.fn(() => 'one-steer-id');
+    vi.stubGlobal('crypto', { randomUUID });
+    act(() => {
+      root?.render(createElement(AgentTilePane, {
+        sessionKey: 'codex-owned:steer-worker',
+        agent: { name: 'Worker', status: 'running', runtime: 'codex' },
+        focused: true,
+        onClose: () => {},
+        onFocus: () => {},
+      }));
+    });
+    const textarea = host?.querySelector('textarea');
+    const form = host?.querySelector('form');
+    expect(textarea).not.toBeNull();
+    expect(form).not.toBeNull();
+    if (!textarea || !form) return;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    await act(async () => {
+      setValue?.call(textarea, 'Continue the verification.');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Receipt unavailable');
+    expect(textarea.disabled).toBe(true);
+    await act(async () => {
+      const check = [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Check receipt');
+      check?.click();
+    });
+    expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Steer accepted');
+    expect(receipt).toHaveBeenCalledTimes(2);
+    expect(receipt.mock.calls[0]?.[1]?.body).toBe(receipt.mock.calls[1]?.[1]?.body);
+    expect(JSON.parse(String(receipt.mock.calls[0]?.[1]?.body)).clientMutationId).toBe('one-steer-id');
+    expect(randomUUID).toHaveBeenCalledOnce();
   });
 });
 
