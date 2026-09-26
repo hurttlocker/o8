@@ -3,13 +3,12 @@
 /** One project first: reopen a registered folder or optionally clone from GitHub. */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { requestPrompt } from '@/components/shared/ConfirmToastHost';
 import { isTauri } from '@/lib/tauri/bridge';
 import type { OnboardingRequest } from './request';
+import { pickFolderPath, SOURCE_WEB_FOLDER_ERROR } from './onboarding-projects';
 import { isOnboardingProject, type OnboardingProject } from './onboarding-progress';
 
 const FONT = 'var(--font-sans-system)';
-const SOURCE_WEB_FOLDER_ERROR = 'The native o8 shell is required to choose a folder. From this source checkout, run `npm run build:cli` then `node cli/dist/o8.mjs repo add /absolute/path`.';
 
 // ── GitHub device flow state (owned by the parent, passed down read-only) ──
 export interface DeviceFlowState {
@@ -84,28 +83,9 @@ const secondaryButtonStyle = (disabled = false): React.CSSProperties => ({
   opacity: disabled ? 0.5 : 1,
 });
 
-// Reuse the canonical dashboard folder-pick chain (useGlobalRepoState.handleOpenFolder).
-async function pickFolderPath(request: OnboardingRequest): Promise<string | null> {
-  let folderPath: string | null = null;
-  try {
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const result = await open({ directory: true, title: 'Select project folder' });
-    if (typeof result === 'string') folderPath = result;
-  } catch {
-    try {
-      const response = await request('/api/panel/browse-folder', { method: 'POST' });
-      const data = await response.json() as { path?: string | null };
-      if (data.path) folderPath = data.path;
-    } catch {
-      folderPath = await requestPrompt({ title: 'Open folder', message: 'Enter the folder path to add as a repository.', placeholder: '/path/to/folder' });
-    }
-  }
-  const trimmed = folderPath?.trim() ?? '';
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 export interface OnboardingReposStepProps {
   request?: OnboardingRequest;
+  initialShowGithub?: boolean;
   pickFolder?: () => Promise<string | null>;
   deviceFlowEnabled: boolean;
   githubFlow: DeviceFlowState;
@@ -114,12 +94,13 @@ export interface OnboardingReposStepProps {
   onSkip: () => void;
   onBusyChange?: (busy: boolean) => void;
   selectedProject?: OnboardingProject | null;
-  onContinue: (project: OnboardingProject) => void;
+  onContinue: (project: OnboardingProject) => void | Promise<void>;
   renderContinueButton: (opts: { label: string; onClick: () => void; disabled: boolean }) => ReactNode;
 }
 
 export function OnboardingReposStep({
   request = fetch,
+  initialShowGithub = false,
   pickFolder,
   deviceFlowEnabled,
   githubFlow,
@@ -136,7 +117,7 @@ export function OnboardingReposStep({
   const [selected, setSelected] = useState<Set<string>>(new Set(selectedProject ? [selectedProject.localPath] : []));
   const [localRevision, setLocalRevision] = useState(0);
   const [search, setSearch] = useState('');
-  const [showGithub, setShowGithub] = useState(false);
+  const [showGithub, setShowGithub] = useState(initialShowGithub);
   const [loading, setLoading] = useState(true);
   const [reposError, setReposError] = useState<string | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
@@ -262,7 +243,11 @@ export function OnboardingReposStep({
     if (saving) return;
     const repo = allItems.find((item) => selected.has(item.key));
     if (!repo) return;
-    if (repo.project) { onContinue(repo.project); return; }
+    if (repo.project) {
+      setSaving(true);
+      try { await onContinue(repo.project); } finally { setSaving(false); }
+      return;
+    }
     if (!repo.cloneUrl) return;
     setSaving(true);
     setReposError(null);
@@ -273,7 +258,7 @@ export function OnboardingReposStep({
       const data = await response.json();
       if (!response.ok || !isOnboardingProject(data.repo)) throw new Error(data.error ?? 'Unable to clone this project.');
       setRowStatus({ [repo.key]: 'done' });
-      onContinue(data.repo);
+      await onContinue(data.repo);
     } catch (cause) {
       setRowStatus({ [repo.key]: 'error' });
       setErrorKind('action');

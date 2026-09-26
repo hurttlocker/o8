@@ -10,13 +10,13 @@ import { recommendRuntimeSetup, type SetupRuntime } from '@/lib/setup/runtime-re
 
 export type ConsentPreviewState = 'unanswered' | 'one-choice' | 'saving' | 'error';
 type PreviewSurface = 'consent' | 'onboarding';
+type PreviewTools = 'both' | 'codex' | 'claude-code' | 'none';
 
 const ONBOARDING_STEPS: Array<{ value: OnboardingStep; label: string }> = [
-  { value: 'open', label: 'Welcome' },
-  { value: 'repos', label: 'Project' },
+  { value: 'open', label: 'Projects' },
+  { value: 'repos', label: 'GitHub' },
   { value: 'dispatch', label: 'Tools' },
   { value: 'privacy', label: 'Privacy' },
-  { value: 'ready', label: 'First task' },
 ];
 
 const CONSENT_STATES: Array<{ value: ConsentPreviewState; label: string }> = [
@@ -37,7 +37,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-export function createOnboardingPreviewRequest(storage: ProgressStorage | null = null): OnboardingRequest {
+export function createOnboardingPreviewRequest(storage: ProgressStorage | null = null, tools: PreviewTools = 'both'): OnboardingRequest {
   let values: Record<string, unknown> = {};
   try { values = JSON.parse(storage?.getItem('settings') ?? '{}'); } catch { /* Fresh fixture. */ }
   return async (input, init) => {
@@ -61,6 +61,9 @@ export function createOnboardingPreviewRequest(storage: ProgressStorage | null =
       { id: 'claude-code', label: 'Claude Code', available: true, unavailableReason: null, detail: 'Ready', fix: '' },
       { id: 'opencode', label: 'OpenCode', available: false, unavailableReason: 'not_installed', detail: 'Not installed', fix: 'Install OpenCode, then refresh tools.' },
     ];
+    for (const item of inventory) {
+      if (item.available && tools !== 'both' && tools !== item.id) { item.available = false; item.unavailableReason = 'not_installed'; item.detail = 'Not installed'; item.fix = `Install ${item.label}, then refresh tools.`; }
+    }
     return jsonResponse({ values, sources: Object.fromEntries(Object.keys(values).map((key) => [key, 'file'])), dispatchableRuntimes: inventory, setupRecommendation: recommendRuntimeSetup({ inventory, values, sources: Object.fromEntries(Object.keys(values).map((key) => [key, 'file'])), activity: { codex: 12, claude: 4, complete: true } }) });
   }
   if (url.startsWith('/api/connectors/')) return jsonResponse({ profile: null });
@@ -137,10 +140,14 @@ const controlStyle: React.CSSProperties = {
 };
 
 export function FirstRunPreview() {
+  const [controlsOpen, setControlsOpen] = useState(true);
   const [surface, setSurface] = useState<PreviewSurface>('onboarding');
   const [consentState, setConsentState] = useState<ConsentPreviewState>('unanswered');
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | undefined>(undefined);
 
+  const [palette, setPalette] = useState<'light' | 'dark'>('light');
+  const [tools, setTools] = useState<PreviewTools>('both');
+  const [run, setRun] = useState(0);
   const [finishedTask, setFinishedTask] = useState<OnboardingTask | null>(null);
   const [finished, setFinished] = useState(false);
   const storage = useMemo<ProgressStorage>(() => ({
@@ -150,13 +157,19 @@ export function FirstRunPreview() {
   }), []);
   const [onboardingRequest, setOnboardingRequest] = useState(() => createOnboardingPreviewRequest(storage));
 
+  const restart = (nextTools = tools) => {
+    storage.removeItem('settings'); storage.removeItem(PROGRESS_KEY);
+    setOnboardingRequest(() => createOnboardingPreviewRequest(storage, nextTools));
+    setFinished(false); setOnboardingStep('open'); setRun((value) => value + 1);
+  };
+
   return (
-    <main style={{ ...resolveTheme(getPalette('light'), 'solid').cssVars, position: 'fixed', inset: 0, overflow: 'hidden', background: 'var(--t-bg)', color: 'var(--t-text)' } as React.CSSProperties}>
-      {finished ? <section style={{ maxWidth: 640, marginTop: 120, marginBottom: 120, marginLeft: 'auto', marginRight: 'auto', padding: 24, fontFamily: 'var(--font-sans-system)' }}><h1>{finishedTask ? 'Your first task is ready to review' : 'Welcome to your workspace'}</h1><p>{finishedTask?.project.name ?? 'Explore o8 and add a project when you are ready.'}</p>{finishedTask ? <textarea aria-label="Lead task draft" defaultValue={finishedTask.text} rows={7} style={{ width: '100%', padding: 16, boxSizing: 'border-box' }} /> : null}<p>Preview handoff. No model request was sent.</p><button type="button" onClick={() => { storage.removeItem('settings'); storage.removeItem(PROGRESS_KEY); setOnboardingRequest(() => createOnboardingPreviewRequest(storage)); setFinished(false); setOnboardingStep('open'); }}>Restart preview</button></section> : surface === 'consent' ? (
+    <main style={{ ...resolveTheme(getPalette(palette), 'solid').cssVars, position: 'fixed', inset: 0, overflow: 'hidden', background: 'var(--t-bg)', color: 'var(--t-text)' } as React.CSSProperties}>
+      {finished ? <section style={{ maxWidth: 520, marginTop: 160, marginLeft: 'auto', marginRight: 'auto', paddingTop: 24, paddingBottom: 24, paddingLeft: 32, paddingRight: 32, fontFamily: 'var(--font-sans-system)' }}><h1 style={{ fontSize: 30, fontWeight: 300 }}>Workspace opened.</h1><p style={{ lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{finishedTask?.project.name ?? 'An empty workspace'} is ready. In the app, you land directly in the workspace with your composer ready.</p><p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>This preview ends at the handoff. No task was submitted.</p><button type="button" onClick={() => restart()} style={controlStyle}>Restart preview</button></section> : surface === 'consent' ? (
         <ConsentScenario key={consentState} state={consentState} />
       ) : (
         <Onboarding
-          key={onboardingStep}
+          key={`${run}:${onboardingStep}`}
           initialStep={onboardingStep}
           request={onboardingRequest}
           storage={storage}
@@ -169,11 +182,15 @@ export function FirstRunPreview() {
       <aside style={{
         position: 'fixed',
         top: 10,
-        left: '50%',
+        left: controlsOpen ? '50%' : undefined,
+        right: controlsOpen ? undefined : 12,
         zIndex: 100001,
-        transform: 'translateX(-50%)',
+        transform: controlsOpen ? 'translateX(-50%)' : undefined,
+        width: 'max-content',
         display: 'flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
         gap: 8,
         maxWidth: 'calc(100vw - 24px)',
         paddingTop: 6,
@@ -186,6 +203,8 @@ export function FirstRunPreview() {
         boxShadow: 'var(--t-glass-shadow)',
         fontFamily: 'var(--font-sans-system)',
       }}>
+        <button type="button" onClick={() => setControlsOpen((value) => !value)} style={{ ...controlStyle, paddingRight: 10 }}>{controlsOpen ? 'Hide controls' : 'Preview controls'}</button>
+        {controlsOpen ? <>
         <span style={{ paddingLeft: 3, fontSize: 9, fontWeight: 500, letterSpacing: '0.12em', color: 'var(--t-text-muted)', whiteSpace: 'nowrap' }}>
           DEV PREVIEW
         </span>
@@ -218,9 +237,13 @@ export function FirstRunPreview() {
             {ONBOARDING_STEPS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         )}
-        <span style={{ fontSize: 10, color: 'var(--t-text-faint)', whiteSpace: 'nowrap' }}>
-          isolated state
-        </span>
+        <select aria-label="Available tools" value={tools} onChange={(event) => { const next = event.target.value as PreviewTools; setTools(next); restart(next); }} style={controlStyle}>
+          <option value="both">Codex + Claude</option><option value="codex">Codex only</option><option value="claude-code">Claude only</option><option value="none">No tools</option>
+        </select>
+        <select aria-label="Preview theme" value={palette} onChange={(event) => setPalette(event.target.value as 'light' | 'dark')} style={controlStyle}><option value="light">Light</option><option value="dark">Dark</option></select>
+        <button type="button" aria-label="Reset onboarding preview" onClick={() => restart()} style={{ ...controlStyle, paddingRight: 10 }}>Reset</button>
+        <span style={{ fontSize: 10, color: 'var(--t-text-faint)', whiteSpace: 'nowrap' }}>isolated state</span>
+        </> : null}
       </aside>
     </main>
   );

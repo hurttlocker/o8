@@ -57,12 +57,12 @@ describe('first-run preview route surface', () => {
     surfacePicker.value = 'onboarding';
     await act(async () => { surfacePicker.dispatchEvent(new Event('change', { bubbles: true })); });
     await settle();
-    expect(document.body.textContent).toContain('Run an AI engineering');
+    expect(document.body.textContent).toContain('Open a project');
 
     const stepPicker = document.querySelector('[aria-label="Onboarding step"]') as HTMLSelectElement;
-    stepPicker.value = 'ready';
+    stepPicker.value = 'dispatch';
     await act(async () => { stepPicker.dispatchEvent(new Event('change', { bubbles: true })); });
     await settle();
-    expect(document.body.textContent).toContain('Your first task');
+    expect(document.body.textContent).toContain('Your setup');
   });
 });

@@ -11,16 +11,18 @@ const quietButton: CSSProperties = {
   cursor: 'pointer', textAlign: 'left',
 };
 
-export function RuntimeToolsPanel({ inventory, loading, error, onRefresh }: {
+export function RuntimeToolsPanel({ inventory, loading, error, onRefresh, initiallyExpanded = false }: {
+  initiallyExpanded?: boolean;
   inventory: readonly SetupRuntime[] | null; loading: boolean; error?: string | null; onRefresh: () => void;
 }) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState(false);
   const needsSetup = inventory?.filter((item) => !item.available) ?? [];
   return (
     <div style={{ fontFamily: 'var(--font-sans-system)', fontSize: 11, color: 'var(--t-text-muted)' }}>
       {error ? <div role="alert" style={{ padding: 8, color: 'var(--t-brand-red)' }}>{error}</div> : null}
-      <details>
+      <details open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
         <summary style={{ ...quietButton, display: 'list-item', marginLeft: 8 }}>Add tools</summary>
         <div style={{ maxHeight: 240, overflowY: 'auto', paddingLeft: 8, paddingRight: 8 }}>
           <p style={{ lineHeight: 1.4 }}>Install or connect a tool, then refresh. New tools become available without changing your setup.</p>
@@ -39,7 +41,8 @@ export function RuntimeToolsPanel({ inventory, loading, error, onRefresh }: {
               </div>
             );
           })}
-          {inventory && needsSetup.length === 0 ? <p>All supported tools in this inventory are ready.</p> : null}
+          {inventory && inventory.length > 0 && needsSetup.length === 0 ? <p>All supported tools in this inventory are ready.</p> : null}
+          {inventory?.length === 0 ? <p>No tool inventory was returned. Refresh to try again.</p> : null}
           {copyError ? <p role="alert">Clipboard unavailable. Use the tool’s installation instructions.</p> : null}
         </div>
       </details>

@@ -1,4 +1,4 @@
-export const ONBOARDING_STEPS = ['open', 'repos', 'dispatch', 'privacy', 'ready'] as const;
+export const ONBOARDING_STEPS = ['open', 'repos', 'dispatch', 'privacy'] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export interface OnboardingProject { id: string; name: string; localPath: string; defaultBranch?: string; remoteUrl?: string }
 export interface OnboardingTask { project: OnboardingProject; text: string }
@@ -13,7 +13,7 @@ export const PROGRESS_KEY = 'o8:onboarding-progress:v1';
 export const EXPLAIN_PROJECT = 'Explain this project: what it does, how it is organized, how to run it, and where I should start. Read the project instructions first. Do not change files.';
 export const PLAN_CHANGE = 'Help me plan a change to this project. Read the project instructions and structure, then ask me what I want to build before making changes.';
 export function emptyProgress(step: OnboardingStep = 'open'): OnboardingProgress {
-  return { step, project: null, toolsConfigured: false, task: EXPLAIN_PROJECT };
+  return { step, project: null, toolsConfigured: false, task: '' };
 }
 export function isOnboardingProject(value: unknown): value is OnboardingProject {
   if (!value || typeof value !== 'object') return false;
@@ -24,9 +24,10 @@ export function isOnboardingProject(value: unknown): value is OnboardingProject 
 export function readProgress(storage: ProgressStorage | null): OnboardingProgress {
   try {
     const value = JSON.parse(storage?.getItem(PROGRESS_KEY) ?? 'null') as Partial<OnboardingProgress> | null;
+    if ((value as { step?: string } | null)?.step === 'ready') value!.step = 'open';
     if (!value || !ONBOARDING_STEPS.includes(value.step as OnboardingStep)) return emptyProgress();
     return { step: value.step as OnboardingStep, project: isOnboardingProject(value.project) ? value.project : null,
-      toolsConfigured: value.toolsConfigured === true, task: typeof value.task === 'string' ? value.task.slice(0, 12000) : EXPLAIN_PROJECT };
+      toolsConfigured: value.toolsConfigured === true, task: typeof value.task === 'string' && value.task !== EXPLAIN_PROJECT && value.task !== PLAN_CHANGE ? value.task.slice(0, 12000) : '' };
   } catch { return emptyProgress(); }
 }
 export function browserProgressStorage(): ProgressStorage | null {
