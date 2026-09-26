@@ -137,6 +137,7 @@ describe('multiple terminal panes', () => {
       onSplitTile: vi.fn(),
     })));
     expect(container.querySelectorAll('button[aria-label^="Close pane"]')).toHaveLength(4);
+    expect([...container.querySelectorAll('button[aria-label^="Close pane"]')].every((button) => button.textContent?.trim() === 'Close')).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Close pane 4"]')?.click());
     expect(onCloseTile).toHaveBeenCalledExactlyOnceWith(fourth.newTileId);
   });
