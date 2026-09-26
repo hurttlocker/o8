@@ -33,6 +33,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [childBusy, setChildBusy] = useState(false);
@@ -75,6 +76,19 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
     heading?.setAttribute('tabindex', '-1');
     heading?.focus({ preventScroll: true });
   }, [progress.step]);
+
+  useEffect(() => {
+    const keepSetupFocus = (event: FocusEvent) => {
+      const overlay = overlayRef.current;
+      const target = event.target;
+      if (!overlay || !(target instanceof Element) || overlay.contains(target)) return;
+      // Help can open a separate dialog above setup. It owns focus until closed.
+      if (target.closest('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) return;
+      (contentRef.current?.querySelector<HTMLElement>('h1, h2') ?? contentRef.current)?.focus({ preventScroll: true });
+    };
+    document.addEventListener('focusin', keepSetupFocus);
+    return () => document.removeEventListener('focusin', keepSetupFocus);
+  }, []);
 
   const acknowledgeAgent = async (project: OnboardingProject | null, result: SetupRequestStatus, message?: string) => {
     const pending = agentRequest.current;
@@ -187,7 +201,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   </div>;
   const renderButton = ({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) => <button type="button" onClick={onClick} disabled={disabled} style={{ ...onboardingButtonStyle, background: 'var(--t-text)', color: 'var(--t-onboarding-bg)', opacity: disabled ? 0.5 : 1 }}>{label}</button>;
   const home = progress.step === 'open';
-  return <div data-o8-onboarding="" role="dialog" aria-modal="true" aria-label="Set up o8" onKeyDown={(event) => {
+  return <div ref={overlayRef} data-o8-onboarding="" role="dialog" aria-modal="true" aria-label="Set up o8" onKeyDown={(event) => {
     // Portaled dialogs own their keyboard navigation while they are open.
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
     const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'))
