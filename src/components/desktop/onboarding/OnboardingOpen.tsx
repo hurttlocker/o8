@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import type { OnboardingProject } from './onboarding-progress';
 import { onboardingButtonStyle, onboardingQuietButtonStyle } from './onboarding-style';
+import { OnboardingFeedback } from './OnboardingFeedback';
 
 function ProjectRow({ project, disabled, onOpen }: { project: OnboardingProject; disabled: boolean; onOpen: () => void }) {
   const [hovered, setHovered] = useState(false);
@@ -37,7 +38,7 @@ export function OnboardingOpen({ projects, loading, busy, status, tools, error, 
       <button type="button" disabled={busy} onClick={onClone} style={onboardingQuietButtonStyle}>Clone from GitHub</button>
     </div>
     <div role="status" aria-live="polite" style={{ minHeight: 22, marginTop: 12, fontSize: 12, color: 'var(--t-text-secondary)' }}>{busy ? status : loading ? 'Loading your projects…' : ''}</div>
-    {error ? <div role="alert" style={{ marginTop: 4, marginBottom: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--t-danger)' }}>{error} <button type="button" disabled={busy} onClick={onRetry} style={onboardingQuietButtonStyle}>Try again</button></div> : null}
+    {error ? <div style={{ marginTop: 4, marginBottom: 8 }}><OnboardingFeedback tone="error" title={error} action={<button type="button" disabled={busy} onClick={onRetry} style={onboardingQuietButtonStyle}>Check again</button>}>You can check again, choose another folder, or change your tools below.</OnboardingFeedback></div> : null}
     {projects.length > 0 ? <section aria-label="Your projects" style={{ marginTop: 16 }}>
       <div style={{ marginBottom: 8, paddingLeft: 12, fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)', letterSpacing: '0.04em' }}>YOUR PROJECTS</div>
       <div style={{ maxHeight: 200, overflowY: 'auto' }}>{projects.map((project) => <ProjectRow key={project.id} project={project} disabled={busy} onOpen={() => onOpenProject(project)} />)}</div>

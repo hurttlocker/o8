@@ -1,5 +1,7 @@
 'use client';
 
+import { OnboardingFeedback } from './OnboardingFeedback';
+
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -230,7 +232,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
       </div> : null}
       {!loading && !leadReady && !needsConnection ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Connect a primary lead, or customize to choose a supported alternative.</div> : null}
       {!loading && !readyToSave && workerRuntimes.length > 0 ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Some selected tools need attention. Connect them below or customize your setup.</div> : null}
-      {error ? <div role="alert" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-danger)' }}>{error}</div> : null}
+      {error ? <OnboardingFeedback tone="error" title={error}>Your selections are still here. Try saving again when you’re ready.</OnboardingFeedback> : null}
       <RuntimeToolsPanel key={needsConnection ? 'connect' : 'additional'} initiallyExpanded={needsConnection} inventory={needsConnection ? inventory.filter((item) => item.id === 'codex' || item.id === 'claude-code') : inventory} loading={loading} error={null} onRefresh={() => setRevision((current) => current + 1)} />
       {!needsConnection ? <div style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-faint)' }}>Recommendations use session file activity from the past seven days. Conversation contents stay unread. Messaging and other optional features can be connected later.</div> : null}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { OnboardingFeedback } from './onboarding/OnboardingFeedback';
 
 import { PRODUCT_EVENT_DISCLOSURES } from '@/lib/analytics/events';
 import { SCRUBBED_CRASH_SAMPLE } from '@/lib/telemetry/consent-sample';
@@ -175,6 +176,8 @@ export function TelemetryConsentCard({
   const [crashReports, setCrashReports] = useState<ConsentChoice>(null);
   const [productUsage, setProductUsage] = useState<ConsentChoice>(null);
   const [saving, setSaving] = useState(false);
+  const [savedChoices, setSavedChoices] = useState<string | null>(null);
+  const choicesSaved = savedChoices === JSON.stringify([crashReports, productUsage]);
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [onBusyChange, saving]);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -244,6 +247,7 @@ export function TelemetryConsentCard({
     setSaving(true);
     setError(null);
     try {
+      if (embedded && choicesSaved) { await onContinue?.(); return; }
       const response = await request({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -257,6 +261,7 @@ export function TelemetryConsentCard({
       if (!response.ok || payload.values?.telemetryConsentAnswered !== true) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Your choices could not be saved.');
       }
+      setSavedChoices(JSON.stringify([crashReports, productUsage]));
       if (embedded) await onContinue?.();
       else setLoadState('hidden');
     } catch (saveError) {
@@ -475,6 +480,7 @@ export function TelemetryConsentCard({
           </DisclosureCard>
         </div>
 
+        {embedded && choicesSaved ? <div style={{ marginTop: 16 }}><OnboardingFeedback title="Privacy choices saved">You can change either choice later in Settings.</OnboardingFeedback></div> : null}
         <footer style={{
           display: 'flex',
           alignItems: 'center',
@@ -485,7 +491,7 @@ export function TelemetryConsentCard({
           borderTop: '1px solid var(--t-divider-subtle)',
         }}>
           <div style={{ minHeight: 20, fontSize: 11.5, fontWeight: 300, lineHeight: 1.45, color: error ? 'var(--t-danger)' : 'var(--t-text-muted)' }} role={error ? 'alert' : undefined}>
-            {error ?? (canSave ? 'Both choices are ready to save.' : 'Choose one option in each card to continue.')}
+            {error ?? (embedded && choicesSaved ? 'Continue when you’re ready.' : canSave ? 'Both choices are ready to save.' : 'Choose one option in each card to continue.')}
           </div>
           <button
             type="button"
@@ -510,7 +516,7 @@ export function TelemetryConsentCard({
               transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
-            {saving ? 'Saving choices…' : 'Save both choices'}
+            {saving ? choicesSaved && embedded ? 'Opening workspace…' : 'Saving choices…' : embedded && choicesSaved ? 'Continue' : 'Save both choices'}
           </button>
         </footer>
       </div>

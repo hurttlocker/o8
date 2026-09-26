@@ -8,6 +8,7 @@ import { OnboardingReposStep } from './onboarding/OnboardingReposStep';
 import { OnboardingPermissionsStep } from './onboarding/OnboardingPermissionsStep';
 import { restartOnboardingAtPermissions } from './onboarding/permissions-check';
 import { OnboardingOpen } from './onboarding/OnboardingOpen';
+import { OnboardingFeedback } from './onboarding/OnboardingFeedback';
 import { useAgentSetupRequest } from './onboarding/useAgentSetupRequest';
 import type { AgentSetupRequest, SetupRequestStatus } from '@/lib/setup/agent-request';
 import { useOnboardingGithub } from './onboarding/useOnboardingGithub';
@@ -36,6 +37,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   const [actionBusy, setActionBusy] = useState(false);
   const [childBusy, setChildBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const [setupSaved, setSetupSaved] = useState(false);
   const actionLock = useRef(false);
   const agentRequest = useRef<AgentSetupRequest | null>(null);
   const continueAfterTools = useRef(false);
@@ -49,7 +51,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
     setProgress(next);
     setStorageError(!writeProgress(progressStorage, next));
   }, [progressStorage]);
-  const navigate = (step: OnboardingStep) => { setError(null); update({ step }); };
+  const navigate = (step: OnboardingStep) => { setError(null); setSetupSaved(false); update({ step }); };
   const consentRequest = useCallback((init: RequestInit = {}) => request('/api/panel/operator-defaults?include=values', init), [request]);
 
   useEffect(() => {
@@ -153,7 +155,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
       }
       if (!currentSetup.consentAnswered) { update({ step: 'privacy' }); await acknowledgeAgent(project, 'needs_privacy'); return; }
       await renewClaim();
-      setStatus('Opening workspace…');
+      setStatus(project ? `Opening ${project.name}…` : 'Opening workspace…');
       const completed = await onComplete(project ? { project, text: progressRef.current.task } : undefined);
       if (completed === false) throw new Error('Could not open the workspace. Try again.');
       await acknowledgeAgent(project, 'opened');
@@ -179,7 +181,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   const tools = <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 300, color: 'var(--t-text-secondary)' }}>
       <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: ready ? 'var(--t-text-secondary)' : 'var(--t-text-faint)' }} />
-      {loading ? 'Finding your tools…' : ready ? `Using ${leadLabel}` : 'Connect a tool when you’re ready'}
+      {loading ? 'Finding your tools…' : ready ? `${setup?.recommendation.preserved ? 'Using' : 'Suggested lead:'} ${leadLabel}` : 'Connect a tool when you’re ready'}
     </span>
     <button type="button" disabled={busy} onClick={() => { continueAfterTools.current = false; navigate('dispatch'); }} style={{ ...onboardingQuietButtonStyle, fontSize: 12 }}>{ready ? 'Change' : 'Set up tools'}</button>
   </div>;
@@ -190,17 +192,19 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
     <div ref={contentRef} role="region" aria-label="Setup content" tabIndex={0} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 24, paddingBottom: 24, paddingLeft: 32, paddingRight: 32 }}>
       <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center', gap: 20 }}>
         {!home ? <div style={{ width: '100%', maxWidth: progress.step === 'privacy' ? 760 : 640 }}><button type="button" disabled={busy} onClick={() => { continueAfterTools.current = false; navigate('open'); }} style={{ ...onboardingQuietButtonStyle, paddingLeft: 0 }}>← Projects</button></div> : null}
+        {!home && progress.project ? <div style={{ width: '100%', maxWidth: progress.step === 'privacy' ? 760 : 640, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)', overflowWrap: 'anywhere' }}>Setting up <span style={{ color: 'var(--t-text)' }}>{progress.project.name}</span><div style={{ marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)' }}>Your project stays selected as you finish these choices.</div></div> : null}
+        {home && setupSaved ? <div style={{ width: '100%', maxWidth: 520 }}><OnboardingFeedback title="Setup saved">Your lead and worker choices are saved. Open a project when you’re ready.</OnboardingFeedback></div> : null}
         {home ? <OnboardingOpen projects={projects} loading={loading} busy={busy} status={status} tools={tools} error={error ?? discoveryError ?? completionError ?? null} onRetry={() => setRevision((value) => value + 1)} onOpenFolder={() => void enter(null, true)} onOpenProject={(project) => void enter(project)} onClone={() => navigate('repos')} onPermissions={() => navigate('permissions')} onExplore={() => void enter(null)} /> : null}
         {progress.step === 'repos' ? <><h1 style={{ fontSize: 28, fontWeight: 300, margin: 0 }}>Choose a project</h1><OnboardingReposStep initialShowGithub onBusyChange={setChildBusy} request={request} pickFolder={pickFolder} selectedProject={progress.project} deviceFlowEnabled={githubDeviceFlowEnabled} githubFlow={githubFlow} onConnectGithub={(onSuccess) => void startGithubFlow(onSuccess)} onSkip={() => navigate('open')} onContinue={(project) => enter(project)} renderContinueButton={renderButton} /></> : null}
         {progress.step === 'dispatch' ? <OnboardingDispatchStep onBusyChange={setChildBusy} request={request} onContinue={() => {
           setRevision((value) => value + 1);
           if (continueAfterTools.current) { continueAfterTools.current = false; return enter(progressRef.current.project); }
-          else navigate('open');
+          else { navigate('open'); setSetupSaved(true); }
         }} onSkip={() => navigate('open')} renderButton={renderButton} /> : null}
         {progress.step === 'permissions' ? <OnboardingPermissionsStep storage={progressStorage} onBusyChange={setChildBusy} onRestart={() => restartOnboardingAtPermissions(progressStorage, progressRef.current)} onContinue={() => navigate('open')} /> : null}
         {progress.step === 'privacy' ? <TelemetryConsentCard onBusyChange={setChildBusy} embedded request={consentRequest} onContinue={() => enter(progressRef.current.project)} /> : null}
         {!home && actionBusy ? <div role="status" style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>{status}</div> : null}
-        {!home && (error || completionError) ? <div role="alert" style={{ maxWidth: 640, fontSize: 12, color: 'var(--t-danger)' }}>{error ?? completionError}</div> : null}
+        {!home && (error || completionError) ? <div style={{ width: '100%', maxWidth: 640 }}><OnboardingFeedback tone="error" title={error ?? completionError ?? ''}>{storageError ? 'Keep this window open while you retry.' : 'Your saved choices are kept. You can retry or return to projects.'}</OnboardingFeedback></div> : null}
         {storageError ? <p role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Progress could not be saved for a restart. You can still continue.</p> : null}
       </div>
     </div>
