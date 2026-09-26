@@ -2,6 +2,8 @@
 
 /** Provider and model choices share one settings state; task behavior lives in Dispatch. */
 
+import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
+import { visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
 import { useEffect, useState } from 'react';
 
 import {
@@ -129,6 +131,9 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
     return () => { alive = false; };
   }, []);
 
+  const runtimeInventory = useRuntimeInventory();
+  const visibleTools = new Set(visibleRuntimeInventory(runtimeInventory.inventory ?? [], [...(data?.values.workerRuntimes ?? []), ...(data?.values.defaultDispatchRuntime ? [data.values.defaultDispatchRuntime] : [])]).map((item) => item.id));
+
   if (loading && !data) {
     return (
       <div style={{ paddingTop: 40, color: 'var(--t-text-muted)', fontSize: 13, fontFamily: APP_FONT_STACK }}>
@@ -254,7 +259,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
           footnote="Supported workers and available connection checks. Not checked means setup has no result for that tool; it does not mean the tool is missing. Local model connections and API keys have their own pages."
         >
           {/* Codex — worker effort */}
-          <SettingsRow
+          {visibleTools.has('codex') ? <SettingsRow
             icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.codex.accentColor} />}
             label={ORCHESTRATOR_RUNTIMES.codex.label}
             subtitle={lockedSub('codexWorkerEffort', runtimeSubtitle('codex'))}
@@ -271,9 +276,9 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
               </TrailingCluster>
             }
             divider
-          />
+          /> : null}
           {/* Claude Code — worker effort */}
-          <SettingsRow
+          {visibleTools.has('claude-code') ? <SettingsRow
             icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES['claude-code'].accentColor} />}
             label={ORCHESTRATOR_RUNTIMES['claude-code'].label}
             subtitle={lockedSub('claudeWorkerEffort', runtimeSubtitle('claude-code'))}
@@ -290,8 +295,8 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
               </TrailingCluster>
             }
             divider
-          />
-          {Object.entries(ORCHESTRATOR_RUNTIMES).filter(([id, runtime]) => runtime.dispatchable && !['codex', 'claude-code', 'opencode'].includes(id)).map(([id, runtime]) => (
+          /> : null}
+          {Object.entries(ORCHESTRATOR_RUNTIMES).filter(([id, runtime]) => runtime.dispatchable && visibleTools.has(id as keyof typeof ORCHESTRATOR_RUNTIMES) && !['codex', 'claude-code', 'opencode'].includes(id)).map(([id, runtime]) => (
             <SettingsRow key={id}
               icon={<RuntimeDot color={runtime.accentColor} />}
               label={runtime.label}
@@ -301,7 +306,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
             />
           ))}
           {/* opencode — enable toggle (experimentalOpencode) */}
-          <SettingsRow
+          {visibleTools.has('opencode') ? <SettingsRow
             icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.opencode.accentColor} />}
             label={ORCHESTRATOR_RUNTIMES.opencode.label}
             subtitle={lockedSub('experimentalOpencode', runtimeSubtitle('opencode'))}
@@ -313,14 +318,11 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
                   disabled={envLocked('experimentalOpencode') || busyField === 'experimentalOpencode'}
                   onChange={(next) => {
                     updateField('experimentalOpencode', next);
-                    if (!next && values.defaultDispatchRuntime === 'opencode') {
-                      updateField('defaultDispatchRuntime', 'codex');
-                    }
                   }}
                 />
               </TrailingCluster>
             }
-          />
+          /> : null}
         </SettingsGroup>
       </SettingsAdvanced>
 

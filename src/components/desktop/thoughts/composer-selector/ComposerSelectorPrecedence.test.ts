@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
 
+vi.mock('@/components/desktop/onboarding/useRuntimeInventory', async () => {
+  const { listDispatchableRuntimes } = await import('@/lib/orchestrator/runtime-capabilities');
+  return { useRuntimeInventory: () => ({
+    inventory: listDispatchableRuntimes().map((id) => ({ id, label: id, available: true, unavailableReason: null, detail: '', fix: '' })),
+    loading: false, error: null, refresh: () => {},
+  }) };
+});
+
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

@@ -1,5 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
+import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
 import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsSegmented } from './shared';
@@ -58,6 +60,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
   busyField: keyof OperatorDefaults | null;
   updateField: <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => void;
 }) {
+  const tools = useRuntimeInventory(!advanced);
   // Hermes (ACP backend) only appears in the backend picker when its binary is present.
   const [hermesAvailable, setHermesAvailable] = useState(false);
   const [opencodeAvailable, setOpencodeAvailable] = useState(false);
@@ -113,8 +116,9 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
                 onChange={(next) => { updateField('orchestratorBackend', next as OrchestratorBackendSetting); }}
                 options={[
                   { value: 'auto', label: 'Use existing setup' },
-                  { value: 'codex', label: 'Codex', detail: cliStatusLabel(cliAuth?.statuses.codex) },
-                  { value: 'claude', label: 'Claude', detail: cliStatusLabel(cliAuth?.statuses.claude) },
+                  { value: 'o8', label: 'o8' },
+                  ...(tools.inventory?.some((item) => item.id === 'codex' && item.available) || values.orchestratorBackend === 'codex' ? [{ value: 'codex', label: 'Codex', detail: cliStatusLabel(cliAuth?.statuses.codex) }] : []),
+                  ...(tools.inventory?.some((item) => item.id === 'claude-code' && item.available) || values.orchestratorBackend === 'claude' ? [{ value: 'claude', label: 'Claude', detail: cliStatusLabel(cliAuth?.statuses.claude) }] : []),
                   // OpenClaw hidden from the picker (Q ruling 2026-07-16, not
                   // one-click yet); shown only if it's already the selection so
                   // an existing choice stays visible + escapable.
@@ -123,8 +127,8 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
                   // Shown when the binary is present, mirroring Hermes. Without
                   // this the composer could select opencode while Settings
                   // rendered no selected segment at all.
-                  ...(opencodeAvailable || values.orchestratorBackend === 'opencode' ? [{ value: 'opencode', label: 'OpenCode 2' }] : []),
-                  { value: 'collide', label: 'Claude + Codex' },
+                  ...(opencodeAvailable || values.orchestratorBackend === 'opencode' ? [{ value: 'opencode', label: 'OpenCode · experimental' }] : []),
+                  ...(cliAuth?.statuses.claude?.ready && tools.inventory?.some((item) => item.id === 'codex' && item.available) || values.orchestratorBackend === 'collide' ? [{ value: 'collide', label: 'Claude + Codex' }] : []),
                 ]}
               />
             }
@@ -178,7 +182,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
             accessory={
               <PickerMenu<DispatchRuntime>
                 value={values.defaultDispatchRuntime}
-                options={DEFAULT_WORKER_RUNTIME_OPTIONS}
+                options={DEFAULT_WORKER_RUNTIME_OPTIONS.filter((option) => option.value === values.defaultDispatchRuntime || tools.inventory?.some((item) => item.id === option.value && item.available))}
                 onChange={(next) => { updateField('defaultDispatchRuntime', next); }}
                 disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
                 minWidth={150}
@@ -191,6 +195,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
           />
       </SettingsGroup>
     </section>
+    <RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} />
     </>}
     {advanced && <>
     <SettingsAdvanced label="Advanced orchestrator options" description="Fallback models and behavior for combined or existing lead setups.">

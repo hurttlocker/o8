@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { MODEL_IDS } from '@/lib/models';
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-onboarding-runtime-picker-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -48,6 +49,11 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
     suggestedSubscriptionProfile: { profile: null, detail: null },
   })),
   getDispatchableRuntimeAvailability: vi.fn(async () => inventory),
+}));
+
+vi.mock('@/lib/setup/runtime-activity', () => ({
+  readRuntimeActivity: vi.fn(async () => ({ codex: 8, claude: 3, complete: true })),
+  readLocalLeadModels: vi.fn(async () => ({})),
 }));
 
 const route = await import('@/app/api/panel/operator-defaults/route');
@@ -100,6 +106,8 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
     await persistOnboardingRuntimeSelection({
       orchestratorRuntime: 'claude-code',
       workerRuntimes: ['claude-code', 'codex'],
+      leadModel: MODEL_IDS.orchestratorDefault,
+      workerModel: MODEL_IDS.claudeWorkerDefault,
     }, routeFetch);
 
     const response = await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
@@ -108,6 +116,11 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
     expect(persisted.values.defaultDispatchRuntime).toBe('claude-code');
     expect(persisted.values.workerRuntimes).toEqual(['claude-code', 'codex']);
     expect(persisted.sources.workerRuntimes).toBe('file');
+    expect(persisted.values.orchestratorModel).toBe(MODEL_IDS.orchestratorDefault);
+    expect(persisted.values.defaultDispatchModel).toBe(MODEL_IDS.claudeWorkerDefault);
+    const { resolveOrchestratorBackendId, resolveReviewerBackendId } = await import('@/lib/lane/orchestrator-backends/active-backend');
+    expect(resolveOrchestratorBackendId()).toBe('claude');
+    expect(resolveReviewerBackendId()).toBe('claude');
 
     inventory = [
       {
@@ -135,7 +148,7 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
     });
   });
 
-  it('returns an honest, skippable empty selection when no agent CLI is installed', async () => {
+  it('retains saved choices as unavailable when tools disappear, without silently rerouting', async () => {
     inventory = [
       {
         id: 'codex',
@@ -157,8 +170,9 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
 
     const loaded = await loadOnboardingRuntimeSelection(routeFetch);
     expect(loaded.inventory.every((runtime) => !runtime.available)).toBe(true);
-    expect(loaded.orchestratorRuntime).toBe('codex');
-    expect(loaded.workerRuntimes).toEqual([]);
+    expect(loaded.orchestratorRuntime).toBe('claude-code');
+    expect(loaded.workerRuntimes).toEqual(['claude-code', 'codex']);
+    expect(loaded.recommendation.preserved).toBe(true);
     expect(toggleOnboardingWorkerRuntime([], 'codex', loaded.inventory)).toEqual([]);
   });
 });

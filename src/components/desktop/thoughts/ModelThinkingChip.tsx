@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
+import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
+import { runtimeForLead, visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
@@ -355,6 +358,18 @@ export function ModelThinkingChip({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const tools = useRuntimeInventory(open);
+  const [advancedLeads, setAdvancedLeads] = useState(false);
+  const installed = visibleRuntimeInventory(tools.inventory ?? []);
+  const visibleLead = (key: ComposerModelGroup['key']) => {
+    const current = key === activeBackend || (key === 'claude' && activeBackend === 'fable');
+    if (current) return true;
+    if (key === 'o8') return advancedLeads;
+    const tool = runtimeForLead(key);
+    return installed.some((item) => item.id === tool) && (key !== 'opencode' || advancedLeads);
+  };
+  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8'
+    || tools.inventory?.some((item) => item.id === runtimeForLead(key) && item.available) === true;
   const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
   const ultraEnabled = useUltraEffortPreference();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -579,7 +594,7 @@ export function ModelThinkingChip({
                 <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Model</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {composerModelGroups.map((group) => {
+                {composerModelGroups.filter((group) => visibleLead(group.key)).map((group) => {
                   const houseOpen = openHouse === group.key;
                   const houseHasActive = group.options.some((o) => activeBackend === o.backend && (!o.model || effectiveModelId === o.model));
                   return (
@@ -611,7 +626,7 @@ export function ModelThinkingChip({
                         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
                       >
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                          <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '0', lineHeight: 1.2 }}>{group.label}</span>
+                          <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '0', lineHeight: 1.2 }}>{group.label}{group.key === 'opencode' ? ' · experimental' : ''}</span>
                           {!houseOpen && houseHasActive ? <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--t-accent)', flexShrink: 0 }} /> : null}
                         </span>
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.6, transform: houseOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
@@ -621,7 +636,8 @@ export function ModelThinkingChip({
                       {/* A model-agnostic house has no fixed option list — its
                           models come from the live agent, so it renders a
                           searchable picker instead of a drawer of literals. */}
-                      {houseOpen && group.searchable ? (
+                      {houseOpen && !leadReady(group.key) ? <div style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>{tools.loading ? 'Checking readiness…' : tools.inventory?.find((item) => item.id === runtimeForLead(group.key))?.fix || 'Connect this tool using Add tools below.'}</div> : null}
+                      {houseOpen && leadReady(group.key) && group.searchable ? (
                         <AcpModelPicker
                           backend={group.key}
                           value={activeBackend === group.key ? (modelId ?? null) : null}
@@ -634,7 +650,7 @@ export function ModelThinkingChip({
                         />
                       ) : null}
                       {/* Models nested under the open house. */}
-                      {houseOpen && !group.searchable ? group.options.map((option) => {
+                      {houseOpen && leadReady(group.key) && !group.searchable ? group.options.map((option) => {
                         const active = activeBackend === option.backend && (!option.model || effectiveModelId === option.model);
                         return (
                           <button
@@ -690,6 +706,8 @@ export function ModelThinkingChip({
                     </div>
                   );
                 })}
+                <button type="button" aria-expanded={advancedLeads} onClick={() => setAdvancedLeads((current) => !current)} style={{ border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)', fontSize: 11, fontWeight: 300, padding: 7, cursor: 'pointer', textAlign: 'left' }}>{advancedLeads ? 'Standard leads' : 'Customize leads'}</button>
+                <RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} />
               </div>
               {hideEffortUi ? null : (
                 <div style={{ marginTop: 4, paddingLeft: 7, paddingRight: 7, paddingTop: 6, paddingBottom: 2, borderTop: '1px solid var(--t-divider-subtle)' }}>

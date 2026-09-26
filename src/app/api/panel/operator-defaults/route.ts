@@ -49,15 +49,15 @@ import { resolveApfsDependencyImagesOverride } from '@/lib/workspace/dependency-
 import {
   getDispatchableRuntimeAvailability,
   getRuntimeAuthSnapshot,
+  invalidateRuntimeAuthCache,
 } from '@/lib/runtimes/shared/auth-detect';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
 import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
+import { readRuntimeSetupRecommendation } from '@/lib/setup/runtime-setup-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
-
 function effectiveOverride() {
   return {
     apfsDependencyImages: resolveApfsDependencyImagesOverride(),
@@ -715,6 +715,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
 export async function GET(request: Request) {
   try {
+    if (new URL(request.url).searchParams.get('refresh') === 'runtime') invalidateRuntimeAuthCache();
     const valuesOnly = new URL(request.url).searchParams.get('include') === 'values';
     if (valuesOnly) {
       const [data, settingsToml] = await Promise.all([
@@ -729,6 +730,10 @@ export async function GET(request: Request) {
       getRuntimeAuthSnapshot(),
     ]);
     const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
+    if (new URL(request.url).searchParams.get('include') === 'setup') {
+      const setupRecommendation = await readRuntimeSetupRecommendation(data, dispatchableRuntimes);
+      return response({ ...operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes), setupRecommendation });
+    }
     return response(operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {
     console.error('[panel-operator-defaults] Failed to load operator defaults:', error);
