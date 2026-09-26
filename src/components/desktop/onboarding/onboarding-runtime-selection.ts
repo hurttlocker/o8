@@ -4,39 +4,28 @@ import type {
   OrchestratorBackendSetting,
 } from '@/components/desktop/settings/dispatch-shared';
 
-export type OnboardingOrchestratorRuntime = 'codex' | 'claude-code';
+import { recommendRuntimeSetup, type RuntimeSetupRecommendation, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
+import { invalidateRuntimeInventory } from './useRuntimeInventory';
+import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
-export interface DispatchableRuntimeInventoryItem {
-  id: DispatchRuntime;
-  label: string;
-  available: boolean;
-  unavailableReason: 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable' | null;
-  detail: string;
-  fix: string;
-}
+export type OnboardingOrchestratorRuntime = Exclude<OrchestratorBackendSetting, 'claude'> | 'claude-code';
+
+export type DispatchableRuntimeInventoryItem = SetupRuntime;
 
 export interface OnboardingRuntimeSelection {
   inventory: DispatchableRuntimeInventoryItem[];
   orchestratorRuntime: OnboardingOrchestratorRuntime;
   workerRuntimes: DispatchRuntime[];
+  recommendation: RuntimeSetupRecommendation;
+  sources: OperatorDefaultsResponse['sources'];
 }
 
 type OnboardingFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export function orchestratorBackendForRuntime(
   runtime: OnboardingOrchestratorRuntime,
-): Extract<OrchestratorBackendSetting, 'codex' | 'claude'> {
-  return runtime === 'claude-code' ? 'claude' : 'codex';
-}
-
-function orchestratorRuntimeForBackend(value: unknown): OnboardingOrchestratorRuntime | null {
-  if (value === 'claude') return 'claude-code';
-  if (value === 'codex') return 'codex';
-  return null;
-}
-
-function availableRuntimeIds(inventory: DispatchableRuntimeInventoryItem[]): Set<DispatchRuntime> {
-  return new Set(inventory.filter((runtime) => runtime.available).map((runtime) => runtime.id));
+): OrchestratorBackendSetting {
+  return runtime === 'claude-code' ? 'claude' : runtime;
 }
 
 export function canSelectOnboardingRuntime(
@@ -51,45 +40,19 @@ export function toggleOnboardingWorkerRuntime(
   runtime: DispatchRuntime,
   inventory: DispatchableRuntimeInventoryItem[],
 ): DispatchRuntime[] {
-  if (!canSelectOnboardingRuntime(inventory, runtime)) return selected;
   if (selected.includes(runtime)) {
     return selected.length > 1 ? selected.filter((item) => item !== runtime) : selected;
   }
+  if (!canSelectOnboardingRuntime(inventory, runtime)) return selected;
   return [...selected, runtime];
-}
-
-function initialWorkerRuntimes(
-  values: OperatorDefaultsResponse['values'],
-  inventory: DispatchableRuntimeInventoryItem[],
-): DispatchRuntime[] {
-  const available = availableRuntimeIds(inventory);
-  const persisted = Array.isArray(values.workerRuntimes)
-    ? values.workerRuntimes.filter((runtime): runtime is DispatchRuntime => available.has(runtime))
-    : [];
-  if (persisted.length > 0) return [...new Set(persisted)];
-  if (available.has(values.defaultDispatchRuntime)) return [values.defaultDispatchRuntime];
-  if (available.has('codex')) return ['codex'];
-  const firstAvailable = inventory.find((runtime) => runtime.available);
-  return firstAvailable ? [firstAvailable.id] : [];
-}
-
-function initialOrchestratorRuntime(
-  values: OperatorDefaultsResponse['values'],
-  inventory: DispatchableRuntimeInventoryItem[],
-): OnboardingOrchestratorRuntime {
-  const available = availableRuntimeIds(inventory);
-  const persisted = orchestratorRuntimeForBackend(values.orchestratorBackend);
-  if (persisted && available.has(persisted)) return persisted;
-  if (available.has('codex')) return 'codex';
-  if (available.has('claude-code')) return 'claude-code';
-  return 'codex';
 }
 
 export async function loadOnboardingRuntimeSelection(
   request: OnboardingFetch = fetch,
+  refresh = false,
 ): Promise<OnboardingRuntimeSelection> {
-  const response = await request('/api/panel/operator-defaults', { cache: 'no-store' });
-  const payload = await response.json().catch(() => null) as OperatorDefaultsResponse | { error?: string } | null;
+  const response = await request(`/api/panel/operator-defaults?include=setup${refresh ? '&refresh=runtime' : ''}`, { cache: 'no-store' });
+  const payload = await response.json().catch(() => null) as (OperatorDefaultsResponse & { setupRecommendation?: RuntimeSetupRecommendation }) | { error?: string } | null;
   if (!response.ok || !payload || !('values' in payload)) {
     const message = payload && 'error' in payload && typeof payload.error === 'string'
       ? payload.error
@@ -97,15 +60,19 @@ export async function loadOnboardingRuntimeSelection(
     throw new Error(message);
   }
   const inventory = payload.dispatchableRuntimes ?? [];
+  const recommendation = payload.setupRecommendation ?? recommendRuntimeSetup({
+    inventory, values: payload.values, sources: payload.sources,
+    activity: { codex: 0, claude: 0, complete: false },
+  });
   return {
-    inventory,
-    orchestratorRuntime: initialOrchestratorRuntime(payload.values, inventory),
-    workerRuntimes: initialWorkerRuntimes(payload.values, inventory),
+    inventory, recommendation, sources: payload.sources ?? {} as OperatorDefaultsResponse['sources'],
+    orchestratorRuntime: recommendation.backend === 'claude' ? 'claude-code' : recommendation.backend ?? 'codex',
+    workerRuntimes: recommendation.workerRuntimes,
   };
 }
 
 export async function persistOnboardingRuntimeSelection(
-  selection: Pick<OnboardingRuntimeSelection, 'orchestratorRuntime' | 'workerRuntimes'>,
+  selection: Pick<OnboardingRuntimeSelection, 'orchestratorRuntime' | 'workerRuntimes'> & { leadModel?: string; workerModel?: string },
   request: OnboardingFetch = fetch,
 ): Promise<void> {
   if (selection.workerRuntimes.length === 0) {
@@ -118,10 +85,16 @@ export async function persistOnboardingRuntimeSelection(
       orchestratorBackend: orchestratorBackendForRuntime(selection.orchestratorRuntime),
       defaultDispatchRuntime: selection.workerRuntimes[0],
       workerRuntimes: selection.workerRuntimes,
+      ...(selection.leadModel && (selection.orchestratorRuntime === 'codex' || selection.orchestratorRuntime === 'claude-code') ? { orchestratorModel: selection.leadModel } : {}),
+      ...(selection.workerModel !== undefined ? selection.workerRuntimes[0] === 'opencode'
+        ? { opencodeWorkerModel: selection.workerModel || null }
+        : { defaultDispatchModel: selection.workerModel } : {}),
     }),
   });
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) {
     throw new Error(payload?.error ?? `Save failed (${response.status})`);
   }
+  invalidateOperatorDefaultsValuesSnapshot();
+  invalidateRuntimeInventory();
 }

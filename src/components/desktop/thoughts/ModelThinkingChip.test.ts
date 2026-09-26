@@ -77,7 +77,9 @@ describe('ModelThinkingChip Claude Code carrier truth', () => {
   });
 
   it('offers Astra without clearing an explicit ultra effort', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false } as Response)));
+    vi.stubGlobal('fetch', vi.fn(async (input) => String(input).includes('operator-defaults')
+      ? { ok: true, json: async () => ({ dispatchableRuntimes: [{ id: 'codex', label: 'Codex', available: true, unavailableReason: null, detail: '', fix: '' }] }) } as Response
+      : { ok: false } as Response));
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       disconnect() {}

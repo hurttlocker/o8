@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Onboarding, type OnboardingStep } from '@/components/desktop/Onboarding';
 import { TelemetryConsentCard } from '@/components/desktop/TelemetryConsentCard';
 import type { OnboardingRequest } from '@/components/desktop/onboarding/request';
+import { getPalette, resolveTheme } from '@/lib/theme/registry';
+import { recommendRuntimeSetup, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
 
 export type ConsentPreviewState = 'unanswered' | 'one-choice' | 'saving' | 'error';
 type PreviewSurface = 'consent' | 'onboarding';
@@ -46,7 +48,12 @@ export const previewOnboardingRequest: OnboardingRequest = async (input) => {
     });
   }
   if (url.startsWith('/api/panel/operator-defaults')) {
-    return jsonResponse({ values: {}, dispatchableRuntimes: [] });
+    const inventory: SetupRuntime[] = [
+      { id: 'codex', label: 'Codex', available: true, unavailableReason: null, detail: 'Ready', fix: '' },
+      { id: 'claude-code', label: 'Claude Code', available: true, unavailableReason: null, detail: 'Ready', fix: '' },
+      { id: 'opencode', label: 'OpenCode', available: false, unavailableReason: 'not_installed', detail: 'Not installed', fix: 'Install OpenCode, then refresh tools.' },
+    ];
+    return jsonResponse({ values: {}, sources: {}, dispatchableRuntimes: inventory, setupRecommendation: recommendRuntimeSetup({ inventory, activity: { codex: 12, claude: 4, complete: true } }) });
   }
   if (url.startsWith('/api/connectors/')) return jsonResponse({ profile: null });
   return jsonResponse({ error: 'Preview request is not stubbed.' }, 404);
@@ -125,7 +132,7 @@ export function FirstRunPreview() {
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('open');
 
   return (
-    <main style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: 'var(--t-bg)' }}>
+    <main style={{ ...resolveTheme(getPalette('light'), 'solid').cssVars, position: 'fixed', inset: 0, overflow: 'hidden', background: 'var(--t-bg)', color: 'var(--t-text)' } as React.CSSProperties}>
       {surface === 'consent' ? (
         <ConsentScenario key={consentState} state={consentState} />
       ) : (

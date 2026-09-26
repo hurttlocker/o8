@@ -82,6 +82,7 @@ export interface RuntimeAuthSnapshot {
 }
 
 export interface DispatchableRuntimeAvailability {
+  installed?: boolean;
   id: OrchestratorRuntime;
   label: string;
   available: boolean;
@@ -716,6 +717,7 @@ export async function getDispatchableRuntimeAvailability(
     return {
       id,
       label: ORCHESTRATOR_RUNTIMES[id].label,
+      installed: status?.installed ?? false,
       available,
       unavailableReason: available ? null : status?.unavailableReason ?? 'adapter_unavailable',
       detail: status?.detail ?? `${ORCHESTRATOR_RUNTIMES[id].label} readiness could not be determined.`,

@@ -152,10 +152,12 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
             No agent runtimes detected. Install Claude Code, Codex, or Gemini to get started, or add API keys in Settings.
           </div>
         ) : (
-          runtimes.map((rt) => <RuntimeRow key={rt.id} runtime={rt} />)
+          runtimes.filter((rt) => rt.detected).map((rt) => <RuntimeRow key={rt.id} runtime={rt} />)
         )}
       </div>
 
+      {!loading && !error ? <details><summary style={{ cursor: 'pointer', color: 'var(--t-text-secondary)', fontSize: 12 }}>Add tools</summary><div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>{runtimes.filter((rt) => !rt.detected).map((rt) => <RuntimeRow key={rt.id} runtime={rt} />)}</div></details> : null}
+      {!loading ? <button type="button" onClick={() => { void detectRuntimes(); }} style={{ border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: FONT, fontSize: 12, cursor: 'pointer' }}>Refresh tools</button> : null}
       {!loading && !error && partial ? (
         <div style={{
           padding: '10px 12px',

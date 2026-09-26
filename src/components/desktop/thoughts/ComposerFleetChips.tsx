@@ -16,6 +16,9 @@
  */
 
 import { useRef, useState } from 'react';
+import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
+import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
+import { visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
 
 import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
 import { composerRuntimeLabel } from './composer-selector/state';
@@ -23,7 +26,6 @@ import { AcpModelPicker } from './AcpModelPicker';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import {
   getRuntimeCapability,
-  listDispatchableRuntimes,
   type OrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { WORKER_START_OPTIONS, type WorkerStartMode } from '@/lib/operator/worker-start-mode';
@@ -217,6 +219,8 @@ export function FleetWorkerChip({
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<FleetPickerView>('runtimes');
+  const tools = useRuntimeInventory(open);
+  const visibleRuntimes = visibleRuntimeInventory(tools.inventory ?? [], [defaults.defaultDispatchRuntime]);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const selectRuntime = (runtime: OrchestratorRuntime) => {
     onRuntimeChange?.(runtime);
@@ -373,14 +377,17 @@ export function FleetWorkerChip({
               }}>
                 Fleet worker
               </div>
-              {listDispatchableRuntimes().map((id) => {
+              {visibleRuntimes.map((item) => {
+                const id = item.id;
                 const active = id === runtime;
                 const rowModel = workerModelForDisplay(id, defaults);
                 return (
                   <button
                     key={id}
                     type="button"
-                    onClick={() => { void selectRuntime(id); }}
+                    disabled={!item.available || saving}
+                    title={item.available ? item.detail : item.fix}
+                    onClick={() => { if (item.available && !saving) void selectRuntime(id); }}
                     onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
                     onMouseLeave={(event) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
                     style={{
@@ -416,7 +423,7 @@ export function FleetWorkerChip({
                       color: 'var(--t-text-faint)',
                       textAlign: 'right',
                     }}>
-                      {rowModel ? shortWorkerModelLabel(rowModel) : ''}
+                      {item.available ? (rowModel ? shortWorkerModelLabel(rowModel) : 'Configured model') : 'Needs setup'}
                     </span>
                     <span style={{ width: 13, flexShrink: 0, color: 'var(--t-accent)', visibility: active ? 'visible' : 'hidden' }}>
                       <CheckGlyph />
@@ -424,6 +431,7 @@ export function FleetWorkerChip({
                   </button>
                 );
               })}
+              <RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} />
               <div style={{
                 minHeight: 15,
                 paddingTop: 3,

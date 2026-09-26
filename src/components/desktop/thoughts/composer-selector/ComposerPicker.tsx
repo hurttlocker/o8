@@ -2,6 +2,9 @@
 
 import { useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
 import { AcpModelPicker } from '../AcpModelPicker';
+import { useRuntimeInventory } from '../../onboarding/useRuntimeInventory';
+import { RuntimeToolsPanel } from '../../onboarding/RuntimeToolsPanel';
+import { runtimeForLead, visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
 import {
   type ComposerModelGroup,
   type ComposerModelOption,
@@ -23,7 +26,7 @@ import {
 import { LeadChip, WorkersChip } from './ComposerSelectorChips';
 import { EffortSlider } from './EffortSlider';
 import { ProviderMarkGlyph } from './provider-marks';
-import { getRuntimeCapability, listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { WORKER_START_OPTIONS, type WorkerStartMode } from '@/lib/operator/worker-start-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 
@@ -71,7 +74,7 @@ type PickerTarget = 'lead' | 'workers';
 export function ComposerPicker({
   state,
   defaults,
-  composerModelGroups,
+  composerModelGroups: allComposerModelGroups,
   onModelChange,
   onBackendChange,
   onEffortChange,
@@ -96,6 +99,16 @@ export function ComposerPicker({
   saving?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const tools = useRuntimeInventory(open);
+  const [advancedLeads, setAdvancedLeads] = useState(false);
+  const installed = useMemo(() => visibleRuntimeInventory(tools.inventory ?? [], [defaults.defaultDispatchRuntime]), [tools.inventory, defaults.defaultDispatchRuntime]);
+  const ready = (id: string | null) => tools.inventory?.some((item) => item.id === id && item.available) === true;
+  const leadReady = (group: ComposerModelGroup) => group.key === 'o8' || ready(runtimeForLead(group.key));
+  const composerModelGroups = useMemo(() => allComposerModelGroups.filter((group) => {
+    if (group.key === state.leadBackend || (group.key === 'claude' && state.leadBackend === 'fable')) return true;
+    if (group.key === 'o8') return advancedLeads;
+    return installed.some((item) => item.id === runtimeForLead(group.key)) && (group.key !== 'opencode' || advancedLeads);
+  }), [allComposerModelGroups, state.leadBackend, installed, advancedLeads]);
   const [openTarget, setOpenTarget] = useState<PickerTarget>('lead');
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -128,12 +141,12 @@ export function ComposerPicker({
   const shownSearchableLeadRows = leadView.kind === 'effort'
     ? []
     : normalizedQuery ? searchableLeadRows : activeLeadGroup?.searchable ? [activeLeadGroup] : [];
-  const workerRows = useMemo(() => listDispatchableRuntimes().filter((runtime) => {
+  const workerRows = useMemo(() => installed.map((item) => item.id).filter((runtime) => {
     if (!normalizedQuery) return true;
     const capability = getRuntimeCapability(runtime);
     const model = workerModelForDisplay(runtime, defaults);
     return `${capability.label} ${runtime} ${model}`.toLowerCase().includes(normalizedQuery);
-  }), [defaults, normalizedQuery]);
+  }), [defaults, normalizedQuery, installed]);
   const workersVisible = state.mode !== 'solo' && (workersExpanded || (normalizedQuery.length > 0 && workerRows.length > 0));
   const visiblePicks: VisiblePick[] = [
     ...providerRows.map((group) => ({ key: `lead-house:${group.key}`, kind: 'lead-house' as const, group })),
@@ -180,6 +193,7 @@ export function ComposerPicker({
   };
 
   const selectLead = (group: ComposerModelGroup, option: ComposerModelOption) => {
+    if (saving || !leadReady(group)) return;
     if (option.backend === state.leadBackend) onModelChange?.(option.model ?? option.value);
     else onBackendChange?.(option.backend, option.model);
     setQuery('');
@@ -188,6 +202,7 @@ export function ComposerPicker({
   };
 
   const selectLeadHouse = (group: ComposerModelGroup) => {
+    if (saving || !leadReady(group)) return;
     if (group.searchable) setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting });
     else setLeadView({ kind: 'models', groupKey: group.key });
     setActiveIndex(0);
@@ -201,6 +216,7 @@ export function ComposerPicker({
   };
 
   const selectWorker = (runtime: OrchestratorRuntime) => {
+    if (saving || !ready(runtime)) return;
     onRuntimeChange(runtime);
     if (runtime === 'opencode' || runtime === '3code') setAcpPicker({ kind: 'worker', backend: runtime });
     else setPopoverOpen(false);
@@ -211,8 +227,8 @@ export function ComposerPicker({
     if (!item) return;
     if (item.kind === 'lead-house') selectLeadHouse(item.group);
     else if (item.kind === 'lead') selectLead(item.group, item.option);
-    else if (item.kind === 'lead-searchable') setAcpPicker({ kind: 'lead', backend: item.group.key as OrchestratorBackendSetting });
-    else selectWorker(item.runtime);
+    else if (item.kind === 'lead-searchable' && leadReady(item.group) && !saving) setAcpPicker({ kind: 'lead', backend: item.group.key as OrchestratorBackendSetting });
+    else if (item.kind === 'worker') selectWorker(item.runtime);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -250,7 +266,7 @@ export function ComposerPicker({
 
   const runtime = defaults.defaultDispatchRuntime;
   const selectedWorkerSummary = composerRuntimeLabel(runtime);
-  const leadHouseLabel = (group: ComposerModelGroup) => group.key === 'claude' ? 'Claude Code' : group.key === 'opencode' ? 'OpenCode' : group.label;
+  const leadHouseLabel = (group: ComposerModelGroup) => group.key === 'claude' ? 'Claude Code' : group.key === 'opencode' ? 'OpenCode · experimental' : group.label;
   const scrollStyle: CSSProperties = { overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none' };
   const anchorRef = openTarget === 'workers' ? workerTriggerRef : leadTriggerRef;
 
@@ -266,6 +282,7 @@ export function ComposerPicker({
       {state.mode !== 'solo' ? (
         <WorkersChip
           mode={state.mode}
+          availableRuntimes={tools.inventory?.filter((item) => item.available).map((item) => item.id)}
           runtime={runtime}
           model={workerModelForDisplay(runtime, defaults)}
           open={pickerOpen && openTarget === 'workers'}
@@ -362,7 +379,7 @@ export function ComposerPicker({
                       highlighted={pickIndex === visibleActiveIndex}
                       label={leadHouseLabel(group)}
                       meta=""
-                      disabled={saving}
+                      disabled={saving || !leadReady(group)}
                       onClick={() => selectLeadHouse(group)}
                     />
                   );
@@ -380,7 +397,7 @@ export function ComposerPicker({
                       highlighted={pickIndex === visibleActiveIndex}
                       label={option.label}
                       meta={normalizedQuery ? group.label.toLowerCase() : ''}
-                      disabled={saving}
+                      disabled={saving || !leadReady(group)}
                       onClick={() => selectLead(group, option)}
                     />
                   );
@@ -398,7 +415,7 @@ export function ComposerPicker({
                       highlighted={pickIndex === visibleActiveIndex}
                       label={leadHouseLabel(group)}
                       meta="live models"
-                      disabled={saving}
+                      disabled={saving || !leadReady(group)}
                       onClick={() => setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting })}
                     />
                   );
@@ -407,6 +424,8 @@ export function ComposerPicker({
                   <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
                 ) : null}
               </div>
+              <button type="button" aria-expanded={advancedLeads} onClick={() => setAdvancedLeads((current) => !current)} style={{ border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)', fontSize: 11, fontWeight: 300, padding: 8, textAlign: 'left', cursor: 'pointer' }}>{advancedLeads ? 'Standard leads' : 'Customize leads'}</button>
+              <RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} />
               {state.mode !== 'solo' ? (
               <div ref={workerSectionRef} style={{ flexShrink: 0, marginTop: 4, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-border)', scrollMarginTop: 6 }}>
                 <button
@@ -436,8 +455,8 @@ export function ComposerPicker({
                             selected={selected}
                             highlighted={pickIndex === visibleActiveIndex}
                             label={composerRuntimeLabel(workerRuntime)}
-                            meta={getRuntimeCapability(workerRuntime).workerProvider}
-                            disabled={saving}
+                            meta={ready(workerRuntime) ? getRuntimeCapability(workerRuntime).workerProvider : 'Needs setup'}
+                            disabled={saving || !ready(workerRuntime)}
                             onClick={() => selectWorker(workerRuntime)}
                           />
                         );

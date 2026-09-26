@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type RefObject } from 'react';
 import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
-import { listDispatchableRuntimes, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { useComposerChipCompact } from '../composer-compact-context';
 import { ProviderMarkGlyph } from './provider-marks';
 import {
@@ -154,6 +154,7 @@ export function LeadChip({
 }
 
 export function WorkersChip({
+  availableRuntimes,
   mode,
   runtime,
   model,
@@ -162,6 +163,7 @@ export function WorkersChip({
   buttonRef,
   onClick,
 }: {
+  availableRuntimes?: OrchestratorRuntime[];
   mode: Exclude<ComposerSelectorMode, 'solo'>;
   runtime: OrchestratorRuntime;
   model: string | null;
@@ -179,13 +181,13 @@ export function WorkersChip({
       { duration: 180, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
     );
   }, [buttonRef]);
-  const runtimes = listDispatchableRuntimes();
+  const runtimes = availableRuntimes?.length ? availableRuntimes : [runtime];
   const selectedIndex = Math.max(0, runtimes.indexOf(runtime));
   const stack = mode === 'fusion'
     ? [0, 1, 2].map((offset) => runtimes[(selectedIndex + offset) % runtimes.length])
     : [runtime];
   const label = mode === 'fusion'
-    ? `${runtimes.length} runtimes`
+    ? availableRuntimes ? `${availableRuntimes.length} ready` : 'Connected tools'
     : mode === 'moa'
       ? `2 ${composerRuntimeLabel(runtime)}`
       : composerRuntimeLabel(runtime);

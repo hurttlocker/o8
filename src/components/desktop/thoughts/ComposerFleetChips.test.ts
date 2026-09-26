@@ -34,6 +34,9 @@ describe('FleetWorkerChip', () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ dispatchableRuntimes: [
+      { id: 'opencode', label: 'OpenCode', available: true, unavailableReason: null, detail: 'Ready', fix: '' },
+    ] }))));
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -49,7 +52,7 @@ describe('FleetWorkerChip', () => {
     const onWorkerModelChange = vi.fn();
     await act(async () => { root.render(createElement(FleetWorkerChip, { onWorkerModelChange })); });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
-    act(() => trigger?.click());
+    await act(async () => trigger?.click());
 
     const opencode = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('OpenCode'));
@@ -68,7 +71,7 @@ describe('FleetWorkerChip', () => {
     const onWorkerStartModeChange = vi.fn();
     await act(async () => { root.render(createElement(FleetWorkerChip, { onWorkerStartModeChange })); });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
-    act(() => trigger?.click());
+    await act(async () => trigger?.click());
 
     const plan = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent === 'Plan');
