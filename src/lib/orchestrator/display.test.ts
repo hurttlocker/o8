@@ -9,7 +9,7 @@ describe('runtimeDisplayLabel', () => {
   it('maps each runtime to its human label', () => {
     expect(runtimeDisplayLabel('codex')).toBe('Codex');
     expect(runtimeDisplayLabel('claude-code')).toBe('Claude Code');
-    expect(runtimeDisplayLabel('gemini')).toBe('Gemini');
+    expect(runtimeDisplayLabel('gemini')).toBe('Gemini CLI');
     expect(runtimeDisplayLabel('opencode')).toBe('OpenCode 2');
   });
 
@@ -70,13 +70,13 @@ describe('agentDisplayLabel', () => {
 
   it('falls back to the runtime human label derived from an owned sessionKey — NEVER the raw prefix', () => {
     expect(agentDisplayLabel({ sessionKey: 'codex-owned:codex-owned-1782-abc' })).toBe('Codex');
-    expect(agentDisplayLabel({ sessionKey: 'gemini-owned:gemini-owned-9-z' })).toBe('Gemini');
+    expect(agentDisplayLabel({ sessionKey: 'gemini-owned:gemini-owned-9-z' })).toBe('Gemini CLI');
     expect(agentDisplayLabel({ sessionKey: 'opencode-owned:opencode-owned-3-y' })).toBe('OpenCode 2');
     expect(agentDisplayLabel({ sessionKey: 'claude-code:claude-code-x' })).toBe('Claude Code');
   });
 
   it('honours an explicit runtime over the sessionKey', () => {
-    expect(agentDisplayLabel({ sessionKey: 'codex-owned:foo', runtime: 'gemini' })).toBe('Gemini');
+    expect(agentDisplayLabel({ sessionKey: 'codex-owned:foo', runtime: 'gemini' })).toBe('Gemini CLI');
   });
 
   it('never returns an owned-key prefix for any owned key (the leak invariant)', () => {
