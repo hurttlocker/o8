@@ -9,10 +9,11 @@ export function SplitPaneCloseButton({ onClick, paneLabel }: { onClick: () => vo
       type="button"
       data-no-drag
       onClick={onClick}
+      onMouseDown={(event) => event.stopPropagation()}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label={paneLabel ? `Close pane (${paneLabel})` : 'Close pane'}
-      title="Close pane"
+      aria-label={paneLabel ? `Close ${paneLabel}` : 'Close pane'}
+      title={paneLabel ? `Close ${paneLabel}` : 'Close pane'}
       style={{
         display: 'inline-flex',
         alignItems: 'center',

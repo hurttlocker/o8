@@ -4,7 +4,7 @@ import { act, createElement, StrictMode, useEffect, useRef, useState } from 'rea
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
-import { collectLeafNodes, createDefaultTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
+import { collectLeafNodes, computeTileLayout, createDefaultTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
 import { createTileRegistry } from '../tileRegistry';
 import { RESTORE_VALIDATION_BUDGET_MS } from './tileLayoutRestore';
@@ -108,7 +108,7 @@ function LayoutRestoreHarness({
 }: {
   onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
   onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
-  onSplitTile?: (split: (tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal') => void) => void;
+  onSplitTile?: (split: (tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal', placeBefore?: boolean, exactPlacement?: boolean) => void) => void;
   onResizeSplit?: (resize: (splitId: string, ratio: number) => void) => void;
   onUnverifiedIds?: (ids: ReadonlySet<string>) => void;
   registeredRepos: RepoRegistryEntry[];
@@ -153,7 +153,7 @@ function LayoutRestoreHarness({
   }, [onReplaceLayout]);
 
   useEffect(() => {
-    onSplitTile?.((tileId, direction = 'horizontal', initialTab) => handleSplitTile(tileId, direction, initialTab));
+    onSplitTile?.((tileId, direction = 'horizontal', initialTab, placeBefore, exactPlacement) => handleSplitTile(tileId, direction, initialTab, placeBefore, exactPlacement));
   }, [onSplitTile, handleSplitTile]);
 
   useEffect(() => {
@@ -231,6 +231,35 @@ describe('useTileLayout browser-origin restore', () => {
     expect(collectLeafNodes(latestLayout.root).map((leaf) => leaf.content)).toContainEqual(expect.objectContaining({
       kind: 'terminal', initialTab: 'terminal',
     }));
+  });
+
+  it('fills the next balanced cell on click but splits the targeted edge on drop', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ repos: [], validatedRestorePaths: [] })));
+    let latestLayout = createDefaultTileLayout();
+    let splitTile: ((tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal', placeBefore?: boolean, exactPlacement?: boolean) => void) | null = null;
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout: (layout) => { latestLayout = layout; },
+      onSplitTile: (split) => { splitTile = split; },
+      registeredRepos: [],
+    })));
+    await act(async () => splitTile?.('tile-root', 'vertical', 'terminal'));
+    await act(async () => splitTile?.('tile-root', 'vertical', 'chat'));
+    const three = computeTileLayout(latestLayout.root).leafRects;
+    for (const rect of three.values()) expect(rect.width).toBeCloseTo(1 / 3);
+
+    await act(async () => splitTile?.('tile-root', 'horizontal', 'terminal', false, true));
+    const four = computeTileLayout(latestLayout.root).leafRects;
+    const first = four.get('tile-root')!;
+    const dropped = collectLeafNodes(latestLayout.root).find((leaf) => !three.has(leaf.id))!;
+    const placed = four.get(dropped.id)!;
+    expect(placed.left).toBe(first.left);
+    expect(placed.width).toBe(first.width);
+    expect(placed.top).toBe(first.top + first.height);
+
+    await act(async () => splitTile?.('tile-root', 'vertical', 'chat'));
+    const five = computeTileLayout(latestLayout.root).leafRects;
+    expect(five.get('tile-root')).toEqual(first);
+    expect(five.get(dropped.id)).toEqual(placed);
   });
 
   it('keeps the real registry consumer blocked from the first hydrated render through an unresolved split', async () => {

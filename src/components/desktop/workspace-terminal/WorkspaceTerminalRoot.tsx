@@ -194,6 +194,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
         detail: {
           workspaceId: workspaceInstanceId,
+          tileId: props.stateScope,
           label: conversationHeaderLabel,
           tabId: activeTabId,
           kind: activeTabKind,
@@ -223,7 +224,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         }));
       };
 
-    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible, terminalMode.active, props.activeWorkspaceSurface]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible, terminalMode.active, props.activeWorkspaceSurface, props.stateScope]);
 
     // Listen for chat-history rename so the workspace tab's label
     // refreshes in sync with the chat-history PATCH. The header strip

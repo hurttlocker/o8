@@ -283,6 +283,7 @@ export function splitTile(
   nextContent: TileContent,
   ratio = 0.5,
   placeBefore = false,
+  userArranged = false,
 ): { root: TileNode; newTileId: string | null } {
   let newTileId: string | null = null;
 
@@ -293,7 +294,10 @@ export function splitTile(
       }
       const nextLeaf = createLeaf(nextContent);
       newTileId = nextLeaf.id;
-      return createSplit(direction, ratio, placeBefore ? [nextLeaf, current] : [current, nextLeaf]);
+      return {
+        ...createSplit(direction, ratio, placeBefore ? [nextLeaf, current] : [current, nextLeaf]),
+        ...(userArranged ? { userArranged: true } : {}),
+      };
     }
 
     const firstChild = walk(current.children[0]);
@@ -312,6 +316,76 @@ export function splitTile(
     root: walk(node),
     newTileId,
   };
+}
+
+export function hasUserArrangedSplit(node: TileNode): boolean {
+  return node.type === 'split' && (node.userArranged === true
+    || hasUserArrangedSplit(node.children[0])
+    || hasUserArrangedSplit(node.children[1]));
+}
+
+/** Equal-area terminal layout that keeps leaf IDs, so live PTYs stay mounted. */
+export function rebalanceTerminalTiles(root: TileNode, twoPaneDirection: TileSplitDirection): TileNode {
+  const leaves = collectLeafNodes(root);
+  if (leaves.length < 2 || leaves.some((leaf) => leaf.content.kind !== 'terminal')) return root;
+
+  const row = (items: TileLeafNode[]): TileNode => {
+    if (items.length === 1) return items[0];
+    return createSplit('vertical', 1 / items.length, [items[0], row(items.slice(1))]);
+  };
+  if (leaves.length === 2) {
+    return createSplit(twoPaneDirection, 0.5, [leaves[0], leaves[1]]);
+  }
+  if (leaves.length === 3) return row(leaves);
+
+  // Two to four columns on a wide workspace. Each row's height is
+  // proportional to its leaf count, giving every terminal the same area.
+  const columns = leaves.length <= 4 ? 2 : leaves.length <= 6 ? 3 : leaves.length <= 9 ? 3 : 4;
+  const rows: TileLeafNode[][] = [];
+  for (let index = 0; index < leaves.length; index += columns) {
+    rows.push(leaves.slice(index, index + columns));
+  }
+  const stack = (items: TileLeafNode[][]): TileNode => {
+    if (items.length === 1) return row(items[0]);
+    const remaining = items.reduce((count, entry) => count + entry.length, 0);
+    return createSplit('horizontal', items[0].length / remaining, [row(items[0]), stack(items.slice(1))]);
+  };
+  return stack(rows);
+}
+
+function sameTileShape(first: TileNode, second: TileNode): boolean {
+  if (first.type !== second.type) return false;
+  if (first.type === 'leaf' && second.type === 'leaf') return first.id === second.id;
+  if (first.type === 'split' && second.type === 'split') {
+    return first.direction === second.direction
+      && sameTileShape(first.children[0], second.children[0])
+      && sameTileShape(first.children[1], second.children[1]);
+  }
+  return false;
+}
+
+export function insertBalancedTerminalTile(
+  root: TileNode,
+  targetTileId: string,
+  direction: TileSplitDirection,
+  nextContent: TileContent,
+  placeBefore = false,
+): { root: TileNode; newTileId: string | null } {
+  const leaves = collectLeafNodes(root);
+  const targetIndex = leaves.findIndex((leaf) => leaf.id === targetTileId);
+  if (targetIndex < 0 || leaves.some((leaf) => leaf.content.kind !== 'terminal') || nextContent.kind !== 'terminal') {
+    return { root, newTileId: null };
+  }
+  const nextLeaf = createLeaf(nextContent);
+  // Click-add fills the next open cell regardless of the focused pane.
+  if (placeBefore) leaves.splice(targetIndex, 0, nextLeaf);
+  else leaves.push(nextLeaf);
+  return { root: rebalanceTerminalTiles(createTerminalSequence(leaves), direction), newTileId: nextLeaf.id };
+}
+
+function createTerminalSequence(leaves: TileLeafNode[]): TileNode {
+  if (leaves.length === 1) return leaves[0];
+  return createSplit('vertical', 0.5, [leaves[0], createTerminalSequence(leaves.slice(1))]);
 }
 
 export function wrapRootWithSplit(
@@ -335,6 +409,7 @@ export function resizeTile(node: TileNode, splitId: string, ratio: number): Tile
     return {
       ...current,
       ratio: clampRatio(ratio),
+      userArranged: true,
     };
   });
 }
@@ -542,9 +617,14 @@ export function deserializeTileLayout(raw: string | null | undefined): TileLayou
     if (parsed.version !== TILE_LAYOUT_VERSION || !isTileNode(migratedRoot)) {
       return null;
     }
+    const normalizedRoot = normalizeNode(migratedRoot);
+    const leaves = collectLeafNodes(normalizedRoot);
+    const balancedRoot = !hasUserArrangedSplit(normalizedRoot) && leaves.length > 2 && leaves.every((leaf) => leaf.content.kind === 'terminal')
+      ? rebalanceTerminalTiles(normalizedRoot, 'vertical')
+      : normalizedRoot;
     return {
       version: TILE_LAYOUT_VERSION,
-      root: normalizeNode(migratedRoot),
+      root: sameTileShape(normalizedRoot, balancedRoot) ? normalizedRoot : balancedRoot,
     };
   } catch {
     return null;

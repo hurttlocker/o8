@@ -3,7 +3,8 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TileHeader } from '@/components/desktop/TileHeader';
-import { HeaderPlayButton } from '@/components/desktop/shell/HeaderPlayButton';
+import { HeaderPillStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
+import { SplitPaneCloseButton } from '@/components/desktop/shell/SplitPaneCloseButton';
 import {
   collectLeafNodes,
   computeTileLayout,
@@ -39,16 +40,22 @@ export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>
 
 interface TileContainerProps {
   activeTileId: string | null;
-  gridMode?: boolean;
+  paneLabels?: ReadonlyMap<string, string>;
+  paneSessions?: ReadonlyMap<string, {
+    workspaceId: string;
+    tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
+    activeTabId: string | null;
+    finishedTabCount: number;
+  }>;
   layout: TileLayout;
   registry: TileContentRegistry;
   onActivateTile: (tileId: string) => void;
   onCloseTile: (tileId: string) => void;
   onResizeSplit: (splitId: string, ratio: number) => void;
-  onSplitTile: (tileId: string, direction: TileSplitDirection, initialTab?: WorkspaceTabDragKind, placeBefore?: boolean) => void;
+  onSplitTile: (tileId: string, direction: TileSplitDirection, initialTab?: WorkspaceTabDragKind, placeBefore?: boolean, exactPlacement?: boolean) => void;
 }
 
-const HANDLE_SIZE = 8;
+const HANDLE_SIZE = 12;
 // Per-leaf gap + squircle. Each leaf gets HALF the gap as inner padding on
 // every edge that faces a sibling, so the sum of two adjacent paddings
 // equals LEAF_GAP. Corners that face a gap get rounded; corners flush
@@ -70,7 +77,8 @@ const LEAF_RADIUS = 14;
  */
 export function TileContainer({
   activeTileId,
-  gridMode = false,
+  paneLabels,
+  paneSessions,
   layout,
   registry,
   onActivateTile,
@@ -94,7 +102,8 @@ export function TileContainer({
   }, [layout.root]);
 
   const totalLeaves = leaves.length;
-  const showGrid = gridMode && totalLeaves > 1 && leaves.every((leaf) => leaf.content.kind === 'terminal');
+  const allTerminalPanes = leaves.every((leaf) => leaf.content.kind === 'terminal');
+  const showPaneHeader = allTerminalPanes && totalLeaves > 1;
 
   const makeResizeStart = useCallback(
     (splitId: string, direction: TileSplitDirection, containerRect: TileRect) =>
@@ -144,22 +153,17 @@ export function TileContainer({
       // carries this once TileContainer actually renders, so a white-screen /
       // empty render can't report healthy. See DashboardHydrationMarker.
       data-o8-workspace="1"
-      data-pane-layout={showGrid ? 'grid' : 'split'}
+      data-pane-layout="split"
       style={{
         position: 'relative',
-        display: showGrid ? 'grid' : 'block',
-        gridTemplateColumns: showGrid ? 'repeat(auto-fit, minmax(min(560px, 100%), 1fr))' : undefined,
-        gridAutoRows: showGrid ? (totalLeaves === 2 ? 'minmax(360px, 1fr)' : 'minmax(360px, 55vh)') : undefined,
-        alignContent: showGrid ? 'start' : undefined,
-        gap: showGrid ? LEAF_GAP : undefined,
-        padding: showGrid ? LEAF_GAP : undefined,
+        display: 'block',
         flexGrow: 1,
         flexShrink: 1,
         flexBasis: '0%',
         minWidth: 0,
         minHeight: 0,
         overflowX: 'hidden',
-        overflowY: showGrid ? 'auto' : 'hidden',
+        overflowY: 'hidden',
         // Transparent so the dashboard chrome shows through any unclaimed
         // pixels (e.g. the hair-width handle strip between two leaves).
         backgroundColor: 'transparent',
@@ -170,6 +174,7 @@ export function TileContainer({
         if (!rect) return null;
         const definition = registry[leaf.content.kind];
         const isActive = leaf.id === activeTileId;
+        const paneSession = paneSessions?.get(leaf.id);
         // Per-edge: half the gap on edges facing siblings; zero on edges
         // flush with the workspace boundary. Adjacent leaves contribute
         // half + half = LEAF_GAP visible in the middle, fully transparent
@@ -217,18 +222,18 @@ export function TileContainer({
                 }));
                 return;
               }
-              onSplitTile(leaf.id, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above');
+              onSplitTile(leaf.id, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above', true);
             }}
             style={{
-              position: showGrid ? 'relative' : 'absolute',
-              left: showGrid ? undefined : `${rect.left * 100}%`,
-              top: showGrid ? undefined : `${rect.top * 100}%`,
-              width: showGrid ? '100%' : `${rect.width * 100}%`,
-              height: showGrid ? '100%' : `${rect.height * 100}%`,
-              paddingLeft: showGrid ? 0 : padLeft,
-              paddingRight: showGrid ? 0 : padRight,
-              paddingTop: showGrid ? 0 : padTop,
-              paddingBottom: showGrid ? 0 : padBottom,
+              position: 'absolute',
+              left: `${rect.left * 100}%`,
+              top: `${rect.top * 100}%`,
+              width: `${rect.width * 100}%`,
+              height: `${rect.height * 100}%`,
+              paddingLeft: padLeft,
+              paddingRight: padRight,
+              paddingTop: padTop,
+              paddingBottom: padBottom,
               boxSizing: 'border-box',
               backgroundColor: 'transparent',
             }}
@@ -240,26 +245,28 @@ export function TileContainer({
                 width: '100%',
                 height: '100%',
                 overflow: 'hidden',
-                borderTopLeftRadius: showGrid ? LEAF_RADIUS : radiusTL,
-                borderTopRightRadius: showGrid ? LEAF_RADIUS : radiusTR,
-                borderBottomLeftRadius: showGrid ? LEAF_RADIUS : radiusBL,
-                borderBottomRightRadius: showGrid ? LEAF_RADIUS : radiusBR,
+                borderTopLeftRadius: radiusTL,
+                borderTopRightRadius: radiusTR,
+                borderBottomLeftRadius: radiusBL,
+                borderBottomRightRadius: radiusBR,
                 backgroundColor: 'var(--t-bg, transparent)',
               }}
             >
-              {showGrid ? (
+              {showPaneHeader ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, minHeight: 34, paddingLeft: 12, paddingRight: 8, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-secondary)', fontSize: 11, fontFamily: 'var(--font-sans-system)' }}>
-                  <span style={{ flex: 1, minWidth: 0, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)' }}>Pane {index + 1}</span>
-                  <HeaderPlayButton
-                    ariaSuffix={`pane ${index + 1}`}
-                    gridMode
-                    onSpawnChat={() => window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind: 'orchestrator', tileId: leaf.id } }))}
-                    onSpawnTerminal={() => window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind: 'terminal', tileId: leaf.id } }))}
-                    onSplitTab={(kind, direction) => onSplitTile(leaf.id, direction === 'right' ? 'vertical' : 'horizontal', kind)}
-                  />
-                  <button type="button" aria-label={`Close pane ${index + 1}`} title="Close pane" onClick={() => onCloseTile(leaf.id)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}>
-                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden><path d="M5 5l14 14M19 5 5 19" /></svg>
-                  </button>
+                  <span style={{ flexShrink: 0, fontWeight: isActive ? 500 : 300, color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)' }}>Pane {index + 1}</span>
+                  {paneSession && paneSession.tabs.length > 1 ? (
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <HeaderPillStrip
+                        tabs={paneSession.tabs}
+                        activeTabId={paneSession.activeTabId}
+                        workspaceId={paneSession.workspaceId}
+                        finishedTabCount={paneSession.finishedTabCount}
+                        ariaLabel={`Open sessions in pane ${index + 1}`}
+                      />
+                    </div>
+                  ) : <span title={paneLabels?.get(leaf.id) ?? undefined} style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontWeight: 300 }}>· {paneLabels?.get(leaf.id) ?? 'New session'}</span>}
+                  <SplitPaneCloseButton onClick={() => onCloseTile(leaf.id)} paneLabel={`pane ${index + 1}`} />
                 </div>
               ) : !definition?.hideHeader && (
                 <TileHeader
@@ -313,11 +320,12 @@ export function TileContainer({
         );
       })}
 
-      {!showGrid && splitFrames.map((frame) => (
+      {splitFrames.map((frame) => (
         <ResizeHandle
           key={frame.id}
           frame={frame}
           onMouseDown={makeResizeStart(frame.id, frame.direction, frame.container)}
+          onResize={(ratio) => onResizeSplit(frame.id, ratio)}
         />
       ))}
     </div>
@@ -327,11 +335,16 @@ export function TileContainer({
 function ResizeHandle({
   frame,
   onMouseDown,
+  onResize,
 }: {
   frame: TileSplitFrame;
   onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onResize: (ratio: number) => void;
 }) {
   const isVertical = frame.direction === 'vertical';
+  const ratio = isVertical
+    ? (frame.boundary.left - frame.container.left) / frame.container.width
+    : (frame.boundary.top - frame.container.top) / frame.container.height;
   const style: React.CSSProperties = isVertical
     ? {
         position: 'absolute',
@@ -352,14 +365,29 @@ function ResizeHandle({
 
   return (
     <div
+      role="separator"
+      aria-label="Resize terminal panes"
+      aria-orientation={isVertical ? 'vertical' : 'horizontal'}
+      aria-valuemin={20}
+      aria-valuemax={80}
+      aria-valuenow={Math.round(ratio * 100)}
+      tabIndex={0}
       onMouseDown={onMouseDown}
+      onKeyDown={(event) => {
+        const step = isVertical
+          ? (event.key === 'ArrowLeft' ? -0.05 : event.key === 'ArrowRight' ? 0.05 : 0)
+          : (event.key === 'ArrowUp' ? -0.05 : event.key === 'ArrowDown' ? 0.05 : 0);
+        if (!step) return;
+        event.preventDefault();
+        onResize(ratio + step);
+      }}
       onMouseEnter={(e) => {
-        const bar = e.currentTarget.firstElementChild as HTMLElement | null;
+        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
         if (bar) bar.style.opacity = '1';
       }}
       onMouseLeave={(e) => {
-        const bar = e.currentTarget.firstElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '0';
+        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
+        if (bar) bar.style.opacity = '0.65';
       }}
       style={{
         ...style,
@@ -370,13 +398,14 @@ function ResizeHandle({
         zIndex: 10,
       }}
     >
+      <div aria-hidden style={{ position: 'absolute', width: isVertical ? 1 : '100%', height: isVertical ? '100%' : 1, backgroundColor: 'var(--t-divider-subtle)', pointerEvents: 'none' }} />
       <div
         style={{
           width: isVertical ? 3 : 42,
           height: isVertical ? 42 : 3,
           borderRadius: 999,
           backgroundColor: 'var(--t-drag-handle)',
-          opacity: 0,
+          opacity: 0.65,
           transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       />

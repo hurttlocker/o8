@@ -670,17 +670,6 @@ function DashboardInner() {
   }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
-  const [workspaceGridMode, setWorkspaceGridMode] = useState(false);
-  useEffect(() => {
-    try { setWorkspaceGridMode(window.localStorage.getItem('o8:workspace-grid:v1') === '1'); } catch { /* private storage */ }
-  }, []);
-  const toggleWorkspaceGridMode = useCallback(() => {
-    setWorkspaceGridMode((current) => {
-      const next = !current;
-      try { window.localStorage.setItem('o8:workspace-grid:v1', next ? '1' : '0'); } catch { /* private storage */ }
-      return next;
-    });
-  }, []);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const designMode = useDesignMode();
   // The element grabbed by Design Mode (Cmd+Shift+D click) — shown in a
@@ -787,6 +776,7 @@ function DashboardInner() {
   };
   type WorkspaceActivePayload = {
     workspaceId: string | null;
+    tileId: string | null;
     label: string | null;
     tabId: string | null;
     kind: string | null;
@@ -804,6 +794,7 @@ function DashboardInner() {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{
         workspaceId?: string;
+        tileId?: string | null;
         label?: string | null;
         tabId?: string | null;
         kind?: string | null;
@@ -826,6 +817,7 @@ function DashboardInner() {
         }
         const payload: WorkspaceActivePayload = {
           workspaceId: id,
+          tileId: detail?.tileId ?? null,
           label: detail?.label ?? null,
           tabId: detail?.tabId ?? null,
           kind: detail?.kind ?? null,
@@ -844,7 +836,7 @@ function DashboardInner() {
               && tab.runtime === next.runtime && tab.packetStatus === next.packetStatus
               && tab.orchestratorThreadId === next.orchestratorThreadId;
           });
-        if (previous && previous.label === payload.label && previous.tabId === payload.tabId
+        if (previous && previous.tileId === payload.tileId && previous.label === payload.label && previous.tabId === payload.tabId
           && previous.kind === payload.kind && previous.finishedTabCount === payload.finishedTabCount
           && previous.contextRailAvailable === payload.contextRailAvailable
           && previous.contextRailVisible === payload.contextRailVisible
@@ -859,23 +851,43 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:workspace-active-label', handler as EventListener);
   }, []);
 
-  const simpleSideBySideWorkspaceSplit = tileLayout.root.type === 'split'
-    && tileLayout.root.direction === 'vertical'
-    && tileLayout.root.children.every((child) => child.type === 'leaf' && child.content.kind === 'terminal');
   const workspaceLeaves = collectLeafNodes(tileLayout.root);
   const workspaceGridAvailable = workspaceLeaves.length > 1 && workspaceLeaves.every((leaf) => leaf.content.kind === 'terminal');
+  const multiTerminalPaneLayout = workspaceGridAvailable;
+  const workspacePaneLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const payload of workspaceActiveMap.values()) {
+      if (!payload.tileId) continue;
+      const activeTab = payload.tabs.find((tab) => tab.id === payload.tabId);
+      labels.set(payload.tileId, activeTab?.label ?? payload.label ?? 'New session');
+    }
+    return labels;
+  }, [workspaceActiveMap]);
+  const workspacePaneSessions = useMemo(() => {
+    const sessions = new Map<string, {
+      workspaceId: string;
+      tabs: WorkspaceActivePayload['tabs'];
+      activeTabId: string | null;
+      finishedTabCount: number;
+    }>();
+    for (const payload of workspaceActiveMap.values()) {
+      if (!payload.tileId || !payload.workspaceId) continue;
+      sessions.set(payload.tileId, {
+        workspaceId: payload.workspaceId,
+        tabs: payload.tabs,
+        activeTabId: payload.tabId,
+        finishedTabCount: payload.finishedTabCount,
+      });
+    }
+    return sessions;
+  }, [workspaceActiveMap]);
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
-    // Stacked or nested splits keep the focused pane's tabs in the header.
-    if (workspaceActiveMap.size === 1) {
-      const [only] = workspaceActiveMap.values();
-      return only;
-    }
-    if (workspaceActiveMap.size > 1 && !simpleSideBySideWorkspaceSplit) {
-      const workspaces = Array.from(workspaceActiveMap.values());
-      return workspaces.find((workspace) => workspace.activeWorkspaceSurface) ?? workspaces[0];
-    }
-    return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false, terminalModeActive: false, activeWorkspaceSurface: false };
-  }, [simpleSideBySideWorkspaceSplit, workspaceActiveMap]);
+    const workspaces = Array.from(workspaceActiveMap.values());
+    return workspaces.find((workspace) => workspace.tileId === activeTileId)
+      ?? workspaces.find((workspace) => workspace.activeWorkspaceSurface)
+      ?? workspaces[0]
+      ?? { workspaceId: null, tileId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false, terminalModeActive: false, activeWorkspaceSurface: false };
+  }, [activeTileId, workspaceActiveMap]);
   const workspaceAddTargetId = workspaceHeaderActive.workspaceId
     ?? Array.from(workspaceActiveMap.values()).find((workspace) => workspace.activeWorkspaceSurface)?.workspaceId
     ?? workspaceActiveMap.values().next().value?.workspaceId
@@ -894,21 +906,6 @@ function DashboardInner() {
     }
     activeWorkspaceTabIdsRef.current = ids;
   }, [workspaceActiveMap]);
-
-  // Side-by-side header pills mirror side-by-side workspace splits.
-  const splitHeaderWorkspaces = useMemo(() => {
-    if (workspaceActiveMap.size < 2) return null;
-    if (!simpleSideBySideWorkspaceSplit) return null;
-    return Array.from(workspaceActiveMap.entries()).map(([workspaceId, payload]) => ({
-      workspaceId,
-      tabs: payload.tabs,
-      activeTabId: payload.tabId,
-      finishedTabCount: payload.finishedTabCount,
-      contextRailAvailable: payload.contextRailAvailable,
-      contextRailVisible: payload.contextRailVisible,
-      terminalModeActive: payload.terminalModeActive,
-    }));
-  }, [simpleSideBySideWorkspaceSplit, workspaceActiveMap]);
 
   // Workspace tab id → chat-history thread id map. OrchestratorTab
   // broadcasts 'o8:workspace-thread-id' whenever its loaded thread
@@ -5318,19 +5315,12 @@ function DashboardInner() {
               detail: { workspaceId: workspaceHeaderActive.workspaceId },
             }));
           }}
-          headerLabel={workspaceHeaderActive.label}
-          headerTabs={workspaceHeaderActive.tabs}
+          headerLabel={multiTerminalPaneLayout ? `${workspaceLeaves.length} panes` : workspaceHeaderActive.label}
+          headerTabs={multiTerminalPaneLayout ? [] : workspaceHeaderActive.tabs}
           workspaceId={workspaceAddTargetId}
-          workspaceGridAvailable={workspaceGridAvailable}
-          workspaceGridMode={workspaceGridMode}
-          onToggleWorkspaceGrid={toggleWorkspaceGridMode}
           terminalModeActive={workspaceHeaderActive.terminalModeActive}
           headerActiveTabId={workspaceHeaderActive.tabId}
           finishedTabCount={workspaceHeaderActive.finishedTabCount}
-          splitHeaderWorkspaces={splitHeaderWorkspaces}
-          onCloseWorkspacePanel={!simpleSideBySideWorkspaceSplit && workspaceActiveMap.size > 1 && workspaceHeaderActive.workspaceId ? () => {
-            window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId: workspaceHeaderActive.workspaceId } }));
-          } : undefined}
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />}
@@ -5414,7 +5404,8 @@ function DashboardInner() {
           >
             <TileContainer
               layout={tileLayout}
-              gridMode={workspaceGridMode}
+              paneLabels={workspacePaneLabels}
+              paneSessions={workspacePaneSessions}
               activeTileId={activeTileId}
               registry={tileRegistry}
               onActivateTile={setActiveTileId}

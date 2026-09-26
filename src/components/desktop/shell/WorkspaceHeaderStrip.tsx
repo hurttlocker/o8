@@ -24,7 +24,6 @@ import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
 import { StatusBottomPanelControl } from '../DesktopStatusBar';
-import { SplitPaneCloseButton } from './SplitPaneCloseButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
 /** Right-edge inset that lands the header's rightmost control on the branch rail
@@ -51,12 +50,8 @@ export function WorkspaceHeaderStrip({
   onSidebarHoverEnter,
   onSidebarHoverLeave,
   onSplitWorkspacePanel,
-  onCloseWorkspacePanel,
   bottomPanelVisible = false,
   onToggleBottomPanel,
-  workspaceGridAvailable = false,
-  workspaceGridMode = false,
-  onToggleWorkspaceGrid,
   rightPanelOpen = false,
   rightPanelDisabled = false,
   onToggleRightPanel,
@@ -67,15 +62,11 @@ export function WorkspaceHeaderStrip({
   workspaceId,
   headerActiveTabId,
   finishedTabCount = 0,
-  splitHeaderWorkspaces,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   const showApprovalBadge = approvalCount > 0 && Boolean(onOpenInbox);
   const tabs = headerTabs ?? [];
-  const isSplit = Boolean(splitHeaderWorkspaces && splitHeaderWorkspaces.length >= 2);
-  // Split mode → side-by-side pill strips. Single 2+ tabs → pill strip.
-  // Single 1 or 0 tabs → title + `…` menu.
-  const usePillStrip = !isSplit && tabs.length > 1;
+  const usePillStrip = tabs.length > 1;
   return (
     <ColumnHeaderStrip
       drag
@@ -108,9 +99,7 @@ export function WorkspaceHeaderStrip({
           ) : null}
         </>
       }
-      center={isSplit && splitHeaderWorkspaces ? (
-        <SplitHeaderPillStrips workspaces={splitHeaderWorkspaces} />
-      ) : usePillStrip ? (
+      center={usePillStrip ? (
         <HeaderPillStrip
           tabs={tabs}
           activeTabId={headerActiveTabId ?? null}
@@ -130,16 +119,7 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
-            {workspaceId && !(workspaceGridMode && workspaceGridAvailable) ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
-            {workspaceGridAvailable && onToggleWorkspaceGrid ? (
-              <HeaderIconPill
-                icon={<svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x={3} y={3} width={7} height={7} rx={1} /><rect x={14} y={3} width={7} height={7} rx={1} /><rect x={3} y={14} width={7} height={7} rx={1} /><rect x={14} y={14} width={7} height={7} rx={1} /></svg>}
-                label={workspaceGridMode ? 'Show split panes' : 'Show pane grid'}
-                onClick={onToggleWorkspaceGrid}
-                yNudge={1.3}
-              />
-            ) : null}
-            {onCloseWorkspacePanel && !(workspaceGridMode && workspaceGridAvailable) ? <SplitPaneCloseButton onClick={onCloseWorkspacePanel} paneLabel="active pane" /> : null}
+            {workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
@@ -191,119 +171,17 @@ export function WorkspaceHeaderStrip({
   );
 }
 
-/** Split-mode header — two HeaderPillStrips side by side, with a small
- *  vertical divider between them mirroring the visual split below.
- *  Each strip dispatches with its own workspaceId so the right
- *  WorkspaceTerminalRoot claims the click. Per-pane ▶ play sits at the
- *  right edge of each section; × close-pane shows on non-first panes
- *  only (closing the first/primary doesn't make sense). */
-function SplitHeaderPillStrips({
-  workspaces,
-}: {
-  workspaces: Array<{
-    workspaceId: string;
-    tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
-    activeTabId: string | null;
-    finishedTabCount?: number;
-    contextRailAvailable?: boolean;
-    contextRailVisible?: boolean;
-    terminalModeActive?: boolean;
-  }>;
-}) {
-  const dispatchClose = useCallback((workspaceId: string) => {
-    window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
-  }, []);
-  const dispatchToggleProjectContextRail = useCallback((workspaceId: string) => {
-    window.dispatchEvent(new CustomEvent('o8:request-toggle-context-rail', { detail: { workspaceId } }));
-  }, []);
-  // Human-readable pane name for aria-labels so split-mode controls
-  // don't collide ("New tab (left pane)" vs "New tab (right pane)").
-  const paneLabel = (index: number) => (
-    workspaces.length === 2
-      ? (index === 0 ? 'left pane' : 'right pane')
-      : `pane ${index + 1}`
-  );
-
-  return (
-    // No blanket data-no-drag here (Q ruling 2026-07-12): every pill guards
-    // itself, so the strip's NEGATIVE SPACE stays a window-drag region even
-    // when tabs are present over the workspace.
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
-      {workspaces.map((workspace, index) => {
-        const canClose = index !== 0;
-        return (
-          <div
-            key={workspace.workspaceId}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              display: 'flex',
-              alignItems: 'center',
-              borderLeftWidth: index === 0 ? 0 : 1,
-              borderLeftStyle: 'solid',
-              borderLeftColor: 'var(--t-divider)',
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
-              <HeaderPillStrip
-                tabs={workspace.tabs}
-                activeTabId={workspace.activeTabId}
-                workspaceId={workspace.workspaceId}
-                finishedTabCount={workspace.finishedTabCount ?? 0}
-              />
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
-              {workspace.contextRailAvailable ? (
-                <HeaderIconPill
-                  icon={<IconInfoCircle />}
-                  label={workspace.contextRailVisible === false ? `Show project context (${paneLabel(index)})` : `Hide project context (${paneLabel(index)})`}
-                  title={workspace.contextRailVisible === false ? 'Show project context' : 'Hide project context'}
-                  onClick={() => dispatchToggleProjectContextRail(workspace.workspaceId)}
-                  yNudge={1.3}
-                />
-              ) : null}
-              <WorkspaceAddTabButton workspaceId={workspace.workspaceId} ariaSuffix={paneLabel(index)} />
-              {canClose ? (
-                <SplitPaneCloseButton onClick={() => dispatchClose(workspace.workspaceId)} paneLabel={paneLabel(index)} />
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function IconInfoCircle({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ display: 'block', flexShrink: 0 }}
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 10v6" />
-      <path d="M12 7.5h.01" />
-    </svg>
-  );
-}
-
 /** Pill strip — renders in the WorkspaceHeaderStrip's
  *  center slot when 2+ tabs are open. Active pill is a filled dark
  *  rounded rect; inactive pills are icon + label only. Horizontal
  *  scroll when overflowing. Click → dispatches a window event the
  *  workspace listens for. */
-function HeaderPillStrip({
+export function HeaderPillStrip({
   tabs,
   activeTabId,
   workspaceId,
   finishedTabCount = 0,
+  ariaLabel = 'Open sessions',
 }: {
   tabs: Array<{
     id: string;
@@ -318,6 +196,7 @@ function HeaderPillStrip({
    *  in split mode without selecting on the wrong pane. */
   workspaceId?: string | null;
   finishedTabCount?: number;
+  ariaLabel?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
@@ -473,7 +352,7 @@ function HeaderPillStrip({
       <div
         ref={scrollRef}
         role="tablist"
-        aria-label="Open sessions"
+        aria-label={ariaLabel}
         aria-orientation="horizontal"
         onKeyDown={handleStripKeyDown}
         style={{
