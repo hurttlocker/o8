@@ -46,7 +46,10 @@ export const PRE_PAINT_THEME_STAMP = `
       // getPalette('dark') in context.tsx: workspace glass forces the dark-glass
       // theme regardless of the stored palette/transparency prefs). Missing this
       // painted a cream cover under a dark-glass boot.
-      if (!noVibrancy && ls.getItem('cortex-workspace-glass') === 'true') {
+      var storedGlass = ls.getItem('cortex-workspace-glass');
+      var freshMacGlass = window.__O8_HOST_PLATFORM__ === 'macos'
+        && storedGlass === null && !hasPref;
+      if (!noVibrancy && (storedGlass === 'true' || freshMacGlass)) {
         pal = 'dark';
         surface = 'glass';
       }

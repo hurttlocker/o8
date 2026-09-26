@@ -109,4 +109,38 @@ describe('ThemeProvider on a non-macOS shell', () => {
   it('treats an unstamped host (browser, pre-#1743 shell) as macOS', () => {
     expect(render()?.surface).toBe('glass');
   });
+
+  it('persists All Glass for a fresh macOS profile and preserves an explicit opt-out', () => {
+    localStorage.clear();
+    stampHostPlatform('macos');
+    const theme = render();
+    expect(theme?.workspaceGlass).toBe(true);
+    expect(document.documentElement.dataset.palette).toBe('dark');
+    expect(document.documentElement.dataset.surface).toBe('glass');
+    expect(localStorage.getItem('cortex-workspace-glass')).toBe('true');
+
+    act(() => theme?.setWorkspaceGlass(false));
+    act(() => root.unmount());
+    root = createRoot(host);
+    expect(render()?.workspaceGlass).toBe(false);
+    expect(document.documentElement.dataset.workspaceGlass).toBeUndefined();
+    expect(localStorage.getItem('cortex-workspace-glass')).toBe('false');
+  });
+
+  it.each(['windows', 'linux', 'browser'])('keeps a fresh %s profile solid', (platform) => {
+    localStorage.clear();
+    stampHostPlatform(platform);
+    expect(render()?.workspaceGlass).toBe(false);
+    expect(document.documentElement.dataset.surface).toBe('solid');
+    expect(localStorage.getItem('cortex-workspace-glass')).toBeNull();
+  });
+
+  it('does not replace a saved macOS solid preference with the new default', () => {
+    localStorage.clear();
+    localStorage.setItem('cortex-reduce-transparency', 'on');
+    stampHostPlatform('macos');
+    expect(render()?.workspaceGlass).toBe(false);
+    expect(document.documentElement.dataset.surface).toBe('solid');
+    expect(localStorage.getItem('cortex-workspace-glass')).toBeNull();
+  });
 });

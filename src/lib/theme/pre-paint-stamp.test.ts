@@ -112,4 +112,33 @@ describe('pre-paint theme stamp', () => {
     expect(document.documentElement.dataset.palette).toBe('light');
     expect(document.documentElement.dataset.surface).toBe('solid');
   });
+
+  it('starts a fresh macOS shell in dark All Glass without a light first frame', () => {
+    stampHostPlatform('macos');
+    runStamp();
+    expect(document.documentElement.dataset.palette).toBe('dark');
+    expect(document.documentElement.dataset.surface).toBe('glass');
+    expect(document.documentElement.style.getPropertyValue('--o8-boot-cover-bg')).toContain('linear-gradient');
+  });
+
+  it.each([
+    ['cortex-workspace-glass', 'false'],
+    ['cortex-reduce-transparency', 'on'],
+    ['cortex-theme-palette', 'light'],
+    ['cortex-theme', 'light'],
+  ])('keeps an existing macOS preference: %s', (key, value) => {
+    stampHostPlatform('macos');
+    localStorage.setItem(key, value);
+    runStamp();
+    expect(document.documentElement.dataset.surface).toBe(key === 'cortex-theme-palette' || key === 'cortex-theme' ? 'glass' : 'solid');
+    if (value === 'light') expect(document.documentElement.dataset.palette).toBe('light');
+    expect(localStorage.getItem(key)).toBe(value);
+  });
+
+  it('keeps a fresh browser relay solid even when the host is macOS', () => {
+    stampHostPlatform('macos');
+    markWebMachine();
+    runStamp();
+    expect(document.documentElement.dataset.surface).toBe('solid');
+  });
 });
