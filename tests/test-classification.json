@@ -991,6 +991,12 @@
       ]
     },
     {
+      "path": "src/lib/ws-server/terminal-resync-snapshot.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/acp-orchestrator-turn-real-path.test.ts",
       "reasons": [
         "real-path"
