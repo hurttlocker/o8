@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetPacketDiffBaseFetchMemoForTest } from '@/lib/diff/base-resolution';
 import { resetCodexProcessCwdIndexForTesting, setCodexProcessReaderForTesting } from '@/lib/runtimes/shared/codex-process-cwd';
@@ -23,18 +23,30 @@ import {
 
 const { createLane, deleteLane, getLane, getLaneEvents, listActiveLanes, updateLane } = await import('@/lib/lane/registry');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
 let ownedRoot: string | null = null;
 let tempWorktree: string | null = null;
 const testLaneIds: string[] = [];
 
-function writeOwnedSession(surfaceId: string, activeRun: unknown): void {
+function writeOwnedSession(surfaceId: string, activeRun: unknown, recentRuns: unknown[] = []): void {
   if (!ownedRoot) throw new Error('ownedRoot not initialized');
   const dir = join(ownedRoot, surfaceId.replace(/^codex-owned:/, ''));
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'session.json'), JSON.stringify({ surfaceId, activeRun }));
+  writeFileSync(join(dir, 'session.json'), JSON.stringify({
+    surfaceId,
+    sessionDir: dir,
+    cwd: tempWorktree ?? dir,
+    repoPath: tempWorktree ?? dir,
+    title: 'Read-only probe',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    latestPrompt: '',
+    latestSummary: '',
+    activeRun,
+    recentRuns,
+  }));
 }
 
 function git(cwd: string, args: string[]): string {
@@ -51,7 +63,7 @@ function commitAll(cwd: string, message: string): string {
   return git(cwd, ['rev-parse', 'HEAD']);
 }
 
-function makePacketClone(name: string) {
+function makePacketClone(name: string, withPacketCommit = true) {
   const root = mkdtempSync(join(tmpdir(), `${name}-`));
   const origin = join(root, 'origin.git');
   const seed = join(root, 'seed');
@@ -68,8 +80,8 @@ function makePacketClone(name: string) {
   execFileSync('git', ['clone', origin, clone], { stdio: 'pipe' });
   git(clone, ['checkout', '-b', 'main', 'origin/main']);
   git(clone, ['checkout', '-b', 'packet']);
-  writeFileSync(join(clone, 'packet.txt'), 'packet\n');
-  const headSha = commitAll(clone, 'packet work');
+  if (withPacketCommit) writeFileSync(join(clone, 'packet.txt'), 'packet\n');
+  const headSha = withPacketCommit ? commitAll(clone, 'packet work') : git(clone, ['rev-parse', 'HEAD']);
 
   return { root, origin, seed, clone, headSha };
 }
@@ -235,5 +247,80 @@ describe('silent-exit detector policy (wave-1B burial incident)', () => {
 
     const status = await getMissionStatus({ missionId, includeCost: false });
     expect(status.packets.find((packet) => packet.id === packetId)?.summary).toBe('packet work');
+  }, 20_000);
+
+  it('releases a steered read-only packet from the latest complete owned-worker receipt', async () => {
+    const { clone } = makePacketClone('o8-silent-exit-read-only', false);
+    const packetId = `pkt-silent-read-only-${Date.now()}`;
+    const lane = createDeadOwnedLane(clone, packetId);
+    const surfaceId = lane.sessionKey!;
+    const sessionDir = join(ownedRoot!, surfaceId.replace(/^codex-owned:/, ''));
+    const baseTime = Date.now() - 180_000;
+    const reviews = [
+      '<self-review>{"passed":false,"confidence":"high","summary":"No evidence yet","decision":"blocked","outcome":"The first turn was blocked","evidence":["No result"],"residual":"Retry needed"}</self-review>',
+      '<self-review>{"passed":true,"confidence":"high","summary":"Finding verified","decision":"finding_ready","outcome":"A bounded exchange completed","evidence":["The persisted reply links to the exact request ID"],"residual":"Native UI proof remains"}</self-review>',
+    ];
+    const runs = reviews.map((review, index) => {
+      const id = `run-${index + 1}`;
+      const stdoutPath = join(sessionDir, `${id}.jsonl`);
+      const stderrPath = join(sessionDir, `${id}.stderr.log`);
+      writeFileSync(stdoutPath, [
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread-read-only-steer' }),
+        JSON.stringify({ type: 'turn.started' }),
+        JSON.stringify({ type: 'item.completed', item: { id: `item-${index}`, type: 'agent_message', text: review } }),
+        JSON.stringify({ type: 'turn.completed' }),
+      ].join('\n'));
+      writeFileSync(stderrPath, '');
+      return {
+        id,
+        mode: index === 0 ? 'launch' : 'resume',
+        prompt: index === 0 ? 'Inspect this repository.' : 'Complete the bounded finding.',
+        startedAt: new Date(baseTime + index * 20_000).toISOString(),
+        finishedAt: new Date(baseTime + index * 20_000 + 5_000).toISOString(),
+        pid: 2_147_483_647,
+        stdoutPath,
+        stderrPath,
+        outcome: 'finished',
+      };
+    });
+    writeOwnedSession(surfaceId, undefined, runs);
+    const missionId = `mission-silent-read-only-${Date.now()}`;
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId,
+      repoPath: clone,
+      packets: [{
+        id: packetId,
+        referenceLabel: 'inline-1',
+        title: 'Read-only continuation',
+        summary: 'Inspect and report a finding.',
+        workspaceTargetPath: clone,
+        branchTarget: 'packet',
+        runtime: 'codex',
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'held',
+        releaseState: 'pending',
+        status: 'blocked',
+        blockedReason: 'read_only_evidence_missing',
+        lane: null,
+        launchContext: { source: 'cli', presentation: 'split', repoContext: 'transient', workMode: 'read-only' },
+      }],
+    });
+
+    vi.resetModules();
+    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+    const captured = await capturePacketCompletionContext(packetId, surfaceId);
+    expect(captured.selfReview).toMatchObject({ passed: true, decision: 'finding_ready' });
+
+    await runSilentExitTickForTesting();
+
+    expect(getLane(lane.id)).toMatchObject({ status: 'completed', lastEventLabel: 'read_only_completed' });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      status: 'released',
+      releaseState: 'released',
+      blockedReason: null,
+      lastEventLabel: 'read_only_completed',
+    });
   }, 20_000);
 });

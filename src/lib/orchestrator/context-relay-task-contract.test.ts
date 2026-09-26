@@ -94,15 +94,20 @@ describe('completion context task contract relay', () => {
       ...runtime,
       id: 'opencode',
       displayName: 'OpenCode test runtime',
-      readTranscript: async () => [entry('4', `<self-review>${JSON.stringify({
-        passed: true,
-        confidence: 'high',
-        summary: 'The read-only finding is supported.',
-        outcome: 'The configuration lacks the required guard.',
-        evidence: ['Observed the missing guard in the production configuration.'],
-        residual: 'Implementation remains intentionally out of scope.',
-        decision: 'finding_ready',
-      })}</self-review>`) ],
+      readTranscript: async (sessionKey) => {
+        const review = entry('4', `<self-review>${JSON.stringify({
+          passed: true,
+          confidence: 'high',
+          summary: 'The read-only finding is supported.',
+          outcome: 'The configuration lacks the required guard.',
+          evidence: ['Observed the missing guard in the production configuration.'],
+          residual: 'Implementation remains intentionally out of scope.',
+          decision: 'finding_ready',
+        })}</self-review>`);
+        return sessionKey === 'opencode-owned:continued-without-receipt'
+          ? [review, { ...entry('5', 'Continue the investigation.'), role: 'user' }, entry('6', 'The continuation ended without a new receipt.')]
+          : [review];
+      },
     });
   });
 
@@ -156,5 +161,15 @@ describe('completion context task contract relay', () => {
       decision: 'finding_ready',
       outcome: 'The configuration lacks the required guard.',
     });
+  });
+
+  it('does not reuse a self-review from before the latest user continuation', async () => {
+    const { capturePacketCompletionContext } = await import('./context-relay');
+    const context = await capturePacketCompletionContext(
+      'pkt-opencode-stale-review',
+      'opencode-owned:continued-without-receipt',
+    );
+
+    expect(context.selfReview).toMatchObject({ passed: false });
   });
 });

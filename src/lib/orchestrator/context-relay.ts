@@ -166,6 +166,7 @@ function latestTranscriptTimestamp(entries: RuntimeTranscriptEntry[]): string | 
 function findLatestSelfReview(entries: RuntimeTranscriptEntry[]): PacketContext['selfReview'] {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
+    if (entry.role === 'user') break; // A later steer requires a new receipt.
     if (entry.role !== 'assistant' || !entry.text.trim()) {
       continue;
     }
