@@ -154,7 +154,10 @@ const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
 function readWorkspaceGlass(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return localStorage.getItem(WORKSPACE_GLASS_STORAGE_KEY) === 'true';
+    const stored = localStorage.getItem(WORKSPACE_GLASS_STORAGE_KEY);
+    if (stored !== null) return stored === 'true';
+    const macShell = (window as unknown as { __O8_HOST_PLATFORM__?: unknown }).__O8_HOST_PLATFORM__ === 'macos';
+    return macShell && !isWebMachineBrowserSurface() && !hasStoredThemePreference();
   } catch {
     return false;
   }
@@ -488,6 +491,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
     applyThemeVars(resolved, mountedRef.current);
     if (effectiveWorkspaceGlass) {
+      // Save the fresh-install choice so later palette changes cannot undo it
+      // on restart. Existing appearance preferences are never migrated.
+      try {
+        if (localStorage.getItem(WORKSPACE_GLASS_STORAGE_KEY) === null && !hasStoredThemePreference()) {
+          localStorage.setItem(WORKSPACE_GLASS_STORAGE_KEY, 'true');
+        }
+      } catch { /* The in-memory theme still works when storage is unavailable. */ }
       for (const [key, value] of Object.entries(WORKSPACE_GLASS_OVERRIDES)) {
         // 'important': globals.css kills --t-bg-gradient with a stylesheet
         // !important on dark+glass (which all-glass forces) — inline-important
