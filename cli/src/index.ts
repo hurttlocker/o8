@@ -1,3 +1,4 @@
+import { runSetup } from './commands/setup.js';
 /**
  * o8 CLI — agent-first wrapper over the local HTTP API.
  *
@@ -274,6 +275,10 @@ commands:
   mission wait         block until a packet hits a review/terminal state [--timeout <milliseconds|5m|90s> --poll]
   mission tail         stream packet status transitions until terminal [--timeout <milliseconds|5m|90s> --poll]
   mcp install          install/print the o8 MCP config (--claude-code | --cursor | --opencode | --print)
+  setup status         inspect first-run choices, readiness, and app handoffs
+  setup configure      --lead <runtime> --workers <list> [--lead-model <id>] [--worker-model <id>]
+  setup open <path>    open a project through visible onboarding without a folder dialog
+  setup cancel <id>    cancel a pending setup request; keep projects and settings
   repo list            list repositories registered in the running o8 app
   repo add <path>      register an existing local Git repository
   repo remove <target> unregister by id, name, or path; the local folder is preserved
@@ -442,6 +447,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'mcp':
       return runMcp(args.mode, secondary, args.rest);
+    case 'setup': return runSetup(args.mode, secondary, args.rest);
     case 'repo':
       return runRepo(args.mode, secondary, args.rest);
     case 'project':

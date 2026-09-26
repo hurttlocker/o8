@@ -5,6 +5,7 @@ import type {
 } from '@/components/desktop/settings/dispatch-shared';
 
 import { recommendRuntimeSetup, runtimeForLead, type RuntimeSetupRecommendation, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
+import { runtimeSelectionUpdate } from '@/lib/setup/runtime-selection';
 import { invalidateRuntimeInventory } from './useRuntimeInventory';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 
@@ -77,21 +78,10 @@ export async function persistOnboardingRuntimeSelection(
   selection: Pick<OnboardingRuntimeSelection, 'orchestratorRuntime' | 'workerRuntimes'> & { leadModel?: string; workerModel?: string },
   request: OnboardingFetch = fetch,
 ): Promise<void> {
-  if (selection.workerRuntimes.length === 0) {
-    throw new Error('Choose at least one available worker runtime.');
-  }
   const response = await request('/api/panel/operator-defaults', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      orchestratorBackend: orchestratorBackendForRuntime(selection.orchestratorRuntime),
-      defaultDispatchRuntime: selection.workerRuntimes[0],
-      workerRuntimes: selection.workerRuntimes,
-      ...(selection.leadModel && selection.orchestratorRuntime === 'claude-code' ? { orchestratorModel: selection.leadModel } : {}),
-      ...(selection.workerModel !== undefined ? selection.workerRuntimes[0] === 'opencode'
-        ? { opencodeWorkerModel: selection.workerModel || null }
-        : { defaultDispatchModel: selection.workerModel } : {}),
-    }),
+    body: JSON.stringify(runtimeSelectionUpdate(selection)),
   });
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) {

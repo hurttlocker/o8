@@ -158,3 +158,68 @@ it('lets folder selection cancel, then registers and opens the chosen project', 
   expect(button('Save both choices').disabled).toBe(true);
   expect(complete).not.toHaveBeenCalled();
 });
+
+function agentFixture() {
+  const base = createOnboardingPreviewRequest(localStorage);
+  const state = { id: 'setup-request', project: PREVIEW_PROJECT, status: 'pending', claimId: 'test-claim' };
+  const writes: string[] = [];
+  let beforeClaim: (() => Promise<void>) | undefined;
+  const request: OnboardingRequest = async (url, init) => {
+    if (!String(url).startsWith('/api/setup/agent')) return base(url, init);
+    if (init?.method !== 'POST') return Response.json({ request: state });
+    const body = JSON.parse(String(init.body));
+    if (body.action === 'claim') {
+      await beforeClaim?.();
+      if (state.status === 'cancelled' || state.status === 'applying') return Response.json({}, { status: 400 });
+      state.status = 'applying';
+    } else if (body.action === 'ack') state.status = body.status;
+    if (body.action !== 'renew') writes.push(state.status);
+    return Response.json({ request: state });
+  };
+  return { request, state, writes, holdClaim: (fn: () => Promise<void>) => { beforeClaim = fn; } };
+}
+
+it('accepts an agent-selected folder without a picker, hands privacy to the user, then confirms the workspace', async () => {
+  const fixture = agentFixture();
+  const picker = vi.fn();
+  const { complete } = await render(fixture.request, vi.fn().mockResolvedValue(true), picker);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  expect(fixture.state.status).toBe('needs_privacy');
+  expect(picker).not.toHaveBeenCalled();
+  expect(complete).not.toHaveBeenCalled();
+  await click('Keep crash reports off'); await click('Keep product usage off'); await click('Save both choices');
+  expect(complete).toHaveBeenCalledWith({ project: PREVIEW_PROJECT, text: '' });
+  expect(fixture.state.status).toBe('opened');
+});
+
+it('holds the UI lock during an agent claim so a manual click cannot strand it', async () => {
+  const fixture = agentFixture();
+  let release!: () => void;
+  fixture.holdClaim(() => new Promise<void>((resolve) => { release = resolve; }));
+  const { complete } = await render(fixture.request);
+  expect(button('Open Sample project').disabled).toBe(true);
+  await click('Open Sample project');
+  await act(async () => release());
+  expect(fixture.state.status).toBe('needs_privacy');
+  expect(fixture.writes).toEqual(['applying', 'needs_privacy']);
+  expect(complete).not.toHaveBeenCalled();
+});
+
+it('recovers a persisted handoff after remount and clears a cancelled agent receipt before a human open', async () => {
+  const fixture = agentFixture();
+  await render(fixture.request);
+  expect(fixture.state.status).toBe('needs_privacy');
+  act(() => root.unmount());
+  const { complete } = await render(fixture.request);
+  await click('Keep crash reports off'); await click('Keep product usage off'); await click('Save both choices');
+  expect(fixture.state.status).toBe('opened');
+  expect(complete).toHaveBeenCalledOnce();
+  act(() => root.unmount());
+  fixture.state.status = 'cancelled';
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify({ ...emptyProgress('privacy'), project: PREVIEW_PROJECT }));
+  const next = await render(fixture.request);
+  await click('Save both choices');
+  expect(next.complete).toHaveBeenCalledOnce();
+  expect(fixture.state.status).toBe('cancelled');
+  expect(document.body.textContent).not.toContain('could not be confirmed');
+});

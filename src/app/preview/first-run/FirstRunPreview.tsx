@@ -46,6 +46,7 @@ export function createOnboardingPreviewRequest(storage: ProgressStorage | null =
     return jsonResponse({ authenticated: false, deviceFlowEnabled: false });
   }
   if (url.startsWith('/api/panel/repos')) return jsonResponse(init?.method === 'POST' ? { repo: PREVIEW_PROJECT } : { repos: [PREVIEW_PROJECT] });
+  if (url.startsWith('/api/setup/agent')) return jsonResponse({ request: null });
   if (url.startsWith('/api/setup/detect')) {
     return jsonResponse({
       tools: [{ id: 'local-preview', name: 'Local preview runtime', detected: true, ready: true, version: 'preview' }],

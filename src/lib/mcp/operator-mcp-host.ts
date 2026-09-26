@@ -1,3 +1,4 @@
+import { SETUP_TOOLS, handleSetup } from '@/lib/mcp/operator-handlers/setup';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -269,6 +270,7 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_status'),
   ...USER_CONTEXT_TOOLS,
   ...REPO_MGMT_TOOLS,
+  ...SETUP_TOOLS,
   ...APPROVE_TOOLS.filter((tool) => tool.name === 'o8_approve'),
   ...APPROVE_TOOLS.filter((tool) => tool.name === 'o8_reject'),
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_history'),
@@ -350,6 +352,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_packet_transcript: handleTranscript,
   steer_packet: handleSteerPacket,
   o8_operator_defaults: handleOperatorDefaults,
+  o8_setup: handleSetup,
   cortex_propose_observation: handleProposeObservation,
   cortex_ask: handleAsk,
   o8_feature_list: handleFeatureList,
