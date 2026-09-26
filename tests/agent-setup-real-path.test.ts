@@ -45,6 +45,7 @@ const server = createServer(async (req, res) => {
   } catch (error) { res.writeHead(500); res.end(JSON.stringify({ error: String(error) })); }
 });
 beforeAll(async () => {
+  execFileSync(process.execPath, [join(process.cwd(), 'cli/esbuild.config.mjs')], { cwd: process.cwd(), stdio: 'pipe', timeout: 60_000 });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
   setApiBase(`http://127.0.0.1:${port}`);
