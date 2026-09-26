@@ -21,6 +21,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
+import { archiveRootForOwnedSessionRoot } from './owned-session/archive';
 
 export interface OwnedActiveRun {
   id?: string;
@@ -189,7 +190,9 @@ export async function listOwnedActiveRuns(now: number = Date.now()): Promise<Ind
 export async function findOwnedLaunchByMutationId(
   clientMutationId: string,
 ): Promise<OwnedLaunchMutationMatch | null> {
-  for (const { root } of ownedRoots()) {
+  // Finished workers may already have been archived by the time the lead
+  // submits its review receipt. Search both roots for the exact launch marker.
+  for (const root of ownedRoots().flatMap(({ root }) => [root, archiveRootForOwnedSessionRoot(root)])) {
     let entries: Awaited<ReturnType<typeof readdir>>;
     try {
       entries = await readdir(root, { withFileTypes: true });

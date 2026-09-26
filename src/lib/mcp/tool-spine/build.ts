@@ -85,45 +85,48 @@ export function findBundledMcpServer(fileName: string, moduleDir?: string): stri
  * prefer bundled .mjs files when they exist. Dev checkout falls back to the TS
  * source run under `tsx`.
  */
-function resolveCortexMcpServerPath(): { command: string; path: string } {
+interface McpServerLaunch {
+  command: string;
+  args: string[];
+}
+
+export function devMcpServerLaunch(sourcePath: string): McpServerLaunch {
+  // The orchestrator's cwd is the user's repository, which may have no o8
+  // tsconfig or dependencies. Pin both to the source checkout so @/ imports
+  // resolve when a Fast worker shares a different checkout.
+  const projectRoot = resolve(dirname(sourcePath), '../../..');
+  return {
+    command: process.execPath,
+    args: [
+      join(projectRoot, 'node_modules/tsx/dist/cli.mjs'),
+      '--tsconfig', join(projectRoot, 'tsconfig.json'),
+      sourcePath,
+    ],
+  };
+}
+
+function resolveCortexMcpServerPath(): McpServerLaunch {
   const bundled = findBundledMcpServer('cortex-mcp-server.mjs');
   if (bundled) {
     const nodeBin = process.env.O8_NODE_BIN || 'node';
-    return { command: nodeBin, path: bundled };
+    return { command: nodeBin, args: [bundled] };
   }
 
   // From src/lib/mcp/tool-spine/ → src/lib/mcp/cortex-mcp-server.ts
   const devSource = resolve(dirname(fileURLToPath(import.meta.url)), '../cortex-mcp-server.ts');
-  return { command: 'npx', path: devSource };
+  return devMcpServerLaunch(devSource);
 }
 
-function resolveOperatorMcpProxyPath(): { command: string; path: string } {
+function resolveOperatorMcpProxyPath(): McpServerLaunch {
   const bundled = findBundledMcpServer('operator-mcp-proxy.mjs');
   if (bundled) {
     const nodeBin = process.env.O8_NODE_BIN || 'node';
-    return { command: nodeBin, path: bundled };
+    return { command: nodeBin, args: [bundled] };
   }
 
   // From src/lib/mcp/tool-spine/ → src/lib/mcp/operator-mcp-proxy.ts
   const devSource = resolve(dirname(fileURLToPath(import.meta.url)), '../operator-mcp-proxy.ts');
-  return { command: 'npx', path: devSource };
-}
-
-// Binary-resolution shape — read this before any new emission surface that
-// resolves the operator/cortex binary (Set-B routes, Gemini/OpenClaw wiring).
-//
-//   PACKAGED (O8_BUNDLED_MCP_PATH set): { command: <O8_NODE_BIN|node>, args: [<bundled .mjs>] }
-//   DEV      (no bundled binary):       { command: "npx",             args: ["tsx", <src .ts>] }
-//
-// "tsx-vs-npx / spec risk #3": the legacy Set-B builders preferred a resolved
-// tsx path (`{command: "/abs/tsx", args: [src]}`) — same server under tsx, a
-// different invocation. The registry standardizes on the npx/tsx form, so in DEV
-// the emitted shape differs from the old Set-B output (cosmetic, functionally
-// equivalent); in PACKAGED mode both collapse to the identical node+bundled
-// form. THEREFORE every byte-for-byte parity proof runs in PACKAGED mode — the
-// shape that actually ships. (Spec risk register item #3.)
-function argsForMcpServer(server: { command: string; path: string }): string[] {
-  return server.command === 'npx' ? ['tsx', server.path] : [server.path];
+  return devMcpServerLaunch(devSource);
 }
 
 let pinnedToolSpinePorts: { apiBase: string; wsPort: string } | null = null;
@@ -231,9 +234,10 @@ export function buildToolRegistry(
     config: {
       type: 'stdio',
       command: operatorProxy.command,
-      args: argsForMcpServer(operatorProxy),
+      args: operatorProxy.args,
       env: {
         O8_API_BASE: apiBase,
+        O8_DATA_DIR: getDataDir(),
       },
     },
   });
@@ -248,9 +252,10 @@ export function buildToolRegistry(
     config: {
       type: 'stdio',
       command: cortexServer.command,
-      args: argsForMcpServer(cortexServer),
+      args: cortexServer.args,
       env: {
         CORTEX_API_BASE: apiBase,
+        O8_DATA_DIR: getDataDir(),
         CORTEX_REPO_PATH: repoPath,
         ...(options?.threadId ? { CORTEX_THREAD_ID: options.threadId } : {}),
         ...(options?.threadId?.startsWith('thoughts-')

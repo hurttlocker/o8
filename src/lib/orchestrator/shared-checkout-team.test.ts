@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -145,6 +145,10 @@ describe('shared checkout team', () => {
     git(repoPath, 'add', 'src/a');
     git(repoPath, '-c', 'user.name=o8 test', '-c', 'user.email=test@o8.local', 'commit', '-m', 'Add A');
     expect(inspectSharedCheckoutTeam(input)?.committedPaths).toEqual(['src/a']);
+    const archiveRoot = `${ownedRoot}-archive`;
+    mkdirSync(archiveRoot);
+    renameSync(join(ownedRoot, 'a'), join(archiveRoot, 'a'));
+    expect(await findOwnedLaunchByMutationId('a')).toMatchObject({ surfaceId: 'codex-owned:a', outcome: 'finished' });
     const result = await finishSharedCheckoutTeam(finish);
     expect(result.committedPaths).toEqual(['src/a']);
     expect(readSharedCheckoutTeam(input)).toBeNull();
