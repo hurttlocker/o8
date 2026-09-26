@@ -6,9 +6,11 @@ import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ensureSharedCheckoutTeam,
+  failSharedCheckoutMember,
   recordSharedCheckoutMember,
   reserveSharedCheckoutMember,
 } from '@/lib/orchestrator/shared-checkout-team';
+import { sharedTeamWorkerLanes } from '@/app/dashboard/hooks/useOutsideWorkerLaunchBridge';
 import { GET } from './route';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
@@ -20,7 +22,7 @@ afterEach(() => {
 });
 
 describe('active Fast team workspace read', () => {
-  it('returns the persisted running member for native pane restoration', async () => {
+  it('restores a running worker and a failed launch with a real surface to native panes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'o8-fast-placement-'));
     roots.push(root);
     const repoPath = join(root, 'repo');
@@ -34,6 +36,9 @@ describe('active Fast team workspace read', () => {
     await ensureSharedCheckoutTeam(input);
     await reserveSharedCheckoutMember({ ...input, runtime: 'codex', taskName: 'Worker A', clientMutationId: 'a', paths: ['src/a'] });
     await recordSharedCheckoutMember({ ...input, surfaceId: 'codex-owned:fast-a', runtime: 'codex', taskName: 'Worker A', clientMutationId: 'a' });
+    await reserveSharedCheckoutMember({ ...input, runtime: 'codex', taskName: 'Worker B', clientMutationId: 'b', paths: ['src/b'] });
+    await recordSharedCheckoutMember({ ...input, surfaceId: 'codex-owned:fast-b', runtime: 'codex', taskName: 'Worker B', clientMutationId: 'b' });
+    await failSharedCheckoutMember({ ...input, clientMutationId: 'b' });
     const ownedSessionDir = join(root, 'state', 'owned-codex', 'fast-a');
     mkdirSync(ownedSessionDir, { recursive: true });
     vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', join(root, 'state', 'owned-codex'));
@@ -47,10 +52,19 @@ describe('active Fast team workspace read', () => {
       { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } },
     ));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ team: {
+    const body = await response.json();
+    expect(body).toEqual({ team: {
       repoPath: realpathSync(repoPath),
       parentThreadId: 'thoughts-fast-parent',
-      members: [{ surfaceId: 'codex-owned:fast-a', runtime: 'codex', taskName: 'Worker A', state: 'running', outcome: 'finished' }],
+      members: [
+        { surfaceId: 'codex-owned:fast-a', runtime: 'codex', taskName: 'Worker A', state: 'running', outcome: 'finished' },
+        { surfaceId: 'codex-owned:fast-b', runtime: 'codex', taskName: 'Worker B', state: 'failed', outcome: 'unknown' },
+      ],
     } });
+    expect(sharedTeamWorkerLanes(body.team).map((lane) => ({ sessionKey: lane.sessionKey, status: lane.status })))
+      .toEqual([
+        { sessionKey: 'codex-owned:fast-a', status: 'completed' },
+        { sessionKey: 'codex-owned:fast-b', status: 'launch_failed' },
+      ]);
   });
 });

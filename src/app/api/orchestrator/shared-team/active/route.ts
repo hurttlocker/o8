@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   }
   try {
     const team = readActiveSharedCheckoutTeam(repoPath);
-    const members = team ? await Promise.all(team.members.filter((member) => member.state === 'running' && member.surfaceId)
+    const members = team ? await Promise.all(team.members.filter((member) => member.surfaceId)
       .map(async ({ surfaceId, runtime: workerRuntime, taskName, state, clientMutationId }) => {
         const launch = await findOwnedLaunchByMutationId(clientMutationId);
         return { surfaceId, runtime: workerRuntime, taskName, state,

@@ -29,12 +29,15 @@ interface ActiveSharedTeam {
 
 export function sharedTeamWorkerLanes(team: ActiveSharedTeam): DispatchedWorkerLane[] {
   return team.members.flatMap((member) => {
-    if (member.state !== 'running' || !member.surfaceId) return [];
+    if (!member.surfaceId) return [];
     return [{
       sessionKey: member.surfaceId,
       runtime: dispatchedWorkerRuntime(member.runtime),
       repoPath: team.repoPath,
-      status: member.outcome === 'running' ? 'running'
+      // A launch can report failure after creating a real process. Keep its
+      // pane visible and attention-worthy until the operator inspects it.
+      status: member.state === 'failed' ? 'launch_failed'
+        : member.outcome === 'running' ? 'running'
         : member.outcome === 'finished' ? 'completed'
           : member.outcome ?? 'unknown',
       packetTitle: member.taskName,
