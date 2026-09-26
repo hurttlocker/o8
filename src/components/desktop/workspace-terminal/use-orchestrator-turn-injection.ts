@@ -14,6 +14,13 @@ export function useOrchestratorTurnInjection(
   useEffect(() => {
     if (!injection?.id || handledInjectionRef.current === injection.id || waitingForReply) return;
     if (expectedThreadId && loadedThreadId !== expectedThreadId) return;
+    if (injection.autoSend === false) {
+      if (!panelRef.current) return;
+      panelRef.current.fillInput(injection.text);
+      panelRef.current.focusInput();
+      handledInjectionRef.current = injection.id;
+      return;
+    }
     const attachments = injection.previewImageDataUri
       ? [{ dataUri: injection.previewImageDataUri, name: 'design-mode-capture.png' }]
       : undefined;

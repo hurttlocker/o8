@@ -62,7 +62,7 @@ describe('setup wizard startup detection', () => {
     expect(current.value?.setupCheckComplete).toBe(true);
   });
 
-  it('opens onboarding and loads detection when setup is incomplete', async () => {
+  it('opens onboarding without duplicating the tool step scan', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ setupComplete: false })));
     const current = { value: null as ReturnType<typeof useSetupWizard> | null };
     mounted = mountHook((value) => { current.value = value; });
@@ -73,7 +73,7 @@ describe('setup wizard startup detection', () => {
       await Promise.resolve();
     });
 
-    expect(mocks.loadSetupDetection).toHaveBeenCalledTimes(1);
+    expect(mocks.loadSetupDetection).not.toHaveBeenCalled();
     expect(current.value?.setupWizardOpen).toBe(true);
     expect(current.value?.setupCheckComplete).toBe(true);
   });

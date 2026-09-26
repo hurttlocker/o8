@@ -1,27 +1,12 @@
 'use client';
 
-/**
- * OnboardingReposStep — Step 2 of onboarding ("Choose your repositories").
- *
- * Extracted from Onboarding.tsx (issue #1334). Handles three honest states the
- * inline version silently skipped:
- *   1. GitHub not connected on this machine — explicit copy + (when configured)
- *      the device-flow connect button, never a dead search box.
- *   2. Local repo add inline — "Choose a folder on this Mac" reuses the exact
- *      dashboard mechanism (@tauri-apps/plugin-dialog → /api/panel/browse-folder
- *      → prompt fallback, then POST /api/panel/repos { action: 'add', localPath }).
- *   3. Loading + error states around the status/repos fetch.
- *   4. GitHub selections actually clone + register (#1339) via the repos
- *      route's `clone` action, with per-row progress — the step advances only
- *      with the count of repos that truly landed in the registry.
- *
- * Inline styles only, var(--t-*) tokens, raw SVG icons.
- */
+/** One project first: reopen a registered folder or optionally clone from GitHub. */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { requestPrompt } from '@/components/shared/ConfirmToastHost';
 import { isTauri } from '@/lib/tauri/bridge';
 import type { OnboardingRequest } from './request';
+import { isOnboardingProject, type OnboardingProject } from './onboarding-progress';
 
 const FONT = 'var(--font-sans-system)';
 const SOURCE_WEB_FOLDER_ERROR = 'The native o8 shell is required to choose a folder. From this source checkout, run `npm run build:cli` then `node cli/dist/o8.mjs repo add /absolute/path`.';
@@ -58,6 +43,7 @@ interface RepoItem {
   isLocal: boolean;
   name: string;
   cloneUrl?: string;
+  project?: OnboardingProject;
 }
 
 function Spinner({ size = 14 }: { size?: number }) {
@@ -126,8 +112,9 @@ export interface OnboardingReposStepProps {
   /** Starts the GitHub device flow; onSuccess runs when auth completes. */
   onConnectGithub: (onSuccess: () => void) => void;
   onSkip: () => void;
-  /** Advance to the next step, reporting how many repos are configured. */
-  onContinue: (selectedCount: number) => void;
+  onBusyChange?: (busy: boolean) => void;
+  selectedProject?: OnboardingProject | null;
+  onContinue: (project: OnboardingProject) => void;
   renderContinueButton: (opts: { label: string; onClick: () => void; disabled: boolean }) => ReactNode;
 }
 
@@ -139,13 +126,17 @@ export function OnboardingReposStep({
   onConnectGithub,
   onSkip,
   onContinue,
+  selectedProject,
+  onBusyChange,
   renderContinueButton,
 }: OnboardingReposStepProps) {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [githubRepos, setGithubRepos] = useState<GithubRepo[]>([]);
   const [localRepos, setLocalRepos] = useState<RepoItem[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set(selectedProject ? [selectedProject.localPath] : []));
+  const [localRevision, setLocalRevision] = useState(0);
   const [search, setSearch] = useState('');
+  const [showGithub, setShowGithub] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reposError, setReposError] = useState<string | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
@@ -156,6 +147,7 @@ export function OnboardingReposStep({
   // Per-repo clone progress (#1339): key → status while Continue clones + registers.
   const [rowStatus, setRowStatus] = useState<Record<string, 'cloning' | 'done' | 'error'>>({});
   const [saving, setSaving] = useState(false);
+  useEffect(() => { onBusyChange?.(saving || addingFolder); return () => onBusyChange?.(false); }, [addingFolder, onBusyChange, saving]);
   // 'fetch' errors offer a Retry (re-fetch) button; 'action' errors (folder add,
   // clone) explain their own retry path and don't re-fetch the list.
   const [errorKind, setErrorKind] = useState<'fetch' | 'action'>('fetch');
@@ -182,14 +174,26 @@ export function OnboardingReposStep({
     }
   }, [request]);
 
-  useEffect(() => { void loadStatusAndRepos(); }, [loadStatusAndRepos]);
+  useEffect(() => {
+    let active = true;
+    setReposError(null);
+    void request('/api/panel/repos').then(async (response) => {
+      if (!response.ok) throw new Error('Could not load saved projects.');
+      const data = await response.json();
+      if (active) {
+        const loaded: RepoItem[] = (Array.isArray(data.repos) ? data.repos : []).filter(isOnboardingProject).map((project: OnboardingProject) => ({
+          key: project.localPath, title: project.name, subtitle: project.localPath, isLocal: true, name: project.name, project,
+        }));
+        // A folder can finish registering while this older inventory read is in flight.
+        setLocalRepos((current) => [...current.filter((item) => !loaded.some((row) => row.key === item.key)), ...loaded]);
+      }
+    }).catch(() => { if (active) { setErrorKind('fetch'); setReposError('Could not load saved projects. You can still choose a folder.'); } });
+    return () => { active = false; };
+  }, [localRevision, request]);
+  useEffect(() => { if (showGithub) void loadStatusAndRepos(); else setLoading(false); }, [loadStatusAndRepos, showGithub]);
 
   const toggle = useCallback((key: string) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
+    setSelected(new Set([key]));
   }, []);
 
   const handleAddFolder = useCallback(async () => {
@@ -219,9 +223,10 @@ export function OnboardingReposStep({
         subtitle: data.repo.localPath,
         isLocal: true,
         name: data.repo.name,
+        project: data.repo,
       };
       setLocalRepos(prev => prev.some(r => r.key === item.key) ? prev : [item, ...prev]);
-      setSelected(prev => new Set(prev).add(item.key));
+      setSelected(new Set([item.key]));
       console.info('[onboarding] added local repo', item.key);
     } catch (err) {
       console.error('[onboarding] add folder failed', err);
@@ -244,8 +249,8 @@ export function OnboardingReposStep({
       name: r.name,
       cloneUrl: r.clone_url,
     }));
-    return [...localRepos, ...gh];
-  }, [githubRepos, localRepos]);
+    return [...localRepos, ...(showGithub ? gh : [])];
+  }, [githubRepos, localRepos, showGithub]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return allItems;
@@ -255,49 +260,26 @@ export function OnboardingReposStep({
 
   const handleContinue = useCallback(async () => {
     if (saving) return;
-    // Local repos are already registered at add-time; GitHub selections must be
-    // cloned + registered through the real clone action (#1339). Sequential, with
-    // per-row progress — advance only when every selection actually registered.
-    const localCount = allItems.filter(r => r.isLocal && selected.has(r.key)).length;
-    const ghSelected = allItems.filter(r => !r.isLocal && r.cloneUrl && selected.has(r.key));
-    const pending = ghSelected.filter(r => rowStatus[r.key] !== 'done');
-
-    if (pending.length === 0) {
-      onContinue(localCount + ghSelected.length);
-      return;
-    }
-
+    const repo = allItems.find((item) => selected.has(item.key));
+    if (!repo) return;
+    if (repo.project) { onContinue(repo.project); return; }
+    if (!repo.cloneUrl) return;
     setSaving(true);
     setReposError(null);
-    const failures: string[] = [];
-    for (const repo of pending) {
-      setRowStatus(prev => ({ ...prev, [repo.key]: 'cloning' }));
-      try {
-        const res = await request('/api/panel/repos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'clone', cloneUrl: repo.cloneUrl, name: repo.name }),
-        });
-        const data = await res.json().catch(() => ({})) as { error?: string; repo?: unknown };
-        if (!res.ok || !data.repo) throw new Error(data.error ?? `Clone failed (${res.status})`);
-        setRowStatus(prev => ({ ...prev, [repo.key]: 'done' }));
-        console.info('[onboarding] cloned + registered', repo.key);
-      } catch (err) {
-        console.error('[onboarding] clone failed', repo.key, err);
-        setRowStatus(prev => ({ ...prev, [repo.key]: 'error' }));
-        failures.push(`${repo.title}: ${err instanceof Error ? err.message : 'clone failed'}`);
-      }
-    }
-    setSaving(false);
-
-    const doneCount = ghSelected.length - failures.length;
-    if (failures.length > 0) {
+    setRowStatus({ [repo.key]: 'cloning' });
+    try {
+      const response = await request('/api/panel/repos', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clone', cloneUrl: repo.cloneUrl, name: repo.name }) });
+      const data = await response.json();
+      if (!response.ok || !isOnboardingProject(data.repo)) throw new Error(data.error ?? 'Unable to clone this project.');
+      setRowStatus({ [repo.key]: 'done' });
+      onContinue(data.repo);
+    } catch (cause) {
+      setRowStatus({ [repo.key]: 'error' });
       setErrorKind('action');
-      setReposError(`Couldn’t add ${failures.length} repo${failures.length > 1 ? 's' : ''} — ${failures.join('; ')}. Continue retries only the failed ones.`);
-      return;
-    }
-    onContinue(localCount + doneCount);
-  }, [allItems, selected, rowStatus, saving, onContinue, request]);
+      setReposError(cause instanceof Error ? cause.message : 'Unable to clone this project. Try again.');
+    } finally { setSaving(false); }
+  }, [allItems, selected, saving, onContinue, request]);
 
   // The search box is only meaningful once there's at least one repo to filter.
   const showSearch = allItems.length > 0;
@@ -306,8 +288,24 @@ export function OnboardingReposStep({
   return (
     <div style={{ maxWidth: 640, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, textAlign: 'center' }}>
-        Select the repositories you want o8 to manage. You can always add more later.
+        Start with one project. Choose a folder or reopen a project already in o8. You can add more later.
       </div>
+
+      {/* Local folders are the primary path. */}
+          <button
+            type="button"
+            disabled={addingFolder || saving}
+            onClick={handleAddFolder}
+            style={{ ...secondaryButtonStyle(addingFolder), alignSelf: 'flex-start' }}
+          >
+            {addingFolder ? <Spinner /> : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+            )}
+            Choose a folder on this Mac
+          </button>
+      <button type="button" aria-expanded={showGithub} disabled={saving} onClick={() => setShowGithub((value) => !value)} style={{ ...secondaryButtonStyle(), alignSelf: 'flex-start', fontSize: 12 }}>
+        {showGithub ? 'Hide GitHub projects' : 'Clone from GitHub (optional)'}
+      </button>
 
       {loading ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 24, justifyContent: 'center', color: 'var(--t-text-secondary)', fontSize: 13 }}>
@@ -316,7 +314,7 @@ export function OnboardingReposStep({
       ) : (
         <>
           {/* GitHub-not-connected notice */}
-          {authenticated === false && (
+          {showGithub && authenticated === false && (
             <div style={{ paddingTop: 16, paddingBottom: 16, paddingLeft: 18, paddingRight: 18, borderRadius: 12, border: '1px solid var(--t-glass-border-strong)', background: 'var(--t-glass-muted)', display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
@@ -350,7 +348,7 @@ export function OnboardingReposStep({
             <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, borderRadius: 12, border: '1px solid var(--t-brand-red, #ef9a9a)', background: 'var(--t-glass-muted)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div style={{ fontSize: 12.5, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>{reposError}</div>
               {errorKind === 'fetch' && (
-                <button type="button" onClick={() => void loadStatusAndRepos()} style={{ ...secondaryButtonStyle(), minHeight: 36, paddingTop: 8, paddingBottom: 8, fontSize: 12.5, flexShrink: 0 }}>Retry</button>
+                <button type="button" onClick={() => { setLocalRevision((value) => value + 1); if (showGithub) void loadStatusAndRepos(); }} style={{ ...secondaryButtonStyle(), minHeight: 36, paddingTop: 8, paddingBottom: 8, fontSize: 12.5, flexShrink: 0 }}>Retry</button>
               )}
             </div>
           )}
@@ -395,7 +393,7 @@ export function OnboardingReposStep({
               linked to (#1344). */}
           {allItems.length === 0 && !reposError && !registering && (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.5 }}>
-              {authenticated === false
+              {authenticated !== true
                 ? <>Add a local repository folder to get started.</>
                 : <>No repos found on your GitHub account. Use &ldquo;Choose a folder on this Mac&rdquo; below, or add repos later from the dashboard.</>}
             </div>
@@ -414,6 +412,8 @@ export function OnboardingReposStep({
                       key={repo.key}
                       type="button"
                       onClick={() => toggle(repo.key)}
+                      disabled={saving}
+                      aria-pressed={isSel}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -475,31 +475,18 @@ export function OnboardingReposStep({
               )}
             </div>
           )}
-
-          {/* Local-folder add — always available, the fresh-user escape hatch */}
-          <button
-            type="button"
-            disabled={addingFolder}
-            onClick={handleAddFolder}
-            style={{ ...secondaryButtonStyle(addingFolder), alignSelf: 'flex-start' }}
-          >
-            {addingFolder ? <Spinner /> : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
-            )}
-            Choose a folder on this Mac
-          </button>
         </>
       )}
 
       {/* Actions */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-        <button type="button" onClick={onSkip} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip</button>
+        <button type="button" disabled={saving || addingFolder} onClick={onSkip} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Choose later</button>
         {renderContinueButton({
           label: saving
-            ? 'Cloning repos…'
-            : selected.size > 0 ? `Continue with ${selected.size} repo${selected.size > 1 ? 's' : ''}` : 'Select repos to continue',
+            ? 'Cloning project…'
+            : selected.size > 0 ? 'Use this project' : 'Choose a project',
           onClick: () => { void handleContinue(); },
-          disabled: selected.size === 0 || saving,
+          disabled: selected.size === 0 || saving || !allItems.some((item) => selected.has(item.key)),
         })}
       </div>
     </div>

@@ -2680,6 +2680,24 @@ function DashboardInner() {
     })();
   }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, waitForWorkspaceTerminalTarget]);
 
+  const onboardingTargetRef = useRef<{ projectId: string; tileId: string; tabId: string; text: string } | null>(null);
+  const handleOnboardingComplete = useCallback(async (task?: import('@/components/desktop/onboarding/onboarding-progress').OnboardingTask) => {
+    if (task) {
+      await loadRegisteredRepos();
+      await handleSelectRegisteredRepo(task.project.id);
+      const target = await waitForWorkspaceTerminalTarget({ repoPath: task.project.localPath, preferredTileId: onboardingTargetRef.current?.tileId, fallbackToAnyExisting: true, activate: true });
+      const previous = onboardingTargetRef.current;
+      const tabId = previous?.projectId === task.project.id && previous.text === task.text && previous.tileId === target.tileId && target.handle.focusTab(previous.tabId)
+        ? previous.tabId : target.handle.openOrchestratorTab({ ...task.project, branch: task.project.defaultBranch });
+      if ((previous?.tabId !== tabId || previous.text !== task.text) && !target.handle.injectIntoOrchestrator(tabId, task.text, { autoSend: false })) throw new Error('Could not prepare the lead conversation. Try again.');
+      onboardingTargetRef.current = { projectId: task.project.id, tileId: target.tileId, tabId, text: task.text };
+      target.handle.focusTab(tabId);
+      setActiveTileId(target.tileId);
+      flashWorkspaceTab(tabId);
+    }
+    return handleSetupComplete();
+  }, [flashWorkspaceTab, handleSelectRegisteredRepo, handleSetupComplete, loadRegisteredRepos, setActiveTileId, waitForWorkspaceTerminalTarget]);
+
   const handleCreateWorkspaceChat = useCallback(() => {
     void (async () => {
       recordSpawnEvent(`chat:requested activeTile=${activeTileId ?? 'none'}`);
@@ -5824,7 +5842,7 @@ function DashboardInner() {
       </Suspense>
       {setupWizardOpen && (
         <Suspense fallback={null}>
-          <LazyOnboarding onComplete={handleSetupComplete} completionError={setupCompleteError} />
+          <LazyOnboarding onComplete={handleOnboardingComplete} completionError={setupCompleteError} />
         </Suspense>
       )}
 

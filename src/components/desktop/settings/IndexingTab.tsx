@@ -24,6 +24,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
   TabHeading,
 } from './shared';
+import { ConversationImportSection } from './ConversationImportSection';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import type { IndexState, RepoIndexEntry, RepoIndexStatus } from '@/lib/codebase-memory/types';
 
@@ -303,6 +304,7 @@ export function IndexingTab() {
           />
         </SettingsGroup>
       </section>
+      <ConversationImportSection />
     </div>
   );
 }

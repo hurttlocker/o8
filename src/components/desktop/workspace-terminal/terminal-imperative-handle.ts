@@ -170,6 +170,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
               orchestratorTurnInjection: {
                 id: `orchestrator-turn-${Date.now()}`,
                 text: nextText,
+                autoSend: options?.autoSend,
                 previewImageDataUri: options?.previewImageDataUri,
               },
             }

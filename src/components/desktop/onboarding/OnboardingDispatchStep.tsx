@@ -119,10 +119,11 @@ function RuntimeInventoryRow({
 }
 
 export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
-  request = fetch, onContinue, onSkip, renderButton,
+  request = fetch, onContinue, onSkip, renderButton, onBusyChange,
 }: {
   request?: OnboardingRequest;
   onContinue: () => void;
+  onBusyChange?: (busy: boolean) => void;
   onSkip: () => void;
   renderButton: (props: { label: string; onClick: () => void; disabled?: boolean }) => ReactNode;
 }) {
@@ -132,6 +133,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
   const [customize, setCustomize] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [onBusyChange, saving]);
   const [error, setError] = useState<string | null>(null);
   const choiceMade = useRef(false);
   const [revision, setRevision] = useState(0);

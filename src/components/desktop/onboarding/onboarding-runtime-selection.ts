@@ -14,6 +14,7 @@ export type DispatchableRuntimeInventoryItem = SetupRuntime;
 
 export interface OnboardingRuntimeSelection {
   inventory: DispatchableRuntimeInventoryItem[];
+  consentAnswered: boolean;
   orchestratorRuntime: OnboardingOrchestratorRuntime;
   workerRuntimes: DispatchRuntime[];
   recommendation: RuntimeSetupRecommendation;
@@ -65,6 +66,7 @@ export async function loadOnboardingRuntimeSelection(
     activity: { codex: 0, claude: 0, complete: false },
   });
   return {
+    consentAnswered: payload.values.telemetryConsentAnswered === true,
     inventory, recommendation, sources: payload.sources ?? {} as OperatorDefaultsResponse['sources'],
     orchestratorRuntime: recommendation.backend === 'claude' ? 'claude-code' : recommendation.backend ?? 'codex',
     workerRuntimes: recommendation.workerRuntimes,

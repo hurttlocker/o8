@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DetectionResult } from '@/components/desktop/setup-wizard/types';
-import { loadSetupDetection } from '@/lib/setup/detection-cache';
-import { normalizeDetection } from '../utils';
 
 export function useSetupWizard() {
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
   const [setupCheckComplete, setSetupCheckComplete] = useState(false);
-  const [setupDetection, setSetupDetection] = useState<DetectionResult | null>(null);
+  const [setupDetection] = useState<DetectionResult | null>(null);
   const [setupCompleteError, setSetupCompleteError] = useState<string | null>(null);
   const setupCheckedRef = useRef(false);
 
@@ -23,14 +21,8 @@ export function useSetupWizard() {
         // hold the server event loop long enough to delay UI chunks. Detection
         // remains part of the onboarding and explicit settings paths.
         if (config.setupComplete || config.completedAt) return;
-        // Paint onboarding before the optional detector finishes.
+        // The combined tools step owns discovery when the user reaches it.
         setSetupWizardOpen(true);
-        try {
-          const rawDetection = await loadSetupDetection();
-          if (rawDetection) {
-            setSetupDetection(normalizeDetection(rawDetection as Record<string, unknown>));
-          }
-        } catch { /* detection is optional for onboarding */ }
       } catch { /* silent — don't block dashboard */ }
       finally { setSetupCheckComplete(true); }
     })();
@@ -53,10 +45,12 @@ export function useSetupWizard() {
       });
       if (!res.ok) throw new Error(`Setup completion save failed (${res.status})`);
       setSetupWizardOpen(false);
+      return true;
     } catch (error) {
       console.error('[setup]', error);
       setSetupCompleteError('Setup could not be saved. Try again to finish onboarding.');
       setSetupWizardOpen(true);
+      return false;
     }
   }, []);
 
