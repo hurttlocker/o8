@@ -11,9 +11,10 @@
  * Issue #663: extract per-session transcript view as
  * <SessionTranscriptPane sessionKey={key} /> so it can mount in any tile.
  */
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { AgentTilePane } from './workspace-terminal/AgentTilePane';
+import type { FleetAgent } from './thoughts/types';
 
 interface SessionTranscriptPaneProps {
   sessionKey: string;
@@ -33,6 +34,23 @@ export function SessionTranscriptPane({
     () => (data?.agents ?? []).find((entry) => entry.sessionKey === sessionKey) ?? null,
     [data?.agents, sessionKey],
   );
+  const [savedAgent, setSavedAgent] = useState<{ sessionKey: string; agent: FleetAgent } | null>(null);
+  useEffect(() => {
+    if (agent || !sessionKey.includes('-owned:')) return;
+    const controller = new AbortController();
+    void fetch(`/api/runtime/session-summary?sessionKey=${encodeURIComponent(sessionKey)}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) return;
+      const payload = await response.json() as { session?: FleetAgent };
+      if (payload.session?.sessionKey !== sessionKey) return;
+      setSavedAgent({ sessionKey, agent: payload.session });
+    }).catch(() => {
+      // A missing archived record leaves the existing runtime label in place.
+    });
+    return () => controller.abort();
+  }, [agent, sessionKey]);
   const packet = useMemo(
     () => data?.missionState?.packets.find((entry) => entry.lane?.sessionKey === sessionKey) ?? null,
     [data?.missionState?.packets, sessionKey],
@@ -49,7 +67,7 @@ export function SessionTranscriptPane({
   return (
     <AgentTilePane
       sessionKey={sessionKey}
-      agent={agent}
+      agent={agent ?? (savedAgent?.sessionKey === sessionKey ? savedAgent.agent : null)}
       packet={packet}
       focused={focused}
       onClose={handleClose}

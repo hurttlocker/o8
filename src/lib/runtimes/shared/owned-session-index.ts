@@ -45,6 +45,14 @@ export interface OwnedLaunchMutationMatch {
   outcome: 'running' | 'finished' | 'interrupted' | 'failed';
 }
 
+export interface OwnedSessionDisplay {
+  sessionKey: string;
+  name: string;
+  model: string | null;
+  runtime: string;
+  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'idle';
+}
+
 /** Resolve the owned roots FRESH per call — env may be set after import (tests),
  *  and the resolution is cheap. */
 export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
@@ -89,6 +97,49 @@ export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
     seen.add(lifecycle.surfaceIdPrefix);
   }
   return roots;
+}
+
+/** Resolve a pane's identity after its owned session leaves the live fleet. */
+export async function readOwnedSessionDisplay(surfaceId: string): Promise<OwnedSessionDisplay | null> {
+  const root = ownedRoots().find((entry) => surfaceId.startsWith(entry.marker));
+  if (!root) return null;
+  const directory = surfaceId.slice(root.marker.length);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(directory)) return null;
+
+  for (const base of [root.root, archiveRootForOwnedSessionRoot(root.root)]) {
+    let parsed: {
+      surfaceId?: unknown;
+      title?: unknown;
+      model?: unknown;
+      activeRun?: unknown;
+      recentRuns?: Array<{ outcome?: unknown; startedAt?: unknown }>;
+    };
+    try {
+      parsed = JSON.parse(await readFile(path.join(base, directory, 'session.json'), 'utf-8'));
+    } catch {
+      continue;
+    }
+    if (parsed.surfaceId !== surfaceId) continue;
+    const outcome = Array.isArray(parsed.recentRuns)
+      ? [...parsed.recentRuns].sort((left, right) => String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')))[0]?.outcome
+      : null;
+    const status = parsed.activeRun ? 'running'
+      : outcome === 'finished' ? 'completed'
+        : outcome === 'failed' ? 'failed'
+          : outcome === 'interrupted' ? 'interrupted'
+            : 'idle';
+    return {
+      sessionKey: surfaceId,
+      name: typeof parsed.title === 'string' && parsed.title.trim()
+        ? parsed.title.trim().slice(0, 120)
+        : root.marker.slice(0, -7),
+      model: typeof parsed.model === 'string' && parsed.model.trim()
+        ? parsed.model.trim().slice(0, 120) : null,
+      runtime: root.marker.slice(0, -7),
+      status,
+    };
+  }
+  return null;
 }
 
 const INDEX_TTL_MS = 2_000;
