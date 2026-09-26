@@ -73,7 +73,7 @@ export function OnboardingPermissionsStep({ storage, onRestart, onContinue, onBu
         </div>)}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button type="button" disabled={Boolean(busy)} onClick={() => mic.busy ? mic.stop() : void mic.start()} style={onboardingQuietButtonStyle}>{mic.busy ? 'Stop microphone test' : 'Test microphone'}</button>
+        <button type="button" disabled={Boolean(busy)} onClick={() => mic.busy ? mic.stop() : void mic.start()} style={onboardingButtonStyle}>{mic.busy ? 'Stop microphone test' : 'Test microphone'}</button>
         <div role="meter" aria-label="Microphone input" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(mic.level * 100)} style={{ height: 4, flex: 1, borderRadius: 2, background: 'var(--t-divider)' }}><div style={{ width: `${mic.level * 100}%`, height: '100%', background: 'var(--t-text-secondary)', borderRadius: 2 }} /></div>
       </div>
       {mic.state === 'heard' ? <div style={{ marginTop: 12 }}><OnboardingFeedback title="We can hear you.">Your microphone picked up audio. You’re ready to try voice.</OnboardingFeedback></div> : <p role="status" style={{ minHeight: 20, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>{mic.state === 'starting' ? 'Waiting for microphone access…' : mic.state === 'listening' ? 'Say a few words. Checking audio for eight seconds…' : mic.state === 'silent' ? 'No audio detected. Check the selected microphone and input volume, then try again.' : mic.state === 'interrupted' ? 'Test stopped when you left the app. Try again when you’re ready.' : 'Try a quick microphone check before your first conversation.'}</p>}
