@@ -21,8 +21,8 @@ close an issue when its PR merges; keep that row here until it ships.
 | #2795 | Optional local operating-agreement loader | #2797 | Release inclusion |
 | #2794 | Agent setup with durable app acknowledgments | #2798 | Release inclusion |
 | #2796 | Permission checks, microphone test, restart recovery | #2800 | Spoken-input success; release inclusion |
-| #2801 | Consistent confirmations, recovery, and project context | Pending | Final native walkthrough and CI |
-| #2799 | Slow native debug restart | Pending | Measured improvement; production timing |
+| #2801 | Consistent confirmations, recovery, and project context | #2802 | Release inclusion |
+| #2799 | Slow native debug restart | #2803 | Idle/release timings; release inclusion |
 
 ## Final acceptance
 
@@ -33,16 +33,19 @@ close an issue when its PR merges; keep that row here until it ships.
 - [x] Agent-requested project opening reaches the actual workspace.
 - [ ] Native folder selection reaches that same workspace.
 - [ ] Final success and recovery UI verified at laptop size, with keyboard access.
-- [ ] Final changed-stack tests, typecheck, lint, and build pass.
+- [x] Final changed-stack tests, typecheck, lint, and build pass.
 - [ ] Published installer contains the reviewed stack; clean-profile and restart checks pass.
 
 ## Latest verification
 
 - Continuity: 19 focused tests pass; TypeScript passes; touched lint has no errors.
 - Runtime persistence integration: 3 tests pass.
-- Setup-saved confirmation and keyboard activation verified in the isolated preview at 1024 × 700.
+- Setup-saved confirmation, retained project identity, explicit privacy choices, and keyboard handoff verified in the isolated preview at 1024 × 700.
 - Native picker opens; automated selection is blocked by macOS focus delivery. This is not a completed selection check.
-- Native workspace shows the selected project and waits for the first message.
+- Native workspace shows the selected project and waits for the first message at 1024 × 700.
+- Optimized debug launch: window at 17.5s; dashboard connection at 20.6s under concurrent load. Restart-and-return: window at 38.2s; dashboard at 43.4s; permissions page restored, all four statuses rechecked, resume marker consumed. Idle/release timings remain unmeasured.
+- Continuity stack CI: https://github.com/hurttlocker/o8/actions/runs/36265555314. All gates passed, including build. Hermetic suite: 5,109 passed, 4 skipped.
+- Debug-profile stack CI: https://github.com/hurttlocker/o8/actions/runs/36265768866. All gates passed; subsequent changes only record these receipts.
 
 ## Deferred
 

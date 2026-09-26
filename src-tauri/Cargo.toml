@@ -8,6 +8,20 @@ repository = "https://github.com/hurttlocker/o8"
 edition = "2021"
 rust-version = "1.77.2"
 
+# Native context creation compiles capability URL patterns at runtime. Keep the
+# regex engine optimized in debug builds too; application code stays debuggable.
+[profile.dev.package.regex-automata]
+opt-level = 3
+
+[profile.dev.package.regex-syntax]
+opt-level = 3
+
+[profile.dev.package.regex]
+opt-level = 3
+
+[profile.dev.package.urlpattern]
+opt-level = 3
+
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
