@@ -131,7 +131,7 @@ export function createFleetComputer({
           name: session.title,
           squadId,
           runtime: runtimeId,
-          model: `${runtimeId} owned`,
+          model: session.model?.trim() || `${runtimeId} owned`,
           status,
           currentTask: buildCurrentTask(lifecycleContext, session, running),
           workspace: shortHome(session.repoPath),

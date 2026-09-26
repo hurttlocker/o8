@@ -54,6 +54,7 @@ export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-sessi
 export type OwnedCodexLaunchRequest = {
   cwd: string;
   prompt: string;
+  taskName?: string;
   clientMutationId?: string;
   model?: string;
   effort?: ThinkingEffort;

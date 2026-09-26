@@ -117,6 +117,30 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({ env: { NODE_ENV: 'development' } });
   });
 
+  it('shows the assigned task and pinned model for an owned worker after launch', async () => {
+    const { createOwnedSessionStore } = await import('./store');
+    ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
+
+    const store = createOwnedSessionStore(testAdapter());
+    await expect(store.launch({
+      cwd: repoPath,
+      prompt: 'edit proof/a.txt',
+      taskName: 'Proof A',
+      model: 'gpt-5.6-terra',
+    })).resolves.toMatchObject({ ok: true });
+
+    const saved = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
+    expect(saved).toMatchObject({ title: 'Proof A', model: 'gpt-5.6-terra' });
+    const fleet = await store.getFleetAdditions({ fresh: true });
+    expect(fleet.agents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sessionKey: saved.surfaceId,
+        name: 'Proof A',
+        model: 'gpt-5.6-terra',
+      }),
+    ]));
+  });
+
   it('returns a failed launch with an install hint when the worker CLI is missing', async () => {
     const { invalidateCliCache } = await import('@/lib/runtimes/shared/cli-resolver');
     const { createOwnedSessionStore } = await import('./store');

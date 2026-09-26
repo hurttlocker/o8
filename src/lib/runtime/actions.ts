@@ -363,6 +363,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   const result = await runtime.launch({
     cwd,
     prompt: launchPrompt,
+    taskName: payload.taskName,
     clientMutationId: payload.clientMutationId,
     model: payload.model,
     claudeCodeModel: payload.claudeCodeModel,
