@@ -16,7 +16,6 @@ import {
   LogOut,
   MessageSquare,
   Settings2,
-  Sparkles,
 } from './lucide-shims';
 import { useO8Auth, type O8AuthState } from '@/components/auth/O8AuthProvider';
 import {
@@ -35,7 +34,6 @@ import { CapacityRows, capacitySummary } from './settings-quick-drawer/capacity-
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const POLL_MS = 30_000;
-const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 const DOCS_URL = 'https://o8.run';
 // The canonical community invite — MUST match the README footer + o8.run
 // (the drawer previously carried a different, stale invite).
@@ -55,9 +53,6 @@ interface SettingsQuickDrawerProps {
   anchorRect: DOMRect | null;
   onClose: () => void;
   onOpenSettings: () => void;
-  /** When provided, the What's-new row opens the in-app Brain-summarized
-   *  card instead of the external releases page. */
-  onWhatsNew?: () => void;
 }
 
 type UsageState =
@@ -290,7 +285,6 @@ export function SettingsQuickDrawer({
   anchorRect,
   onClose,
   onOpenSettings,
-  onWhatsNew,
 }: SettingsQuickDrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -517,12 +511,6 @@ export function SettingsQuickDrawer({
                       ? `v${version}`
                       : ''}
             </span>
-          </RowButton>
-
-          <RowButton onClick={onWhatsNew ?? (() => openExternalUrl(RELEASE_URL))}>
-            <IconFrame><Sparkles size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>What&apos;s new</span>
-            {onWhatsNew ? null : <ExternalLink size={11} color={FAINT} />}
           </RowButton>
 
           <RowButton
