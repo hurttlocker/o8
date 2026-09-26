@@ -125,6 +125,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
       "path": "src/components/desktop/thoughts/mission-panel/PacketMetaRows.test.ts",
       "reasons": [
         "apfs-tool"
