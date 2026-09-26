@@ -86,6 +86,7 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     options: [
       { value: MODEL_IDS.raw.openAiGpt6Astra, label: 'GPT-6 Astra', triggerLabel: 'Astra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Astra, sub: 'orchestrator flagship' },
       { value: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', triggerLabel: '6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Sol, sub: 'everyday orchestrator' },
+      { value: MODEL_IDS.raw.openAiGpt6Luna, label: 'GPT-6 Luna', triggerLabel: '6 Luna', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Luna, sub: 'fast model for easier tasks' },
       { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', triggerLabel: '5.6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
     ],

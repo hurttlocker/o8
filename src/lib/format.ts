@@ -7,6 +7,7 @@ export function formatModelLabel(model: string): string {
     // Vendor-prefixed model ids from runtime and config surfaces
     .replace('openai-codex/gpt-6-astra', 'Codex GPT-6 Astra')
     .replace('openai-codex/gpt-6-sol', 'Codex GPT-6 Sol')
+    .replace('openai-codex/gpt-6-luna', 'Codex GPT-6 Luna')
     .replace('openai-codex/gpt-5.6-sol', 'Codex 5.6 Sol')
     .replace('openai-codex/gpt-5.6-terra', 'Codex 5.6 Terra')
     .replace('openai-codex/gpt-5.6-luna', 'Codex 5.6 Luna')
@@ -27,6 +28,7 @@ export function formatModelLabel(model: string): string {
     // Bare forms (from live sessions)
     .replace('gpt-6-astra', 'GPT-6 Astra')
     .replace('gpt-6-sol', 'GPT-6 Sol')
+    .replace('gpt-6-luna', 'GPT-6 Luna')
     .replace('gpt-5.6-sol', 'GPT-5.6 Sol')
     .replace('gpt-5.6-terra', 'GPT-5.6 Terra')
     .replace('gpt-5.6-luna', 'GPT-5.6 Luna')

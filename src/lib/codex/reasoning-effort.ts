@@ -11,6 +11,7 @@ import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/th
  */
 
 const HIGH_END_EFFORTS = ['max', 'ultra'] as const satisfies readonly ManualThinkingEffort[];
+const MAX_EFFORTS = ['max'] as const satisfies readonly ManualThinkingEffort[];
 
 /**
  * Verified model-catalog receipt: ~/.codex/models_cache.json client_version
@@ -21,6 +22,7 @@ const HIGH_END_EFFORTS = ['max', 'ultra'] as const satisfies readonly ManualThin
 export const CODEX_HIGH_END_EFFORT_CATALOG: Readonly<Record<string, readonly ManualThinkingEffort[]>> = Object.freeze({
   'gpt-6-astra': HIGH_END_EFFORTS,
   'gpt-6-sol': HIGH_END_EFFORTS,
+  'gpt-6-luna': MAX_EFFORTS,
   'gpt-5.6-sol': HIGH_END_EFFORTS,
   'gpt-5.6-terra': HIGH_END_EFFORTS,
 });

@@ -18,6 +18,7 @@ const CURRENT_CLAUDE_FLAGSHIPS = [
 const CURRENT_CODEX_FLAGSHIPS = [
   MODEL_IDS.raw.openAiGpt6Astra,
   MODEL_IDS.raw.openAiGpt6Sol,
+  MODEL_IDS.raw.openAiGpt6Luna,
   MODEL_IDS.raw.openAiGpt56Sol,
 ] as const;
 
