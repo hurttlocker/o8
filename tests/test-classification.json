@@ -262,7 +262,10 @@
     {
       "path": "src/lib/lane/codex-orchestrator-config.test.ts",
       "reasons": [
-        "executable-fixture"
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal"
       ]
     },
     {
@@ -406,6 +409,13 @@
       "path": "src/lib/mcp/operator-node22-locator.test.ts",
       "reasons": [
         "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/mcp/tool-spine/build-mcp-resolution.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
       ]
     },
     {
