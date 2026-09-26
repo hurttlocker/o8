@@ -31,6 +31,8 @@ export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'p
 ];
 
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: MODEL_IDS.raw.anthropicClaudeOpus55, label: 'Opus 5.5' },
+  { value: MODEL_IDS.raw.anthropicClaudeFable51, label: 'Fable 5.1' },
   { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5' },
   { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8' },
   { value: MODEL_IDS.raw.anthropicClaudeOpus47, label: 'Opus 4.7' },

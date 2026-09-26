@@ -9,6 +9,7 @@ import { parseCursorSessionCost } from '@/lib/runtimes/cursor-cost-parser';
 import { parseGeminiSessionCost } from '@/lib/runtimes/gemini-cost-parser';
 import { parseOpencodeSessionCost } from '@/lib/runtimes/opencode-cost-parser';
 import { modelRateTable, resolveRate } from './rate-table';
+import { anthropicPricingForModel } from '@/lib/llm/pricing';
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), 'o8-rate-table-'));
 const TOKENS_PER_MILLION = 1_000_000;
@@ -35,6 +36,23 @@ afterAll(() => {
 });
 
 describe('dated model rate table reproducibility', () => {
+  it.each([
+    ['claude-opus-5-5', 4, 20, 0.2, 5, 8],
+    ['claude-fable-5-1', 10, 50, 0.25, 12.5, 20],
+  ] as const)('prices %s consistently through the session parser and estimator', async (model, input, output, cacheRead, cacheWrite, cacheWrite1h) => {
+    expect(resolveRate('claude-code', model)).toMatchObject({
+      inputUsdPerMillion: input, outputUsdPerMillion: output,
+      cacheReadUsdPerMillion: cacheRead, cacheWriteUsdPerMillion: cacheWrite,
+      cacheWrite1hUsdPerMillion: cacheWrite1h,
+    });
+    expect(anthropicPricingForModel(model)).toEqual({ input, output });
+    const parsed = await parseSessionCost(fixture(`${model}.jsonl`, {
+      type: 'assistant', requestId: model,
+      message: { id: model, model, usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } },
+    }));
+    expect(parsed.totalCostUsd).toBe(input + output);
+  });
+
   it('reproduces each table-priced parser and the Brain estimator', async () => {
     const claudeRate = resolveRate('claude-code', 'claude-sonnet-5')!;
     const claude = await parseSessionCost(fixture('claude.jsonl', {
@@ -125,8 +143,8 @@ describe('dated model rate table reproducibility', () => {
     ) / TOKENS_PER_MILLION);
 
     expect(modelRateTable).toMatchObject({
-      rateTableVersion: '2026-08-28.1',
-      observedOn: '2026-08-28',
+      rateTableVersion: '2026-09-26.1',
+      observedOn: '2026-09-26',
     });
   });
 

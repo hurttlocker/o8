@@ -5,6 +5,7 @@
 export function formatModelLabel(model: string): string {
   return model
     // Vendor-prefixed model ids from runtime and config surfaces
+    .replace('openai-codex/gpt-6-sol', 'Codex GPT-6 Sol')
     .replace('openai-codex/gpt-6-astra', 'Codex GPT-6 Astra')
     .replace('openai-codex/gpt-5.6-sol', 'Codex 5.6 Sol')
     .replace('openai-codex/gpt-5.6-terra', 'Codex 5.6 Terra')
@@ -12,6 +13,8 @@ export function formatModelLabel(model: string): string {
     .replace('openai-codex/gpt-5.5', 'Codex 5.5')
     .replace('openai-codex/gpt-5.4', 'Codex 5.4')
     .replace('openai-codex/gpt-5.3-codex', 'Codex 5.3')
+    .replace('anthropic/claude-fable-5-1', 'Fable 5.1')
+    .replace('anthropic/claude-opus-5-5', 'Opus 5.5')
     .replace('anthropic/claude-fable-5', 'Fable 5')
     .replace('anthropic/claude-opus-5', 'Opus 5')
     .replace('anthropic/claude-opus-4-8', 'Opus 4.8')
@@ -24,6 +27,7 @@ export function formatModelLabel(model: string): string {
     .replace('anthropic/claude-haiku-4-5-20251001', 'Haiku 4.5')
     .replace('google/gemini-3-flash-preview', 'Gemini 3 Flash')
     // Bare forms (from live sessions)
+    .replace('gpt-6-sol', 'GPT-6 Sol')
     .replace('gpt-6-astra', 'GPT-6 Astra')
     .replace('gpt-5.6-sol', 'GPT-5.6 Sol')
     .replace('gpt-5.6-terra', 'GPT-5.6 Terra')
@@ -31,6 +35,8 @@ export function formatModelLabel(model: string): string {
     .replace('gpt-5.5', 'GPT-5.5')
     .replace('gpt-5.4', 'GPT-5.4')
     .replace('gpt-5.3-codex', 'Codex 5.3')
+    .replace('claude-fable-5-1', 'Fable 5.1')
+    .replace('claude-opus-5-5', 'Opus 5.5')
     .replace('claude-fable-5[1m]', 'Fable 5 (1M)')
     .replace('claude-fable-5', 'Fable 5')
     .replace('claude-opus-5', 'Opus 5')
