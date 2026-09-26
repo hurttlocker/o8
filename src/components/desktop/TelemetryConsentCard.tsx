@@ -12,6 +12,8 @@ type LoadState = 'loading' | 'hidden' | 'visible';
 interface ConsentResponse {
   values?: {
     telemetryConsentAnswered?: unknown;
+    crashReportsEnabled?: unknown;
+    productTelemetryEnabled?: unknown;
   };
   error?: unknown;
 }
@@ -158,40 +160,59 @@ function DisclosureCard({ children }: { children: React.ReactNode }) {
 export function TelemetryConsentCard({
   blocked = false,
   request = fetchOperatorDefaults,
+  embedded = false,
+  onContinue,
+  onBusyChange,
 }: {
   blocked?: boolean;
+  embedded?: boolean;
+  onContinue?: () => void;
+  onBusyChange?: (busy: boolean) => void;
   request?: typeof fetchOperatorDefaults;
 }) {
+  const [revision, setRevision] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [crashReports, setCrashReports] = useState<ConsentChoice>(null);
   const [productUsage, setProductUsage] = useState<ConsentChoice>(null);
   const [saving, setSaving] = useState(false);
+  useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [onBusyChange, saving]);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const crashSample = useMemo(() => JSON.stringify(SCRUBBED_CRASH_SAMPLE, null, 2), []);
 
   useEffect(() => {
+    if (blocked) return;
     let alive = true;
     void (async () => {
       try {
         const response = await request({}, { fresh: true, includeRuntime: false });
         const payload = await response.json().catch(() => ({})) as ConsentResponse;
-        if (!response.ok) return;
+        if (!response.ok) throw new Error('Could not load your privacy choices.');
         if (alive) {
-          setLoadState(payload.values?.telemetryConsentAnswered === true ? 'hidden' : 'visible');
+          const answered = payload.values?.telemetryConsentAnswered === true;
+          if (embedded && answered) {
+            setCrashReports(typeof payload.values?.crashReportsEnabled === 'boolean' ? payload.values.crashReportsEnabled : null);
+            setProductUsage(typeof payload.values?.productTelemetryEnabled === 'boolean' ? payload.values.productTelemetryEnabled : null);
+          }
+          setError(null);
+          setLoadState(answered && !embedded ? 'hidden' : 'visible');
         }
       } catch {
-        // A missing consent read fails closed and must never block the dashboard.
+        if (alive && embedded) setError('Could not load your privacy choices. Retry to continue.');
       }
     })();
     return () => { alive = false; };
-  }, [request]);
+  }, [blocked, embedded, request, revision]);
 
   useEffect(() => {
-    if (loadState === 'visible' && !blocked) dialogRef.current?.focus();
-  }, [blocked, loadState]);
+    if (loadState === 'visible' && !blocked && !embedded) dialogRef.current?.focus();
+  }, [blocked, embedded, loadState]);
 
-  if (loadState !== 'visible' || blocked) return null;
+  if (blocked || loadState === 'hidden') return null;
+  if (loadState === 'loading') return embedded ? <div style={{ color: 'var(--t-text-secondary)', fontSize: 13 }}>
+    <p role={error ? 'alert' : 'status'}>{error ?? 'Loading your privacy choices…'}</p>
+    {error ? <button type="button" onClick={() => { setError(null); setRevision((value) => value + 1); }}>Retry privacy choices</button> : null}
+  </div> : null;
 
   const canSave = crashReports !== null && productUsage !== null && !saving;
   const keepFocusInDialog = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -201,7 +222,7 @@ export function TelemetryConsentCard({
     }
     if (event.key !== 'Tab' || !dialogRef.current) return;
     const focusable = Array.from(
-      dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled])'),
+      dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), summary'),
     );
     if (focusable.length === 0) {
       event.preventDefault();
@@ -236,7 +257,8 @@ export function TelemetryConsentCard({
       if (!response.ok || payload.values?.telemetryConsentAnswered !== true) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Your choices could not be saved.');
       }
-      setLoadState('hidden');
+      if (embedded) onContinue?.();
+      else setLoadState('hidden');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Your choices could not be saved.');
     } finally {
@@ -248,16 +270,14 @@ export function TelemetryConsentCard({
     <div
       role="presentation"
       style={{
-        position: 'fixed',
+        position: embedded ? 'relative' : 'fixed',
         inset: 0,
         zIndex: 99997,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: 32,
-        paddingBottom: 32,
-        paddingLeft: 32,
-        paddingRight: 32,
+        width: embedded ? '100%' : undefined,
+        padding: embedded ? 0 : 32,
         background: 'var(--t-bg)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
@@ -266,23 +286,21 @@ export function TelemetryConsentCard({
       <div
         ref={dialogRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={embedded ? undefined : true}
         aria-labelledby="telemetry-consent-title"
         tabIndex={-1}
-        onKeyDown={keepFocusInDialog}
+        onKeyDown={embedded ? undefined : keepFocusInDialog}
         style={{
           width: 'min(960px, 100%)',
+          boxSizing: 'border-box',
           maxHeight: '100%',
           overflowY: 'auto',
-          paddingTop: 32,
-          paddingBottom: 28,
-          paddingLeft: 32,
-          paddingRight: 32,
+          padding: embedded ? 0 : 28,
           borderRadius: 16,
-          border: '1px solid var(--t-chat-surface-border)',
+          border: embedded ? 'none' : '1px solid var(--t-chat-surface-border)',
           background: 'var(--t-chat-surface-bg)',
           color: 'var(--t-chat-surface-text)',
-          boxShadow: 'var(--t-glass-shadow)',
+          boxShadow: embedded ? 'none' : 'var(--t-glass-shadow)',
           fontFamily: 'var(--font-sans-system)',
         }}
       >
@@ -310,7 +328,7 @@ export function TelemetryConsentCard({
               textTransform: 'uppercase',
               color: 'var(--t-text-muted)',
             }}>
-              01 — Privacy <span style={{ marginLeft: 10, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', letterSpacing: '0.04em' }}>(first run)</span>
+              Privacy <span style={{ marginLeft: 10, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', letterSpacing: '0.04em' }}>(first run)</span>
             </div>
             <h1 id="telemetry-consent-title" style={{
               marginTop: 0,
@@ -333,7 +351,7 @@ export function TelemetryConsentCard({
               lineHeight: 1.55,
               color: 'var(--t-text-secondary)',
             }}>
-              New installs share neither, and nothing is selected for you here. Choose each option independently, save once, and o8 will not ask again. You can change either choice later in Settings → General → Privacy.
+              Both are optional. New installs share neither. Choose each independently; you can change them later in Settings → General → Privacy.
             </p>
           </div>
         </header>
@@ -353,8 +371,10 @@ export function TelemetryConsentCard({
               </span>
             </div>
             <p style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-              Sends scrubbed errors and stack traces when o8 breaks. The sample below is generated in this build by the same <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: 11.5 }}>scrubSentryEvent</code> path used before browser and server reports leave the machine.
+              Helps diagnose failures with scrubbed errors and stack traces. Native crash reports may include thread-stack memory and loaded-module paths, beginning on the next launch.
             </p>
+            <details style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>
+              <summary style={{ cursor: 'pointer', marginBottom: 8 }}>See a sample crash report</summary>
             <div style={{ marginBottom: 6, fontSize: 10, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-muted)' }}>
               Scrubbed sample payload
             </div>
@@ -382,8 +402,9 @@ export function TelemetryConsentCard({
               {crashSample}
             </pre>
             <p style={{ marginTop: 10, marginBottom: 0, fontSize: 10.5, fontWeight: 300, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
-              The input uses placeholders. The output is live scrubber output, not hand-written copy. Native fault reporting starts on the next launch and may include thread-stack memory and loaded-module paths, so keep this off if you do not want that diagnostic context to leave your machine.
+              This sample uses placeholders and the same scrubber as browser and server reports.
             </p>
+            </details>
             <DecisionButtons
               value={crashReports}
               shareLabel="Share crash reports"
@@ -403,8 +424,10 @@ export function TelemetryConsentCard({
               </span>
             </div>
             <p style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-              Sends only these allowlisted events and fields. Unknown events fail closed, and extra fields are discarded.
+              Helps us understand which features get used. Sends six basic events, such as opening o8 or adding a project. Code, prompts, project names, and identities are never included.
             </p>
+            <details style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>
+              <summary style={{ cursor: 'pointer', marginBottom: 8 }}>See exactly what is shared</summary>
             <div style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--t-divider-subtle)' }}>
               {PRODUCT_EVENT_DISCLOSURES.map(({ event, fields }) => (
                 <div key={event} style={{
@@ -441,6 +464,7 @@ export function TelemetryConsentCard({
                 Code, prompts, repo names, paths, diffs, transcripts, file contents, credentials, user identity, or machine identity.
               </div>
             </div>
+            </details>
             <DecisionButtons
               value={productUsage}
               shareLabel="Share product usage"

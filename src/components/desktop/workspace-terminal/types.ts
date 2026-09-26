@@ -30,6 +30,7 @@ export interface RegisteredRepo {
 }
 
 export interface OrchestratorTurnInjection {
+  autoSend?: boolean;
   id: string;
   text: string;
   previewImageDataUri?: string;
@@ -212,6 +213,7 @@ export interface TerminalTabHandle {
     autoArchiveOnIdle?: boolean;
   }) => string;
   injectIntoOrchestrator: (tabId: string, text: string, options?: {
+    autoSend?: boolean;
     previewImageDataUri?: string;
   }) => boolean;
   focusTab: (tabId: string) => boolean;
