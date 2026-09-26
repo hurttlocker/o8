@@ -6,6 +6,8 @@ import { composeComposerTurnMessage } from '../composer-mode';
 import { prepareOrchestratorTurn } from '../use-orchestrator-stream/turn-option-resolution';
 import {
   clampEffortToLead,
+  composerSupportsFastMode,
+  cycleComposerSelectorMode,
   composerEffortConsequence,
   isHotComposerEffort,
   providerMarkForLead,
@@ -22,7 +24,7 @@ import {
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { MODEL_IDS } from '@/lib/models';
 
-const MODES: ComposerSelectorMode[] = ['solo', 'multitask', 'moa', 'fusion'];
+const MODES: ComposerSelectorMode[] = ['solo', 'multitask', 'fast', 'moa', 'fusion'];
 const EFFORTS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max', 'ultra'];
 
 describe('composer selector state', () => {
@@ -196,6 +198,7 @@ describe('composer selector state', () => {
   it.each([
     ['solo', 'Codex', 'Sol', 'single'],
     ['multitask', 'OpenCode', null, 'fleet'],
+    ['fast', 'Codex', 'Sol', 'fleet'],
     ['moa', 'Codex', 'Sol', 'fleet'],
     ['fusion', 'Codex', null, 'fusion'],
   ] as const)('keeps resolved mode and worker fields coherent for %s', (mode, runtime, workerModel, execution) => {
@@ -205,10 +208,24 @@ describe('composer selector state', () => {
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
       adaptiveEnabled: true, workerRuntimeLabel: runtime, workerModelLabel: workerModel,
     });
-    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
+    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', fast: 'Fast · shared checkout', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
     expect(resolved.orchestrationMode).toBe(execution);
     expect(resolved.workerRuntimeLabel).toBe(runtime);
     expect(resolved.workerModelLabel).toBe(workerModel);
+  });
+
+  it('offers Fast only for leads with the orchestrator delegation tool', () => {
+    expect(composerSupportsFastMode('codex')).toBe(true);
+    expect(composerSupportsFastMode('claude')).toBe(true);
+    expect(composerSupportsFastMode('fable')).toBe(true);
+    expect(composerSupportsFastMode('openclaw')).toBe(false);
+    expect(cycleComposerSelectorMode('multitask', 1, 'openclaw')).toBe('moa');
+    expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('fast');
+    const state = resolveComposerSelectorState({
+      mode: 'fast', leadModelId: 'external', leadModelLabel: 'External', leadBackend: 'openclaw',
+      inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'medium', adaptiveEnabled: false,
+    });
+    expect(state.mode).toBe('multitask');
   });
 
   it('resolves mode and worker settings by session, thread, then operator default', () => {

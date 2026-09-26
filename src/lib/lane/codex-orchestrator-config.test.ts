@@ -66,6 +66,14 @@ function readGeneratedConfig(codexHome: string): {
 }
 
 describe('Codex orchestrator home model config', () => {
+  it('binds each o8 chat to a separate MCP config for Fast worker placement', () => {
+    const first = prepareCodexHome(repoPath, 'full', 'gpt-6-astra', 'thoughts-team-a');
+    const second = prepareCodexHome(repoPath, 'full', 'gpt-6-astra', 'thoughts-team-b');
+    expect(first.codexHome).not.toBe(second.codexHome);
+    expect(readGeneratedConfig(first.codexHome).raw).toContain('CORTEX_THREAD_ID = "thoughts-team-a"');
+    expect(readGeneratedConfig(second.codexHome).raw).toContain('CORTEX_THREAD_ID = "thoughts-team-b"');
+  });
+
   it('writes the Astra default through the generated orchestrator config path', () => {
     writeModelsCache(['gpt-6-astra', 'gpt-5.6-sol']);
 

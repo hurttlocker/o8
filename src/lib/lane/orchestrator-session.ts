@@ -380,10 +380,10 @@ export async function rehydrateOrchestratorSessions(options: OrchestratorRehydra
  * so a concurrent full turn for the same repo can't clobber its surface either. */
 type ClaudeMcpConfig = ReturnType<typeof toClaudeJson>;
 
-function ensureMcpConfig(repoPath: string, profile: ToolProfile, config: ClaudeMcpConfig): string {
+function ensureMcpConfig(repoPath: string, profile: ToolProfile, config: ClaudeMcpConfig, threadId?: string | null): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
-  const suffix = profile === 'full' ? '' : `-${profile}`;
+  const suffix = `${profile === 'full' ? '' : `-${profile}`}${threadId ? `-${repoHash(threadId)}` : ''}`;
   const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}${suffix}.json`);
   // The caller fingerprints this exact object. Keeping construction out of the
   // writer prevents transient resolver state from making the stored hash differ
@@ -1008,9 +1008,9 @@ export async function sendToOrchestrator(
   // Write the MCP config (idempotent) + compute the desired resident-proc config.
   // A 'propose' turn gets the operator-stripped read-only surface — Collide's
   // lockout. The config baked into the resident proc is compared each turn.
-  const mcpConfig = toClaudeJson(buildToolRegistry(session.repoPath, { profile: toolProfile }));
+  const mcpConfig = toClaudeJson(buildToolRegistry(session.repoPath, { profile: toolProfile, threadId: session.threadId }));
   const mcpFingerprint = fingerprintMcpConfig(mcpConfig);
-  const mcpConfigPath = ensureMcpConfig(session.repoPath, toolProfile, mcpConfig);
+  const mcpConfigPath = ensureMcpConfig(session.repoPath, toolProfile, mcpConfig, session.threadId);
   const desiredConfig: OrchestratorProcConfig = {
     cwd: session.repoPath,
     model,

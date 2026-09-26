@@ -9,7 +9,7 @@ import {
   type ComposerWireMode,
 } from './composer-wire';
 
-const MODES: ComposerWireMode[] = ['solo', 'multitask', 'moa'];
+const MODES: ComposerWireMode[] = ['solo', 'multitask', 'fast', 'moa'];
 
 /** Directives as o8 shipped them before #2153 — still on the wire from old clients. */
 const LEGACY_MULTITASK = '[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. Review and merge through the gate as they finish.';
@@ -26,6 +26,12 @@ describe('composer mode directives', () => {
   it('keeps Solo a prohibition and never points it at the launch tool', () => {
     expect(COMPOSER_MODE_DIRECTIVES.solo).toContain('do NOT dispatch worker agents');
     expect(COMPOSER_MODE_DIRECTIVES.solo).not.toContain('cortex_launch_agent');
+  });
+
+  it('requires scoped shared launches and a single orchestrator review in Fast mode', () => {
+    expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('checkoutMode: "shared"');
+    expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('assignedPaths');
+    expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('one orchestrator-owned commit');
   });
 
   it('keeps every directive prefixed with its [Mode: …] marker', () => {

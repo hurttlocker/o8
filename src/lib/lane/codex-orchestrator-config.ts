@@ -1,5 +1,6 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { serializeCodexMcpServers, toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';
@@ -157,9 +158,11 @@ export function prepareCodexHome(
   repoPath: string,
   profile: ToolProfile = 'full',
   requestedModel: string = MODEL_IDS.codexDefault,
+  threadId?: string | null,
 ): PreparedCodexHome {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const suffix = profile === 'full' ? '' : `-${profile}`;
+  const threadSuffix = threadId ? `-${createHash('sha256').update(threadId).digest('hex').slice(0, 12)}` : '';
+  const suffix = `${profile === 'full' ? '' : `-${profile}`}${threadSuffix}`;
   const codexHome = join(CODEX_ORCHESTRATOR_HOME_DIR, `${repoHash(normalizedRepoPath)}${suffix}`);
   mkdirSync(codexHome, { recursive: true });
   const resolved = resolveCachedCodexOrchestratorModel(requestedModel);
@@ -168,7 +171,7 @@ export function prepareCodexHome(
     : '';
   const mergedConfig = mergeCodexMcpConfig(
     pinCodexOrchestratorModel(userConfigToml, resolved.model, resolved.note),
-    toCodexServersMap(buildToolRegistry(normalizedRepoPath, { profile })),
+    toCodexServersMap(buildToolRegistry(normalizedRepoPath, { profile, threadId })),
   );
   const configPath = join(codexHome, 'config.toml');
   writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });

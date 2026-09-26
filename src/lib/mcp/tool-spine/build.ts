@@ -21,6 +21,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { fastDelegationCapability } from '@/lib/orchestrator/fast-delegation-auth';
 import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
 
 /** Resolve repo slug from git remote. */
@@ -191,7 +192,7 @@ function resolveCodebaseMemoryBin(): string | null {
  */
 export function buildToolRegistry(
   repoPath: string,
-  options?: { profile?: ToolProfile },
+  options?: { profile?: ToolProfile; threadId?: string | null },
 ): ToolRegistry {
   const repoSlug = detectRepoSlug(repoPath);
   const apiBase = resolveToolSpineApiBase();
@@ -251,6 +252,10 @@ export function buildToolRegistry(
       env: {
         CORTEX_API_BASE: apiBase,
         CORTEX_REPO_PATH: repoPath,
+        ...(options?.threadId ? { CORTEX_THREAD_ID: options.threadId } : {}),
+        ...(options?.threadId?.startsWith('thoughts-')
+          ? { CORTEX_FAST_CAPABILITY: fastDelegationCapability(repoPath, options.threadId) }
+          : {}),
         CORTEX_REPO_SLUG: repoSlug,
         WS_PORT: resolveToolSpineWsPort(),
         WS_TOKEN: getOrCreateWsToken(),

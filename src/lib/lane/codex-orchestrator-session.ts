@@ -389,7 +389,7 @@ async function sendToCodexOrchestratorAttempt(
   try {
     // A 'propose' turn gets the operator-stripped (read-only proposer) config —
     // Collide's dispatch lockout.
-    const prepared = prepareCodexHome(session.repoPath, options.toolProfile ?? 'full', model);
+    const prepared = prepareCodexHome(session.repoPath, options.toolProfile ?? 'full', model, session.historyThreadId);
     codexHome = prepared.codexHome;
     model = prepared.model;
     if (prepared.note) {

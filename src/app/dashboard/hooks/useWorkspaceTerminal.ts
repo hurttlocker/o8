@@ -30,7 +30,7 @@ import {
 import type {
   OrchestratorLaneSnapshot, OrchestratorPacket, WorkerLaunchContext, WorkspaceLaneState,
 } from '@/lib/orchestrator/types';
-import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
+import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
 import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
 import { queueOutsideWorkerSplit } from '@/lib/orchestrator/outside-worker-split';
 import { registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
@@ -63,6 +63,7 @@ import {
   type DispatchedWorkerLane,
 } from './dispatched-worker-lane';
 import { useOutsideWorkerLaunchBridge } from './useOutsideWorkerLaunchBridge';
+import { openWorkerFromMutation } from './workspace-worker-mutation';
 import { waitForWorkspaceTerminalHandle } from './workspace-terminal-readiness';
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
@@ -751,25 +752,7 @@ export function useWorkspaceTerminal({
 
   const realtimeDispatchCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onRealtimeEvent: (event: RealtimeEventEnvelope) => {
-      if (event.channel !== 'mutation') return;
-      if (event.event !== 'mutation.record' && event.event !== 'mutation.settled') return;
-      const mutation = (event.data as { mutation?: RealtimeMutationRecord }).mutation;
-      if (!mutation || mutation.action !== 'packet-dispatch' || mutation.status === 'failed') return;
-      if (!mutation.sessionKey || !mutation.repoPath) return;
-
-      const mutationRuntime = dispatchedWorkerRuntime(mutation.runtime);
-      void openWorkspaceTabForLane({
-        laneId: mutation.laneId ?? null,
-        packetId: mutation.packetId ?? null,
-        packetReferenceLabel: mutation.packetReferenceLabel ?? null,
-        packetTitle: mutation.packetTitle ?? null,
-        sessionKey: mutation.sessionKey,
-        runtime: mutationRuntime,
-        repoPath: mutation.repoPath,
-        status: 'launching',
-        branch: mutation.branch ?? null,
-        launchContext: mutation.launchContext ?? null,
-      });
+      if (!openWorkerFromMutation(event, openWorkspaceTabForLane)) return;
       void refreshWorkspaceLifecycle();
       void loadOrchestratorMissionState();
     },
@@ -780,7 +763,7 @@ export function useWorkspaceTerminal({
   }), [openWorkspaceTabForLane, refreshWorkspaceLifecycle]);
 
   useSharedDesktopWs(undefined, realtimeDispatchCallbacks);
-  useOutsideWorkerLaunchBridge(openWorkspaceTabForLane);
+  useOutsideWorkerLaunchBridge(openWorkspaceTabForLane, workspaceScopeEntries.map((entry) => entry.localPath));
   useEffect(() => {
     async function pollLanes() {
       try {

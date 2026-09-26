@@ -61,6 +61,7 @@ const CORTEX_READONLY_TOOLS = new Set<string>([
   'cortex_list_prs',
   'cortex_list_projects',
   'cortex_ci_status',
+  'cortex_shared_team_status',
 ]);
 
 /**

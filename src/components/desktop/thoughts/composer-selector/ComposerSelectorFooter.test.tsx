@@ -482,13 +482,13 @@ describe('ComposerSelectorFooter', () => {
       .toEqual({ 'o8-free': 'high' });
   });
 
-  it('cycles all four modes with Shift+Tab and keeps textarea focus', async () => {
+  it('cycles all five modes with Shift+Tab and keeps textarea focus', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const textarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
     textarea.focus();
-    for (const label of ['Multitask', 'MoA', 'Fusion', 'Solo']) {
+    for (const label of ['Multitask', 'Fast', 'MoA', 'Fusion', 'Solo']) {
       await act(async () => {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, shiftKey: true, bubbles: true, cancelable: true }));
       });

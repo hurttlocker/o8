@@ -28,6 +28,10 @@ A disposable packet exposed a review-evidence mismatch: process instructions wer
 
 The repository-scoped Handoffs pane, split-transcript peer events, visible codenames, and bounded conversation protocol merged in source. An installed two-agent run still has to prove the whole interaction. [#2690](https://github.com/hurttlocker/o8/issues/2690)
 
+An opt-in shared-checkout worker mode is in development. The orchestrator owns one checkout and group review while named workers use separate file scopes in that checkout. A local two-worker runtime proof passed; native placement, reload, compact-window layout, and review of a real combined edit are still required before release. [#2772](https://github.com/hurttlocker/o8/issues/2772)
+
+An outside agent chat can be readable through discovery without becoming the orchestrator chat in an o8 workspace. A read-only exact-session view comes first; linked worker placement and a writable handoff need parent identity and active-writer proof. [#2775](https://github.com/hurttlocker/o8/issues/2775)
+
 Linux and Windows maintainer-VM validation is paused; the install-to-merge proof remains outstanding. Do not start that work from this queue. [#1672](https://github.com/hurttlocker/o8/issues/1672), [#2204](https://github.com/hurttlocker/o8/issues/2204)
 
 ## What we need to prove
