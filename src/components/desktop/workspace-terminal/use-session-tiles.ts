@@ -26,6 +26,7 @@ import {
   hasAnyAuxLeaf,
   replaceLeafWithThread,
   reconcileSessionTileParticipants,
+  rebalanceAutomaticSessionTiles,
   resizeSessionSplit,
   serializeSessionTileLayout,
   splitChatWithSession,
@@ -54,7 +55,7 @@ function readStoredSessionTileLayout(tabId: string): SessionTileLayout {
   if (typeof window === 'undefined') return createDefaultSessionTileLayout();
   try {
     const raw = window.localStorage.getItem(sessionTileStorageKey(tabId));
-    return deserializeSessionTileLayout(raw) ?? createDefaultSessionTileLayout();
+    return rebalanceAutomaticSessionTiles(deserializeSessionTileLayout(raw) ?? createDefaultSessionTileLayout());
   } catch {
     return createDefaultSessionTileLayout();
   }
@@ -175,6 +176,10 @@ export function useSessionTiles({
   const [layout, setLayout] = useState<SessionTileLayout>(
     () => readStoredSessionTileLayout(tabId),
   );
+  useEffect(() => {
+    const handle = window.setTimeout(() => setLayout((current) => rebalanceAutomaticSessionTiles(current)), 0);
+    return () => window.clearTimeout(handle);
+  }, [tabId]);
   const [focusedLeafIdentity, setFocusedLeafIdentity] = useState<string | null>(null);
   const [pillContextMenu, setPillContextMenu] = useState<{
     request: SessionPillContextMenuRequest;

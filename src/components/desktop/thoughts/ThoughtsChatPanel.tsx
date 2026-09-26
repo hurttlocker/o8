@@ -2223,7 +2223,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           // At narrow widths the floating rail shares the empty-state row.
           // Reserve its footprint so the prompt cannot paint beneath it.
           paddingRight: composeFirstRailClearance
-            ? `clamp(0px, calc(1000px - 100cqw), ${composeFirstRailClearance}px)`
+            ? `clamp(0px, calc(1000px - 100cqw), var(--o8-compose-first-rail-clearance, ${composeFirstRailClearance}px))`
             : 0,
           boxSizing: 'border-box',
         }}
@@ -2282,12 +2282,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // Its rail clearance is applied only while the transcript is empty.
         style={{
           flexShrink: 0,
-          width: composeFirstRailClearance ? `calc(100% - ${composeFirstRailClearance}px)` : '100%',
+          width: composeFirstRailClearance ? `calc(100% - var(--o8-compose-first-rail-clearance, ${composeFirstRailClearance}px))` : '100%',
           maxWidth: composeFirst ? 900 : undefined,
           // Center inside the available canvas on wide windows. On narrow
           // windows keep the right edge clear of the floating capsule.
           marginRight: composeFirstRailClearance
-            ? `max(${composeFirstRailClearance}px, calc((100cqw - 900px) / 2))`
+            ? `max(var(--o8-compose-first-rail-clearance, ${composeFirstRailClearance}px), calc((100cqw - 900px) / 2))`
             : 'auto',
           marginLeft: 'auto',
           // Keep position in layout so resizing reflows without overlap.

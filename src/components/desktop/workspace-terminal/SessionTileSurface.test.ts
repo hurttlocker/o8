@@ -58,6 +58,32 @@ describe('SessionTileSurface manual split geometry', () => {
     host.remove();
   });
 
+  it.each([5, 8])('keeps all %i outside workers in resizable transcript panes', async (workerCount) => {
+    const keys = Array.from({ length: workerCount }, (_, index) => `automatic:${index + 1}`);
+    const layout = keys.reduce(
+      (current, key) => addSessionToLayout(current, key),
+      createDefaultSessionTileLayout(),
+    );
+
+    await act(async () => {
+      root.render(createElement(SessionTileSurface, {
+        layout,
+        focusedSessionKey: keys[0]!,
+        chatSlot: createElement('div', { 'data-chat-slot': true }),
+        onResizeSplit: vi.fn(),
+        onCloseLeaf: vi.fn(),
+        onFocusSession: vi.fn(),
+      }));
+    });
+
+    const panes = Array.from(host.querySelectorAll<HTMLElement>('[data-manual-transcript]'));
+    expect(new Set(panes.map((pane) => pane.dataset.manualTranscript))).toEqual(new Set(keys));
+    expect(host.querySelectorAll('[data-live-session-mesh-region]')).toHaveLength(0);
+    expect(host.querySelectorAll('[data-session-resize-handle]')).toHaveLength(workerCount);
+    expect(host.querySelectorAll('[data-chat-slot]')).toHaveLength(1);
+    expect(host.querySelector<HTMLElement>('[data-chat-slot]')?.parentElement?.style.getPropertyValue('--o8-compose-first-rail-clearance')).toBe('0px');
+  });
+
   it('mounts explicit session splits as independent panes with authored ratio and resize handle', async () => {
     let layout = addSessionToLayout(createDefaultSessionTileLayout(), 'automatic:one');
     const first = collectSessionLeaves(layout.root)[0];

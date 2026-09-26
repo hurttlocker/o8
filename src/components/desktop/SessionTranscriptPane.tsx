@@ -45,6 +45,14 @@ export function SessionTranscriptPane({
   const handleClose = useCallback((key: string) => {
     onClose?.(key);
   }, [onClose]);
+  const handleOpenReview = useCallback(() => {
+    if (!packet?.lane?.laneId) return;
+    data?.onOpenO8Panel?.({
+      tab: 'review',
+      reviewLaneId: packet.lane.laneId,
+      repoPath: packet.lane.repoPath ?? null,
+    });
+  }, [data, packet]);
 
   return (
     <AgentTilePane
@@ -54,6 +62,7 @@ export function SessionTranscriptPane({
       focused={focused}
       onClose={handleClose}
       onFocus={handleFocus}
+      onOpenReview={packet?.lane?.laneId && data?.onOpenO8Panel ? handleOpenReview : undefined}
     />
   );
 }

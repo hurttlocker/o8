@@ -58,6 +58,9 @@ export interface SessionTileSplit {
   direction: SessionTileSplitDirection;
   ratio: number;
   children: [SessionTileNode, SessionTileNode];
+  /** Automatic worker grid may reflow as agents arrive until a divider is moved. */
+  autoGrid?: boolean;
+  manualOverride?: boolean;
 }
 
 export type SessionTileNode = SessionTileLeaf | SessionTileSplit;
@@ -391,7 +394,9 @@ export function closeSessionLeaf(
   }
 
   const result = walk(layout.root);
-  return result.closed ? { ...layout, root: result.next } : layout;
+  return result.closed
+    ? rebalanceAutomaticSessionTiles({ ...layout, root: result.next }, true)
+    : layout;
 }
 
 /**
@@ -429,7 +434,13 @@ export function resizeSessionSplit(
     if (next0 === node.children[0] && next1 === node.children[1]) return node;
     return { ...node, children: [next0, next1] };
   }
-  return { ...layout, root: walk(layout.root) };
+  const root = walk(layout.root);
+  return {
+    ...layout,
+    root: root.type === 'split' && isAutomaticWorkerRoot(root)
+      ? { ...root, manualOverride: true }
+      : root,
+  };
 }
 
 export function clearSessionTiles(layout: SessionTileLayout): SessionTileLayout {
@@ -453,15 +464,15 @@ export function hasAnyAuxLeaf(layout: SessionTileLayout): boolean {
 /**
  * Add a session to the layout following the outside-worker claim rules:
  * - First session splits the chat leaf vertically.
- * - Later sessions split the existing automatic worker leaf with the largest
- *   computed area (stable reading-order tie-break: first leaf wins ties).
+ * - Later sessions enter the automatic worker region; four or more untouched
+ *   workers reflow into balanced rows beside a full-height chat column.
  * - Explicitly authored session panes remain boundaries; the first automatic
  *   worker starts a separate subtree beside chat when only manual panes exist.
  * - Direction follows the selected leaf: vertical when it is at least as wide
  *   as it is tall, horizontal otherwise.
  * - Duplicate session keys and requests that would exceed MAX_VISIBLE_SESSIONS
  *   are no-ops.
- * - Preserves existing split ratios.
+ * - Preserves operator-resized split ratios instead of reflowing that tree.
  *
  * viewport defaults to { width: 1, height: 1 } so callers without a DOM rect
  * (e.g. the outside-worker claim loop) get sensible default area weights.
@@ -500,7 +511,86 @@ export function addSessionToLayout(
   const direction: SessionTileSplitDirection = bestRect && bestRect.width < bestRect.height
     ? 'horizontal'
     : 'vertical';
-  return splitSessionWithSession(layout, targetLeaf.id, sessionKey, direction, 0.5, 'mesh');
+  return rebalanceAutomaticSessionTiles(
+    splitSessionWithSession(layout, targetLeaf.id, sessionKey, direction, 0.5, 'mesh'),
+    true,
+  );
+}
+
+function isAutomaticWorkerRoot(root: SessionTileNode): root is SessionTileSplit {
+  return root.type === 'split'
+    && root.direction === 'vertical'
+    && root.children[0].type === 'leaf'
+    && root.children[0].kind === 'chat'
+    && collectSessionLeaves(root).length > 0
+    && collectAllLeaves(root).every((leaf) => leaf.kind === 'chat' || (leaf.kind === 'session' && leaf.sessionSurface === 'mesh'));
+}
+
+function equalSplit(nodes: SessionTileNode[], direction: SessionTileSplitDirection): SessionTileNode {
+  if (nodes.length === 1) return nodes[0]!;
+  const leftCount = Math.floor(nodes.length / 2);
+  return {
+    type: 'split',
+    id: makeId('split'),
+    direction,
+    ratio: leftCount / nodes.length,
+    children: [
+      equalSplit(nodes.slice(0, leftCount), direction),
+      equalSplit(nodes.slice(leftCount), direction),
+    ],
+  };
+}
+
+function automaticChatRatio(count: number): number {
+  if (count <= 1) return 0.5;
+  if (count <= 3) return 0.4;
+  if (count <= 4) return 0.38;
+  if (count <= 6) return 0.32;
+  if (count <= 8) return 0.28;
+  return 0.24;
+}
+
+/** The chat owns one full-height column; worker rows divide the remaining width. */
+export function rebalanceAutomaticSessionTiles(
+  layout: SessionTileLayout,
+  force = false,
+): SessionTileLayout {
+  const root = layout.root;
+  if (!isAutomaticWorkerRoot(root) || root.manualOverride) return layout;
+  const workers = collectSessionLeaves(root)
+    .map((leaf, index) => ({ leaf, index }))
+    .sort((left, right) => (left.leaf.arrivalOrder ?? left.index) - (right.leaf.arrivalOrder ?? right.index))
+    .map(({ leaf }) => leaf);
+  if (workers.length < 4 && !root.autoGrid) return layout;
+  if (!force && root.autoGrid) return layout;
+  if (!root.autoGrid && collectAllSplits(root).some((split) => split.ratio !== 0.5)) return layout;
+
+  const columnCount = workers.length <= 4 ? 2 : workers.length <= 8 ? 3 : 4;
+  const rowCount = Math.ceil(workers.length / columnCount);
+  const rowBase = Math.floor(workers.length / rowCount);
+  const rowExtra = workers.length % rowCount;
+  let offset = 0;
+  const rows = Array.from({ length: rowCount }, (_, rowIndex) => {
+    const size = rowBase + (rowIndex < rowExtra ? 1 : 0);
+    const row = equalSplit(workers.slice(offset, offset + size), 'vertical');
+    offset += size;
+    return row;
+  });
+  return {
+    ...layout,
+    root: {
+      ...root,
+      ratio: automaticChatRatio(workers.length),
+      autoGrid: true,
+      children: [root.children[0], equalSplit(rows, 'horizontal')],
+    },
+  };
+}
+
+function collectAllSplits(node: SessionTileNode): SessionTileSplit[] {
+  return node.type === 'split'
+    ? [node, ...collectAllSplits(node.children[0]), ...collectAllSplits(node.children[1])]
+    : [];
 }
 
 // --- Persistence ---
@@ -558,12 +648,16 @@ function isPlainSessionNode(value: unknown): value is SessionTileNode {
     direction?: unknown;
     ratio?: unknown;
     children?: unknown;
+    autoGrid?: unknown;
+    manualOverride?: unknown;
   };
   if (v.type === 'leaf') return isPlainSessionLeaf(value);
   if (v.type !== 'split') return false;
   return typeof v.id === 'string'
     && (v.direction === 'horizontal' || v.direction === 'vertical')
     && typeof v.ratio === 'number'
+    && (v.autoGrid === undefined || typeof v.autoGrid === 'boolean')
+    && (v.manualOverride === undefined || typeof v.manualOverride === 'boolean')
     && Array.isArray(v.children)
     && v.children.length === 2
     && isPlainSessionNode(v.children[0])
