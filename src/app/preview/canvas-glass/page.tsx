@@ -253,7 +253,7 @@ const LISSE_PANEL_SURFACE = {
 const HOME_AGENTS: { id: string; label: string; command: string }[] = [
   { id: 'claude', label: 'Claude', command: 'claude' },
   { id: 'codex', label: 'Codex', command: 'codex' },
-  { id: 'gemini', label: 'Gemini', command: 'gemini' },
+  { id: 'gemini', label: 'Gemini CLI', command: 'gemini' },
 ];
 
 export default function CanvasGlassPreviewPage() {

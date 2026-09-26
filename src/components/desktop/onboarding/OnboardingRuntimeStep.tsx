@@ -100,7 +100,7 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
           These power your assistant and agent sessions. No extra API keys needed.
         </div>
         <div style={{ fontSize: 12, color: 'var(--t-text-faint)', lineHeight: 1.5 }}>
-          A <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>runtime</span> is the AI that writes the code — Codex, Claude, or Gemini. o8 uses whichever you have installed.
+          A <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>runtime</span> is the CLI that writes the code — Codex, Claude Code, Antigravity, or Gemini CLI. o8 uses whichever you have installed.
         </div>
       </div>
 
@@ -149,7 +149,7 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
           </div>
         ) : runtimes.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-            No agent runtimes detected. Install Claude Code, Codex, or Gemini to get started, or add API keys in Settings.
+            No agent runtimes detected. Install Codex, Claude Code, or Antigravity CLI to get started, or add API keys in Settings.
           </div>
         ) : (
           runtimes.map((rt) => <RuntimeRow key={rt.id} runtime={rt} />)

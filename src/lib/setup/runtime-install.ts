@@ -38,7 +38,13 @@ export const RUNTIME_INSTALL_INFO: Record<string, RuntimeInstallInfo> = {
     id: 'gemini',
     label: 'Gemini CLI',
     command: 'npm i -g @google/gemini-cli',
-    hint: "Install Google's Gemini CLI to dispatch packets.",
+    hint: 'Gemini CLI remains available for enterprise and paid API access. For free or AI Pro/Ultra use Antigravity CLI.',
+  },
+  antigravity: {
+    id: 'antigravity',
+    label: 'Antigravity CLI',
+    link: 'https://antigravity.google/docs/getting-started?tab=cli',
+    hint: 'Install Google Antigravity CLI (agy) for free or AI Pro/Ultra agent sessions.',
   },
   opencode: {
     id: 'opencode',

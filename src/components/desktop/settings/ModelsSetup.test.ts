@@ -57,7 +57,8 @@ describe('model setup navigation', () => {
     expect(container.querySelector('[data-settings-section="Advanced orchestrator options"]')?.closest('details')?.open).toBe(false);
     expect(tools?.open).toBe(false);
     expect(tools?.querySelector('summary')?.textContent).toContain('Ready: Antigravity');
-    expect(tools?.textContent).toContain('Standalone Gemini CLI; separate from Antigravity');
+    expect(tools?.textContent).toContain('Legacy Gemini CLI (gemini) for enterprise or paid API access');
+    expect(tools?.textContent).toContain('Google Antigravity CLI (agy) for free and AI Pro/Ultra accounts');
     expect(tools?.textContent).toContain('GitHub Copilot CLI');
     expect(tools?.textContent).toContain('Not checked');
     const review = [...container.querySelectorAll('span')].find(element => element.textContent === 'Code review provider');

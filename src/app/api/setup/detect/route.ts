@@ -289,7 +289,9 @@ function detectGemini(deadlineAt?: number): DetectedTool {
     name: 'Gemini CLI',
     detected,
     ready: detected ? authPresent : undefined,
-    authHint: detected && !authPresent ? 'run: gemini (or set GEMINI_API_KEY)' : undefined,
+    authHint: detected && !authPresent
+      ? 'Gemini CLI requires enterprise sign-in or a paid API key. For free or AI Pro/Ultra, use Antigravity CLI (agy).'
+      : undefined,
     version,
     path,
     details: { authPresent },

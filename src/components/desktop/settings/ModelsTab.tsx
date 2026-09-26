@@ -29,6 +29,7 @@ import { ModelRoutingControls } from './ModelRoutingControls';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { SettingsAdvanced } from './SettingsAdvanced';
 import { AgentRoleRoutingSection } from './AgentRoleRoutingSection';
+import { CliUpdatePrompt } from './CliUpdatePrompt';
 
 // ── Runtime detection (real, via /api/setup/detect) ──
 
@@ -73,12 +74,12 @@ function CpuIcon() {
 const RUNTIME_BLURB: Record<string, string> = {
   codex: 'Codex connection and default worker effort',
   'claude-code': 'Claude Code connection and default worker effort',
-  antigravity: 'Google account connection for agent tasks',
+  antigravity: 'Google Antigravity CLI (agy) for free and AI Pro/Ultra accounts',
   '3code': 'Uses the providers and models configured in 3code',
   opencode: 'Uses the providers configured in OpenCode',
   cursor: 'Cursor account or API key connection',
   grok: 'Uses the model selected in Grok Build',
-  gemini: 'Standalone Gemini CLI; separate from Antigravity',
+  gemini: 'Legacy Gemini CLI (gemini) for enterprise or paid API access',
 };
 
 function DetectionPill({ tool, state }: { tool: DetectedTool | undefined; state: DetectState }) {
@@ -168,6 +169,8 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         title="models & providers"
         subtitle="Manage orchestrator and worker connections here. Choose their models in the workspace composer."
       />
+
+      <CliUpdatePrompt />
 
       {notice ? (
         <div style={{ marginBottom: 28, fontSize: 13, color: 'var(--t-text)', lineHeight: 1.55 }}>

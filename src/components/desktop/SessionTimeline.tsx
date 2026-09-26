@@ -92,7 +92,7 @@ function parseTimelineAgent(raw: string | undefined | null): ParsedTimelineAgent
     return { runtimeKind: 'claude', runtimeLabel: 'Claude Code', displayName: value.slice(3) || 'Claude Code' };
   }
   if (value === 'codex') return { runtimeKind: 'codex', runtimeLabel: 'Codex', displayName: 'Codex' };
-  if (value === 'gemini') return { runtimeKind: 'gemini', runtimeLabel: 'Gemini', displayName: 'Gemini' };
+  if (value === 'gemini') return { runtimeKind: 'gemini', runtimeLabel: 'Gemini CLI', displayName: 'Gemini CLI' };
   return { runtimeKind: null, runtimeLabel: null, displayName: value };
 }
 

@@ -23,7 +23,7 @@ import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/Wor
 import { useAgentPeerMessages } from '@/components/desktop/workspace-terminal/useAgentPeerMessages';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { agentDisplayLabel, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
+import { agentDisplayLabel, resolveDisplayRuntime, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import {
   ORCHESTRATOR_RUNTIME_IDS,
   getRuntimeCapability,
@@ -293,10 +293,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     name,
     packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
   ), [entries, name, packet?.id, packet?.issue?.body]);
-  const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
+  const runtime = packet
+    ? resolveDisplayRuntime(packet)
+    : inferRuntime(sessionKey, agent?.runtime);
   const runtimeModelLabel = runtimeModelDisplayLabel(
     runtime,
-    agent?.model ?? packet?.lane?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel,
+    packet?.lane?.model ?? agent?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel,
   );
   const statusEvidence = packet?.statusEvidence ?? agent?.statusEvidence;
   const status = useMemo(
