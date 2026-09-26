@@ -21,8 +21,8 @@ close an issue when its PR merges; keep that row here until it ships.
 | #2795 | Optional local operating-agreement loader | #2797 | Release inclusion |
 | #2794 | Agent setup with durable app acknowledgments | #2798 | Release inclusion |
 | #2796 | Permission checks, microphone test, restart recovery | #2800 | Spoken-input success; release inclusion |
-| #2801 | Consistent confirmations, recovery, and project context | Pending | Final native walkthrough and CI |
-| #2799 | Slow native debug restart | Pending | Measured improvement; production timing |
+| #2801 | Consistent confirmations, recovery, and project context | #2802 | Final native walkthrough and CI |
+| #2799 | Slow native debug restart | #2803 | Idle/release timings; final restart acceptance |
 
 ## Final acceptance
 
@@ -40,9 +40,11 @@ close an issue when its PR merges; keep that row here until it ships.
 
 - Continuity: 19 focused tests pass; TypeScript passes; touched lint has no errors.
 - Runtime persistence integration: 3 tests pass.
-- Setup-saved confirmation and keyboard activation verified in the isolated preview at 1024 × 700.
+- Setup-saved confirmation, retained project identity, explicit privacy choices, and keyboard handoff verified in the isolated preview at 1024 × 700.
 - Native picker opens; automated selection is blocked by macOS focus delivery. This is not a completed selection check.
-- Native workspace shows the selected project and waits for the first message.
+- Native workspace shows the selected project and waits for the first message at 1024 × 700.
+- Optimized debug build: window created at 17.5s; dashboard connection at 20.6s under concurrent load. Production timing remains unmeasured.
+- Continuity stack CI: https://github.com/hurttlocker/o8/actions/runs/36265555314 (in progress).
 
 ## Deferred
 
