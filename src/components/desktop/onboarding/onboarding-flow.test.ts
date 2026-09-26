@@ -23,7 +23,7 @@ it('starts with projects and a quiet runtime recommendation without changing set
   const request = vi.fn(createOnboardingPreviewRequest());
   const { container } = await render(request);
   expect(container.textContent).toContain('Open a project');
-  expect(container.textContent).toContain('Using Codex');
+  expect(container.textContent).toContain('Suggested lead: Codex');
   expect(button('Open Sample project')).toBeDefined();
   expect(container.querySelector('textarea')).toBeNull();
   expect(container.querySelector('nav[aria-label="Setup progress"]')).toBeNull();
@@ -60,15 +60,38 @@ it('opens the chosen project after explicit privacy choices, without a tour or t
 it('resumes privacy with the selected project and retries a failed workspace handoff', async () => {
   localStorage.setItem(PROGRESS_KEY, JSON.stringify({ ...emptyProgress('privacy'), project: PREVIEW_PROJECT }));
   const complete = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-  await render(createOnboardingPreviewRequest(), complete);
+  const request = vi.fn(createOnboardingPreviewRequest());
+  await render(request, complete);
   await click('Keep crash reports off');
   await click('Share product usage');
   await click('Save both choices');
   expect(document.body.textContent).toContain('Could not open the workspace');
+  expect(document.body.textContent).toContain('Privacy choices saved');
+  expect(document.body.textContent).toContain('Setting up Sample project');
   expect(localStorage.getItem(PROGRESS_KEY)).not.toBeNull();
-  await click('Save both choices');
+  await click('Continue');
   expect(complete).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST' && JSON.parse(String(init.body)).telemetryConsentAnswered === true)).toHaveLength(1);
   expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
+});
+
+it('confirms tool choices only after a successful save and keeps failures retryable', async () => {
+  const fixture = createOnboardingPreviewRequest(localStorage);
+  let fail = true;
+  const request: OnboardingRequest = async (url, init) => {
+    if (String(url).includes('operator-defaults') && init?.method === 'POST' && fail) return Response.json({ error: 'Could not save setup' }, { status: 503 });
+    return fixture(url, init);
+  };
+  await render(request);
+  await click('Change');
+  await click('Use this setup');
+  expect(document.body.textContent).toContain('Could not save setup');
+  expect(document.body.textContent).not.toContain('Setup saved');
+  fail = false;
+  await click('Use this setup');
+  expect(document.body.textContent).toContain('Setup saved');
+  expect(document.body.textContent).toContain('Open a project.');
+  expect(JSON.parse(localStorage.getItem('settings')!)).toHaveProperty('orchestratorBackend', 'codex');
 });
 
 it('routes a project to tool setup when no runtime is usable', async () => {

@@ -106,6 +106,7 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
         >
           {title}
         </h1>
+        {kind === 'orchestrator' && !homeMode ? <div title={repoPath ?? undefined} style={{ marginTop: 10, fontSize: 11, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-muted)', textAlign: 'center', overflowWrap: 'anywhere' }}>Working in {repoPath?.split(/[\\/]/).filter(Boolean).slice(-2).join('/')}. Your first message starts the work.</div> : null}
         {kind === 'orchestrator' ? <details style={{ marginTop: 16, width: '100%', maxWidth: 420, fontSize: 12, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>
           <summary style={{ minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--t-text-muted)' }}>How work happens</summary>
           <div style={{ paddingTop: 8, paddingRight: 16, paddingBottom: 12, paddingLeft: 16, border: '1px solid var(--t-divider)', borderRadius: 10 }}>
