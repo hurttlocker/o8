@@ -52,13 +52,12 @@ import { ORCHESTRATOR_HOME_REPO_SENTINEL, resolveOrchestratorClientRepoPath } fr
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
 import { SessionTileSurface, projectLiveSessionMeshParticipants } from './SessionTileSurface';
+import { WorkerSplitPreview } from './WorkerSplitPreview';
 import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
 import type { OrchestratorTurnInjection } from './types';
 import { useOrchestratorTurnInjection } from './use-orchestrator-turn-injection';
-// Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
-// row. The old layout component is no longer imported here.
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -1174,6 +1173,7 @@ function OrchestratorTabInner({
             layout={sessionTiles.layout}
             onDrop={handleThreadDrop}
           />
+          {process.env.NODE_ENV === 'development' ? <WorkerSplitPreview /> : null}
         </div>
         {/* Branch-details rail moved INSIDE the panel (transcriptSideRail) so
             it sits beside the transcript, not the composer — see branchRail. */}

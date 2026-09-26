@@ -19,6 +19,7 @@ import {
   collectAllLeaves,
   computeSessionTileLayout,
   type SessionTileLayout,
+  type SessionTileLeaf,
   type SessionTileRect,
   type SessionTileSplitDirection,
   type SessionTileSplitFrame,
@@ -33,6 +34,8 @@ interface SessionTileSurfaceProps {
   onResizeSplit: (splitId: string, ratio: number) => void;
   onCloseLeaf: (leafId: string) => void;
   onFocusSession: (sessionKey: string) => void;
+  /** Development previews can exercise the real split geometry without launching agents. */
+  renderSessionPane?: (leaf: SessionTileLeaf) => ReactNode;
 }
 
 const HANDLE_SIZE = 8;
@@ -46,6 +49,7 @@ export function SessionTileSurface({
   onResizeSplit,
   onCloseLeaf,
   onFocusSession,
+  renderSessionPane,
 }: SessionTileSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Track listeners so we can remove them on unmount-during-drag (issue #818).
@@ -249,12 +253,14 @@ export function SessionTileSurface({
                   paddingLeft: 8,
                 }}
               >
-                <SessionTranscriptPane
-                  sessionKey={leaf.sessionKey}
-                  focused={focusedSessionKey === leaf.sessionKey}
-                  onFocus={onFocusSession}
-                  onClose={() => onCloseLeaf(leaf.id)}
-                />
+                {renderSessionPane ? renderSessionPane(leaf) : (
+                  <SessionTranscriptPane
+                    sessionKey={leaf.sessionKey}
+                    focused={focusedSessionKey === leaf.sessionKey}
+                    onFocus={onFocusSession}
+                    onClose={() => onCloseLeaf(leaf.id)}
+                  />
+                )}
               </div>
             ) : null}
           </div>
