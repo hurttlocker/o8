@@ -17,6 +17,7 @@ const ONBOARDING_STEPS: Array<{ value: OnboardingStep; label: string }> = [
   { value: 'repos', label: 'GitHub' },
   { value: 'dispatch', label: 'Tools' },
   { value: 'privacy', label: 'Privacy' },
+  { value: 'permissions', label: 'Voice & permissions' },
 ];
 
 const CONSENT_STATES: Array<{ value: ConsentPreviewState; label: string }> = [

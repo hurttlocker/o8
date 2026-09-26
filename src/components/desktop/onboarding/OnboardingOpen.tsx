@@ -19,11 +19,11 @@ function ProjectRow({ project, disabled, onOpen }: { project: OnboardingProject;
   </button>;
 }
 
-export function OnboardingOpen({ projects, loading, busy, status, tools, error, onRetry, onOpenFolder, onOpenProject, onClone, onExplore }: {
+export function OnboardingOpen({ projects, loading, busy, status, tools, error, onRetry, onOpenFolder, onOpenProject, onClone, onExplore, onPermissions }: {
   projects: OnboardingProject[]; loading: boolean; busy: boolean; status: string;
   tools: ReactNode; error: string | null; onRetry: () => void;
   onOpenFolder: () => void; onOpenProject: (project: OnboardingProject) => void;
-  onClone: () => void; onExplore: () => void;
+  onClone: () => void; onExplore: () => void; onPermissions: () => void;
 }) {
   return <section aria-labelledby="onboarding-project-title" style={{ width: '100%', maxWidth: 520, display: 'flex', flexDirection: 'column' }}>
     <span aria-label="o8" style={{ fontSize: 28, fontWeight: 400, letterSpacing: '-2px', lineHeight: 1, marginBottom: 36 }}>o8<span aria-hidden style={{ color: 'var(--t-brand-orange)' }}>.</span></span>
@@ -43,6 +43,7 @@ export function OnboardingOpen({ projects, loading, busy, status, tools, error, 
       <div style={{ maxHeight: 200, overflowY: 'auto' }}>{projects.map((project) => <ProjectRow key={project.id} project={project} disabled={busy} onOpen={() => onOpenProject(project)} />)}</div>
     </section> : null}
     <div style={{ borderTop: '1px solid var(--t-divider)', marginTop: 28, paddingTop: 12 }}>{tools}</div>
+    <button type="button" disabled={busy} onClick={onPermissions} style={{ ...onboardingQuietButtonStyle, alignSelf: 'flex-start', marginTop: 8, paddingLeft: 0, fontSize: 12 }}>Check voice &amp; permissions</button>
     <button type="button" disabled={busy} onClick={onExplore} style={{ ...onboardingQuietButtonStyle, alignSelf: 'flex-start', marginTop: 12, paddingLeft: 0, color: 'var(--t-text-muted)', fontSize: 12 }}>Start without a project</button>
   </section>;
 }
