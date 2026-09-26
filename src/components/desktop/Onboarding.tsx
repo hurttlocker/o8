@@ -187,7 +187,22 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   </div>;
   const renderButton = ({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) => <button type="button" onClick={onClick} disabled={disabled} style={{ ...onboardingButtonStyle, background: 'var(--t-text)', color: 'var(--t-onboarding-bg)', opacity: disabled ? 0.5 : 1 }}>{label}</button>;
   const home = progress.step === 'open';
-  return <div data-o8-onboarding="" style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-onboarding-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
+  return <div data-o8-onboarding="" role="dialog" aria-modal="true" aria-label="Set up o8" onKeyDown={(event) => {
+    // Portaled dialogs own their keyboard navigation while they are open.
+    if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'))
+      .filter((element) => element.tabIndex >= 0 && !element.matches(':disabled') && !element.closest('[hidden], [inert]')
+        && getComputedStyle(element).display !== 'none' && getComputedStyle(element).visibility !== 'hidden');
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }} style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-onboarding-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
     <div data-tauri-drag-region="" style={{ height: 52, flexShrink: 0 }} />
     <div ref={contentRef} role="region" aria-label="Setup content" tabIndex={0} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 24, paddingBottom: 24, paddingLeft: 32, paddingRight: 32 }}>
       <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center', gap: 20 }}>

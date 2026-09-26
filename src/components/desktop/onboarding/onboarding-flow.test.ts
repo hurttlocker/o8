@@ -31,6 +31,26 @@ it('starts with projects and a quiet runtime recommendation without changing set
   expect(request.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
+it('wraps keyboard focus inside setup instead of entering the obscured workspace', async () => {
+  await render();
+  const overlay = document.querySelector<HTMLElement>('[data-o8-onboarding]')!;
+  const first = overlay.querySelector<HTMLElement>('[tabindex="0"]')!;
+  const last = button('Privacy');
+  const tab = (shiftKey = false) => {
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
+    document.activeElement!.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  first.focus();
+  expect(tab(true)).toBe(true);
+  expect(document.activeElement).toBe(last);
+  expect(tab()).toBe(true);
+  expect(document.activeElement).toBe(first);
+  button('Open a folder').focus();
+  expect(tab()).toBe(false);
+  expect(overlay.getAttribute('aria-modal')).toBe('true');
+});
+
 it('uses an opaque overlay and visible button ink even when workspace glass is transparent', async () => {
   const { container } = await render();
   expect((container.firstElementChild as HTMLElement).style.background).toBe('var(--t-onboarding-bg)');
