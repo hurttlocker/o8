@@ -20,17 +20,21 @@ close an issue when its PR merges; keep that row here until it ships.
 | #2784 | Native folder picker and manual fallback | #2793 | Release inclusion |
 | #2795 | Optional local operating-agreement loader | #2797 | Release inclusion |
 | #2794 | Agent setup with durable app acknowledgments | #2798 | Release inclusion |
-| #2796 | Permission checks, microphone test, restart recovery | #2800 | Spoken-input success; release inclusion |
+| #2796 | Permission checks, microphone test, restart recovery | #2800 | Release inclusion |
 | #2801 | Consistent confirmations, recovery, and project context | #2802 | Release inclusion |
 | #2799 | Slow native debug restart | #2803 | Release inclusion |
 | #2804 | Align dialog packages for native bundling | #2805 | Release inclusion |
 | #2806 | Keep keyboard focus inside onboarding | #2807 | Release inclusion |
+| #2808 | Visible microphone-test button | #2809 | Release inclusion |
 
 ## Final acceptance
+
+The agreed non-media local acceptance scope is complete. Release inclusion remains gated below.
 
 - [x] Existing runtime, model, worker, and privacy choices remain preserved.
 - [x] No task or provider request is submitted automatically.
 - [x] Permission grants and detected audio are distinct results.
+- [x] Real microphone input reaches the successful audio-check state.
 - [x] Native restart restores onboarding and rechecks access.
 - [x] Agent-requested project opening reaches the actual workspace.
 - [x] Native folder selection reaches that same workspace.
@@ -47,12 +51,12 @@ close an issue when its PR merges; keep that row here until it ships.
 - Native picker acceptance passes: selected the fixture folder through the macOS dialog, confirmed Open, then verified onboarding closed into that project workspace with no task submitted.
 - Native workspace shows the selected project and waits for the first message at 1024 × 700.
 - Keyboard acceptance found focus escaping into the obscured workspace through Tab navigation and late composer focus after startup. Both regressions fail before #2806 and all 16 flow tests pass afterward. Native Shift-Tab and Tab wrap within setup at 1024 × 700; a separate Help dialog can still own focus.
-- Final keyboard stack: hermetic suite passes with 5,111 tests passed and 4 skipped; TypeScript, touched ESLint, rule-check, and roadmap checks pass.
+- Final keyboard stack and subsequent microphone-button polish: hermetic suite passes with 5,111 tests passed and 4 skipped; TypeScript, touched ESLint, rule-check, and roadmap checks pass.
 - Final keyboard code CI (`515031de0`): https://github.com/hurttlocker/o8/actions/runs/36269653069. Later ledger-only commits do not change the tested application.
 - Local production candidate at `325038fb9`: real WKWebView boot and idle footprint gates pass. Clean-profile window appears at 3.962s, server ready at 7.978s. Restart window appears at 5.150s, server ready at 8.293s; permissions page restored, four permissions rechecked, resume marker consumed. These are startup milestones, not measured time to first interaction. No fatal WebView errors. The artifact is local, ad-hoc signed, and not notarized or published.
 - Idle sample: 15 seconds after cooldown, approximately 945 MB physical memory across the app process tree, 2.33% CPU, zero process churn. Loaded-worker footprint was not requested.
 - Final packaged UI at `515031de0`: production build and signature verification pass; initial and post-restart focus stay inside onboarding. Restart restores permissions and consumes the resume marker. At 1024 × 700, keyboard navigation reaches the microphone test and scrolls the return button fully into view. Launch milestones: window 4.044s, server 7.789s; restart: window 4.951s, server 8.160s.
-- Real microphone-input success remains unverified: permission checks pass, but the optional local audio check reported silence. It did not report a false success. A spoken-input check remains before closing #2796.
+- Real microphone input passes: the operator completed the live check and its "We can hear you" success state was observed in the native app. Earlier silence correctly produced no success. The test and stop actions now use the established outlined button with a 44-pixel target; native layout verified at 1024 × 700.
 - Optimized debug launch: window at 17.5s; dashboard connection at 20.6s under concurrent load. Restart-and-return: window at 38.2s; dashboard at 43.4s; permissions page restored, all four statuses rechecked, resume marker consumed. Production timings are recorded above.
 - Continuity stack CI: https://github.com/hurttlocker/o8/actions/runs/36265555314. All gates passed, including build. Hermetic suite: 5,109 passed, 4 skipped.
 - Debug-profile stack CI: https://github.com/hurttlocker/o8/actions/runs/36265768866. All gates passed; subsequent changes only record these receipts.
