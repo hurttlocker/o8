@@ -53,6 +53,7 @@ import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
 import { SessionTileSurface, projectLiveSessionMeshParticipants } from './SessionTileSurface';
 import { WorkerSplitPreview } from './WorkerSplitPreview';
+const SessionSurface = process.env.NODE_ENV === 'development' ? WorkerSplitPreview : SessionTileSurface;
 import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
@@ -1157,7 +1158,7 @@ function OrchestratorTabInner({
               auto-restore pass that could adopt whatever thread was touched
               seconds ago (hit live 2026-07-15 when closing a dragged-in
               thread pane). A single-leaf surface renders the same visual. */}
-          <SessionTileSurface
+          <SessionSurface
             layout={sessionTiles.layout}
             focusedSessionKey={sessionTiles.focusedSessionKey}
             chatSlot={thoughtsChatPanel}
@@ -1173,7 +1174,6 @@ function OrchestratorTabInner({
             layout={sessionTiles.layout}
             onDrop={handleThreadDrop}
           />
-          {process.env.NODE_ENV === 'development' ? <WorkerSplitPreview /> : null}
         </div>
         {/* Branch-details rail moved INSIDE the panel (transcriptSideRail) so
             it sits beside the transcript, not the composer — see branchRail. */}

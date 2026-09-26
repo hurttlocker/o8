@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type ComponentProps, type CSSProperties } from 'react';
 import {
   addSessionToLayout,
   closeSessionLeaf,
@@ -117,7 +117,7 @@ function MockWorkerPane({
 }
 
 /** Dev-only visual stress test. Its session keys never enter persistence or the agent registry. */
-export function WorkerSplitPreview() {
+export function WorkerSplitPreview(live: ComponentProps<typeof SessionTileSurface>) {
   const [request, setRequest] = useState({ count: 0, generation: 0 });
   const [layout, setLayout] = useState<SessionTileLayout>(createDefaultSessionTileLayout);
   const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
@@ -152,26 +152,29 @@ export function WorkerSplitPreview() {
   ), [focusedSessionKey]);
 
   return (
-    <>
+    <div data-worker-split-preview={active ? 'true' : undefined} style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
       {active ? (
-        <div data-worker-split-preview="true" style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
-          <div style={{ height: 40, minHeight: 40, display: 'flex', alignItems: 'center', gap: 7, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-border)', color: 'var(--t-text-secondary)', fontSize: 11 }}>
-            <span style={{ marginRight: 'auto' }}>Layout preview · {collectSessionLeaves(layout.root).length}/{request.count} simulated workers</span>
-            <button type="button" onClick={() => selectCount(4)} style={buttonStyle}>Spawn 4</button>
-            <button type="button" onClick={() => selectCount(10)} style={buttonStyle}>Spawn 10</button>
-            <button type="button" onClick={() => selectCount(0)} style={buttonStyle}>Live</button>
-          </div>
-          <SessionTileSurface
-            layout={layout}
-            focusedSessionKey={focusedSessionKey}
-            chatSlot={<div style={{ flex: 1, minHeight: 0, paddingTop: 22, paddingRight: 22, paddingBottom: 22, paddingLeft: 22, background: 'var(--t-chat-surface-bg, var(--t-panel))', color: 'var(--t-text-secondary)' }}><div style={{ color: 'var(--t-text)', fontSize: 13, marginBottom: 8 }}>Orchestrator · layout preview</div><div style={{ fontSize: 12, lineHeight: 1.5 }}>Drag the dividers, resize the native window, or switch between four and ten workers. All workers here are simulated.</div></div>}
-            onResizeSplit={(splitId, ratio) => setLayout((current) => resizeSessionSplit(current, splitId, ratio))}
-            onCloseLeaf={(leafId) => setLayout((current) => closeSessionLeaf(current, leafId))}
-            onFocusSession={setFocusedSessionKey}
-            renderSessionPane={renderSessionPane}
-          />
+        <div style={{ height: 40, minHeight: 40, display: 'flex', alignItems: 'center', gap: 7, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-border)', color: 'var(--t-text-secondary)', fontSize: 11 }}>
+          <span style={{ marginRight: 'auto' }}>Layout preview · {collectSessionLeaves(layout.root).length}/{request.count} simulated workers</span>
+          <button type="button" onClick={() => selectCount(4)} style={buttonStyle}>Spawn 4</button>
+          <button type="button" onClick={() => selectCount(10)} style={buttonStyle}>Spawn 10</button>
+          <button type="button" onClick={() => selectCount(0)} style={buttonStyle}>Live</button>
         </div>
-      ) : (
+      ) : null}
+      <SessionTileSurface
+        {...live}
+        layout={active ? layout : live.layout}
+        focusedSessionKey={active ? focusedSessionKey : live.focusedSessionKey}
+        onResizeSplit={active
+          ? (splitId, ratio) => setLayout((current) => resizeSessionSplit(current, splitId, ratio))
+          : live.onResizeSplit}
+        onCloseLeaf={active
+          ? (leafId) => setLayout((current) => closeSessionLeaf(current, leafId))
+          : live.onCloseLeaf}
+        onFocusSession={active ? setFocusedSessionKey : live.onFocusSession}
+        renderSessionPane={active ? renderSessionPane : live.renderSessionPane}
+      />
+      {!active ? (
         <button
           type="button"
           data-worker-split-preview-launch="true"
@@ -180,7 +183,7 @@ export function WorkerSplitPreview() {
         >
           Preview 4 / 10 workers
         </button>
-      )}
-    </>
+      ) : null}
+    </div>
   );
 }

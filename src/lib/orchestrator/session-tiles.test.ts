@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addSessionToLayout,
+  collectAllLeaves,
   collectSessionKeys,
   collectSessionKeysByArrival,
   collectSessionLeaves,
@@ -84,7 +85,7 @@ describe('addSessionToLayout', () => {
     );
   });
 
-  it('balances four workers across equal-area leaves', () => {
+  it('keeps chat full-height and balances four workers in the remaining width', () => {
     const layout = addSessions(['s:1', 's:2', 's:3', 's:4']);
     const { leafRects } = computeSessionTileLayout(layout.root);
     const areas = collectSessionLeaves(layout.root).map((leaf) => {
@@ -93,8 +94,33 @@ describe('addSessionToLayout', () => {
     });
 
     expect(areas).toHaveLength(4);
-    for (const area of areas) expect(area).toBeCloseTo(0.125);
+    for (const area of areas) expect(area).toBeCloseTo((1 - 0.38) / 4);
+    const chat = collectAllLeaves(layout.root).find((leaf) => leaf.kind === 'chat')!;
+    expect(leafRects.get(chat.id)).toMatchObject({ left: 0, top: 0, width: 0.38, height: 1 });
     expect(countChatLeaves(layout.root)).toBe(1);
+  });
+
+  it('gives ten workers balanced rows beside a thinner full-height chat', () => {
+    const layout = addSessions(Array.from({ length: 10 }, (_, index) => `s:${index + 1}`));
+    const { leafRects } = computeSessionTileLayout(layout.root);
+    const chat = collectAllLeaves(layout.root).find((leaf) => leaf.kind === 'chat')!;
+    const workerRects = collectSessionLeaves(layout.root).map((leaf) => leafRects.get(leaf.id)!);
+
+    expect(leafRects.get(chat.id)).toMatchObject({ left: 0, top: 0, width: 0.24, height: 1 });
+    expect(workerRects).toHaveLength(10);
+    expect(Math.min(...workerRects.map((rect) => rect.width))).toBeGreaterThanOrEqual(0.19);
+    for (const rect of workerRects) expect(rect.height).toBeCloseTo(1 / 3);
+  });
+
+  it('keeps an operator-resized chat width when an eleventh worker arrives', () => {
+    let layout = addSessions(Array.from({ length: 10 }, (_, index) => `s:${index + 1}`));
+    expect(layout.root.type).toBe('split');
+    if (layout.root.type !== 'split') return;
+    layout = resizeSessionSplit(layout, layout.root.id, 0.35);
+    layout = addSessionToLayout(layout, 's:11');
+
+    expect(layout.root).toMatchObject({ type: 'split', ratio: 0.35, manualOverride: true });
+    expect(collectSessionLeaves(layout.root)).toHaveLength(11);
   });
 
   it('keeps one through four workers as full transcript splits', () => {

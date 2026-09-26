@@ -210,7 +210,8 @@ export function SessionTileSurface({
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                }}
+                  '--o8-compose-first-rail-clearance': leaves.some((entry) => entry.kind === 'session') ? '0px' : undefined,
+                } as CSSProperties}
               >
                 {chatSlot}
               </div>

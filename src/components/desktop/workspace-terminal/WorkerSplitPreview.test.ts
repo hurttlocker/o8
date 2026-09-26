@@ -3,6 +3,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDefaultSessionTileLayout } from '@/lib/orchestrator/session-tiles';
 import { WorkerSplitPreview } from './WorkerSplitPreview';
 
 vi.mock('@/components/desktop/SessionTranscriptPane', () => ({
@@ -36,9 +37,19 @@ describe('native worker split preview', () => {
   });
 
   it('spawns four or ten simulated panes and returns to live data without touching a transcript', async () => {
-    await act(async () => root.render(createElement(WorkerSplitPreview)));
+    await act(async () => root.render(createElement(WorkerSplitPreview, {
+      layout: createDefaultSessionTileLayout(),
+      focusedSessionKey: null,
+      chatSlot: createElement('div', { 'data-real-chat': true }, 'Real orchestrator chat'),
+      onResizeSplit: vi.fn(),
+      onCloseLeaf: vi.fn(),
+      onFocusSession: vi.fn(),
+    })));
+    const chat = host.querySelector('[data-real-chat]');
     await act(async () => host.querySelector<HTMLButtonElement>('[data-worker-split-preview-launch]')!.click());
     await act(async () => vi.advanceTimersByTime(4 * 180));
+    expect(host.querySelectorAll('[data-real-chat]')).toHaveLength(1);
+    expect(host.querySelector('[data-real-chat]')).toBe(chat);
     expect(host.querySelectorAll('[data-preview-worker]')).toHaveLength(4);
     expect(host.querySelectorAll('[data-session-resize-handle]')).toHaveLength(4);
 
@@ -46,6 +57,7 @@ describe('native worker split preview', () => {
     await act(async () => vi.advanceTimersByTime(10 * 180));
     expect(host.querySelectorAll('[data-preview-worker]')).toHaveLength(10);
     expect(host.querySelectorAll('[data-session-resize-handle]')).toHaveLength(10);
+    expect(host.querySelector('[data-real-chat]')).toBe(chat);
 
     await act(async () => host.querySelector<HTMLButtonElement>('[data-worker-split-preview] button:nth-of-type(3)')!.click());
     expect(host.querySelector('[data-worker-split-preview]')).toBeNull();

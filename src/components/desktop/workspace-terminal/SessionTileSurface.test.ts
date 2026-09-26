@@ -81,6 +81,7 @@ describe('SessionTileSurface manual split geometry', () => {
     expect(host.querySelectorAll('[data-live-session-mesh-region]')).toHaveLength(0);
     expect(host.querySelectorAll('[data-session-resize-handle]')).toHaveLength(workerCount);
     expect(host.querySelectorAll('[data-chat-slot]')).toHaveLength(1);
+    expect(host.querySelector<HTMLElement>('[data-chat-slot]')?.parentElement?.style.getPropertyValue('--o8-compose-first-rail-clearance')).toBe('0px');
   });
 
   it('mounts explicit session splits as independent panes with authored ratio and resize handle', async () => {
