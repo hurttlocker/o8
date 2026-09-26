@@ -11,7 +11,7 @@
  * component state across split/resize/close changes.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { ConnectedLiveSessionMesh, projectLiveSessionMeshParticipants } from '@/components/desktop/workspace-terminal/LiveSessionMesh';
+import { projectLiveSessionMeshParticipants } from '@/components/desktop/workspace-terminal/LiveSessionMesh';
 import { SessionTranscriptPane } from '@/components/desktop/SessionTranscriptPane';
 export { projectLiveSessionMeshParticipants };
 import { ThreadChatPane } from '@/components/desktop/workspace-terminal/ThreadChatPane';
@@ -23,7 +23,6 @@ import {
   type SessionTileSplitDirection,
   type SessionTileSplitFrame,
 } from '@/lib/orchestrator/session-tiles';
-import { collectSessionTileMeshGroups } from '@/lib/orchestrator/session-tile-mesh';
 
 interface SessionTileSurfaceProps {
   layout: SessionTileLayout;
@@ -70,37 +69,10 @@ export function SessionTileSurface({
     };
   }, []);
 
-  const { leaves, leafRects, splitFrames, meshFrames, meshedLeafIds } = useMemo(() => {
+  const { leaves, leafRects, splitFrames } = useMemo(() => {
     const { leafRects, splitFrames } = computeSessionTileLayout(layout.root);
     const leaves = collectAllLeaves(layout.root);
-    const meshGroups = collectSessionTileMeshGroups(layout.root);
-    const meshedLeafIds = new Set(meshGroups.flatMap((group) => (
-      group.leaves.map((leaf) => leaf.id)
-    )));
-    const meshFrames = meshGroups.flatMap((group) => {
-      const rects = group.leaves
-        .map((leaf) => leafRects.get(leaf.id))
-        .filter((rect): rect is SessionTileRect => Boolean(rect));
-      if (rects.length === 0) return [];
-      const left = Math.min(...rects.map((rect) => rect.left));
-      const top = Math.min(...rects.map((rect) => rect.top));
-      const right = Math.max(...rects.map((rect) => rect.left + rect.width));
-      const bottom = Math.max(...rects.map((rect) => rect.top + rect.height));
-      return [{
-        ...group,
-        rect: { left, top, width: right - left, height: bottom - top },
-      }];
-    });
-    const internalMeshSplitIds = new Set(
-      meshGroups.flatMap((group) => group.internalSplitIds),
-    );
-    return {
-      leaves,
-      leafRects,
-      splitFrames: splitFrames.filter((frame) => !internalMeshSplitIds.has(frame.id)),
-      meshFrames,
-      meshedLeafIds,
-    };
+    return { leaves, leafRects, splitFrames };
   }, [layout.root]);
 
   // FLIP morph (motion audit 003): the percentage rect stays the resting
@@ -155,13 +127,6 @@ export function SessionTileSurface({
     };
   }, [leafRects]);
 
-  useEffect(() => {
-    const meshed = new Set(meshFrames.flatMap((mesh) => (
-      mesh.leaves.map((leaf) => leaf.id)
-    )));
-    for (const leafId of meshed) leafNodesRef.current.delete(leafId);
-  }, [meshFrames]);
-
   const makeResizeStart = useCallback(
     (splitId: string, direction: SessionTileSplitDirection, container: SessionTileRect) =>
       (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -209,7 +174,7 @@ export function SessionTileSurface({
         background: 'var(--t-chat-surface-bg, #ffffff)',
       }}
     >
-      {leaves.filter((leaf) => !meshedLeafIds.has(leaf.id)).map((leaf) => {
+      {leaves.map((leaf) => {
         const rect = leafRects.get(leaf.id);
         if (!rect) return null;
         return (
@@ -295,30 +260,6 @@ export function SessionTileSurface({
           </div>
         );
       })}
-      {meshFrames.map((mesh) => (
-        <div
-          key={`mesh-${mesh.id}`}
-          data-live-session-mesh-region={mesh.id}
-          style={{
-            position: 'absolute',
-            left: `${mesh.rect.left * 100}%`,
-            top: `${mesh.rect.top * 100}%`,
-            width: `${mesh.rect.width * 100}%`,
-            height: `${mesh.rect.height * 100}%`,
-            minWidth: 0,
-            minHeight: 0,
-            display: 'flex',
-            overflow: 'hidden',
-          }}
-        >
-          <ConnectedLiveSessionMesh
-            leaves={mesh.leaves}
-            focusedSessionKey={focusedSessionKey}
-            onFocusSession={onFocusSession}
-            onCloseLeaf={onCloseLeaf}
-          />
-        </div>
-      ))}
       {splitFrames.map((frame) => (
         <SessionResizeHandle
           key={frame.id}
