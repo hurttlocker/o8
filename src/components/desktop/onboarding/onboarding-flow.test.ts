@@ -31,6 +31,16 @@ it('starts with projects and a quiet runtime recommendation without changing set
   expect(request.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
+it('uses an opaque overlay and visible button ink even when workspace glass is transparent', async () => {
+  const { container } = await render();
+  expect((container.firstElementChild as HTMLElement).style.background).toBe('var(--t-onboarding-bg)');
+  expect(button('Open a folder').style.color).toBe('var(--t-onboarding-bg)');
+  const { PALETTES } = await import('@/lib/theme/registry');
+  for (const palette of PALETTES) {
+    expect(palette.baseTokens['--t-onboarding-bg']).toMatch(/^#[0-9a-f]{6}$/i);
+  }
+});
+
 it('opens the chosen project after explicit privacy choices, without a tour or task draft', async () => {
   const request = vi.fn(createOnboardingPreviewRequest());
   const { complete } = await render(request);

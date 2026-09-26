@@ -30,7 +30,7 @@ export function OnboardingOpen({ projects, loading, busy, status, tools, error, 
     <h1 id="onboarding-project-title" style={{ margin: 0, fontSize: 'clamp(30px, 4vw, 40px)', fontWeight: 300, letterSpacing: '-1.2px', lineHeight: 1.15 }}>Open a project.</h1>
     <p style={{ marginTop: 14, marginBottom: 28, fontSize: 14, fontWeight: 300, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>Use your coding tools in one workspace.</p>
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-      <button type="button" disabled={busy} onClick={onOpenFolder} style={{ ...onboardingButtonStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 12, background: 'var(--t-text)', color: 'var(--t-chat-surface-bg)', borderColor: 'transparent', paddingLeft: 22, paddingRight: 22, opacity: busy ? 0.6 : 1 }}>
+      <button type="button" disabled={busy} onClick={onOpenFolder} style={{ ...onboardingButtonStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 12, background: 'var(--t-text)', color: 'var(--t-onboarding-bg)', borderColor: 'transparent', paddingLeft: 22, paddingRight: 22, opacity: busy ? 0.6 : 1 }}>
         <svg aria-hidden width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></svg>
         Open a folder
       </button>
