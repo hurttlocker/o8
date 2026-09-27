@@ -245,32 +245,30 @@ export async function computeRestoredTabs(
     const now = Date.now();
     const tabKind = savedTab.kind ?? 'terminal';
 
-    // Orchestrator tabs restore ONLY when they carry a recoverable chat-history
-    // thread — either the thread id IS the tab id (history-opened tabs use a
-    // `thoughts-…` id) or a separate `orchestratorThreadId` was persisted for a
-    // spawned tab. This reopens each orchestrator conversation on its own tab
-    // instead of collapsing every tab onto the global last-active thread.
+    // Orchestrator tabs restore when they carry a recoverable chat-history
+    // thread or an explicit fresh-chat choice. History-opened tabs use a
+    // `thoughts-…` id; spawned tabs persist `orchestratorThreadId` once bound.
     //
-    // Tabs with NO recoverable thread are dropped here (the migration effect in
-    // useWorkspaceTerminalController injects a single fresh Orchestrator). That
-    // preserves the original #708 / #714 guarantees: a stale/empty orchestrator
-    // entry — or a #714 zombie whose `kind` was mutated to `terminal` but whose
-    // `orchestrator-` id remains — has no thread id, so it can never resurrect
-    // as a duplicate tab or leak the "Orchestrator" label onto a terminal.
+    // Unmarked threadless tabs are dropped so the controller can inject one
+    // boot default. Explicit fresh tabs keep their identity and must not adopt
+    // the selected repo's older conversation after reload. The #714 mutated-
+    // kind zombie is stripped by sanitizePersistedTabState above.
     if (tabKind === 'orchestrator' || (savedTab.id ?? '').startsWith('orchestrator-')) {
       const recoveredThreadId = (savedTab.id ?? '').startsWith('thoughts-')
         ? savedTab.id
         : (savedTab.orchestratorThreadId ?? null);
-      if (!recoveredThreadId) continue;
+      if (!recoveredThreadId && savedTab.freshSpawn !== true) continue;
       // Archived threads are off the active surfaces — their persisted tab must
       // not resurrect on reload. Only drop ids positively confirmed archived; a
       // null set (fetch failed/disabled) leaves every tab intact.
-      if (archivedOrchestratorThreadIds?.has(recoveredThreadId)) continue;
+      if (recoveredThreadId && archivedOrchestratorThreadIds?.has(recoveredThreadId)) continue;
       // One orchestrator tab per thread — a second persisted tab pointing at the
       // same conversation is a duplicate; drop it so reload can't resurrect the
       // two-copies-of-one-thread bug.
-      if (seenOrchestratorThreads.has(recoveredThreadId)) continue;
-      seenOrchestratorThreads.add(recoveredThreadId);
+      if (recoveredThreadId) {
+        if (seenOrchestratorThreads.has(recoveredThreadId)) continue;
+        seenOrchestratorThreads.add(recoveredThreadId);
+      }
       const tabId = claimWorkspaceTabId('orchestrator', seenTabIds, savedTab.id);
       restoredTabs.push({
         id: tabId,
@@ -282,7 +280,8 @@ export async function computeRestoredTabs(
         singleRuntime: savedTab.singleRuntime,
         chatModelId: savedTab.chatModelId,
         chatOpenrouterModel: savedTab.chatOpenrouterModel,
-        orchestratorThreadId: recoveredThreadId,
+        orchestratorThreadId: recoveredThreadId ?? undefined,
+        freshSpawn: savedTab.freshSpawn === true ? true : undefined,
         outsideWorkerHost: savedTab.outsideWorkerHost,
         createdAt: now,
         lastActivity: now,

@@ -60,6 +60,8 @@ export interface PersistedTab {
    * collapsing every orchestrator tab onto the global last-active thread.
    */
   orchestratorThreadId?: string;
+  /** An explicitly started unsent orchestrator tab must stay fresh after reload. */
+  freshSpawn?: boolean;
   /** Transient host for externally-dispatched worker transcripts. */
   outsideWorkerHost?: boolean;
   linkedIssue?: {

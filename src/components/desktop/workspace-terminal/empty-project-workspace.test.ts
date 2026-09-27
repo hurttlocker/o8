@@ -40,8 +40,9 @@ function Terminal({ id }: { id: string }) {
   const c = useWorkspaceTerminalController({ ...terminalProps, stateScope: id, splitCreated: true, defaultTab: 'terminal' }, null);
   return createElement('output', { 'data-terminal': id }, c.tabs.map((tab) => tab.tmuxSession).join(','));
 }
+let bootRepo = '/repo/original';
 function Workspace() {
-  const [repo, setRepo] = useState('/repo/original');
+  const [repo, setRepo] = useState(bootRepo);
   const [layout, setLayout] = useState(initialLayout);
   const onRepoScopeChange = useCallback((path: string | null) => {
     if (!path) return;
@@ -61,8 +62,9 @@ function Workspace() {
   );
 }
 
-it('keeps an unsent chat and both live terminal panes when selecting a repo with older history', async () => {
+it('keeps an explicitly selected unsent chat and its terminal panes across reload', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  bootRepo = '/repo/original';
   localStorage.clear();
   localStorage.setItem('o8:last-orchestrator-thread-id::/repo/selected', 'thoughts-older-chat');
   const saved = new Map<string, PersistedTabState>();
@@ -78,7 +80,7 @@ it('keeps an unsent chat and both live terminal panes when selecting a repo with
     return Response.json({ conversations: [], paths: [] });
   }));
   const host = document.createElement('div'); document.body.append(host);
-  const root = createRoot(host);
+  let root = createRoot(host);
   try {
     await act(async () => root.render(createElement(Workspace)));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
@@ -97,7 +99,20 @@ it('keeps an unsent chat and both live terminal panes when selecting a repo with
     expect(saved.get('tile-root')?.tabs.find((tab) => tab.id === originalId)?.repoPath).toBe('/repo/selected');
     const pages = JSON.parse(localStorage.getItem('o8:dashboard-page-layouts:v1') ?? '{}');
     expect(collectLeafNodes(JSON.parse(pages[originalId!]).root)).toHaveLength(3);
+    await act(async () => root.unmount());
+    bootRepo = '/repo/selected';
+    root = createRoot(host);
+    await act(async () => root.render(createElement(Workspace)));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1000)); });
+    expect(host.firstElementChild?.getAttribute('data-active-tab')).toBe(originalId);
+    expect(host.firstElementChild?.getAttribute('data-repo')).toBe('/repo/selected');
+    expect(h.load).not.toHaveBeenCalledWith('thoughts-older-chat');
+    expect(host.querySelector('[data-terminal="terminal-a"]')?.textContent).toBe('cortex-dash-terminal-a');
+    expect(host.querySelector('[data-terminal="terminal-b"]')?.textContent).toBe('cortex-dash-terminal-b');
+    expect(saved.get('tile-root')?.tabs.find((tab) => tab.id === originalId)?.freshSpawn).toBe(true);
+    const reloadedPages = JSON.parse(localStorage.getItem('o8:dashboard-page-layouts:v1') ?? '{}');
+    expect(collectLeafNodes(JSON.parse(reloadedPages[originalId!]).root)).toHaveLength(3);
   } finally {
-    await act(async () => root.unmount()); host.remove(); localStorage.clear(); vi.unstubAllGlobals();
+    await act(async () => root.unmount()); host.remove(); localStorage.clear(); vi.unstubAllGlobals(); bootRepo = '/repo/original';
   }
 });
