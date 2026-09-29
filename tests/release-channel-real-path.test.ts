@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -7,6 +7,7 @@ import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
+const speechBuildScript = join(process.cwd(), 'scripts/build-speech-local.mjs');
 const CPU_TYPE_X86_64 = 0x01000007;
 const CPU_TYPE_ARM64 = 0x0100000c;
 
@@ -42,18 +43,21 @@ function fixture(version = '0.1.741-preview.1') {
   mkdirSync(join(bundle, 'dmg'), { recursive: true });
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
   writeFileSync(join(bundle, 'dmg', `o8_${version}_universal.dmg`), 'fixture');
-  writeFileSync(join(bundle, 'macos', 'o8.app.tar.gz'), 'fixture');
   writeFileSync(join(bundle, 'macos', 'o8.app.tar.gz.sig'), 'fixture-signature');
   for (const name of ['o8', 'speech_recognizer', 'speech-local']) {
     const path = join(bundle, 'macos', 'o8.app', 'Contents', 'MacOS', name);
     mkdirSync(join(path, '..'), { recursive: true });
     writeFileSync(path, universalMachO());
   }
+  const archive = spawnSync('tar', ['czf', join(bundle, 'macos', 'o8.app.tar.gz'), '-C', join(bundle, 'macos'), 'o8.app']);
+  if (archive.status !== 0) throw new Error(`failed to create updater fixture: ${archive.stderr}`);
   const log = join(root, 'effects.jsonl');
   const prelude = `import { appendFileSync } from 'node:fs';
 const record = (name, args = []) => appendFileSync(process.env.O8_CHANNEL_TEST_LOG, JSON.stringify({name, args}) + '\\n');`;
   const childProcess = `${prelude}
-export function execFileSync(command, args = []) {
+const realChildProcess = process.getBuiltinModule('node:child_process');
+export function execFileSync(command, args = [], options = {}) {
+  if (command === 'tar') return realChildProcess.execFileSync(command, args, options);
   record(command, args);
   if (command === 'gh' && args[0] === 'release' && args[1] === 'view') {
     if (args.includes('--json')) return '2026-09-07T00:00:00Z';
@@ -170,6 +174,67 @@ describe('release channels through the publication entry point', () => {
     expect(effects(f).some(c => c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])))
       .toBe(false);
     expect(existsSync(join(f.bundle, 'macos', 'latest.json'))).toBe(false);
+  });
+
+  it('refuses publication when the separately staged updater archive is thin', () => {
+    const f = fixture('0.1.741');
+    const main = join(f.bundle, 'macos', 'o8.app', 'Contents', 'MacOS', 'o8');
+    writeFileSync(main, thinMachO(CPU_TYPE_X86_64));
+    const archive = spawnSync('tar', ['czf', join(f.bundle, 'macos', 'o8.app.tar.gz'), '-C', join(f.bundle, 'macos'), 'o8.app']);
+    if (archive.status !== 0) throw new Error(`failed to replace updater fixture: ${archive.stderr}`);
+    writeFileSync(main, universalMachO());
+
+    const result = run(f, 'stable');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('archived Contents/MacOS/o8 is missing required Mach-O architecture arm64');
+    expect(effects(f).some(c => c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])))
+      .toBe(false);
+  });
+
+  it('refuses publication when the separately staged updater archive is stale', () => {
+    const f = fixture('0.1.741');
+    writeFileSync(join(f.bundle, 'macos', 'o8.app', 'Contents', 'release-identity.txt'), 'new build');
+
+    const result = run(f, 'stable');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('updater archive contents do not match the inspected macOS app bundle');
+    expect(effects(f).some(c => c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])))
+      .toBe(false);
+  });
+
+  it('invalidates a stale universal speech helper when only the thin fallback succeeds', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-speech-fallback-')));
+    roots.push(root);
+    const scripts = join(root, 'scripts');
+    const helpers = join(root, 'src-tauri', 'helpers');
+    const armBuild = join(root, 'src-tauri', 'sidecars', 'speech-local', '.build', 'arm64-apple-macosx', 'release');
+    mkdirSync(scripts, { recursive: true });
+    mkdirSync(helpers, { recursive: true });
+    mkdirSync(armBuild, { recursive: true });
+    copyFileSync(speechBuildScript, join(scripts, 'build-speech-local.mjs'));
+    writeFileSync(join(helpers, 'speech-local'), 'old-generic');
+    writeFileSync(join(helpers, 'speech-local-aarch64-apple-darwin'), 'old-arm');
+    writeFileSync(join(helpers, 'speech-local-universal-apple-darwin'), 'old-universal');
+    writeFileSync(join(helpers, 'speech-local-x86_64-apple-darwin'), 'old-intel');
+    writeFileSync(join(armBuild, 'speech-local'), 'new-arm');
+    writeFileSync(join(root, 'loader.mjs'), `export async function load(url, context, nextLoad) {
+  if (url !== 'node:child_process') return nextLoad(url, context);
+  return { format: 'module', shortCircuit: true, source: \`export function execSync(command) {
+    if (command.includes('arm64 --arch x86_64')) throw new Error('forced universal failure');
+    return Buffer.from('');
+  }\` };
+}`);
+
+    const result = spawnSync(process.execPath, ['--experimental-loader', join(root, 'loader.mjs'), join(scripts, 'build-speech-local.mjs')], {
+      encoding: 'utf8',
+      env: { ...process.env, O8_TAURI_BUILD_TARGET: 'universal-apple-darwin' },
+    });
+
+    expect(result.status).toBe(1);
+    expect(readFileSync(join(helpers, 'speech-local'), 'utf8')).toBe('new-arm');
+    expect(readFileSync(join(helpers, 'speech-local-aarch64-apple-darwin'), 'utf8')).toBe('new-arm');
+    expect(readFileSync(join(helpers, 'speech-local-x86_64-apple-darwin'), 'utf8')).toBe('old-intel');
+    expect(existsSync(join(helpers, 'speech-local-universal-apple-darwin'))).toBe(false);
   });
 
   it.each([

@@ -2114,6 +2114,12 @@
       ]
     },
     {
+      "path": "tests/macos-release-artifacts.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/managed-cleanup-missing-directory-real-path.test.ts",
       "reasons": [
         "child-process",

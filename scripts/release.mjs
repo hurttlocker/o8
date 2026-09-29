@@ -31,7 +31,7 @@ import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
-import { resolveMacosReleaseArtifacts, verifyUniversalMacApp } from './lib/macos-release-artifacts.mjs';
+import { resolveMacosReleaseArtifacts, verifyUniversalMacUpdaterArchive } from './lib/macos-release-artifacts.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 
@@ -205,11 +205,11 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
 
 let darwinIdentity;
 try {
-  darwinIdentity = verifyUniversalMacApp(artifacts.app);
-  console.log('[release] universal macOS artifact gate passed', JSON.stringify(darwinIdentity));
+  darwinIdentity = verifyUniversalMacUpdaterArchive(artifacts.app, APP_TAR);
+  console.log('[release] universal macOS updater archive gate passed', JSON.stringify(darwinIdentity));
 } catch (error) {
   console.error(`[release] FATAL: ${error.message}`);
-  console.error('[release] Refusing to publish either Darwin updater entry without verified x86_64 + arm64 app and sidecar slices.');
+  console.error('[release] Refusing to publish either Darwin updater entry without an archive matching the verified x86_64 + arm64 app and sidecar slices.');
   process.exit(1);
 }
 

@@ -23,7 +23,11 @@ import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, sym
 import { join } from 'node:path';
 import { stapleAndValidate, submitForNotarization } from './lib/notarization.mjs';
 import { assertMacPackageSize } from './lib/mac-package-size.mjs';
-import { resolveMacosReleaseArtifacts, verifyUniversalMacApp } from './lib/macos-release-artifacts.mjs';
+import {
+  resolveMacosReleaseArtifacts,
+  verifyUniversalMacApp,
+  verifyUniversalMacUpdaterArchive,
+} from './lib/macos-release-artifacts.mjs';
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
 for (const key of REQUIRED) {
@@ -211,6 +215,8 @@ execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], {
   stdio: 'inherit',
   env: { ...process.env, COPYFILE_DISABLE: '1' },
 });
+
+console.log('[sign-and-notarize] verified updater archive', verifyUniversalMacUpdaterArchive(APP, TAR));
 
 // Recheck the final signed/stapled bytes before updater signing or DMG upload.
 console.log('[sign-and-notarize] final package size', assertMacPackageSize(APP, TAR));

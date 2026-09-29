@@ -1,6 +1,16 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const MACOS_RELEASE_TARGET = 'universal-apple-darwin';
 export const MACOS_RELEASE_ARCHITECTURES = Object.freeze(['x86_64', 'arm64']);
@@ -139,4 +149,88 @@ export function verifyUniversalMacApp(appPath) {
     architectures: [...MACOS_RELEASE_ARCHITECTURES],
     binaries,
   };
+}
+
+function bundleContentSha256(appPath) {
+  const digest = createHash('sha256');
+
+  function visit(path, relativePath) {
+    const stat = lstatSync(path);
+    const normalizedPath = relativePath.split(sep).join('/');
+    const mode = (stat.mode & 0o7777).toString(8);
+    if (stat.isDirectory()) {
+      digest.update(`directory\0${normalizedPath}\0${mode}\0`);
+      for (const name of readdirSync(path).sort()) visit(join(path, name), join(relativePath, name));
+      return;
+    }
+    if (stat.isFile()) {
+      digest.update(`file\0${normalizedPath}\0${mode}\0${stat.size}\0`);
+      digest.update(readFileSync(path));
+      digest.update('\0');
+      return;
+    }
+    if (stat.isSymbolicLink()) {
+      const target = readlinkSync(path);
+      const resolvedTarget = resolve(dirname(path), target);
+      const targetRelative = relative(appPath, resolvedTarget);
+      if (isAbsolute(target) || targetRelative === '..' || targetRelative.startsWith(`..${sep}`)) {
+        throw new Error(`${normalizedPath} has an unsafe symlink target outside o8.app`);
+      }
+      digest.update(`symlink\0${normalizedPath}\0${target}\0`);
+      return;
+    }
+    throw new Error(`${normalizedPath} has an unsupported filesystem entry type`);
+  }
+
+  visit(appPath, 'o8.app');
+  return digest.digest('hex');
+}
+
+function validateUpdaterArchiveMembers(archivePath) {
+  const listing = execFileSync('tar', ['tzf', archivePath], {
+    encoding: 'utf8',
+    maxBuffer: 128 * 1024 * 1024,
+  });
+  const members = listing.split('\n').filter(Boolean);
+  if (members.length === 0) throw new Error('updater archive is empty');
+  for (const member of members) {
+    const normalized = member.replace(/\/+$/, '');
+    const parts = normalized.split('/');
+    if (isAbsolute(member) || parts.includes('..') || parts.includes('.') || parts[0] !== 'o8.app') {
+      throw new Error(`updater archive contains unsafe member ${JSON.stringify(member)}`);
+    }
+  }
+}
+
+export function verifyUniversalMacUpdaterArchive(appPath, archivePath) {
+  if (!existsSync(archivePath)) throw new Error('macOS updater archive is missing');
+  verifyUniversalMacApp(appPath);
+  validateUpdaterArchiveMembers(archivePath);
+  const extractionRoot = mkdtempSync(join(tmpdir(), 'o8-updater-inspection-'));
+  try {
+    execFileSync('tar', ['xzf', archivePath, '-C', extractionRoot], { stdio: 'pipe' });
+    const entries = readdirSync(extractionRoot).sort();
+    if (entries.length !== 1 || entries[0] !== 'o8.app') {
+      throw new Error('updater archive must contain exactly one top-level o8.app bundle');
+    }
+    const archivedApp = join(extractionRoot, 'o8.app');
+    let archivedIdentity;
+    try {
+      archivedIdentity = verifyUniversalMacApp(archivedApp);
+    } catch (error) {
+      throw new Error(`archived ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const bundleSha256 = bundleContentSha256(appPath);
+    const archivedBundleSha256 = bundleContentSha256(archivedApp);
+    if (archivedBundleSha256 !== bundleSha256) {
+      throw new Error('updater archive contents do not match the inspected macOS app bundle');
+    }
+    return {
+      ...archivedIdentity,
+      bundleSha256,
+      updaterArchiveSha256: createHash('sha256').update(readFileSync(archivePath)).digest('hex'),
+    };
+  } finally {
+    rmSync(extractionRoot, { recursive: true, force: true });
+  }
 }

@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,6 +8,7 @@ import {
   readMachOArchitectures,
   resolveMacosReleaseArtifacts,
   verifyUniversalMacApp,
+  verifyUniversalMacUpdaterArchive,
 } from '../scripts/lib/macos-release-artifacts.mjs';
 
 const roots: string[] = [];
@@ -56,6 +58,12 @@ function appFixture() {
   return app;
 }
 
+function archiveFixture(app: string) {
+  const archive = join(dirname(app), 'o8.app.tar.gz');
+  execFileSync('tar', ['czf', archive, '-C', dirname(app), 'o8.app']);
+  return archive;
+}
+
 describe('stable macOS release artifact identity', () => {
   it('resolves the universal target without inferring architecture from an x64 filename', () => {
     expect(resolveMacosReleaseArtifacts('/repo', '0.1.999')).toEqual({
@@ -100,5 +108,37 @@ describe('stable macOS release artifact identity', () => {
     writeFileSync(join(app, 'Contents/MacOS/speech-local'), binary);
 
     expect(() => verifyUniversalMacApp(app)).toThrow('fat Mach-O slice CPU type mismatch');
+  });
+
+  it('binds the updater archive contents to the inspected universal app', () => {
+    const app = appFixture();
+    const archive = archiveFixture(app);
+
+    const identity = verifyUniversalMacUpdaterArchive(app, archive);
+
+    expect(identity.updaterArchiveSha256).toHaveLength(64);
+    expect(identity.bundleSha256).toHaveLength(64);
+    expect(identity.binaries.every((binary) => binary.architectures.length === 2)).toBe(true);
+  });
+
+  it('refuses a thin updater archive even when the loose app is universal', () => {
+    const app = appFixture();
+    writeFileSync(join(app, 'Contents/MacOS/o8'), thinMachO(CPU_TYPE_X86_64));
+    const archive = archiveFixture(app);
+    writeFileSync(join(app, 'Contents/MacOS/o8'), universalMachO());
+
+    expect(() => verifyUniversalMacUpdaterArchive(app, archive)).toThrow(
+      'archived Contents/MacOS/o8 is missing required Mach-O architecture arm64',
+    );
+  });
+
+  it('refuses a stale universal updater archive whose contents differ from the loose app', () => {
+    const app = appFixture();
+    const archive = archiveFixture(app);
+    writeFileSync(join(app, 'Contents', 'release-identity.txt'), 'new build');
+
+    expect(() => verifyUniversalMacUpdaterArchive(app, archive)).toThrow(
+      'updater archive contents do not match the inspected macOS app bundle',
+    );
   });
 });

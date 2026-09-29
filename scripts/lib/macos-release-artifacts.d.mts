@@ -18,8 +18,14 @@ export interface MacosUniversalArtifactIdentity {
     architectures: Array<'x86_64' | 'arm64'>;
     sha256: string;
   }>;
+  bundleSha256?: string;
+  updaterArchiveSha256?: string;
 }
 
 export function readMachOArchitectures(path: string): Array<'x86_64' | 'arm64'>;
 export function resolveMacosReleaseArtifacts(root: string, version: string): MacosReleaseArtifacts;
 export function verifyUniversalMacApp(appPath: string): MacosUniversalArtifactIdentity;
+export function verifyUniversalMacUpdaterArchive(
+  appPath: string,
+  archivePath: string,
+): MacosUniversalArtifactIdentity & { bundleSha256: string; updaterArchiveSha256: string };
