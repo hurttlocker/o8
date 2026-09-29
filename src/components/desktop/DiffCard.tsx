@@ -128,9 +128,16 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff, isStreaming,
   const canApply = !!onApplyDiff && !isStreaming && selectedHunkCount > 0;
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    const writeText = navigator.clipboard?.writeText;
+    if (typeof writeText !== 'function') {
+      return;
+    }
+    void writeText.call(navigator.clipboard, code).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      /* write rejected — keep Copy label for retry */
+    });
   }, [code]);
 
   const handleApply = useCallback(() => {
