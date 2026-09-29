@@ -84,6 +84,19 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     expect(solo).toContain('cortex_list_issues');
   });
 
+  it('lets the orchestrator use gh where the cortex GitHub tools stop (#2901)', () => {
+    const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: false });
+    const cortexServer = readFileSync(new URL('cortex-mcp-server.ts', MCP_DIR), 'utf8');
+
+    // cortex_list_issues returns no body and points at gh; nothing in cortex or operator writes issues.
+    expect(cortexServer).toContain('Use `gh issue view` for full text.');
+    expect(full).not.toMatch(/never use the gh CLI/i);
+    for (const command of ['gh issue view', 'gh issue create', 'gh issue comment']) {
+      expect(full, command).toContain(command);
+    }
+    expect(full).toContain('cortex_list_issues');
+  });
+
   it('names no MCP tool in a single-mode Codex prompt, which launches without MCP servers', () => {
     const single = buildCodexOrchestratorPrompt('/tmp/example-repo', 'work directly', {
       toolProfile: 'solo',

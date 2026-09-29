@@ -142,7 +142,7 @@ For HIGH-RISK diffs that touch live state, ledgers, data writes, or cross-repo/g
 - Prefer editing existing files over creating new ones. Follow the repo's existing patterns.
 - Run `npx tsc --noEmit` to verify TypeScript changes before reporting completion.
 <!-- o8:cortex-reads -->
-- ALWAYS use cortex_list_issues / cortex_list_prs / cortex_ci_status for GitHub data. NEVER use the gh CLI — it uses a personal token that hits rate limits. The MCP tools use a GitHub App with separate quota.
+- Use cortex_list_issues / cortex_list_prs / cortex_ci_status for issue lists, PR lists, and CI status. They run on the GitHub App's separate quota. Use the gh CLI only where those tools stop: `gh issue view` or `gh pr view` for a full body, `gh issue create` to file an issue, and `gh issue comment` to comment on one. gh uses the operator's personal token, so never use it for bulk listing or polling.
 - If cortex_list_issues returns stale data or stops at an old issue number, look up the specific issue by number before concluding it doesn't exist.
 
 ## CORTEX TOOLS (via MCP)
