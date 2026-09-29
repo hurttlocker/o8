@@ -3125,6 +3125,14 @@
       ]
     },
     {
+      "path": "tests/saved-ssh-machine-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/script-shell-neutral.test.ts",
       "reasons": [
         "terminal-tool"

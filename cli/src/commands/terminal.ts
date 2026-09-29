@@ -3,6 +3,7 @@ import WebSocket from 'ws';
 import { CliError, EXIT, resolveWsBase } from '../api.js';
 import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
+import { runRemoteTerminal } from './machine.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
 
@@ -297,6 +298,15 @@ function observe(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
 export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
   if (!['list', 'show', 'observe', 'control'].includes(sub ?? '')) {
     throw new CliError('invalid_args', 'Use `o8 terminal list|show <id>|observe <id>|control <id>`.', EXIT.INVALID_ARGS);
+  }
+  const machineAt = rest.indexOf('--machine');
+  if (machineAt >= 0) {
+    const key = rest[machineAt + 1];
+    if (!key || rest.lastIndexOf('--machine') !== machineAt) {
+      throw new CliError('invalid_args', 'Use exactly one `--machine <label-or-id>`.', EXIT.INVALID_ARGS);
+    }
+    const localRest = rest.filter((_, index) => index !== machineAt && index !== machineAt + 1);
+    return runRemoteTerminal(mode, sub!, localRest, key);
   }
   const cfg = operatorConfig();
   if (sub === 'list') {

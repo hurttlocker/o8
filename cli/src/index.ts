@@ -53,6 +53,7 @@ import { runStatus } from './commands/status.js';
 import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
 import { runTerminal } from './commands/terminal.js';
+import { runMachine } from './commands/machine.js';
 import { runServe } from './commands/serve.js';
 import { runVersion } from './commands/version.js';
 import { runWorkerLogin } from './commands/worker-login.js';
@@ -232,6 +233,9 @@ commands:
   terminal show <id> [--lines N]  bounded snapshot of an existing terminal
   terminal observe <id>  read-only live stream from an existing terminal
   terminal control <id>  exclusive input/output to an existing terminal; --human for interactive mode
+  terminal ... --machine <label-or-id>  run terminal commands on a saved SSH machine
+  machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
+  machine list|check|rename|disable|enable|remove  manage saved SSH machines
   serve                start the headless API, WebSocket layer, and supervisor daemon
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children
@@ -391,6 +395,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runRun(args.mode, args.rest);
     case 'terminal':
       return runTerminal(args.mode, secondary, args.rest);
+    case 'machine':
+      return runMachine(args.mode, secondary, args.rest);
     case 'serve':
       return runServe(args.mode, secondary, args.rest);
     case 'ask':

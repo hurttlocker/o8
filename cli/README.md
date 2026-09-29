@@ -74,6 +74,29 @@ Input is sent as terminal bytes, so a command needs a carriage return to run.
 Closing stdin or disconnecting releases the writer slot. The shell and its
 saved history remain available for later attachments.
 
+### Saved SSH machines
+
+Save a machine only after its remote o8 terminal host is already running:
+
+```sh
+o8 machine add workbox --label Build
+o8 machine list
+o8 machine check Build
+o8 terminal list --machine Build
+o8 terminal show <id> --machine Build
+o8 terminal control <id> --machine Build
+```
+
+`machine add` accepts `--port`, `--ssh-config /absolute/path`, and
+`--remote-cli /absolute/path/to/o8` when the remote executable is not on the
+non-interactive SSH path. Profiles contain the target and these paths, not keys
+or passwords. OpenSSH handles authentication and verifies the host key. The
+remote o8 installation uses its own local operator credential. A disabled,
+missing, or unreachable target fails without sending the command to Local.
+Use `o8 machine rename <id> --label <name>`, `disable`, `enable`, or `remove`
+to manage a profile. Remote `control` uses the JSON stream; interactive
+`--human` control and native workspace switching are not in this CLI slice.
+
 ## Exit codes
 
 | Code | Meaning |
