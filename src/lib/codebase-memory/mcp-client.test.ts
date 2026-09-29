@@ -38,15 +38,15 @@ describe('codebase-memory MCP transport', () => {
     expect([first.callCount, second.callCount]).toEqual([1, 2]);
   });
 
-  it('preserves the one-shot call adapter used by the indexer', async () => {
-    const result = await callCodebaseMemoryTool({
-      binPath: stubBin,
-      cwd: process.cwd(),
-      toolName: 'index_repo',
-      timeoutMs: 1000,
-    });
+  it('keeps fixture initialization outside the one-shot tool-call deadline', async () => {
+    const session = await withCodebaseMemoryToolSession(
+      { binPath: stubBin, cwd: process.cwd() },
+      (callTool) => callTool({ toolName: 'index_repo', timeoutMs: 1000 }),
+    );
 
-    expect(parsePayload(result)).toMatchObject({
+    expect(session.ok).toBe(true);
+    if (!session.ok) throw new Error(session.error);
+    expect(parsePayload(session.value)).toMatchObject({
       callCount: 1,
       toolName: 'index_repo',
     });
