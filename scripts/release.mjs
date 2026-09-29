@@ -31,7 +31,12 @@ import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
-import { resolveMacosReleaseArtifacts, verifyUniversalMacUpdaterArchive } from './lib/macos-release-artifacts.mjs';
+import {
+  resolveMacosReleaseArtifacts,
+  verifyMacosDmgMatchesApp,
+  verifyUniversalMacUpdaterArchive,
+} from './lib/macos-release-artifacts.mjs';
+import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 
@@ -210,6 +215,27 @@ try {
 } catch (error) {
   console.error(`[release] FATAL: ${error.message}`);
   console.error('[release] Refusing to publish either Darwin updater entry without an archive matching the verified x86_64 + arm64 app and sidecar slices.');
+  process.exit(1);
+}
+
+try {
+  const signatureIdentity = verifyUpdaterSignature(root, APP_TAR, APP_SIG);
+  if (signatureIdentity.artifactSha256 !== darwinIdentity.updaterArchiveSha256) {
+    throw new Error('verified updater signature identity does not match the inspected updater archive');
+  }
+  console.log('[release] updater signature gate passed', JSON.stringify(signatureIdentity));
+} catch (error) {
+  console.error(`[release] FATAL: ${error.message}`);
+  console.error('[release] Refusing to publish an updater archive without a valid signature from the configured updater key.');
+  process.exit(1);
+}
+
+try {
+  const dmgIdentity = verifyMacosDmgMatchesApp(artifacts.app, DMG, version);
+  console.log('[release] macOS installer identity gate passed', JSON.stringify(dmgIdentity));
+} catch (error) {
+  console.error(`[release] FATAL: ${error.message}`);
+  console.error('[release] Refusing to publish a DMG that does not contain the same signed, versioned universal app.');
   process.exit(1);
 }
 

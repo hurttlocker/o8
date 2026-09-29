@@ -2116,7 +2116,10 @@
     {
       "path": "tests/macos-release-artifacts.test.ts",
       "reasons": [
-        "child-process"
+        "apfs-tool",
+        "child-process",
+        "executable-fixture",
+        "native-build"
       ]
     },
     {
@@ -2832,8 +2835,10 @@
     {
       "path": "tests/release-channel-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "git-cli",
+        "native-build",
         "real-path"
       ]
     },

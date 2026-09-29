@@ -29,3 +29,12 @@ export function verifyUniversalMacUpdaterArchive(
   appPath: string,
   archivePath: string,
 ): MacosUniversalArtifactIdentity & { bundleSha256: string; updaterArchiveSha256: string };
+export function verifyMacosDmgMatchesApp(
+  appPath: string,
+  dmgPath: string,
+  version: string,
+): MacosUniversalArtifactIdentity & {
+  bundleVersion: string;
+  bundleSha256: string;
+  dmgSha256: string;
+};

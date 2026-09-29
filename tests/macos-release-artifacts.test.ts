@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -7,6 +15,7 @@ import {
   MACOS_RELEASE_ARCHITECTURES,
   readMachOArchitectures,
   resolveMacosReleaseArtifacts,
+  verifyMacosDmgMatchesApp,
   verifyUniversalMacApp,
   verifyUniversalMacUpdaterArchive,
 } from '../scripts/lib/macos-release-artifacts.mjs';
@@ -62,6 +71,29 @@ function archiveFixture(app: string) {
   const archive = join(dirname(app), 'o8.app.tar.gz');
   execFileSync('tar', ['czf', archive, '-C', dirname(app), 'o8.app']);
   return archive;
+}
+
+function signedAppFixture(version: string) {
+  const root = mkdtempSync(join(tmpdir(), 'o8-signed-universal-app-'));
+  roots.push(root);
+  const app = join(root, 'o8.app');
+  const macos = join(app, 'Contents', 'MacOS');
+  mkdirSync(macos, { recursive: true });
+  for (const name of ['o8', 'speech_recognizer', 'speech-local']) {
+    const path = join(macos, name);
+    copyFileSync('/usr/bin/true', path);
+    chmodSync(path, 0o755);
+  }
+  writeFileSync(join(app, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>o8</string>
+<key>CFBundleIdentifier</key><string>run.o8.fixture</string>
+<key>CFBundleShortVersionString</key><string>${version}</string>
+<key>CFBundleVersion</key><string>${version}</string>
+</dict></plist>\n`);
+  execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', app]);
+  return { app, root };
 }
 
 describe('stable macOS release artifact identity', () => {
@@ -140,5 +172,31 @@ describe('stable macOS release artifact identity', () => {
     expect(() => verifyUniversalMacUpdaterArchive(app, archive)).toThrow(
       'updater archive contents do not match the inspected macOS app bundle',
     );
+  });
+
+  it.skipIf(process.platform !== 'darwin')('mounts and verifies an actual signed DMG against the source app', () => {
+    const version = '0.1.999';
+    const { app, root } = signedAppFixture(version);
+    const staging = join(root, 'dmg-staging');
+    const dmg = join(root, 'o8.dmg');
+    mkdirSync(staging);
+    cpSync(app, join(staging, 'o8.app'), { recursive: true, preserveTimestamps: true });
+    execFileSync('/usr/bin/hdiutil', [
+      'create',
+      '-quiet',
+      '-volname', 'o8 fixture',
+      '-srcfolder', staging,
+      '-ov',
+      '-format', 'UDZO',
+      dmg,
+    ]);
+    execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', dmg]);
+
+    const identity = verifyMacosDmgMatchesApp(app, dmg, version);
+
+    expect(identity.bundleVersion).toBe(version);
+    expect(identity.architectures).toEqual(MACOS_RELEASE_ARCHITECTURES);
+    expect(identity.dmgSha256).toHaveLength(64);
+    expect(identity.bundleSha256).toHaveLength(64);
   });
 });

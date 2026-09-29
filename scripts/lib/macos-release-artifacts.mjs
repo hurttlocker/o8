@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readlinkSync,
@@ -233,4 +234,89 @@ export function verifyUniversalMacUpdaterArchive(appPath, archivePath) {
   } finally {
     rmSync(extractionRoot, { recursive: true, force: true });
   }
+}
+
+export function verifyMacosDmgMatchesApp(appPath, dmgPath, version) {
+  execFileSync('/usr/bin/hdiutil', ['verify', dmgPath], { stdio: 'pipe' });
+  execFileSync('/usr/bin/codesign', ['--verify', '--strict', dmgPath], { stdio: 'pipe' });
+
+  const inspectionRoot = mkdtempSync(join(tmpdir(), 'o8-dmg-inspection-'));
+  const mountPath = join(inspectionRoot, 'mount');
+  mkdirSync(mountPath);
+  let mounted = false;
+  let identity;
+  let verificationError;
+  try {
+    execFileSync('/usr/bin/hdiutil', [
+      'attach',
+      '-readonly',
+      '-nobrowse',
+      '-mountpoint', mountPath,
+      dmgPath,
+    ], { stdio: 'pipe' });
+    mounted = true;
+    const dmgApp = join(mountPath, 'o8.app');
+    if (!existsSync(dmgApp)) throw new Error('DMG is missing its top-level o8.app bundle');
+    execFileSync('/usr/bin/codesign', [
+      '--verify',
+      '--deep',
+      '--strict',
+      dmgApp,
+    ], { stdio: 'pipe' });
+    let dmgAppIdentity;
+    try {
+      dmgAppIdentity = verifyUniversalMacApp(dmgApp);
+    } catch (error) {
+      throw new Error(`DMG ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const bundleVersion = execFileSync('/usr/bin/plutil', [
+      '-extract',
+      'CFBundleShortVersionString',
+      'raw',
+      '-o', '-',
+      join(dmgApp, 'Contents', 'Info.plist'),
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    if (bundleVersion !== version) {
+      throw new Error(`DMG app version ${JSON.stringify(bundleVersion)} does not match release version ${JSON.stringify(version)}`);
+    }
+    const bundleSha256 = bundleContentSha256(appPath);
+    const dmgBundleSha256 = bundleContentSha256(dmgApp);
+    if (dmgBundleSha256 !== bundleSha256) {
+      throw new Error('DMG app contents do not match the inspected macOS app bundle');
+    }
+    identity = {
+      ...dmgAppIdentity,
+      bundleVersion,
+      bundleSha256,
+      dmgSha256: createHash('sha256').update(readFileSync(dmgPath)).digest('hex'),
+    };
+  } catch (error) {
+    verificationError = error;
+  }
+
+  let cleanupError;
+  if (mounted) {
+    try {
+      execFileSync('/usr/bin/hdiutil', ['detach', mountPath], { stdio: 'pipe' });
+    } catch {
+      try {
+        execFileSync('/usr/bin/hdiutil', ['detach', mountPath, '-force'], { stdio: 'pipe' });
+      } catch (error) {
+        cleanupError = error;
+      }
+    }
+  }
+  if (!cleanupError) rmSync(inspectionRoot, { recursive: true, force: true });
+  if (verificationError) {
+    if (cleanupError) {
+      throw new Error(
+        `${verificationError instanceof Error ? verificationError.message : String(verificationError)}; DMG cleanup also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+      );
+    }
+    throw verificationError;
+  }
+  if (cleanupError) {
+    throw new Error(`DMG verification passed but cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+  }
+  return identity;
 }
