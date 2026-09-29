@@ -14,6 +14,26 @@ describe('orchestrator turn receipt context', () => {
     expect(message).toContain('Dispatch the task.');
   });
 
+  it('omits the create_mission receipt on a single-mode turn', () => {
+    expect(withOrchestratorTurnReceiptContext({
+      message: 'Work directly.',
+      threadId: 'thoughts-123',
+      turnId: 'assistant-456',
+      orchestrationMode: 'single',
+    })).toBe('Work directly.');
+  });
+
+  it('keeps the receipt on fleet and fusion turns', () => {
+    for (const orchestrationMode of ['fleet', 'fusion'] as const) {
+      expect(withOrchestratorTurnReceiptContext({
+        message: 'Dispatch the task.',
+        threadId: 'thoughts-123',
+        turnId: 'assistant-456',
+        orchestrationMode,
+      }), orchestrationMode).toContain('orchestratorTurnId: "assistant-456"');
+    }
+  });
+
   it('leaves threadless turns untouched', () => {
     expect(withOrchestratorTurnReceiptContext({
       message: 'No transcript owner.',

@@ -149,12 +149,13 @@ import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempo
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
+import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
 import {
   backendSwitchRequiresExplicitHandoff,
   prepareBackendSwitchHandoff,
   recordBackendSwitchHandoffAudit,
 } from './lib/orchestrator/backend-switch-carry';
-import { isComposerWireMode, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
+import { isComposerWireMode, modelFacingComposerMessage, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
   resolveOrchestratorRepoPath,
@@ -5531,9 +5532,11 @@ async function handleOrchestratorSendMsgOnce(
     // what got persisted to the transcript above; only the payload handed to
     // the backend carries the "Operator session rules (binding)" block. Applies
     // across ALL backends because they all forward this argument untouched.
+    const executionMode = resolveOrchestratorExecutionMode(msg.orchestrationMode);
+    const operatorMessage = modelFacingComposerMessage(message, executionMode);
     const turnBody = backendSwitchHandoff
-      ? `${backendSwitchHandoff.prelude}\n\n${message}`
-      : message;
+      ? `${backendSwitchHandoff.prelude}\n\n${operatorMessage}`
+      : operatorMessage;
     const projectTurn = await prepareOrchestratorProjectTurn({
       message: turnBody,
       persistedProjectId: updatedThread?.projectId,
@@ -5547,6 +5550,7 @@ async function handleOrchestratorSendMsgOnce(
       message: turnMessageWithRules,
       threadId,
       turnId: assistantMessageId,
+      orchestrationMode: executionMode,
     });
     // Fable Slice 6 #2 — server-side metered-window valve. The 15K auto-compact
     // target lives in the desktop client's React effect; a headless or mobile
