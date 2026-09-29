@@ -11,7 +11,7 @@ function operatorConfig(): ResolvedConfig {
   if (cfg.source.token === 'worker' || cfg.source.token === 'spectator' || !cfg.token) {
     throw new CliError(
       'operator_required',
-      'Terminal observation requires the local operator credential.',
+      'Terminal access requires the local operator credential.',
       EXIT.UNAUTHORIZED,
     );
   }
@@ -58,6 +58,163 @@ async function requireLiveSession(cfg: ResolvedConfig, id: string): Promise<void
   if (!(await listSessions(cfg)).some((session) => session.id === id)) {
     throw new CliError('terminal_not_found', `Terminal ${id} is not live.`, EXIT.NOT_FOUND);
   }
+}
+
+/** A controller owns the writer slot only while this WebSocket is connected. */
+function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<number> {
+  const url = new URL('/ws', resolveWsBase(cfg));
+  url.searchParams.set('token', cfg.token!);
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const decoder = new TextDecoder();
+    const inputDecoder = new TextDecoder();
+    let attached = false;
+    let settled = false;
+    let lineBuffer = '';
+    const wasRaw = process.stdin.isTTY ? process.stdin.isRaw : false;
+    const send = (frame: Record<string, unknown>) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
+    };
+    const dimensions = () => ({ cols: process.stdout.columns || 120, rows: process.stdout.rows || 30 });
+    const cleanup = () => {
+      clearTimeout(connectTimer);
+      process.off('SIGINT', stop);
+      process.off('SIGTERM', stop);
+      process.stdin.off('data', onInput);
+      process.stdin.off('end', stop);
+      process.stdout.off('resize', onResize);
+      if (process.stdin.isTTY) process.stdin.setRawMode(wasRaw ?? false);
+      process.stdin.pause();
+      if (attached) send({ type: 'terminal-detach', sessionName: id });
+      socket.close();
+    };
+    const fail = (error: CliError) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const stop = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(EXIT.OK);
+    };
+    const onResize = () => {
+      if (attached && mode.human) send({ type: 'terminal-resize', sessionName: id, ...dimensions() });
+    };
+    const onInput = (chunk: Buffer | string) => {
+      if (!attached) return;
+      if (mode.human) {
+        const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const releaseAt = input.indexOf(0x1d); // Ctrl-] releases the CLI without killing the shell.
+        const data = releaseAt < 0 ? input : input.subarray(0, releaseAt);
+        if (data.length) {
+          const text = inputDecoder.decode(data, { stream: true });
+          if (text) send({ type: 'terminal-input', sessionName: id, data: text });
+        }
+        if (releaseAt >= 0) stop();
+        return;
+      }
+      lineBuffer += String(chunk);
+      let newline = lineBuffer.indexOf('\n');
+      while (newline >= 0 && !settled) {
+        const line = lineBuffer.slice(0, newline).trim();
+        lineBuffer = lineBuffer.slice(newline + 1);
+        if (line.length > 65_536) {
+          fail(new CliError('invalid_args', 'Terminal input line exceeds 64 KiB.', EXIT.INVALID_ARGS));
+          return;
+        }
+        if (line) {
+          let frame: { type?: unknown; data?: unknown; cols?: unknown; rows?: unknown };
+          try { frame = JSON.parse(line); } catch {
+            fail(new CliError('invalid_args', 'Terminal control input must be newline-delimited JSON.', EXIT.INVALID_ARGS));
+            return;
+          }
+          if (frame.type === 'release') {
+            stop();
+            return;
+          }
+          if (frame.type === 'input' && typeof frame.data === 'string') {
+            send({ type: 'terminal-input', sessionName: id, data: frame.data });
+          } else if (frame.type === 'resize'
+            && Number.isSafeInteger(frame.cols) && Number.isSafeInteger(frame.rows)
+            && Number(frame.cols) >= 1 && Number(frame.cols) <= 500
+            && Number(frame.rows) >= 1 && Number(frame.rows) <= 300) {
+            send({ type: 'terminal-resize', sessionName: id, cols: frame.cols, rows: frame.rows });
+          } else {
+            fail(new CliError('invalid_args', 'Use input, resize, or release frames.', EXIT.INVALID_ARGS));
+            return;
+          }
+        }
+        newline = lineBuffer.indexOf('\n');
+      }
+      if (lineBuffer.length > 65_536) {
+        fail(new CliError('invalid_args', 'Terminal input line exceeds 64 KiB.', EXIT.INVALID_ARGS));
+      }
+    };
+    const connectTimer = setTimeout(() => fail(new CliError(
+      'server_timeout', 'Timed out claiming terminal control.', EXIT.SERVER_TIMEOUT,
+    )), 8_000);
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+    socket.on('open', () => send({
+      type: 'terminal-attach', sessionName: id, control: true,
+      ...(mode.human ? dimensions() : {}),
+    }));
+    socket.on('message', (raw) => {
+      let frame: { channel?: string; event?: string; data?: {
+        sessionName?: string; data?: string; error?: string; code?: string; control?: boolean;
+      } };
+      try { frame = JSON.parse(String(raw)); } catch { return; }
+      if (frame.channel !== 'terminal' || frame.data?.sessionName !== id) return;
+      if (frame.event === 'error') {
+        fail(new CliError(
+          frame.data.code === 'terminal_busy' ? 'terminal_busy' : 'terminal_unavailable',
+          frame.data.error ?? 'Terminal control was refused.',
+          frame.data.code === 'terminal_busy' ? EXIT.CONFLICT : EXIT.NOT_FOUND,
+        ));
+        return;
+      }
+      if (frame.event === 'attached') {
+        if (frame.data.control !== true) {
+          fail(new CliError('invalid_response', 'Terminal host did not grant control.', EXIT.CONFLICT));
+          return;
+        }
+        attached = true;
+        clearTimeout(connectTimer);
+        if (!mode.human) process.stdout.write(`${JSON.stringify({ schema: 'o8/cli/terminal.control/v1', event: 'attached', id })}\n`);
+        process.stdin.on('data', onInput);
+        process.stdin.on('end', stop);
+        if (mode.human) {
+          if (process.stdin.isTTY) process.stdin.setRawMode(true);
+          process.stdout.on('resize', onResize);
+        }
+        process.stdin.resume();
+        return;
+      }
+      if (frame.event === 'exited' && attached) {
+        if (!mode.human) process.stdout.write(`${JSON.stringify({ schema: 'o8/cli/terminal.control/v1', event: 'exited', id })}\n`);
+        stop();
+        return;
+      }
+      if (frame.event === 'data' && attached && typeof frame.data.data === 'string') {
+        const bytes = Buffer.from(frame.data.data, 'base64');
+        if (mode.human) process.stdout.write(bytes);
+        else {
+          const output = decoder.decode(bytes, { stream: true });
+          if (output) process.stdout.write(`${JSON.stringify({ schema: 'o8/cli/terminal.control/v1', event: 'data', id, text: output })}\n`);
+        }
+      }
+    });
+    socket.on('error', () => fail(new CliError(
+      'connection_refused', 'Could not connect to the o8 terminal host.', EXIT.CONNECTION_REFUSED,
+    )));
+    socket.on('close', () => {
+      if (settled) return;
+      fail(new CliError('terminal_disconnected', 'Terminal control disconnected.', EXIT.CONNECTION_REFUSED));
+    });
+  });
 }
 
 function observe(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<number> {
@@ -138,8 +295,8 @@ function observe(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
 }
 
 export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
-  if (!['list', 'show', 'observe'].includes(sub ?? '')) {
-    throw new CliError('invalid_args', 'Use `o8 terminal list|show <id>|observe <id>`.', EXIT.INVALID_ARGS);
+  if (!['list', 'show', 'observe', 'control'].includes(sub ?? '')) {
+    throw new CliError('invalid_args', 'Use `o8 terminal list|show <id>|observe <id>|control <id>`.', EXIT.INVALID_ARGS);
   }
   const cfg = operatorConfig();
   if (sub === 'list') {
@@ -151,10 +308,10 @@ export async function runTerminal(mode: OutputMode, sub: string | undefined, res
   }
   const id = rest[0]?.trim();
   if (!id) throw new CliError('invalid_args', `terminal ${sub} requires an exact session ID.`, EXIT.INVALID_ARGS);
-  if (sub === 'observe') {
-    if (rest.length !== 1) throw new CliError('invalid_args', 'terminal observe takes one session ID.', EXIT.INVALID_ARGS);
+  if (sub === 'observe' || sub === 'control') {
+    if (rest.length !== 1) throw new CliError('invalid_args', `terminal ${sub} takes one session ID.`, EXIT.INVALID_ARGS);
     await requireLiveSession(cfg, id);
-    return observe(cfg, id, mode);
+    return sub === 'control' ? control(cfg, id, mode) : observe(cfg, id, mode);
   }
   let lines = 200;
   if (rest.length > 1) {

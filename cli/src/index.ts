@@ -231,6 +231,7 @@ commands:
   terminal list        list live dashboard terminal session IDs, including detached shells
   terminal show <id> [--lines N]  bounded snapshot of an existing terminal
   terminal observe <id>  read-only live stream from an existing terminal
+  terminal control <id>  exclusive input/output to an existing terminal; --human for interactive mode
   serve                start the headless API, WebSocket layer, and supervisor daemon
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children

@@ -34,6 +34,7 @@ JSON to stdout is the default; pass `--human` for ANSI-formatted output.
 | `o8 terminal list` | List live dashboard shell IDs, including detached sessions |
 | `o8 terminal show <id> [--lines N]` | Read up to 1000 lines from an existing dashboard shell |
 | `o8 terminal observe <id>` | Stream an existing shell read-only; `--human` prints terminal text |
+| `o8 terminal control <id>` | Claim one existing shell for input/output; refuses an active writer and releases on exit |
 | `o8 packet log <event>` | (Phase-1 stub) — will append a structured lane event once the backend route lands |
 
 ## Configuration
@@ -53,7 +54,25 @@ Resolution order:
 4. Fallback port `3001`, no token (dev workflow on loopback)
 
 Loopback callers don't need a token; cross-origin callers do.
-Terminal commands require the local operator token even on loopback; worker credentials cannot observe operator shells.
+Terminal commands require the local operator token even on loopback; worker credentials cannot read or control operator shells.
+
+For a person at a terminal, run `o8 --human terminal control <id>`. The shell
+streams in place; press Ctrl-] to release the CLI attachment without ending the
+shell. Ctrl-C is sent to the shell. A second writable pane or controller must
+close before control can be claimed, while read-only observers may stay open.
+
+For automation, `o8 terminal control <id>` writes newline-delimited JSON events
+to stdout and accepts newline-delimited JSON on stdin:
+
+```json
+{"type":"input","data":"pwd\r"}
+{"type":"resize","cols":120,"rows":30}
+{"type":"release"}
+```
+
+Input is sent as terminal bytes, so a command needs a carriage return to run.
+Closing stdin or disconnecting releases the writer slot. The shell and its
+saved history remain available for later attachments.
 
 ## Exit codes
 

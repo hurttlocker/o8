@@ -955,6 +955,8 @@ interface TerminalAttachment {
   ptyProcess: any; // node-pty IPty
   clientIds: Set<string>;
   clientViews: Map<string, TerminalClientView>;
+  /** An explicit CLI controller owns writes until detach or socket close. */
+  controlClientId?: string;
   snapshotSource: 'tmux' | 'scrollback';
   /** The first attach came from a viewer; its tmux client ignores window size. */
   observerOwned?: boolean;
@@ -7015,17 +7017,43 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
   const readOnly = msg.readOnly === true;
+  const control = msg.control === true;
+  if (control && (readOnly || client.authKind !== 'operator' || !isDashTerminalSession(sessionName))) {
+    sendTerminal(client, 'error', { sessionName, code: 'control_forbidden', error: 'Terminal control requires an operator-owned dashboard shell.' });
+    return;
+  }
+  if (control && pendingDashSessions.has(sessionName)) {
+    sendTerminal(client, 'error', { sessionName, code: 'terminal_not_ready', error: 'Terminal has not started. Open it in the workspace first.' });
+    return;
+  }
 
   // Check if we already have a PTY for this tmux session
   let attachment = terminalAttachments.get(sessionName);
 
   if (attachment) {
+    if (control) {
+      const busy = [...attachment.clientViews].some(([id, view]) => id !== client.id && !view.readOnly);
+      if (busy || (attachment.controlClientId && attachment.controlClientId !== client.id)) {
+        sendTerminal(client, 'error', { sessionName, code: 'terminal_busy', error: 'Terminal already has a writer. Close that pane before taking CLI control.' });
+        return;
+      }
+      if (attachment.clientViews.get(client.id)?.readOnly) {
+        sendTerminal(client, 'error', { sessionName, code: 'control_forbidden', error: 'A read-only observer cannot become a controller.' });
+        return;
+      }
+    } else if (!readOnly && attachment.controlClientId && attachment.controlClientId !== client.id) {
+      sendTerminal(client, 'error', { sessionName, code: 'terminal_busy', error: 'Terminal is controlled by another client.' });
+      return;
+    }
     if (attachment.observerOwned && !readOnly) {
       try {
         // The first viewer attached with tmux -r (read-only, ignore-size).
         // Replace that client when a writer arrives so its later resize and
         // input affect the session, while observers keep their own WS guard.
-        replaceTmuxAttachmentPty(attachment, cols, rows, false);
+        const dimensions = control && (msg.cols == null || msg.rows == null)
+          ? tmuxSessionDimensions(sessionName)
+          : { cols, rows };
+        replaceTmuxAttachmentPty(attachment, dimensions.cols, dimensions.rows, false);
       } catch (error) {
         sendTerminal(client, 'error', {
           sessionName,
@@ -7042,9 +7070,10 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     attachment.clientIds.add(client.id);
     const view = ensureTerminalClientView(attachment, client.id);
     view.readOnly ||= readOnly;
+    if (control) attachment.controlClientId = client.id;
     terminalWorkloadStats?.recordAttach(sessionName, client.id);
     client.terminalSessions.add(sessionName);
-    sendTerminal(client, 'attached', { sessionName, cols: attachment.cols, rows: attachment.rows });
+    sendTerminal(client, 'attached', { sessionName, cols: attachment.cols, rows: attachment.rows, control });
     if (attachment.kind === 'dash-shell') {
       sendTerminalScrollback(client, attachment);
     }
@@ -7085,7 +7114,9 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     && tmuxSessionExists(sessionName, dashTmuxArgs())
   ) {
     try {
-      const dimensions = readOnly ? tmuxSessionDimensions(sessionName) : { cols, rows };
+      const dimensions = readOnly || (control && (msg.cols == null || msg.rows == null))
+        ? tmuxSessionDimensions(sessionName)
+        : { cols, rows };
       const ptyProcess = spawnTmuxAttachPty(sessionName, dimensions.cols, dimensions.rows, readOnly);
       const now = Date.now();
       attachment = {
@@ -7095,6 +7126,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
         ptyProcess,
         clientIds: new Set([client.id]),
         clientViews: new Map(),
+        controlClientId: control ? client.id : undefined,
         snapshotSource: 'tmux',
         observerOwned: readOnly,
         cols: dimensions.cols,
@@ -7126,7 +7158,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
         // starts at column zero instead of wrapping away every screenful.
         if (keep.length > 0) appendScrollback(attachment, `${keep.join('\r\n')}\r\n`);
       }
-      sendTerminal(client, 'attached', { sessionName, cols: attachment.cols, rows: attachment.rows });
+      sendTerminal(client, 'attached', { sessionName, cols: attachment.cols, rows: attachment.rows, control });
       sendTerminalScrollback(client, attachment);
       console.log(`[ws-server] [persistent-terminals] re-attached surviving dash session ${sessionName}`);
       return;
@@ -7206,6 +7238,7 @@ function handleTerminalInput(client: ClientState, msg: Record<string, unknown>) 
   }
   if (!attachment || !attachment.clientIds.has(client.id)) return;
   if (attachment.clientViews.get(client.id)?.readOnly) return;
+  if (attachment.controlClientId && attachment.controlClientId !== client.id) return;
 
   try {
     attachment.ptyProcess.write(data);
@@ -7233,6 +7266,7 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   }
 
   if (!attachment.clientIds.has(client.id) || attachment.clientViews.get(client.id)?.readOnly) return;
+  if (attachment.controlClientId && attachment.controlClientId !== client.id) return;
 
   try {
     if (resizeTerminalIfChanged(attachment, cols, rows)) sendObserverDimensions(attachment);
@@ -7309,6 +7343,7 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
   const view = attachment.clientViews.get(clientId);
   if (view?.hiddenTimer) clearTimeout(view.hiddenTimer);
   attachment.clientViews.delete(clientId);
+  if (attachment.controlClientId === clientId) attachment.controlClientId = undefined;
   terminalWorkloadStats?.recordDetach(sessionName, clientId);
   const c = clients.get(clientId);
   if (c) c.terminalSessions.delete(sessionName);
@@ -7772,6 +7807,11 @@ const httpServer = createServer((req, res) => {
         res.end('session not found');
         return;
       }
+      if (attachment.controlClientId) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'terminal_busy' }));
+        return;
+      }
       try {
         attachment.ptyProcess.write(payload.raw ? text : `${text}\r`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -7981,6 +8021,11 @@ const httpServer = createServer((req, res) => {
       if (!attachment) {
         res.writeHead(404);
         res.end('session not found');
+        return;
+      }
+      if (attachment.controlClientId) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'terminal_busy' }));
         return;
       }
 
