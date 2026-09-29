@@ -210,9 +210,16 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
   const isShell = (!!lang && shellTags.includes(lang.toLowerCase())) || looksLikeShell;
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const writeText = navigator.clipboard?.writeText;
+    if (typeof writeText !== 'function') {
+      return;
+    }
+    void writeText.call(navigator.clipboard, code).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      /* write rejected — keep Copy label for retry */
+    });
   }, [code]);
 
   if (isMermaid) {
