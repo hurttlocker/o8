@@ -2,7 +2,6 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  callCodebaseMemoryTool,
   withCodebaseMemoryToolSession,
   type McpToolCallResult,
 } from './mcp-client';
