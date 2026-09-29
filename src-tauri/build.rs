@@ -393,14 +393,8 @@ fn build_speech_recognizer() {
 
         // In release mode the sidecar Tauri bundles for the CURRENT cargo
         // target is the UNIVERSAL fat binary, not the thin current-arch
-        // slice. o8 ships one x86_64 build to every Mac (release.mjs points
-        // darwin-aarch64 at the same artifact), so with a thin sidecar every
-        // Apple Silicon Mac ran the speech helper under Rosetta — where the
-        // SFSpeechRecognizer client silently fails (the 2026-07-13 M4
-        // "waveform moves, zero partials" diagnosis). A fat sidecar costs
-        // ~200KB and lets exec pick the NATIVE arm64 slice on AS (child
-        // processes don't inherit the parent's Rosetta mode) while Intel
-        // keeps the identical x86_64 slice it runs today.
+        // slice. Stable macOS releases use one universal app, so both Intel
+        // and Apple Silicon must select a native slice from this sidecar.
         let arch_prefix = cargo_target.split('-').next().unwrap_or("aarch64");
         let canonical_arch_bin =
           helpers_dir.join(format!("speech_recognizer-{arch_prefix}-apple-darwin"));

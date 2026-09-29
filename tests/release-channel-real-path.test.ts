@@ -7,17 +7,48 @@ import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
+const CPU_TYPE_X86_64 = 0x01000007;
+const CPU_TYPE_ARM64 = 0x0100000c;
+
+function thinMachO(cpuType: number) {
+  const binary = Buffer.alloc(32);
+  binary.writeUInt32LE(0xfeedfacf, 0);
+  binary.writeUInt32LE(cpuType, 4);
+  return binary;
+}
+
+function universalMachO() {
+  const slices = [thinMachO(CPU_TYPE_X86_64), thinMachO(CPU_TYPE_ARM64)];
+  const binary = Buffer.alloc(8 + slices.length * 20 + slices.reduce((sum, slice) => sum + slice.length, 0));
+  binary.writeUInt32BE(0xcafebabe, 0);
+  binary.writeUInt32BE(slices.length, 4);
+  let offset = 8 + slices.length * 20;
+  slices.forEach((slice, index) => {
+    const entry = 8 + index * 20;
+    binary.writeUInt32BE(index === 0 ? CPU_TYPE_X86_64 : CPU_TYPE_ARM64, entry);
+    binary.writeUInt32BE(offset, entry + 8);
+    binary.writeUInt32BE(slice.length, entry + 12);
+    slice.copy(binary, offset);
+    offset += slice.length;
+  });
+  return binary;
+}
 
 function fixture(version = '0.1.741-preview.1') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-release-channel-')));
   roots.push(root);
-  const bundle = join(root, 'src-tauri/target/release/bundle');
+  const bundle = join(root, 'src-tauri/target/universal-apple-darwin/release/bundle');
   mkdirSync(join(bundle, 'macos'), { recursive: true });
   mkdirSync(join(bundle, 'dmg'), { recursive: true });
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
-  writeFileSync(join(bundle, 'dmg', `o8_${version}_x64.dmg`), 'fixture');
+  writeFileSync(join(bundle, 'dmg', `o8_${version}_universal.dmg`), 'fixture');
   writeFileSync(join(bundle, 'macos', 'o8.app.tar.gz'), 'fixture');
   writeFileSync(join(bundle, 'macos', 'o8.app.tar.gz.sig'), 'fixture-signature');
+  for (const name of ['o8', 'speech_recognizer', 'speech-local']) {
+    const path = join(bundle, 'macos', 'o8.app', 'Contents', 'MacOS', name);
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, universalMachO());
+  }
   const log = join(root, 'effects.jsonl');
   const prelude = `import { appendFileSync } from 'node:fs';
 const record = (name, args = []) => appendFileSync(process.env.O8_CHANNEL_TEST_LOG, JSON.stringify({name, args}) + '\\n');`;
@@ -127,6 +158,18 @@ describe('release channels through the publication entry point', () => {
     expect(existsSync(join(f.bundle, 'macos', 'fixed.json'))).toBe(true);
     expect(existsSync(join(f.root, 'release-notes', 'next.md'))).toBe(true);
     expect(calls.some(c => c.name === 'git' && ['add', 'commit', 'push'].includes(c.args[0]))).toBe(false);
+  });
+
+  it('refuses publication when the app backing the arm64 updater entry is x86_64-only', () => {
+    const f = fixture('0.1.741');
+    writeFileSync(join(f.bundle, 'macos', 'o8.app', 'Contents', 'MacOS', 'o8'), thinMachO(CPU_TYPE_X86_64));
+
+    const result = run(f, 'stable');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('missing required Mach-O architecture arm64');
+    expect(effects(f).some(c => c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])))
+      .toBe(false);
+    expect(existsSync(join(f.bundle, 'macos', 'latest.json'))).toBe(false);
   });
 
   it.each([

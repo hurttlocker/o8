@@ -31,6 +31,7 @@ import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
+import { resolveMacosReleaseArtifacts, verifyUniversalMacApp } from './lib/macos-release-artifacts.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 
@@ -187,21 +188,32 @@ try {
   console.warn(`[release] WARNING: HEAD is not ${tag}; fixed-report receipts will scan ${releaseRange(tag)}.`);
 }
 
-const BUNDLE = join(root, 'src-tauri/target/release/bundle');
-const DMG = join(BUNDLE, 'dmg', `o8_${version}_x64.dmg`);
-const APP_TAR = join(BUNDLE, 'macos', 'o8.app.tar.gz');
-const APP_SIG = join(BUNDLE, 'macos', 'o8.app.tar.gz.sig');
+const artifacts = resolveMacosReleaseArtifacts(root, version);
+const BUNDLE = artifacts.bundleDir;
+const DMG = artifacts.dmg;
+const APP_TAR = artifacts.updaterArchive;
+const APP_SIG = artifacts.updaterSignature;
 
 for (const path of [DMG, APP_TAR, APP_SIG]) {
   if (!existsSync(path)) {
     console.error(`[release] missing artifact: ${path}`);
     console.error(`[release] Run this first:`);
-    console.error(`[release]   TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) cargo tauri build`);
+    console.error('[release]   npm run tauri:build:stable-macos');
     process.exit(1);
   }
 }
 
-const PACKAGED_SERVER = join(BUNDLE, 'macos', 'o8.app', 'Contents', 'Resources', 'server');
+let darwinIdentity;
+try {
+  darwinIdentity = verifyUniversalMacApp(artifacts.app);
+  console.log('[release] universal macOS artifact gate passed', JSON.stringify(darwinIdentity));
+} catch (error) {
+  console.error(`[release] FATAL: ${error.message}`);
+  console.error('[release] Refusing to publish either Darwin updater entry without verified x86_64 + arm64 app and sidecar slices.');
+  process.exit(1);
+}
+
+const PACKAGED_SERVER = join(artifacts.app, 'Contents', 'Resources', 'server');
 try {
   runNativeGate(PACKAGED_SERVER);
 } catch (error) {
@@ -258,18 +270,21 @@ const releaseNotes = (gateReleaseNote
   : `o8 ${tag} — see installer assets.`) + warnStamp;
 const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 ${tag}`;
 
-// Same signed binary works on x86_64 natively and aarch64 under Rosetta, so
-// point both platforms at the same artifact until a native arm64 runner
-// exists. Still signed with the same minisign key the installed app trusts.
+// Both Darwin entries intentionally share the one updater archive. The
+// inspected artifact identity above proves that archive's app is universal;
+// buildReleaseManifest rejects an identity missing either native slice.
 const latestJsonPath = join(BUNDLE, 'macos', releaseChannel.manifestName);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
 const { latestJson, uploadArgs } = buildReleaseManifest({
-  bundleDir: BUNDLE,
+  // Linux preview artifacts are produced separately under the non-targeted
+  // Cargo bundle directory. Keep discovering them there while macOS uses the
+  // explicit universal target directory.
+  bundleDir: join(root, 'src-tauri/target/release/bundle'),
   version,
   notes: latestNotes,
   pubDate,
   downloadBase,
-  darwinSignature: signature,
+  darwinArtifact: { signature, identity: darwinIdentity },
   baseUploadAssets: [DMG, APP_TAR, APP_SIG],
   trailingUploadAssets: [latestJsonPath, ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });

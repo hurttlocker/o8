@@ -21,6 +21,7 @@ const helpersDir = join(root, 'src-tauri', 'helpers');
 const staged = [
   join(helpersDir, 'speech-local'),
   join(helpersDir, 'speech-local-aarch64-apple-darwin'),
+  join(helpersDir, 'speech-local-universal-apple-darwin'),
   join(helpersDir, 'speech-local-x86_64-apple-darwin'),
 ];
 
@@ -32,6 +33,7 @@ if (process.platform !== 'darwin') {
 mkdirSync(helpersDir, { recursive: true });
 
 let built = null;
+let builtArchitectures = 'universal';
 try {
   execSync('swift build -c release --arch arm64 --arch x86_64', {
     cwd: pkgDir,
@@ -45,15 +47,23 @@ try {
   try {
     execSync('swift build -c release --arch arm64', { cwd: pkgDir, stdio: 'inherit', timeout: 15 * 60_000 });
     const arm = join(pkgDir, '.build', 'arm64-apple-macosx', 'release', 'speech-local');
-    if (existsSync(arm)) built = arm;
+    if (existsSync(arm)) {
+      built = arm;
+      builtArchitectures = 'arm64';
+    }
   } catch (inner) {
     console.warn(`[speech-local] arm64 build failed too (${inner.message})`);
   }
 }
 
 if (built) {
-  for (const target of staged) copyFileSync(built, target);
-  console.log(`[speech-local] staged ${built} → helpers/ (3 names)`);
+  const targets = builtArchitectures === 'universal' ? staged : staged.slice(0, 2);
+  for (const target of targets) copyFileSync(built, target);
+  console.log(`[speech-local] staged ${built} → helpers/ (${targets.length} names, ${builtArchitectures})`);
+  if (!staged.every((path) => existsSync(path))) {
+    console.error('[speech-local] arm64 fallback preserved existing x86_64/universal binaries, but one is missing');
+    process.exit(1);
+  }
 } else if (staged.every((p) => existsSync(p))) {
   console.warn('[speech-local] build unavailable — keeping previously staged binaries');
 } else {

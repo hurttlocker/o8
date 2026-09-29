@@ -23,6 +23,7 @@ import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, sym
 import { join } from 'node:path';
 import { stapleAndValidate, submitForNotarization } from './lib/notarization.mjs';
 import { assertMacPackageSize } from './lib/mac-package-size.mjs';
+import { resolveMacosReleaseArtifacts, verifyUniversalMacApp } from './lib/macos-release-artifacts.mjs';
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
 for (const key of REQUIRED) {
@@ -36,11 +37,12 @@ for (const key of REQUIRED) {
 const root = process.cwd();
 const pkgJson = JSON.parse(execFileSync('cat', [join(root, 'package.json')], { encoding: 'utf8' }));
 const version = pkgJson.version;
-const BUNDLE = join(root, 'src-tauri/target/release/bundle');
-const APP = join(BUNDLE, 'macos/o8.app');
-const TAR = join(BUNDLE, 'macos/o8.app.tar.gz');
-const TAR_SIG = join(BUNDLE, 'macos/o8.app.tar.gz.sig');
-const DMG = join(BUNDLE, `dmg/o8_${version}_x64.dmg`);
+const artifacts = resolveMacosReleaseArtifacts(root, version);
+const BUNDLE = artifacts.bundleDir;
+const APP = artifacts.app;
+const TAR = artifacts.updaterArchive;
+const TAR_SIG = artifacts.updaterSignature;
+const DMG = artifacts.dmg;
 const DMG_STAGING = join(BUNDLE, 'dmg-staging');
 const ENTITLEMENTS = join(root, 'src-tauri/entitlements.plist');
 // Voice STT sidecar (lifted from aqua/Symon) ships as a Tauri externalBin in
@@ -58,6 +60,13 @@ const notarizationCredentials = {
 if (!existsSync(APP)) {
   console.error(`[sign-and-notarize] missing .app: ${APP}`);
   console.error(`[sign-and-notarize] run cargo tauri build first`);
+  process.exit(1);
+}
+
+try {
+  console.log('[sign-and-notarize] universal artifact preflight', verifyUniversalMacApp(APP));
+} catch (error) {
+  console.error(`[sign-and-notarize] refusing non-universal stable artifact: ${error.message}`);
   process.exit(1);
 }
 
@@ -183,6 +192,11 @@ submitForNotarization(ZIP, notarizationCredentials);
 
 console.log('[sign-and-notarize] stapling notarization ticket');
 stapleAndValidate(APP);
+
+// Codesigning and stapling rewrite bundle bytes. Re-inspect the final app
+// before creating either distributable so a stale/thin replacement cannot
+// become the arm64 updater payload.
+console.log('[sign-and-notarize] final universal artifact', verifyUniversalMacApp(APP));
 
 console.log('[sign-and-notarize] repackaging .app.tar.gz');
 if (existsSync(TAR)) rmSync(TAR);

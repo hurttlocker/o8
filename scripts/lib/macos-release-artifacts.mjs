@@ -1,0 +1,142 @@
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+export const MACOS_RELEASE_TARGET = 'universal-apple-darwin';
+export const MACOS_RELEASE_ARCHITECTURES = Object.freeze(['x86_64', 'arm64']);
+
+const CPU_ARCH_ABI64 = 0x01000000;
+const CPU_TYPE_X86 = 7;
+const CPU_TYPE_ARM = 12;
+const CPU_TYPE_X86_64 = CPU_ARCH_ABI64 | CPU_TYPE_X86;
+const CPU_TYPE_ARM64 = CPU_ARCH_ABI64 | CPU_TYPE_ARM;
+const FAT_MAGIC = 0xcafebabe;
+const FAT_CIGAM = 0xbebafeca;
+const FAT_MAGIC_64 = 0xcafebabf;
+const FAT_CIGAM_64 = 0xbfbafeca;
+const MH_MAGIC = 0xfeedface;
+const MH_MAGIC_64 = 0xfeedfacf;
+
+const REQUIRED_BINARIES = Object.freeze([
+  'Contents/MacOS/o8',
+  'Contents/MacOS/speech_recognizer',
+  'Contents/MacOS/speech-local',
+]);
+
+function architectureForCpuType(cpuType) {
+  if (cpuType === CPU_TYPE_X86_64) return 'x86_64';
+  if (cpuType === CPU_TYPE_ARM64) return 'arm64';
+  throw new Error(`unsupported Mach-O CPU type 0x${cpuType.toString(16)}`);
+}
+
+function assertReadableRange(buffer, offset, bytes, label) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(bytes)
+    || offset < 0 || bytes < 0 || offset + bytes > buffer.length) {
+    throw new Error(`${label} exceeds file bounds`);
+  }
+}
+
+function readUInt32(buffer, offset, littleEndian) {
+  assertReadableRange(buffer, offset, 4, 'Mach-O header');
+  return littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset);
+}
+
+function readUInt64(buffer, offset, littleEndian) {
+  assertReadableRange(buffer, offset, 8, 'Mach-O header');
+  const value = littleEndian ? buffer.readBigUInt64LE(offset) : buffer.readBigUInt64BE(offset);
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Mach-O slice offset exceeds safe integer range');
+  return Number(value);
+}
+
+function thinCpuType(buffer, offset = 0) {
+  assertReadableRange(buffer, offset, 8, 'thin Mach-O header');
+  const littleMagic = buffer.readUInt32LE(offset);
+  if (littleMagic === MH_MAGIC || littleMagic === MH_MAGIC_64) {
+    return buffer.readUInt32LE(offset + 4);
+  }
+  const bigMagic = buffer.readUInt32BE(offset);
+  if (bigMagic === MH_MAGIC || bigMagic === MH_MAGIC_64) {
+    return buffer.readUInt32BE(offset + 4);
+  }
+  throw new Error('file is not a thin Mach-O binary');
+}
+
+function fatArchitectures(buffer, littleEndian, is64Bit) {
+  const count = readUInt32(buffer, 4, littleEndian);
+  if (count < 1 || count > 64) throw new Error(`invalid fat Mach-O architecture count ${count}`);
+  const entryBytes = is64Bit ? 32 : 20;
+  assertReadableRange(buffer, 8, count * entryBytes, 'fat Mach-O architecture table');
+  const architectures = [];
+  for (let index = 0; index < count; index += 1) {
+    const entryOffset = 8 + index * entryBytes;
+    const declaredCpuType = readUInt32(buffer, entryOffset, littleEndian);
+    const sliceOffset = is64Bit
+      ? readUInt64(buffer, entryOffset + 8, littleEndian)
+      : readUInt32(buffer, entryOffset + 8, littleEndian);
+    const sliceBytes = is64Bit
+      ? readUInt64(buffer, entryOffset + 16, littleEndian)
+      : readUInt32(buffer, entryOffset + 12, littleEndian);
+    assertReadableRange(buffer, sliceOffset, sliceBytes, 'fat Mach-O slice');
+    if (sliceBytes < 8) throw new Error('fat Mach-O slice is too short');
+    const embeddedCpuType = thinCpuType(buffer, sliceOffset);
+    if (embeddedCpuType !== declaredCpuType) throw new Error('fat Mach-O slice CPU type mismatch');
+    architectures.push(architectureForCpuType(declaredCpuType));
+  }
+  return [...new Set(architectures)];
+}
+
+export function readMachOArchitectures(path) {
+  const binary = readFileSync(path);
+  assertReadableRange(binary, 0, 8, 'Mach-O header');
+  const magic = binary.readUInt32BE(0);
+  let architectures;
+  if (magic === FAT_MAGIC || magic === FAT_MAGIC_64) {
+    architectures = fatArchitectures(binary, false, magic === FAT_MAGIC_64);
+  } else if (magic === FAT_CIGAM || magic === FAT_CIGAM_64) {
+    architectures = fatArchitectures(binary, true, magic === FAT_CIGAM_64);
+  } else {
+    architectures = [architectureForCpuType(thinCpuType(binary))];
+  }
+  return MACOS_RELEASE_ARCHITECTURES.filter((architecture) => architectures.includes(architecture));
+}
+
+export function resolveMacosReleaseArtifacts(root, version) {
+  const bundleDir = join(root, 'src-tauri', 'target', MACOS_RELEASE_TARGET, 'release', 'bundle');
+  const macosDir = join(bundleDir, 'macos');
+  return {
+    target: MACOS_RELEASE_TARGET,
+    bundleDir,
+    app: join(macosDir, 'o8.app'),
+    updaterArchive: join(macosDir, 'o8.app.tar.gz'),
+    updaterSignature: join(macosDir, 'o8.app.tar.gz.sig'),
+    dmg: join(bundleDir, 'dmg', `o8_${version}_universal.dmg`),
+  };
+}
+
+export function verifyUniversalMacApp(appPath) {
+  const binaries = REQUIRED_BINARIES.map((relativePath) => {
+    const path = join(appPath, ...relativePath.split('/'));
+    if (!existsSync(path)) throw new Error(`${relativePath} is missing from the macOS app bundle`);
+    let architectures;
+    try {
+      architectures = readMachOArchitectures(path);
+    } catch (error) {
+      throw new Error(`${relativePath} failed Mach-O inspection: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    for (const architecture of MACOS_RELEASE_ARCHITECTURES) {
+      if (!architectures.includes(architecture)) {
+        throw new Error(`${relativePath} is missing required Mach-O architecture ${architecture}`);
+      }
+    }
+    return {
+      relativePath,
+      architectures,
+      sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+    };
+  });
+  return {
+    kind: 'macos-universal-app',
+    architectures: [...MACOS_RELEASE_ARCHITECTURES],
+    binaries,
+  };
+}
