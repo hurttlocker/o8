@@ -871,7 +871,7 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     mcpConfigPath: config.mcpConfigPath,
     model: config.model,
     claudeSessionId: session.claudeSessionId,
-    systemPrompt: buildOrchestratorSystemPrompt(session.repoPath),
+    systemPrompt: buildOrchestratorSystemPrompt(session.repoPath, { toolProfile: config.toolProfile }),
   });
 
   // The orchestrator must stay on the interactive REPL path for every carrier.

@@ -157,6 +157,31 @@ describe('warm orchestrator MCP config reuse', () => {
     }
   });
 
+  it('bakes a dispatch-free system prompt into a Solo resident process (#2898)', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-solo-prompt-launch-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+    const proc = new FakeClaudeProc();
+    spawnMock.mockReturnValue(proc as unknown as ChildProcess);
+    const session = ensureOrchestratorSession(repoPath, `thoughts-solo-prompt-${Date.now()}`);
+
+    const turn = sendToOrchestrator(session, 'work directly', () => {}, { toolProfile: 'solo' });
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(proc.stdin.write).toHaveBeenCalledOnce());
+
+    const args = spawnMock.mock.calls[0]![1] as string[];
+    const systemPrompt = args[args.indexOf('--append-system-prompt') + 1]!;
+    expect(systemPrompt).toContain('Outcome, Evidence, Residual, and Decision');
+    expect(systemPrompt).toContain('cortex_list_issues');
+    expect(systemPrompt).not.toContain('cortex_launch_agent');
+    expect(systemPrompt).not.toContain('create_mission');
+    expect(systemPrompt).not.toContain('## ORCHESTRATOR PROTOCOL');
+
+    proc.stdout.emit('data', Buffer.from('{"type":"result","session_id":"solo-prompt-session"}\n'));
+    await turn;
+    proc.exitCode = 0;
+    proc.emit('close', 0);
+  });
+
   it('carries an explicitly selected API model through the real orchestrator launch path', async () => {
     carrierState.source = 'openrouter';
     carrierState.model = 'provider/frontier-model';
