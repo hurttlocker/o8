@@ -2132,6 +2132,8 @@
       "path": "tests/local-egress-assertion-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
+        "git-cli",
         "network-listener",
         "real-path"
       ]
