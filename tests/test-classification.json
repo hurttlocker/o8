@@ -158,12 +158,6 @@
       ]
     },
     {
-      "path": "src/components/desktop/workspace-terminal/use-terminal-mode.test.ts",
-      "reasons": [
-        "terminal-tool"
-      ]
-    },
-    {
       "path": "src/components/desktop/workspace-terminal/WorkspaceTerminalPanels.test.ts",
       "reasons": [
         "terminal-tool"
@@ -171,6 +165,12 @@
     },
     {
       "path": "src/components/desktop/workspace-terminal/XtermPanel.bench.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/components/desktop/workspace-terminal/use-terminal-mode.test.ts",
       "reasons": [
         "terminal-tool"
       ]
