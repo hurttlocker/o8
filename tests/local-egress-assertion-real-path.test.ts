@@ -109,7 +109,7 @@ const preloadArg = preloadPath.includes(' ')
   ? '--import="' + preloadPath + '"'
   : '--import=' + preloadPath;
 process.env.NODE_OPTIONS = [priorEnv.get('NODE_OPTIONS'), preloadArg].filter(Boolean).join(' ');
-await import('./fixtures/egress-assert-preload.mjs');
+await import(preloadPath);
 
 writeFileSync(fakeWorkerPath, [
   '#!/usr/bin/env node',
