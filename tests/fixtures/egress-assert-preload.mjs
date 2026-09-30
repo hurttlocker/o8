@@ -83,6 +83,7 @@ function record(target) {
 
 if (!globalThis[INSTALL_KEY]) {
   globalThis[INSTALL_KEY] = true;
+  process.env.O8_EGRESS_PRELOAD_ACTIVE = '1';
   const originalConnect = net.Socket.prototype.connect;
   net.Socket.prototype.connect = function o8EgressRecordedConnect(...args) {
     const target = endpointOf(args);
