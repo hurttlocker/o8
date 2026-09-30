@@ -471,6 +471,41 @@ describe('shared release build cache', () => {
       .toThrow();
   });
 
+  it('caches both native slices for a universal Tauri target without caching release bundles', async () => {
+    const { root, cacheRoot } = fixture();
+    const buildOptions = {
+      cargoTauriArgs: ['--target', 'universal-apple-darwin', '--', '--features', 'dev-mcp-plugin'],
+    };
+    const triples = ['x86_64-apple-darwin', 'aarch64-apple-darwin', 'universal-apple-darwin'];
+    for (const triple of triples) {
+      const release = join(root, 'src-tauri', 'target', triple, 'release');
+      mkdirSync(join(release, 'deps'), { recursive: true });
+      mkdirSync(join(release, 'bundle', 'macos'), { recursive: true });
+      writeFileSync(join(release, 'deps', `${triple}.rlib`), `compiler-${triple}`);
+      writeFileSync(join(release, 'bundle', 'macos', 'o8.app'), `bundle-${triple}`);
+    }
+
+    expect(await captureReleaseBuildCache(root, 'native', {
+      cacheRoot,
+      identity: nativeIdentity('universal-a'),
+      buildOptions,
+    })).toMatchObject({ status: 'captured' });
+    for (const triple of triples) {
+      rmSync(join(root, 'src-tauri', 'target', triple), { recursive: true, force: true });
+    }
+    expect(await restoreReleaseBuildCache(root, 'native', {
+      cacheRoot,
+      identity: nativeIdentity('universal-b'),
+      buildOptions,
+    })).toMatchObject({ status: 'hit_compatible' });
+
+    for (const triple of triples) {
+      const release = join(root, 'src-tauri', 'target', triple, 'release');
+      expect(readFileSync(join(release, 'deps', `${triple}.rlib`), 'utf8')).toBe(`compiler-${triple}`);
+      expect(existsSync(join(release, 'bundle'))).toBe(false);
+    }
+  });
+
   it('bypasses dirty source and records phase totals without local paths', async () => {
     const { root, cacheRoot } = fixture();
     const dirty = identity('dirty');
