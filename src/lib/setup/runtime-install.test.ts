@@ -1,8 +1,27 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { getRuntimeInstallInfo } from './runtime-install';
 
+function sourceFiles(root: string): string[] {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    return entry.isDirectory() ? sourceFiles(path) : [path];
+  });
+}
+
 describe('runtime install metadata', () => {
+  it('does not reference the nonexistent Codex CLI npm package under src', () => {
+    const root = join(process.cwd(), 'src');
+    const offenders = sourceFiles(root).filter((path) => {
+      const extension = extname(path);
+      if (!['.ts', '.tsx', '.js', '.jsx', '.md'].includes(extension)) return false;
+      return readFileSync(path, 'utf8').includes('@openai/codex-cli');
+    });
+    expect(offenders).toEqual([]);
+  });
+
   it('routes free Google accounts to Antigravity instead of the Gemini npm package', () => {
     expect(getRuntimeInstallInfo('antigravity')).toMatchObject({
       label: 'Antigravity CLI',
