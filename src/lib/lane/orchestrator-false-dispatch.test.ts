@@ -44,6 +44,11 @@ describe('claimsDispatch', () => {
     'Should I dispatch these three packets?',
     'The retry timer fired and the watchdog reaped the proc.',
     "I'll keep polling the mission status until the workers report.",
+    // #2940: contractions carry the negation inside the word.
+    "I haven't launched any agents.",
+    "I haven't dispatched anything.",
+    'I hadn’t launched the mission yet.',
+    "The workers weren't launched because plan mode is on.",
   ])('does not flag: %s', (text) => {
     expect(claimsDispatch(text)).toBe(false);
   });

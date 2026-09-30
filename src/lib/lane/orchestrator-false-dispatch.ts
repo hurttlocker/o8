@@ -49,7 +49,9 @@ const DISPATCH_VERB_PATTERN = /\b(?:dispatched|dispatching|launched|launching|ki
  * telling it to launch agents it deliberately did not launch — a false positive
  * that causes an unwanted dispatch. The guard is mandatory, not cosmetic.
  */
-const DISPATCH_NEGATION_PATTERN = /\b(?:no|not|n't|nothing|none|never|without|cannot|unable|instead of|rather than|before|would|should|could|will|can|if)\b/i;
+// A contraction's `n't` sits inside a word ("haven't", "didn’t"), where `\b`
+// never matches, so it is matched on its own without a leading boundary (#2940).
+const DISPATCH_NEGATION_PATTERN = /\b(?:no|not|nothing|none|never|without|cannot|unable|instead of|rather than|before|would|should|could|will|can|if)\b|n['’]t\b/i;
 
 /** Split on sentence terminators AND newlines — bullet lists rarely punctuate. */
 function sentences(text: string): string[] {
