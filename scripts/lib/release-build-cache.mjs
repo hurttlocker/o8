@@ -483,10 +483,20 @@ async function verifyCacheEntry(root, identity, manifestPath, config) {
   return { valid: true, manifest, archivePath };
 }
 
+function isReleaseBuildCacheJsonCandidate(name) {
+  // macOS AppleDouble sidecars (._*.json) are binary metadata, not cache JSON.
+  return name.endsWith('.json') && !name.startsWith('._');
+}
+
+function isReleaseBuildCachePhaseReceiptName(name) {
+  if (!isReleaseBuildCacheJsonCandidate(name)) return false;
+  return RELEASE_BUILD_CACHE_PHASES.includes(basename(name, '.json'));
+}
+
 function cacheManifests(directory, preferredEntry) {
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
-    .filter((name) => name.endsWith('.json'))
+    .filter((name) => isReleaseBuildCacheJsonCandidate(name))
     .map((name) => join(directory, name))
     .sort((left, right) => {
       const leftPreferred = basename(left, '.json') === preferredEntry ? 1 : 0;
@@ -569,7 +579,7 @@ function tarArguments(root, config, archivePath) {
 function pruneEntries(directory, keepEntry, projectRoot) {
   assertOutsideProjectNodeModules(directory, projectRoot);
   const manifests = readdirSync(directory)
-    .filter((name) => name.endsWith('.json'))
+    .filter((name) => isReleaseBuildCacheJsonCandidate(name))
     .map((name) => ({ name, mtimeMs: statSync(join(directory, name)).mtimeMs }))
     .sort((left, right) => right.mtimeMs - left.mtimeMs);
   const ordered = [
@@ -779,7 +789,7 @@ export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary, opti
   const directory = runDirectory(cacheRoot, runId);
   const phases = {};
   if (existsSync(directory)) {
-    for (const name of readdirSync(directory).filter((entry) => entry.endsWith('.json')).sort()) {
+    for (const name of readdirSync(directory).filter((entry) => isReleaseBuildCachePhaseReceiptName(entry)).sort()) {
       const receipt = JSON.parse(readFileSync(join(directory, name), 'utf8'));
       phases[receipt.phase] = receipt;
     }
@@ -814,6 +824,8 @@ export const releaseBuildCacheInternals = {
   PHASE_CONFIG,
   assertOutsideProjectNodeModules,
   collectWebEnvironmentFiles,
+  isReleaseBuildCacheJsonCandidate,
+  isReleaseBuildCachePhaseReceiptName,
   normalizeArchivePath,
   pathAllowed,
   phaseConfig,
