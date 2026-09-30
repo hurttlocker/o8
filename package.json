@@ -1,6 +1,6 @@
 {
   "name": "o8",
-  "version": "0.1.777",
+  "version": "0.1.778",
   "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
@@ -71,6 +71,7 @@
     "tauri:prebuild": "node scripts/tauri-prebuild.mjs",
     "version": "node scripts/sync-version.mjs",
     "tauri:build:nonotary": "sh -c 'unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= node scripts/tauri-build.mjs -- --features dev-mcp-plugin'",
+    "tauri:build:stable-macos": "sh -c 'unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= node scripts/tauri-build.mjs --target universal-apple-darwin -- --features dev-mcp-plugin'",
     "sign-and-notarize": "node scripts/sign-and-notarize.mjs",
     "build:cli": "node cli/esbuild.config.mjs",
     "test": "vitest run --config config/vitest/vitest.unit.config.ts",

@@ -219,6 +219,7 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     await act(async () => root.render(createElement(ForwardedControllerHarness, { ref: controllerRef, props: { ...props, termWsConnected: true } })));
     const remoteRequest = sendTerminalCreate.mock.calls.find((call) => String(call[2]).includes(tabId));
     expect(remoteRequest).toBeDefined();
+    expect(remoteRequest?.[5]).toBe(true);
     await act(async () => {
       expect(controllerRef.current?.onSessionCreated('remote-live-session', remoteRequest?.[2])).toBe(true);
     });

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
+import { readAbnormalStderrTail } from '@/lib/runtimes/shared/owned-session/exit-outcome';
+import { codexAuthRecoveryMessage } from '@/lib/runtimes/shared/codex-auth-failure';
 
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { findLaneBySession, getLane, updateLane } from '@/lib/lane/registry';
@@ -24,8 +26,8 @@ export async function relaunchSupervisedAgent(
   if (!['running', 'recovering'].includes(lane.status)) {
     return { status: 'held', reason: 'Automatic retry held: the lane is no longer running or recovering.' };
   }
-  const hold = (reason: string): SupervisorRelaunchResult => {
-    const note = `Automatic retry held: ${reason}. Use an explicit governed retry.`;
+  const hold = (reason: string, direct = false): SupervisorRelaunchResult => {
+    const note = direct ? reason : `Automatic retry held: ${reason}. Use an explicit governed retry.`;
     const current = getLane(lane.id);
     if (current?.sessionKey === retryOfSurfaceId && current.status === lane.status
       && current.runtime === lane.runtime && current.worktreePath === lane.worktreePath) {
@@ -57,6 +59,15 @@ export async function relaunchSupervisedAgent(
   if (!session || session.laneId !== lane.id || session.packetId !== (lane.packetId ?? undefined)
     || session.cwd !== lane.worktreePath || session.activeRun) {
     return hold('the original stopped session cannot be verified');
+  }
+  if (runtime === 'codex') {
+    const failedRun = session.recentRuns.find((run) => run.outcome === 'failed');
+    const stderr = failedRun?.childExit?.stderrTail
+      ?? (failedRun?.childExit
+        ? await readAbnormalStderrTail(failedRun.stderrPath, failedRun.childExit, 4_000)
+        : undefined);
+    const authMessage = codexAuthRecoveryMessage(stderr ?? '');
+    if (authMessage) return hold(authMessage, true);
   }
   const model = session.model?.trim();
   if (!model || !isThinkingEffort(session.effort)) {

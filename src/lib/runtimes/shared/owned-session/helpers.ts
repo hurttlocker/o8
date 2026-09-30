@@ -17,6 +17,7 @@ import {
 import type { RuntimeSurfaceLifecycle } from '@/lib/fleet/types';
 import { truncateText } from '@/lib/util/text';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { codexAuthRecoveryMessage } from '@/lib/runtimes/shared/codex-auth-failure';
 
 import type { OwnedChildExitOutcome, OwnedRunOutcome, OwnedRunRecord, ParsedRunLog } from './types';
 import { probeOwnedRunProcessClaim, resolveSpawnedProcessGroupId } from './run-process-proof';
@@ -431,6 +432,9 @@ export function ownedProcessExitPayload(
     classification: childExit.classification,
     runtimeOutcome: run.outcome,
     stderr,
+    ...(runtime === 'codex' && run.outcome === 'failed'
+      && codexAuthRecoveryMessage(childExit.stderrTail ?? stderr)
+      ? { authRecoveryRequired: true } : {}),
     completedTurn: parsed?.completedTurn ?? false,
     ...(parsed?.providerFailure ? { providerFailure: parsed.providerFailure } : {}),
     ...(parsed?.turnContextUsage ?? {}),

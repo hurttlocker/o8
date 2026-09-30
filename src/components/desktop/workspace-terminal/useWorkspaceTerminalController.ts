@@ -426,7 +426,7 @@ export function useWorkspaceTerminalController(
     if (command) {
       pendingCliCommands.current.set(tabId, command);
     }
-    sendTerminalCreate(120, 30, requestId, undefined, `workspace:${tabId}`);
+    sendTerminalCreate(120, 30, requestId, undefined, `workspace:${tabId}`, Boolean(tabsRef.current.find((tab) => tab.id === tabId)?.remoteMachine));
   }, [sendTerminalCreate]);
 
   useEffect(() => {

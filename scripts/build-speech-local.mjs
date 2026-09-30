@@ -5,13 +5,12 @@
 // x86_64 slice exists so bundling never breaks, but the Rust caller gates on
 // aarch64 — Intel machines never spawn it (benchmarked unusable there).
 //
-// Best-effort by design: if the Swift toolchain or network (SPM fetch of
-// FluidAudio) is unavailable, we KEEP any previously staged binaries and exit
-// 0 so a ship isn't blocked; we only hard-fail when there's nothing staged at
-// all AND the build failed — that would produce a bundle missing a declared
-// externalBin, which tauri build rejects anyway.
+// Best-effort for thin development builds: if the Swift toolchain or network
+// is unavailable, existing architecture-specific helpers may be retained. A
+// requested universal build is fail-closed and never accepts a helper left by
+// an earlier run after the current universal build fails.
 import { execSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,8 +20,12 @@ const helpersDir = join(root, 'src-tauri', 'helpers');
 const staged = [
   join(helpersDir, 'speech-local'),
   join(helpersDir, 'speech-local-aarch64-apple-darwin'),
+  join(helpersDir, 'speech-local-universal-apple-darwin'),
   join(helpersDir, 'speech-local-x86_64-apple-darwin'),
 ];
+const universalTarget = 'universal-apple-darwin';
+const requestedTarget = process.env.O8_TAURI_BUILD_TARGET || process.env.TAURI_ENV_TARGET_TRIPLE || '';
+const universalRequired = requestedTarget === universalTarget;
 
 if (process.platform !== 'darwin') {
   console.log('[speech-local] non-macOS — skipping');
@@ -32,6 +35,8 @@ if (process.platform !== 'darwin') {
 mkdirSync(helpersDir, { recursive: true });
 
 let built = null;
+let builtArchitectures = 'universal';
+let universalBuildFailed = false;
 try {
   execSync('swift build -c release --arch arm64 --arch x86_64', {
     cwd: pkgDir,
@@ -39,22 +44,41 @@ try {
     timeout: 15 * 60_000,
   });
   const universal = join(pkgDir, '.build', 'apple', 'Products', 'Release', 'speech-local');
-  if (existsSync(universal)) built = universal;
+  if (!existsSync(universal)) throw new Error('Swift build did not produce the universal helper');
+  built = universal;
 } catch (error) {
+  universalBuildFailed = true;
+  rmSync(staged[2], { force: true });
   console.warn(`[speech-local] universal build failed (${error.message}) — trying arm64-only`);
   try {
     execSync('swift build -c release --arch arm64', { cwd: pkgDir, stdio: 'inherit', timeout: 15 * 60_000 });
     const arm = join(pkgDir, '.build', 'arm64-apple-macosx', 'release', 'speech-local');
-    if (existsSync(arm)) built = arm;
+    if (existsSync(arm)) {
+      built = arm;
+      builtArchitectures = 'arm64';
+    }
   } catch (inner) {
     console.warn(`[speech-local] arm64 build failed too (${inner.message})`);
   }
 }
 
 if (built) {
-  for (const target of staged) copyFileSync(built, target);
-  console.log(`[speech-local] staged ${built} → helpers/ (3 names)`);
-} else if (staged.every((p) => existsSync(p))) {
+  const targets = builtArchitectures === 'universal' ? staged : staged.slice(0, 2);
+  for (const target of targets) copyFileSync(built, target);
+  console.log(`[speech-local] staged ${built} → helpers/ (${targets.length} names, ${builtArchitectures})`);
+  if (universalBuildFailed && universalRequired) {
+    console.error('[speech-local] requested universal build has no fresh universal helper; refusing stale or thin fallback');
+    process.exit(1);
+  }
+  const required = builtArchitectures === 'universal' ? staged : [staged[0], staged[1], staged[3]];
+  if (!required.every((path) => existsSync(path))) {
+    console.error('[speech-local] arm64 fallback preserved the Intel helper, but a required staged binary is missing');
+    process.exit(1);
+  }
+} else if (universalBuildFailed && universalRequired) {
+  console.error('[speech-local] requested universal build failed; refusing previously staged helpers');
+  process.exit(1);
+} else if ([staged[0], staged[1], staged[3]].every((p) => existsSync(p))) {
   console.warn('[speech-local] build unavailable — keeping previously staged binaries');
 } else {
   console.error('[speech-local] no build and no staged binaries — externalBin would be missing');
