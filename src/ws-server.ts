@@ -149,12 +149,13 @@ import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempo
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
+import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
 import {
   backendSwitchRequiresExplicitHandoff,
   prepareBackendSwitchHandoff,
   recordBackendSwitchHandoffAudit,
 } from './lib/orchestrator/backend-switch-carry';
-import { isComposerWireMode, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
+import { isComposerWireMode, modelFacingComposerMessage, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
   resolveOrchestratorRepoPath,
@@ -1001,7 +1002,7 @@ const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
 const TERMINAL_TMUX_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
-const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string }>();
+const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean }>();
 
 // ── Orchestrator channel state ──
 
@@ -5531,9 +5532,11 @@ async function handleOrchestratorSendMsgOnce(
     // what got persisted to the transcript above; only the payload handed to
     // the backend carries the "Operator session rules (binding)" block. Applies
     // across ALL backends because they all forward this argument untouched.
+    const executionMode = resolveOrchestratorExecutionMode(msg.orchestrationMode);
+    const operatorMessage = modelFacingComposerMessage(message, executionMode);
     const turnBody = backendSwitchHandoff
-      ? `${backendSwitchHandoff.prelude}\n\n${message}`
-      : message;
+      ? `${backendSwitchHandoff.prelude}\n\n${operatorMessage}`
+      : operatorMessage;
     const projectTurn = await prepareOrchestratorProjectTurn({
       message: turnBody,
       persistedProjectId: updatedThread?.projectId,
@@ -5547,6 +5550,7 @@ async function handleOrchestratorSendMsgOnce(
       message: turnMessageWithRules,
       threadId,
       turnId: assistantMessageId,
+      orchestrationMode: executionMode,
     });
     // Fable Slice 6 #2 — server-side metered-window valve. The 15K auto-compact
     // target lives in the desktop client's React effect; a headless or mobile
@@ -6910,7 +6914,7 @@ function materializePendingDashSession(
   const cwd = (pending.cwd && existsSync(pending.cwd) ? pending.cwd : undefined)
     ?? process.env.HOME ?? homedir() ?? '/tmp';
   const tmuxBacked = createDashTmuxSessionSync({
-    enabled: dashPersistentTerminalsEnabled(),
+    enabled: dashPersistentTerminalsEnabled() && !pending.directPty,
     sessionName,
     cols: nextCols,
     rows: nextRows,
@@ -6960,6 +6964,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
   const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
+  const directPty = msg.directPty === true;
   const ownerSessionName = dashSessionNameForOwnerKey(
     typeof msg.ownerKey === 'string' ? msg.ownerKey : undefined,
   );
@@ -6977,7 +6982,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     && (
       pendingDashSessions.has(ownerSessionName)
       || terminalAttachments.has(ownerSessionName)
-      || (dashPersistentTerminalsEnabled() && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
+      || (dashPersistentTerminalsEnabled() && !directPty && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
     )
   ) {
     console.log(`[ws-server] Reusing owned dashboard PTY session: ${ownerSessionName}`);
@@ -6997,7 +7002,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   }
 
   const sessionName = ownerSessionName ?? `cortex-dash-${randomUUID().slice(0, 8)}`;
-  pendingDashSessions.set(sessionName, { cols, rows, cwd });
+  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty });
   console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });
 }
@@ -7260,7 +7265,7 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   if (!attachment) {
     if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
       const pending = pendingDashSessions.get(sessionName);
-      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd });
+      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true });
     }
     return;
   }

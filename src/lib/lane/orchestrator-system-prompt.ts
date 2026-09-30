@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { buildFirstRunClarifyNote } from './clarify-first';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { ORCHESTRATOR_OUTCOME_OWNERSHIP_FALLBACK_V1 } from '@/lib/prompts/v1';
+import { toolProfileCanDispatch, type ToolProfile } from '@/lib/mcp/tool-spine/registry';
 
 /**
  * Shared o8 orchestrator system prompt assembly.
@@ -47,11 +48,77 @@ function repoHasDispatchHistory(repoPath: string): boolean {
   }
 }
 
+/** The CLI running the orchestrator turn. Fable runs through the Claude Code session. */
+export type OrchestratorPromptBackend = 'claude' | 'codex';
+
+const BACKEND_LABEL: Record<OrchestratorPromptBackend, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+};
+
+/** The tool surface a turn actually has, which decides the prompt sections it gets. */
+export interface OrchestratorPromptSurface {
+  /** Operator server and full cortex: dispatch, review, merge, render. */
+  dispatch: boolean;
+  /** Cortex read tools: fleet status, issues, PRs, packets, transcripts. */
+  cortexReads: boolean;
+  /** Backend-only sections (`<!-- o8:claude -->`) reach only that backend (#2900). */
+  backend: OrchestratorPromptBackend;
+}
+
+export function orchestratorPromptSurface(opts: {
+  backend: OrchestratorPromptBackend;
+  toolProfile?: ToolProfile;
+  /** False when the backend launches with no MCP servers at all (Codex single mode). */
+  mcpServers?: boolean;
+}): OrchestratorPromptSurface {
+  const mcpServers = opts.mcpServers !== false;
+  return {
+    dispatch: mcpServers && toolProfileCanDispatch(opts.toolProfile),
+    cortexReads: mcpServers,
+    backend: opts.backend,
+  };
+}
+
+const SCOPED_SECTION = /^<!-- o8:(dispatch|cortex-reads|claude) -->\n([\s\S]*?)^<!-- o8:\/\1 -->\n/gm;
+
+function keepsSection(kind: string, surface: OrchestratorPromptSurface): boolean {
+  if (kind === 'dispatch') return surface.dispatch;
+  if (kind === 'cortex-reads') return surface.cortexReads;
+  return kind === surface.backend;
+}
+
+/**
+ * `orchestrator.md` wraps sections that need a tool surface in
+ * `<!-- o8:dispatch -->` or `<!-- o8:cortex-reads -->` markers, and
+ * backend-only sections in `<!-- o8:claude -->`. Keep a section only when the
+ * turn has that surface or backend, so a Solo turn is never taught tools its
+ * profile removed (#2898) and a Codex turn is never told it is Claude (#2900).
+ * Sections nest, so the pass repeats until no marker is left; marker lines
+ * never reach the model.
+ */
+export function scopeOrchestratorPrompt(template: string, surface: OrchestratorPromptSurface): string {
+  let scoped = template;
+  for (;;) {
+    const next = scoped.replace(SCOPED_SECTION, (_match, kind: string, body: string) => (
+      keepsSection(kind, surface) ? body : ''
+    ));
+    if (next === scoped) return scoped;
+    scoped = next;
+  }
+}
+
 export function buildOrchestratorSystemPrompt(
   repoPath: string,
-  opts?: {
+  opts: {
+    /** The CLI running the turn; the prompt names it and keeps only its sections. */
+    backend: OrchestratorPromptBackend;
     /** Test override — production callers omit and it's computed from the lanes table. */
     firstRunClarify?: boolean;
+    /** The MCP tool profile the turn runs with. Defaults to the full surface. */
+    toolProfile?: ToolProfile;
+    /** False when the backend launches with no MCP servers at all (Codex single mode). */
+    mcpServers?: boolean;
   },
 ): string {
   const repoName = repoPath.split('/').filter(Boolean).pop() ?? repoPath;
@@ -86,11 +153,12 @@ export function buildOrchestratorSystemPrompt(
 
   // Clarify-first, first-mission trigger (silent — system prompt only, never
   // the transcript): a repo with no dispatch history gets the interview note.
-  const firstRun = opts?.firstRunClarify ?? !repoHasDispatchHistory(repoPath);
+  const firstRun = opts.firstRunClarify ?? !repoHasDispatchHistory(repoPath);
 
-  return template
+  return scopeOrchestratorPrompt(template, orchestratorPromptSurface(opts))
     .replaceAll('{{REPO_NAME}}', repoName)
     .replaceAll('{{REPO_PATH}}', repoPath)
+    .replaceAll('{{ORCHESTRATOR_BACKEND}}', BACKEND_LABEL[opts.backend])
     .replaceAll('{{REPO_LIST}}', repoList)
     .replaceAll('{{CLARIFY_FIRST_RUN_NOTE}}', firstRun ? buildFirstRunClarifyNote() : '');
 }

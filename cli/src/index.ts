@@ -49,10 +49,12 @@ import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
 import { runProject, runRepo } from './commands/resources.js';
 import { runProblem } from './commands/problem.js';
+import { runPlugin } from './commands/plugin.js';
 import { runStatus } from './commands/status.js';
 import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
 import { runTerminal } from './commands/terminal.js';
+import { runMachine } from './commands/machine.js';
 import { runServe } from './commands/serve.js';
 import { runVersion } from './commands/version.js';
 import { runWorkerLogin } from './commands/worker-login.js';
@@ -232,6 +234,10 @@ commands:
   terminal show <id> [--lines N]  bounded snapshot of an existing terminal
   terminal observe <id>  read-only live stream from an existing terminal
   terminal control <id>  exclusive input/output to an existing terminal; --human for interactive mode
+  terminal wait <id> --match <text> [--timeout ms]  wait read-only for output already present or arriving later
+  terminal ... --machine <label-or-id>  run terminal commands on a saved SSH machine
+  machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
+  machine list|check|rename|disable|enable|remove  manage saved SSH machines
   serve                start the headless API, WebSocket layer, and supervisor daemon
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children
@@ -295,6 +301,10 @@ commands:
   project delete <target>               remove a project and exclusive repo registrations; disk is preserved
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
+  plugin list          list reviewed executable actions [--plugin ID]
+  plugin action list   list action IDs, revisions, and project bindings [--plugin ID]
+  plugin action invoke <plugin-id> <action-id> --revision <sha256> [--repo <registered-path>]
+  plugin log list      read persisted, bounded action receipts [--plugin ID] [--limit N]
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
@@ -391,6 +401,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runRun(args.mode, args.rest);
     case 'terminal':
       return runTerminal(args.mode, secondary, args.rest);
+    case 'machine':
+      return runMachine(args.mode, secondary, args.rest);
     case 'serve':
       return runServe(args.mode, secondary, args.rest);
     case 'ask':
@@ -461,6 +473,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runProject(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
+    case 'plugin':
+      return runPlugin(args.mode, secondary, args.rest);
     case 'inbox':
       return runInbox(args.mode, secondary, args.rest);
     case 'session':

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { computeNewTerminalTab, detectLocalhostPreviews, resolveRunCommandTarget, serializeTabsForPersistence } from './terminal-tab-handlers';
+import { computeNewTerminalTab, detectLocalhostPreviews, flushPendingCliCommands, resolveRunCommandTarget, serializeTabsForPersistence } from './terminal-tab-handlers';
 import type { TerminalTab } from './types';
 
 describe('workspace terminal CLI launch', () => {
@@ -20,6 +20,33 @@ describe('workspace terminal CLI launch', () => {
     expect(result.cliCommand).toContain("cd '/tmp/demo repo'");
     expect(result.cliCommand).toContain('command -v magnitude');
     expect(result.cliCommand).toContain('npm i -g @magnitudedev/cli');
+  });
+});
+
+describe('saved machine terminal launch', () => {
+  it('retries a bridge 404 before unlocking the remote pane', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('session not found', { status: 404 }))
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const tab: TerminalTab = {
+      id: 'remote-tab', label: 'Saved machine', kind: 'terminal', tmuxSession: 'local-shell',
+      remoteMachine: { id: 'machine-1', label: 'Saved machine', sessionId: 'remote-session' },
+      remoteLaunchPending: true, createdAt: 1, lastActivity: 1,
+    };
+    const pending = new Map([[tab.id, 'o8 terminal control remote-session --machine machine-1']]);
+    const result = vi.fn();
+    const sendInput = vi.fn();
+    try {
+      flushPendingCliCommands([tab], pending, sendInput, () => true, result);
+      await vi.waitFor(() => expect(result).toHaveBeenCalledWith(tab.id, true));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0][1].body).toBe(fetchMock.mock.calls[1][1].body);
+      expect(sendInput).not.toHaveBeenCalled();
+      expect(pending.size).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

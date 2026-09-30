@@ -11,6 +11,7 @@ import {
   isStaleTask,
   runtimeLabel,
   shimmerTextStyle,
+  taskSessionKey,
   taskSignal,
   taskTimeLabel,
 } from './helpers';
@@ -31,12 +32,18 @@ export function TaskRow({
 }) {
   const [hovered, setHovered] = useState(false);
   const tone = GROUP_TONES[task.group] ?? GROUP_TONES.ready;
-  const sessionKey = task.lane?.sessionKey ?? null;
+  const sessionKey = taskSessionKey(task);
   const selectedRuntime = task.workerRouting?.selectedRuntime ?? task.runtime;
   const taskIntent = task.workerRouting?.workerIntent ?? task.workerIntent;
   const requestedProvider = task.workerRouting?.requestedProvider;
   const repoLabel = (task.repoName ?? baseName(task.repoPath)) || 'repo';
-  const detail = taskSignal(task) || task.summary;
+  const remote = task.execution;
+  const remoteState = remote?.leaseState === 'expired' ? 'lease expired'
+    : remote?.leaseState === 'active' ? `worker ${remote.workerId ?? 'unknown'}`
+      : remote?.status ?? null;
+  const detail = remote
+    ? [taskSignal(task), `Remote attempt ${remote.attempt} · ${remoteState}`, 'Editor and preview unavailable'].filter(Boolean).join(' · ')
+    : taskSignal(task) || task.summary;
   const stale = isStaleTask(task);
   const metaParts = [
     repoLabel,
@@ -139,6 +146,7 @@ export function TaskRow({
         </span>
         {detail ? (
           <span
+            title={detail}
             style={{
               display: 'block',
             marginTop: 2,

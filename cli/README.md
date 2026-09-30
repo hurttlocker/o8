@@ -74,6 +74,41 @@ Input is sent as terminal bytes, so a command needs a carriage return to run.
 Closing stdin or disconnecting releases the writer slot. The shell and its
 saved history remain available for later attachments.
 
+`o8 terminal wait <id> --match <text> [--timeout ms]` attempts to check existing
+visible terminal text, then follows the same live shell read-only for new output. It defaults to a
+30-second wait and never takes the writer slot or resizes the shell. A match
+returns the matching line and elapsed time; timeout exits 5 with a specific
+`wait_timeout` error. A timeout says only that no matching output was observed,
+so inspect the shell before retrying the command that should have produced it.
+The same command accepts `--machine <label-or-id>` for a saved SSH target when
+the remote o8 CLI also supports `terminal wait`.
+
+### Saved SSH machines
+
+Save a machine only after its remote o8 terminal host is already running:
+
+```sh
+o8 machine add workbox --label Build
+o8 machine list
+o8 machine check Build
+o8 terminal list --machine Build
+o8 terminal show <id> --machine Build
+o8 terminal control <id> --machine Build
+o8 --human terminal control <id> --machine Build
+```
+
+`machine add` accepts `--port`, `--ssh-config /absolute/path`, and
+`--remote-cli /absolute/path/to/o8` when the remote executable is not on the
+non-interactive SSH path. Profiles contain the target and these paths, not keys
+or passwords. OpenSSH handles authentication and verifies the host key. The
+remote o8 installation uses its own local operator credential. A disabled,
+missing, or unreachable target fails without sending the command to Local.
+Use `o8 machine rename <id> --label <name>`, `disable`, `enable`, or `remove`
+to manage a profile. Remote control supports both the JSON stream and the
+interactive terminal. Ctrl-] releases the attachment without ending the remote
+shell. A connection failure never changes the selected machine or routes input
+to Local. Native workspace switching is a separate app feature.
+
 ## Exit codes
 
 | Code | Meaning |

@@ -2,6 +2,15 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
+  // Tauri's `custom-protocol` feature belongs to the dependency, so this crate
+  // cannot inspect it with `cfg!(feature = ...)`. Surface Tauri's own build-mode
+  // decision for the pre-startup native test isolation guard.
+  println!("cargo:rerun-if-env-changed=DEP_TAURI_DEV");
+  println!("cargo:rustc-check-cfg=cfg(o8_custom_protocol)");
+  if !tauri_build::is_dev() {
+    println!("cargo:rustc-cfg=o8_custom_protocol");
+  }
+
   // ── Voice STT Swift sidecar compile (lifted from aqua/Symon) ──
   // macOS: compile the Swift speech recognizer helper FIRST.
   // IMPORTANT: This must run BEFORE tauri_build::build() because Tauri's

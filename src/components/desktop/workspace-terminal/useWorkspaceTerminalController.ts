@@ -55,8 +55,8 @@ import {
   buildNewLlmChatTab,
   buildPersistedState,
   computeCheckpointRestore,
-  computeNewTerminalTab,
-  flushPendingCliCommands,
+  deferRemoteTerminalLaunch,
+  flushQueuedRemoteLaunches,
   isAutoArchiveEligible,
   resolveRunCommandTarget,
   observeXtermHelperNames,
@@ -67,6 +67,8 @@ import {
   computeUpdatedChatSessionKey,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import { useWorkspaceTabCleanup } from '@/components/desktop/workspace-terminal/useWorkspaceTabCleanup';
+import { useTerminalTabLaunchers } from '@/components/desktop/workspace-terminal/use-terminal-tab-launchers';
+import { usePendingCliCommands } from '@/components/desktop/workspace-terminal/use-pending-cli-commands';
 import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
 import { useWorkspaceTabLabelUpdater } from '@/components/desktop/workspace-terminal/use-workspace-tab-label-updater';
 import { recordSpawnEvent, registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
@@ -146,6 +148,7 @@ export function useWorkspaceTerminalController(
   const tabsRef = useRef<TerminalTab[]>([]);
   const panelRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
   const pendingCliCommands = useRef<Map<string, string>>(new Map());
+  const queuedRemoteLaunchesRef = useRef<Map<string, string>>(new Map());
   const pendingRequestRef = useRef<Map<string, string>>(new Map());
   const pendingSessionsRef = useRef<Set<string>>(new Set());
   const restoredRef = useRef(false);
@@ -409,6 +412,7 @@ export function useWorkspaceTerminalController(
   }, [persistTabsNow]);
 
   const requestTerminalForTab = useCallback((tabId: string, command: string | undefined, caller: TerminalRequestCaller) => {
+    if (deferRemoteTerminalLaunch(tabsRef.current, queuedRemoteLaunchesRef.current, tabId, command, termWsConnectedRef.current)) return;
     const requestId = `workspace-${tabId}-${Date.now()}`;
     logTerminalBench('terminal-create-requested', {
       tabId,
@@ -422,7 +426,7 @@ export function useWorkspaceTerminalController(
     if (command) {
       pendingCliCommands.current.set(tabId, command);
     }
-    sendTerminalCreate(120, 30, requestId, undefined, `workspace:${tabId}`);
+    sendTerminalCreate(120, 30, requestId, undefined, `workspace:${tabId}`, Boolean(tabsRef.current.find((tab) => tab.id === tabId)?.remoteMachine));
   }, [sendTerminalCreate]);
 
   useEffect(() => {
@@ -842,18 +846,22 @@ export function useWorkspaceTerminalController(
   }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createInitialChatTabs, createDefaultShellTab, defaultTab, requestTerminalForTab, restoreKey, splitCreated, stateScope]);
 
   useEffect(() => {
-    if (!termWsConnected || !restoreSettledRef.current || initialTerminalBootstrapRef.current) return;
-    initialTerminalBootstrapRef.current = true;
-    for (const tab of tabsRef.current) {
-      if (tab.kind !== 'terminal') continue;
-      if (tab.tmuxSession) {
-        sendTerminalAttach(tab.tmuxSession, 120, 30, tab.readOnly);
-        continue;
+    if (!termWsConnected || !restoreSettledRef.current) return;
+    if (!initialTerminalBootstrapRef.current) {
+      initialTerminalBootstrapRef.current = true;
+      for (const tab of tabsRef.current) {
+        if (tab.kind !== 'terminal') continue;
+        if (tab.tmuxSession) {
+          sendTerminalAttach(tab.tmuxSession, 120, 30, tab.readOnly);
+          continue;
+        }
+        if (tab.remoteMachine) continue;
+        const restoreCommand = tab.repo?.localPath ? `cd ${shellQuote(tab.repo.localPath)}` : undefined;
+        requestTerminalForTab(tab.id, restoreCommand, 'ws-bootstrap');
       }
-      const restoreCommand = tab.repo?.localPath ? `cd ${shellQuote(tab.repo.localPath)}` : undefined;
-      requestTerminalForTab(tab.id, restoreCommand, 'ws-bootstrap');
     }
-  }, [requestTerminalForTab, sendTerminalAttach, termWsConnected]);
+    flushQueuedRemoteLaunches(tabsRef.current, queuedRemoteLaunchesRef.current, requestTerminalForTab);
+  }, [requestTerminalForTab, restoreCompletedKey, sendTerminalAttach, termWsConnected]);
 
   useEffect(() => {
     if (tabs.length > 0 || !termWsConnected || splitCreated || !primaryRestoreSettled) return;
@@ -1112,20 +1120,9 @@ export function useWorkspaceTerminalController(
 
   const handleCloseTabRef = useRef<(tabId: string) => void>(() => undefined);
 
-  const openWorkspaceTerminalTab = useCallback((agentId: string, repo?: RegisteredRepo): string => {
-    // Pass the current tabs so `Terminal N` numbering picks the next free slot.
-    const result = computeNewTerminalTab(agentId, repo, tabsRef.current);
-    if (!result.newTab) return '';
-    if (result.cliCommand) {
-      pendingCliCommands.current.set(result.newTab.id, result.cliCommand);
-    }
-    const nextTabs = [result.newTab, ...tabsRef.current];
-    tabsRef.current = nextTabs;
-    setTabs(nextTabs);
-    setActiveTabIdFromUser(result.activeTabId);
-    requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined, 'new-tab');
-    return result.activeTabId;
-  }, [requestTerminalForTab, setActiveTabIdFromUser]);
+  const { openWorkspaceTerminalTab, openRemoteTerminalTab } = useTerminalTabLaunchers({
+    tabsRef, pendingCliCommands, setTabs, setActiveTabIdFromUser, requestTerminalForTab,
+  });
 
   const attachWorkspaceTerminalSession = useCallback((
     session: WorkspaceAttachedTerminalSession,
@@ -1174,13 +1171,14 @@ export function useWorkspaceTerminalController(
     openWorkspaceLlmChatSession,
     openWorkspaceOrchestratorTab: spawnOrchestratorTab,
     openWorkspaceTerminalTab,
+    openRemoteTerminalTab,
     attachWorkspaceTerminalSession,
     openWorkspaceInspectorTab,
     persistTabsNow,
     recordTerminalActivity: terminalActivity.record,
     sendTerminalDetach,
     closeTabById: (tabId: string) => handleCloseTabRef.current(tabId),
-  }), [activeTabId, attachWorkspaceTerminalSession, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, openWorkspaceTerminalTab, persistTabsNow, preferredRepo, sendTerminalDetach, setActiveTabIdFromUser, spawnOrchestratorTab, stateScope, terminalActivity]);
+  }), [activeTabId, attachWorkspaceTerminalSession, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openRemoteTerminalTab, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, openWorkspaceTerminalTab, persistTabsNow, preferredRepo, sendTerminalDetach, setActiveTabIdFromUser, spawnOrchestratorTab, stateScope, terminalActivity]);
 
   const handleRegisterRepo = useCallback((localPath: string) => {
     fetch('/api/panel/repos', {
@@ -1305,6 +1303,7 @@ export function useWorkspaceTerminalController(
     pendingRequestRef,
     pendingSessionsRef,
     sendTerminalDetach,
+    sendTerminalInput,
     setActiveTabIdFromUser,
     setPreviews,
     setTabs,
@@ -1330,9 +1329,7 @@ export function useWorkspaceTerminalController(
     }
     return () => { timers.forEach((id) => window.clearTimeout(id)); };
   }, [archiveWorkspaceTab, effectiveActiveTabId, tabs, terminalActivity]);
-  useEffect(() => {
-    flushPendingCliCommands(tabs, pendingCliCommands.current, sendTerminalInput);
-  }, [sendTerminalInput, tabs]);
+  usePendingCliCommands(tabs, pendingCliCommands.current, tabsRef, setTabs, sendTerminalInput);
 
   const handleDragStart = useCallback((event: ReactMouseEvent) => {
     event.preventDefault();
@@ -1428,6 +1425,7 @@ export function useWorkspaceTerminalController(
     handleNewChatTab,
     handleNewLLMChatTab,
     handleNewTab,
+    openRemoteTerminalTab,
     handleOpenHistoryChat,
     handleReorderTabs,
     handleOpenWorkspaceCommitTab,

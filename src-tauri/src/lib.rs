@@ -25,6 +25,7 @@ mod models;
 // Child processes must not open console windows on Windows — a console the
 // user can click into suspends the process (see the module doc).
 mod no_window;
+mod native_test_instance;
 mod overlay_geometry;
 mod paste;
 mod point_overlay;
@@ -7526,6 +7527,19 @@ fn boot_trace(stage: &str) {
 }
 
 pub fn run() {
+    // A disposable native test process runs beside the operator's installed app.
+    // Treat its environment as an all-or-nothing safety contract and fail before
+    // telemetry, lifecycle cleanup, plugins, ports, or persistent state when it
+    // is incomplete. A typo must never silently degrade into a production boot.
+    let native_test_instance =
+        match native_test_instance::NativeTestInstance::from_env_if_requested() {
+            Ok(instance) => instance,
+            Err(error) => {
+                eprintln!("[native-test-isolation] refusing unsafe launch: {error}");
+                std::process::exit(78);
+            }
+        };
+
     // First statement in the process: everything else is measured against this.
     let _ = BOOT_T0.set(std::time::Instant::now());
     boot_trace("run() entry");
@@ -7559,7 +7573,7 @@ pub fn run() {
     // unset. Placed AFTER minidump init so the reporter is already listening.
     telemetry::maybe_trigger_crash_test();
 
-    let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
+    let preship_gate = native_test_instance.is_some();
     let dev_frontend = match dev_frontend::from_env() {
         Ok(dev_frontend) => dev_frontend,
         Err(err) => {
@@ -7631,7 +7645,9 @@ pub fn run() {
     // So the sequence is, and must remain: reap the processes, THEN clean the
     // socket, THEN build. All this change does is overlap the reap with the 1.6s
     // the macro was going to spend anyway.
-    if desktop_attached {
+    if preship_gate {
+        boot_trace("orphan reap SKIPPED (isolated native test instance)");
+    } else if desktop_attached {
         boot_trace("orphan reap SKIPPED (desktop attached to daemon)");
     } else {
         start_orphan_reap();
@@ -7647,9 +7663,13 @@ pub fn run() {
     // spent inside generate_context!() above, so this join is free — but it must
     // happen here, because the socket clean below depends on those stale
     // processes being dead, and tauri-plugin-mcp binds the socket in .build().
-    join_orphan_reap();
-    sidecar_lifecycle::clean_stale_mcp_socket();
-    if desktop_attached {
+    if !preship_gate {
+        join_orphan_reap();
+        sidecar_lifecycle::clean_stale_mcp_socket();
+    }
+    if preship_gate {
+        boot_trace("production MCP socket cleanup SKIPPED (isolated native test instance)");
+    } else if desktop_attached {
         boot_trace("mcp socket cleaned (daemon listeners untouched)");
     } else {
         boot_trace("orphan reap joined + mcp socket cleaned (pre-builder)");
@@ -7739,7 +7759,7 @@ pub fn run() {
     // whose parent is still alive (so it cannot touch the live instance's
     // next-server/ws-server), and it is Unix-only, so on Windows it is a no-op.
     #[cfg(any(target_os = "windows", target_os = "linux"))]
-    {
+    if !preship_gate {
         builder = builder
             .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
                 // The `deep-link` feature already handed _argv to the deep-link
@@ -8055,10 +8075,12 @@ pub fn run() {
                 }
             }
             #[cfg(target_os = "macos")]
-            url_scheme_handler::reassert_o8_scheme_handler();
+            if !preship_gate {
+                url_scheme_handler::reassert_o8_scheme_handler();
+            }
             // ── Windows/Linux `o8://` (#1742) — the non-macOS half of the above ──
             #[cfg(any(target_os = "windows", target_os = "linux"))]
-            {
+            if !preship_gate {
                 use tauri_plugin_deep_link::DeepLinkExt;
 
                 // Hot path: a live app receiving a URL (fresh launch that
@@ -8129,7 +8151,9 @@ pub fn run() {
             // and auto-update silently break (#fresh-user). Off-thread so the
             // blocking osascript dialog doesn't delay window creation.
             #[cfg(target_os = "macos")]
-            std::thread::spawn(first_run_install::offer_move_to_applications_if_needed);
+            if !preship_gate {
+                std::thread::spawn(first_run_install::offer_move_to_applications_if_needed);
+            }
             // ── System Tray (issue #731) ──
             // Menu items: Show / Quit.
             let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
@@ -8552,14 +8576,11 @@ pub fn run() {
                     // (the probe's 127.0.0.1 bind doesn't conflict with an
                     // operator listener on ::1/0.0.0.0), so do NOT probe — bind
                     // exactly the free ports the gate driver provisioned.
-                    api_port = std::env::var("O8_API_PORT")
-                        .ok()
-                        .and_then(|p| p.parse().ok())
-                        .unwrap_or(3060);
-                    ws_port = std::env::var("O8_WS_PORT")
-                        .ok()
-                        .and_then(|p| p.parse().ok())
-                        .unwrap_or(3061);
+                    let isolation = native_test_instance
+                        .as_ref()
+                        .expect("validated native test isolation missing");
+                    api_port = isolation.api_port;
+                    ws_port = isolation.ws_port;
                     log::info!(
                         "[preship-gate] forced isolated ports: api={} ws={}",
                         api_port,

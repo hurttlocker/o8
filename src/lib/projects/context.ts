@@ -71,6 +71,7 @@ export interface ProjectContextOptions {
 export interface ProjectTaskBriefOptions extends ProjectContextOptions {
   taskTitle?: string | null;
   taskBody?: string | null;
+  includeLocalPaths?: boolean;
 }
 
 const RAIL_IMPORT_PLACEHOLDER = 'Imported from the desktop project rail.';
@@ -446,10 +447,10 @@ export function buildProjectTaskBrief(context: ProjectContext, options: ProjectT
   const lines = [
     `Project: ${context.name} (${context.repos.length} repo${context.repos.length === 1 ? '' : 's'})`,
     context.primaryRepo
-      ? `Main repo: ${formatRepoLabel(context.primaryRepo)} at ${context.primaryRepo.localPath}`
+      ? `Main repo: ${formatRepoLabel(context.primaryRepo)}${options.includeLocalPaths === false ? '' : ` at ${context.primaryRepo.localPath}`}`
       : null,
     context.currentRepo && context.currentRepo.id !== context.primaryRepo?.id
-      ? `Current repo: ${formatRepoLabel(context.currentRepo)} at ${context.currentRepo.localPath}`
+      ? `Current repo: ${formatRepoLabel(context.currentRepo)}${options.includeLocalPaths === false ? '' : ` at ${context.currentRepo.localPath}`}`
       : null,
     siblingRepos.length > 0
       ? `Related repos: ${siblingRepos.map(formatRepoLabel).join(', ')}`

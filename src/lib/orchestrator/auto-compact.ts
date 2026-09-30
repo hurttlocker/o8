@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { MODEL_IDS } from '@/lib/models';
@@ -10,10 +10,9 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 import { logUsage } from '@/lib/db/usage';
 import { scoreCompactionSegment } from '@/lib/orchestrator/compaction-scorer';
-const HISTORY_DIR = path.join(getDataDir(), 'chat-history');
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
-type PersistedThread = { filePath: string; tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[]; mtimeMs: number };
+type PersistedThread = { tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[] };
 export const ORCHESTRATOR_COMPACTION_PROVENANCE = {
   backend: 'codex',
   model: MODEL_IDS.codexCliDefault,
@@ -50,67 +49,23 @@ function coerceEntry(value: unknown): MobileTranscriptEntry | null {
     }
     : null;
 }
-async function readThread(repoPath: string, threadId?: string): Promise<PersistedThread | null> {
-  if (threadId?.startsWith('thoughts-')) {
-    const filePath = getCanonicalChatHistoryPath(threadId);
-    const raw = await readFile(filePath, 'utf8').catch(() => '');
-    if (!raw) return null;
-    try {
-      const payload = JSON.parse(raw) as Record<string, unknown>;
-      if ((payload.repoPath as string | undefined)?.trim() !== repoPath) return null;
-      const fileStat = await stat(filePath).catch(() => null);
-      const messages = Array.isArray(payload.messages) ? payload.messages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
-      return messages.length === 0 || !fileStat ? null : {
-        filePath,
-        tabId: threadId,
-        payload,
-        messages,
-        mtimeMs: fileStat.mtimeMs,
-      };
-    } catch {
-      return null;
-    }
-  }
-  const files = await readdir(HISTORY_DIR).catch(() => [] as string[]);
-  const candidates = await Promise.all(files.filter((file) => file.startsWith('thoughts-') && file.endsWith('.json')).map(async (file) => {
-    const filePath = path.join(HISTORY_DIR, file);
-    const raw = await readFile(filePath, 'utf8').catch(() => '');
-    if (!raw) return null;
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+async function readThread(repoPath: string, threadId: string): Promise<PersistedThread | null> {
+  if (!threadId.startsWith('thoughts-')) return null;
+  const filePath = getCanonicalChatHistoryPath(threadId);
+  const raw = await readFile(filePath, 'utf8').catch(() => '');
+  if (!raw) return null;
+  try {
+    const payload = JSON.parse(raw) as Record<string, unknown>;
     if ((payload.repoPath as string | undefined)?.trim() !== repoPath) return null;
-    const fileStat = await stat(filePath).catch(() => null);
     const messages = Array.isArray(payload.messages) ? payload.messages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
-    return messages.length === 0 || !fileStat ? null : {
-      filePath,
-      tabId: file.replace(/\.json$/, ''),
+    return messages.length === 0 ? null : {
+      tabId: threadId,
       payload,
       messages,
-      mtimeMs: fileStat.mtimeMs,
     };
-  }));
-  return candidates.filter((candidate): candidate is PersistedThread => Boolean(candidate)).sort((left, right) => right.mtimeMs - left.mtimeMs)[0] ?? null;
-}
-function mergeSnapshots(history: MobileTranscriptEntry[], snapshot: MobileTranscriptEntry[]) {
-  if (snapshot.length === 0) return history;
-  const next = [...history];
-  const seen = new Set(next.map((entry) => entry.id));
-  for (const entry of snapshot) {
-    const index = next.findIndex((candidate) => candidate.id === entry.id);
-    if (index >= 0) {
-      next[index] = entry;
-      continue;
-    }
-    if (!seen.has(entry.id)) {
-      next.push(entry);
-      seen.add(entry.id);
-    }
+  } catch {
+    return null;
   }
-  return next.sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
 }
 function buildExcerpt(messages: MobileTranscriptEntry[], maxChars: number) {
   let size = 0;
@@ -330,8 +285,7 @@ export async function digest(text: string, repoPath: string): Promise<DigestResu
 
 export async function autoCompactOrchestratorThread(input: {
   repoPath: string;
-  threadId?: string;
-  liveMessages?: MobileTranscriptEntry[];
+  threadId: string;
   /** Parent-session context tokens only. Child usage belongs to cost receipts. */
   runningTotal?: number;
   keepTailCount?: number;
@@ -340,8 +294,8 @@ export async function autoCompactOrchestratorThread(input: {
   force?: boolean;
 }): Promise<AutoCompactResult> {
   const repoPath = input.repoPath.trim();
-  const snapshot = Array.isArray(input.liveMessages) ? input.liveMessages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
-  if (!repoPath) return notApplied(snapshot);
+  const threadId = input.threadId.trim();
+  if (!repoPath || !threadId.startsWith('thoughts-')) return notApplied([]);
 
   // Gate background LLM work on the in-app orchestrator toggle (#1046, epic
   // #1044). Toggle ON means user has at least one sub (Codex) and wants the
@@ -349,14 +303,15 @@ export async function autoCompactOrchestratorThread(input: {
   // compaction — the thread keeps growing but no LLM calls happen.
   const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
   if (!input.force && !resolveInAppOrchestratorEnabledSync()) {
-    return notApplied(snapshot);
+    return notApplied([]);
   }
-  const inFlightKey = `${repoPath}\0${input.threadId?.trim() ?? ''}`;
+  const inFlightKey = `${repoPath}\0${threadId}`;
   const existing = inFlight.get(inFlightKey);
   if (existing) return existing;
   const job = (async () => {
-    const thread = await readThread(repoPath, input.threadId?.trim());
-    const transcript = mergeSnapshots(thread?.messages ?? [], snapshot);
+    const thread = await readThread(repoPath, threadId);
+    if (!thread) return notApplied([]);
+    const transcript = thread.messages;
     if (transcript.length < 2) return notApplied(transcript);
     const keepTailCount = typeof input.keepTailCount === 'number' && Number.isFinite(input.keepTailCount)
       ? Math.max(1, Math.floor(input.keepTailCount))
@@ -377,7 +332,7 @@ export async function autoCompactOrchestratorThread(input: {
     const scorerJob = scoreCompactionSegment(compactedTurns);
     const summaryResult = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
     const summary = summaryResult.text;
-    recordCompactionUsage(repoPath, thread?.tabId ?? input.threadId?.trim() ?? null, summaryResult, compactedAt);
+    recordCompactionUsage(repoPath, thread.tabId, summaryResult, compactedAt);
     const displaySummary = `<compacted_context turns="${compactedTurns.length}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
     const compactionEntry: MobileTranscriptEntry = {
       id: `orch-compaction-${compactedAt.getTime()}`,
@@ -403,11 +358,11 @@ export async function autoCompactOrchestratorThread(input: {
     const scorer = await scorerJob;
     if (scorer) compactionEntry.compaction!.scorer = scorer;
     await mkdir(ARCHIVE_DIR, { recursive: true });
-    const archiveRef = `${thread?.tabId ?? 'thoughts'}-${compactionEntry.id}.json`;
+    const archiveRef = `${thread.tabId}-${compactionEntry.id}.json`;
     compactionEntry.compaction!.archiveRef = archiveRef;
     await writeFile(path.join(ARCHIVE_DIR, archiveRef), JSON.stringify({
       repoPath,
-      tabId: thread?.tabId ?? null,
+      tabId: thread.tabId,
       archivedAt: compactedAt.toISOString(),
       compactedCount: compactedTurns.length,
       turns: compactedTurns.map(toStoredMessage),
@@ -415,13 +370,11 @@ export async function autoCompactOrchestratorThread(input: {
       compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
       ...(scorer ? { scorer } : {}),
     }));
-    if (thread) {
-      persistCanonicalChatHistoryRecord(thread.tabId, {
-        ...thread.payload,
-        messages: nextTranscript.map(toStoredMessage),
-        savedAt: compactedAt.toISOString(),
-      });
-    }
+    persistCanonicalChatHistoryRecord(thread.tabId, {
+      ...thread.payload,
+      messages: nextTranscript.map(toStoredMessage),
+      savedAt: compactedAt.toISOString(),
+    });
     return {
       applied: true,
       transcript: nextTranscript,

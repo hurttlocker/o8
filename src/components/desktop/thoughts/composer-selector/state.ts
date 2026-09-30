@@ -45,6 +45,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
   },
   workerRuntimes: {
     codex: 'openai',
+    cloud: 'openai',
     'claude-code': 'anthropic',
     gemini: 'gemini',
     antigravity: 'gemini',

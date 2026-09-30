@@ -3,6 +3,9 @@ import WebSocket from 'ws';
 import { CliError, EXIT, resolveWsBase } from '../api.js';
 import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
+import { runRemoteTerminal } from './machine.js';
+import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
+import { waitForTerminalOutput } from './terminal-wait.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
 
@@ -61,7 +64,7 @@ async function requireLiveSession(cfg: ResolvedConfig, id: string): Promise<void
 }
 
 /** A controller owns the writer slot only while this WebSocket is connected. */
-function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<number> {
+function control(cfg: ResolvedConfig, id: string, mode: OutputMode, filterProbeReplies = false): Promise<number> {
   const url = new URL('/ws', resolveWsBase(cfg));
   url.searchParams.set('token', cfg.token!);
   return new Promise((resolve, reject) => {
@@ -71,6 +74,8 @@ function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
     let attached = false;
     let settled = false;
     let lineBuffer = '';
+    const probeFilter = filterProbeReplies ? new TerminalProbeReplyFilter() : null;
+    let probeFlushTimer: ReturnType<typeof setTimeout> | null = null;
     const wasRaw = process.stdin.isTTY ? process.stdin.isRaw : false;
     const send = (frame: Record<string, unknown>) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
@@ -78,6 +83,7 @@ function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
     const dimensions = () => ({ cols: process.stdout.columns || 120, rows: process.stdout.rows || 30 });
     const cleanup = () => {
       clearTimeout(connectTimer);
+      if (probeFlushTimer) clearTimeout(probeFlushTimer);
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
       process.stdin.off('data', onInput);
@@ -111,7 +117,14 @@ function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
         const data = releaseAt < 0 ? input : input.subarray(0, releaseAt);
         if (data.length) {
           const text = inputDecoder.decode(data, { stream: true });
-          if (text) send({ type: 'terminal-input', sessionName: id, data: text });
+          const filtered = probeFilter ? probeFilter.push(text) : text;
+          if (filtered) send({ type: 'terminal-input', sessionName: id, data: filtered });
+          if (probeFlushTimer) clearTimeout(probeFlushTimer);
+          probeFlushTimer = probeFilter?.hasPending ? setTimeout(() => {
+            const remainder = probeFilter.flush();
+            if (remainder) send({ type: 'terminal-input', sessionName: id, data: remainder });
+            probeFlushTimer = null;
+          }, probeFilter.pendingDelayMs) : null;
         }
         if (releaseAt >= 0) stop();
         return;
@@ -295,8 +308,17 @@ function observe(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
 }
 
 export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
-  if (!['list', 'show', 'observe', 'control'].includes(sub ?? '')) {
-    throw new CliError('invalid_args', 'Use `o8 terminal list|show <id>|observe <id>|control <id>`.', EXIT.INVALID_ARGS);
+  if (!['list', 'show', 'observe', 'control', 'wait'].includes(sub ?? '')) {
+    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait`.', EXIT.INVALID_ARGS);
+  }
+  const machineAt = rest.indexOf('--machine');
+  if (machineAt >= 0) {
+    const key = rest[machineAt + 1];
+    if (!key || rest.lastIndexOf('--machine') !== machineAt) {
+      throw new CliError('invalid_args', 'Use exactly one `--machine <label-or-id>`.', EXIT.INVALID_ARGS);
+    }
+    const localRest = rest.filter((_, index) => index !== machineAt && index !== machineAt + 1);
+    return runRemoteTerminal(mode, sub!, localRest, key);
   }
   const cfg = operatorConfig();
   if (sub === 'list') {
@@ -308,10 +330,29 @@ export async function runTerminal(mode: OutputMode, sub: string | undefined, res
   }
   const id = rest[0]?.trim();
   if (!id) throw new CliError('invalid_args', `terminal ${sub} requires an exact session ID.`, EXIT.INVALID_ARGS);
-  if (sub === 'observe' || sub === 'control') {
-    if (rest.length !== 1) throw new CliError('invalid_args', `terminal ${sub} takes one session ID.`, EXIT.INVALID_ARGS);
+  if (sub === 'wait') {
+    let match: string | null = null;
+    let timeoutMs = 30_000;
+    if ((rest.length - 1) % 2 !== 0) {
+      throw new CliError('invalid_args', 'Use `terminal wait <id> --match <text> [--timeout ms]`.', EXIT.INVALID_ARGS);
+    }
+    for (let i = 1; i < rest.length; i += 2) {
+      if (rest[i] === '--match' && match === null) match = rest[i + 1];
+      else if (rest[i] === '--timeout' && /^\d+$/.test(rest[i + 1] ?? '')) timeoutMs = Number(rest[i + 1]);
+      else throw new CliError('invalid_args', 'Use one --match and optional --timeout.', EXIT.INVALID_ARGS);
+    }
+    if (!match || match.length > 256 || !Number.isSafeInteger(timeoutMs)
+      || timeoutMs < 1 || timeoutMs > 600_000) {
+      throw new CliError('invalid_args', '--match must be 1..256 characters and --timeout 1..600000 ms.', EXIT.INVALID_ARGS);
+    }
     await requireLiveSession(cfg, id);
-    return sub === 'control' ? control(cfg, id, mode) : observe(cfg, id, mode);
+    return waitForTerminalOutput(cfg, id, match, timeoutMs, mode);
+  }
+  if (sub === 'observe' || sub === 'control') {
+    const filterProbeReplies = sub === 'control' && rest.length === 2 && rest[1] === '--filter-probe-replies';
+    if (rest.length !== 1 && !filterProbeReplies) throw new CliError('invalid_args', `terminal ${sub} takes one session ID.`, EXIT.INVALID_ARGS);
+    await requireLiveSession(cfg, id);
+    return sub === 'control' ? control(cfg, id, mode, filterProbeReplies) : observe(cfg, id, mode);
   }
   let lines = 200;
   if (rest.length > 1) {
