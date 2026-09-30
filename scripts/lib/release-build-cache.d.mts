@@ -77,6 +77,10 @@ export const releaseBuildCacheInternals: {
   collectWebEnvironmentFiles(root: string): Array<{ path: string; sha256: string }>;
   normalizeArchivePath(value: string): string | null;
   pathAllowed(candidate: string, targets: string[], excludes: string[]): boolean;
+  phaseConfig(phase: ReleaseBuildCachePhase, buildOptions?: Record<string, unknown>): {
+    targets: string[];
+    excludes: string[];
+  };
   pruneCacheToBudget(
     cacheRoot: string,
     budgetBytes: number,
