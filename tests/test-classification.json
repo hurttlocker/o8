@@ -158,6 +158,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/workspace-terminal/use-terminal-mode.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/components/desktop/workspace-terminal/WorkspaceTerminalPanels.test.ts",
       "reasons": [
         "terminal-tool"
@@ -165,12 +171,6 @@
     },
     {
       "path": "src/components/desktop/workspace-terminal/XtermPanel.bench.test.ts",
-      "reasons": [
-        "terminal-tool"
-      ]
-    },
-    {
-      "path": "src/components/desktop/workspace-terminal/use-terminal-mode.test.ts",
       "reasons": [
         "terminal-tool"
       ]
@@ -1957,6 +1957,15 @@
       "path": "tests/global-test-data-dir.test.ts",
       "reasons": [
         "fixture-lifecycle"
+      ]
+    },
+    {
+      "path": "tests/governed-terminal-write-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
       ]
     },
     {
