@@ -85,7 +85,7 @@ const envKeys = [
   'O8_EGRESS_ALLOWED_ENDPOINTS',
   'O8_EGRESS_BLOCK_UNEXPECTED',
   'O8_EGRESS_SURFACE',
-  'O8_EGRESS_PRELOAD_ACTIVE',
+  'O8_EGRESS_PRELOAD_PID',
   'NODE_OPTIONS',
 ] as const;
 const priorEnv = new Map<string, string | undefined>();
@@ -117,8 +117,8 @@ writeFileSync(fakeWorkerPath, [
   "const fs = require('node:fs');",
   "process.env.O8_EGRESS_SURFACE = 'runtime-adapter';",
   "if (process.argv.includes('--version')) { process.stdout.write('qodercli 1.0.0\\n'); process.exit(0); }",
-  "if (process.env.O8_EGRESS_PRELOAD_ACTIVE !== '1') {",
-  "  process.stderr.write('egress preload missing from worker\\n');",
+  "if (process.env.O8_EGRESS_PRELOAD_PID !== String(process.pid)) {",
+  "  process.stderr.write('egress preload missing from worker process\\n');",
   "  process.exit(86);",
   "}",
   '(async () => {',
