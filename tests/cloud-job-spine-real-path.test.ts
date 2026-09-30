@@ -21,11 +21,16 @@ const pollRoute = await import('@/app/api/cloud/worker-poll/route');
 const streamRoute = await import('@/app/api/cloud/worker-stream/route');
 const controlRoute = await import('@/app/api/cloud/worker-control/route');
 const statusRoute = await import('@/app/api/cloud/job-status/route');
+const workerPanelRoute = await import('@/app/api/panel/cloud-workers/route');
+const taskRoute = await import('@/app/api/tasks/[taskId]/route');
 const drainRoute = await import('@/app/api/panel/cloud-jobs/drain/route');
 const { createCloudWorkerKey, revokeCloudWorkerKey } = await import('@/lib/cloud/worker-auth');
+const { recordCloudWorkerPresence } = await import('@/lib/cloud/worker-presence');
 const { getJob, getLatestSessionJob, getJobDrainStatus, listJobControls, listJobs } = await import('@/lib/cloud/job-queue');
-const { closeDb } = await import('@/lib/db');
+const { closeDb, getSqlite } = await import('@/lib/db');
+const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { cloudRuntime } = await import('@/lib/runtimes/cloud-adapter');
+const { findDispatchSessionKey, taskSessionKey } = await import('@/components/desktop/repo-focus/tabs/control-room/helpers');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { addRepo, findRepoByLocalPath } = await import('@/lib/repos/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -41,6 +46,7 @@ const packetIds = [
   'packet-cloud-worker-reject-push',
   'packet-cloud-invalid-source',
   'packet-cloud-prebound-lane',
+  'packet-cloud-task-board',
 ];
 
 beforeAll(async () => {
@@ -285,6 +291,48 @@ afterAll(() => {
 });
 
 describe('durable cloud execution through the runtime launch path', () => {
+  it('shows only recently authenticated and unrevoked external workers', async () => {
+    const presenceKey = createCloudWorkerKey({ teamId: 'team_default', label: 'presence fixture' });
+    const poll = await pollRoute.GET(new NextRequest(
+      'http://localhost:3000/api/cloud/worker-poll?cursor=0&waitMs=0&workerId=presence-fixture',
+      { headers: { authorization: `Bearer ${presenceKey.plaintext}` } },
+    ));
+    expect(poll.status).toBe(204);
+    const connected = await workerPanelRoute.GET();
+    expect((await connected.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
+    closeDb();
+    const afterRestart = await workerPanelRoute.GET();
+    expect((await afterRestart.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
+
+    const crowdedKey = createCloudWorkerKey({ teamId: 'team_default', label: 'bounded presence fixture' });
+    for (let index = 0; index < 40; index += 1) {
+      recordCloudWorkerPresence({
+        teamId: 'team_default', keyId: crowdedKey.record.id,
+        workerId: `crowded-${index}`, nowMs: Date.now() + index,
+      });
+    }
+    const count = getSqlite().prepare(`
+      SELECT COUNT(*) AS count FROM cloud_worker_presence WHERE key_id = ?
+    `).get(crowdedKey.record.id) as { count: number };
+    expect(count.count).toBeLessThanOrEqual(32);
+    const fairPanel = await workerPanelRoute.GET();
+    expect((await fairPanel.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
+
+    const invalid = await pollRoute.GET(new NextRequest(
+      'http://localhost:3000/api/cloud/worker-poll?cursor=0&waitMs=0&workerId=untrusted',
+      { headers: { authorization: 'Bearer cwk_invalid' } },
+    ));
+    expect(invalid.status).toBe(401);
+    revokeCloudWorkerKey(presenceKey.record.id);
+    revokeCloudWorkerKey(crowdedKey.record.id);
+    const revoked = await workerPanelRoute.GET();
+    expect((await revoked.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
+  });
+
   it('binds the exact packet lane to the persisted cloud job', async () => {
     const packetId = 'packet-cloud-prebound-lane';
     const branchName = 'o8/cloud-prebound';
@@ -337,6 +385,95 @@ describe('durable cloud execution through the runtime launch path', () => {
       launch: { laneId: lane.id, branchName },
     });
     await expect(cloudRuntime.interrupt(result.surfaceId)).resolves.toMatchObject({ ok: true });
+  });
+
+  it('reads the current packet worker attempt after reconnect without opening a stale local workspace', async () => {
+    const packetId = 'packet-cloud-task-board';
+    const launch = await runtimeLaunch({
+      runtime: 'cloud', prompt: 'Inspect the remote task board.',
+      cwd: repoPath, repoPath, branchName: 'o8/cloud-task-board', packetId,
+      skipSetup: true, clientMutationId: 'cloud-task-board-1',
+    });
+    expect(launch.status).toBe(200);
+    const launched = await launch.json() as { surfaceId: string };
+    const jobId = launched.surfaceId.replace(/^cloud:/, '');
+    const taskRequest = (id: string, authenticated: boolean = true) => taskRoute.GET(
+      new NextRequest(`http://example.invalid/api/tasks/${id}`, {
+        headers: authenticated ? { authorization: `Bearer ${getOrCreateWsToken()}` } : {},
+      }),
+      { params: Promise.resolve({ taskId: id }) },
+    );
+    const pending = await taskRequest(packetId);
+    expect(pending.status).toBe(200);
+    expect((await pending.json() as { task: { execution: unknown } }).task.execution).toMatchObject({
+      jobId, status: 'pending', attempt: 0, workerId: null,
+      workspaceAccess: 'unavailable', previewAccess: 'unavailable',
+    });
+    const unrelated = await taskRequest('packet-cloud-invalid-source');
+    expect((await unrelated.json() as { task: { execution: unknown } }).task.execution).toBeNull();
+    expect((await taskRequest(packetId, false)).status).toBe(401);
+
+    const firstPoll = await workerPoll('task-board-first');
+    expect(firstPoll.status).toBe(200);
+    const firstJob = (await firstPoll.json() as { job: { id: string } }).job;
+    expect(firstJob.id).toBe(jobId);
+    const first = await taskRequest(packetId);
+    const firstTask = (await first.json() as { task: Parameters<typeof taskSessionKey>[0] }).task;
+    expect(firstTask.execution).toMatchObject({
+      jobId, status: 'leased', attempt: 1, workerId: 'task-board-first', leaseState: 'active',
+    });
+    expect(taskSessionKey(firstTask)).toBe(launched.surfaceId);
+    expect(taskSessionKey({
+      ...firstTask,
+      lane: firstTask.lane && { ...firstTask.lane, sessionKey: 'codex:stale-local-pane' },
+    })).toBeNull();
+    const oldPane = [{ sessionKey: 'codex:stale-local-pane', orchestrationPacket: { packetId } }] as
+      Parameters<typeof findDispatchSessionKey>[1];
+    expect(findDispatchSessionKey({
+      packetId, laneId: firstTask.laneId, sessionKey: launched.surfaceId,
+      requireExactSession: true, startedAt: Date.now(),
+    }, oldPane)).toBeNull();
+
+    closeDb();
+    const reopened = await taskRequest(packetId);
+    expect((await reopened.json() as { task: { execution: unknown } }).task.execution).toMatchObject({
+      jobId, status: 'leased', attempt: 1, workerId: 'task-board-first',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const expired = await taskRequest(packetId);
+    expect((await expired.json() as { task: { execution: unknown } }).task.execution).toMatchObject({
+      jobId, status: 'leased', attempt: 1, workerId: null, leaseState: 'expired',
+    });
+    const secondPoll = await workerPoll('task-board-second');
+    expect(secondPoll.status).toBe(200);
+    const secondJob = (await secondPoll.json() as {
+      job: { id: string; claimedBy: string; leaseToken: string };
+    }).job;
+    expect(secondJob.id).toBe(jobId);
+    const reassigned = await taskRequest(packetId);
+    expect((await reassigned.json() as { task: { execution: unknown } }).task.execution).toMatchObject({
+      jobId, status: 'leased', attempt: 2, workerId: 'task-board-second', leaseState: 'active',
+    });
+    const completion = await workerStream({
+      jobId, workerId: secondJob.claimedBy, leaseToken: secondJob.leaseToken,
+      type: 'completed', payload: { text: 'Task board fixture complete.' },
+    });
+    expect(completion.status).toBe(200);
+    const completed = await taskRequest(packetId);
+    expect((await completed.json() as { task: { execution: unknown } }).task.execution).toMatchObject({
+      jobId, status: 'completed', attempt: 2, workerId: null, leaseState: 'none',
+    });
+    const localLane = createLane({
+      repoPath, branch: 'o8/local-after-cloud', runtime: 'codex', packetId,
+      sessionKey: 'codex:current-local-pane', ownership: 'managed',
+    });
+    setLaneStatus(localLane.id, 'launching', 'system', 'dispatch');
+    setLaneStatus(localLane.id, 'running', 'system', 'dispatch');
+    const localTaskResponse = await taskRequest(packetId);
+    const localTask = (await localTaskResponse.json() as { task: Parameters<typeof taskSessionKey>[0] }).task;
+    expect(localTask.runtime).toBe('codex');
+    expect(localTask.execution).toBeNull();
+    expect(taskSessionKey(localTask)).toBe('codex:current-local-pane');
   });
 
   it('rejects invalid remote source before enqueueing a worker job', async () => {
@@ -475,6 +612,22 @@ describe('durable cloud execution through the runtime launch path', () => {
     expect(staleWorker.status).toBe(409);
     await expect(staleWorker.json()).resolves.toMatchObject({ reason: 'lease_mismatch' });
 
+    recordCloudWorkerPresence({
+      teamId: 'team_default', keyId: workerKey.record.id,
+      workerId: 'worker-recovery', nowMs: Date.now() - 61_000,
+    });
+    const beforeAcceptedEvent = await workerPanelRoute.GET();
+    expect((await beforeAcceptedEvent.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'worker-recovery' })]));
+    const rejectedPresence = await workerStream({
+      jobId, workerId: 'forged-presence', leaseToken: firstClaim?.leaseToken,
+      type: 'heartbeat', payload: { status: 'running' },
+    });
+    expect(rejectedPresence.status).toBe(409);
+    const afterRejectedEvent = await workerPanelRoute.GET();
+    expect((await afterRejectedEvent.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'forged-presence' })]));
+
     const output = await workerStream({
       jobId,
       workerId: recoveredClaim?.claimedBy,
@@ -483,6 +636,9 @@ describe('durable cloud execution through the runtime launch path', () => {
       payload: { text: 'durable worker output' },
     });
     expect(output.status).toBe(200);
+    const afterAcceptedEvent = await workerPanelRoute.GET();
+    expect((await afterAcceptedEvent.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'worker-recovery' })]));
     const diff = await workerStream({
       jobId,
       workerId: recoveredClaim?.claimedBy,

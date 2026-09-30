@@ -83,7 +83,7 @@ describe('cold start with only CORTEX_IDE_DATA_DIR configured', () => {
     }));
 
     expect(resolveRepoPath('example/registered-repo')).toBe(registeredRepo);
-    expect(buildOrchestratorSystemPrompt(primaryRepo, { firstRunClarify: false }))
+    expect(buildOrchestratorSystemPrompt(primaryRepo, { backend: 'claude', firstRunClarify: false }))
       .toContain(`Registered Repo → ${registeredRepo}`);
   });
 });

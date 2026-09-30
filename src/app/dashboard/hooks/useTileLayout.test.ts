@@ -4,7 +4,8 @@ import { act, createElement, StrictMode, useEffect, useRef, useState } from 'rea
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
-import { collectLeafNodes, computeTileLayout, createDefaultTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
+import type { RemoteTerminalDetails, TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
+import { collectLeafNodes, computeTileLayout, createDefaultTileLayout, deserializeTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
 import { createTileRegistry } from '../tileRegistry';
 import { RESTORE_VALIDATION_BUDGET_MS } from './tileLayoutRestore';
@@ -14,14 +15,18 @@ const STALE_REPO_PATH = '/tmp/first-o8-instance/repo';
 const CANONICAL_REPO_PATH = '/private/tmp/first-o8-instance/repo';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const workspaceBoundary = vi.hoisted(() => ({ preferredRepoPaths: [] as Array<string | null> }));
+const workspaceBoundary = vi.hoisted(() => ({
+  preferredRepoPaths: [] as Array<string | null>,
+  openRemoteTerminal: null as ((details: { command: string; machineId: string; machineLabel: string; sessionId: string }) => void) | null,
+}));
 
 vi.mock('@/lib/react/retrying-lazy', () => ({
   retryingLazy: (_loader: unknown, options: { label?: string }) => (
     options.label === 'Workspace terminal'
-      ? (props: { preferredRepo?: { localPath?: string } | null }) => {
+      ? (props: { preferredRepo?: { localPath?: string } | null; onOpenRemoteTerminal?: (details: RemoteTerminalDetails) => void }) => {
           const repoPath = props.preferredRepo?.localPath ?? null;
           workspaceBoundary.preferredRepoPaths.push(repoPath);
+          workspaceBoundary.openRemoteTerminal = props.onOpenRemoteTerminal ?? null;
           if (repoPath) {
             void fetch('/api/runtime/launch', {
               method: 'POST',
@@ -100,17 +105,21 @@ function LayoutRestoreHarness({
   onLayout,
   onReplaceLayout,
   onSplitTile,
+  onCloseTile,
   onResizeSplit,
   onUnverifiedIds,
+  onTerminalHandles,
   registeredRepos,
   repoInventoryRevision = 0,
   refreshRestoredRepoState = async () => true,
 }: {
   onLayout: (layout: TileLayout, hydrated: boolean, validationState: string) => void;
   onReplaceLayout?: (replaceLayout: (layout: TileLayout) => void) => void;
-  onSplitTile?: (split: (tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal', placeBefore?: boolean, exactPlacement?: boolean) => void) => void;
+  onSplitTile?: (split: (tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal' | 'remote', placeBefore?: boolean, exactPlacement?: boolean) => string | null) => void;
+  onCloseTile?: (close: (tileId: string) => void) => void;
   onResizeSplit?: (resize: (splitId: string, ratio: number) => void) => void;
   onUnverifiedIds?: (ids: ReadonlySet<string>) => void;
+  onTerminalHandles?: (handles: Map<string, TerminalTabHandle>) => void;
   registeredRepos: RepoRegistryEntry[];
   repoInventoryRevision?: number;
   refreshRestoredRepoState?: (validatedPaths: readonly string[]) => Promise<boolean>;
@@ -118,7 +127,7 @@ function LayoutRestoreHarness({
   const [layout, setLayout] = useState(createDefaultTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>('tile-root');
   const contextualPanelHandlesRef = useRef(new Map());
-  const workspaceTerminalHandlesRef = useRef(new Map());
+  const [workspaceTerminalHandlesRef] = useState(() => ({ current: new Map<string, TerminalTabHandle>() }));
   const restored = useTileLayout({
     activeTileId,
     activeWorkspaceChatSessionKey: undefined,
@@ -157,8 +166,16 @@ function LayoutRestoreHarness({
   }, [onSplitTile, handleSplitTile]);
 
   useEffect(() => {
+    onCloseTile?.(restored.handleCloseTile);
+  }, [onCloseTile, restored.handleCloseTile]);
+
+  useEffect(() => {
     onUnverifiedIds?.(restored.unverifiedRestoredRepoTileIds);
   }, [onUnverifiedIds, restored.unverifiedRestoredRepoTileIds]);
+
+  useEffect(() => {
+    onTerminalHandles?.(workspaceTerminalHandlesRef.current);
+  }, [onTerminalHandles, workspaceTerminalHandlesRef]);
 
   useEffect(() => {
     onResizeSplit?.((splitId, ratio) => handleResizeSplit(splitId, ratio));
@@ -166,10 +183,13 @@ function LayoutRestoreHarness({
 
   if (!restored.tileLayoutHydrated) return createElement('div');
   const leaf = getFirstLeaf(layout.root);
+  // The registry reads the handle map only after the saved-machine click.
+  // eslint-disable-next-line react-hooks/refs
   const registry = createTileRegistry({
     activeTileId,
     canvasStateByTileId: {},
     globalRepoEntries: [],
+    handleSplitTile,
     parsedAgents: [],
     registerWorkspaceTerminalHandle: () => undefined,
     setActiveTileId,
@@ -186,6 +206,7 @@ function LayoutRestoreHarness({
       localPath: repo.localPath,
     })),
     workspaceTerminalPreferredRepo: null,
+    workspaceTerminalHandlesRef,
     workspaceTerminalResetNonceByTileId: {},
     unverifiedRestoredRepoTileIds: restored.unverifiedRestoredRepoTileIds,
   } as unknown as Parameters<typeof createTileRegistry>[0]);
@@ -199,6 +220,7 @@ describe('useTileLayout browser-origin restore', () => {
   beforeEach(() => {
     window.localStorage.clear();
     workspaceBoundary.preferredRepoPaths = [];
+    workspaceBoundary.openRemoteTerminal = null;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -231,6 +253,68 @@ describe('useTileLayout browser-origin restore', () => {
     expect(collectLeafNodes(latestLayout.root).map((leaf) => leaf.content)).toContainEqual(expect.objectContaining({
       kind: 'terminal', initialTab: 'terminal',
     }));
+  });
+
+  it('returns a distinct saved-machine pane identity that survives layout reload', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ repos: [], validatedRestorePaths: [] })));
+    let latestLayout = createDefaultTileLayout();
+    let splitTile: ((tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal' | 'remote') => string | null) | null = null;
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout: (layout) => { latestLayout = layout; },
+      onSplitTile: (split) => { splitTile = split; },
+      registeredRepos: [],
+    })));
+    let machinePaneId: string | null = null;
+    await act(async () => { machinePaneId = splitTile?.('tile-root', 'vertical', 'remote') ?? null; });
+    expect(machinePaneId).toBeTruthy();
+    expect(machinePaneId).not.toBe('tile-root');
+    const pane = collectLeafNodes(latestLayout.root).find((leaf) => leaf.id === machinePaneId);
+    expect(pane?.content).toMatchObject({ kind: 'terminal', initialTab: 'remote', createdFromSplit: true });
+    const restored = deserializeTileLayout(serializeTileLayout(latestLayout));
+    expect(restored && collectLeafNodes(restored.root).find((leaf) => leaf.id === machinePaneId)?.content)
+      .toMatchObject({ kind: 'terminal', initialTab: 'remote' });
+  });
+
+  it('releases saved-machine controls before removing their pane', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ repos: [], validatedRestorePaths: [] })));
+    let latestLayout = createDefaultTileLayout();
+    let splitTile: ((tileId: string, direction?: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal' | 'remote') => string | null) | null = null;
+    let closePane: ((tileId: string) => void) | null = null;
+    const terminalHandles: { current: Map<string, TerminalTabHandle> | null } = { current: null };
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout: (layout) => { latestLayout = layout; },
+      onSplitTile: (split) => { splitTile = split; },
+      onCloseTile: (close) => { closePane = close; },
+      onTerminalHandles: (handles) => { terminalHandles.current = handles; },
+      registeredRepos: [],
+    })));
+    let paneId: string | null = null;
+    await act(async () => { paneId = splitTile?.('tile-root', 'vertical', 'remote') ?? null; });
+    expect(paneId).toBeTruthy();
+    const release = vi.fn();
+    terminalHandles.current?.set(paneId!, { closeRemoteTerminalTabs: release } as unknown as TerminalTabHandle);
+    await act(async () => closePane?.(paneId!));
+    expect(release).toHaveBeenCalledOnce();
+    expect(collectLeafNodes(latestLayout.root).some((leaf) => leaf.id === paneId)).toBe(false);
+  });
+
+  it('routes a saved-machine selection into the new pane handle', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ repos: [], validatedRestorePaths: [] })));
+    let latestLayout = createDefaultTileLayout();
+    const terminalHandles: { current: Map<string, TerminalTabHandle> | null } = { current: null };
+    const openRemoteTab = vi.fn(() => 'remote-tab');
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      onLayout: (layout) => { latestLayout = layout; },
+      onTerminalHandles: (handles) => { terminalHandles.current = handles; },
+      registeredRepos: [],
+    })));
+    const details = { command: 'o8 machine terminal attach Studio session-1', machineId: 'machine-1', machineLabel: 'Studio', sessionId: 'session-1' };
+    await act(async () => { workspaceBoundary.openRemoteTerminal?.(details); });
+    const remoteLeaf = collectLeafNodes(latestLayout.root).find((leaf) => leaf.content.kind === 'terminal' && leaf.content.initialTab === 'remote');
+    expect(remoteLeaf).toBeDefined();
+    terminalHandles.current?.set(remoteLeaf!.id, { openRemoteTerminalTab: openRemoteTab } as unknown as TerminalTabHandle);
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 120)));
+    expect(openRemoteTab).toHaveBeenCalledExactlyOnceWith(details);
   });
 
   it('fills the next balanced cell on click but splits the targeted edge on drop', async () => {

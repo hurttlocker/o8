@@ -516,7 +516,7 @@ function normalizeNode(node: TileNode): TileNode {
             ? node.content.repoPath
             : null,
           ...(node.content.createdFromSplit === true ? { createdFromSplit: true } : {}),
-          ...(node.content.initialTab === 'chat' || node.content.initialTab === 'terminal'
+          ...(node.content.initialTab === 'chat' || node.content.initialTab === 'terminal' || node.content.initialTab === 'remote'
             ? { initialTab: node.content.initialTab }
             : {}),
         },

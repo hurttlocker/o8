@@ -59,7 +59,7 @@ function getWsUrl(): string {
 
 interface SharedWsCommands {
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string, directPty?: boolean) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number, readOnly?: boolean) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -248,8 +248,8 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     wsSend({ type: 'switch-session', sessionKey: key });
   }, [wsSend]);
 
-  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => {
-    wsSend({ type: 'terminal-create', cols, rows, requestId, cwd, ownerKey });
+  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string, directPty?: boolean) => {
+    wsSend({ type: 'terminal-create', cols, rows, requestId, cwd, ownerKey, directPty });
   }, [wsSend]);
 
   const sendTerminalAttach = useCallback((sessionName: string, cols: number, rows: number, readOnly = false) => {
@@ -557,7 +557,7 @@ interface UseSharedDesktopWsResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string, directPty?: boolean) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number, readOnly?: boolean) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;

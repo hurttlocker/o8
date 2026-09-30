@@ -5,7 +5,7 @@ import { ChevronDown } from '../../../lucide-shims';
 import { REPO_FOCUS_FONT } from '../../utils';
 import type { TaskAction, TaskActionMenuState, TaskPoolTask } from './types';
 import { FIELD_SURFACE, FLOATING_GLASS_SURFACE, GROUP_LABELS } from './constants';
-import { baseName, runtimeLabel } from './helpers';
+import { baseName, runtimeLabel, taskSessionKey } from './helpers';
 import { ActionButton, MenuActionRow, SectionLabel } from './shared';
 import { TaskRow } from './TaskRow';
 
@@ -50,7 +50,7 @@ export function TaskSection({
         <TaskRow
           key={task.id}
           task={task}
-          active={Boolean(task.lane?.sessionKey && task.lane.sessionKey === activeSessionKey)}
+          active={Boolean(taskSessionKey(task) && taskSessionKey(task) === activeSessionKey)}
           onSelectSession={onSelectSession}
           onOpenMenu={onOpenMenu}
           compactActions={compactActions}
@@ -194,7 +194,7 @@ export function CollapsedTaskSection({
             <TaskRow
               key={task.id}
               task={task}
-              active={Boolean(task.lane?.sessionKey && task.lane.sessionKey === activeSessionKey)}
+              active={Boolean(taskSessionKey(task) && taskSessionKey(task) === activeSessionKey)}
               onSelectSession={onSelectSession}
               onOpenMenu={onOpenMenu}
               compactActions={compactActions}
@@ -256,7 +256,7 @@ export function TaskActionMenu({
   const minTop = boundaryTop + 8;
   const maxTop = Math.max(minTop, boundaryBottom - menuHeight - 8);
   const top = Math.min(Math.max(state.y, minTop), maxTop);
-  const sessionKey = task.lane?.sessionKey ?? null;
+  const sessionKey = taskSessionKey(task);
   const taskIsDone = task.group === 'done';
   const taskCanUnqueue = task.group === 'ready' || task.group === 'blocked';
 

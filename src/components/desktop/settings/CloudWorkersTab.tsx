@@ -411,9 +411,9 @@ export function CloudWorkersTab() {
           margin: 0,
           marginBottom: 14,
         }}>
-          Workers currently long-polling{' '}
+          Workers seen in the last minute by{' '}
           <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12, color: 'var(--t-text-secondary)' }}>/api/cloud/worker-poll</span>.
-          Live discovery wires up when the worker CLI ships.
+          Active jobs also refresh their connection while running.
         </p>
 
         {connectedWorkers.length === 0 ? (

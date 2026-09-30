@@ -49,6 +49,7 @@ import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
 import { runProject, runRepo } from './commands/resources.js';
 import { runProblem } from './commands/problem.js';
+import { runPlugin } from './commands/plugin.js';
 import { runStatus } from './commands/status.js';
 import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
@@ -300,6 +301,10 @@ commands:
   project delete <target>               remove a project and exclusive repo registrations; disk is preserved
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
+  plugin list          list reviewed executable actions [--plugin ID]
+  plugin action list   list action IDs, revisions, and project bindings [--plugin ID]
+  plugin action invoke <plugin-id> <action-id> --revision <sha256> [--repo <registered-path>]
+  plugin log list      read persisted, bounded action receipts [--plugin ID] [--limit N]
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
@@ -468,6 +473,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runProject(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
+    case 'plugin':
+      return runPlugin(args.mode, secondary, args.rest);
     case 'inbox':
       return runInbox(args.mode, secondary, args.rest);
     case 'session':

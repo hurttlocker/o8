@@ -1,6 +1,9 @@
 import 'server-only';
 
 import { basename } from 'node:path';
+import { getLatestPacketJob } from '@/lib/cloud/job-queue';
+import type { CloudJob, CloudJobStatus } from '@/lib/cloud/job-store';
+import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 
 import { listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneStatus } from '@/lib/lane/types';
@@ -48,6 +51,19 @@ export interface TaskPoolLaneSummary {
   lastEventLabel: string | null;
 }
 
+export interface TaskPoolRemoteExecution {
+  kind: 'remote_worker';
+  jobId: string;
+  sessionKey: string;
+  status: CloudJobStatus;
+  attempt: number;
+  workerId: string | null;
+  leaseState: 'active' | 'expired' | 'none';
+  updatedAt: string;
+  workspaceAccess: 'unavailable';
+  previewAccess: 'unavailable';
+}
+
 export interface TaskPoolTask {
   id: string;
   packetId: string | null;
@@ -74,6 +90,7 @@ export interface TaskPoolTask {
   problemRemedyId: string | null;
   project: TaskPoolProjectSummary | null;
   lane: TaskPoolLaneSummary | null;
+  execution: TaskPoolRemoteExecution | null;
   taskBrief?: string;
 }
 
@@ -155,6 +172,24 @@ function toLaneSummary(lane: Lane | null): TaskPoolLaneSummary | null {
   };
 }
 
+function toRemoteExecution(job: CloudJob | undefined, nowMs: number): TaskPoolRemoteExecution | null {
+  if (!job) return null;
+  const leaseState = job.status !== 'leased' ? 'none'
+    : job.leaseExpiresAt && Date.parse(job.leaseExpiresAt) > nowMs ? 'active' : 'expired';
+  return {
+    kind: 'remote_worker',
+    jobId: job.id,
+    sessionKey: `cloud:${job.sessionId}`,
+    status: job.status,
+    attempt: job.claimCount,
+    workerId: leaseState === 'active' ? job.claimedBy ?? null : null,
+    leaseState,
+    updatedAt: job.updatedAt,
+    workspaceAccess: 'unavailable',
+    previewAccess: 'unavailable',
+  };
+}
+
 function toRepoSummary(context: ProjectContext, repoId: string | null | undefined): TaskPoolRepoSummary | null {
   const repo = repoId ? context.repos.find((candidate) => candidate.id === repoId) : null;
   if (!repo) return null;
@@ -225,9 +260,16 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
   const packetIds = new Set(mission.packets.map((packet) => packet.id));
   const projectCache = new Map<string, ProjectContext>();
   const tasks: TaskPoolTask[] = [];
+  const nowMs = Date.now();
 
   for (const packet of mission.packets) {
     const lane = lanesByPacketId.get(packet.id) ?? null;
+    const remoteJob = lane?.runtime === 'cloud'
+      ? getLatestPacketJob(DEFAULT_CLOUD_TEAM_ID, packet.id)
+      : undefined;
+    const execution = remoteJob && lane?.sessionKey === `cloud:${remoteJob.sessionId}`
+      ? toRemoteExecution(remoteJob, nowMs)
+      : null;
     const repoPath = normalizePath(lane?.repoPath ?? packet.workspaceTargetPath);
     const context = await resolveProjectContext(projectCache, repoPath, lane?.projectId ?? null);
     if (options.projectId && context?.id !== options.projectId && context?.slug !== options.projectId) continue;
@@ -262,6 +304,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       problemRemedyId: packet.problemRemedyId ?? null,
       project: context ? toProjectSummary(context) : null,
       lane: toLaneSummary(lane),
+      execution,
       taskBrief: options.includeBrief && context
         ? buildProjectTaskBrief(context, {
           repoPath,
@@ -308,6 +351,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       problemRemedyId: null,
       project: context ? toProjectSummary(context) : null,
       lane: toLaneSummary(lane),
+      execution: null,
       taskBrief: options.includeBrief && context
         ? buildProjectTaskBrief(context, {
           repoPath,

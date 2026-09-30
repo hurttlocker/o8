@@ -7,6 +7,7 @@ import { cloneRepoForRun, commitWorkerChanges, pushRemoteBranch } from './clone-
 import { EventStream, type CloudRemoteSource, type CloudWorkerControl, type CloudWorkerJob } from './event-stream';
 import { startCodex, type RunningCodex } from './run-codex';
 import { PersistentWorkerState } from './state';
+import { startWorkspaceServices, type RunningWorkspaceServices } from './workspace-services';
 
 interface WorkerCliOptions {
   o8Url: string;
@@ -76,6 +77,7 @@ async function reportFailure(stream: EventStream, job: CloudWorkerJob, error: un
 async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: WorkerCliOptions): Promise<void> {
   const operation = new AbortController();
   let codex: RunningCodex | null = null;
+  let services: RunningWorkspaceServices | null = null;
   let abortControl: CloudWorkerControl | null = null;
   let monitorFailure: Error | null = null;
   let leaseExpiresAt = Date.parse(job.leaseExpiresAt);
@@ -125,6 +127,9 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     if (abortControl || monitorFailure) return;
     await stream.postEvent(job, 'chunk', { text: 'Repository cloned.' });
 
+    services = await startWorkspaceServices({ cloneDir, job, stream, signal: operation.signal });
+    if (abortControl || monitorFailure) return;
+
     codex = await startCodex({
       cwd: cloneDir,
       prompt: job.launch.prompt,
@@ -137,6 +142,11 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     if (monitorFailure) throw monitorFailure;
     if (result.aborted) throw new Error('[worker] Codex stopped before completion');
     if (result.exitCode !== 0) throw new Error(`[worker] codex exited with code ${result.exitCode}`);
+    const serviceStop = await services?.stop();
+    services = null;
+    if (serviceStop && !serviceStop.healthyUntilStop) {
+      throw new Error('[worker] workspace service exited before task completion');
+    }
     const files = await commitWorkerChanges(cloneDir, source.baseSha, operation.signal);
     if (files.length > 0) await stream.postEvent(job, 'diff', { files });
     const sha = await pushRemoteBranch(cloneDir, source.branch, operation.signal);
@@ -151,6 +161,9 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     clearInterval(timer);
     clearInterval(watchdog);
     await monitorChain;
+    await services?.stop().catch((error) => {
+      console.error(`[worker] service cleanup failed: ${safeMessage(error)}`);
+    });
     if (abortControl) {
       // Clone, Codex, or push has exited before the server marks cancellation.
       await stream.acknowledgeControl(job, abortControl).catch((error) => {

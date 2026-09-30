@@ -23,6 +23,7 @@ import { NextResponse } from 'next/server';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
 import { workerLaunchPayload } from '@/lib/cloud/worker-payload';
+import { recordCloudWorkerPresence } from '@/lib/cloud/worker-presence';
 import {
   claimNextJob,
   cloudJobLeaseMs,
@@ -91,8 +92,15 @@ export async function GET(request: Request) {
       { status: 400, headers: NO_STORE_HEADERS },
     );
   }
+  if (workerId.length > 128 || /[\0-\x1f\x7f]/.test(workerId)) {
+    return NextResponse.json(
+      { error: 'Invalid workerId', reason: 'worker_id_out_of_range' },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
 
   try {
+    recordCloudWorkerPresence({ teamId: auth.teamId, keyId: auth.keyId, workerId });
     const leaseMs = cloudJobLeaseMs();
     // Fast path — job already waiting for this cursor.
     const immediate = claimNextJob(auth.teamId, cursor, workerId, leaseMs);

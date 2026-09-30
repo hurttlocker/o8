@@ -8,5 +8,6 @@ export function workerLaunchPayload(launch: LaunchOptions) {
     packetId: launch.packetId,
     workMode: launch.workMode,
     remoteSource: launch.remoteSource,
+    remoteManifestHash: launch.remoteManifestHash,
   };
 }
