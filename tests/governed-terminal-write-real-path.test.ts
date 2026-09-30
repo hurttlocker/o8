@@ -31,15 +31,6 @@ const db = await import('@/lib/db');
 
 const packetA = `packet-terminal-a-${Date.now()}`;
 const packetB = `packet-terminal-b-${Date.now()}`;
-const laneA = laneRegistry.createLane({
-  label: 'governed terminal wrong owner',
-  repoPath: '/tmp/o8-governed-terminal-a',
-  worktreePath: '/tmp/o8-governed-terminal-a',
-  branch: 'agent/governed-terminal-a',
-  baseBranch: 'main',
-  runtime: 'codex',
-  packetId: packetA,
-});
 const laneB = laneRegistry.createLane({
   label: 'governed terminal owner',
   repoPath: '/tmp/o8-governed-terminal-b',
