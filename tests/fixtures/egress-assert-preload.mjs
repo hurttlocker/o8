@@ -1,4 +1,6 @@
 import { appendFileSync } from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 
 const INSTALL_KEY = Symbol.for('o8.egress-assert-preload.installed');
@@ -11,20 +13,56 @@ function isLoopback(host) {
     || normalized.startsWith('127.');
 }
 
-function endpointOf(args) {
+function normalizedTarget(host, port) {
+  const numericPort = Number(port);
+  if (!host || !Number.isFinite(numericPort)) return null;
+  const normalizedHost = String(host).replace(/^\[|\]$/g, '');
+  return {
+    host: normalizedHost,
+    port: numericPort,
+    endpoint: `${normalizedHost}:${numericPort}`,
+  };
+}
+
+function socketTarget(args) {
   const first = args[0];
   if (first && typeof first === 'object') {
-    const port = Number(first.port);
-    if (!Number.isFinite(port)) return null;
-    const host = String(first.host ?? first.hostname ?? 'localhost');
-    return { host, port, endpoint: `${host}:${port}` };
+    return normalizedTarget(first.host ?? first.hostname ?? 'localhost', first.port);
   }
   if (typeof first === 'number') {
-    const port = first;
-    const host = typeof args[1] === 'string' ? args[1] : 'localhost';
-    return { host, port, endpoint: `${host}:${port}` };
+    return normalizedTarget(typeof args[1] === 'string' ? args[1] : 'localhost', first);
   }
   return null; // Unix-domain / named-pipe connection: machine-local, not egress.
+}
+
+function urlTarget(input) {
+  try {
+    const raw = typeof input === 'string' || input instanceof URL
+      ? input
+      : input && typeof input === 'object' && typeof input.url === 'string'
+        ? input.url
+        : null;
+    if (!raw) return null;
+    const parsed = raw instanceof URL ? raw : new URL(raw);
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) return null;
+    const port = parsed.port
+      ? Number(parsed.port)
+      : parsed.protocol === 'https:' || parsed.protocol === 'wss:'
+        ? 443
+        : 80;
+    return normalizedTarget(parsed.hostname, port);
+  } catch {
+    return null;
+  }
+}
+
+function httpTarget(protocol, args) {
+  const direct = urlTarget(args[0]);
+  if (direct) return direct;
+  const options = args[0];
+  if (!options || typeof options !== 'object') return null;
+  const defaultPort = protocol === 'https:' ? 443 : 80;
+  return normalizedTarget(options.hostname ?? options.host ?? 'localhost', options.port ?? defaultPort);
 }
 
 function surfaceFromStack() {
@@ -49,9 +87,9 @@ function configuredAllowedEndpoints() {
   );
 }
 
-function record(target) {
+function record(target, transport) {
   const reportPath = process.env.O8_EGRESS_REPORT_PATH?.trim();
-  if (!reportPath) return;
+  if (!reportPath || !target) return;
 
   const allowed = configuredAllowedEndpoints();
   const endpoint = target.endpoint.toLowerCase();
@@ -66,6 +104,7 @@ function record(target) {
     at: new Date().toISOString(),
     pid: process.pid,
     surface: surfaceFromStack(),
+    transport,
     host: target.host,
     port: target.port,
     endpoint: target.endpoint,
@@ -75,19 +114,57 @@ function record(target) {
 
   if (!providerEndpoint && process.env.O8_EGRESS_BLOCK_UNEXPECTED === '1') {
     throw new Error(
-      `O8_EGRESS_BLOCKED surface=${row.surface} endpoint=${row.endpoint}; `
+      `O8_EGRESS_BLOCKED surface=${row.surface} transport=${transport} endpoint=${row.endpoint}; `
       + 'the attempted destination was recorded before connect',
     );
   }
 }
 
+function patchHttpModule(module, protocol) {
+  const originalRequest = module.request;
+  module.request = function o8EgressRecordedRequest(...args) {
+    record(httpTarget(protocol, args), protocol === 'https:' ? 'https' : 'http');
+    return Reflect.apply(originalRequest, this, args);
+  };
+  const originalGet = module.get;
+  module.get = function o8EgressRecordedGet(...args) {
+    record(httpTarget(protocol, args), protocol === 'https:' ? 'https' : 'http');
+    return Reflect.apply(originalGet, this, args);
+  };
+}
+
 if (!globalThis[INSTALL_KEY]) {
   globalThis[INSTALL_KEY] = true;
   process.env.O8_EGRESS_PRELOAD_PID = String(process.pid);
+
+  const originalFetch = globalThis.fetch;
+  if (typeof originalFetch === 'function') {
+    globalThis.fetch = function o8EgressRecordedFetch(input, init) {
+      record(urlTarget(input), 'fetch');
+      return Reflect.apply(originalFetch, this, [input, init]);
+    };
+  }
+
+  if (typeof globalThis.WebSocket === 'function') {
+    const OriginalWebSocket = globalThis.WebSocket;
+    globalThis.WebSocket = new Proxy(OriginalWebSocket, {
+      construct(target, args, newTarget) {
+        record(urlTarget(args[0]), 'websocket');
+        return Reflect.construct(target, args, newTarget);
+      },
+    });
+  }
+
+  patchHttpModule(http, 'http:');
+  patchHttpModule(https, 'https:');
+
   const originalConnect = net.Socket.prototype.connect;
   net.Socket.prototype.connect = function o8EgressRecordedConnect(...args) {
-    const target = endpointOf(args);
-    if (target) record(target);
+    const target = socketTarget(args);
+    // Raw TCP is still important for clients that bypass fetch/http. The
+    // higher-level hooks above are request-counted; raw TCP may add a second
+    // row for such libraries, which is intentional evidence rather than a miss.
+    if (target) record(target, 'tcp');
     return Reflect.apply(originalConnect, this, args);
   };
 }
