@@ -383,7 +383,7 @@ describe.skipIf(process.platform === 'win32')('#2228 local provider egress asser
 
     const report = aggregateReport();
     writeFileSync(renderedReportPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
-    console.log('[local-egress-baseline] ' + JSON.stringify(report));
+    console.warn('[local-egress-baseline] ' + JSON.stringify(report));
 
     expect(report.contacts.some((entry) =>
       entry.surface === 'runtime-adapter' && entry.endpoint === providerEndpoint)).toBe(true);
