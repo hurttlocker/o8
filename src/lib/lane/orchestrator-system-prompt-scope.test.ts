@@ -144,4 +144,19 @@ describe('orchestrator prompt tool scope (#2898)', () => {
       expect(prompt.replace(/cortex_[a-z_*]+|o8 cortex \w+/g, ''), backend).not.toMatch(/cortex/i);
     }
   });
+
+  it('states each collapsed prohibition once (#2902)', () => {
+    const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
+    const count = (pattern: RegExp) => full.match(new RegExp(pattern.source, `${pattern.flags}g`))?.length ?? 0;
+
+    expect(count(/check back/i), 'promised follow-up').toBe(1);
+    expect(count(/merge directly/i), 'direct merge').toBe(1);
+    expect(count(/Claim only dispatches that happened/), 'false dispatch').toBe(1);
+    expect(count(/after your last tool call/), 'summary after tools').toBe(1);
+    expect(full).not.toContain('Forbidden phrasings');
+    // Outcome ownership and the review traces carry their rules unchanged.
+    for (const kept of ['### Outcome ownership', '### Adversarial review protocol', 'GUARD/PREDICATE TRACE', 'COMPLETENESS TRACE']) {
+      expect(full, kept).toContain(kept);
+    }
+  });
 });
