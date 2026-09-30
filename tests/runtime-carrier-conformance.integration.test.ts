@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -86,14 +86,15 @@ describe('registered runtime carrier conformance', () => {
         return;
       }
 
+      const binaryPath = status.binaryPath;
       requireContract(
         runtime,
         'install-detection',
-        typeof status.binaryPath === 'string' && status.binaryPath.length > 0,
+        typeof binaryPath === 'string' && binaryPath.length > 0,
         `installed=true must include the resolved ${capability.binaryName} path`,
       );
 
-      const version = await realVersion(status.binaryPath);
+      const version = await realVersion(binaryPath);
       requireContract(
         runtime,
         'version-command',
@@ -122,8 +123,8 @@ describe('registered runtime carrier conformance', () => {
       // disconnection; a resolvable model is stronger positive evidence.
       if (runtime === 'opencode' && status.unavailableReason !== 'needs_restart') {
         const [providers, models] = await Promise.all([
-          opencode.opencodeAuthenticatedProviders(process.env.HOME ?? '', status.binaryPath),
-          opencode.opencodeCliModels(status.binaryPath),
+          opencode.opencodeAuthenticatedProviders(homedir(), binaryPath),
+          opencode.opencodeCliModels(binaryPath),
         ]);
         if (providers.size === 0 && models && models.size > 0) {
           requireContract(runtime, 'auth-empty-success-indeterminate', status.ready,
