@@ -453,6 +453,12 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/auto-compact-excerpt.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/auto-compact.test.ts",
       "reasons": [
         "executable-fixture"
