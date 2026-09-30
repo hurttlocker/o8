@@ -2618,6 +2618,13 @@
       ]
     },
     {
+      "path": "tests/packaged-server-smoke-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packaging-preflight-real-path.test.ts",
       "reasons": [
         "child-process",
