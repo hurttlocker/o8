@@ -325,7 +325,7 @@ describe('release channels through the publication entry point', () => {
     expectNoPublicationMutation(f);
   });
 
-  it('invalidates a stale universal speech helper when only the thin fallback succeeds', () => {
+  it.skipIf(process.platform !== 'darwin')('invalidates a stale universal speech helper when only the thin fallback succeeds', () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-speech-fallback-')));
     roots.push(root);
     const scripts = join(root, 'scripts');
