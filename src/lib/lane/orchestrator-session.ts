@@ -1005,7 +1005,7 @@ export async function sendToOrchestrator(
     killOrchestratorProc(session, w, true);
   }
 
-  const systemPrompt = buildOrchestratorSystemPrompt(session.repoPath, { toolProfile });
+  const systemPrompt = buildOrchestratorSystemPrompt(session.repoPath, { backend: 'claude', toolProfile });
   const promptFingerprint = orchestratorPromptFingerprint(systemPrompt);
 
   // Spawn a fresh proc when there's no warm one (first turn / after recycle).
