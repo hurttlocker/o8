@@ -2129,6 +2129,14 @@
       ]
     },
     {
+      "path": "tests/local-egress-assertion-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/loop-detector-real-path.test.ts",
       "reasons": [
         "executable-fixture",
