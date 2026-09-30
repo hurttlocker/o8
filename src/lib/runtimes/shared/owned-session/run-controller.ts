@@ -675,6 +675,8 @@ export function createOwnedRunController({
             shellCommand: shellCmd,
             cwd: session.repoPath,
             env: spawnEnv,
+            packetId: session.packetId ?? undefined,
+            laneId: session.laneId ?? undefined,
           });
           terminalSessionName = result.sessionName;
           pid = typeof result.pid === 'number' ? result.pid : 0;
