@@ -60,6 +60,16 @@ the transition; do not reuse a legacy credential as a cloud worker key.
 - Requires `launch.remoteSource` with `repoUrl`, `baseSha`, and `branch`. The
   worker clones that repository, checks out the exact base SHA, and creates the
   requested branch.
+- If the coordinator's workspace manifest policy authorizes the exact
+  `o8.workspace.json` bytes at that base SHA, the worker runs setup and starts
+  declared services in its clone. A remote service must declare a port and a
+  loopback health check. The worker writes lease-bound `service` receipts for
+  healthy, stopped, or failed states. Services stop before the job completes;
+  this is not a persistent preview or a user-facing preview URL.
+- With the manifest policy disabled, no manifest command runs. With the
+  one-approval policy, an unapproved manifest blocks dispatch until its exact
+  bytes are approved. A follow-up whose agent changed the manifest fails
+  closed until a new authorized dispatch is made.
 - Sends `chunk`, `diff`, `heartbeat`, `completed`, and `errored` events to
   `POST /api/cloud/worker-stream`. Rejected stream writes stop the owned Codex
   process and leave a visible local failure receipt. A lost POST acknowledgement

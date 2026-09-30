@@ -10,6 +10,7 @@ export type CloudJobEventType =
   | 'claimed'
   | 'chunk'
   | 'diff'
+  | 'service'
   | 'heartbeat'
   | 'completed'
   | 'errored'
@@ -120,7 +121,7 @@ export interface AppendCloudJobEventInput {
   jobId: string;
   workerId: string;
   leaseToken: string;
-  type: Extract<CloudJobEventType, 'chunk' | 'diff' | 'heartbeat' | 'completed' | 'errored'>;
+  type: Extract<CloudJobEventType, 'chunk' | 'diff' | 'service' | 'heartbeat' | 'completed' | 'errored'>;
   payload: unknown;
   leaseMs: number;
   nowMs?: number;

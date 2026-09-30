@@ -42,7 +42,8 @@ export interface CloudWorkerJob {
   cursor: number;
   leaseToken: string;
   leaseExpiresAt: string;
-  launch: { prompt: string; model?: string; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; };
+  claimCount: number;
+  launch: { prompt: string; model?: string; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; };
 }
 
 export interface CloudWorkerControl {
@@ -52,7 +53,7 @@ export interface CloudWorkerControl {
   deliveryToken: string;
 }
 
-export type WorkerOutboundEventType = 'chunk' | 'diff' | 'completed' | 'errored' | 'heartbeat';
+export type WorkerOutboundEventType = 'chunk' | 'diff' | 'service' | 'completed' | 'errored' | 'heartbeat';
 
 export interface EventStreamOptions { o8Url: string; workerKey: string; workerId: string; }
 
@@ -91,7 +92,8 @@ export class EventStream {
     if (!isRecord(data.job)) throw new Error('[worker/cloud] poll returned an invalid job payload');
     const job = data.job as Partial<CloudWorkerJob>;
     if (typeof job.id !== 'string' || !Number.isInteger(job.cursor) || typeof job.leaseToken !== 'string'
-      || typeof job.leaseExpiresAt !== 'string' || !isRecord(job.launch) || typeof job.launch.prompt !== 'string') {
+      || typeof job.leaseExpiresAt !== 'string' || !Number.isInteger(job.claimCount)
+      || !isRecord(job.launch) || typeof job.launch.prompt !== 'string') {
       throw new Error('[worker/cloud] poll returned an invalid job payload');
     }
     return job as CloudWorkerJob;

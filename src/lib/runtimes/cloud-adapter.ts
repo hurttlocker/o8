@@ -37,6 +37,7 @@ import {
 import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 import { randomUUID } from 'node:crypto';
 import { resolveCloudRemoteSource } from '@/lib/cloud/remote-source';
+import { resolveRemoteManifestHash } from '@/lib/cloud/remote-manifest';
 
 /**
  * Launch, discovery, transcript replay, and interrupt use the durable job
@@ -85,6 +86,12 @@ function textFromPayload(payload: unknown, fallback: string): string {
 }
 
 function eventText(type: string, payload: unknown): string {
+  if (type === 'service' && payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const receipt = payload as Record<string, unknown>;
+    if (typeof receipt.name === 'string' && typeof receipt.state === 'string') {
+      return `Workspace service ${receipt.name}: ${receipt.state}.`;
+    }
+  }
   switch (type) {
     case 'accepted': return 'Cloud job accepted.';
     case 'claimed': return 'Cloud worker claimed the job.';
@@ -185,6 +192,8 @@ export const cloudRuntime: AgentRuntime = {
     let remoteSource: Awaited<ReturnType<typeof resolveCloudRemoteSource>>;
     try {
       remoteSource = await resolveCloudRemoteSource(opts);
+      const remoteManifestHash = await resolveRemoteManifestHash(opts.sourceRepoPath!, remoteSource.baseSha);
+      opts = { ...opts, remoteManifestHash };
     } catch (error) {
       return {
         ok: false,
