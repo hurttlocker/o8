@@ -3142,8 +3142,7 @@
     {
       "path": "tests/runtime-carrier-conformance.integration.test.ts",
       "reasons": [
-        "child-process",
-        "integration"
+        "child-process"
       ]
     },
     {
