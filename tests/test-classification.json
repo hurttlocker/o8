@@ -3057,6 +3057,15 @@
       ]
     },
     {
+      "path": "tests/retired-owned-session-close-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/retired-workspace-lane-recovery-real-path.test.ts",
       "reasons": [
         "child-process",
