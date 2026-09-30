@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  callCodebaseMemoryTool,
   withCodebaseMemoryToolSession,
   type McpToolCallResult,
 } from './mcp-client';
@@ -35,6 +36,20 @@ describe('codebase-memory MCP transport', () => {
     const second = parsePayload(session.value[1]);
     expect(second.pid).toBe(first.pid);
     expect([first.callCount, second.callCount]).toEqual([1, 2]);
+  });
+
+  it('preserves the one-shot call adapter used by the indexer', async () => {
+    const result = await callCodebaseMemoryTool({
+      binPath: stubBin,
+      cwd: process.cwd(),
+      toolName: 'index_repo',
+      timeoutMs: 1000,
+    });
+
+    expect(parsePayload(result)).toMatchObject({
+      callCount: 1,
+      toolName: 'index_repo',
+    });
   });
 
   it('keeps fixture initialization outside the one-shot tool-call deadline', async () => {
