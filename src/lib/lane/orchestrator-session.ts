@@ -47,6 +47,7 @@ import {
 } from '@/lib/lane/orchestrator-prompt-ledger';
 import {
   isFalseDispatchTurn,
+  launchesWorker,
   runTurnWithFalseDispatchRetry,
   type FalseDispatchAttemptResult,
 } from '@/lib/lane/orchestrator-false-dispatch';
@@ -1108,7 +1109,7 @@ export async function sendToOrchestrator(
           turn.sawToolUseAfterText = false;
         } else if (e.type === 'tool_use') {
           turn.sawToolUseAfterText = true;
-          if (e.name === 'cortex_launch_agent' || e.name === 'mcp__cortex__cortex_launch_agent') {
+          if (launchesWorker(e.name, e.input)) {
             turn.launchAgentCallCount += 1;
           }
         }
