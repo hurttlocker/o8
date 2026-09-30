@@ -278,6 +278,8 @@ export interface LaunchOptions {
   baseBranch?: string;
   /** Validated, immutable remote checkout contract persisted with a cloud job. */
   remoteSource?: { repoUrl: string; baseSha: string; branch: string };
+  /** SHA-256 of operator-authorized manifest bytes at the dispatched base revision. */
+  remoteManifestHash?: string;
   /** Operator-facing task name for an owned worker surface. */
   taskName?: string;
   /** Stable caller correlation persisted before an owned process is spawned. */

@@ -21,10 +21,13 @@ import {
   issueAge,
   issueKey,
   issueKind,
+  findDispatchSessionKey,
   isStaleTask,
   repoIssueParam,
   supervisorIncidentMatchesProject,
   taskMatchesProject,
+  taskSessionKey,
+  type PendingDispatch,
 } from './control-room/helpers';
 import {
   CollapsedTaskSection,
@@ -36,32 +39,7 @@ import {
   TaskSection,
   TaskStatusStrip,
 } from './control-room/components';
-import type { IdeWorkspaceSession } from '../types';
-
-interface PendingDispatch {
-  packetId: string | null;
-  laneId: string | null;
-  sessionKey: string | null;
-  startedAt: number;
-}
-
 const PENDING_DISPATCH_TIMEOUT_MS = 30_000;
-
-function findDispatchSessionKey(
-  pending: PendingDispatch,
-  sessions: IdeWorkspaceSession[],
-): string | null {
-  for (const session of sessions) {
-    if (!session.sessionKey) continue;
-    if (pending.sessionKey && session.sessionKey === pending.sessionKey) {
-      return session.sessionKey;
-    }
-    if (pending.packetId && session.orchestrationPacket?.packetId === pending.packetId) {
-      return session.sessionKey;
-    }
-  }
-  return null;
-}
 
 export function ControlRoomTab({
   project,
@@ -438,11 +416,12 @@ export function ControlRoomTab({
 
         const dispatchedPacketId = dispatchPayload.packetId ?? dispatchPayload.task?.packetId ?? payload.taskId ?? null;
         const dispatchedLaneId = dispatchPayload.laneId ?? dispatchPayload.task?.laneId ?? null;
-        const dispatchedSessionKey = dispatchPayload.task?.lane?.sessionKey ?? null;
+        const dispatchedSessionKey = dispatchPayload.task ? taskSessionKey(dispatchPayload.task) : null;
         const candidate: PendingDispatch = {
           packetId: dispatchedPacketId,
           laneId: dispatchedLaneId,
           sessionKey: dispatchedSessionKey,
+          requireExactSession: dispatchPayload.task?.runtime === 'cloud',
           startedAt: Date.now(),
         };
         const immediateKey = findDispatchSessionKey(candidate, ideWorkspaceSessions);
@@ -512,7 +491,10 @@ export function ControlRoomTab({
   ), [liveActiveTasks]);
   const openSessionKeys = useMemo(() => new Set(ideWorkspaceSessions.map((session) => session.sessionKey)), [ideWorkspaceSessions]);
   const sessionBound = useMemo(() => (
-    liveActiveTasks.filter((task) => task.lane?.sessionKey && openSessionKeys.has(task.lane.sessionKey)).length
+    liveActiveTasks.filter((task) => {
+      const sessionKey = taskSessionKey(task);
+      return Boolean(sessionKey && openSessionKeys.has(sessionKey));
+    }).length
   ), [liveActiveTasks, openSessionKeys]);
   const attentionTasks = useMemo(() => (
     [...grouped.blocked, ...grouped.review]

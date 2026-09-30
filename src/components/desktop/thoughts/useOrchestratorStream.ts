@@ -19,6 +19,7 @@ import {
 } from './use-orchestrator-stream/delivery';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
+import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import { primeCompactedOrchestratorSession, refreshOrchestratorTokenTelemetry, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
 import {
@@ -979,11 +980,11 @@ export function useOrchestratorStream(
         && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
-      let outboundMessage = wireMessage;
-      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId);
-      if (resumePrelude) {
-        outboundMessage = `${resumePrelude}\n\nOperator message:\n${wireMessage}`;
-      }
+      const outboundMessage = withSessionPrelude(
+        wireMessage,
+        consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId),
+        orchestrationMode,
+      );
       turnTranscriptEventCountRef.current = 0;
       const payload = buildOrchestratorSendPayload({
         repoPath: activeRepoPath,

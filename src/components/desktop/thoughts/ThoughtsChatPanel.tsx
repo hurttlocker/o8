@@ -2,7 +2,6 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
-import { COLLAPSED_BRANCH_RAIL_WIDTH } from '@/components/desktop/branch-rail-geometry';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
@@ -2173,9 +2172,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     });
   })();
   const composeFirst = displayMessages.length === 0 && !displayWaiting;
-  const composeFirstRailClearance = composeFirst && transcriptSideRail
-    ? COLLAPSED_BRANCH_RAIL_WIDTH + 18
-    : 0;
   return (
     <div
       style={{
@@ -2216,11 +2212,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           background: thoughtsBodyBackground,
           outline: attachmentDragOver ? '2px solid var(--t-accent)' : 'none',
           outlineOffset: -2,
-          // At narrow widths the floating rail shares the empty-state row.
-          // Reserve its footprint so the prompt cannot paint beneath it.
-          paddingRight: composeFirstRailClearance
-            ? `clamp(0px, calc(1000px - 100cqw), var(--o8-compose-first-rail-clearance, ${composeFirstRailClearance}px))`
-            : 0,
           boxSizing: 'border-box',
         }}
       >
@@ -2276,16 +2267,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       />
       <div
         // The composer follows the empty-state prompt in normal flex flow.
-        // Its rail clearance is applied only while the transcript is empty.
+        // Both center against the full pane, including in split layouts.
         style={{
           flexShrink: 0,
-          width: composeFirstRailClearance ? `calc(100% - var(--o8-compose-first-rail-clearance, ${composeFirstRailClearance}px))` : '100%',
+          width: '100%',
           maxWidth: composeFirst ? 900 : undefined,
-          // Center inside the available canvas on wide windows. On narrow
-          // windows keep the right edge clear of the floating capsule.
-          marginRight: composeFirstRailClearance
-            ? `max(var(--o8-compose-first-rail-clearance, ${composeFirstRailClearance}px), calc((100cqw - 900px) / 2))`
-            : 'auto',
+          marginRight: 'auto',
           marginLeft: 'auto',
           // Keep position in layout so resizing reflows without overlap.
           transform: 'none',

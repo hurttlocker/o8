@@ -10,7 +10,9 @@
 
 o8 is an open-source control room for one person running several AI coding agents across their repositories, the governance layer above them. Claude Code, Codex, Grok Build, DeepSeek Harness, OpenCode, Gemini, and twelve more do the work in isolated git worktrees; o8 brings the work, the reviews, and the decisions into one place so you can direct the agents without following every terminal.
 
-[**Download for macOS**](https://github.com/hurttlocker/o8/releases) · [Build from source](#get-it)
+[**Download for macOS**](https://o8.run/download) · [Build from source](#get-it)
+
+The download page identifies the current Mac installer. A universal DMG runs natively on Apple Silicon and Intel; an Intel-only DMG needs Rosetta on Apple Silicon.
 
 macOS today. Linux compiles in CI, but nobody has yet installed it, launched it, and merged a packet on a mainstream distro. Windows is help wanted. Both are on the [roadmap](./ROADMAP.md).
 

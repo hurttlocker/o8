@@ -30,6 +30,7 @@ export interface PersistedTab {
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
   readOnly?: boolean; // live run view: never send input to an attached PTY
+  remoteMachine?: { id: string; label: string; sessionId: string };
   chatRuntime?: OrchestratorRuntime; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
   /** Stable lane identity behind a dispatched chat tab (#1553) — survives the
@@ -233,7 +234,8 @@ function isClearlyDeadTab(tab: PersistedTab): boolean {
   if (kind === 'terminal') {
     const hasTmuxSession = Boolean(tab.tmuxSession?.trim());
     const hasRepoPath = Boolean(tab.repoPath?.trim());
-    return !hasTmuxSession && !hasRepoPath;
+    const hasRemoteMachine = Boolean(tab.remoteMachine?.id && tab.remoteMachine.sessionId);
+    return !hasTmuxSession && !hasRepoPath && !hasRemoteMachine;
   }
 
   return false;

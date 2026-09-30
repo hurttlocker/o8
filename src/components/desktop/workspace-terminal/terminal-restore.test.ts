@@ -191,6 +191,23 @@ describe('resetControllerRefs', () => {
 });
 
 describe('computeRestoredTabs — optimistic crash recovery', () => {
+  it('keeps a disconnected saved-machine tab inert instead of creating a local shell', async () => {
+    const remoteMachine = { id: '12345678-1234-1234-1234-123456789abc', label: 'Studio', sessionId: 'dash-1' };
+    const result = await computeRestoredTabs({
+      version: 1,
+      activeTabId: 'remote-tab',
+      savedAt: new Date().toISOString(),
+      tabs: [{ id: 'remote-tab', label: 'Studio / dash-1', kind: 'terminal', cliAgent: 'shell', remoteMachine }],
+    }, {
+      preferredRepo: null,
+      defaultTab: 'terminal',
+      createDefaultChatTab: () => tab({ kind: 'llm-chat' }),
+    }, undefined, 'optimistic');
+
+    expect(result?.tabs).toEqual([expect.objectContaining({ remoteMachine, tmuxSession: null, readOnly: true })]);
+    expect(result?.deadTerminalTabs).toEqual([]);
+  });
+
   it('restores a live run terminal as read-only', async () => {
     const result = await computeRestoredTabs({
       version: 1,

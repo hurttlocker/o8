@@ -147,6 +147,10 @@ export function getLatestSessionJob(teamId: string, sessionId: string): CloudJob
   return store.getLatestForSession(teamId, sessionId);
 }
 
+export function getLatestPacketJob(teamId: string, packetId: string): CloudJob | undefined {
+  return store.getLatestForPacket(teamId, packetId);
+}
+
 export function listJobs(teamId: string, limit?: number): CloudJob[] {
   return store.list(teamId, limit);
 }

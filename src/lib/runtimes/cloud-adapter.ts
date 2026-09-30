@@ -5,9 +5,10 @@
  * outbound-only HTTPS to the o8 backend. They long-poll the job queue, pick
  * up dispatched jobs, and stream transcripts + diffs back over POST.
  *
- * This is the o8-side surface that makes the runtime dispatchable. The
- * worker CLI is a separate ship. Resume and diff retrieval stay unavailable
- * until that client can service them.
+ * This is the o8-side durable runtime surface. Mission dispatch remains
+ * gated until external worker availability is surfaced in its picker. The
+ * packaged worker lives in scripts/worker. In-flight Codex process resume is
+ * unsupported; durable transcript and diff retrieval use the job queue.
  *
  * Parallel to `codex.ts` and `claude-code.ts`. Registered under runtime id
  * `cloud` via `src/lib/runtimes/index.ts`.
@@ -33,8 +34,10 @@ import {
   queueJobControl,
   readSessionJobEvents,
 } from '@/lib/cloud/job-queue';
+import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 import { randomUUID } from 'node:crypto';
 import { resolveCloudRemoteSource } from '@/lib/cloud/remote-source';
+import { resolveRemoteManifestHash } from '@/lib/cloud/remote-manifest';
 
 /**
  * Launch, discovery, transcript replay, and interrupt use the durable job
@@ -61,7 +64,7 @@ const RUNTIME_ID = 'cloud' as const;
  * constant here; when teams show up in the dispatch flow (separate issue),
  * the LaunchOptions will carry a teamId and we'll read from that instead.
  */
-const DEFAULT_TEAM_ID = 'team_default';
+const DEFAULT_TEAM_ID = DEFAULT_CLOUD_TEAM_ID;
 
 function sessionKeyFor(jobId: string): string {
   return `${RUNTIME_ID}:${jobId}`;
@@ -83,6 +86,12 @@ function textFromPayload(payload: unknown, fallback: string): string {
 }
 
 function eventText(type: string, payload: unknown): string {
+  if (type === 'service' && payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const receipt = payload as Record<string, unknown>;
+    if (typeof receipt.name === 'string' && typeof receipt.state === 'string') {
+      return `Workspace service ${receipt.name}: ${receipt.state}.`;
+    }
+  }
   switch (type) {
     case 'accepted': return 'Cloud job accepted.';
     case 'claimed': return 'Cloud worker claimed the job.';
@@ -183,6 +192,8 @@ export const cloudRuntime: AgentRuntime = {
     let remoteSource: Awaited<ReturnType<typeof resolveCloudRemoteSource>>;
     try {
       remoteSource = await resolveCloudRemoteSource(opts);
+      const remoteManifestHash = await resolveRemoteManifestHash(opts.sourceRepoPath!, remoteSource.baseSha);
+      opts = { ...opts, remoteManifestHash };
     } catch (error) {
       return {
         ok: false,

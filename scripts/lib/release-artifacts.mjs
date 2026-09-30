@@ -22,11 +22,15 @@ const RECIPE_FILES = [
   'scripts/build-speech-local.mjs',
   'scripts/tauri-export.mjs',
   'scripts/tauri-prebuild.mjs',
+  'scripts/packaged-server-smoke.mjs',
+  'scripts/lib/packaged-server-smoke.mjs',
+  'scripts/lib/tauri-export-safety.mjs',
 ];
 
 const SPEECH_ARTIFACTS = [
   'src-tauri/helpers/speech-local',
   'src-tauri/helpers/speech-local-aarch64-apple-darwin',
+  'src-tauri/helpers/speech-local-universal-apple-darwin',
   'src-tauri/helpers/speech-local-x86_64-apple-darwin',
 ];
 

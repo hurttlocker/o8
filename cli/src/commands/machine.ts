@@ -133,7 +133,9 @@ function sshArgs(profile: MachineProfile, command: string[], interactive = false
 }
 
 function remoteCommand(profile: MachineProfile, sub: string, rest: string[], mode: OutputMode): string[] {
-  return [profile.remoteCli, 'terminal', sub, ...rest, ...(mode.human ? ['--human'] : [])];
+  return [profile.remoteCli, 'terminal', sub, ...rest,
+    ...(sub === 'control' && mode.human ? ['--filter-probe-replies'] : []),
+    ...(mode.human ? ['--human'] : [])];
 }
 
 async function sshRun(profile: MachineProfile, command: string[], stream = false, timeoutMs = 15_000, interactive = false): Promise<{ code: number; output: string; error: string }> {

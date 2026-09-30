@@ -281,7 +281,7 @@ export function buildCodexOrchestratorPrompt(
   // Single mode launches Codex with `mcp_servers={}` (codexOrchestrationModeFlags).
   const mcpServers = scope.orchestrationMode !== 'single';
   return [
-    buildOrchestratorSystemPrompt(repoPath, { toolProfile: scope.toolProfile, mcpServers }),
+    buildOrchestratorSystemPrompt(repoPath, { backend: 'codex', toolProfile: scope.toolProfile, mcpServers }),
     codexBrainFirstSection(mcpServers),
     '## USER MESSAGE',
     message,

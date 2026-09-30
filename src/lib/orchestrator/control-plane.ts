@@ -10,6 +10,7 @@ import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
 import { packetContextObservationFromEvent } from '@/lib/orchestrator/packet-context-telemetry';
+import { CODEX_AUTH_RECOVERY_MESSAGE, codexAuthRecoveryMessage } from '@/lib/runtimes/shared/codex-auth-failure';
 import {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
@@ -335,12 +336,20 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
       const recovery = recoveryInfoFromLaneEvents(events);
       const runtimeExited = hasUnreconciledRuntimeExit(lane, events);
       const contextEvent = events.findLast((event) => event.verb === 'runtime_process_exit');
+      const failureMessage = contextEvent?.payload.runtime === 'codex'
+        && contextEvent.payload.surfaceId === lane.sessionKey
+        && !events.slice(events.indexOf(contextEvent) + 1).some((event) => event.verb === 'attach_session')
+        && contextEvent.payload.runtimeOutcome === 'failed'
+        ? (contextEvent.payload.authRecoveryRequired === true ? CODEX_AUTH_RECOVERY_MESSAGE
+          : codexAuthRecoveryMessage(typeof contextEvent.payload.stderr === 'string' ? contextEvent.payload.stderr : ''))
+        : null;
       return {
         laneId: lane.id,
         packetId: lane.packetId!,
         status: runtimeExited ? 'failed' : lane.status,
         sessionKey: lane.sessionKey,
         lastEventLabel: runtimeExited ? 'runtime_process_exit' : lane.lastEventLabel,
+        failureMessage,
         recovery,
         contextObservation: contextEvent ? packetContextObservationFromEvent(contextEvent) : undefined,
         mergeMode: mergePolicy.mode,

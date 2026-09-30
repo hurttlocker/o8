@@ -7,6 +7,7 @@ import { buildCodexOrchestratorPrompt } from './codex-orchestrator-session';
 import {
   buildOrchestratorSystemPrompt,
   orchestratorPromptSurface,
+  type OrchestratorPromptBackend,
   type OrchestratorPromptSurface,
 } from './orchestrator-system-prompt';
 
@@ -46,6 +47,7 @@ function toolsFor(surface: OrchestratorPromptSurface): Set<string> {
 }
 
 const PROFILES: ToolProfile[] = ['full', 'propose', 'solo', 'fable', 'fable-solo'];
+const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex'];
 
 describe('orchestrator prompt tool scope (#2898)', () => {
   it('finds the registered tool catalogs it guards', () => {
@@ -55,24 +57,27 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     for (const name of CORTEX_READONLY_TOOLS) expect(CORTEX_TOOLS, name).toContain(name);
   });
 
-  for (const toolProfile of PROFILES) {
-    for (const mcpServers of [true, false]) {
-      it(`names only tools a ${toolProfile} turn has${mcpServers ? '' : ' with no MCP servers'}`, () => {
-        const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', {
-          firstRunClarify: false,
-          toolProfile,
-          mcpServers,
+  for (const backend of BACKENDS) {
+    for (const toolProfile of PROFILES) {
+      for (const mcpServers of [true, false]) {
+        it(`names only tools a ${backend} ${toolProfile} turn has${mcpServers ? '' : ' with no MCP servers'}`, () => {
+          const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', {
+            backend,
+            firstRunClarify: false,
+            toolProfile,
+            mcpServers,
+          });
+          const available = toolsFor(orchestratorPromptSurface({ backend, toolProfile, mcpServers }));
+          expect(namedTools(prompt).filter((name) => !available.has(name))).toEqual([]);
+          expect(prompt).not.toMatch(/<!-- o8:|\{\{[A-Z_]+\}\}/);
         });
-        const available = toolsFor(orchestratorPromptSurface({ toolProfile, mcpServers }));
-        expect(namedTools(prompt).filter((name) => !available.has(name))).toEqual([]);
-        expect(prompt).not.toMatch(/<!-- o8:/);
-      });
+      }
     }
   }
 
   it('keeps the fleet doctrine on a full turn and drops it on a Solo turn', () => {
-    const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: false });
-    const solo = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: false, toolProfile: 'solo' });
+    const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
+    const solo = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false, toolProfile: 'solo' });
 
     for (const heading of ['## FINAL-MESSAGE FORMAT FOR DISPATCH', '## ORCHESTRATOR PROTOCOL', '## Huddle mode']) {
       expect(full, heading).toContain(heading);
@@ -85,7 +90,7 @@ describe('orchestrator prompt tool scope (#2898)', () => {
   });
 
   it('lets the orchestrator use gh where the cortex GitHub tools stop (#2901)', () => {
-    const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: false });
+    const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
     const cortexServer = readFileSync(new URL('cortex-mcp-server.ts', MCP_DIR), 'utf8');
 
     // cortex_list_issues returns no body and points at gh; nothing in cortex or operator writes issues.
@@ -108,5 +113,50 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     expect(single).toContain('`o8 ask`');
     expect(fleet).toContain('cortex_launch_agent');
     expect(fleet).toContain('`cortex_ask` MCP tool');
+  });
+
+  it('names the backend running the turn and keeps Claude-only sections off Codex (#2900)', () => {
+    const claude = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
+    const codex = buildCodexOrchestratorPrompt('/tmp/example-repo', 'fan this out');
+
+    expect(claude).toContain('This turn runs on the Claude Code orchestrator backend.');
+    expect(codex).toContain('This turn runs on the Codex orchestrator backend.');
+    expect(codex).not.toContain('Claude Code orchestrator backend');
+    expect(claude).not.toContain('Codex orchestrator backend');
+
+    expect(claude).toContain('### YOU ARE CLAUDE CODE UNDER THE HOOD');
+    expect(claude).toContain('native Claude sub-agents');
+    for (const claudeOnly of ['### YOU ARE CLAUDE CODE UNDER THE HOOD', 'native Claude sub-agents', 'You are Claude']) {
+      expect(codex, claudeOnly).not.toContain(claudeOnly);
+    }
+    // Backend-neutral dispatch guidance survives on both.
+    for (const prompt of [claude, codex]) {
+      expect(prompt).toContain('### Inline work vs dispatch');
+      expect(prompt).toContain('orchestrator_review');
+    }
+  });
+
+  it('carries no fixed default backend, closed-issue note, or stale server prefix (#2900)', () => {
+    for (const backend of BACKENDS) {
+      const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend, firstRunClarify: false });
+      expect(prompt, backend).not.toMatch(/default orchestrator backend|#1045|-p mode|mcp__o8__/);
+      // o8 is the product; `cortex_*` appears only as tool names and the `o8 cortex` command.
+      expect(prompt.replace(/cortex_[a-z_*]+|o8 cortex \w+/g, ''), backend).not.toMatch(/cortex/i);
+    }
+  });
+
+  it('states each collapsed prohibition once (#2902)', () => {
+    const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
+    const count = (pattern: RegExp) => full.match(new RegExp(pattern.source, `${pattern.flags}g`))?.length ?? 0;
+
+    expect(count(/check back/i), 'promised follow-up').toBe(1);
+    expect(count(/merge directly/i), 'direct merge').toBe(1);
+    expect(count(/Claim only dispatches that happened/), 'false dispatch').toBe(1);
+    expect(count(/after your last tool call/), 'summary after tools').toBe(1);
+    expect(full).not.toContain('Forbidden phrasings');
+    // Outcome ownership and the review traces carry their rules unchanged.
+    for (const kept of ['### Outcome ownership', '### Adversarial review protocol', 'GUARD/PREDICATE TRACE', 'COMPLETENESS TRACE']) {
+      expect(full, kept).toContain(kept);
+    }
   });
 });

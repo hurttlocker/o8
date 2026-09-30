@@ -6,9 +6,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DispatchBackendWaitResult } from '@/lib/runtimes/shared/dispatch-readiness';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './types';
 
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn());
+const fetchRuntimeLaunchMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/runtimes/shared/dispatch-readiness')>();
@@ -17,6 +19,7 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
     ensureDispatchBackendReady: ensureDispatchBackendReadyMock,
   };
 });
+vi.mock('@/lib/ws-server/next-fetch', () => ({ fetchRuntimeLaunch: fetchRuntimeLaunchMock }));
 
 describe('createOwnedSessionStore child exit recording', () => {
   let tempRoot: string;
@@ -24,6 +27,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   let priorRoot: string | undefined;
   let priorBin: string | undefined;
   let priorSandbox: string | undefined;
+  let priorCodexRoot: string | undefined;
 
   beforeEach(async () => {
     tempRoot = await mkdtemp(path.join(process.cwd(), '.tmp-owned-child-exit-'));
@@ -32,20 +36,25 @@ describe('createOwnedSessionStore child exit recording', () => {
     priorRoot = process.env.O8_TEST_CHILD_EXIT_ROOT;
     priorBin = process.env.O8_TEST_CHILD_EXIT_BIN;
     priorSandbox = process.env.O8_WORKER_SANDBOX;
+    priorCodexRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
     process.env.O8_TEST_CHILD_EXIT_ROOT = path.join(tempRoot, 'sessions');
     process.env.O8_TEST_CHILD_EXIT_BIN = process.execPath;
     process.env.O8_TEST_CHILD_EXIT_REPO = repoPath;
     ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
+    fetchRuntimeLaunchMock.mockResolvedValue({ surfaceId: 'codex-owned:unexpected-retry' });
   });
 
   afterEach(async () => {
     ensureDispatchBackendReadyMock.mockReset();
+    fetchRuntimeLaunchMock.mockReset();
     if (priorRoot === undefined) delete process.env.O8_TEST_CHILD_EXIT_ROOT;
     else process.env.O8_TEST_CHILD_EXIT_ROOT = priorRoot;
     if (priorBin === undefined) delete process.env.O8_TEST_CHILD_EXIT_BIN;
     else process.env.O8_TEST_CHILD_EXIT_BIN = priorBin;
     if (priorSandbox === undefined) delete process.env.O8_WORKER_SANDBOX;
     else process.env.O8_WORKER_SANDBOX = priorSandbox;
+    if (priorCodexRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+    else process.env.CORTEX_IDE_OWNED_CODEX_ROOT = priorCodexRoot;
     delete process.env.O8_TEST_CHILD_EXIT_REPO;
     delete process.env.O8_TEST_SANDBOX_DENIED_PATH;
     await rm(tempRoot, { recursive: true, force: true });
@@ -65,6 +74,87 @@ describe('createOwnedSessionStore child exit recording', () => {
       classification: 'nonzero-exit',
     });
     expect(run.childExit?.stderrTail).toContain('rmcp session-delete 404');
+  }, 20_000);
+
+  it.each([
+    { kind: 'auth-failure' as const, expected: 'held' as const },
+    { kind: 'exit-1' as const, expected: 'launched' as const },
+  ])('handles a real Codex child $kind without misclassifying other exits', async ({ kind, expected }) => {
+    const [{ attachSession, createLane, getLane, setLaneStatus }, { createOwnedSessionStore }, { relaunchSupervisedAgent }, { buildDomainLaneSummaries }, { createEmptyOrchestratorMissionState, reconcileOrchestratorMissionState }] = await Promise.all([
+      import('@/lib/lane/registry'), import('./store'),
+      import('@/lib/supervisor/relaunch-agent'), import('@/lib/orchestrator/control-plane'),
+      import('@/lib/orchestrator/store'),
+    ]);
+    execFileSync('git', ['-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+      'commit', '--allow-empty', '-m', 'seed'], { cwd: repoPath });
+    const worktreePath = path.join(tempRoot, 'packet-worktree');
+    execFileSync('git', ['worktree', 'add', '-b', 'agent/auth-failure', worktreePath], { cwd: repoPath });
+    const packetId = `pkt-auth-failure-${Date.now()}`;
+    const lane = createLane({ repoPath, worktreePath, branch: 'agent/auth-failure',
+      runtime: 'codex', packetId });
+    process.env.CORTEX_IDE_OWNED_CODEX_ROOT = process.env.O8_TEST_CHILD_EXIT_ROOT;
+    const store = createOwnedSessionStore({ ...testAdapter(kind),
+      runtimeId: 'codex', surfaceIdPrefix: 'codex-owned:',
+      rootEnvVar: 'CORTEX_IDE_OWNED_CODEX_ROOT' }, {
+      workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
+    });
+
+    const launched = await store.launch({ cwd: worktreePath, prompt: 'Add a note',
+      laneId: lane.id, packetId, model: 'gpt-5.6-terra', effort: 'low' });
+    expect(launched.ok, launched.note).toBe(true);
+    attachSession(lane.id, launched.surfaceId, 'system');
+    setLaneStatus(lane.id, 'running', 'system', 'session_launched');
+    await waitForRecordedExit(launched.surfaceId);
+    const supervisor = await import('@/lib/supervisor/agent-supervisor');
+    const updates = vi.fn();
+    const relaunch = vi.fn(relaunchSupervisedAgent);
+    supervisor.startSupervisorLoop({
+      fetchFleetStatus: async () => [{ sessionKey: launched.surfaceId, status: 'failed' }],
+      fetchTranscript: async () => [], steerAgent: async () => {}, interruptAgent: async () => {},
+      relaunchAgent: relaunch, broadcastAgentUpdate: updates, queueOrchestratorEscalation: () => {},
+    });
+    supervisor.stopSupervisorLoop();
+    supervisor.registerWatchedAgent(launched.surfaceId, repoPath, 'auth-check', 'Add a note');
+    supervisor.getWatchedAgents(repoPath)[0].nextPollAt = 0;
+    await supervisor.runSupervisorTickForTesting();
+    const result = await relaunch.mock.results[0].value;
+    supervisor.stopSupervisorLoop();
+    for (const watch of supervisor.getWatchedAgents()) supervisor.unregisterWatchedAgent(watch.surfaceId);
+
+    expect(result.status).toBe(expected);
+    expect(fetchRuntimeLaunchMock).toHaveBeenCalledTimes(expected === 'held' ? 0 : 1);
+    const summary = buildDomainLaneSummaries(new Set([packetId]));
+    if (expected === 'held') {
+      if (result.status !== 'held') throw new Error('Expected the auth retry to be held.');
+      expect(result.reason).toContain('codex login');
+      expect(getLane(lane.id)?.status).toBe('awaiting_input');
+      expect(summary[0]?.failureMessage).toContain('codex login');
+      const packet = {
+        id: packetId, referenceLabel: 'auth-check', title: 'auth-check', summary: 'auth-check',
+        status: 'failed', queueState: 'queued', releaseState: 'pending', runtime: 'codex',
+        wave: 1, dependencyPacketIds: [], dependencyLabels: [], blockedReason: 'runtime_process_exit', lane: null, review: null,
+        workspaceTargetPath: repoPath, branchTarget: 'agent/auth-failure',
+      } as OrchestratorPacket;
+      const state = { ...createEmptyOrchestratorMissionState(), packets: [packet] };
+      const reconciled = reconcileOrchestratorMissionState(state, {
+        laneSnapshots: [], runtimeTruth: [], domainLanes: summary,
+      });
+      expect(reconciled.packets[0]?.blockedReason).toContain('codex login');
+      expect(reconcileOrchestratorMissionState(state, {
+        laneSnapshots: [], runtimeTruth: [], domainLanes: summary.map((entry) => ({ ...entry, status: 'failed' })),
+      }).packets[0]?.blockedReason).toContain('codex login');
+      expect(updates).toHaveBeenCalledWith(expect.objectContaining({ status: 'awaiting_input', detail: result.reason }));
+      const customState = { ...state, packets: [{ ...packet, blockedReason: 'Merge conflict in README.md' }] };
+      expect(reconcileOrchestratorMissionState(customState, {
+        laneSnapshots: [], runtimeTruth: [], domainLanes: summary,
+      }).packets[0]?.blockedReason).toBe('Merge conflict in README.md');
+      attachSession(lane.id, launched.surfaceId, 'system');
+      expect(buildDomainLaneSummaries(new Set([packetId]))[0]?.failureMessage).toBeNull();
+      attachSession(lane.id, 'codex-owned:replacement-session', 'system');
+      expect(buildDomainLaneSummaries(new Set([packetId]))[0]?.failureMessage).toBeNull();
+    } else {
+      expect(summary[0]?.failureMessage).toBeNull();
+    }
   }, 20_000);
 
   it('records SIGKILL signal and stderr tail from the real runner child', async () => {
@@ -355,7 +445,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   });
 });
 
-function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-error'): OwnedRuntimeAdapter {
+function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-error' | 'auth-failure'): OwnedRuntimeAdapter {
   return {
     runtimeId: `test-child-${kind}`,
     surfaceIdPrefix: `test-child-${kind}:`,
@@ -382,7 +472,7 @@ function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-e
   };
 }
 
-function childScript(kind: 'exit-1' | 'sigkill' | 'provider-error') {
+function childScript(kind: 'exit-1' | 'sigkill' | 'provider-error' | 'auth-failure') {
   const stderrLine = 'rmcp session-delete 404 from fake child\\n';
   if (kind === 'exit-1') {
     return `process.stderr.write(${JSON.stringify(stderrLine)}); process.exit(1);`;
@@ -392,6 +482,9 @@ function childScript(kind: 'exit-1' | 'sigkill' | 'provider-error') {
       type: 'result', subtype: 'success', is_error: true, result: 'Not logged in',
     });
     return `process.stdout.write(${JSON.stringify(`${result}\n`)}); process.exit(0);`;
+  }
+  if (kind === 'auth-failure') {
+    return `process.stderr.write('diagnostic '.repeat(600) + 'Failed to refresh token: 401 refresh_token_reused\\n'); process.exit(1);`;
   }
   return `process.stderr.write(${JSON.stringify(stderrLine)}); process.stderr.write('', () => process.kill(process.pid, 'SIGKILL'));`;
 }

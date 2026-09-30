@@ -589,6 +589,16 @@ export class SqliteCloudJobStore implements CloudJobStore {
     return row ? jobFromRow(row) : undefined;
   }
 
+  getLatestForPacket(teamId: string, packetId: string): CloudJob | undefined {
+    const row = this.sqliteProvider().prepare(`
+      SELECT * FROM cloud_jobs
+      WHERE team_id = ? AND packet_id = ?
+      ORDER BY cursor DESC
+      LIMIT 1
+    `).get(teamId, packetId) as CloudJobRow | undefined;
+    return row ? jobFromRow(row) : undefined;
+  }
+
   list(teamId: string, limit: number = 500): CloudJob[] {
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 5_000);
     const rows = this.sqliteProvider().prepare(`
