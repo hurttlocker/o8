@@ -290,6 +290,29 @@ afterAll(async () => {
 });
 
 describe.skipIf(process.platform === 'win32')('#2228 local provider egress assertion', () => {
+  it('fails closed and names the surface before an unexpected request can connect', async () => {
+    const priorSurface = process.env.O8_EGRESS_SURFACE;
+    process.env.O8_EGRESS_SURFACE = 'sabotage-probe';
+    try {
+      await expect(Promise.resolve().then(
+        () => fetch('https://o8-egress-sabotage.invalid/probe'),
+      )).rejects.toThrow(/O8_EGRESS_BLOCKED.*sabotage-probe.*o8-egress-sabotage\.invalid:443/);
+    } finally {
+      if (priorSurface === undefined) delete process.env.O8_EGRESS_SURFACE;
+      else process.env.O8_EGRESS_SURFACE = priorSurface;
+    }
+    expect(readRows()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        surface: 'sabotage-probe',
+        endpoint: 'o8-egress-sabotage.invalid:443',
+        allowed: false,
+      }),
+    ]));
+    // The next test is the honest lifecycle baseline, so remove sabotage-only
+    // evidence after proving the recorder catches it pre-connect.
+    writeFileSync(reportPath, '', 'utf8');
+  });
+
   it('dispatches, works, uses Brain, reviews, and merges with only the local provider as egress', async () => {
     const repoPath = makeRepo();
     await addRepo(realpathSync.native(repoPath));
