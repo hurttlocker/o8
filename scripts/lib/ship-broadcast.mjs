@@ -147,11 +147,11 @@ export function createShipBroadcast(version) {
   };
 }
 
-function defaultShipPlan(root) {
+export function defaultShipPlan(root) {
   return {
     preflight: { command: process.execPath, args: [join(root, 'scripts/ship-preflight.mjs')] },
     prepare: [{ command: process.execPath, args: [join(root, 'scripts/detach-stale-dmg.mjs')] }],
-    build: { command: 'npm', args: ['run', 'tauri:build:nonotary'] },
+    build: { command: 'npm', args: ['run', 'tauri:build:stable-macos'] },
     notarize: { command: 'npm', args: ['run', 'sign-and-notarize'] },
     publish: { command: process.execPath, args: [join(root, 'scripts/release.mjs')] },
     alwaysCleanup: [

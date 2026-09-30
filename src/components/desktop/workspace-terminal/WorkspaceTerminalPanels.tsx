@@ -187,7 +187,7 @@ function WorkspaceTerminalPanelsBase({
     return () => window.clearTimeout(timer);
   }, [restoreSettled]);
   return (
-    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {!restoreSettled && !restoreHoldExpired ? <WorkspaceBootLoaderClaim /> : null}
       {visibleTabs.map((tab) => residentTabIdSet.has(tab.id) ? (
         tab.kind === 'orchestrator' ? (
@@ -340,18 +340,18 @@ function EmptyWorkspaceCTA() {
     window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind } }));
   };
   return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 24, paddingBottom: 24, paddingLeft: 24, paddingRight: 24 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, textAlign: 'center', maxWidth: 560 }}>
-        <div style={{ color: 'var(--t-text)', fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em' }}>
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 24, paddingBottom: 24, paddingLeft: 24, paddingRight: 24 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, textAlign: 'center', width: '100%', maxWidth: 560, minWidth: 0 }}>
+        <div style={{ color: 'var(--t-text)', fontSize: 18, fontWeight: 400, letterSpacing: '-0.01em' }}>
           Start a new session
         </div>
         <div style={{ color: 'var(--t-text-muted)', fontSize: 12.5, lineHeight: 1.55, maxWidth: 440 }}>
           Pick how you want to work. You can switch between sessions and spawn more from the play button in the header.
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(140px, 1fr))', gap: 10, marginTop: 8 }}>
+        <div style={{ display: 'grid', width: '100%', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 10, marginTop: 8 }}>
           <EmptyWorkspaceCard
             label="Orchestrator"
-            hint="Plan & dispatch with Claude"
+            hint="Plan and dispatch work"
             onClick={() => spawn('orchestrator')}
           />
           <EmptyWorkspaceCard

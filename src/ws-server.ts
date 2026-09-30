@@ -1002,7 +1002,7 @@ const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
 const TERMINAL_TMUX_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
-const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string }>();
+const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean }>();
 
 // ── Orchestrator channel state ──
 
@@ -6914,7 +6914,7 @@ function materializePendingDashSession(
   const cwd = (pending.cwd && existsSync(pending.cwd) ? pending.cwd : undefined)
     ?? process.env.HOME ?? homedir() ?? '/tmp';
   const tmuxBacked = createDashTmuxSessionSync({
-    enabled: dashPersistentTerminalsEnabled(),
+    enabled: dashPersistentTerminalsEnabled() && !pending.directPty,
     sessionName,
     cols: nextCols,
     rows: nextRows,
@@ -6964,6 +6964,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
   const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
+  const directPty = msg.directPty === true;
   const ownerSessionName = dashSessionNameForOwnerKey(
     typeof msg.ownerKey === 'string' ? msg.ownerKey : undefined,
   );
@@ -6981,7 +6982,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     && (
       pendingDashSessions.has(ownerSessionName)
       || terminalAttachments.has(ownerSessionName)
-      || (dashPersistentTerminalsEnabled() && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
+      || (dashPersistentTerminalsEnabled() && !directPty && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
     )
   ) {
     console.log(`[ws-server] Reusing owned dashboard PTY session: ${ownerSessionName}`);
@@ -7001,7 +7002,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   }
 
   const sessionName = ownerSessionName ?? `cortex-dash-${randomUUID().slice(0, 8)}`;
-  pendingDashSessions.set(sessionName, { cols, rows, cwd });
+  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty });
   console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });
 }
@@ -7264,7 +7265,7 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   if (!attachment) {
     if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
       const pending = pendingDashSessions.get(sessionName);
-      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd });
+      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true });
     }
     return;
   }
