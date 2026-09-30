@@ -14,10 +14,11 @@ function sourceFiles(root: string): string[] {
 describe('runtime install metadata', () => {
   it('does not reference the nonexistent Codex CLI npm package under src', () => {
     const root = join(process.cwd(), 'src');
+    const legacyPackage = ['@openai', 'codex-cli'].join('/');
     const offenders = sourceFiles(root).filter((path) => {
       const extension = extname(path);
       if (!['.ts', '.tsx', '.js', '.jsx', '.md'].includes(extension)) return false;
-      return readFileSync(path, 'utf8').includes('@openai/codex-cli');
+      return readFileSync(path, 'utf8').includes(legacyPackage);
     });
     expect(offenders).toEqual([]);
   });
