@@ -3,6 +3,7 @@ import type { OrchestratorEvent } from './orchestrator-stream-events';
 import {
   claimsDispatch,
   isFalseDispatchTurn,
+  launchesWorker,
   runTurnWithFalseDispatchRetry,
   FALSE_DISPATCH_CORRECTION,
   FALSE_DISPATCH_ERROR,
@@ -95,6 +96,52 @@ describe('isFalseDispatchTurn', () => {
  * events were ever gated. These assertions are on TEXT events and their content
  * — a suite that only counted `done`/`error` passed while the bug was present.
  */
+describe('launchesWorker (#2936)', () => {
+  it.each([
+    'cortex_launch_agent',
+    'mcp__cortex__cortex_launch_agent',
+    'cortex__cortex_launch_agent',
+    'mcp__operator__create_mission',
+    'create_mission',
+    'mcp__operator__dispatch_mission',
+    'mcp__operator__rerun_with_feedback',
+  ])('counts %s as a worker launch', (name) => {
+    expect(launchesWorker(name, { issues: ['2936'] })).toBe(true);
+  });
+
+  it('does not count create_mission called with dispatch: false', () => {
+    expect(launchesWorker('mcp__operator__create_mission', { issues: ['2936'], dispatch: false })).toBe(false);
+  });
+
+  it.each([
+    'mcp__operator__retry_packet',
+    'mcp__operator__steer_packet',
+    'mcp__operator__get_mission_status',
+    'mcp__cortex__cortex_read_packets',
+    'Bash',
+  ])('does not count %s', (name) => {
+    expect(launchesWorker(name, {})).toBe(false);
+  });
+
+  it('a turn that dispatched through create_mission and says so is not a false dispatch', () => {
+    const toolCalls = [
+      { name: 'mcp__operator__create_mission', input: { issues_inline: [{ title: 'a' }, { title: 'b' }] } },
+      { name: 'mcp__operator__get_mission_status', input: {} },
+    ];
+    expect(isFalseDispatchTurn({
+      completedResult: true,
+      error: null,
+      launchAgentCallCount: toolCalls.filter((call) => launchesWorker(call.name, call.input)).length,
+      assistantText: 'Dispatched 2 agent(s):\n1. a → surfaceId=pkt-1\n2. b → surfaceId=pkt-2',
+    })).toBe(false);
+  });
+
+  it('the correction names the o8 dispatch tool, not only cortex_launch_agent', () => {
+    expect(FALSE_DISPATCH_CORRECTION).toContain('`create_mission`');
+    expect(FALSE_DISPATCH_CORRECTION).not.toContain('`cortex_launch_agent` is the only thing that launches a worker');
+  });
+});
+
 describe('runTurnWithFalseDispatchRetry', () => {
   function recorder() {
     const events: OrchestratorEvent[] = [];

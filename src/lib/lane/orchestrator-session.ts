@@ -47,6 +47,7 @@ import {
 } from '@/lib/lane/orchestrator-prompt-ledger';
 import {
   isFalseDispatchTurn,
+  launchesWorker,
   runTurnWithFalseDispatchRetry,
   type FalseDispatchAttemptResult,
 } from '@/lib/lane/orchestrator-false-dispatch';
@@ -1005,7 +1006,7 @@ export async function sendToOrchestrator(
     killOrchestratorProc(session, w, true);
   }
 
-  const systemPrompt = buildOrchestratorSystemPrompt(session.repoPath, { toolProfile });
+  const systemPrompt = buildOrchestratorSystemPrompt(session.repoPath, { backend: 'claude', toolProfile });
   const promptFingerprint = orchestratorPromptFingerprint(systemPrompt);
 
   // Spawn a fresh proc when there's no warm one (first turn / after recycle).
@@ -1108,7 +1109,7 @@ export async function sendToOrchestrator(
           turn.sawToolUseAfterText = false;
         } else if (e.type === 'tool_use') {
           turn.sawToolUseAfterText = true;
-          if (e.name === 'cortex_launch_agent' || e.name === 'mcp__cortex__cortex_launch_agent') {
+          if (launchesWorker(e.name, e.input)) {
             turn.launchAgentCallCount += 1;
           }
         }
