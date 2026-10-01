@@ -9,6 +9,18 @@ import { baseName, runtimeLabel, taskSessionKey } from './helpers';
 import { ActionButton, MenuActionRow, SectionLabel } from './shared';
 import { TaskRow } from './TaskRow';
 
+interface RemoteEvidencePayload {
+  packetId: string;
+  jobId: string;
+  attempt: number;
+  status: string;
+  leaseState: string;
+  logs: { id: number; text: string; createdAt: string }[];
+  files: { path: string; status: string; additions: number; deletions: number }[];
+  logsTruncated: boolean;
+  filesTruncated: boolean;
+}
+
 export function TaskSection({
   label,
   tasks,
@@ -213,19 +225,50 @@ export function CollapsedTaskSection({
 
 export function TaskActionMenu({
   state,
+  boundaryElement,
   busyKey,
   onClose,
+  onRefreshTask,
   onSelectSession,
   onAction,
 }: {
   state: TaskActionMenuState;
+  boundaryElement?: HTMLElement | null;
   busyKey: string | null;
   onClose: () => void;
+  onRefreshTask: () => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
   onAction: (task: TaskPoolTask, action: TaskAction, body?: Record<string, unknown>) => void;
 }) {
-  const [mode, setMode] = useState<'menu' | 'block' | 'report'>('menu');
+  const [mode, setMode] = useState<'menu' | 'block' | 'report' | 'evidence'>('menu');
   const [detail, setDetail] = useState('');
+  const [evidence, setEvidence] = useState<RemoteEvidencePayload | null>(null);
+  const [evidenceError, setEvidenceError] = useState<{ key: string; message: string } | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceReload, setEvidenceReload] = useState(0);
+  const task = state.task;
+  const evidenceJobId = task.execution?.jobId;
+  const evidenceAttempt = task.execution?.attempt;
+  const evidenceKey = `${task.id}:${evidenceJobId}:${evidenceAttempt}`;
+  const currentEvidence = evidence && evidence.packetId === task.packetId && evidence.jobId === evidenceJobId && evidence.attempt === evidenceAttempt ? evidence : null;
+  const currentError = evidenceError?.key === evidenceKey ? evidenceError.message : null;
+
+  useEffect(() => {
+    if (mode !== 'evidence' || !evidenceJobId || evidenceAttempt === undefined) return;
+    let active = true;
+    const requestKey = `${task.id}:${evidenceJobId}:${evidenceAttempt}`;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ jobId: evidenceJobId, attempt: String(evidenceAttempt) });
+    void fetch(`/api/tasks/${encodeURIComponent(task.id)}/evidence?${params}`, { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({})) as RemoteEvidencePayload & { error?: string };
+        if (!response.ok) throw new Error(body.error || 'Remote evidence is unavailable.');
+        if (active) { setEvidence(body); setEvidenceError(null); }
+      })
+      .catch((error: unknown) => { if (active) setEvidenceError({ key: requestKey, message: error instanceof Error ? error.message : 'Remote evidence is unavailable.' }); })
+      .finally(() => { if (active) setEvidenceLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [mode, task.id, evidenceJobId, evidenceAttempt, evidenceReload]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -235,20 +278,32 @@ export function TaskActionMenu({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const task = state.task;
   const busy = busyKey?.endsWith(`:${task.id}`) ?? false;
   const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
-  const menuWidth = 248;
   const canUnqueue = state.task.group === 'ready' || state.task.group === 'blocked';
-  const menuHeight = mode === 'menu' ? (canUnqueue ? 299 : 266) : 214;
-  const panelRect = typeof document === 'undefined'
-    ? null
-    : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
-  const boundaryLeft = panelRect?.left ?? 0;
-  const boundaryRight = panelRect?.right ?? viewportWidth;
-  const boundaryTop = panelRect?.top ?? 0;
-  const boundaryBottom = panelRect?.bottom ?? viewportHeight;
+  const menuHeight = mode === 'evidence' ? 480 : mode === 'menu' ? (canUnqueue ? 299 : 266) : 214;
+  const panelRect = boundaryElement?.getBoundingClientRect();
+  let boundaryLeft = Math.max(0, panelRect?.left ?? 0);
+  let boundaryRight = Math.min(viewportWidth, panelRect?.right ?? viewportWidth);
+  let boundaryTop = Math.max(0, panelRect?.top ?? 0);
+  let boundaryBottom = Math.min(viewportHeight, panelRect?.bottom ?? viewportHeight);
+  // The board can extend beyond a scroll container or clipped project sheet.
+  // Keep the entire popup, including its actions, inside the visible portion.
+  for (let parent = boundaryElement?.parentElement; parent; parent = parent.parentElement) {
+    const style = window.getComputedStyle(parent);
+    const rect = parent.getBoundingClientRect();
+    const clipsBoth = Boolean(style.clipPath && style.clipPath !== 'none') || /paint|strict|content/.test(style.contain);
+    if (clipsBoth || /auto|scroll|hidden|clip/.test(style.overflowX || style.overflow)) {
+      boundaryLeft = Math.max(boundaryLeft, rect.left);
+      boundaryRight = Math.min(boundaryRight, rect.right);
+    }
+    if (clipsBoth || /auto|scroll|hidden|clip/.test(style.overflowY || style.overflow)) {
+      boundaryTop = Math.max(boundaryTop, rect.top);
+      boundaryBottom = Math.min(boundaryBottom, rect.bottom);
+    }
+  }
+  const menuWidth = Math.min(mode === 'evidence' ? 480 : 248, Math.max(180, boundaryRight - boundaryLeft - 16));
   const minLeft = boundaryLeft + 8;
   const maxLeft = Math.max(minLeft, boundaryRight - menuWidth - 8);
   const desiredLeft = state.x + menuWidth > boundaryRight - 8 ? state.x - menuWidth + 18 : state.x;
@@ -282,7 +337,10 @@ export function TaskActionMenu({
           left,
           top,
           zIndex: 49,
-          width: 248,
+          width: menuWidth,
+          maxHeight: Math.max(180, boundaryBottom - boundaryTop - 16),
+          overflowY: mode === 'evidence' ? 'auto' : 'visible',
+          scrollbarWidth: 'none',
           borderRadius: 16,
           border: '1px solid var(--t-divider-subtle)',
           background: FLOATING_GLASS_SURFACE,
@@ -295,7 +353,7 @@ export function TaskActionMenu({
         }}
       >
         <div style={{ padding: '5px 6px 8px' }}>
-          <div style={{ fontSize: 11.5, lineHeight: '15px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 11.5, lineHeight: '15px', fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {task.title}
           </div>
           <div style={{ marginTop: 1, color: 'var(--t-text-faint)', fontSize: 10.25, lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -313,6 +371,14 @@ export function TaskActionMenu({
                 onClose();
               }}
             />
+            {task.execution ? (
+              <MenuActionRow label="Remote logs & files" onClick={() => {
+                setEvidenceLoading(true);
+                setEvidence(null);
+                setEvidenceError(null);
+                setMode('evidence');
+              }} />
+            ) : null}
             <MenuActionRow
               label="Claim"
               disabled={busy}
@@ -353,6 +419,37 @@ export function TaskActionMenu({
                 onClick={() => onAction(task, 'remove', { reason: 'Un-queued from Control Room.' })}
               />
             ) : null}
+          </div>
+        ) : mode === 'evidence' ? (
+          <div style={{ paddingTop: 2, paddingRight: 6, paddingBottom: 6, paddingLeft: 6, fontSize: 11, lineHeight: '16px', color: 'var(--t-text-muted)' }}>
+            <div style={{ fontWeight: 300, color: 'var(--t-text)', marginBottom: 6 }}>Remote evidence · attempt {task.execution?.attempt}</div>
+            {!currentEvidence && !currentError ? <div>Loading current attempt…</div> : null}
+            {currentError ? <div role="alert" style={{ color: 'var(--t-danger, #dc2626)', overflowWrap: 'anywhere' }}>{currentError}</div> : null}
+            {currentEvidence ? (
+              <>
+                <div style={{ marginBottom: 10 }}>{currentEvidence.status} · lease {currentEvidence.leaseState}</div>
+                <div style={{ fontWeight: 300, color: 'var(--t-text)', marginBottom: 4 }}>Changed files · {currentEvidence.files.length}{currentEvidence.filesTruncated ? '+' : ''}</div>
+                {currentEvidence.files.length ? currentEvidence.files.map((file) => (
+                  <div key={`${file.path}:${file.status}`} style={{ display: 'flex', gap: 8, justifyContent: 'space-between', overflowWrap: 'anywhere', marginBottom: 3 }}>
+                    <span>{file.status} · {file.path}</span><span style={{ flexShrink: 0 }}>+{file.additions} −{file.deletions}</span>
+                  </div>
+                )) : <div style={{ marginBottom: 8 }}>No changed-file receipt for this attempt yet.</div>}
+                <div style={{ fontWeight: 300, color: 'var(--t-text)', marginTop: 12, marginBottom: 4 }}>Worker log{currentEvidence.logsTruncated ? ' · recent excerpt' : ''}</div>
+                {currentEvidence.logs.length ? currentEvidence.logs.map((entry) => (
+                  <div key={entry.id} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'monospace', fontSize: 10.5, lineHeight: '15px', marginBottom: 5 }}>{entry.text}</div>
+                )) : <div>No log receipt for this attempt yet.</div>}
+                <div style={{ borderTop: '1px solid var(--t-divider-subtle)', marginTop: 10, paddingTop: 8 }}>Remote editor and preview are unavailable.</div>
+              </>
+            ) : null}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
+              <ActionButton label="Back" onClick={() => setMode('menu')} />
+              <ActionButton label="Refresh" disabled={evidenceLoading} onClick={() => {
+                setEvidenceLoading(true);
+                setEvidence(null);
+                setEvidenceError(null);
+                void onRefreshTask().catch(() => {}).finally(() => setEvidenceReload((value) => value + 1));
+              }} />
+            </div>
           </div>
         ) : (
           <div style={{ padding: '2px 4px 4px' }}>

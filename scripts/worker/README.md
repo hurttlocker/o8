@@ -50,6 +50,15 @@ the transition; do not reuse a legacy credential as a cloud worker key.
 
 ## Runtime protocol
 
+- In the task composer, choose **Remote worker · Codex**, then **Add + dispatch**.
+  The connection check uses recent authenticated sightings in the execution team.
+  Saving a task preserves its placement even when the pool is disconnected;
+  dispatch then refuses instead of launching a local worker. Connected does not
+  imply idle capacity or verified remote CLI credentials. General mission
+  dispatch remains unavailable for this runtime.
+- The same flow is available through authenticated `POST /api/tasks` with
+  `requestedRuntime: "cloud"`, followed by `POST /api/tasks/:taskId/dispatch`.
+  `GET /api/tasks/worker-availability` exposes the current pool connection check.
 - Dispatch through `POST /api/runtime/launch` with `runtime: "cloud"`, a real
   packet ID, the registered repository, and the assigned branch. The route
   creates or binds a governed cloud lane and returns its ID with the durable

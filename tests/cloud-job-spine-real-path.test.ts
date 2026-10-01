@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-cloud-job-spine-'));
 const repoPath = join(dataDir, 'source-repo');
@@ -48,6 +48,10 @@ const packetIds = [
   'packet-cloud-prebound-lane',
   'packet-cloud-task-board',
 ];
+
+// External origin transport is substituted with the pinned fixture revision.
+const published = await import('@/lib/cloud/published-base');
+vi.spyOn(published, 'resolvePublishedCloudBase').mockImplementation(async () => execFileSync('git', ['-C', repoPath, 'rev-parse', 'HEAD']).toString().trim());
 
 beforeAll(async () => {
   mkdirSync(repoPath);

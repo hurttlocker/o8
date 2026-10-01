@@ -1571,6 +1571,20 @@
       ]
     },
     {
+      "path": "tests/cloud-published-base-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cloud-worker-poll-revocation-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cloud-worker-services-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2945,6 +2959,23 @@
       ]
     },
     {
+      "path": "tests/remote-task-dispatch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/remote-task-evidence-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-package-manager-contract-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3431,6 +3462,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/task-pool-history-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

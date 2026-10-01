@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * CloudWorkersTab — issue #514 v0 scaffolding
+ * CloudWorkersTab: scoped keys and connected standalone workers.
  *
  * Settings tab for the self-hosted cloud runtime. Lists the
  * service-account API keys that have been provisioned and surfaces a
@@ -21,7 +21,6 @@ import {
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
-  ComingSoonBanner,
   FieldLabel,
   HairlineRule,
   SectionLabel,
@@ -170,7 +169,10 @@ export function CloudWorkersTab() {
       />
 
       <div style={{ marginTop: 0, marginBottom: 32 }}>
-        <ComingSoonBanner message="Cloud worker runtime is v0 scaffolding. You can mint keys and the /api/cloud/worker-poll endpoint is live, but there is no production worker runner yet. Key management below is safe to use — nothing executes against these keys yet." />
+        <div style={{ fontSize: 12, lineHeight: '18px', fontWeight: 300, color: 'var(--t-text-muted)' }}>
+          Run the standalone worker on your execution host, then choose Remote worker in the task composer.
+          {' '}Connected means recently authenticated, not idle or ready to execute. Tasks queue until a worker claims them.
+        </div>
       </div>
 
       {notice ? (

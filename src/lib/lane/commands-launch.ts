@@ -27,7 +27,7 @@ function recordLaunchFailure(
   reason: string,
 ) {
   const binaryName = getRuntimeCapability(lane.runtime).binaryName;
-  const resolvedBinaryPath = scanForBinary(binaryName);
+  const resolvedBinaryPath = lane.runtime === 'cloud' ? null : scanForBinary(binaryName);
   const now = new Date().toISOString();
   return updateLane(lane.id, {
     status,
@@ -50,7 +50,7 @@ export async function launchSession(
 ): Promise<LaneCommandResult> {
   const lane = getLane(command.laneId);
   if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
-  if (!listDispatchableRuntimes({ includeExperimental: true }).includes(lane.runtime)) {
+  if (!listDispatchableRuntimes({ includeExperimental: true }).includes(lane.runtime) && !(lane.runtime === 'cloud' && lane.packetId)) {
     return {
       ok: false,
       laneId: command.laneId,
@@ -114,7 +114,7 @@ export async function launchSession(
       const recoveredLane = getLane(command.laneId);
       // #2498 — the start snapshot shells out per runtime (seconds); detach it
       // so the launch result never waits on it.
-      if (recoveredLane) {
+      if (recoveredLane && lane.runtime !== 'cloud') {
         void capturePacketCapacitySnapshot(recoveredLane, 'start').catch((err) => {
           console.warn('[capacity-snapshot] start snapshot failed for lane', command.laneId, err);
         });
@@ -252,7 +252,7 @@ export async function launchSession(
     setLaneStatus(command.laneId, 'running', actor, 'session_launched');
     void emitProductEvent('dispatch.started', { runtime: lane.runtime });
 
-    {
+    if (lane.runtime !== 'cloud') {
       const { wsPort } = resolvePortInfo();
       let watchRegistered = false;
       for (let attempt = 1; attempt <= 2 && !watchRegistered; attempt += 1) {
@@ -283,7 +283,7 @@ export async function launchSession(
     const launchedLane = getLane(command.laneId);
     // #2498 — same as the recovered path: the launch result never waits on
     // the per-runtime capacity shell-outs.
-    if (launchedLane) {
+    if (launchedLane && lane.runtime !== 'cloud') {
       void capturePacketCapacitySnapshot(launchedLane, 'start').catch((err) => {
         console.warn('[capacity-snapshot] start snapshot failed for lane', command.laneId, err);
       });

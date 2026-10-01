@@ -40,7 +40,7 @@ import { normalizeReleaseStatePayload } from '@/lib/orchestrator/release-state-p
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 export type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
-  return isDispatchableRuntime(value) ? value : 'codex';
+  return isDispatchableRuntime(value) || value === 'cloud' ? value : 'codex';
 }
 if (typeof window !== 'undefined') installOrchestratorTurnPinFetchPatch();
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
