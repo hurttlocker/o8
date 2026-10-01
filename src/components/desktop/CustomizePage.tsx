@@ -165,7 +165,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
 
         {/* Keep section changes immediate. */}
         {tab === 'plugins' ? (
-          <PluginsTab />
+          <PluginsTab repoPath={repoPath} />
         ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
         ) : inventoryError ? (

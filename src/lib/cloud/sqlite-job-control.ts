@@ -99,8 +99,26 @@ export function promoteSteerControls(
   const next = sqlite.prepare(
     'SELECT COALESCE(MAX(cursor), 0) + 1 AS cursor FROM cloud_jobs WHERE team_id = ?',
   ).get(row.team_id) as { cursor: number };
+  const priorLaunch = JSON.parse(row.launch_json) as LaunchOptions;
+  const completion = sqlite.prepare(`
+    SELECT payload_json FROM cloud_job_events
+    WHERE job_id = ? AND event_type = 'completed'
+    ORDER BY id DESC LIMIT 1
+  `).get(row.id) as { payload_json: string } | undefined;
+  let pushedSha: string | undefined;
+  if (completion) {
+    try {
+      const payload = JSON.parse(completion.payload_json) as { commitSha?: unknown };
+      if (typeof payload.commitSha === 'string' && /^[a-f0-9]{40,64}$/.test(payload.commitSha)) {
+        pushedSha = payload.commitSha;
+      }
+    } catch { /* Older completion events carry no revision. */ }
+  }
   const launch = {
-    ...(JSON.parse(row.launch_json) as LaunchOptions),
+    ...priorLaunch,
+    ...(pushedSha && priorLaunch.remoteSource
+      ? { remoteSource: { ...priorLaunch.remoteSource, baseSha: pushedSha } }
+      : {}),
     prompt: controls.map((control) => steerMessage(control.payload_json).trim()).filter(Boolean).join('\n\n')
       || 'Continue the prior cloud session.',
     clientMutationId: `cloud-follow-up:${first.id}`,

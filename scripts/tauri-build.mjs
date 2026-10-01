@@ -20,6 +20,8 @@ const runId = createReleaseBuildCacheRunId();
 const cacheRoot = resolveReleaseBuildCacheRoot();
 const cargoTauriArgs = process.argv.slice(2);
 const nativeBuildOptions = { cargoTauriArgs };
+const targetFlagIndex = cargoTauriArgs.indexOf('--target');
+const requestedTarget = targetFlagIndex >= 0 ? cargoTauriArgs[targetFlagIndex + 1] : undefined;
 const prebuildMarker = join(cacheRoot, 'runs', runId, 'prebuild-completed-at');
 let nativeIdentity;
 let nativeRestore;
@@ -51,6 +53,7 @@ const env = {
   O8_RELEASE_BUILD_CACHE_DIR: cacheRoot,
   O8_RELEASE_CACHE_RUN_ID: runId,
   O8_RELEASE_CACHE_PREBUILD_MARKER: prebuildMarker,
+  ...(requestedTarget ? { O8_TAURI_BUILD_TARGET: requestedTarget } : {}),
 };
 const build = spawnSync('cargo', ['tauri', 'build', ...cargoTauriArgs], {
   cwd: root,

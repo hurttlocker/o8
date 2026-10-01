@@ -13,3 +13,4 @@ export { TaskSection, CollapsedTaskSection, TaskActionMenu } from './TaskSection
 export { GitHubIntakeSection } from './GitHubIntakeSection';
 export { SupervisorIncidentSection, SupervisorIncidentRow } from './SupervisorIncident';
 export { NewTaskComposer, TaskStatusStrip } from './NewTaskComposer';
+export { DispatchLockStrip } from './DispatchLockStrip';

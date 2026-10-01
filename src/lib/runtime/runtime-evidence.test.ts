@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_RUNTIME_IDS } from '@/lib/orchestrator/runtime-capabilities';
 import {
   RUNTIME_EVIDENCE_DEFINITIONS,
+  getRuntimeEvidenceSnapshot,
   parseGrokModelCatalogue,
   runtimeEvidenceFreshness,
   validateRuntimeEvidenceDefinitions,
@@ -10,6 +11,12 @@ import {
 } from './runtime-evidence';
 
 describe('runtime evidence catalog', () => {
+  it('does not treat a local Codex binary as a ready external worker', async () => {
+    const snapshot = await getRuntimeEvidenceSnapshot();
+    const cloud = snapshot.runtimes.find((runtime) => runtime.runtimeId === 'cloud');
+    expect(cloud).toMatchObject({ installed: false, ready: false, dispatchable: false });
+  });
+
   it('covers every runtime with valid provenance, transport, billing, and freshness inputs', () => {
     expect(Object.keys(RUNTIME_EVIDENCE_DEFINITIONS)).toEqual(ORCHESTRATOR_RUNTIME_IDS);
     expect(validateRuntimeEvidenceDefinitions(RUNTIME_EVIDENCE_DEFINITIONS)).toEqual([]);

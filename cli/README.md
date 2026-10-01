@@ -34,6 +34,7 @@ JSON to stdout is the default; pass `--human` for ANSI-formatted output.
 | `o8 terminal list` | List live dashboard shell IDs, including detached sessions |
 | `o8 terminal show <id> [--lines N]` | Read up to 1000 lines from an existing dashboard shell |
 | `o8 terminal observe <id>` | Stream an existing shell read-only; `--human` prints terminal text |
+| `o8 terminal control <id>` | Claim one existing shell for input/output; refuses an active writer and releases on exit |
 | `o8 packet log <event>` | (Phase-1 stub) — will append a structured lane event once the backend route lands |
 
 ## Configuration
@@ -53,7 +54,60 @@ Resolution order:
 4. Fallback port `3001`, no token (dev workflow on loopback)
 
 Loopback callers don't need a token; cross-origin callers do.
-Terminal commands require the local operator token even on loopback; worker credentials cannot observe operator shells.
+Terminal commands require the local operator token even on loopback; worker credentials cannot read or control operator shells.
+
+For a person at a terminal, run `o8 --human terminal control <id>`. The shell
+streams in place; press Ctrl-] to release the CLI attachment without ending the
+shell. Ctrl-C is sent to the shell. A second writable pane or controller must
+close before control can be claimed, while read-only observers may stay open.
+
+For automation, `o8 terminal control <id>` writes newline-delimited JSON events
+to stdout and accepts newline-delimited JSON on stdin:
+
+```json
+{"type":"input","data":"pwd\r"}
+{"type":"resize","cols":120,"rows":30}
+{"type":"release"}
+```
+
+Input is sent as terminal bytes, so a command needs a carriage return to run.
+Closing stdin or disconnecting releases the writer slot. The shell and its
+saved history remain available for later attachments.
+
+`o8 terminal wait <id> --match <text> [--timeout ms]` attempts to check existing
+visible terminal text, then follows the same live shell read-only for new output. It defaults to a
+30-second wait and never takes the writer slot or resizes the shell. A match
+returns the matching line and elapsed time; timeout exits 5 with a specific
+`wait_timeout` error. A timeout says only that no matching output was observed,
+so inspect the shell before retrying the command that should have produced it.
+The same command accepts `--machine <label-or-id>` for a saved SSH target when
+the remote o8 CLI also supports `terminal wait`.
+
+### Saved SSH machines
+
+Save a machine only after its remote o8 terminal host is already running:
+
+```sh
+o8 machine add workbox --label Build
+o8 machine list
+o8 machine check Build
+o8 terminal list --machine Build
+o8 terminal show <id> --machine Build
+o8 terminal control <id> --machine Build
+o8 --human terminal control <id> --machine Build
+```
+
+`machine add` accepts `--port`, `--ssh-config /absolute/path`, and
+`--remote-cli /absolute/path/to/o8` when the remote executable is not on the
+non-interactive SSH path. Profiles contain the target and these paths, not keys
+or passwords. OpenSSH handles authentication and verifies the host key. The
+remote o8 installation uses its own local operator credential. A disabled,
+missing, or unreachable target fails without sending the command to Local.
+Use `o8 machine rename <id> --label <name>`, `disable`, `enable`, or `remove`
+to manage a profile. Remote control supports both the JSON stream and the
+interactive terminal. Ctrl-] releases the attachment without ending the remote
+shell. A connection failure never changes the selected machine or routes input
+to Local. Native workspace switching is a separate app feature.
 
 ## Exit codes
 

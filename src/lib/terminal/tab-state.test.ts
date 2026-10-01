@@ -3,6 +3,8 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   formatPersistedRuntimeSessionKey,
   loadTabState,
+  pruneTabs,
+  saveTabState,
   stripPersistedRuntimeSessionKey,
   stripPersistedTabs,
 } from './tab-state';
@@ -63,6 +65,31 @@ describe('loadTabState', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
 
     await expect(loadTabState('tile-root')).resolves.toBeNull();
+  });
+});
+
+describe('saved remote terminal continuity', () => {
+  const remoteMachine = { id: '12345678-1234-1234-1234-123456789abc', label: 'Studio', sessionId: 'dash-1' };
+  const remoteTab = { id: 'remote-tab', kind: 'terminal' as const, label: 'Studio / dash-1', cliAgent: 'shell', remoteMachine };
+
+  it('keeps an inactive remote terminal through save and load pruning', async () => {
+    const state = {
+      version: 1 as const,
+      activeTabId: 'active-tab',
+      savedAt: new Date(0).toISOString(),
+      tabs: [{ id: 'active-tab', kind: 'terminal' as const, label: 'Active', cliAgent: 'shell', tmuxSession: 'active-session' }, remoteTab],
+    };
+    expect(pruneTabs(state.tabs, state.activeTabId).tabs).toContainEqual(remoteTab);
+    let saved: typeof state | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        saved = JSON.parse(String(init.body)) as typeof state;
+        return new Response('{}', { status: 200 });
+      }
+      return new Response(JSON.stringify(saved), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+    await saveTabState(state, 'remote-roundtrip');
+    expect((await loadTabState('remote-roundtrip'))?.tabs).toContainEqual(remoteTab);
   });
 });
 

@@ -183,4 +183,54 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     ]);
     expect(sendTerminalCreate).toHaveBeenCalledTimes(2);
   });
+
+  it('starts a newly selected remote terminal after the workspace socket reconnects', async () => {
+    const sendTerminalCreate = vi.fn<WorkspaceTerminalProps['sendTerminalCreate']>();
+    const sendTerminalInput = vi.fn<WorkspaceTerminalProps['sendTerminalInput']>();
+    const sendTerminalDetach = vi.fn<WorkspaceTerminalProps['sendTerminalDetach']>();
+    const fetchMock = vi.mocked(fetch);
+    const controllerRef = { current: null as TerminalTabHandle | null };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'remote-reconnect',
+      defaultTab: 'terminal',
+      autoCreateDefaultTab: false,
+      sendTerminalCreate,
+      sendTerminalAttach: vi.fn(),
+      sendTerminalInput,
+      sendTerminalResize: vi.fn(),
+      sendTerminalVisibility: vi.fn(),
+      sendTerminalDetach,
+      termWsConnected: false,
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { ref: controllerRef, props })));
+    await act(async () => Promise.resolve());
+    let tabId = '';
+    await act(async () => {
+      tabId = controllerRef.current?.openRemoteTerminalTab({
+        command: 'o8 machine attach fixture',
+        machineId: '12345678-1234-1234-1234-123456789abc',
+        machineLabel: 'Studio',
+        sessionId: 'dash-1',
+      }) ?? '';
+    });
+    expect(tabId).not.toBe('');
+    expect(sendTerminalCreate).not.toHaveBeenCalled();
+
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { ref: controllerRef, props: { ...props, termWsConnected: true } })));
+    const remoteRequest = sendTerminalCreate.mock.calls.find((call) => String(call[2]).includes(tabId));
+    expect(remoteRequest).toBeDefined();
+    expect(remoteRequest?.[5]).toBe(true);
+    await act(async () => {
+      expect(controllerRef.current?.onSessionCreated('remote-live-session', remoteRequest?.[2])).toBe(true);
+    });
+    expect(fetchMock).toHaveBeenCalledWith('/api/panel/terminal-exec', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ sessionName: 'remote-live-session', command: 'o8 machine attach fixture' }),
+    }));
+    await act(async () => Promise.resolve());
+    await act(async () => expect(controllerRef.current?.closeActiveTab()).toBe(true));
+    expect(sendTerminalInput).toHaveBeenCalledWith('remote-live-session', '\x1d');
+    expect(sendTerminalDetach).toHaveBeenCalledWith('remote-live-session');
+    expect(sendTerminalInput.mock.invocationCallOrder[0]).toBeLessThan(sendTerminalDetach.mock.invocationCallOrder[0]);
+  });
 });
