@@ -426,7 +426,7 @@ export class SqliteCloudJobStore implements CloudJobStore {
         SELECT * FROM cloud_job_controls
         WHERE team_id = ? AND job_id = ?
           AND status IN ('pending', 'delivered')
-        ORDER BY sequence ASC
+        ORDER BY CASE WHEN control_type = 'abort' THEN 0 ELSE 1 END, sequence ASC
         LIMIT 1
       `).get(input.teamId, input.jobId) as CloudJobControlRow | undefined;
       if (!controlRow) return { accepted: true };
@@ -586,6 +586,16 @@ export class SqliteCloudJobStore implements CloudJobStore {
       ORDER BY cursor DESC
       LIMIT 1
     `).get(teamId, sessionId, sessionId) as CloudJobRow | undefined;
+    return row ? jobFromRow(row) : undefined;
+  }
+
+  getLatestForPacket(teamId: string, packetId: string): CloudJob | undefined {
+    const row = this.sqliteProvider().prepare(`
+      SELECT * FROM cloud_jobs
+      WHERE team_id = ? AND packet_id = ?
+      ORDER BY cursor DESC
+      LIMIT 1
+    `).get(teamId, packetId) as CloudJobRow | undefined;
     return row ? jobFromRow(row) : undefined;
   }
 

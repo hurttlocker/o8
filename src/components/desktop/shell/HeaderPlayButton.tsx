@@ -7,6 +7,7 @@ import { WORKSPACE_TAB_DRAG_TYPE, type WorkspaceTabDragKind } from '@/lib/tiles/
 interface HeaderPlayButtonProps {
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
+  onOpenSavedMachines?: () => void;
   onSplitTab?: (kind: 'chat' | 'terminal', direction: 'right' | 'below') => void;
   ariaSuffix?: string;
   paneMode?: boolean;
@@ -60,6 +61,7 @@ function HeaderPlayMenuItem({ label, onClick, dragKind, onDragEnd }: {
 export function HeaderPlayButton({
   onSpawnChat,
   onSpawnTerminal,
+  onOpenSavedMachines,
   onSplitTab,
   ariaSuffix,
   paneMode = false,
@@ -169,6 +171,9 @@ export function HeaderPlayButton({
         ) : null}
         {onSpawnTerminal ? (
           <HeaderPlayMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} dragKind="terminal" onDragEnd={() => setOpen(false)} />
+        ) : null}
+        {onOpenSavedMachines ? (
+          <HeaderPlayMenuItem label="Saved machine…" onClick={pick(onOpenSavedMachines)} />
         ) : null}
         {paneMode ? (
           <div style={{ color: 'var(--t-text-muted)', fontSize: 11, paddingTop: 7, paddingBottom: 5, paddingLeft: 12, borderTop: '1px solid var(--t-divider)' }}>Drag to place on a pane edge</div>

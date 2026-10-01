@@ -41,10 +41,15 @@ import { promisify } from 'node:util';
 
 import {
   getLane,
+  getLaneEvents,
   listActiveLanes,
   setLaneStatus,
 } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import {
+  CODEX_AUTH_RECOVERY_LANE_LABEL,
+  findCurrentAuthExit,
+} from '@/lib/lane/current-auth-exit';
 import { probeLaneSessionAlive } from '@/lib/lane/owned-session-liveness';
 import { commitCrashedWorkerWork } from '@/lib/lane/salvage';
 import { archiveDeadLanes } from '@/lib/lane/dead-lane-archiver';
@@ -395,6 +400,12 @@ async function recordVerificationFailureLearning(
  * when we took any action so the caller can log the outcome.
  */
 async function triageSilentExit(lane: Lane): Promise<boolean> {
+  if (findCurrentAuthExit(lane, getLaneEvents(lane.id, 200))) {
+    if (lane.status !== 'awaiting_input' || lane.lastEventLabel !== CODEX_AUTH_RECOVERY_LANE_LABEL) {
+      setLaneStatus(lane.id, 'awaiting_input', 'system', CODEX_AUTH_RECOVERY_LANE_LABEL);
+    }
+    return true;
+  }
   const cwd = lane.worktreePath?.trim() || lane.repoPath;
   if (!cwd) {
     console.warn(`[silent-exit] Lane ${lane.id} has no worktree path — skipping triage.`);

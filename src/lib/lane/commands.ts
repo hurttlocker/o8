@@ -138,7 +138,7 @@ async function dispatchUnlocked(
         command.branch,
       );
       if (existing) {
-        if (!listDispatchableRuntimes({ includeExperimental: true }).includes(existing.runtime)) {
+        if (!listDispatchableRuntimes({ includeExperimental: true }).includes(existing.runtime) && !(existing.runtime === 'cloud' && command.packetId === existing.packetId)) {
           return {
             ok: false,
             laneId: existing.id,
@@ -151,7 +151,6 @@ async function dispatchUnlocked(
           : existing;
         return { ok: true, laneId: updatedExisting.id, note: 'Lane already exists for this repo and branch.', lane: updatedExisting };
       }
-
       const baseBranch = command.baseBranch?.trim() || 'main';
       let baseCommit: string | undefined;
       if (command.packetId) {

@@ -469,7 +469,7 @@ export function MCPTab() {
                   <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
                     Install with{' '}
                     <code style={{ fontFamily: MONO_FONT_STACK, fontSize: 11, color: RAMS_ACCENT }}>
-                      npm i -g @openai/codex-cli
+                      npm i -g @openai/codex
                     </code>
                     {' '}and sign in with ChatGPT Plus or an OPENAI_API_KEY. Without Codex, missions still dispatch via Claude Code or Gemini — but Codex is the recommended default workhorse.
                   </div>

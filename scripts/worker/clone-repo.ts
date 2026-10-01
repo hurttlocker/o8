@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -11,6 +11,14 @@ export interface CloneOptions {
   baseRef: string;
   remoteBranch: string;
   workDir: string;
+  signal?: AbortSignal;
+}
+
+export interface WorkerChangedFile {
+  path: string;
+  status: 'added' | 'modified' | 'deleted';
+  additions: number;
+  deletions: number;
 }
 
 async function ensureGhAuthIfNeeded(repoUrl: string) {
@@ -24,6 +32,47 @@ async function ensureGhAuthIfNeeded(repoUrl: string) {
       );
     }
   }
+}
+
+function killGitTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (!child.pid) return;
+  if (process.platform === 'win32') { if (child.exitCode === null) child.kill(signal); return; }
+  try { process.kill(-child.pid, signal); }
+  catch { if (child.exitCode === null) child.kill(signal); }
+}
+
+async function runGit(args: string[], cwd?: string, signal?: AbortSignal): Promise<{ stdout: string }> {
+  if (signal?.aborted) throw new Error('[worker/clone-repo] operation aborted');
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    let stdout = '';
+    let failure: Error | null = null;
+    let forceKill: ReturnType<typeof setTimeout> | null = null;
+    const stop = (error: Error) => {
+      if (failure) return;
+      failure = error;
+      killGitTree(child, 'SIGTERM');
+      forceKill = setTimeout(() => killGitTree(child, 'SIGKILL'), 5_000);
+    };
+    const onAbort = () => stop(new Error('[worker/clone-repo] operation aborted'));
+    const timeout = setTimeout(() => stop(new Error(`[worker/clone-repo] git ${args[0] ?? 'command'} timed out`)), EXEC_OPTIONS.timeout);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+      if (stdout.length > EXEC_OPTIONS.maxBuffer) stop(new Error('[worker/clone-repo] git output exceeded the limit'));
+    });
+    child.stderr.on('data', () => { /* Suppress remote URLs and credential-bearing Git diagnostics. */ });
+    child.once('error', (error) => { failure = error; });
+    child.once('close', (code) => {
+      if (failure) killGitTree(child, 'SIGKILL');
+      clearTimeout(timeout);
+      if (forceKill) clearTimeout(forceKill);
+      signal?.removeEventListener('abort', onAbort);
+      if (failure) reject(failure);
+      else if (code !== 0) reject(new Error(`[worker/clone-repo] git ${args[0] ?? 'command'} failed`));
+      else resolve({ stdout });
+    });
+  });
 }
 
 async function pathExists(target: string) {
@@ -44,15 +93,48 @@ export async function cloneRepoForRun(opts: CloneOptions): Promise<string> {
     throw new Error(`[worker/clone-repo] workDir already has a repo: ${cloneTarget}. Pass a fresh --workspace-dir run slot.`);
   }
 
-  await execFileAsync('git', ['clone', opts.repoUrl, cloneTarget], EXEC_OPTIONS);
-  await execFileAsync('git', ['checkout', opts.baseRef], { ...EXEC_OPTIONS, cwd: cloneTarget });
-  await execFileAsync('git', ['checkout', '-b', opts.remoteBranch], { ...EXEC_OPTIONS, cwd: cloneTarget });
+  await runGit(['clone', opts.repoUrl, cloneTarget], undefined, opts.signal);
+  await runGit(['checkout', '--detach', opts.baseRef], cloneTarget, opts.signal);
+  await runGit(['checkout', '-B', opts.remoteBranch, opts.baseRef], cloneTarget, opts.signal);
 
   return cloneTarget;
 }
 
-export async function pushRemoteBranch(cloneDir: string, remoteBranch: string): Promise<string> {
-  await execFileAsync('git', ['push', '-u', 'origin', remoteBranch], { ...EXEC_OPTIONS, cwd: cloneDir });
-  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { ...EXEC_OPTIONS, cwd: cloneDir });
+export async function pushRemoteBranch(cloneDir: string, remoteBranch: string, signal?: AbortSignal): Promise<string> {
+  await runGit(['push', '-u', 'origin', remoteBranch], cloneDir, signal);
+  const { stdout } = await runGit(['rev-parse', 'HEAD'], cloneDir, signal);
   return stdout.trim();
+}
+
+/** Commit agent edits and return the full change set from the pinned base. */
+export async function commitWorkerChanges(cloneDir: string, baseSha: string, signal?: AbortSignal): Promise<WorkerChangedFile[]> {
+  await runGit(['add', '--all'], cloneDir, signal);
+  const staged = await runGit(['diff', '--cached', '--name-only'], cloneDir, signal);
+  if (staged.stdout.trim()) {
+    await runGit([
+      '-c', 'user.name=o8 worker',
+      '-c', 'user.email=worker@o8.invalid',
+      'commit', '-m', 'feat: complete remote worker task',
+    ], cloneDir, signal);
+  }
+  const status = await runGit(['diff', '--name-status', '-z', '--no-renames', baseSha, 'HEAD'], cloneDir, signal);
+  const counts = await runGit(['diff', '--numstat', '-z', '--no-renames', baseSha, 'HEAD'], cloneDir, signal);
+  const byPath = new Map<string, { additions: number; deletions: number }>();
+  for (const entry of counts.stdout.split('\0').filter(Boolean)) {
+    const [added, deleted, filePath] = entry.split('\t');
+    if (!filePath) continue;
+    byPath.set(filePath, { additions: Number(added) || 0, deletions: Number(deleted) || 0 });
+  }
+  const fields = status.stdout.split('\0').filter(Boolean);
+  const files: WorkerChangedFile[] = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const marker = fields[i];
+    const filePath = fields[i + 1];
+    files.push({
+      path: filePath,
+      status: marker === 'A' ? 'added' : marker === 'D' ? 'deleted' : 'modified',
+      ...(byPath.get(filePath) ?? { additions: 0, deletions: 0 }),
+    });
+  }
+  return files;
 }

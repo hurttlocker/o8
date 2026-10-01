@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
-import type { RepoFocusRepo } from '../../types';
+import type { IdeWorkspaceSession, RepoFocusRepo } from '../../types';
 import {
   formatElapsed,
   normalizeRepoPath,
@@ -90,6 +90,37 @@ export function taskTime(task: TaskPoolTask): string {
   return formatElapsed(value);
 }
 
+export function taskSessionKey(task: TaskPoolTask): string | null {
+  const laneKey = task.lane?.sessionKey ?? null;
+  if (task.runtime !== 'cloud') return laneKey;
+  return task.execution?.sessionKey === laneKey ? laneKey : null;
+}
+
+export interface PendingDispatch {
+  packetId: string | null;
+  laneId: string | null;
+  sessionKey: string | null;
+  requireExactSession: boolean;
+  startedAt: number;
+}
+
+export function findDispatchSessionKey(
+  pending: PendingDispatch,
+  sessions: IdeWorkspaceSession[],
+): string | null {
+  if (pending.sessionKey) {
+    return sessions.find((session) => session.sessionKey === pending.sessionKey)?.sessionKey ?? null;
+  }
+  if (pending.requireExactSession) return null;
+  for (const session of sessions) {
+    if (!session.sessionKey) continue;
+    if (pending.packetId && session.orchestrationPacket?.packetId === pending.packetId) {
+      return session.sessionKey;
+    }
+  }
+  return null;
+}
+
 export function taskTimeLabel(task: TaskPoolTask): string {
   const elapsed = taskTime(task);
   return elapsed === 'now' ? 'now' : `${elapsed} ago`;
@@ -116,7 +147,7 @@ export function isStaleTask(task: TaskPoolTask): boolean {
   const signal = task.blockedReason || task.lastEventLabel || task.lane?.lastEventLabel || null;
   if (signal && STALE_CLEANUP_SIGNALS.has(signal) && age > STALE_FAILURE_MS) return true;
   if (isAttentionTask(task) && age > STALE_ATTENTION_MS) return true;
-  if (isAttentionTask(task) && !task.lane?.sessionKey && age > DETACHED_ATTENTION_MS) return true;
+  if (isAttentionTask(task) && !taskSessionKey(task) && age > DETACHED_ATTENTION_MS) return true;
   return task.lane?.status === 'failed' && age > STALE_FAILURE_MS;
 }
 

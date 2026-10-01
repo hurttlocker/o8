@@ -129,7 +129,14 @@ describe('the download url matches what the release pipeline publishes (seam C)'
       notes: `o8 v${version}`,
       pubDate: '2026-09-02T12:00:00.000Z',
       downloadBase,
-      darwinSignature: 'darwin-fixture-signature',
+      darwinArtifact: {
+        signature: 'darwin-fixture-signature',
+        identity: {
+          kind: 'macos-universal-app',
+          architectures: ['x86_64', 'arm64'],
+          binaries: [],
+        },
+      },
     });
 
     // The local build name and the published asset name differ; the card must

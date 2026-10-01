@@ -16,7 +16,7 @@ export interface TerminalTileContent {
   kind: 'terminal';
   repoPath?: string | null;
   createdFromSplit?: boolean;
-  initialTab?: 'chat' | 'terminal';
+  initialTab?: 'chat' | 'terminal' | 'remote';
 }
 
 export interface PreviewTileContent {
