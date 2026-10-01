@@ -172,7 +172,7 @@ describe('RuntimeRow install-command copy feedback', () => {
       configurable: true,
       value: { writeText },
     });
-    const execSpy = vi.spyOn(globalThis, 'eval' as never).mockImplementation(() => {
+    const execSpy = vi.spyOn(globalThis, 'eval').mockImplementation(() => {
       throw new Error('eval must not run');
     });
 
