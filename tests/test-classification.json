@@ -1643,6 +1643,14 @@
       ]
     },
     {
+      "path": "tests/codex-review-retry-format-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-review-retry-head-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2871,6 +2879,15 @@
       ]
     },
     {
+      "path": "tests/project-verification-dispatch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/prompt-library-api-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -3546,6 +3563,15 @@
       "reasons": [
         "child-process",
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/terminal-release-durable-mission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {

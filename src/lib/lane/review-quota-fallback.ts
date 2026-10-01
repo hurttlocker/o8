@@ -58,6 +58,8 @@ async function runAttempt(input: {
   surface: string;
   prompt: string;
   expectedHeadSha?: string | null;
+  /** Internal format-repair constraint, never accepted from a public review caller. */
+  formatRetryRejecting?: boolean;
   model?: string;
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
@@ -81,6 +83,7 @@ async function runAttempt(input: {
     backend: input.backend.id,
     surface: input.surface,
     expectedHeadSha: input.expectedHeadSha,
+    formatRetryRejecting: input.formatRetryRejecting,
   });
   const turnController = new AbortController();
   const forwardAbort = () => turnController.abort(input.signal?.reason);
@@ -151,6 +154,8 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   prompt: string | ((backend: OrchestratorBackendId) => string);
   /** HEAD this turn's prompt and diff describe. */
   expectedHeadSha?: string | null;
+  /** Internal format-repair constraint, never accepted from a public review caller. */
+  formatRetryRejecting?: boolean;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
   initialBackend?: OrchestratorBackend;
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
@@ -216,6 +221,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     sessionThreadId: input.sessionThreadId,
     prompt: promptFor(initialBackend.id),
     expectedHeadSha: input.expectedHeadSha,
+    formatRetryRejecting: input.formatRetryRejecting,
     onEvent: input.onEvent,
     signal: input.signal,
   });
@@ -297,6 +303,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     sessionThreadId: input.sessionThreadId,
     prompt: promptFor(fallbackBackend.id),
     expectedHeadSha: input.expectedHeadSha,
+    formatRetryRejecting: input.formatRetryRejecting,
     model: decision.toModel,
     onEvent: input.onEvent,
     signal: input.signal,

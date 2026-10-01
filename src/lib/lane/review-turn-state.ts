@@ -10,6 +10,7 @@ interface ReviewTurnEventPayload {
   backend?: unknown;
   surface?: unknown;
   expectedHeadSha?: unknown;
+  formatRetryRejecting?: unknown;
 }
 
 interface ReviewAttemptStatusRow {
@@ -22,6 +23,7 @@ export interface ActiveReviewTurn {
   backend: string | null;
   surface: string | null;
   expectedHeadSha: string | null;
+  formatRetryRejecting?: boolean;
 }
 
 export interface ReviewTurnStopResult extends ActiveReviewTurn {
@@ -39,6 +41,7 @@ export function startReviewTurn(input: {
   backend: string;
   surface: string;
   expectedHeadSha?: string | null;
+  formatRetryRejecting?: boolean;
 }): string {
   const reviewTurnId = `review-turn-${randomUUID()}`;
   recordLaneEvent(input.laneId, 'review_turn_started', 'system', {
@@ -47,6 +50,7 @@ export function startReviewTurn(input: {
     backend: input.backend,
     surface: input.surface,
     expectedHeadSha: input.expectedHeadSha ?? null,
+    ...(input.formatRetryRejecting ? { formatRetryRejecting: true } : {}),
   });
   return reviewTurnId;
 }
@@ -68,6 +72,7 @@ function findUnsettledReviewTurn(laneId: string): ActiveReviewTurn | null {
           id: payload.reviewTurnId,
           threadId: typeof payload.threadId === 'string' ? payload.threadId : null,
           backend: typeof payload.backend === 'string' ? payload.backend : null,
+          ...(payload.formatRetryRejecting === true ? { formatRetryRejecting: true } : {}),
           surface: typeof payload.surface === 'string' ? payload.surface : null,
           expectedHeadSha: typeof payload.expectedHeadSha === 'string'
             ? payload.expectedHeadSha
