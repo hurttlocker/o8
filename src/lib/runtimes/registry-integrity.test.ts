@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ORCHESTRATOR_RUNTIME_IDS,
   ORCHESTRATOR_RUNTIMES,
+  getRuntimeCapability,
   isOrchestratorRuntime,
   listDispatchableRuntimes,
 } from '@/lib/orchestrator/runtime-capabilities';
@@ -53,16 +54,19 @@ describe('dispatchable runtime registry integrity', () => {
       .filter((runtime) => isOrchestratorRuntime(runtime.id) && runtime.capabilities.launch)
       .map((runtime) => runtime.id)
       .sort();
-    expect(registeredCanonicalLaunchers).toEqual([...advertised].sort());
+    const explicitLaunchers = ORCHESTRATOR_RUNTIME_IDS.filter(
+      (runtimeId) => getRuntimeCapability(runtimeId).explicitLaunchOnly,
+    );
+    expect(registeredCanonicalLaunchers).toEqual([...advertised, ...explicitLaunchers].sort());
   });
 
-  it('keeps non-dispatchable canonical entries non-launchable', () => {
+  it('keeps mission-hidden runtimes non-launchable unless they have an explicit governed launch route', () => {
     for (const runtimeId of ORCHESTRATOR_RUNTIME_IDS) {
-      const capability = ORCHESTRATOR_RUNTIMES[runtimeId];
+      const capability = getRuntimeCapability(runtimeId);
       const adapter = getRuntime(runtimeId);
       expect(adapter, `${runtimeId} canonical adapter registration`).toBeDefined();
       expect(adapter?.capabilities.launch, `${runtimeId} dispatchability parity`)
-        .toBe(capability.dispatchable);
+        .toBe(capability.dispatchable || Boolean(capability.explicitLaunchOnly));
     }
   });
 });

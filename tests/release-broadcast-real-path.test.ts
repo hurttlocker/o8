@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
+// @ts-expect-error -- release orchestration is a plain ESM script without declarations.
+import { defaultShipPlan } from '../scripts/lib/ship-broadcast.mjs';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
@@ -149,6 +151,13 @@ afterEach(() => {
 });
 
 describe('release Broadcast milestones through the release entry point', () => {
+  it('builds the stable macOS release through the universal target command', () => {
+    expect(defaultShipPlan('/repo').build).toEqual({
+      command: 'npm',
+      args: ['run', 'tauri:build:stable-macos'],
+    });
+  });
+
   it('preserves preview selection through preflight, build, notarization and publication', () => {
     const fixture = makeFixture();
     const result = runRelease(fixture, false, true);

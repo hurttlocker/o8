@@ -264,16 +264,25 @@ export function codexOrchestratorModelFlags(model: string, reasoningEffort: stri
   return ['-c', `model=${model}`, '-c', `model_reasoning_effort=${reasoningEffort}`];
 }
 
-const CODEX_BRAIN_FIRST_SECTION = [
-  '## ENGINEERING BRAIN — USE THIS FIRST',
-  BRAIN_PROMPT_SECTION,
-  'Codex orchestrator rule: on every turn, if you need repo conventions, history, ownership, prior fixes, directives, or cross-repo context, ask the Engineering Brain first via the `cortex_ask` MCP tool (or `o8 ask` from shell) before grepping or re-reading broad files. One focused Brain question is the default context-gathering step; use direct file reads after the Brain points you at current source or when exact code is needed.',
-].join('\n\n');
-
-export function buildCodexOrchestratorPrompt(repoPath: string, message: string): string {
+function codexBrainFirstSection(mcpServers: boolean): string {
+  const askVia = mcpServers ? 'via the `cortex_ask` MCP tool (or `o8 ask` from shell)' : 'with `o8 ask` from shell';
   return [
-    buildOrchestratorSystemPrompt(repoPath),
-    CODEX_BRAIN_FIRST_SECTION,
+    '## ENGINEERING BRAIN — USE THIS FIRST',
+    BRAIN_PROMPT_SECTION,
+    `Codex orchestrator rule: on every turn, if you need repo conventions, history, ownership, prior fixes, directives, or cross-repo context, ask the Engineering Brain first ${askVia} before grepping or re-reading broad files. One focused Brain question is the default context-gathering step; use direct file reads after the Brain points you at current source or when exact code is needed.`,
+  ].join('\n\n');
+}
+
+export function buildCodexOrchestratorPrompt(
+  repoPath: string,
+  message: string,
+  scope: { toolProfile?: ToolProfile; orchestrationMode?: OrchestratorExecutionMode } = {},
+): string {
+  // Single mode launches Codex with `mcp_servers={}` (codexOrchestrationModeFlags).
+  const mcpServers = scope.orchestrationMode !== 'single';
+  return [
+    buildOrchestratorSystemPrompt(repoPath, { backend: 'codex', toolProfile: scope.toolProfile, mcpServers }),
+    codexBrainFirstSection(mcpServers),
     '## USER MESSAGE',
     message,
   ].join('\n\n');

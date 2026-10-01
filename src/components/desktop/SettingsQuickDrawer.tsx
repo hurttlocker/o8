@@ -311,7 +311,7 @@ export function SettingsQuickDrawer({
   const checkForUpdates = useCallback(async () => {
     setUpdateStatus('checking');
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
+      const { check } = await import('@/lib/app-update/check');
       const update = await check();
       if (update) {
         setUpdateStatus('available');

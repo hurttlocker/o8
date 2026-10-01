@@ -20,6 +20,7 @@ export async function handleHandoffSlashCommand(
   }
 
   const compacted = await context.compactNow({ keepTailCount: 8, source: 'handoff' });
+  if (context.isCurrentThread && !context.isCurrentThread()) return { handled: true };
   const resumePrelude = compacted?.resumePrelude?.trim()
     ? compacted.resumePrelude.trim()
     : [
@@ -28,8 +29,17 @@ export async function handleHandoffSlashCommand(
       'Continue from that context using the next operator message as the active instruction.',
     ].join('\n\n');
 
+  const reset = await context.resetRemoteSession();
+  if (context.isCurrentThread && !context.isCurrentThread()) return { handled: true };
+  if (!reset) {
+    context.appendEntries([buildSlashCommandEntry({
+      name: 'handoff',
+      summary: 'Unable to reset the remote session for handoff.',
+      chips: [{ label: 'reset failed', tone: 'amber' }],
+    })]);
+    return { handled: true };
+  }
   context.queuePrelude(resumePrelude, 'replace');
-  await context.resetRemoteSession();
   if (compacted?.applied) {
     context.replaceTranscript([
       ...compacted.transcript,

@@ -1,18 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type {
-  MobileTranscriptEntry,
-  MobileTranscriptToolLaunchLink,
-} from '@/lib/mobile/types';
+import type { MobileTranscriptEntry, MobileTranscriptToolLaunchLink } from '@/lib/mobile/types';
 import { retainedTranscriptReducer, retainTranscriptEntries } from '@/lib/transcripts/retained-state';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
-import { isMeteredOrchestratorBackend } from '@/lib/lane/orchestrator-backends/billing';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
-  hasQueuedOrchestratorSessionPrelude,
   subscribeOrchestratorMissionCompleted,
   type OrchestratorMissionCompletedDetail,
 } from '@/lib/orchestrator/store';
@@ -24,23 +19,16 @@ import {
 } from './use-orchestrator-stream/delivery';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
+import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
-import {
-  primeCompactedOrchestratorSession,
-  refreshOrchestratorTokenTelemetry,
-  requestOrchestratorCompaction,
-} from './use-orchestrator-stream/session';
+import { primeCompactedOrchestratorSession, refreshOrchestratorTokenTelemetry, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
 import {
   appendSnapshotTurnFailure,
   useNoSnapshotBusyFallback,
 } from './use-orchestrator-stream/snapshot-reconcile';
 import {
-  ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR,
-  ORCHESTRATOR_AUTO_COMPACT_THRESHOLD,
   ORCHESTRATOR_COMPACTION_STATUS_MIN_MS,
   ORCHESTRATOR_FORCE_COMPACT_THRESHOLD,
-  ORCHESTRATOR_METERED_AUTO_COMPACT_RESET_FLOOR,
-  ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD,
   ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS,
   ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS,
   approxTokens,
@@ -53,6 +41,7 @@ import {
   sortTranscriptEntries,
   type OrchestratorStreamStatus,
 } from './use-orchestrator-stream/shared';
+import { useOrchestratorAutoCompaction } from './use-orchestrator-stream/auto-compaction';
 import {
   createOrchestratorMessageHandler,
   type CurrentAssistantStreamState,
@@ -116,7 +105,7 @@ export function useOrchestratorStream(
   const flushFrameRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const telemetrySessionKeyRef = useRef<string | null>(null);
+  const telemetryBindingRef = useRef<string | null>(null);
   const telemetryTotalRef = useRef<number | null>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -240,9 +229,11 @@ export function useOrchestratorStream(
   const refreshTokenTelemetry = useCallback(async () => {
     return await refreshOrchestratorTokenTelemetry({
       repoPath: repoPathRef.current,
+      threadId: threadIdRef.current,
+      backend: isOrchestratorBackendId(lastBackendRef.current) ? lastBackendRef.current : null,
       setRunningTotal: updateRunningTotal,
       setTokenCount,
-      telemetrySessionKeyRef,
+      telemetryBindingRef,
       telemetryTotalRef,
     });
   }, [updateRunningTotal]);
@@ -250,29 +241,36 @@ export function useOrchestratorStream(
   const requestCompaction = useCallback(async (
     activeRepoPath: string,
     nextRunningTotal: number,
-    nextMessages: MobileTranscriptEntry[],
-    options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff' },
+    options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null },
   ) => {
-    return await requestOrchestratorCompaction(activeRepoPath, nextRunningTotal, nextMessages, options);
+    const activeThreadId = options?.threadId ?? threadIdRef.current;
+    if (!activeThreadId) return null;
+    return await requestOrchestratorCompaction(activeRepoPath, nextRunningTotal, {
+      ...options,
+      threadId: activeThreadId,
+    });
   }, []);
 
   const primeCompactedSession = useCallback(async (
     activeRepoPath: string,
     payload: Awaited<ReturnType<typeof requestOrchestratorCompaction>>,
-    options?: { setTranscript?: boolean },
+    options?: { setTranscript?: boolean; threadId?: string | null },
   ) => {
     if (!payload) return null;
+    const compactThreadId = options?.threadId ?? threadIdRef.current;
+    if (!compactThreadId) return null;
     return await primeCompactedOrchestratorSession({
       messagesRef,
       payload,
       repoPath: activeRepoPath,
-      threadId: threadIdRef.current,
+      threadId: compactThreadId,
       setMessages: syncMessages,
       setRunningTotal: updateRunningTotal,
       setTokenCount,
       setTranscript: options?.setTranscript,
-      telemetrySessionKeyRef,
+      telemetrySessionKeyRef: telemetryBindingRef,
       telemetryTotalRef,
+      isCurrent: () => mountedRef.current && repoPathRef.current === activeRepoPath && threadIdRef.current === compactThreadId,
     });
   }, [syncMessages, updateRunningTotal]);
 
@@ -324,7 +322,7 @@ export function useOrchestratorStream(
     updateRunningTotal(0);
     currentAssistantRef.current = null;
     hasHistoryRef.current = false;
-    telemetrySessionKeyRef.current = null;
+    telemetryBindingRef.current = null;
     telemetryTotalRef.current = null;
     autoCompactInFlightRef.current = false;
     autoCompactArmedRef.current = true;
@@ -684,7 +682,7 @@ export function useOrchestratorStream(
     if (!repoPath) return;
 
     mountedRef.current = true;
-    telemetrySessionKeyRef.current = null;
+    telemetryBindingRef.current = null;
     telemetryTotalRef.current = null;
     setTokenCount(0);
     updateRunningTotal(0);
@@ -725,6 +723,19 @@ export function useOrchestratorStream(
   }, [repoPath, connect, refreshTokenTelemetry, updateRunningTotal]);
 
   useEffect(() => {
+    telemetryBindingRef.current = null;
+    telemetryTotalRef.current = null;
+    setTokenCount(0);
+    updateRunningTotal(0);
+    emitTokenUsage({ repoPath, tokenCount: 0, runningTotal: 0 });
+    if (!repoPath || !threadId) return;
+    if (tokenRefreshTimerRef.current) clearTimeout(tokenRefreshTimerRef.current);
+    tokenRefreshTimerRef.current = setTimeout(() => {
+      void refreshTokenTelemetry();
+    }, 900);
+  }, [repoPath, threadId, refreshTokenTelemetry, updateRunningTotal]);
+
+  useEffect(() => {
     if (!repoPath) return () => {};
 
     return subscribeOrchestratorMissionCompleted((detail) => {
@@ -757,53 +768,19 @@ export function useOrchestratorStream(
     void rotateMissionThread(pendingMissionCompletionRef.current);
   }, [rotateMissionThread, status]);
 
-  useEffect(() => {
-    if (!repoPath) return;
-    // Fable Slice 4 — a metered backend compacts at the ~15K window target;
-    // subscription backends keep the global 300K. Cache-aware: this effect only
-    // fires at status==='ready' (the between-turn boundary), so a compaction —
-    // which rewrites the prompt-cache prefix at one full-price re-read — never
-    // lands mid-stride. Keyed to the billing class, not the backend name.
-    const metered = lastBackendRef.current !== null
-      && isOrchestratorBackendId(lastBackendRef.current)
-      && isMeteredOrchestratorBackend(lastBackendRef.current);
-    const resetFloor = metered ? ORCHESTRATOR_METERED_AUTO_COMPACT_RESET_FLOOR : ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR;
-    const threshold = metered ? ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD : ORCHESTRATOR_AUTO_COMPACT_THRESHOLD;
-    if (runningTotal < resetFloor) autoCompactArmedRef.current = true;
-    if (status !== 'ready' || runningTotal < threshold || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
-    if (hasQueuedOrchestratorSessionPrelude(repoPath, threadIdRef.current)) return;
-    autoCompactInFlightRef.current = true;
-    autoCompactArmedRef.current = false;
-    let started = false;
-    const timer = window.setTimeout(() => {
-      started = true;
-      void (async () => {
-        try {
-          const payload = await requestCompaction(repoPath, runningTotal, messagesRef.current);
-          if (!payload?.ok || !payload.applied || !Array.isArray(payload.transcript) || statusRef.current !== 'ready') {
-            autoCompactArmedRef.current = true;
-            return;
-          }
-          // setTranscript:false — auto-compaction is a SILENT background op: it
-          // compacts the server session but must NOT replace the visible
-          // transcript, or it wipes ephemeral entries (the Collide "N proposals
-          // collided" card, system notes) that live only in the client array.
-          // Matches the two send-flow compaction call sites, which already pass
-          // false; this path was the lone outlier that dropped the Collide card
-          // on a later turn.
-          await primeCompactedSession(repoPath, payload, { setTranscript: false });
-        } catch {
-          autoCompactArmedRef.current = true;
-        } finally {
-          autoCompactInFlightRef.current = false;
-        }
-      })();
-    }, 800);
-    return () => {
-      window.clearTimeout(timer);
-      if (!started) autoCompactInFlightRef.current = false;
-    };
-  }, [primeCompactedSession, repoPath, requestCompaction, runningTotal, status]);
+  useOrchestratorAutoCompaction({
+    repoPath,
+    threadId,
+    runningTotal,
+    status,
+    lastBackendRef,
+    threadIdRef,
+    statusRef,
+    inFlightRef: autoCompactInFlightRef,
+    armedRef: autoCompactArmedRef,
+    requestCompaction,
+    primeCompactedSession,
+  });
 
   useNoSnapshotBusyFallback({
     repoPath, snapshotSeenRef, statusRef, lastEventAtRef,
@@ -813,9 +790,12 @@ export function useOrchestratorStream(
   const compactNow = useCallback(async (_options?: { keepTailCount?: number; source?: 'manual' | 'handoff' }) => {
     const activeRepoPath = repoPathRef.current;
     if (!activeRepoPath) return null;
-    const payload = await requestCompaction(activeRepoPath, runningTotalRef.current, messagesRef.current, {
+    const activeThreadId = threadIdRef.current;
+    if (!activeThreadId) return null;
+    const payload = await requestCompaction(activeRepoPath, runningTotalRef.current, {
       keepTailCount: _options?.keepTailCount,
       trigger: _options?.source ?? 'manual',
+      threadId: activeThreadId,
     });
     if (!payload?.ok) return null;
     if (!payload.applied || !Array.isArray(payload.transcript)) {
@@ -826,7 +806,12 @@ export function useOrchestratorStream(
         tokensAfter: runningTotalRef.current,
       };
     }
-    const primed = await primeCompactedSession(activeRepoPath, payload, { setTranscript: false });
+    if (threadIdRef.current !== activeThreadId) return null;
+    const primed = await primeCompactedSession(activeRepoPath, payload, {
+      setTranscript: false,
+      threadId: activeThreadId,
+    });
+    if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== activeThreadId) return null;
     if (!primed) return null;
     return {
       applied: true,
@@ -913,6 +898,13 @@ export function useOrchestratorStream(
       }
       const transcriptSnapshot = transcriptBeforeSend;
       let planCaptureSource = transcriptSnapshot;
+      if (backend && lastBackendRef.current !== backend) {
+        lastBackendRef.current = backend;
+        telemetryBindingRef.current = null;
+        telemetryTotalRef.current = null;
+        setTokenCount(0);
+        updateRunningTotal(0);
+      }
       const projectedTokens = estimateNextTurnTokens(wireMessage);
       if (projectedTokens >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
         const compactingId = `orch-compacting-${Date.now()}`;
@@ -927,12 +919,20 @@ export function useOrchestratorStream(
           timestampLabel: formatTimestampLabel(compactingAt),
         }]);
         try {
-          const payload = await requestCompaction(activeRepoPath, runningTotalRef.current, transcriptSnapshot);
-          const primed = payload ? await primeCompactedSession(activeRepoPath, payload, { setTranscript: false }) : null;
+          const payload = await requestCompaction(activeRepoPath, runningTotalRef.current, {
+            threadId: sendHandle.threadId,
+          });
+          if (threadIdRef.current !== sendHandle.threadId) return;
+          const primed = payload ? await primeCompactedSession(activeRepoPath, payload, {
+            setTranscript: false,
+            threadId: sendHandle.threadId,
+          }) : null;
+          if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== sendHandle.threadId) return;
           const remaining = ORCHESTRATOR_COMPACTION_STATUS_MIN_MS - (Date.now() - compactingAt);
           if (remaining > 0) {
             await new Promise((resolve) => window.setTimeout(resolve, remaining));
           }
+          if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== sendHandle.threadId) return;
           if (!primed) {
             throw new Error(`Compaction failed before send. Re-send this message:\n\n${displayMessage}`);
           }
@@ -966,6 +966,7 @@ export function useOrchestratorStream(
           return;
         }
       }
+      if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== sendHandle.threadId) return;
       const userEntry = optimisticUserEntry({
         id: sendHandle.userMessageId, text: displayMessage,
         timestamp: sentAtMs, timestampLabel: formatTimestampLabel(sentAtMs),
@@ -979,11 +980,11 @@ export function useOrchestratorStream(
         && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
-      let outboundMessage = wireMessage;
-      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId);
-      if (resumePrelude) {
-        outboundMessage = `${resumePrelude}\n\nOperator message:\n${wireMessage}`;
-      }
+      const outboundMessage = withSessionPrelude(
+        wireMessage,
+        consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId),
+        orchestrationMode,
+      );
       turnTranscriptEventCountRef.current = 0;
       const payload = buildOrchestratorSendPayload({
         repoPath: activeRepoPath,
@@ -1033,7 +1034,7 @@ export function useOrchestratorStream(
       setPendingStatusBusy();
     })();
     return sendHandle;
-  }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution]);
+  }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
 
   const undoSend = useCallback((handle: OrchestratorSendHandle) => {
     turnOptionResolution.abort(handle.clientMessageId);

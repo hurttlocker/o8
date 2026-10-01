@@ -3660,7 +3660,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.774"
+version = "0.1.779"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -3706,9 +3706,11 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "window-vibrancy",
  "windows-sys 0.59.0",
  "winreg 0.55.0",

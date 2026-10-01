@@ -31,7 +31,10 @@ export const codexBackend: OrchestratorBackend = {
     void prewarmSonnetCli().catch(() => {});
     return sendToCodexOrchestrator(
       ensureCodexOrchestratorSession(repoPath, options?.threadId),
-      buildCodexOrchestratorPrompt(repoPath, message),
+      buildCodexOrchestratorPrompt(repoPath, message, {
+        toolProfile: options?.toolProfile,
+        orchestrationMode: options?.orchestrationMode,
+      }),
       onEvent,
       options,
     );

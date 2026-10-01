@@ -325,6 +325,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmSt
           const runtime = resolveDisplayRuntime(packet);
           const tone = orchestratorRuntimeTone(runtime);
           const eventLabel = packet.blockedReason === 'runtime_process_exit'
+            || packet.blockedReason?.startsWith('Codex sign-in expired')
             ? packet.blockedReason
             : packet.lane?.lastEventLabel?.trim() || packet.lastEventLabel?.trim() || null;
           const title = packet.title?.trim() || packet.referenceLabel?.trim() || 'Agent';

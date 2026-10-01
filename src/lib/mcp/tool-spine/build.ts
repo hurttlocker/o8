@@ -22,7 +22,7 @@ import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { fastDelegationCapability } from '@/lib/orchestrator/fast-delegation-auth';
-import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
+import { toolProfileCanDispatch, type ServerEntry, type ToolProfile, type ToolRegistry } from './registry';
 
 /** Resolve repo slug from git remote. */
 function detectRepoSlug(repoPath: string): string {
@@ -313,8 +313,8 @@ export function buildToolRegistry(
   const profile = options?.profile ?? 'full';
   const soloProfile = profile === 'solo' || profile === 'fable-solo';
   const stripExternal = profile === 'propose' || profile === 'fable' || soloProfile;
-  const dropOperator = profile === 'propose' || soloProfile;
-  const cortexReadonly = profile === 'propose' || soloProfile;
+  const dropOperator = !toolProfileCanDispatch(profile);
+  const cortexReadonly = !toolProfileCanDispatch(profile);
   const projected = (stripExternal || dropOperator)
     ? entries
         .filter((entry) => !(dropOperator && entry.id === 'builtin:operator'))
