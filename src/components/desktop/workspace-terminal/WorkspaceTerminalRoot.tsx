@@ -17,9 +17,9 @@ import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/c
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
     const {
-      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
+      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
     } = useWorkspaceTerminalController(props, ref);
-    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
+    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
     const workspaceInstanceId = useId();
     const handleNewTab = controller.handleNewTab;
     const createTerminalModeShellTab = useCallback(
@@ -106,6 +106,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     const onSplitVertical = props.onSplitVertical;
     const onSplitHorizontal = props.onSplitHorizontal;
     const attachLiveRun = controller.attachWorkspaceTerminalSession;
+    const openRemoteTerminal = props.onOpenRemoteTerminal ?? controller.openRemoteTerminalTab;
     const selectLiveRunTab = controller.handleSelectTab;
     const activeWorkspaceSurface = props.activeWorkspaceSurface === true;
     useEffect(() => {
@@ -148,17 +149,32 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         }, preferredRepo ?? activeRepo ?? null);
         if (tabId) selectLiveRunTab(tabId);
       };
+      const onOpenRemoteTerminal = (event: Event) => {
+        const detail = (event as CustomEvent<{
+          workspaceId?: string; command?: string; machineId?: string; machineLabel?: string; sessionId?: string;
+        }>).detail;
+        if (detail?.workspaceId !== workspaceInstanceId || !detail.command || !detail.machineId
+          || !detail.machineLabel || !detail.sessionId) return;
+        openRemoteTerminal({
+          command: detail.command,
+          machineId: detail.machineId,
+          machineLabel: detail.machineLabel,
+          sessionId: detail.sessionId,
+        });
+      };
       window.addEventListener('o8:request-spawn-tab', onSpawn as EventListener);
       window.addEventListener('o8:request-close-workspace', onCloseWorkspace as EventListener);
       window.addEventListener('o8:request-split-workspace-tab', onSplitWorkspace as EventListener);
       window.addEventListener('o8:open-agent-terminal', onOpenAgentTerminal as EventListener);
+      window.addEventListener('o8:request-open-remote-terminal', onOpenRemoteTerminal as EventListener);
       return () => {
         window.removeEventListener('o8:request-spawn-tab', onSpawn as EventListener);
         window.removeEventListener('o8:request-close-workspace', onCloseWorkspace as EventListener);
         window.removeEventListener('o8:request-split-workspace-tab', onSplitWorkspace as EventListener);
         window.removeEventListener('o8:open-agent-terminal', onOpenAgentTerminal as EventListener);
+        window.removeEventListener('o8:request-open-remote-terminal', onOpenRemoteTerminal as EventListener);
       };
-    }, [props.canCloseTile, props.stateScope, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, spawnFleetCanvasTab, activeRepo, preferredRepo, onCloseTile, onSplitVertical, onSplitHorizontal, workspaceInstanceId, activeWorkspaceSurface, attachLiveRun, selectLiveRunTab]);
+    }, [props.canCloseTile, props.stateScope, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, spawnFleetCanvasTab, activeRepo, preferredRepo, onCloseTile, onSplitVertical, onSplitHorizontal, workspaceInstanceId, activeWorkspaceSurface, attachLiveRun, selectLiveRunTab, openRemoteTerminal]);
 
     // Broadcast the active-tab label + tabId + kind + workspaceId + full
     // tabs list so the dashboard can route the title to the column-level
@@ -412,6 +428,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
 
         <WorkspaceTerminalPanels
           workspaceId={workspaceInstanceId}
+          tileId={props.stateScope}
+          pendingRemotePane={props.autoCreateDefaultTab === false && props.splitCreated === true}
           visibleTabs={controller.visibleTabs}
           attachedTerminalSessions={props.attachedTerminalSessions}
           terminalModeStatusEvidence={terminalMode.statusEvidence}

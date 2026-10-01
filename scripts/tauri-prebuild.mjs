@@ -126,6 +126,7 @@ try {
     const receipt = writeReleaseArtifactManifest(root, recipe);
     console.log(`[tauri-prebuild] verified artifact ${recipe.recipeSha256.slice(0, 16)} (${receipt.manifest.outputs.length} checksums)`);
   }
+  phase('packaged server smoke', process.execPath, ['scripts/packaged-server-smoke.mjs']);
   cacheOutcome = 'PASS';
   if (env.O8_RELEASE_CACHE_PREBUILD_MARKER) {
     writeFileSync(env.O8_RELEASE_CACHE_PREBUILD_MARKER, `${Date.now()}\n`, { mode: 0o600 });

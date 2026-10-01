@@ -25,6 +25,9 @@ describe('runtime capability catalog', () => {
     expect(isOrchestratorRuntime('antigravity')).toBe(true);
     expect(isDispatchableRuntime('antigravity')).toBe(true);
     expect(isOrchestratorRuntime('made-up-cli')).toBe(false);
+    expect(isOrchestratorRuntime('cloud')).toBe(true);
+    expect(isDispatchableRuntime('cloud')).toBe(false);
+    expect(getRuntimeCapability('cloud').explicitLaunchOnly).toBe(true);
   });
 
   it('derives declarative membership and auth inventory from the same entries', () => {

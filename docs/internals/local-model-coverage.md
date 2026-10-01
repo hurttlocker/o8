@@ -36,6 +36,16 @@ This audit covers the registered orchestrator backends, every dispatchable worke
 | TTS | Partial | Automatic network synthesis, then OS/browser speech fallback | `src/lib/tts/engine.ts:259`; `src-tauri/src/tts/native_say.rs:52` | Offline speech exists only as a fallback and cannot be selected as primary. |
 | Settings / Diagnostics detection | Partial | Persisted local settings or env; configured-endpoint probe plus fixed default-runtime probe | `src/lib/cortex/qa/llm/inference-route.ts:178`; `src/app/api/setup/detect/route.ts:443` | Model discovery tries `/api/tags` first, then `/v1/models`; Diagnostics does not show effective per-surface routes. |
 
+## Verifiable egress harness
+
+`tests/local-egress-assertion-real-path.test.ts` drives a real packet through
+dispatch → worker → Brain → review → merge while a process-level preload records
+TCP destinations in both the o8 process and inherited Node worker processes.
+Unexpected non-loopback destinations are recorded before connect and blocked;
+loopback o8-internal IPC is excluded, while the configured local-provider
+endpoint remains in the report. The test prints an `o8/local-egress-report/v1`
+baseline with per-surface endpoint counts.
+
 ## Issue-worthy gaps
 
 - Add fail-closed local-only enforcement with per-surface routing receipts [L]

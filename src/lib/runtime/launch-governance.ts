@@ -29,7 +29,22 @@ export async function settleRuntimeLaunchGovernance(input: {
   repoPath: string;
 }): Promise<RuntimeLaunchResult> {
   const { payload, runtime, runtimeId, prompt, result, launchWorktree, projectId, cwd, repoPath } = input;
-  if (!result.sessionKey) throw new Error(result.note || `Unable to launch ${runtimeId}.`);
+  if (!result.sessionKey) {
+    if (!result.ok && result.sideEffect === 'none') {
+      return {
+        ok: false,
+        runtime: runtimeId,
+        clientMutationId: payload.clientMutationId,
+        surfaceId: '',
+        note: result.note || `Unable to launch ${runtimeId}.`,
+        cwd,
+        repoPath,
+        worktree: launchWorktree?.worktree ?? null,
+        laneId: payload.existingLaneId ?? null,
+      };
+    }
+    throw new Error(result.note || `Unable to launch ${runtimeId}.`);
+  }
   if (!result.ok) {
     const failedResult: RuntimeLaunchResult = {
       ok: false,
@@ -56,6 +71,46 @@ export async function settleRuntimeLaunchGovernance(input: {
     const laneRuntime: OrchestratorRuntime | null = ORCHESTRATOR_RUNTIMES[runtimeId as OrchestratorRuntime]
       ? runtimeId as OrchestratorRuntime
       : null;
+    if (runtimeId === 'cloud' && laneRuntime) {
+      try {
+        const { createLane, attachSession, setLaneStatus } = await import('@/lib/lane/registry');
+        if (!laneId) {
+          const lane = createLane({
+            repoPath,
+            projectId,
+            branch: payload.branchName?.trim() || '',
+            baseBranch: payload.baseBranch?.trim() || 'main',
+            runtime: laneRuntime,
+            label: payload.taskName?.trim() || summarizeTaskName(prompt),
+            packetId: payload.packetId,
+            ownership: 'managed',
+            actor: 'system',
+          });
+          laneId = lane.id;
+        }
+        const attached = attachSession(laneId, result.sessionKey, 'system');
+        if (!attached || attached.sessionKey !== result.sessionKey) {
+          throw new Error('The cloud lane could not be bound to its durable session.');
+        }
+        const running = setLaneStatus(laneId, 'running', 'system', 'cloud_job_queued');
+        if (!running || running.status !== 'running') {
+          throw new Error('The cloud lane could not enter its running state.');
+        }
+      } catch (error) {
+        const cancellation = await runtime.interrupt(result.sessionKey).catch(() => null);
+        throw new RuntimeLaunchPostEffectError({
+          ok: false,
+          runtime: runtimeId,
+          clientMutationId: payload.clientMutationId,
+          surfaceId: result.sessionKey,
+          note: `Cloud job was enqueued but its governance lane did not settle; cancellation ${cancellation?.ok ? 'was requested' : 'could not be confirmed'}.`,
+          cwd,
+          repoPath,
+          worktree: null,
+          laneId,
+        }, error);
+      }
+    }
     if (!laneId && launchWorktree?.worktree && laneRuntime) {
       let createdLaneId: string | null = null;
       try {

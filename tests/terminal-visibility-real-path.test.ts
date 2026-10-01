@@ -36,6 +36,7 @@ const sessionName = dashSessionNameForOwnerKey(ownerKey)!;
 const duplicateOwnerKey = `workspace:terminal-visibility-duplicate-${process.pid}`;
 const duplicateSessionName = dashSessionNameForOwnerKey(duplicateOwnerKey)!;
 const cliSessionName = dashSessionNameForOwnerKey(`workspace:terminal-cli-${process.pid}`)!;
+const controlSessionName = dashSessionNameForOwnerKey(`workspace:terminal-control-${process.pid}`)!;
 const observerSessionName = `cortex-observer-${process.pid}`;
 const plainSessionName = `cortex-plain-visibility-${process.pid}`;
 const OVERFLOW_TERMINAL = { cols: 120, rows: 30 } as const;
@@ -660,5 +661,129 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(foreign.status).toBe(404);
+  }, 60_000);
+
+  it('controls one existing shell exclusively, releases it, and reconnects after server restart', async () => {
+    const ui = await connectClient();
+    ui.socket.send(JSON.stringify({
+      type: 'terminal-create', ownerKey: `workspace:terminal-control-${process.pid}`,
+      requestId: 'control-create', cols: 100, rows: 30,
+    }));
+    await waitFor(() => ui.received.some(({ frame }) => (
+      frame.event === 'created' && frame.data?.sessionName === controlSessionName
+    )), 'control shell reservation');
+    ui.socket.send(JSON.stringify({ type: 'terminal-attach', sessionName: controlSessionName, cols: 100, rows: 30 }));
+    await waitFor(() => ui.received.some(({ frame }) => (
+      frame.event === 'attached' && frame.data?.sessionName === controlSessionName
+    )), 'control shell UI attachment');
+
+    const cliEnv: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: dataDir, O8_API_PORT: String(apiPort),
+      O8_WS_PORT: String(wsPort), O8_API_TOKEN: token };
+    delete cliEnv.O8_WORKER_TOKEN;
+    const first = spawnSync(process.execPath, [cliBundle, 'terminal', 'control', controlSessionName], {
+      cwd: process.cwd(), env: cliEnv, encoding: 'utf8', input: '', timeout: 10_000,
+    });
+    expect(first.status).toBe(5);
+    expect(first.stderr).toContain('terminal_busy');
+    ui.socket.close();
+    await waitFor(() => ui.socket.readyState === WebSocket.CLOSED, 'UI writer release');
+
+    const observer = await connectClient();
+    observer.socket.send(JSON.stringify({ type: 'terminal-attach', sessionName: controlSessionName, readOnly: true }));
+    await waitFor(() => observer.received.some(({ frame }) => (
+      frame.event === 'attached' && frame.data?.sessionName === controlSessionName
+    )), 'read-only observer');
+    const dimensionsBeforeControl = tmuxWindowDimensions(controlSessionName);
+    const control = spawn(process.execPath, [cliBundle, 'terminal', 'control', controlSessionName], {
+      cwd: process.cwd(), env: cliEnv, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const controlClosed = once(control, 'close');
+    let output = '';
+    control.stdout.on('data', (chunk) => { output += String(chunk); });
+    try {
+      await waitFor(() => output.includes('"event":"attached"'), 'CLI control claim');
+      expect(tmuxWindowDimensions(controlSessionName)).toBe(dimensionsBeforeControl);
+      const second = spawnSync(process.execPath, [cliBundle, 'terminal', 'control', controlSessionName], {
+        cwd: process.cwd(), env: cliEnv, encoding: 'utf8', input: '', timeout: 10_000,
+      });
+      expect(second.status).toBe(5);
+      expect(second.stderr).toContain('terminal_busy');
+      const blockedUi = await connectClient();
+      blockedUi.socket.send(JSON.stringify({ type: 'terminal-attach', sessionName: controlSessionName }));
+      await waitFor(() => blockedUi.received.some(({ frame }) => (
+        frame.event === 'error' && frame.data?.sessionName === controlSessionName
+      )), 'UI writer conflict');
+      expect(blockedUi.received.find(({ frame }) => frame.event === 'error')?.frame.data?.code).toBe('terminal_busy');
+      blockedUi.socket.close();
+      for (const [path, body] of [
+        ['/terminal-voice-input', { sessionName: controlSessionName, text: 'O8_VOICE_MUST_NOT_WRITE' }],
+        ['/terminal-exec', { sessionName: controlSessionName, command: 'O8_EXEC_MUST_NOT_WRITE' }],
+      ] as const) {
+        const response = await fetch(`http://127.0.0.1:${wsPort}${path}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        expect(response.status).toBe(409);
+      }
+      control.stdin.write(`${JSON.stringify({ type: 'input', data: "printf 'O8_CONTROL_RECONNECTED\\n'\r" })}\n`);
+      await waitFor(() => capturePane(controlSessionName).includes('O8_CONTROL_RECONNECTED'), 'CLI input in original shell');
+      expect(capturePane(controlSessionName)).not.toContain('O8_VOICE_MUST_NOT_WRITE');
+      expect(capturePane(controlSessionName)).not.toContain('O8_EXEC_MUST_NOT_WRITE');
+      observer.socket.send(JSON.stringify({ type: 'terminal-input', sessionName: controlSessionName, data: 'O8_OBSERVER_MUST_NOT_WRITE' }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(capturePane(controlSessionName)).not.toContain('O8_OBSERVER_MUST_NOT_WRITE');
+      control.stdin.write(`${JSON.stringify({ type: 'release' })}\n`);
+      expect((await controlClosed)[0]).toBe(0);
+    } finally {
+      if (control.exitCode === null) control.kill('SIGTERM');
+      await controlClosed;
+    }
+    const restoredUi = await connectClient();
+    restoredUi.socket.send(JSON.stringify({ type: 'terminal-attach', sessionName: controlSessionName }));
+    await waitFor(() => restoredUi.received.some(({ frame }) => (
+      frame.event === 'attached' && frame.data?.sessionName === controlSessionName
+    )), 'UI writer after release');
+    restoredUi.socket.close();
+    await waitFor(() => restoredUi.socket.readyState === WebSocket.CLOSED, 'restored UI writer release');
+    const human = spawn(process.execPath, [cliBundle, '--human', 'terminal', 'control', controlSessionName], {
+      cwd: process.cwd(), env: cliEnv, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const humanClosed = once(human, 'close');
+    let humanOutput = '';
+    human.stdout.on('data', (chunk) => { humanOutput += String(chunk); });
+    try {
+      await waitFor(() => humanOutput.includes('O8_CONTROL_RECONNECTED'), 'interactive shell replay');
+      const unicodeCommand = Buffer.from("printf 'O8_UTF8_é_OK\\n'\r");
+      const splitAt = unicodeCommand.indexOf(0xc3) + 1;
+      human.stdin.write(unicodeCommand.subarray(0, splitAt));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      human.stdin.write(unicodeCommand.subarray(splitAt));
+      await waitFor(() => capturePane(controlSessionName).includes('O8_UTF8_é_OK'), 'split UTF-8 terminal input');
+      human.stdin.write(Buffer.from([0x1d]));
+      expect((await humanClosed)[0]).toBe(0);
+    } finally {
+      if (human.exitCode === null) human.kill('SIGTERM');
+      await humanClosed;
+    }
+    const dimensionsBeforeRestart = tmuxWindowDimensions(controlSessionName);
+    await stopWsServer();
+    await startWsServer();
+    const next = spawn(process.execPath, [cliBundle, 'terminal', 'control', controlSessionName], {
+      cwd: process.cwd(), env: cliEnv, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const nextClosed = once(next, 'close');
+    let nextOutput = '';
+    next.stdout.on('data', (chunk) => { nextOutput += String(chunk); });
+    try {
+      await waitFor(() => nextOutput.includes('"event":"attached"'), 'CLI control after restart');
+      expect(tmuxWindowDimensions(controlSessionName)).toBe(dimensionsBeforeRestart);
+      next.stdin.write(`${JSON.stringify({ type: 'release' })}\n`);
+      expect((await nextClosed)[0]).toBe(0);
+    } finally {
+      if (next.exitCode === null) next.kill('SIGTERM');
+      await nextClosed;
+      execFileSync('tmux', dashTmuxArgs('kill-session', '-t', controlSessionName));
+    }
   }, 60_000);
 });

@@ -363,6 +363,7 @@ export function serializeTabsForPersistence(currentTabs: TerminalTab[]) {
       repoPath: tab.repo?.localPath,
       tmuxSession: tab.tmuxSession ?? undefined,
       readOnly: tab.readOnly,
+      remoteMachine: tab.remoteMachine,
       chatRuntime: tab.chatRuntime,
       chatSessionKey: tab.chatSessionKey,
       laneId: tab.laneId ?? undefined,
@@ -571,24 +572,64 @@ export function isTabFinishedForCleanup(tab: TerminalTab): boolean {
 /*  flushPendingCliCommands                                            */
 /* ------------------------------------------------------------------ */
 
+export function deferRemoteTerminalLaunch(
+  tabs: TerminalTab[], queued: Map<string, string>, tabId: string,
+  command: string | undefined, connected: boolean,
+): boolean {
+  if (!command || connected || !tabs.some((tab) => tab.id === tabId && tab.remoteMachine)) return false;
+  queued.set(tabId, command);
+  return true;
+}
+
+export function flushQueuedRemoteLaunches(
+  tabs: TerminalTab[], queued: Map<string, string>,
+  launch: (tabId: string, command: string, caller: 'ws-bootstrap') => void,
+): void {
+  for (const [tabId, command] of queued) {
+    queued.delete(tabId);
+    if (tabs.some((tab) => tab.id === tabId && tab.remoteMachine && !tab.tmuxSession)) launch(tabId, command, 'ws-bootstrap');
+  }
+}
+
 export function flushPendingCliCommands(
   tabs: TerminalTab[],
   pendingCliCommands: Map<string, string>,
   sendTerminalInput: (sessionName: string, data: string) => void,
+  isSessionCurrent: (tabId: string, sessionName: string) => boolean = () => true,
+  onRemoteLaunchResult: (tabId: string, started: boolean) => void = () => undefined,
 ): void {
   for (const tab of tabs) {
     if (tab.tmuxSession && pendingCliCommands.has(tab.id)) {
       const command = pendingCliCommands.get(tab.id)!;
       pendingCliCommands.delete(tab.id);
-      fetch('/api/panel/terminal-exec', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName: tab.tmuxSession, command }),
-      }).catch(() => {
-        setTimeout(() => {
-          sendTerminalInput(tab.tmuxSession!, command + '\n');
-        }, 2000);
-      });
+      const sessionName = tab.tmuxSession;
+      void (async () => {
+        // The created acknowledgement can precede the WS bridge attaching its
+        // PTY. A 404 at that point is transient; deleting the command on the
+        // first HTTP response leaves a remote pane as an ordinary local shell.
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (!isSessionCurrent(tab.id, sessionName)) return;
+          try {
+            const response = await fetch('/api/panel/terminal-exec', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionName, command }),
+              signal: AbortSignal.timeout(2_000),
+            });
+            if (response.ok) {
+              if (tab.remoteMachine) onRemoteLaunchResult(tab.id, true);
+              return;
+            }
+            if (response.status !== 404 && response.status !== 503) break;
+          } catch {
+            // Keep the same bounded retry path for a brief bridge disconnect.
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (!isSessionCurrent(tab.id, sessionName)) return;
+        if (tab.remoteMachine) onRemoteLaunchResult(tab.id, false);
+        else sendTerminalInput(sessionName, `${command}\n`);
+      })();
     }
   }
 }

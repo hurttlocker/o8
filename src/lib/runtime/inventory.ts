@@ -689,6 +689,8 @@ export async function getRuntimeInventorySnapshot(
     // ── Reconcile lanes with discovered sessions ���─
     try {
       const { reconcileLanesWithSessions } = await import('@/lib/lane/registry');
+      const { reconcileCloudJobLanes } = await import('@/lib/lane/cloud-reconciliation');
+      reconcileCloudJobLanes();
       const sessionSummaries = snapshot.agents
         .filter((agent) => agent.sessionKey && isDispatchableRuntime(agent.runtime))
         .map((agent) => ({
