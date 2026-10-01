@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { cloneRepoForRun, commitWorkerChanges, pushRemoteBranch } from './clone-repo';
 import { EventStream, type CloudRemoteSource, type CloudWorkerControl, type CloudWorkerJob } from './event-stream';
@@ -74,7 +75,7 @@ async function reportFailure(stream: EventStream, job: CloudWorkerJob, error: un
   }
 }
 
-async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: WorkerCliOptions): Promise<void> {
+async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: WorkerCliOptions, shutdown: AbortSignal): Promise<void> {
   const operation = new AbortController();
   let codex: RunningCodex | null = null;
   let services: RunningWorkspaceServices | null = null;
@@ -85,6 +86,9 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     await reportFailure(stream, job, new Error('[worker] cloud job has no valid lease expiry'));
     return;
   }
+  const stop = () => { operation.abort(); codex?.abort(); };
+  shutdown.addEventListener('abort', stop, { once: true });
+  if (shutdown.aborted) stop();
   const leaseMarginMs = Math.min(2_000, Math.max(10, Math.floor((leaseExpiresAt - Date.now()) / 5)));
   const watchdog = setInterval(() => {
     if (Date.now() < leaseExpiresAt - leaseMarginMs || monitorFailure || abortControl) return;
@@ -93,13 +97,13 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     codex?.abort();
   }, 1_000);
   const monitor = async () => {
-    if (monitorFailure || abortControl) return;
+    if (monitorFailure || abortControl || operation.signal.aborted) return;
     try {
-      const renewed = await stream.postEvent(job, 'heartbeat', { status: 'running' });
+      const renewed = await stream.postEvent(job, 'heartbeat', { status: 'running' }, operation.signal);
       const nextExpiry = renewed ? Date.parse(renewed) : NaN;
       if (!Number.isFinite(nextExpiry)) throw new Error('[worker] heartbeat returned no lease expiry');
       leaseExpiresAt = nextExpiry;
-      const control = await stream.pollControl(job);
+      const control = await stream.pollControl(job, operation.signal);
       if (control?.type === 'abort') {
         abortControl = control;
         operation.abort();
@@ -120,25 +124,25 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   try {
     if (job.launch.workMode === 'read-only') throw new Error('[worker] read-only cloud jobs are unsupported by this worker');
     const source = remoteSource(job);
-    if (abortControl || monitorFailure) return;
+    if (abortControl || monitorFailure || shutdown.aborted) return;
     // A recovered lease must never reuse a checkout still owned by an older attempt.
     const runDir = path.join(opts.workspaceDir, `${job.id}-${randomUUID()}`);
     const cloneDir = await cloneRepoForRun({ repoUrl: source.repoUrl, baseRef: source.baseSha, remoteBranch: source.branch, workDir: runDir, signal: operation.signal });
-    if (abortControl || monitorFailure) return;
-    await stream.postEvent(job, 'chunk', { text: 'Repository cloned.' });
+    if (abortControl || monitorFailure || shutdown.aborted) return;
+    await stream.postEvent(job, 'chunk', { text: 'Repository cloned.' }, operation.signal);
 
     services = await startWorkspaceServices({ cloneDir, job, stream, signal: operation.signal });
-    if (abortControl || monitorFailure) return;
+    if (abortControl || monitorFailure || shutdown.aborted) return;
 
     codex = await startCodex({
       cwd: cloneDir,
       prompt: job.launch.prompt,
       model: job.launch.model,
-      onChunk: async (text) => { await stream.postEvent(job, 'chunk', { text }); },
+      onChunk: async (text) => { await stream.postEvent(job, 'chunk', { text }, operation.signal); },
     });
-    if (abortControl || monitorFailure) codex.abort();
+    if (abortControl || monitorFailure || shutdown.aborted) codex.abort();
     const result = await codex.result;
-    if (abortControl) return;
+    if (abortControl || shutdown.aborted) return;
     if (monitorFailure) throw monitorFailure;
     if (result.aborted) throw new Error('[worker] Codex stopped before completion');
     if (result.exitCode !== 0) throw new Error(`[worker] codex exited with code ${result.exitCode}`);
@@ -148,18 +152,19 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
       throw new Error('[worker] workspace service exited before task completion');
     }
     const files = await commitWorkerChanges(cloneDir, source.baseSha, operation.signal);
-    if (files.length > 0) await stream.postEvent(job, 'diff', { files });
+    if (files.length > 0) await stream.postEvent(job, 'diff', { files }, operation.signal);
     const sha = await pushRemoteBranch(cloneDir, source.branch, operation.signal);
     clearInterval(timer);
     await monitorChain;
-    if (abortControl) return;
+    if (abortControl || shutdown.aborted) return;
     if (monitorFailure) throw monitorFailure;
-    await stream.postEvent(job, 'completed', { result: `branch ${source.branch} pushed at ${sha}`, commitSha: sha });
+    await stream.postEvent(job, 'completed', { result: `branch ${source.branch} pushed at ${sha}`, commitSha: sha }, operation.signal);
   } catch (error) {
     failure = error;
   } finally {
     clearInterval(timer);
     clearInterval(watchdog);
+    shutdown.removeEventListener('abort', stop);
     await monitorChain;
     await services?.stop().catch((error) => {
       console.error(`[worker] service cleanup failed: ${safeMessage(error)}`);
@@ -169,33 +174,44 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
       await stream.acknowledgeControl(job, abortControl).catch((error) => {
         console.error(`[worker] abort receipt failed: ${safeMessage(error)}`);
       });
+    } else if (shutdown.aborted) {
+      // Process shutdown is not a task cancellation or an execution failure.
+      // Stop renewing the lease; restart recovers it through the durable queue.
+      console.log(`[worker] stopped job ${job.id}; its lease remains recoverable`);
     } else if (failure || monitorFailure) {
       await reportFailure(stream, job, failure ?? monitorFailure);
     }
   }
 }
 
-function sleep(ms: number) { return new Promise<void>((resolve) => setTimeout(resolve, ms)); }
-
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const state = await PersistentWorkerState.load(opts.workspaceDir, opts.workerId);
   const stream = new EventStream({ o8Url: opts.o8Url, workerKey: opts.workerKey, workerId: state.workerId });
   console.log(`[worker] online as ${state.workerId}; polling durable cloud queue`);
-  let shouldExit = false;
-  const shutdown = () => { shouldExit = true; };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-  while (!shouldExit) {
-    try {
-      const job = await stream.pollOnce(state.cursor);
-      if (!job) { await sleep(opts.pollIntervalMs); continue; }
-      await state.advanceCursor(job.cursor);
-      await handleLaunch(job, stream, opts);
-    } catch (error) {
-      console.error(`[worker] poll failed: ${safeMessage(error)}`);
-      await sleep(opts.pollIntervalMs);
+  const shutdown = new AbortController();
+  const stop = () => shutdown.abort();
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  try {
+    while (!shutdown.signal.aborted) {
+      try {
+        const job = await stream.pollOnce(state.cursor, shutdown.signal);
+        if (shutdown.signal.aborted) break;
+        if (!job) { await delay(opts.pollIntervalMs, undefined, { signal: shutdown.signal }); continue; }
+        await state.advanceCursor(job.cursor);
+        await handleLaunch(job, stream, opts, shutdown.signal);
+      } catch (error) {
+        if (shutdown.signal.aborted) break;
+        console.error(`[worker] poll failed: ${safeMessage(error)}`);
+        await delay(opts.pollIntervalMs, undefined, { signal: shutdown.signal }).catch((waitError: unknown) => {
+          if (!shutdown.signal.aborted) throw waitError;
+        });
+      }
     }
+  } finally {
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
   }
   console.log('[worker] shutdown complete');
 }
