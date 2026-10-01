@@ -45,7 +45,7 @@ describe('buildOrchestratorSystemPrompt packaged template loading', () => {
   it('loads the packaged server template when the build checkout is unavailable', async () => {
     const packagedRoot = mkdtempSync(join(tmpdir(), 'o8-packaged-prompt-'));
     tempRoots.push(packagedRoot);
-    const packagedTemplate = join(packagedRoot, 'src', 'lib', 'lane', 'orchestrator.md');
+    const packagedTemplate = join(packagedRoot, 'orchestrator.md');
     mkdirSync(dirname(packagedTemplate), { recursive: true });
     cpSync(sourceTemplate, packagedTemplate);
 
