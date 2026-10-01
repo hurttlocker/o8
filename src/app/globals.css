@@ -1769,7 +1769,8 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 /* Hide scrollbar — AgentPanel */
-.hide-scrollbar::-webkit-scrollbar {
+.hide-scrollbar::-webkit-scrollbar,
+[data-o8-task-action-menu]::-webkit-scrollbar {
   display: none;
 }
 

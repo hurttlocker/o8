@@ -31,13 +31,16 @@ function CopyChip({ command }: { command: string }) {
       type="button"
       onClick={(event) => {
         event.stopPropagation();
-        try {
-          void navigator.clipboard?.writeText(command);
+        const writeText = navigator.clipboard?.writeText;
+        if (typeof writeText !== 'function') {
+          return;
+        }
+        void writeText.call(navigator.clipboard, command).then(() => {
           setCopied(true);
           window.setTimeout(() => setCopied(false), 1600);
-        } catch {
-          /* clipboard may be unavailable */
-        }
+        }).catch(() => {
+          /* write rejected — keep command visible for retry */
+        });
       }}
       style={{
         display: 'inline-flex',

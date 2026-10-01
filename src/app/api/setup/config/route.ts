@@ -5,6 +5,7 @@ import { installClaudeCodePreToolHook } from '@/lib/hooks/install-hooks';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { SetupConfig } from '@/lib/setup/types';
 import { readAgentSetupRequest } from '@/lib/setup/agent-request-store';
+import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,8 +73,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
+  // Projectless setup has no hook target. Launch cwd/env can point inside the app bundle.
+  // Keep the explicit project target out of persisted setup choices.
+  const { repoPath, ...patch } = body as Partial<SetupConfig> & { repoPath?: unknown };
+  let projectRoot: string | null = null;
+  if (repoPath !== undefined) {
+    if (typeof repoPath !== 'string' || !repoPath.trim()) {
+      return NextResponse.json({ error: { code: 'invalid_repo_path', message: 'repoPath must name a registered project.' } }, { status: 400 });
+    }
+    const resolved = await resolveRepoPathFromRegistry(repoPath);
+    if (!resolved.ok) {
+      return NextResponse.json({ error: { code: 'invalid_repo_path', message: resolved.message } }, { status: resolved.status });
+    }
+    projectRoot = resolved.repoRoot;
+  }
+
   const current = readConfig();
-  const updated = mergeConfig(current, body as Partial<SetupConfig>);
+  const updated = mergeConfig(current, patch);
 
   try {
     writeConfig(updated);
@@ -85,9 +101,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (updated.setupComplete || updated.completedAt) {
+  if (projectRoot && (updated.setupComplete || updated.completedAt)) {
     try {
-      installClaudeCodePreToolHook(process.env.CORTEX_IDE_REPO_ROOT || process.cwd());
+      await installClaudeCodePreToolHook(projectRoot);
     } catch {
       // Hook installation is best-effort during onboarding.
     }

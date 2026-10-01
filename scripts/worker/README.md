@@ -50,6 +50,15 @@ the transition; do not reuse a legacy credential as a cloud worker key.
 
 ## Runtime protocol
 
+- In the task composer, choose **Remote worker · Codex**, then **Add + dispatch**.
+  The connection check uses recent authenticated sightings in the execution team.
+  Saving a task preserves its placement even when the pool is disconnected;
+  dispatch then refuses instead of launching a local worker. Connected does not
+  imply idle capacity or verified remote CLI credentials. General mission
+  dispatch remains unavailable for this runtime.
+- The same flow is available through authenticated `POST /api/tasks` with
+  `requestedRuntime: "cloud"`, followed by `POST /api/tasks/:taskId/dispatch`.
+  `GET /api/tasks/worker-availability` exposes the current pool connection check.
 - Dispatch through `POST /api/runtime/launch` with `runtime: "cloud"`, a real
   packet ID, the registered repository, and the assigned branch. The route
   creates or binds a governed cloud lane and returns its ID with the durable
@@ -85,6 +94,23 @@ the transition; do not reuse a legacy credential as a cloud worker key.
   leased to a stopped process becomes claimable again after lease expiry, in a
   fresh clone. Repeated execution failures park the job after its attempt
   budget; an operator can inspect its transcript and retry deliberately.
+
+## Stopping and restarting
+
+Send `SIGINT` or `SIGTERM` to stop the worker. It cancels idle polls and retry
+delays, stops the current owned Git or Codex process and workspace services,
+then exits after cleanup. A Codex process that ignores the graceful stop gets
+a forced process-group stop after five seconds on supported systems.
+
+Stopping the runner is not cancelling the task. An interrupted job keeps its
+lease until expiry, then the existing queue can recover it in a fresh clone.
+It does not consume the execution failure budget or publish a completed result.
+The next runner start reuses the saved worker identity and cursor. Service
+teardown commands still have their existing individual time limits.
+
+Use the task's Abort action when the task itself should be cancelled. A hard
+kill, host failure, or power loss cannot run this cleanup; lease expiry still
+guards evidence, but orphan process cleanup needs host-level supervision.
 
 The worker does not log its cloud key, bearer header, or credential-bearing
 repository URL. Clone, Codex, push, and event failures are sent to the durable

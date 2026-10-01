@@ -167,6 +167,11 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
         }
         update({ toolsConfigured: true });
       }
+      if (!project && onboardingSetupIsReady(currentSetup) && !currentSetup.recommendation.preserved) {
+        setStatus('Preparing your tools…');
+        await persistOnboardingRuntimeSelection({ ...currentSetup, leadModel: currentSetup.recommendation.leadModel, workerModel: currentSetup.recommendation.workerModel }, request);
+        update({ toolsConfigured: true });
+      }
       if (!currentSetup.consentAnswered) { update({ step: 'privacy' }); await acknowledgeAgent(project, 'needs_privacy'); return; }
       await renewClaim();
       setStatus(project ? `Opening ${project.name}…` : 'Opening workspace…');

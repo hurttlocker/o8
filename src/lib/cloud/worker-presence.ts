@@ -47,8 +47,8 @@ export function recordCloudWorkerPresence(input: {
 }
 
 /** Revoked keys and stale sightings cannot make a worker appear connected. */
-export function listConnectedCloudWorkers(nowMs = Date.now()): ConnectedCloudWorker[] {
-  const activeKeys = listCloudWorkerKeys().filter((key) => !key.revokedAt);
+export function listConnectedCloudWorkers(nowMs = Date.now(), teamId?: string): ConnectedCloudWorker[] {
+  const activeKeys = listCloudWorkerKeys().filter((key) => !key.revokedAt && (!teamId || key.teamId === teamId));
   const query = getSqlite().prepare(`
     SELECT worker_id AS workerId, last_seen_at AS lastSeenAt
     FROM cloud_worker_presence

@@ -121,7 +121,11 @@ export async function GET(request: Request) {
     // Slow path — long-poll until a job arrives or timeout.
     // The AbortSignal on the incoming request fires when the worker hangs
     // up early; in that case we cancel the waiter so we don't leak memory.
-    const waiter = waitForJob(auth.teamId, cursor, workerId, waitMs, leaseMs);
+    const canClaim = () => {
+      const current = verifyCloudWorkerKey(request.headers.get('authorization'));
+      return current.ok && current.keyId === auth.keyId && current.teamId === auth.teamId;
+    };
+    const waiter = waitForJob(auth.teamId, cursor, workerId, waitMs, leaseMs, canClaim);
     const abort = request.signal;
     if (abort.aborted) {
       waiter.cancel();
@@ -132,6 +136,11 @@ export async function GET(request: Request) {
 
     try {
       const job = await waiter.promise;
+      const current = verifyCloudWorkerKey(request.headers.get('authorization'));
+      if (!current.ok) return authErrorResponse(current.status, current.reason);
+      if (current.keyId !== auth.keyId || current.teamId !== auth.teamId) {
+        return authErrorResponse(403, 'credential_identity_changed');
+      }
       if (!job) {
         return new NextResponse(null, { status: 204, headers: NO_STORE_HEADERS });
       }

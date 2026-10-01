@@ -453,6 +453,12 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/auto-compact-excerpt.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/auto-compact.test.ts",
       "reasons": [
         "executable-fixture"
@@ -1187,6 +1193,16 @@
       ]
     },
     {
+      "path": "tests/auth-exit-before-attach-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/automatic-release-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1565,6 +1581,20 @@
       ]
     },
     {
+      "path": "tests/cloud-published-base-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cloud-worker-poll-revocation-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cloud-worker-services-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1572,6 +1602,26 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cloud-worker-shutdown-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/codex-review-config-isolation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },
@@ -2135,6 +2185,16 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/local-egress-assertion-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "real-path"
       ]
     },
     {
@@ -2918,6 +2978,23 @@
       ]
     },
     {
+      "path": "tests/remote-task-dispatch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/remote-task-evidence-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-package-manager-contract-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3037,6 +3114,15 @@
         "network-listener",
         "process-signal",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/retired-owned-session-close-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -3160,6 +3246,12 @@
       ]
     },
     {
+      "path": "tests/runtime-carrier-conformance.integration.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/runtime-launch-idempotency-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -3198,6 +3290,13 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/setup-config-project-hooks-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },
@@ -3389,6 +3488,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/task-pool-history-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

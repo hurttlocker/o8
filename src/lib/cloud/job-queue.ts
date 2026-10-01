@@ -80,6 +80,7 @@ export function waitForJob(
   workerId: string,
   timeoutMs: number,
   leaseMs: number = cloudJobLeaseMs(),
+  canClaim?: () => boolean,
 ): { promise: Promise<CloudJob | null>; cancel: () => void } {
   let settled = false;
   let finish: (job: CloudJob | null) => void = () => {};
@@ -107,6 +108,7 @@ export function waitForJob(
   const check = () => {
     if (settled) return;
     try {
+      if (canClaim && !canClaim()) { settle(null); return; }
       const job = claimNextJob(teamId, cursor, workerId, leaseMs);
       if (job) settle(job);
     } catch (error) {

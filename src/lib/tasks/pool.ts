@@ -15,7 +15,7 @@ import type {
   WorkerIntent,
   WorkerRouting,
 } from '@/lib/orchestrator/types';
-import { buildProjectTaskBrief, getProjectContext, type ProjectContext } from '@/lib/projects/context';
+import { buildProjectTaskBrief, getProjectContext, ProjectNotFoundError, type ProjectContext } from '@/lib/projects/context';
 
 export type TaskPoolGroup = 'ready' | 'running' | 'review' | 'blocked' | 'done';
 
@@ -135,9 +135,17 @@ function packetAllowedFiles(packet: OrchestratorPacket | null): string[] {
   return [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
 }
 
-function chooseGroup(packet: OrchestratorPacket | null, lane: Lane | null): TaskPoolGroup {
+function chooseGroup(packet: OrchestratorPacket | null, lane: Lane | null, remoteJob?: CloudJob): TaskPoolGroup {
   if (packet?.releaseState === 'released' || (packet && DONE_PACKET_STATUSES.has(packet.status))) return 'done';
   if (lane && DONE_LANE_STATUSES.has(lane.status)) return 'done';
+  // Recover display truth for jobs dispatched before the explicit hold was
+  // cleared. Operator holds remain authoritative; only an exact remote binding
+  // can supersede the old pre-dispatch marker.
+  if (remoteJob && packet?.holdIntent === 'explicit-dispatch') {
+    if (remoteJob.status === 'leased') return 'running';
+    if (remoteJob.status === 'completed') return 'review';
+    if (remoteJob.status === 'parked' || remoteJob.status === 'cancelled') return 'blocked';
+  }
   if ((packet && REVIEW_PACKET_STATUSES.has(packet.status)) || (lane && REVIEW_LANE_STATUSES.has(lane.status))) {
     return 'review';
   }
@@ -238,17 +246,24 @@ function taskSortKey(task: TaskPoolTask): string {
 }
 
 async function resolveProjectContext(
-  cache: Map<string, ProjectContext>,
+  cache: Map<string, ProjectContext | null>,
   repoPath: string | null,
   projectId: string | null,
 ): Promise<ProjectContext | null> {
   if (!repoPath && !projectId) return null;
   const key = `${projectId ?? ''}::${repoPath ?? ''}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-  const context = await getProjectContext({ repoPath, projectId });
-  cache.set(key, context);
-  return context;
+  if (cache.has(key)) return cache.get(key) ?? null;
+  try {
+    const context = await getProjectContext({ repoPath, projectId });
+    cache.set(key, context);
+    return context;
+  } catch (error) {
+    // Historical lanes can outlive a project. Do not retarget them to the
+    // active project, or hide unrelated tasks behind one stale identity.
+    if (!(error instanceof ProjectNotFoundError)) throw error;
+    cache.set(key, null);
+    return null;
+  }
 }
 
 export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPool> {
@@ -258,7 +273,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     lane.packetId ? [[lane.packetId, lane] as const] : []
   )));
   const packetIds = new Set(mission.packets.map((packet) => packet.id));
-  const projectCache = new Map<string, ProjectContext>();
+  const projectCache = new Map<string, ProjectContext | null>();
   const tasks: TaskPoolTask[] = [];
   const nowMs = Date.now();
 
@@ -275,7 +290,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     if (options.projectId && context?.id !== options.projectId && context?.slug !== options.projectId) continue;
     if (options.repoPath && repoPath !== normalizePath(options.repoPath)) continue;
 
-    const group = chooseGroup(packet, lane);
+    const group = chooseGroup(packet, lane, execution ? remoteJob : undefined);
     if (!options.includeDone && group === 'done') continue;
 
     tasks.push({
@@ -295,7 +310,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       repoName: context?.currentRepo?.name ?? (repoPath ? basename(repoPath) : null),
       queueState: packet.queueState,
       releaseState: packet.releaseState,
-      blockedReason: packet.blockedReason ?? null,
+      blockedReason: execution && group !== 'blocked' ? null : packet.blockedReason ?? null,
       lastEventAt: lane?.lastEventAt ?? packet.lastEventAt ?? null,
       lastEventLabel: lane?.lastEventLabel ?? packet.lastEventLabel ?? null,
       allowedFiles: packetAllowedFiles(packet),

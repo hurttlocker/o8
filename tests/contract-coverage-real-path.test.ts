@@ -26,11 +26,14 @@ const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-repo-'));
 const reviewRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-review-repo-'));
 
 const { recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { getSqlite } = await import('@/lib/db');
+const { recordMission } = await import('@/lib/db/missions-store');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
 const { buildPreviewForLane } = await import('@/lib/lane/preview-merge');
 const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } =
   await import('@/lib/orchestrator/control-plane');
+const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
 function git(args: string[], cwd = repo): string {
@@ -204,17 +207,19 @@ async function assessPersistedContractPacket(input: {
 }
 
 describe('durable approval enforces contract coverage on the real path', () => {
-  it('persists the first captured contract on the bound packet before review starts', async () => {
+  it('persists the first contract to its background mission from the current worker only', async () => {
     const packetId = `pkt-capture-${Date.now()}`;
-    const sessionKey = `codex:${packetId}`;
-    const lane = createLane({
+    const missionId = `mission-${packetId}`;
+    const staleSessionKey = `codex:${packetId}:stale`;
+    const sessionKey = `codex:${packetId}:current`;
+    const staleLane = createLane({
       repoPath: reviewRepo,
       worktreePath: reviewRepo,
       branch: 'inline/contract-review',
       baseBranch: 'main',
       runtime: 'codex',
       packetId,
-      sessionKey,
+      sessionKey: staleSessionKey,
     });
     const packet: OrchestratorPacket = {
       id: packetId,
@@ -234,17 +239,37 @@ describe('durable approval enforces contract coverage on the real path', () => {
       taskContract: null,
       lane: {
         tileId: 'test', tabId: 'test', repoPath: reviewRepo, worktreePath: reviewRepo,
-        runtime: 'codex', sessionKey, laneId: lane.id,
+        runtime: 'codex', sessionKey: staleSessionKey, laneId: staleLane.id,
       },
     };
-    writeOrchestratorControlPlaneState({
+    const owningMission = {
       ...createEmptyOrchestratorMissionState(),
-      missionId: `mission-${packetId}`,
+      missionId,
       prompt: 'Capture contract',
       summary: 'Capture contract',
       repoPath: reviewRepo,
       packets: [packet],
+    };
+    recordMission({
+      id: missionId,
+      repoPath: reviewRepo,
+      runtime: 'codex',
+      prompt: owningMission.prompt,
+      summary: owningMission.summary,
+      constraints: owningMission.constraints ?? '',
+      packetMeta: [{ id: packet.id, title: packet.title, referenceLabel: packet.referenceLabel }],
+      missionState: owningMission,
+      totalWaves: 1,
     });
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-foreground-${packetId}`,
+      prompt: 'Different foreground mission',
+      summary: 'Different foreground mission',
+      repoPath: reviewRepo,
+    });
+    let emittedContract = processContract;
+    let replacementLaneId = '';
     const runtime: AgentRuntime = {
       id: 'codex',
       displayName: 'Contract capture fixture',
@@ -253,9 +278,135 @@ describe('durable approval enforces contract coverage on the real path', () => {
         interrupt: false, reviewDiffs: true, costTelemetry: false, streaming: false,
       },
       discoverSessions: async () => [],
+      readTranscript: async (capturedSessionKey) => {
+        if (capturedSessionKey === staleSessionKey && !replacementLaneId) {
+          getSqlite().prepare(`
+            UPDATE lanes
+               SET status = 'archived', created_at = '2026-01-01T00:00:00.000Z'
+             WHERE id = ?
+          `).run(staleLane.id);
+          replacementLaneId = createLane({
+            repoPath: reviewRepo,
+            worktreePath: reviewRepo,
+            branch: 'inline/contract-review',
+            baseBranch: 'main',
+            runtime: 'codex',
+            packetId,
+            sessionKey,
+          }).id;
+        }
+        return [{
+          id: 'contract-turn', role: 'assistant',
+          text: `<task-contract>${JSON.stringify(emittedContract)}</task-contract>`,
+          timestamp: new Date('2026-09-23T12:00:00Z'),
+        }];
+      },
+      launch: async () => ({ ok: false, note: 'not supported' }),
+      resume: async () => ({ ok: false, note: 'not supported' }),
+      interrupt: async () => ({ ok: false, note: 'not supported' }),
+      getChangedFiles: async () => [],
+    };
+    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+    const { registerRuntime } = await import('@/lib/runtimes/registry');
+    registerRuntime(runtime);
+
+    await capturePacketCompletionContext(packetId, staleSessionKey);
+    expect(replacementLaneId).not.toBe('');
+    expect(readMissionRegistryEntry(missionId)?.mission.packets[0]?.taskContract).toBeNull();
+
+    const context = await capturePacketCompletionContext(packetId, sessionKey);
+    expect(context.taskContract).toEqual(processContract);
+    expect(readMissionRegistryEntry(missionId)?.mission.packets[0]?.taskContract).toEqual(processContract);
+    expect(readOrchestratorControlPlaneState().missionId).toBe(`mission-foreground-${packetId}`);
+
+    emittedContract = capturedContract;
+    await capturePacketCompletionContext(packetId, sessionKey);
+    expect(readMissionRegistryEntry(missionId)?.mission.packets[0]?.taskContract).toEqual(processContract);
+
+    const archivedPacketId = `${packetId}-archived`;
+    const archivedMissionId = `${missionId}-archived`;
+    const archivedSessionKey = `${sessionKey}-archived`;
+    createLane({
+      repoPath: reviewRepo,
+      worktreePath: reviewRepo,
+      branch: 'inline/contract-review',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: archivedPacketId,
+      sessionKey: archivedSessionKey,
+    });
+    const archivedMission = {
+      ...owningMission,
+      missionId: archivedMissionId,
+      packets: [{ ...packet, id: archivedPacketId, lane: { ...packet.lane!, sessionKey: archivedSessionKey } }],
+    };
+    recordMission({
+      id: archivedMissionId,
+      repoPath: reviewRepo,
+      runtime: 'codex',
+      prompt: archivedMission.prompt,
+      summary: archivedMission.summary,
+      constraints: archivedMission.constraints ?? '',
+      packetMeta: [{ id: archivedPacketId, title: packet.title, referenceLabel: packet.referenceLabel }],
+      missionState: archivedMission,
+      totalWaves: 1,
+    });
+    getSqlite().prepare('UPDATE missions SET archived_at = ? WHERE id = ?').run(Date.now(), archivedMissionId);
+    await capturePacketCompletionContext(archivedPacketId, archivedSessionKey);
+    const archivedEntry = readMissionRegistryEntry(archivedMissionId, { includeArchived: true });
+    expect(archivedEntry?.archivedAt).not.toBeNull();
+    expect(archivedEntry?.mission.packets[0]?.taskContract).toBeNull();
+  }, 30_000);
+
+  it('persists the first contract to the active mission despite a missing packet lane projection', async () => {
+    const packetId = `pkt-active-capture-${Date.now()}`;
+    const sessionKey = `codex:${packetId}`;
+    createLane({
+      repoPath: reviewRepo,
+      worktreePath: reviewRepo,
+      branch: 'inline/contract-review',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      sessionKey,
+    });
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-${packetId}`,
+      prompt: 'Active contract capture',
+      summary: 'Active contract capture',
+      repoPath: reviewRepo,
+      packets: [{
+        id: packetId,
+        referenceLabel: 'P1',
+        title: 'Active contract capture',
+        summary: 'Active contract capture',
+        workspaceTargetPath: reviewRepo,
+        branchTarget: 'inline/contract-review',
+        runtime: 'codex',
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'queued',
+        releaseState: 'pending',
+        status: 'awaiting_review',
+        taskContractRequired: true,
+        taskContractSource: 'default',
+        taskContract: null,
+        lane: null,
+      }],
+    });
+    let emittedContract = processContract;
+    const runtime: AgentRuntime = {
+      id: 'codex',
+      displayName: 'Active contract capture fixture',
+      capabilities: {
+        discover: false, readTranscript: true, launch: false, resume: false,
+        interrupt: false, reviewDiffs: true, costTelemetry: false, streaming: false,
+      },
+      discoverSessions: async () => [],
       readTranscript: async () => [{
         id: 'contract-turn', role: 'assistant',
-        text: `<task-contract>${JSON.stringify(processContract)}</task-contract>`,
+        text: `<task-contract>${JSON.stringify(emittedContract)}</task-contract>`,
         timestamp: new Date('2026-09-23T12:00:00Z'),
       }],
       launch: async () => ({ ok: false, note: 'not supported' }),
@@ -266,19 +417,11 @@ describe('durable approval enforces contract coverage on the real path', () => {
     const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
     const { registerRuntime } = await import('@/lib/runtimes/registry');
     registerRuntime(runtime);
-    expect(readOrchestratorControlPlaneState().packets[0]?.lane?.sessionKey).toBe(sessionKey);
-    const context = await capturePacketCompletionContext(packetId, sessionKey);
-    expect(context.taskContract).toEqual(processContract);
+
+    await capturePacketCompletionContext(packetId, sessionKey);
     expect(readOrchestratorControlPlaneState().packets[0]?.taskContract).toEqual(processContract);
 
-    registerRuntime({
-      ...runtime,
-      readTranscript: async () => [{
-        id: 'later-turn', role: 'assistant',
-        text: `<task-contract>${JSON.stringify(capturedContract)}</task-contract>`,
-        timestamp: new Date('2026-09-23T12:01:00Z'),
-      }],
-    });
+    emittedContract = capturedContract;
     await capturePacketCompletionContext(packetId, sessionKey);
     expect(readOrchestratorControlPlaneState().packets[0]?.taskContract).toEqual(processContract);
   }, 30_000);
