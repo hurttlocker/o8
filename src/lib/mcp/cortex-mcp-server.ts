@@ -25,6 +25,7 @@ import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
+import { CORTEX_READONLY_TOOLS } from './cortex-readonly-tools';
 import { parseMcpConfigInput, type ParsedMcpServer } from './parse-config';
 import { getOrCreateWsToken } from '../ws-auth';
 import {
@@ -122,18 +123,6 @@ const { handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam } = cr
 // any cortex tool added later, and every mutator) FAILS CLOSED. Allowlist, not
 // denylist — new tools must opt IN to being proposer-safe, never fall through.
 const CORTEX_READONLY = process.env.CORTEX_READONLY === '1';
-const CORTEX_READONLY_TOOLS = new Set<string>([
-  'cortex_ask',
-  'cortex_read_packets',
-  'cortex_read_transcript',
-  'cortex_fleet_status',
-  'cortex_list_approvals',
-  'cortex_list_issues',
-  'cortex_list_prs',
-  'cortex_list_projects',
-  'cortex_ci_status',
-  'cortex_shared_team_status',
-]);
 
 // ── Tool Definitions ──
 

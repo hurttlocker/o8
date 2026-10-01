@@ -8,6 +8,7 @@ export interface XtermPanelProps {
   tmuxSession: string;
   /** Observe an existing run without writing keystrokes into its PTY. */
   readOnly?: boolean;
+  inputLocked?: boolean;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number, readOnly?: boolean) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;

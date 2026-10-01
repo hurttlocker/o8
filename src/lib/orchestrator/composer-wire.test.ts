@@ -4,6 +4,7 @@ import {
   COMPOSER_MODE_DIRECTIVES,
   composeComposerWireMessage,
   isKnownComposerPreambleTitle,
+  modelFacingComposerMessage,
   resolveOrchestratorTranscriptMessage,
   stripKnownComposerWirePreamble,
   type ComposerWireMode,
@@ -89,5 +90,20 @@ describe('isKnownComposerPreambleTitle', () => {
   it('rejects operator-authored titles and non-strings', () => {
     expect(isKnownComposerPreambleTitle('Fix the multitask dispatch bug')).toBe(false);
     expect(isKnownComposerPreambleTitle(null)).toBe(false);
+  });
+});
+
+describe('modelFacingComposerMessage', () => {
+  it('drops the composer directive on a single-mode turn, whichever mode was picked', () => {
+    for (const mode of [...MODES, 'fusion'] as ComposerWireMode[]) {
+      const { wireMessage } = composeComposerWireMessage('Fix the footer', mode);
+      expect(modelFacingComposerMessage(wireMessage, 'single'), mode).toBe('Fix the footer');
+    }
+  });
+
+  it('keeps the composer directive on fleet and fusion turns', () => {
+    const { wireMessage } = composeComposerWireMessage('Fan this out', 'multitask');
+    expect(modelFacingComposerMessage(wireMessage, 'fleet')).toBe(wireMessage);
+    expect(modelFacingComposerMessage(wireMessage, 'fusion')).toBe(wireMessage);
   });
 });

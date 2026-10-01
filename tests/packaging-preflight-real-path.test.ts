@@ -15,15 +15,44 @@ const picomatch = createRequire(import.meta.url)('next/dist/compiled/picomatch')
   patterns: string[], options: { dot: boolean; contains: boolean },
 ) => (path: string) => boolean;
 
+function thinMachO(cpuType: number) {
+  const binary = Buffer.alloc(32);
+  binary.writeUInt32LE(0xfeedfacf, 0);
+  binary.writeUInt32LE(cpuType, 4);
+  return binary;
+}
+
+function universalMachO() {
+  const cpuTypes = [0x01000007, 0x0100000c];
+  const slices = cpuTypes.map(thinMachO);
+  const binary = Buffer.alloc(8 + slices.length * 20 + slices.reduce((sum, slice) => sum + slice.length, 0));
+  binary.writeUInt32BE(0xcafebabe, 0);
+  binary.writeUInt32BE(slices.length, 4);
+  let offset = 8 + slices.length * 20;
+  slices.forEach((slice, index) => {
+    const entry = 8 + index * 20;
+    binary.writeUInt32BE(cpuTypes[index], entry);
+    binary.writeUInt32BE(offset, entry + 8);
+    binary.writeUInt32BE(slice.length, entry + 12);
+    slice.copy(binary, offset);
+    offset += slice.length;
+  });
+  return binary;
+}
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'o8-package-preflight-'));
   roots.push(root);
-  const app = join(root, 'src-tauri/target/release/bundle/macos/o8.app');
+  const app = join(root, 'src-tauri/target/universal-apple-darwin/release/bundle/macos/o8.app');
   const server = join(app, 'Contents/Resources/server');
   for (const file of ['server.js', '.next/server/app/page.js', '.next/static/chunks/main.js',
     '.next/required-server-files.json', 'node_modules/better-sqlite3/binding.node']) {
     mkdirSync(dirname(join(server, file)), { recursive: true });
     writeFileSync(join(server, file), `runtime:${file}`);
+  }
+  for (const name of ['o8', 'speech_recognizer', 'speech-local']) {
+    mkdirSync(join(app, 'Contents/MacOS'), { recursive: true });
+    writeFileSync(join(app, 'Contents/MacOS', name), universalMachO());
   }
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.1.742' }));
   return { root, app, server };

@@ -52,6 +52,7 @@ describe('orchestrator home HTTP session seams', () => {
   it('compacts home mode against the resolved home path without registry lookup', async () => {
     const response = await compactRoute.POST(post('/api/orchestrator/compact', {
       repoPath: '~',
+      threadId: 'thoughts-home-compact',
       messages: [],
       runningTotal: 0,
     }));
@@ -60,6 +61,7 @@ describe('orchestrator home HTTP session seams', () => {
     expect(mocks.registryResolve).not.toHaveBeenCalled();
     expect(mocks.autoCompact).toHaveBeenCalledWith(expect.objectContaining({
       repoPath: homedir(),
+      threadId: 'thoughts-home-compact',
     }));
   });
 

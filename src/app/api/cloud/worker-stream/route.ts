@@ -19,15 +19,16 @@
 import { NextResponse } from 'next/server';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
-import { appendJobEvent } from '@/lib/cloud/job-queue';
+import { appendJobEvent, getJob } from '@/lib/cloud/job-queue';
+import { recordCloudWorkerPresence } from '@/lib/cloud/worker-presence';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' };
 
-type StreamEventType = 'chunk' | 'diff' | 'completed' | 'errored' | 'heartbeat';
-const STREAM_EVENT_TYPES = new Set<StreamEventType>(['chunk', 'diff', 'completed', 'errored', 'heartbeat']);
+type StreamEventType = 'chunk' | 'diff' | 'service' | 'completed' | 'errored' | 'heartbeat';
+const STREAM_EVENT_TYPES = new Set<StreamEventType>(['chunk', 'diff', 'service', 'completed', 'errored', 'heartbeat']);
 
 function isStreamEventType(value: unknown): value is StreamEventType {
   return typeof value === 'string' && STREAM_EVENT_TYPES.has(value as StreamEventType);
@@ -49,6 +50,18 @@ function isDiffPayload(value: unknown): boolean {
     && Number(file.deletions) >= 0
     && (file.originalPath === undefined || typeof file.originalPath === 'string')
   ));
+}
+
+function isServicePayload(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value.name === 'string' && value.name.trim().length > 0
+    && value.name.length <= 64 && !/[\x00-\x1f\x7f]/.test(value.name)
+    && (value.state === 'healthy' || value.state === 'stopped' || value.state === 'failed')
+    && typeof value.commandId === 'string' && /^[a-f0-9]{64}$/.test(value.commandId)
+    && typeof value.manifestHash === 'string' && /^[a-f0-9]{64}$/.test(value.manifestHash)
+    && Number.isInteger(value.claimCount) && Number(value.claimCount) > 0
+    && (value.port === null || (Number.isInteger(value.port) && Number(value.port) > 0 && Number(value.port) <= 65_535))
+    && (value.health === undefined || (typeof value.health === 'boolean'));
 }
 
 function authErrorResponse(status: 401 | 403, reason: string) {
@@ -88,8 +101,18 @@ export async function POST(request: Request) {
   if (type === 'diff' && !isDiffPayload(body.payload)) {
     return badRequest('Invalid diff payload');
   }
+  if (type === 'service' && !isServicePayload(body.payload)) {
+    return badRequest('Invalid service payload');
+  }
 
   try {
+    if (type === 'service' && isRecord(body.payload)) {
+      const job = getJob(auth.teamId, jobId);
+      if (!job || job.claimCount !== body.payload.claimCount
+        || job.launch.remoteManifestHash !== body.payload.manifestHash) {
+        return badRequest('Service receipt does not match the current job attempt');
+      }
+    }
     const result = appendJobEvent({
       teamId: auth.teamId,
       jobId,
@@ -113,6 +136,8 @@ export async function POST(request: Request) {
         { status: 409, headers: NO_STORE_HEADERS },
       );
     }
+
+    recordCloudWorkerPresence({ teamId: auth.teamId, keyId: auth.keyId, workerId });
 
     return NextResponse.json(
       {

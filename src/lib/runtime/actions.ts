@@ -196,7 +196,8 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
 
   const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
-  const supportsWorktrees = ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'deepseek-harness'].includes(runtimeId)
+  const remoteManagedWorktree = runtimeId === 'cloud';
+  const supportsWorktrees = remoteManagedWorktree || ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'deepseek-harness'].includes(runtimeId)
     || listDeclarativeRuntimes().includes(runtimeId as OrchestratorRuntime);
   const packetNeedsWorktree = packetRequiresWorktree(payload);
 
@@ -217,7 +218,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
 
   // Dispatch can force isolation while still skipping environment setup.
-  const shouldCreateWorktree = supportsWorktrees && repoIsGit && (payload.isolate || !payload.skipSetup);
+  const shouldCreateWorktree = !remoteManagedWorktree && supportsWorktrees && repoIsGit && (payload.isolate || !payload.skipSetup);
   if (shouldCreateWorktree) {
     const retryInSeconds = fetchUnreachableCooldownRetrySeconds(repoPath, {
       packetId: payload.packetId ?? null,
@@ -337,12 +338,35 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
       throw packetWorktreeProvisionError(payload, runtimeId, repoPath, err, note);
     }
   }
-  if (packetNeedsWorktree && !launchWorktree?.worktree) {
+  if (packetNeedsWorktree && !remoteManagedWorktree && !launchWorktree?.worktree) {
     const note = 'Managed worktree preparation returned no worktree.';
     throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
   }
 
   const cwd = launchWorktree?.cwd ?? repoPath;
+  if (remoteManagedWorktree && payload.existingLaneId) {
+    const lane = listLanes().find((candidate) => candidate.id === payload.existingLaneId);
+    if (!lane
+      || lane.packetId !== payload.packetId
+      || lane.runtime !== 'cloud'
+      || lane.status !== 'launching'
+      || lane.sessionKey !== null
+      || lane.repoPath !== repoPath
+      || lane.branch !== payload.branchName) {
+      const note = 'Remote execution requires an exact unbound cloud lane for this packet and branch.';
+      return {
+        ok: false,
+        runtime: runtimeId,
+        clientMutationId: payload.clientMutationId,
+        surfaceId: '',
+        note,
+        cwd,
+        repoPath,
+        worktree: null,
+        laneId: payload.existingLaneId,
+      };
+    }
+  }
   if (packetNeedsWorktree && payload.existingLaneId && payload.packetId && launchWorktree?.worktree) {
     const lane = listLanes().find((candidate) => candidate.id === payload.existingLaneId);
     if (!lane
@@ -362,6 +386,9 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
   const result = await runtime.launch({
     cwd,
+    sourceRepoPath: repoPath,
+    branchName: payload.branchName,
+    baseBranch: payload.baseBranch,
     prompt: launchPrompt,
     taskName: payload.taskName,
     clientMutationId: payload.clientMutationId,
