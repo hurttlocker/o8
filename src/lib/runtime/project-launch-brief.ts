@@ -36,6 +36,7 @@ export async function buildLaunchPromptWithProjectBrief(
     repoPath: contextRepoPath,
     taskTitle: payload.taskName?.trim() || summarizeTaskName(prompt),
     taskBody: prompt,
+    includeLocalPaths: payload.runtime !== 'cloud',
   });
   return { projectContext, prompt: buildProjectBriefPromptV1(projectBrief, prompt) };
 }

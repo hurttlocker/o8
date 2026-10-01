@@ -19,6 +19,7 @@ import { settleWorkspaceManifestOnTerminal } from '@/lib/workspace/manifest/term
 import { captureLaneStorageCleanup, laneOwnsWorktree, settleLaneStorageOnAssociationLoss, worktreeIsConfirmedAbsent } from './lane-storage-release';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { resolveLaneCreationBaseCommit } from './creation-base';
+import { CODEX_AUTH_RECOVERY_LANE_LABEL } from './current-auth-exit';
 
 export {
   findLanesTouching,
@@ -566,19 +567,15 @@ export function attachSession(
   laneId: string,
   sessionKey: string,
   actor: LaneEventActor = 'system',
+  eventPayload: Record<string, unknown> = {},
 ): Lane | null {
   const lane = getLane(laneId);
   if (!lane) return null;
-
   const now = nowIso();
-  updateLaneRecord(laneId, {
-    sessionKey,
-    updatedAt: now,
-    lastEventAt: now,
-    lastEventLabel: 'session_attached',
-  });
-
-  appendEvent(laneId, 'attach_session', actor, { sessionKey });
+  getSqlite().transaction(() => {
+    updateLaneRecord(laneId, { sessionKey, updatedAt: now, lastEventAt: now, lastEventLabel: 'session_attached' });
+    appendEvent(laneId, 'attach_session', actor, { ...eventPayload, sessionKey });
+  })();
   return getLane(laneId);
 }
 
@@ -709,7 +706,7 @@ export function reconcileLanesWithSessions(
       // wakes). The lane status is the truth here; the session is a heuristic.
       // (`awaiting_orchestrator` — incl. the Huddle alignment turn — keeps its
       // own continue below so the warm session survives for steer_packet.)
-      if (isWorkerTerminal(lane.status) || lane.status === 'merging') continue;
+      if (lane.runtime === 'cloud' || isWorkerTerminal(lane.status) || lane.status === 'merging') continue;
 
       if (lane.sessionKey) {
         const session = sessionByKey.get(lane.sessionKey);
@@ -761,15 +758,14 @@ export function reconcileLanesWithSessions(
 
         // Session came back (or never went missing) — clear any pending grace timer.
         sessionMissingSince.delete(lane.sessionKey);
-        // A lane parked for a human decision (awaiting_orchestrator, or the
-        // layer-5 awaiting_human give-up #1513) must NOT be flipped back to
-        // `running` just because a session still lingers — the operator owns it.
+        // A lane parked for a human decision (awaiting_orchestrator, or the layer-5
+        // awaiting_human give-up #1513) stays parked while its session lingers.
         if (lane.status === 'awaiting_orchestrator' || lane.status === 'awaiting_human') {
           continue;
         }
         if (
           lane.status === 'awaiting_input'
-          && lane.lastEventLabel?.startsWith(SILENT_EXIT_EVENT_PREFIX)
+          && (lane.lastEventLabel?.startsWith(SILENT_EXIT_EVENT_PREFIX) || lane.lastEventLabel === CODEX_AUTH_RECOVERY_LANE_LABEL)
         ) {
           continue;
         }

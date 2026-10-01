@@ -69,6 +69,7 @@ export interface SlashCommandContext {
     resumePrelude: string | null;
     tokensAfter: number;
   } | null>;
+  isCurrentThread?: () => boolean;
   resetRemoteSession: () => Promise<boolean>;
   queuePrelude: (prelude: string, mode?: 'append' | 'replace') => void;
   searchArchive: (query: string, limit?: number) => Promise<OrchestratorArchiveMatch[]>;

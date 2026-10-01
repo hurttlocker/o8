@@ -2,7 +2,7 @@
  * Cortex read-only profile (Collide proposer / #1075) — STRUCTURAL proof at the
  * real server. Spawns cortex-mcp-server.ts with CORTEX_READONLY=1, drives the
  * stdio JSON-RPC, and asserts:
- *   - tools/list advertises ONLY the 9 allowlisted read tools — cortex_launch_agent
+ *   - tools/list advertises ONLY the allowlisted read tools — cortex_launch_agent
  *     and every other mutator are absent from the proposer's surface;
  *   - tools/call cortex_launch_agent is REJECTED (fail-closed) without dispatching;
  *   - control: WITHOUT the flag, cortex_launch_agent IS advertised.
@@ -17,11 +17,9 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
 import './require-temp-data-dir';
+import { CORTEX_READONLY_TOOLS } from '../../src/lib/mcp/cortex-readonly-tools';
 const SERVER = join(process.cwd(), 'src/lib/mcp/cortex-mcp-server.ts');
-const READONLY_EXPECTED = [
-  'cortex_ask', 'cortex_read_packets', 'cortex_read_transcript', 'cortex_fleet_status',
-  'cortex_list_approvals', 'cortex_list_issues', 'cortex_list_prs', 'cortex_list_projects', 'cortex_ci_status',
-].sort();
+const READONLY_EXPECTED = [...CORTEX_READONLY_TOOLS].sort();
 
 interface Rpc { id: number; method: string; params?: unknown }
 
@@ -77,7 +75,7 @@ async function main(): Promise<void> {
   // ── Read-only profile.
   const ro = await driveServer(true, reqs);
   const roTools = toolNames(ro.get(2)).sort();
-  assert.deepStrictEqual(roTools, READONLY_EXPECTED, `read-only tools/list must be exactly the 9 reads; got ${roTools.join(', ')}`);
+  assert.deepStrictEqual(roTools, READONLY_EXPECTED, `read-only tools/list must be exactly the allowlisted reads; got ${roTools.join(', ')}`);
   assert(!roTools.includes('cortex_launch_agent'), 'cortex_launch_agent ABSENT from read-only surface');
   const callRes = (ro.get(3)?.result ?? {}) as { isError?: boolean; content?: Array<{ text?: string }> };
   assert(callRes.isError === true, 'tools/call cortex_launch_agent is rejected in read-only mode');

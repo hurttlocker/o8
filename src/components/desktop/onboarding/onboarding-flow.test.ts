@@ -92,6 +92,90 @@ it('opens the chosen project after explicit privacy choices, without a tour or t
   expect(writes.map(([, init]) => JSON.parse(String(init?.body)))).toContainEqual({ crashReportsEnabled: false, productTelemetryEnabled: false, telemetryConsentAnswered: true });
 });
 
+it('saves a ready projectless recommendation before privacy and completes after consent', async () => {
+  const request = vi.fn(createOnboardingPreviewRequest());
+  const { complete } = await render(request);
+
+  await click('Start without a project');
+  expect(complete).not.toHaveBeenCalled();
+  expect(button('Save both choices')).toBeDefined();
+
+  const routingWritesBeforePrivacy = request.mock.calls.filter(([, init]) => {
+    if (init?.method !== 'POST') return false;
+    return JSON.parse(String(init.body)).orchestratorBackend !== undefined;
+  });
+  expect(routingWritesBeforePrivacy).toHaveLength(1);
+  expect(JSON.parse(String(routingWritesBeforePrivacy[0]?.[1]?.body))).toMatchObject({
+    orchestratorBackend: 'codex',
+    defaultDispatchRuntime: 'codex',
+    workerRuntimes: ['codex'],
+  });
+
+  await click('Keep crash reports off');
+  await click('Keep product usage off');
+  await click('Save both choices');
+
+  expect(complete).toHaveBeenCalledWith(undefined);
+  expect(request.mock.calls.filter(([, init]) => {
+    if (init?.method !== 'POST') return false;
+    return JSON.parse(String(init.body)).orchestratorBackend !== undefined;
+  })).toHaveLength(1);
+});
+
+it('preserves explicit projectless routing without writing it again', async () => {
+  const fixture = createOnboardingPreviewRequest(localStorage);
+  await fixture('/api/panel/operator-defaults', { method: 'POST', body: JSON.stringify({
+    orchestratorBackend: 'claude', workerRuntimes: ['claude-code'], defaultDispatchRuntime: 'claude-code',
+    telemetryConsentAnswered: true, crashReportsEnabled: false, productTelemetryEnabled: false,
+  }) });
+  const request = vi.fn(fixture);
+  const { complete } = await render(request);
+
+  await click('Start without a project');
+
+  expect(complete).toHaveBeenCalledWith(undefined);
+  expect(request.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('allows projectless exploration without a ready tool', async () => {
+  const request = vi.fn(createOnboardingPreviewRequest(null, 'none'));
+  const { complete } = await render(request);
+
+  await click('Start without a project');
+  expect(button('Save both choices')).toBeDefined();
+  await click('Keep crash reports off');
+  await click('Keep product usage off');
+  await click('Save both choices');
+
+  expect(complete).toHaveBeenCalledWith(undefined);
+  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+    { crashReportsEnabled: false, productTelemetryEnabled: false, telemetryConsentAnswered: true },
+  ]);
+});
+
+it('does not continue projectless setup when saving the recommendation fails', async () => {
+  const fixture = createOnboardingPreviewRequest();
+  let fail = true;
+  const request = vi.fn<OnboardingRequest>(async (url, init) => {
+    if (String(url).includes('operator-defaults') && init?.method === 'POST'
+      && JSON.parse(String(init.body)).orchestratorBackend !== undefined && fail) {
+      return Response.json({ error: 'Could not save setup' }, { status: 503 });
+    }
+    return fixture(url, init);
+  });
+  const { complete } = await render(request);
+
+  await click('Start without a project');
+  expect(document.body.textContent).toContain('Could not save setup');
+  expect(document.body.textContent).not.toContain('Choose what to share');
+  expect(complete).not.toHaveBeenCalled();
+
+  fail = false;
+  await click('Start without a project');
+  expect(button('Save both choices')).toBeDefined();
+  expect(complete).not.toHaveBeenCalled();
+});
+
 it('resumes privacy with the selected project and retries a failed workspace handoff', async () => {
   localStorage.setItem(PROGRESS_KEY, JSON.stringify({ ...emptyProgress('privacy'), project: PREVIEW_PROJECT }));
   const complete = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);

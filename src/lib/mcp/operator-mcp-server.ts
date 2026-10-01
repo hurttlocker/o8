@@ -162,7 +162,7 @@ function runPreflightDiagnostics(): void {
     console.error(
       `[o8-operator] Pre-flight warning: missing binaries on PATH: ${missing.join(', ')}. ` +
       `Tools that depend on them will fail with a clear error. ` +
-      `Install with: \`npm i -g @openai/codex-cli\` / \`brew install gh\`.`,
+      `Install with: \`npm i -g @openai/codex\` / \`brew install gh\`.`,
     );
   }
 }

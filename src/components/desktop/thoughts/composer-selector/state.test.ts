@@ -126,7 +126,7 @@ describe('composer selector state', () => {
     expect(['low', 'medium', 'adaptive', 'high'].some((effort) => isHotComposerEffort(effort as ThinkingEffort))).toBe(false);
   });
 
-  it('keeps the free backend on its real low tier while exposing both o8 tiers', () => {
+  it.each([true, false])('keeps o8 on Low without locked efforts (free plan: %s)', (isFreePlan) => {
     const resolved = resolveComposerSelectorState({
       mode: 'solo',
       leadModelId: 'o8-free',
@@ -136,15 +136,32 @@ describe('composer selector state', () => {
       threadEffortByModel: {},
       operatorDefaultEffort: 'max',
       adaptiveEnabled: true,
-      isFreePlan: true,
+      isFreePlan,
       workerRuntimeLabel: 'Codex',
     });
 
     expect(resolved.effort).toBe('low');
     expect(resolved.effortOptions).toEqual(['low']);
-    expect(resolved.lockedEffortOptions).toEqual(['high']);
+    expect(resolved.lockedEffortOptions).toEqual([]);
     expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
-    expect(composerEffortConsequence('o8', 'high')).toBe('High · founders');
+    expect(resolved.effortClampedFrom).toBe('high');
+  });
+
+  it.each([true, false])('defaults o8 to Low without a saved preference (free plan: %s)', (isFreePlan) => {
+    const resolved = resolveComposerSelectorState({
+      mode: 'solo',
+      leadModelId: 'o8-free',
+      leadModelLabel: 'o8',
+      leadBackend: 'o8',
+      inSessionEffortByModel: {},
+      threadEffortByModel: {},
+      operatorDefaultEffort: 'high',
+      adaptiveEnabled: true,
+      isFreePlan,
+    });
+    expect(resolved.effort).toBe('low');
+    expect(resolved.effortClampedFrom).toBeNull();
+    expect(resolved.lockedEffortOptions).toEqual([]);
   });
 
   it('clamps a free o8 effort change before it reaches persistence callbacks', () => {

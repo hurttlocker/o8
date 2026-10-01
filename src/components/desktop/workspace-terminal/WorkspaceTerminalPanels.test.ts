@@ -169,6 +169,22 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
     expect(container.querySelector('[data-o8-term-tab="tab-0"]')?.getAttribute('data-o8-term-state')).toBe('ws-disconnected');
   });
 
+  it('keeps a reserved saved-machine pane out of the generic session chooser', async () => {
+    await act(async () => root.render(createElement(WorkspaceTerminalPanels, {
+      ...panelProps([]),
+      tileId: 'machine-pane',
+      pendingRemotePane: true,
+    })));
+    expect(container.textContent).toContain('Connecting to saved machine');
+    expect(container.textContent).not.toContain('Start a new session');
+
+    await act(async () => window.dispatchEvent(new CustomEvent('o8:remote-pane-open-failed', {
+      detail: { tileId: 'machine-pane', message: 'Machine session is busy.' },
+    })));
+    expect(container.textContent).toContain('Could not open saved machine');
+    expect(container.textContent).toContain('Machine session is busy.');
+  });
+
   it('enters and exits Terminal Mode 100 times without replacing the resident XtermPanel', async () => {
     const previousTab = {
       id: 'chat-before-mode',

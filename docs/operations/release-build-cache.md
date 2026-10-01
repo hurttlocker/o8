@@ -8,7 +8,7 @@ The build wrapper caches three generated trees:
 
 - Web compiler state under `.next/cache`.
 - Speech helper compiler state under `src-tauri/sidecars/speech-local/.build`.
-- Native release compiler state under `src-tauri/target/release`, excluding `bundle/`, exported `server/`, and cache receipts.
+- Native release compiler state under the Cargo release directories selected by the build target, excluding `bundle/`, exported `server/`, and cache receipts. The stable universal macOS build caches the `x86_64-apple-darwin`, `aarch64-apple-darwin`, and `universal-apple-darwin` release trees as one target contract.
 
 Final applications, installers, exported server output, signatures, notarization tickets, and publication state are never cache inputs or cache outputs. A warm build still runs every normal build phase. Restored compiler state only gives those tools an incremental starting point.
 
@@ -27,7 +27,7 @@ This verification detects corruption and metadata mismatch. It does not turn an 
 
 ## Operation
 
-`npm run tauri:build`, `npm run tauri:build:signed`, and `npm run tauri:build:nonotary` use the shared cache automatically. The default root is `~/.o8-build-cache/release-v1`.
+`npm run tauri:build`, `npm run tauri:build:signed`, `npm run tauri:build:nonotary`, and `npm run tauri:build:stable-macos` use the shared cache automatically. The default root is `~/.o8-build-cache/release-v1`.
 
 Set `O8_RELEASE_BUILD_CACHE_DIR` to isolate a canary or move the cache to another local volume. Set `O8_RELEASE_BUILD_CACHE=off` to bypass restore and capture without changing the build command.
 
