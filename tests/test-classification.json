@@ -1643,6 +1643,14 @@
       ]
     },
     {
+      "path": "tests/codex-review-retry-head-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-sol-compatibility-real-path.test.ts",
       "reasons": [
         "child-process",
