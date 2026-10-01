@@ -6,6 +6,8 @@ import { NextResponse } from 'next/server';
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { spawnsViaInterpreter } from '@/lib/runtimes/shared/cli-spawn';
+import { CODEX_MODEL_IDS, MODEL_IDS } from '@/lib/models';
+import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupported } from '@/lib/codex/model-compatibility';
 
 /**
  * POST /api/v2/proxy/cli
@@ -50,11 +52,7 @@ function describeSilentExit(input: {
 }
 
 const CODEX_MODEL_MAP: Record<string, string> = {
-  'gpt-5.6-sol': 'gpt-5.6-sol',
-  'gpt-5.6-terra': 'gpt-5.6-terra',
-  'gpt-5.6-luna': 'gpt-5.6-luna',
-  'gpt-5.5': 'gpt-5.5',
-  'gpt-5.4': 'gpt-5.4',
+  ...Object.fromEntries(CODEX_MODEL_IDS.map((id) => [id, id])),
   'o4-mini': 'o4-mini',
 };
 
@@ -127,6 +125,7 @@ export async function POST(request: Request) {
 
     let cmd: string;
     let args: string[];
+    let codexModel: string | undefined;
     let cliSpec: {
       runtimeId: string;
       binaryName: string;
@@ -146,7 +145,8 @@ export async function POST(request: Request) {
         }, { status: 410 });
       }
       case 'codex': {
-        const cliModel = CODEX_MODEL_MAP[modelKey] ?? 'gpt-5.6-sol';
+        const cliModel = CODEX_MODEL_MAP[modelKey] ?? MODEL_IDS.codexCliDefault;
+        codexModel = cliModel;
         cmd = 'codex';
         cliSpec = {
           runtimeId: 'codex',
@@ -238,86 +238,114 @@ export async function POST(request: Request) {
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();
-        const child = spawn(cmd, args, {
-          windowsHide: true,
-          cwd: repoRoot,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-        });
+        let retried = false;
+        let closed = false;
+        const run = () => {
+          const child = spawn(cmd, args, {
+            windowsHide: true,
+            cwd: repoRoot,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+          });
 
-        let buffer = '';
-        let emitted = 0;
-        let stderrTail = '';
+          let buffer = '';
+          let emitted = 0;
+          let stderrTail = '';
+          let unsupported = false;
+          let sawActivity = false;
 
-        const emit = (event: Record<string, unknown>) => {
-          emitted += 1;
-          controller.enqueue(encoder.encode(sse(event)));
-        };
+          const emit = (event: Record<string, unknown>) => {
+            emitted += 1;
+            controller.enqueue(encoder.encode(sse(event)));
+          };
 
-        // `message` and `text` carry the same string: consumers of this stream read one
-        // or the other (mobile chat + durable send read `message`, the workspace chat
-        // pane reads `text`), and an error nobody can render is the same as no error.
-        const emitError = (reason: string) => {
-          controller.enqueue(encoder.encode(sse({ type: 'error', message: reason, text: reason })));
-        };
+          // `message` and `text` carry the same string: consumers of this stream read one
+          // or the other (mobile chat + durable send read `message`, the workspace chat
+          // pane reads `text`), and an error nobody can render is the same as no error.
+          const emitError = (reason: string) => {
+            controller.enqueue(encoder.encode(sse({ type: 'error', message: reason, text: reason })));
+          };
 
-        child.stdout.on('data', (chunk: Buffer) => {
-          buffer += chunk.toString('utf-8');
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
+          child.stdout.on('data', (chunk: Buffer) => {
+            buffer += chunk.toString('utf-8');
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
 
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const parsed = JSON.parse(line);
-              const events = normalizeCliEvent(runtime, parsed);
-              for (const event of events) {
-                emit(event);
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const parsed = JSON.parse(line);
+                sawActivity ||= runtime === 'codex' && (parsed.type === 'item.started' || parsed.type === 'item.completed');
+                if (runtime === 'codex' && (parsed.type === 'error' || parsed.type === 'turn.failed')) {
+                  unsupported ||= isCodexSolUnsupported(codexModel, parsed.message ?? parsed.error?.message ?? parsed.error ?? '');
+                }
+                const events = normalizeCliEvent(runtime, parsed);
+                for (const event of events) {
+                  emit(event);
+                }
+              } catch {
+                // Not JSON, skip
               }
-            } catch {
-              // Not JSON, skip
             }
-          }
-        });
+          });
 
-        child.stderr.on('data', (chunk: Buffer) => {
-          const text = chunk.toString('utf-8').trim();
-          if (text && !text.includes('DeprecationWarning')) {
-            console.error(`[cli-proxy] ${runtime} stderr:`, text);
-            stderrTail = `${stderrTail}${stderrTail ? '\n' : ''}${text}`.slice(-STDERR_TAIL_CHARS);
-          }
-        });
+          child.stderr.on('data', (chunk: Buffer) => {
+            const text = chunk.toString('utf-8').trim();
+            if (text && !text.includes('DeprecationWarning')) {
+              console.error(`[cli-proxy] ${runtime} stderr:`, text);
+              stderrTail = `${stderrTail}${stderrTail ? '\n' : ''}${text}`.slice(-STDERR_TAIL_CHARS);
+              unsupported ||= runtime === 'codex' && isCodexSolUnsupported(codexModel, text + stderrTail);
+            }
+          });
 
-        child.on('close', (code) => {
-          // Flush remaining buffer
-          if (buffer.trim()) {
-            try {
-              const parsed = JSON.parse(buffer);
-              const events = normalizeCliEvent(runtime, parsed);
-              for (const event of events) {
-                emit(event);
-              }
-            } catch { /* ignore */ }
-          }
-          // A silent exit used to close the stream with a bare `done`, which every
-          // surface renders as "No response received." — say what actually happened.
-          if (emitted === 0 || (typeof code === 'number' && code !== 0)) {
-            emitError(describeSilentExit({
-              label: cliSpec.humanLabel,
-              code,
-              cwd: repoRoot,
-              stderrTail,
-              producedOutput: emitted > 0,
-            }));
-          }
-          controller.enqueue(encoder.encode(sse({ type: 'done' })));
-          controller.close();
-        });
+          child.on('close', (code) => {
+            if (closed) return;
+            // Flush remaining buffer
+            if (buffer.trim()) {
+              try {
+                const parsed = JSON.parse(buffer);
+                sawActivity ||= runtime === 'codex' && (parsed.type === 'item.started' || parsed.type === 'item.completed');
+                if (runtime === 'codex' && (parsed.type === 'error' || parsed.type === 'turn.failed')) {
+                  unsupported ||= isCodexSolUnsupported(codexModel, parsed.message ?? parsed.error?.message ?? parsed.error ?? '');
+                }
+                const events = normalizeCliEvent(runtime, parsed);
+                for (const event of events) {
+                  emit(event);
+                }
+              } catch { /* ignore */ }
+            }
+            if (runtime === 'codex' && !retried && !sawActivity && emitted === 0 && !request.signal.aborted && unsupported) {
+              retried = true;
+              codexModel = CODEX_SOL_FALLBACK_MODEL;
+              controller.enqueue(encoder.encode(sse({ type: 'content', text: `${CODEX_SOL_UPDATE_NOTICE}\n\n` })));
+              args = args.map((arg) => arg.startsWith('model=') ? `model="${CODEX_SOL_FALLBACK_MODEL}"` : arg);
+              run();
+              return;
+            }
+            // A silent exit used to close the stream with a bare `done`, which every
+            // surface renders as "No response received." — say what actually happened.
+            if (emitted === 0 || (typeof code === 'number' && code !== 0)) {
+              emitError(describeSilentExit({
+                label: cliSpec.humanLabel,
+                code,
+                cwd: repoRoot,
+                stderrTail,
+                producedOutput: emitted > 0,
+              }));
+            }
+            controller.enqueue(encoder.encode(sse({ type: 'done' })));
+            closed = true;
+            controller.close();
+          });
 
-        child.on('error', (err) => {
-          emitError(err.message);
-          controller.close();
-        });
+          child.on('error', (err) => {
+            if (closed) return;
+            emitError(err.message);
+            closed = true;
+            controller.close();
+          });
+        };
+        run();
       },
     });
 

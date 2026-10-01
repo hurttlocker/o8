@@ -36,6 +36,7 @@ import {
   pathExists,
 } from './helpers';
 import { stageMissingCliRun } from './missing-cli';
+import { createModelCompatibilityRecovery } from './model-compatibility';
 import { prependOwnedRun } from './run-ledger';
 import { probeOwnedRunMarker, resolveSpawnedProcessGroupId } from './run-process-proof';
 import { assertOwnedWorkspaceSpawnAvailable, type OwnedWorkspaceSpawnGuard } from './workspace-spawn-guard';
@@ -63,7 +64,7 @@ export interface OwnedRunController {
     parsed: ReturnType<OwnedRuntimeAdapter['parseRunLog']>;
   }>;
   readCostLine(run: OwnedRunRecord): Promise<string | undefined>;
-  refreshSession(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
+  refreshSession(session: OwnedSessionRecord, surfaceLockHeld?: boolean, allowRetry?: boolean): Promise<OwnedSessionRecord>;
   reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
   spawnOwnedRun(
     session: OwnedSessionRecord,
@@ -103,6 +104,7 @@ export function createOwnedRunController({
   }>();
   const RUN_ARTIFACT_CACHE_MAX = 48;
   const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
+  const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   function recordSandboxDenialEvent(
     laneId: string,
     surfaceId: string,
@@ -262,6 +264,8 @@ export function createOwnedRunController({
     invalidateFleetCache();
 
     const recordedRun = exitedRun as OwnedRunRecord | null;
+    const recoverySession = !finishedClean && adapter.modelCompatibilityFallback ? await io.findSession(surfaceId) : null;
+    const recovered = recoverySession ? await recoverModelCompatibility(recoverySession) : false;
     const recordedArtifacts = artifacts as Awaited<ReturnType<typeof readRunArtifacts>> | null;
     if (laneId && recordedRun) {
       const stderr = compactText(recordedArtifacts?.stderrRaw || childExit.stderrTail || '', 4_000);
@@ -279,7 +283,7 @@ export function createOwnedRunController({
         } catch (error) {
           console.warn(`[owned-store] Failed to record sandbox_denied for lane ${laneId}:`, error);
         }
-      } else if (!finishedClean) {
+      } else if (!finishedClean && !recovered) {
         try {
           const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
           await handleWorkerRuntimeFailure({
@@ -373,7 +377,7 @@ export function createOwnedRunController({
     return session;
   }
 
-  async function refreshSession(session: OwnedSessionRecord) {
+  async function refreshSession(session: OwnedSessionRecord, surfaceLockHeld = false, allowRetry = true) {
     let dirty = false;
 
     for (const run of session.recentRuns) {
@@ -434,8 +438,9 @@ export function createOwnedRunController({
       await io.saveSession(session);
     }
 
+    if (allowRetry && await recoverModelCompatibility(session, surfaceLockHeld)) return session;
     const retryBudget = adapter.chooseRetryModel ? MAX_AUTO_RETRIES : 1;
-    if (session.autoRetry && (session.retryCount ?? 0) < retryBudget) {
+    if (allowRetry && session.autoRetry && (session.retryCount ?? 0) < retryBudget) {
       const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
       if (latestFailedRun && !latestFailedRun.sandboxDenial && !session.activeRun) {
         const failAge = latestFailedRun.finishedAt

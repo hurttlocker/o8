@@ -39,6 +39,7 @@ import {
   TaskStatusStrip,
 } from './control-room/components';
 import { createTaskRequest, type TaskExecutionRuntime } from './control-room/create-task-request';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 const PENDING_DISPATCH_TIMEOUT_MS = 30_000;
 
 export function ControlRoomTab({
@@ -319,7 +320,7 @@ export function ControlRoomTab({
     }
   }, [loadIssueIntake, project.id, refresh, selectedRepo?.localPath]);
 
-  const createControlTask = useCallback(async (dispatchAfterCreate = false, requestedRuntime: TaskExecutionRuntime = 'codex', model: string | null = null) => {
+  const createControlTask = useCallback(async (dispatchAfterCreate = false, requestedRuntime: TaskExecutionRuntime = 'codex', model: string | null = null, requestedEffort: ThinkingEffort | null = null) => {
     const title = newTaskTitle.trim();
     if (!title) {
       setNotice('Add a short task title first.');
@@ -336,6 +337,7 @@ export function ControlRoomTab({
         workerIntent: newTaskIntent,
         requestedRuntime,
         model,
+        requestedEffort,
       }, dispatchAfterCreate);
       setNewTaskTitle('');
       setNewTaskSummary('');
@@ -612,8 +614,8 @@ export function ControlRoomTab({
           onRepoPathChange={setNewTaskRepoPath}
           onWorkerIntentChange={setNewTaskIntent}
           onCancel={() => setComposerOpen(false)}
-          onCreate={(runtime, model) => { void createControlTask(false, runtime, model); }}
-          onCreateAndDispatch={(runtime, model) => { void createControlTask(true, runtime, model); }}
+          onCreate={(runtime, model, effort) => { void createControlTask(false, runtime, model, effort); }}
+          onCreateAndDispatch={(runtime, model, effort) => { void createControlTask(true, runtime, model, effort); }}
         />
       ) : null}
 

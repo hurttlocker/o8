@@ -523,7 +523,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     // model needs an inference source — never leak env-var names to the user
     // (report BCJBBJ showed a raw "set OPENROUTER_API_KEY…" dev string).
     return jsonError(
-      'The free o8 model needs a connection: sign in with your founder account to use o8-managed inference, or add your own model key in Settings → Keys.',
+      'The free o8 model needs a connection: sign in with your Pro · Lifetime account to use o8-managed inference, or add your own model key in Settings → Keys.',
       503,
     );
   }

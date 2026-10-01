@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -11,7 +11,7 @@ vi.mock('@/lib/cortex/spec-ingest', () => ({
   purgeOrphanedSpecDirectives: vi.fn(async () => 0),
 }));
 
-const dataDir = mkdtempSync(join(tmpdir(), 'o8-remote-task-'));
+const dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'o8-remote-task-')));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const repoPath = join(dataDir, 'repo');
@@ -45,9 +45,9 @@ function request(path: string, body?: unknown, authenticated = true) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
-async function create(model?: string) {
+async function create(model?: string, requestedEffort?: string) {
   const response = await tasks.POST(request('/api/tasks', {
-    title: 'Remote task fixture', repoPath, requestedRuntime: 'cloud', model,
+    title: 'Remote task fixture', repoPath, requestedRuntime: 'cloud', model, requestedEffort,
   }));
   expect(response.status).toBe(201);
   const body = await response.json();
@@ -57,8 +57,8 @@ async function create(model?: string) {
     .toMatchObject({ runtime: 'cloud', queueState: 'held', holdIntent: 'explicit-dispatch' });
   return body.taskId as string;
 }
-async function run(taskId: string) {
-  return dispatch.POST(request(`/api/tasks/${taskId}/dispatch`, { repoPath }), {
+async function run(taskId: string, requestedEffort?: string) {
+  return dispatch.POST(request(`/api/tasks/${taskId}/dispatch`, { repoPath, requestedEffort }), {
     params: Promise.resolve({ taskId }),
   });
 }
@@ -90,6 +90,22 @@ describe('remote placement through ordinary authenticated task routes', () => {
     expect((await availability.GET(request('/api/tasks/worker-availability', undefined, false))).status).toBe(401);
   });
 
+  it('refuses invalid, conflicting and coerced effort before saving a task', async () => {
+    const count = readOrchestratorControlPlaneState().packets.length;
+    for (const selection of [
+      { requestedEffort: 'maximal' },
+      { requestedEffort: 'medium', thinkingEffort: 'high' },
+      { model: 'gpt-unlisted', requestedEffort: 'ultra' },
+    ]) {
+      const response = await tasks.POST(request('/api/tasks', {
+        title: 'Invalid effort', repoPath, requestedRuntime: 'cloud', model: 'gpt-6.1-sol', ...selection,
+      }));
+      expect(response.status).toBe(400);
+    }
+    closeDb();
+    expect(readOrchestratorControlPlaneState().packets).toHaveLength(count);
+  });
+
   it('preserves remote placement and refuses absent, stale, other-team, and revoked workers', async () => {
     const taskId = await create();
     const localLaunch = vi.spyOn(getRuntime('codex')!, 'launch');
@@ -118,21 +134,22 @@ describe('remote placement through ordinary authenticated task routes', () => {
     const ready = await (await availability.GET(request('/api/tasks/worker-availability'))).json();
     expect(ready).toMatchObject({ available: true, connectedWorkers: 1 });
     const localLaunch = vi.spyOn(getRuntime('codex')!, 'launch');
-    const taskId = await create('gpt-6-sol');
+    const taskId = await create('gpt-6.1-sol', 'medium');
     closeDb();
-    expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === taskId)?.runtime).toBe('cloud');
+    expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === taskId))
+      .toMatchObject({ runtime: 'cloud', workerRouting: { requestedEffort: 'medium', selectedEffort: 'medium' } });
     const response = await run(taskId);
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(body.ok, body.note).toBe(true);
-    expect(body.workerRouting).toMatchObject({ selectedRuntime: 'cloud', selectedModel: 'gpt-6-sol' });
+    expect(body.workerRouting).toMatchObject({ selectedRuntime: 'cloud', selectedModel: 'gpt-6.1-sol', selectedEffort: 'medium' });
     expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === taskId))
       .toMatchObject({ queueState: 'queued' });
     const lane = getLane(body.laneId)!;
-    expect(lane).toMatchObject({ runtime: 'cloud', worktreePath: null, packetId: body.packetId, model: 'gpt-6-sol' });
+    expect(lane).toMatchObject({ runtime: 'cloud', worktreePath: null, packetId: body.packetId, model: 'gpt-6.1-sol' });
     expect(lane.sessionKey).toMatch(/^cloud:/);
     const job = getJob('team_default', lane.sessionKey!.slice('cloud:'.length))!;
-    expect(job).toMatchObject({ packetId: body.packetId, launch: { laneId: lane.id, model: 'gpt-6-sol' } });
+    expect(job).toMatchObject({ packetId: body.packetId, launch: { laneId: lane.id, model: 'gpt-6.1-sol', effort: 'medium' } });
     expect(job.launch.remoteSource).toMatchObject({ repoUrl: 'https://example.invalid/fixture.git', branch: lane.branch });
     const claimedResponse = await poll.GET(new NextRequest('http://localhost/api/cloud/worker-poll?waitMs=0&workerId=remote-fixture', {
       headers: { Authorization: `Bearer ${key.plaintext}` },
@@ -140,6 +157,7 @@ describe('remote placement through ordinary authenticated task routes', () => {
     expect(claimedResponse.status).toBe(200);
     const claimed = (await claimedResponse.json()).job;
     expect(claimed.id).toBe(job.id);
+    expect(claimed.launch).toMatchObject({ model: 'gpt-6.1-sol', effort: 'medium' });
     const blocked = await block.POST(request(`/api/tasks/${taskId}/block`, { repoPath, reason: 'Operator review needed', actor: 'user' }), { params: Promise.resolve({ taskId }) });
     expect(blocked.status).toBe(200);
     reconcileCloudJobLanes();
@@ -189,6 +207,12 @@ describe('remote placement through ordinary authenticated task routes', () => {
     const reviewed = await (await tasks.GET(request('/api/tasks?includeDone=true'))).json();
     expect(reviewed.tasks.find((task: { id: string }) => task.id === taskId))
       .toMatchObject({ group: 'review', blockedReason: null });
+    const reset = await run(await create('gpt-6.1-sol', 'medium'), 'adaptive');
+    expect(reset.status).toBe(200);
+    expect((await reset.json()).workerRouting.selectedEffort).toBeNull();
+    const override = await run(await create('gpt-6.1-sol', 'high'), 'medium');
+    expect(override.status).toBe(200);
+    expect((await override.json()).workerRouting.selectedEffort).toBe('medium');
     localLaunch.mockRestore();
     revokeCloudWorkerKey(key.record.id);
     expect((await run(await create())).status).toBe(409);

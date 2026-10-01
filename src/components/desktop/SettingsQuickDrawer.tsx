@@ -26,6 +26,7 @@ import {
 } from '@/lib/auth/desktop-auth-error';
 import { useTheme } from '@/lib/theme/context';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
 import { ThemeContrastGlyph, AppearanceControl } from './settings-quick-drawer/theme-rows';
@@ -140,20 +141,16 @@ function separatorStyle(): CSSProperties {
   };
 }
 
-/** Founding Operator mark — founders-only, drawer account row ONLY (Q ruling
- *  2026-07-27: founder identity shows only once settings is opened). Restyled
- *  2026-07-31 (Q: the bordered FOUNDING pill read too loud and sat glued to
- *  the drawer's right edge): now the quiet plain-dot vocabulary — one founding
- *  orange dot + the tabular serial, no box, breathing room from the edge. The
- *  full title lives in the tooltip. Hides while View-as-free is active because
- *  the effective entitlement's `founder` goes null under the override. */
+/** Lifetime mark on the drawer account row: a quiet dot and tabular serial.
+ *  The plan name lives in the tooltip. Hides while View-as-free is active
+ *  because the effective entitlement's `founder` goes null under the override. */
 const FOUNDER_ORANGE = '#ff5a1f';
 
 function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
   const serial = String(operatorNumber).padStart(3, '0');
   return (
     <div
-      title={`Founding Operator · No. ${serial}`}
+      title={`${PLAN_LABELS.founder} · No. ${serial}`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -311,7 +308,7 @@ export function SettingsQuickDrawer({
   const checkForUpdates = useCallback(async () => {
     setUpdateStatus('checking');
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
+      const { check } = await import('@/lib/app-update/check');
       const update = await check();
       if (update) {
         setUpdateStatus('available');

@@ -36,6 +36,21 @@ afterAll(() => {
 });
 
 describe('dated model rate table reproducibility', () => {
+  it.each([272_000, 272_001])('prices GPT-6.1 Sol through the persisted transcript at %s input tokens', async (input) => {
+    expect(resolveRate('codex', 'gpt-6.1-sol')).toMatchObject({
+      inputUsdPerMillion: 2, cacheReadUsdPerMillion: 0.1,
+      outputUsdPerMillion: 10, cacheWriteUsdPerMillion: 2.5,
+    });
+    const parsed = await parseCodexSessionCost(fixture(`sol-${input}.jsonl`, {
+      type: 'turn.completed', model: 'gpt-6.1-sol',
+      usage: { input_tokens: input, cached_input_tokens: 20_000, output_tokens: 10_000 },
+    }));
+    const inputMultiplier = input > 272_000 ? 2 : 1;
+    const outputMultiplier = input > 272_000 ? 1.5 : 1;
+    expect(parsed.totalCostUsd).toBe(rounded(((input - 20_000) * 2 * inputMultiplier
+      + 20_000 * 0.1 * inputMultiplier + 10_000 * 10 * outputMultiplier) / TOKENS_PER_MILLION));
+  });
+
   it.each([
     ['claude-opus-5-5', 4, 20, 0.2, 5, 8],
     ['claude-fable-5-1', 10, 50, 0.25, 12.5, 20],
@@ -143,8 +158,8 @@ describe('dated model rate table reproducibility', () => {
     ) / TOKENS_PER_MILLION);
 
     expect(modelRateTable).toMatchObject({
-      rateTableVersion: '2026-09-26.1',
-      observedOn: '2026-09-26',
+      rateTableVersion: '2026-09-29.1',
+      observedOn: '2026-09-29',
     });
   });
 

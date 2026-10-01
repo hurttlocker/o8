@@ -15,11 +15,12 @@ export interface ModelRateTable {
 /**
  * Original rates were consolidated on 2026-08-28. Opus 5.5 and Fable 5.1
  * were added from https://platform.claude.com/docs/en/about-claude/pricing
- * on 2026-09-26; this does not claim the older entries were refreshed.
+ * on 2026-09-26. GPT-6.1 Sol was added on 2026-09-29 (#2950).
+ * This does not claim the older entries were refreshed.
  */
 export const modelRateTable = {
-  rateTableVersion: '2026-09-26.1',
-  observedOn: '2026-09-26',
+  rateTableVersion: '2026-09-29.1',
+  observedOn: '2026-09-29',
   rates: {
     'claude-opus-5-5': {
       inputUsdPerMillion: 4,
@@ -104,6 +105,12 @@ export const modelRateTable = {
       cacheReadUsdPerMillion: 0.08,
       cacheWriteUsdPerMillion: 1,
       cacheWrite1hUsdPerMillion: 1.6,
+    },
+    'gpt-6.1-sol': {
+      inputUsdPerMillion: 2,
+      outputUsdPerMillion: 10,
+      cacheReadUsdPerMillion: 0.1,
+      cacheWriteUsdPerMillion: 2.5,
     },
     'gpt-5.6-sol': {
       inputUsdPerMillion: 5,
@@ -201,6 +208,18 @@ export const modelRateTable = {
 
 export type ResolvedRate = ModelRate & { modelKey: string };
 
+/** Codex usage includes cached input in inputTokens; the surcharge is per request. */
+export function codexUsageCostUsd(rate: ResolvedRate, usage: {
+  inputTokens: number; cachedInputTokens: number; outputTokens: number;
+}): number {
+  const longContext = usage.inputTokens > 272_000
+    && ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.5', 'gpt-5.4'].includes(rate.modelKey);
+  const cached = Math.min(usage.inputTokens, usage.cachedInputTokens);
+  return ((usage.inputTokens - cached) * rate.inputUsdPerMillion * (longContext ? 2 : 1)
+    + cached * (rate.cacheReadUsdPerMillion ?? 0) * (longContext ? 2 : 1)
+    + usage.outputTokens * rate.outputUsdPerMillion * (longContext ? 1.5 : 1)) / 1_000_000;
+}
+
 function resolved(modelKey: keyof typeof modelRateTable.rates): ResolvedRate {
   return { modelKey, ...modelRateTable.rates[modelKey] };
 }
@@ -223,6 +242,7 @@ function resolveAnthropicRate(model: string): ResolvedRate | null {
 
 function resolveCodexRate(model: string): ResolvedRate | null {
   const normalized = model.trim().toLowerCase();
+  if (normalized.includes('gpt-6.1-sol')) return resolved('gpt-6.1-sol');
   if (normalized.includes('gpt-5.6-sol')) return resolved('gpt-5.6-sol');
   if (normalized.includes('gpt-5.6-terra')) return resolved('gpt-5.6-terra');
   if (normalized.includes('gpt-5.6-luna')) return resolved('gpt-5.6-luna');

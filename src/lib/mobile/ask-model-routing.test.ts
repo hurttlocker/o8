@@ -99,7 +99,7 @@ describe('mobile Ask model routing', () => {
     expect(resolveMobileAskRoute('codex-sol-xhigh', { claude: true, codex: true })).toEqual({
       kind: 'codex',
       requestedModel: 'codex-sol-xhigh',
-      cliModel: 'gpt-5.6-sol',
+      cliModel: 'gpt-6.1-sol',
       effort: 'xhigh',
     });
     expect(resolveMobileAskRoute('auto', { claude: true, codex: true })).toMatchObject({
@@ -136,7 +136,7 @@ describe('mobile Ask model routing', () => {
     });
     expect(resolveMobileAskRoute('codex-sol-xhigh', { claude: true, codex: true }, 'bogus')).toMatchObject({
       kind: 'codex',
-      cliModel: 'gpt-5.6-sol',
+      cliModel: 'gpt-6.1-sol',
       effort: 'xhigh',
     });
   });

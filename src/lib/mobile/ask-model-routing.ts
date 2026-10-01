@@ -39,7 +39,7 @@ export type MobileAskRoute =
   | {
     kind: 'codex';
     requestedModel: 'auto' | keyof typeof CODEX_CLI_MODELS;
-    cliModel: typeof MODEL_IDS.codexWorkerDefault | typeof MODEL_IDS.codexDefault | typeof MODEL_IDS.raw.openAiGpt56Sol;
+    cliModel: typeof MODEL_IDS.codexWorkerDefault | typeof MODEL_IDS.codexDefault | typeof MODEL_IDS.codexCliDefault;
     effort: MobileAskEffort;
   }
   | {
@@ -63,7 +63,7 @@ const CLAUDE_CLI_MODELS = {
 const CODEX_CLI_MODELS = {
   'codex-terra-xhigh': MODEL_IDS.codexWorkerDefault,
   'codex-astra-xhigh': MODEL_IDS.codexDefault,
-  'codex-sol-xhigh': MODEL_IDS.raw.openAiGpt56Sol,
+  'codex-sol-xhigh': MODEL_IDS.codexCliDefault,
 } as const;
 
 const MODEL_COPY: Record<MobileAskModelId, Omit<MobileAskModel, 'id' | 'available'>> = {
@@ -96,7 +96,7 @@ const MODEL_COPY: Record<MobileAskModelId, Omit<MobileAskModel, 'id' | 'availabl
     detail: 'Uses the signed-in Codex CLI on this desktop.',
   },
   'codex-sol-xhigh': {
-    label: 'Codex GPT-5.6 Sol',
+    label: 'Codex GPT-6.1 Sol',
     detail: 'Uses the signed-in Codex CLI on this desktop.',
   },
   'managed-free': {

@@ -4,6 +4,10 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountTab from '@/app/voice-settings/tabs/AccountTab';
+import { BillingTab } from '@/components/desktop/settings/BillingTab';
+import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
+import { AccountBlock } from '@/components/desktop/account-block/AccountBlock';
+import { GeneralTab } from '@/components/desktop/settings/GeneralTab';
 import { EntitlementProvider, useEntitlement } from '@/lib/entitlement/context';
 import type { Plan } from '@/lib/entitlement/types';
 
@@ -13,14 +17,29 @@ vi.mock('@/app/voice-settings/icons', () => ({
   Icon: () => null,
 }));
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn(async () => '0.0.0') }));
+const authState = vi.hoisted(() => ({ signedIn: false }));
 vi.mock('@/components/auth/O8AuthProvider', () => ({
-  useO8Auth: () => ({ clerkEnabled: false, isLoaded: true, signedIn: false, user: null }),
+  useO8Auth: () => ({
+    clerkEnabled: false, isLoaded: true, signedIn: authState.signedIn,
+    user: authState.signedIn ? { id: 'user_fixture', name: 'Account' } : null,
+  }),
+}));
+vi.mock('@/lib/theme/context', () => ({
+  useTheme: () => ({ paletteId: 'light', surface: {}, workspaceGlass: false }),
+}));
+vi.mock('@/components/desktop/dictation/SymonMachineControl', () => ({
+  SymonMachineControl: () => null, SymonOrbStatusLine: () => null,
+  useSymonOrbMinimized: () => true,
+}));
+vi.mock('@/components/desktop/settings/operator-defaults-client', () => ({
+  fetchOperatorDefaults: async () => Response.json({ values: {}, envLocked: {} }),
 }));
 
 let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  authState.signedIn = false;
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -36,7 +55,10 @@ afterEach(async () => {
 function respondWithPlan(plan: Plan, actualPlan: Plan = plan) {
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true,
-    json: async () => ({ plan, actualPlan, overrideActive: actualPlan !== plan }),
+    json: async () => ({
+      plan, actualPlan, overrideActive: actualPlan !== plan,
+      founder: plan === 'founder' ? { operatorNumber: 7, tier: null } : null,
+    }),
   })));
 }
 
@@ -50,7 +72,9 @@ describe('voice settings Account tab paid plan rendering', () => {
     respondWithPlan(plan);
     await act(async () => root.render(createElement(AccountTab)));
 
-    expect(container.textContent).toContain(plan.charAt(0).toUpperCase() + plan.slice(1));
+    const label = plan === 'founder' ? 'Pro · Lifetime' : plan === 'pro' ? 'Pro' : 'Team';
+    expect(container.textContent).toContain(label);
+    expect(container.textContent).not.toMatch(/Founder|Founding Operator/);
     expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent))
       .not.toContain('Upgrade');
     expect(container.textContent).toContain('Active');
@@ -65,6 +89,48 @@ describe('voice settings Account tab paid plan rendering', () => {
     expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent))
       .toContain('Upgrade');
     expect(container.textContent).not.toContain('Pro features unlocked across o8.');
+  });
+});
+
+describe('lifetime plan copy in desktop settings', () => {
+  it.each([
+    { name: 'the sidebar account row', element: createElement(AccountBlock) },
+    { name: 'General settings', element: createElement(GeneralTab) },
+  ])('labels the lifetime plan in $name', async ({ element }) => {
+    authState.signedIn = true;
+    respondWithPlan('founder');
+    await act(async () => root.render(createElement(EntitlementProvider, null,
+      element,
+    )));
+
+    expect(container.textContent).toContain('Pro · Lifetime');
+    expect(container.textContent).not.toMatch(/founder|founding operator/i);
+  });
+
+  it.each<Plan>(['founder', 'pro'])('labels %s distinctly in Plan & Billing', async (plan) => {
+    respondWithPlan(plan);
+    await act(async () => root.render(
+      createElement(EntitlementProvider, null, createElement(BillingTab)),
+    ));
+
+    const currentPlan = container.querySelector('[data-settings-section="Current plan"]')?.closest('section');
+    expect(currentPlan?.textContent).toContain(plan === 'founder' ? 'Pro · Lifetime' : 'Pro');
+    expect(container.textContent).not.toMatch(/founding|founder/i);
+    if (plan === 'founder') expect(container.textContent).toContain('for life');
+    else expect(currentPlan?.textContent).not.toContain('Pro · Lifetime');
+  });
+
+  it('keeps the lifetime serial and renames the quick-settings badge tooltip', async () => {
+    respondWithPlan('founder');
+    await act(async () => root.render(createElement(EntitlementProvider, null,
+      createElement(SettingsQuickDrawer, {
+        open: true, anchorRect: null, onClose: () => {}, onOpenSettings: () => {},
+      }),
+    )));
+
+    const drawer = document.querySelector('[aria-label="Quick settings"]');
+    expect(drawer?.querySelector('[title="Pro · Lifetime · No. 007"]')?.textContent).toBe('007');
+    expect(drawer?.innerHTML).not.toMatch(/Founding Operator/);
   });
 });
 

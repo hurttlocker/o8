@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { ChromeButton, SIDEBAR_FOOTER_HIT_SIZE } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
@@ -114,10 +115,7 @@ export function AccountBlock({
   const initial = Array.from(displayName)[0]?.toUpperCase() ?? '';
   const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
   const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
-  // Founders present as Pro (Q ruling 2026-07-27): the ladder reads Free/Pro/
-  // Team everywhere; founding identity is the serial chip in the settings
-  // drawer, not a plan name.
-  const planLabel = isFounder || isPaid ? 'Pro' : 'Free Plan';
+  const planLabel = isFounder ? PLAN_LABELS.founder : isPaid ? PLAN_LABELS.pro : 'Free Plan';
   // Signed out while a paid/founder entitlement is still cached = the Clerk
   // session expired underneath the account (server-side lifetime, #1623) —
   // an explicit sign-out clears the cached entitlement, so this state can

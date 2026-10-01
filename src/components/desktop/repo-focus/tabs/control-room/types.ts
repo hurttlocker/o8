@@ -26,6 +26,7 @@ export interface TaskPoolWorkerRouting {
   selectedProvider: string;
   selectedRuntime: string;
   selectedModel: string | null;
+  selectedEffort?: string | null;
   enforcement: string;
   confidence: string;
   reason: string;

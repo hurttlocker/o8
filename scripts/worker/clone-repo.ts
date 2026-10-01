@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -21,11 +21,12 @@ export interface WorkerChangedFile {
   deletions: number;
 }
 
-async function ensureGhAuthIfNeeded(repoUrl: string) {
+async function ensureGhAuthIfNeeded(repoUrl: string, signal?: AbortSignal) {
   if (!/github\.com/i.test(repoUrl)) return;
   try {
-    await execFileAsync('gh', ['auth', 'status'], EXEC_OPTIONS);
+    await execFileAsync('gh', ['auth', 'status'], { ...EXEC_OPTIONS, signal });
   } catch {
+    if (signal?.aborted) throw new Error('[worker/clone-repo] operation aborted');
     if (!process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
       throw new Error(
         '[worker/clone-repo] gh auth status failed and neither GITHUB_TOKEN nor GH_TOKEN is set. Run `gh auth login` or export a token before starting the worker.',
@@ -75,27 +76,38 @@ async function runGit(args: string[], cwd?: string, signal?: AbortSignal): Promi
   });
 }
 
-async function pathExists(target: string) {
-  try {
-    await stat(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function cloneRepoForRun(opts: CloneOptions): Promise<string> {
-  await ensureGhAuthIfNeeded(opts.repoUrl);
+  if (opts.signal?.aborted) throw new Error('[worker/clone-repo] operation aborted');
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(opts.baseRef)) {
+    throw new Error('[worker/clone-repo] baseRef must be a full pinned commit ID');
+  }
+  if (!opts.repoUrl.trim() || opts.repoUrl.startsWith('-')) {
+    throw new Error('[worker/clone-repo] repo URL is invalid');
+  }
+  await runGit(['check-ref-format', '--branch', opts.remoteBranch], undefined, opts.signal);
+  await ensureGhAuthIfNeeded(opts.repoUrl, opts.signal);
   await mkdir(opts.workDir, { recursive: true });
 
   const cloneTarget = path.join(opts.workDir, 'repo');
-  if (await pathExists(cloneTarget)) {
-    throw new Error(`[worker/clone-repo] workDir already has a repo: ${cloneTarget}. Pass a fresh --workspace-dir run slot.`);
+  try {
+    await mkdir(cloneTarget);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error('[worker/clone-repo] workDir already has a repo. Pass a fresh --workspace-dir run slot.');
+    }
+    throw error;
   }
 
-  await runGit(['clone', opts.repoUrl, cloneTarget], undefined, opts.signal);
-  await runGit(['checkout', '--detach', opts.baseRef], cloneTarget, opts.signal);
-  await runGit(['checkout', '-B', opts.remoteBranch, opts.baseRef], cloneTarget, opts.signal);
+  const baseSha = opts.baseRef.toLowerCase();
+  const objectFormat = baseSha.length === 64 ? 'sha256' : 'sha1';
+  await runGit(['init', '--quiet', `--object-format=${objectFormat}`, cloneTarget], undefined, opts.signal);
+  await runGit(['remote', 'add', 'origin', opts.repoUrl], cloneTarget, opts.signal);
+  // Fetch only the reviewed commit and its checkout; never expand to unrelated history.
+  await runGit(['fetch', '--depth=1', '--no-tags', 'origin', baseSha], cloneTarget, opts.signal);
+  const { stdout } = await runGit(['rev-parse', '--verify', 'FETCH_HEAD^{commit}'], cloneTarget, opts.signal);
+  if (stdout.trim() !== baseSha) throw new Error('[worker/clone-repo] fetched commit does not match the pinned base');
+  await runGit(['checkout', '--detach', baseSha], cloneTarget, opts.signal);
+  await runGit(['checkout', '-b', opts.remoteBranch, baseSha], cloneTarget, opts.signal);
 
   return cloneTarget;
 }

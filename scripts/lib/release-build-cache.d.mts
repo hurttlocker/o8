@@ -73,6 +73,8 @@ export function finalizeReleaseBuildCacheReceipt(
 ): { receipt: Record<string, unknown>; receiptPath: string };
 export const releaseBuildCacheInternals: {
   PHASE_CONFIG: Record<ReleaseBuildCachePhase, unknown>;
+  isReleaseBuildCacheJsonCandidate(name: string): boolean;
+  isReleaseBuildCachePhaseReceiptName(name: string): boolean;
   assertOutsideProjectNodeModules(target: string, projectRoot: string): void;
   collectWebEnvironmentFiles(root: string): Array<{ path: string; sha256: string }>;
   normalizeArchivePath(value: string): string | null;

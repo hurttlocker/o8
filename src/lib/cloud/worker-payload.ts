@@ -5,6 +5,7 @@ export function workerLaunchPayload(launch: LaunchOptions) {
   return {
     prompt: launch.prompt,
     model: launch.model,
+    effort: launch.effort,
     packetId: launch.packetId,
     workMode: launch.workMode,
     remoteSource: launch.remoteSource,

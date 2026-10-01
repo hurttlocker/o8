@@ -22,6 +22,7 @@
  * second open is instant.
  */
 
+import { CodexCliUpdateNotice } from './CodexCliUpdateNotice';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
@@ -175,6 +176,10 @@ function normalizeUpdateCheckReport(payload: unknown): UpdateCheckReport | null 
 }
 
 export function UpdateCard() {
+  return <><CodexCliUpdateNotice /><AppUpdateCard /></>;
+}
+
+function AppUpdateCard() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checkReport, setCheckReport] = useState<UpdateCheckReport>(() => updateCheckReport('never'));
   const [installing, setInstalling] = useState(false);
@@ -259,7 +264,7 @@ export function UpdateCard() {
   const checkForUpdate = useCallback(async () => {
     if (!canUseTauriEvents()) return;
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
+      const { check } = await import('@/lib/app-update/check');
       const result = await check();
       if (result) {
         setUpdate({

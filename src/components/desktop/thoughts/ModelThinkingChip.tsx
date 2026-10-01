@@ -8,6 +8,7 @@ import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
@@ -89,7 +90,8 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     label: 'Codex',
     options: [
       { value: MODEL_IDS.raw.openAiGpt6Astra, label: 'GPT-6 Astra', triggerLabel: 'Astra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Astra, sub: 'orchestrator flagship' },
-      { value: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', triggerLabel: '6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Sol, sub: 'everyday orchestrator' },
+      { value: MODEL_IDS.raw.openAiGpt61Sol, label: 'GPT-6.1 Sol', triggerLabel: '6.1 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt61Sol, sub: 'everyday orchestrator' },
+      { value: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', triggerLabel: '6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Sol, sub: 'previous Sol' },
       { value: MODEL_IDS.raw.openAiGpt6Luna, label: 'GPT-6 Luna', triggerLabel: '6 Luna', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Luna, sub: 'fast model for easier tasks' },
       { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', triggerLabel: '5.6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
@@ -448,7 +450,7 @@ export function ModelThinkingChip({
     effort: option,
     label: THINKING_EFFORT_LABELS[option].long,
     sub: isO8Backend
-      ? option === 'high' ? 'founders' : 'free'
+      ? option === 'high' ? PLAN_LABELS[entitlementPlan] : 'free'
       : option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
   }));
   const currentEffortIndex = Math.max(0, options.indexOf(effort));

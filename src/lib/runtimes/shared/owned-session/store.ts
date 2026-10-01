@@ -290,7 +290,7 @@ export function createOwnedSessionStore(
     };
 
     try {
-      await runController.refreshSession(session);
+      await runController.refreshSession(session, true);
 
       if (session.activeRun?.spawnState === 'prepared') {
         throw new Error(`This owned ${adapter.squadShortName} session has an unresolved prepared run. Wait for marker reconciliation before resuming it.`);
@@ -333,7 +333,7 @@ export function createOwnedSessionStore(
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
     }
-    await runController.refreshSession(session);
+    await runController.refreshSession(session, true, false);
 
     if (session.activeRun?.spawnState === 'prepared') {
       return {
@@ -342,6 +342,12 @@ export function createOwnedSessionStore(
       };
     }
     if (!session.activeRun || !isPidAlive(session.activeRun.pid)) {
+      const latest = session.recentRuns[0];
+      if (latest?.outcome === 'failed' && adapter.modelCompatibilityFallback) {
+        // A stop also cancels recovery that lifecycle polling has not started yet.
+        latest.interruptRequestedAt = nowIso();
+        await io.saveSession(session);
+      }
       return { interrupted: false, note: `No active owned ${adapter.squadShortName} run was in flight.` };
     }
 

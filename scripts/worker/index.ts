@@ -138,6 +138,7 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
       cwd: cloneDir,
       prompt: job.launch.prompt,
       model: job.launch.model,
+      effort: job.launch.effort,
       onChunk: async (text) => { await stream.postEvent(job, 'chunk', { text }, operation.signal); },
     });
     if (abortControl || monitorFailure || shutdown.aborted) codex.abort();

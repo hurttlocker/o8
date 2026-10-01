@@ -9,6 +9,8 @@ import { ActionButton, IconActionButton, StatusChip } from './shared';
 import type { TaskExecutionRuntime } from './create-task-request';
 import { useRemoteWorkerAvailability } from './useRemoteWorkerAvailability';
 import { CODEX_MODEL_IDS, MODEL_IDS } from '@/lib/models';
+import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { THINKING_EFFORTS, THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export function TaskStatusStrip({
   counts,
@@ -86,12 +88,14 @@ export function NewTaskComposer({
   onRepoPathChange: (value: string) => void;
   onWorkerIntentChange: (value: string) => void;
   onCancel: () => void;
-  onCreate: (runtime: TaskExecutionRuntime, model: string | null) => void;
-  onCreateAndDispatch: (runtime: TaskExecutionRuntime, model: string | null) => void;
+  onCreate: (runtime: TaskExecutionRuntime, model: string | null, effort: ThinkingEffort | null) => void;
+  onCreateAndDispatch: (runtime: TaskExecutionRuntime, model: string | null, effort: ThinkingEffort | null) => void;
 }) {
   const [executionRuntime, setExecutionRuntime] = useState<TaskExecutionRuntime>('codex');
   const remote = useRemoteWorkerAvailability();
   const [model, setModel] = useState('');
+  const [effort, setEffort] = useState<ThinkingEffort>('adaptive');
+  const effortSupported = effort === 'adaptive' || codexSupportsReasoningEffort(model || MODEL_IDS.codexWorkerDefault, effort);
   const fieldStyle: CSSProperties = {
     width: '100%',
     border: '1px solid var(--t-divider-subtle)',
@@ -212,18 +216,32 @@ export function NewTaskComposer({
         <option value="codex">This machine · Codex</option>
         <option value="cloud">Remote worker · Codex</option>
       </select>
-      <select aria-label="Task model" value={model} onChange={(event) => setModel(event.currentTarget.value)} style={{ ...fieldStyle, marginTop: 7 }}>
-        <option value="">Automatic · {MODEL_IDS.codexWorkerDefault}</option>
-        {CODEX_MODEL_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
-      </select>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 7, marginTop: 7 }}>
+        <select aria-label="Task model" value={model} disabled={busy} onChange={(event) => setModel(event.currentTarget.value)} style={fieldStyle}>
+          <option value="">Automatic · {MODEL_IDS.codexWorkerDefault}</option>
+          {CODEX_MODEL_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
+        </select>
+        <select aria-label="Task reasoning effort" value={effort} disabled={busy} onChange={(event) => setEffort(event.currentTarget.value as ThinkingEffort)} style={fieldStyle}>
+          {THINKING_EFFORTS.map((value) => (
+            <option key={value} value={value} disabled={value !== 'adaptive' && !codexSupportsReasoningEffort(model || MODEL_IDS.codexWorkerDefault, value)}>
+              {THINKING_EFFORT_LABELS[value].long}
+            </option>
+          ))}
+        </select>
+      </div>
+      {!effortSupported ? (
+        <div role="status" style={{ marginTop: 5, fontSize: 10.5, lineHeight: '15px', fontWeight: 300, color: 'var(--t-text-muted)' }}>
+          Choose an effort supported by this model.
+        </div>
+      ) : null}
       {executionRuntime === 'cloud' ? (
         <div role="status" style={{ marginTop: 5, fontSize: 10.5, lineHeight: '15px', fontWeight: 300, color: 'var(--t-text-muted)' }}>
           {remote?.detail ?? 'Checking remote workers…'}
         </div>
       ) : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7, marginTop: 9 }}>
-        <ActionButton label="Add" disabled={busy} onClick={() => onCreate(executionRuntime, model || null)} />
-        <ActionButton label="Add + dispatch" icon={<Play size={12} strokeWidth={2.2} />} primary disabled={busy || (executionRuntime === 'cloud' && !remote?.available)} onClick={() => onCreateAndDispatch(executionRuntime, model || null)} />
+        <ActionButton label="Add" disabled={busy || !effortSupported} onClick={() => onCreate(executionRuntime, model || null, effort === 'adaptive' ? null : effort)} />
+        <ActionButton label="Add + dispatch" icon={<Play size={12} strokeWidth={2.2} />} primary disabled={busy || !effortSupported || (executionRuntime === 'cloud' && !remote?.available)} onClick={() => onCreateAndDispatch(executionRuntime, model || null, effort === 'adaptive' ? null : effort)} />
       </div>
     </div>
   );

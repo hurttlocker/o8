@@ -40,7 +40,7 @@ describe('task execution placement', () => {
     expect(container.textContent).toContain('No remote worker connected.');
     expect(button('Add + dispatch').disabled).toBe(true);
     act(() => button('Add').click());
-    expect(onCreate).toHaveBeenCalledWith('cloud', null);
+    expect(onCreate).toHaveBeenCalledWith('cloud', null, null);
     expect(onDispatch).not.toHaveBeenCalled();
   });
 
@@ -50,7 +50,22 @@ describe('task execution placement', () => {
     const model = container.querySelector<HTMLSelectElement>('select[aria-label="Task model"]')!;
     act(() => { model.value = 'gpt-6-sol'; model.dispatchEvent(new Event('change', { bubbles: true })); });
     act(() => button('Add + dispatch').click());
-    expect(onDispatch).toHaveBeenCalledWith('cloud', 'gpt-6-sol');
+    expect(onDispatch).toHaveBeenCalledWith('cloud', 'gpt-6-sol', null);
+  });
+
+  it('sends the chosen model and effort for this task', async () => {
+    await show(true);
+    const model = container.querySelector<HTMLSelectElement>('select[aria-label="Task model"]')!;
+    const effort = container.querySelector<HTMLSelectElement>('select[aria-label="Task reasoning effort"]');
+    expect(effort).not.toBeNull();
+    act(() => {
+      model.value = 'gpt-6.1-sol'; model.dispatchEvent(new Event('change', { bubbles: true }));
+      effort!.value = 'medium'; effort!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => button('Add').click());
+    expect(onCreate).toHaveBeenCalledWith('cloud', 'gpt-6.1-sol', 'medium');
+    act(() => button('Add + dispatch').click());
+    expect(onDispatch).toHaveBeenCalledWith('cloud', 'gpt-6.1-sol', 'medium');
   });
 
   it('preserves placement across create and dispatch, and surfaces a server refusal without retrying locally', async () => {
@@ -58,9 +73,9 @@ describe('task execution placement', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, taskId: 'task-remote' }) })
       .mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Remote worker disconnected.' }) });
     vi.stubGlobal('fetch', fetchMock);
-    await expect(createTaskRequest({ title: 'Task', summary: null, repoPath: '/tmp/fixture', projectId: 'project', workerIntent: 'light_worker', requestedRuntime: 'cloud', model: 'gpt-6-sol' }, true))
+    await expect(createTaskRequest({ title: 'Task', summary: null, repoPath: '/tmp/fixture', projectId: 'project', workerIntent: 'light_worker', requestedRuntime: 'cloud', model: 'gpt-6.1-sol', requestedEffort: 'medium' }, true))
       .rejects.toThrow('Remote worker disconnected.');
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ requestedRuntime: 'cloud', model: 'gpt-6-sol' });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ requestedRuntime: 'cloud', model: 'gpt-6.1-sol', requestedEffort: 'medium' });
     expect(fetchMock.mock.calls[1][0]).toBe('/api/tasks/task-remote/dispatch');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

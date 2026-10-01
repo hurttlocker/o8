@@ -1589,6 +1589,15 @@
       ]
     },
     {
+      "path": "tests/cloud-worker-checkout-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cloud-worker-poll-revocation-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -1613,6 +1622,32 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/codex-cli-update-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/codex-review-config-isolation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/codex-sol-compatibility-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },
@@ -3281,6 +3316,13 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/setup-config-project-hooks-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },

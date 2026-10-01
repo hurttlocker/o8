@@ -16,6 +16,7 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod launch_updater;
+mod update_ping;
 #[cfg(target_os = "macos")]
 mod live_dictation;
 #[cfg(target_os = "macos")]
@@ -7867,6 +7868,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            update_ping::check_app_update,
             get_desktop_info,
             get_running_bundle_integrity,
             check_port,
@@ -8055,6 +8057,9 @@ pub fn run() {
             background::open_system_settings,
         ])
         .setup(move |app| {
+            if let Err(err) = update_ping::initialize(app.handle()) {
+                log::warn!("[updater] update identity unavailable: {}", err);
+            }
             log::info!("[boot] setup() entered at {}ms (Builder + plugins done)", boot_ms());
             boot_trace("setup() entered (plugins INITIALISED)");
             match desktop_attach.decision {

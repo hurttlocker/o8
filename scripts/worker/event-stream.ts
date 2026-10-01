@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import type { ThinkingEffort } from '../../src/lib/orchestrator/thinking-effort';
 
 const INITIAL_BACKOFF_MS = 100;
 const MAX_BACKOFF_MS = 1_600;
@@ -46,7 +47,7 @@ export interface CloudWorkerJob {
   leaseToken: string;
   leaseExpiresAt: string;
   claimCount: number;
-  launch: { prompt: string; model?: string; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; };
+  launch: { prompt: string; model?: string; effort?: ThinkingEffort; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; };
 }
 
 export interface CloudWorkerControl {
