@@ -271,6 +271,15 @@ export interface RuntimeSessionTransformProviderResult {
 export interface LaunchOptions {
   cwd: string;
   prompt: string;
+  /** Coordinator-side registered repository root; never sent to an external worker. */
+  sourceRepoPath?: string;
+  /** Explicit packet branch and base ref for remote execution. */
+  branchName?: string;
+  baseBranch?: string;
+  /** Validated, immutable remote checkout contract persisted with a cloud job. */
+  remoteSource?: { repoUrl: string; baseSha: string; branch: string };
+  /** SHA-256 of operator-authorized manifest bytes at the dispatched base revision. */
+  remoteManifestHash?: string;
   /** Operator-facing task name for an owned worker surface. */
   taskName?: string;
   /** Stable caller correlation persisted before an owned process is spawned. */

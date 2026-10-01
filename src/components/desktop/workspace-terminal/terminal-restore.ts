@@ -449,6 +449,7 @@ export async function computeRestoredTabs(
         kind: 'terminal',
         tmuxSession: savedTab.tmuxSession,
         readOnly: savedTab.readOnly,
+        remoteMachine: savedTab.remoteMachine,
         cliAgent: savedTab.cliAgent,
         repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : (currentPreferredRepo ?? undefined),
         createdAt: now,
@@ -461,6 +462,8 @@ export async function computeRestoredTabs(
         label: savedTab.label,
         kind: 'terminal',
         tmuxSession: null,
+        readOnly: savedTab.remoteMachine ? true : undefined,
+        remoteMachine: savedTab.remoteMachine,
         cliAgent: 'shell',
         repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : (currentPreferredRepo ?? undefined),
         createdAt: now,
@@ -509,7 +512,7 @@ export async function computeRestoredTabs(
   }
   if (cancelled?.()) return null;
 
-  const deadTerminalTabs = finalTabs.filter((tab) => tab.kind === 'terminal' && tab.tmuxSession === null);
+  const deadTerminalTabs = finalTabs.filter((tab) => tab.kind === 'terminal' && tab.tmuxSession === null && !tab.remoteMachine);
 
   return {
     tabs: finalTabs,

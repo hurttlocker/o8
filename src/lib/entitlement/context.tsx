@@ -27,7 +27,7 @@ import {
 
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 
-import { resolveFlags } from './flags';
+import { isPaidPlan, resolveFlags } from './flags';
 import type { EntitlementFlags, FounderInfo, Plan } from './types';
 
 interface EntitlementContextValue {
@@ -200,7 +200,7 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
     () => ({
       plan,
       flags,
-      isPro: plan === 'pro' || plan === 'team',
+      isPro: isPaidPlan(plan),
       isTeam: plan === 'team',
       founder,
       actualPlan,

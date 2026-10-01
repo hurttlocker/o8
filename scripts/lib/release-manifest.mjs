@@ -71,24 +71,39 @@ function discoverLinuxArtifacts(bundleDir) {
   return { updater, uploadAssets };
 }
 
+function assertUniversalDarwinArtifact(artifact) {
+  if (!artifact || typeof artifact.signature !== 'string' || artifact.signature.trim() === '') {
+    throw new Error('macOS updater artifact is missing its signature');
+  }
+  if (artifact.identity?.kind !== 'macos-universal-app') {
+    throw new Error('macOS updater artifact identity must come from a universal app inspection');
+  }
+  for (const architecture of ['x86_64', 'arm64']) {
+    if (!artifact.identity.architectures?.includes(architecture)) {
+      throw new Error(`macOS updater artifact identity is missing ${architecture}`);
+    }
+  }
+}
+
 export function buildReleaseManifest({
   bundleDir,
   version,
   notes,
   pubDate,
   downloadBase,
-  darwinSignature,
+  darwinArtifact,
   baseUploadAssets = [],
   trailingUploadAssets = [],
 }) {
+  assertUniversalDarwinArtifact(darwinArtifact);
   const linux = discoverLinuxArtifacts(bundleDir);
   const platforms = {
     'darwin-x86_64': {
-      signature: darwinSignature,
+      signature: darwinArtifact.signature,
       url: `${downloadBase}/o8.app.tar.gz`,
     },
     'darwin-aarch64': {
-      signature: darwinSignature,
+      signature: darwinArtifact.signature,
       url: `${downloadBase}/o8.app.tar.gz`,
     },
   };

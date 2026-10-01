@@ -47,6 +47,7 @@ export interface ImperativeHandleDeps {
   }) => string;
   openWorkspaceOrchestratorTab: (repo?: RegisteredRepo | null) => string;
   openWorkspaceTerminalTab: (agentId: string, repo?: RegisteredRepo) => string;
+  openRemoteTerminalTab: TerminalTabHandle['openRemoteTerminalTab'];
   attachWorkspaceTerminalSession: (session: Parameters<TerminalTabHandle['openAttachedTerminalSession']>[0], repo: RegisteredRepo | null) => string;
   openWorkspaceInspectorTab: (canvasTab: NonNullable<TerminalTab['canvasTab']>, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
   persistTabsNow: (currentTabs: TerminalTab[], currentActiveId: string) => void;
@@ -103,6 +104,16 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     },
     setTermExited: (sessionName) => {
       deps.panelRefs.current.get(sessionName)?.setExited();
+      const remoteTab = deps.tabsRef.current.find((tab) => (
+        tab.kind === 'terminal' && tab.tmuxSession === sessionName && tab.remoteMachine && !tab.readOnly
+      ));
+      if (remoteTab) {
+        const nextTabs = deps.tabsRef.current.map((tab) => (
+          tab.id === remoteTab.id ? { ...tab, readOnly: true } : tab
+        ));
+        deps.tabsRef.current = nextTabs;
+        deps.setTabs(nextTabs);
+      }
     },
     onSessionCreated: deps.handleSessionCreated,
     clearDetectedPreview: (port) => {
@@ -114,6 +125,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     openLlmChatSession: (options) => deps.openWorkspaceLlmChatSession(options ?? {}),
     openOrchestratorTab: (repo) => deps.openWorkspaceOrchestratorTab(repo),
     openTerminalTab: (repo) => deps.openWorkspaceTerminalTab('shell', repo),
+    openRemoteTerminalTab: deps.openRemoteTerminalTab,
     focusTerminalSession: (sessionName) => {
       const tab = deps.tabsRef.current.find((candidate) => (
         candidate.kind === 'terminal' && candidate.tmuxSession === sessionName
@@ -235,6 +247,11 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       if (!exists) return false;
       deps.closeTabById(activeId);
       return true;
+    },
+    closeRemoteTerminalTabs: () => {
+      for (const tab of deps.tabsRef.current.filter((candidate) => candidate.remoteMachine)) {
+        deps.closeTabById(tab.id);
+      }
     },
     getTabsSnapshot: () => ({
       tabs: deps.tabsRef.current.map((tab) => ({

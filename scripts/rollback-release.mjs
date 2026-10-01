@@ -25,10 +25,10 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, renameSync } from 'node:fs';
-import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
+import { existsSync, mkdtempSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 
 // ── Args ──
 const args = process.argv.slice(2);
@@ -84,44 +84,10 @@ if (!existsSync(tarPath) || !existsSync(sigPath)) {
   fail(`downloaded artifacts missing (expected o8.app.tar.gz + .sig in ${workDir}).`);
 }
 
-// ── 3. Verify the minisign signature against the updater pubkey ──
-function loadUpdaterPubkey() {
-  const conf = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
-  const wrapped = conf?.plugins?.updater?.pubkey;
-  if (typeof wrapped !== 'string' || !wrapped) fail('no plugins.updater.pubkey in src-tauri/tauri.conf.json.');
-  // Tauri stores the pubkey base64-wrapped around the standard minisign text.
-  const std = Buffer.from(wrapped, 'base64').toString('utf8');
-  const b64 = std.trim().split('\n')[1];
-  const raw = Buffer.from(b64, 'base64'); // [2 alg][8 keyid][32 ed25519 key]
-  return raw.subarray(10, 42);
-}
-
-function verifyMinisign(filePath, minisignSigPath, edPubRaw) {
-  // Tauri's .sig is base64 of the standard minisign signature file.
-  const std = Buffer.from(readFileSync(minisignSigPath, 'utf8').trim(), 'base64').toString('utf8');
-  const sigB64 = std.trim().split('\n')[1];
-  const sigRaw = Buffer.from(sigB64, 'base64'); // [2 alg][8 keyid][64 sig]
-  const alg = sigRaw.subarray(0, 2).toString('latin1');
-  const edSig = sigRaw.subarray(10, 74);
-
-  // Ed25519 raw pubkey -> SPKI DER so Node's crypto can consume it.
-  const der = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), edPubRaw]);
-  const keyObj = createPublicKey({ key: der, format: 'der', type: 'spki' });
-
-  const file = readFileSync(filePath);
-  // 'ED' = prehashed (Blake2b-512 of the file); 'Ed' = legacy (raw file).
-  const message = alg === 'ED' ? createHash('blake2b512').update(file).digest() : file;
-  return edVerify(null, message, keyObj, edSig);
-}
-
-let verified = false;
 try {
-  verified = verifyMinisign(tarPath, sigPath, loadUpdaterPubkey());
+  verifyUpdaterSignature(root, tarPath, sigPath);
 } catch (err) {
   fail(`signature verification threw (${err?.message ?? err}). Refusing to swap.`);
-}
-if (!verified) {
-  fail(`signature verification FAILED for ${previousTag}. Refusing to swap the app.`);
 }
 log(`signature verified OK for ${previousTag} against the updater pubkey.`);
 

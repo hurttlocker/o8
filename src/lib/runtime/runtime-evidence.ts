@@ -29,6 +29,7 @@ export type RuntimeTransport =
   | 'acp'
   | 'discovery-only'
   | 'headless-json-schema'
+  | 'http'
   | 'interactive-terminal'
   | 'jsonl'
   | 'ndjson'
@@ -176,6 +177,7 @@ const BUILT_IN_ARCHIVE_RUNTIMES = new Set<OrchestratorRuntime>([
 
 export const RUNTIME_EVIDENCE_DEFINITIONS = {
   codex: unknownEvidence('codex', ['jsonl'], 'provider-native'),
+  cloud: unknownEvidence('cloud', ['http'], 'provider-native'),
   'claude-code': unknownEvidence('claude-code', ['stream-json'], 'provider-native'),
   gemini: {
     ...unknownEvidence('gemini', ['stream-json'], 'provider-native'),
@@ -566,7 +568,11 @@ export async function getRuntimeEvidenceSnapshot(options: {
     const authStatus = capability.dispatchable
       ? await detectRuntimeAuthStatus(runtimeId).catch(() => null)
       : null;
-    const binaryPath = authStatus?.binaryPath ?? scanAndLink(capability.binaryName) ?? null;
+    // A local Codex binary does not prove that an external cloud worker is
+    // enrolled, connected, or able to claim a job.
+    const binaryPath = runtimeId === 'cloud'
+      ? null
+      : authStatus?.binaryPath ?? scanAndLink(capability.binaryName) ?? null;
     const definition = RUNTIME_EVIDENCE_DEFINITIONS[runtimeId];
     const grokCatalogue = runtimeId === 'grok' && binaryPath && options.fresh
       ? await probeGrokModelCatalogue(binaryPath)

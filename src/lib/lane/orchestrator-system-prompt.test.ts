@@ -4,7 +4,7 @@ import { buildOrchestratorSystemPrompt } from './orchestrator-system-prompt';
 describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489, silent since 2026-07-11)', () => {
   // firstRunClarify pinned per-test so assertions don't depend on the
   // machine's real lanes table.
-  const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: false });
+  const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
 
   it('renders the clarify-first doctrine section with the ambiguity trigger', () => {
     expect(prompt).toContain('Clarify-first — interview before dispatch');
@@ -31,7 +31,7 @@ describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489, silen
   });
 
   it('injects the first-mission note when the repo has no dispatch history', () => {
-    const first = buildOrchestratorSystemPrompt('/tmp/example-repo', { firstRunClarify: true });
+    const first = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: true });
     expect(first).toMatch(/first mission on this repo/i);
     expect(first).toMatch(/materially ambiguous by default/i);
   });

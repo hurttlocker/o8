@@ -27,6 +27,7 @@ interface UseWorkspaceTabCleanupOptions {
   pendingRequestRef: MutableRefObject<Map<string, string>>;
   pendingSessionsRef: MutableRefObject<Set<string>>;
   sendTerminalDetach: (sessionName: string) => void;
+  sendTerminalInput: (sessionName: string, data: string) => void;
   setActiveTabIdFromUser: (next: string) => void;
   setPreviews: Dispatch<SetStateAction<LocalhostPreview[]>>;
   setTabs: Dispatch<SetStateAction<TerminalTab[]>>;
@@ -43,6 +44,7 @@ export function useWorkspaceTabCleanup({
   pendingRequestRef,
   pendingSessionsRef,
   sendTerminalDetach,
+  sendTerminalInput,
   setActiveTabIdFromUser,
   setPreviews,
   setTabs,
@@ -55,9 +57,15 @@ export function useWorkspaceTabCleanup({
   );
 
   const handleCloseTab = useCallback((tabId: string) => {
+    const closingTab = tabsRef.current.find((tab) => tab.id === tabId);
     const result = computeCloseTab(tabsRef.current, tabId, activeTabId);
     if (!result) return;
     if (result.detachedSession) {
+      // The local shell runs `exec o8 terminal control` over SSH. Release its
+      // writer before detaching so reopening can claim the saved session.
+      if (closingTab?.remoteMachine && !closingTab.remoteLaunchPending) {
+        sendTerminalInput(result.detachedSession, '\x1d');
+      }
       sendTerminalDetach(result.detachedSession);
       panelRefs.current.delete(result.detachedSession);
     }
@@ -85,6 +93,7 @@ export function useWorkspaceTabCleanup({
     pendingRequestRef,
     pendingSessionsRef,
     sendTerminalDetach,
+    sendTerminalInput,
     setActiveTabIdFromUser,
     setPreviews,
     setTabs,

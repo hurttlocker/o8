@@ -69,6 +69,10 @@ export interface TerminalTab {
   tmuxSession: string | null;
   /** Live run views attach to an existing PTY but must never send it input. */
   readOnly?: boolean;
+  /** Prevent typing into a new local shell until its remote control starts. */
+  remoteLaunchPending?: boolean;
+  /** Saved SSH target behind a local control shell. Retained after exit or reload. */
+  remoteMachine?: { id: string; label: string; sessionId: string };
   cliAgent?: string;
   repo?: RegisteredRepo;
   createdAt: number;
@@ -145,6 +149,13 @@ export interface TerminalTab {
   worktreePath?: string;
 }
 
+export interface RemoteTerminalDetails {
+  command: string;
+  machineId: string;
+  machineLabel: string;
+  sessionId: string;
+}
+
 export type LocalhostPreview = DetectedLocalhostPreview;
 export type { PreviewSelectionPayload };
 export type WorkspaceChatRuntime = OrchestratorRuntime | 'chat';
@@ -196,6 +207,7 @@ export interface TerminalTabHandle {
   }) => string;
   openOrchestratorTab: (repo?: RegisteredRepo | null) => string;
   openTerminalTab: (repo?: RegisteredRepo) => string;
+  openRemoteTerminalTab: (details: RemoteTerminalDetails) => string;
   focusTerminalSession: (sessionName: string) => boolean;
   openAttachedTerminalSession: (session: WorkspaceAttachedTerminalSession, repo: RegisteredRepo | null) => string;
   openHistoryChat: (
@@ -225,6 +237,8 @@ export interface TerminalTabHandle {
   focusTabRelative: (delta: number) => boolean;
   focusTabAtIndex: (oneBasedIndex: number) => boolean;
   closeActiveTab: () => boolean;
+  /** Close remote control tabs before their containing pane unmounts. */
+  closeRemoteTerminalTabs: () => void;
   getTabsSnapshot: () => {
     tabs: Array<{
       id: string;
@@ -291,10 +305,11 @@ export interface WorkspaceTerminalProps {
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   onSplitVertical?: (initialTab?: 'chat' | 'terminal') => void;
   onSplitHorizontal?: (initialTab?: 'chat' | 'terminal') => void;
+  onOpenRemoteTerminal?: (details: RemoteTerminalDetails) => void;
   canCloseTile?: boolean;
   onCloseTile?: () => void;
   conversationNavigation?: 'tabs' | 'sidebar';
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string, directPty?: boolean) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number, readOnly?: boolean) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;

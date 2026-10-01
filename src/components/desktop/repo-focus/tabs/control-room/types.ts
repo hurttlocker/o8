@@ -64,6 +64,18 @@ export interface TaskPoolTask {
   } | null;
   project: TaskPoolProjectSummary | null;
   lane: TaskPoolLaneSummary | null;
+  execution?: {
+    kind: 'remote_worker';
+    jobId: string;
+    sessionKey: string;
+    status: 'pending' | 'leased' | 'completed' | 'parked' | 'cancelled';
+    attempt: number;
+    workerId: string | null;
+    leaseState: 'active' | 'expired' | 'none';
+    updatedAt: string;
+    workspaceAccess: 'unavailable';
+    previewAccess: 'unavailable';
+  } | null;
 }
 
 export interface TaskPoolPayload {

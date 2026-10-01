@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { O8ScratchChat } from './O8ScratchChat';
+import { MarkdownRender, proseWithoutBrainCitationMarkers } from '../markdown-render';
 
 let finishCortexAskStream: (() => void) | null = null;
 
@@ -87,5 +88,22 @@ describe('O8ScratchChat Brain answers', () => {
     expect(guide?.href).toBe('https://example.com/guide');
     expect(document.body.textContent).toContain('First source');
     expect(document.body.textContent).toContain('Second source');
+  });
+
+  it('preserves paragraph boundaries when stripping a leading citation marker', async () => {
+    // Named invariant: citation_marker_strip_preserves_paragraph_boundaries
+    const raw = 'First paragraph.\n\n[CITATION:source-1] Second paragraph.';
+    const cleaned = proseWithoutBrainCitationMarkers(raw);
+    expect(cleaned).toContain('\n\n');
+    expect(cleaned).not.toBe('First paragraph. Second paragraph.');
+    expect(cleaned).toBe('First paragraph.\n\n Second paragraph.');
+
+    await act(async () => {
+      root.render(createElement(MarkdownRender, { content: cleaned }));
+    });
+
+    const paragraphs = [...container.querySelectorAll('p')].map((node) => node.textContent);
+    expect(paragraphs).toEqual(['First paragraph.', ' Second paragraph.']);
+    expect(container.textContent).not.toContain('[CITATION:');
   });
 });

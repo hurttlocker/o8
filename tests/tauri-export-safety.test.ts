@@ -42,4 +42,20 @@ describe('Tauri export input safety', () => {
       .toThrow('standalone node_modules is a symbolic link');
     expect(existsSync(marker)).toBe(true);
   });
+
+  it('refuses a nested dependency link that escapes the standalone tree', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-tauri-export-nested-'));
+    const sharedModules = mkdtempSync(join(tmpdir(), 'o8-tauri-export-shared-'));
+    roots.push(root, sharedModules);
+    const standalone = join(root, '.next', 'standalone');
+    const modules = join(standalone, 'node_modules');
+    const marker = join(sharedModules, 'marker.txt');
+    mkdirSync(modules, { recursive: true });
+    writeFileSync(marker, 'must-survive');
+    symlinkSync(sharedModules, join(modules, 'node_modules'), 'dir');
+
+    expect(() => assertTauriExportInputsSafe(standalone))
+      .toThrow('dependency link escapes the package');
+    expect(existsSync(marker)).toBe(true);
+  });
 });

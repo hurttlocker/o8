@@ -67,3 +67,12 @@ it('formats current model IDs without dropping their minor versions', () => {
   expect(formatModelLabel('claude-fable-5-1')).toBe('Fable 5.1');
   expect(formatModelLabel('gpt-6-sol')).toBe('GPT-6 Sol');
 });
+
+it('preserves longer model variants before shorter ID replacements', () => {
+  // Longer/more-specific IDs must win: flash-lite before flash; vendor-prefixed [1m] before bare fable-5.
+  expect(formatModelLabel('gemini-2.5-flash-lite')).toBe('Gemini 2.5 Flash Lite');
+  expect(formatModelLabel('anthropic/claude-fable-5[1m]')).toBe('Fable 5 (1M)');
+  // Stable controls: shorter sibling and already-correct bare [1m] form.
+  expect(formatModelLabel('gemini-2.5-flash')).toBe('Gemini 2.5 Flash');
+  expect(formatModelLabel('claude-fable-5[1m]')).toBe('Fable 5 (1M)');
+});

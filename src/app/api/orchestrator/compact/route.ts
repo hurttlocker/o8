@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import { autoCompactOrchestratorThread } from '@/lib/orchestrator/auto-compact';
 import { isOrchestratorHomePath, resolveOrchestratorRepoPath } from '@/lib/orchestrator/repo-path';
@@ -24,6 +23,10 @@ export async function POST(request: NextRequest) {
   if (!repoPath) {
     return NextResponse.json({ ok: false, error: 'repoPath is required' }, { status: 400 });
   }
+  const threadId = typeof body?.threadId === 'string' ? body.threadId.trim() : '';
+  if (!threadId.startsWith('thoughts-')) {
+    return NextResponse.json({ ok: false, error: 'threadId is required' }, { status: 400 });
+  }
 
   const resolvedHomePath = isOrchestratorHomePath(repoPath)
     ? resolveOrchestratorRepoPath(repoPath)
@@ -40,9 +43,8 @@ export async function POST(request: NextRequest) {
   try {
     const result = await autoCompactOrchestratorThread({
       repoPath: repoRoot,
-      threadId: typeof body?.threadId === 'string' ? body.threadId : undefined,
+      threadId,
       runningTotal: typeof body?.runningTotal === 'number' ? body.runningTotal : undefined,
-      liveMessages: Array.isArray(body?.messages) ? body.messages as MobileTranscriptEntry[] : undefined,
       keepTailCount: typeof body?.keepTailCount === 'number' ? body.keepTailCount : undefined,
       trigger: body?.trigger === 'manual' || body?.trigger === 'handoff' ? body.trigger : 'auto',
     });
