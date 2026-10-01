@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_notification::NotificationExt;
-use tauri_plugin_updater::UpdaterExt;
 
 const UPDATE_AVAILABLE_EVENT: &str = "o8://update-available";
 const UPDATE_CLEAR_EVENT: &str = "o8://update-clear";
@@ -204,16 +203,7 @@ pub fn start_launch_update_check<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         emit_bundle_integrity_warning(&app);
 
-        let updater = match app.updater() {
-            Ok(updater) => updater,
-            Err(err) => {
-                log::warn!("[launch-updater] updater unavailable: {}", err);
-                emit_clear(&app, "failed", Some(bounded_check_error(err)));
-                return;
-            }
-        };
-
-        match updater.check().await {
+        match crate::update_ping::check(&app).await {
             Ok(Some(update)) => {
                 let payload = LaunchUpdatePayload {
                     version: update.version.clone(),

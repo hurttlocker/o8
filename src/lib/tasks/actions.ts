@@ -33,6 +33,7 @@ import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
 import { resolveTaskContractRequired } from '@/lib/orchestrator/task-contract-required';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
+import { remoteWorkerPreflightError } from '@/lib/cloud/worker-readiness';
 import { getTaskPoolTask, type TaskPoolTask } from './pool';
 
 export type TaskMutationAction = 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune' | 'remove';
@@ -205,7 +206,14 @@ async function syncPacketForLane(
       lastEventLabel,
     };
 
-    if (patch.status) nextPacket.status = patch.status;
+    if (patch.status) {
+      nextPacket.status = patch.status;
+      if ((patch.status === 'running' || patch.status === 'launching')
+        && nextPacket.queueState === 'held' && nextPacket.holdIntent === 'explicit-dispatch') {
+        nextPacket.queueState = 'queued';
+        nextPacket.holdIntent = undefined;
+      }
+    }
     if (patch.blockedReason !== undefined) nextPacket.blockedReason = patch.blockedReason;
 
     state.packets = state.packets.map((candidate, candidateIndex) => (
@@ -367,9 +375,10 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
       runtime: workerRouting.selectedRuntime,
       dependencyLabels: [],
       dependencyPacketIds: [],
-      queueState: 'queued',
+      queueState: workerRouting.selectedRuntime === 'cloud' ? 'held' : 'queued',
+      holdIntent: workerRouting.selectedRuntime === 'cloud' ? 'explicit-dispatch' : undefined,
       releaseState: 'pending',
-      status: 'queued',
+      status: workerRouting.selectedRuntime === 'cloud' ? 'draft' : 'queued',
       attemptCount: 0,
       maxAttempts: 3,
       blockedReason: null,
@@ -456,7 +465,12 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     source: 'task-dispatch',
   });
   try {
-    await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, task.repoPath);
+    if (workerRouting.selectedRuntime === 'cloud') {
+      const error = remoteWorkerPreflightError(input.model ?? task.workerRouting?.requestedModel);
+      if (error) throw new TaskMutationError(409, error);
+    } else {
+      await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, task.repoPath);
+    }
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
       throw new TaskMutationError(409, `${error.status.detail} ${error.status.fix}`);

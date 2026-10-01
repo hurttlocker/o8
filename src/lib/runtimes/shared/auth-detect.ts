@@ -246,7 +246,7 @@ async function detectCodex(): Promise<RuntimeAuthStatus> {
     installed: true,
     authenticated: cliSaysLoggedIn || hasToken,
     detail: cliSaysLoggedIn || hasToken
-      ? 'Codex CLI is installed and signed in.'
+      ? 'Codex CLI has credential evidence. Provider access has not been checked.'
       : 'Codex CLI is installed but not signed in.',
     binaryPath,
   });

@@ -1,11 +1,14 @@
 'use client';
 
-import { type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Play, Plus, RefreshCw, X } from '../../../lucide-shims';
 import { REPO_FOCUS_FONT } from '../../utils';
 import type { RepoFocusRepo } from '../../types';
 import { FIELD_SURFACE, FLOATING_GLASS_SURFACE } from './constants';
 import { ActionButton, IconActionButton, StatusChip } from './shared';
+import type { TaskExecutionRuntime } from './create-task-request';
+import { useRemoteWorkerAvailability } from './useRemoteWorkerAvailability';
+import { CODEX_MODEL_IDS, MODEL_IDS } from '@/lib/models';
 
 export function TaskStatusStrip({
   counts,
@@ -83,9 +86,12 @@ export function NewTaskComposer({
   onRepoPathChange: (value: string) => void;
   onWorkerIntentChange: (value: string) => void;
   onCancel: () => void;
-  onCreate: () => void;
-  onCreateAndDispatch: () => void;
+  onCreate: (runtime: TaskExecutionRuntime, model: string | null) => void;
+  onCreateAndDispatch: (runtime: TaskExecutionRuntime, model: string | null) => void;
 }) {
+  const [executionRuntime, setExecutionRuntime] = useState<TaskExecutionRuntime>('codex');
+  const remote = useRemoteWorkerAvailability();
+  const [model, setModel] = useState('');
   const fieldStyle: CSSProperties = {
     width: '100%',
     border: '1px solid var(--t-divider-subtle)',
@@ -117,11 +123,11 @@ export function NewTaskComposer({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11.5, lineHeight: '15px', color: 'var(--t-text)', fontWeight: 640 }}>
+          <div style={{ fontSize: 11.5, lineHeight: '15px', color: 'var(--t-text)', fontWeight: 300 }}>
             New task
           </div>
           <div style={{ marginTop: 1, fontSize: 10.25, lineHeight: '13px', color: 'var(--t-text-faint)' }}>
-            Ready pool - Codex-only dispatch
+            Choose where this task runs
           </div>
         </div>
         <button
@@ -197,9 +203,27 @@ export function NewTaskComposer({
           <option value="orchestrator">Orchestrator</option>
         </select>
       </div>
+      <select
+        aria-label="Task execution location"
+        value={executionRuntime}
+        onChange={(event) => setExecutionRuntime(event.currentTarget.value as TaskExecutionRuntime)}
+        style={{ ...fieldStyle, marginTop: 7, fontWeight: 300 }}
+      >
+        <option value="codex">This machine · Codex</option>
+        <option value="cloud">Remote worker · Codex</option>
+      </select>
+      <select aria-label="Task model" value={model} onChange={(event) => setModel(event.currentTarget.value)} style={{ ...fieldStyle, marginTop: 7 }}>
+        <option value="">Automatic · {MODEL_IDS.codexWorkerDefault}</option>
+        {CODEX_MODEL_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
+      </select>
+      {executionRuntime === 'cloud' ? (
+        <div role="status" style={{ marginTop: 5, fontSize: 10.5, lineHeight: '15px', fontWeight: 300, color: 'var(--t-text-muted)' }}>
+          {remote?.detail ?? 'Checking remote workers…'}
+        </div>
+      ) : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7, marginTop: 9 }}>
-        <ActionButton label="Add" disabled={busy} onClick={onCreate} />
-        <ActionButton label="Add + dispatch" icon={<Play size={12} strokeWidth={2.2} />} primary disabled={busy} onClick={onCreateAndDispatch} />
+        <ActionButton label="Add" disabled={busy} onClick={() => onCreate(executionRuntime, model || null)} />
+        <ActionButton label="Add + dispatch" icon={<Play size={12} strokeWidth={2.2} />} primary disabled={busy || (executionRuntime === 'cloud' && !remote?.available)} onClick={() => onCreateAndDispatch(executionRuntime, model || null)} />
       </div>
     </div>
   );

@@ -1,14 +1,14 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- registry dependencies are supplied through one stable render contract */
 
-import { Suspense, type Dispatch, type SetStateAction } from 'react';
+import { Suspense, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { toast } from '@/components/shared/ConfirmToastHost';
 import type { CanvasRepoTaskLaunchRequest } from '@/components/desktop/Canvas';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from '@/components/desktop/ContextualPanel';
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import type { TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
-import type { TerminalTab, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
+import type { RemoteTerminalDetails, TerminalTab, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type {
@@ -39,6 +39,7 @@ import {
   repoSlugFromRemote,
   sameWorkspaceLaneState,
 } from './utils';
+import { waitForWorkspaceTerminalHandle } from './hooks/workspace-terminal-readiness';
 
 const LazyWorkspaceTerminal = retryingLazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })), { label: 'Workspace terminal' });
 const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })), { label: 'Canvas' });
@@ -100,7 +101,7 @@ export interface TileRegistryDeps {
   handleSelectCommit: (hash: string, meta?: Record<string, string>) => void;
   handleSelectPreviewTile: (tileId: string, previewId: string) => void;
   handleSelectRegisteredRepo: (repoId: string) => Promise<void>;
-  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'chat' | 'terminal', placeBefore?: boolean) => void;
+  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'chat' | 'terminal' | 'remote', placeBefore?: boolean) => string | null;
   handleThoughtsMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -136,6 +137,7 @@ export interface TileRegistryDeps {
   workspacePreviews: DetectedLocalhostPreview[];
   workspaceScopeEntries: WorkspaceScopeEntry[];
   workspaceTerminalPreferredRepo: WorkspaceScopeEntry | null;
+  workspaceTerminalHandlesRef: MutableRefObject<Map<string, TerminalTabHandle>>;
   workspaceTerminalResetNonceByTileId: Record<string, number>;
 }
 
@@ -192,8 +194,31 @@ export function createTileRegistry({
   workspacePreviews,
   workspaceScopeEntries,
   workspaceTerminalPreferredRepo,
+  workspaceTerminalHandlesRef,
   workspaceTerminalResetNonceByTileId,
 }: TileRegistryDeps): TileContentRegistry {
+  const openRemoteMachinePane = (tileId: string, details: RemoteTerminalDetails) => {
+    const newTileId = handleSplitTile(tileId, 'vertical', 'remote');
+    if (!newTileId) {
+      toast('Unable to open a pane for this machine.');
+      return;
+    }
+    void waitForWorkspaceTerminalHandle({
+      read: () => workspaceTerminalHandlesRef.current.get(newTileId) ?? null,
+      wait: (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs)),
+    }).then((handle) => {
+      if (!handle) throw new Error('The new machine pane did not become ready.');
+      if (!handle.openRemoteTerminalTab(details)) {
+        throw new Error('Unable to start the machine terminal in its new pane.');
+      }
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : 'Unable to open the machine terminal.';
+      window.dispatchEvent(new CustomEvent('o8:remote-pane-open-failed', {
+        detail: { tileId: newTileId, message },
+      }));
+      toast(message);
+    });
+  };
   return {
     workspace: {
       label: 'Workspace',
@@ -345,7 +370,9 @@ export function createTileRegistry({
             stateScope={tileId}
             activeWorkspaceSurface={activeTileId === tileId}
             defaultTab={isPrimaryWorkspaceTile || (content.kind === 'terminal' && content.initialTab === 'chat') ? 'llm-chat' : 'terminal'}
-            autoCreateDefaultTab={isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0 || (content.kind === 'terminal' && Boolean(content.initialTab))}
+            autoCreateDefaultTab={content.kind === 'terminal' && content.initialTab === 'remote'
+              ? false
+              : isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0 || (content.kind === 'terminal' && Boolean(content.initialTab))}
             conversationNavigation={isPrimaryWorkspaceTile ? 'sidebar' : 'tabs'}
             preferredRepo={tilePreferredRepo}
             selectedRepo={workspaceTerminalPreferredRepo}
@@ -443,6 +470,7 @@ export function createTileRegistry({
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
             onSplitVertical={(initialTab) => handleSplitTile(tileId, 'vertical', initialTab)}
             onSplitHorizontal={(initialTab) => handleSplitTile(tileId, 'horizontal', initialTab)}
+            onOpenRemoteTerminal={(details) => openRemoteMachinePane(tileId, details)}
             onCloseTile={() => handleCloseTile(tileId)}
             sendTerminalCreate={sendTerminalCreate}
             sendTerminalAttach={sendTerminalAttach}

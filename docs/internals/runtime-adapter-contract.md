@@ -67,6 +67,14 @@ entry. A resumable representative must prove launch, discovered thread ID,
 resume, clean child exit, and transcript normalization through the shared
 adapter.
 
+Every dispatchable runtime is also covered by
+`tests/runtime-carrier-conformance.integration.test.ts`. That suite derives its
+cases from `ORCHESTRATOR_RUNTIMES`, skips an absent real binary with an explicit
+reason, and checks install detection, a parseable real `--version`, auth/readiness
+evidence, and the dispatch adapter entry. A successful-but-empty auth listing is
+indeterminate evidence; it must not be interpreted as a disconnected account
+when stronger runtime evidence says the carrier can dispatch.
+
 ## Specialized runtimes
 
 Use a hand-written adapter when a CLI has stateful process control that cannot be

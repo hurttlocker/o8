@@ -36,6 +36,8 @@ export interface OrchestratorRuntimeCapability<
   shortLabel: string;
   /** Can this runtime receive dispatched packets via mission control? */
   dispatchable: boolean;
+  /** Adapter can launch through an explicit governed route but is not offered in mission pickers. */
+  explicitLaunchOnly?: boolean;
   /** Does it require a --model flag to be picked before launch? */
   requiresModel: boolean;
   /** Default model if user doesn't pick one */
@@ -110,6 +112,24 @@ export const ORCHESTRATOR_RUNTIMES = {
     },
     tier: 'frontier',
     description: 'Codex coding agent via `codex exec --json` (Astra orchestration · Terra workers). Full-access sandbox, thread resume.',
+  },
+  cloud: {
+    label: 'Cloud Worker',
+    shortLabel: 'Cloud',
+    // The durable adapter is usable through the runtime launch route. Mission
+    // dispatch stays hidden until external-worker availability is surfaced.
+    dispatchable: false,
+    explicitLaunchOnly: true,
+    requiresModel: false,
+    defaultModel: MODEL_IDS.codexWorkerDefault,
+    accentColor: '#2563eb',
+    binaryName: 'codex',
+    workerProvider: 'codex',
+    authHouse: null,
+    modelIdPattern: /^(gpt-|o\d|openai\/)/i,
+    reasoningEffort: true,
+    tier: 'frontier',
+    description: 'Durable external Codex worker with a remote Git checkout and scoped worker key.',
   },
   'claude-code': {
     label: 'Claude Code',
