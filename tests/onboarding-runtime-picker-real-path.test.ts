@@ -186,4 +186,7 @@ it('keeps the Claude model setting when saving an Astra and Terra setup', async 
   expect(persisted.values.orchestratorBackend).toBe('codex');
   expect(persisted.values.defaultDispatchModel).toBe('gpt-5.6-terra');
   expect(persisted.values.orchestratorModel).toBe(before.values.orchestratorModel);
+  const { resolveOrchestratorBackendId, resolveReviewerBackendId } = await import('@/lib/lane/orchestrator-backends/active-backend');
+  expect(resolveOrchestratorBackendId()).toBe('codex');
+  expect(resolveReviewerBackendId()).toBe('codex');
 });

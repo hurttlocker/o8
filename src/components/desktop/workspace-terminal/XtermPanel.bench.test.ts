@@ -25,7 +25,7 @@ class MockAddon {
 class MockTerminal {
   cols = 120;
   rows = 30;
-  options: { theme?: Record<string, string> } = {};
+  options: { theme?: Record<string, string>; disableStdin?: boolean } = {};
   unicode = { activeVersion: '' };
   buffer = {
     active: {
@@ -51,6 +51,13 @@ class MockTerminal {
   }
   write(data: Uint8Array | string, callback?: () => void) {
     if (data instanceof Uint8Array) xtermMock.writes.push(data);
+    const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+    // xterm answers terminal queries while parsing output. Model fragmented
+    // response events so the replay boundary cannot leak any fragment.
+    if (text.includes('\x1b[c') && !this.options.disableStdin) {
+      xtermMock.onData?.('\x1b[?1');
+      xtermMock.onData?.(';2c');
+    }
     xtermMock.writeCallbacks.push(callback);
     if (xtermMock.completeWritesImmediately) callback?.();
   }
@@ -308,5 +315,36 @@ describe('XtermPanel terminal workload instrumentation', () => {
     expect(props.sendTerminalInput).not.toHaveBeenCalled();
     await act(async () => xtermMock.writeCallbacks[1]?.());
     expect(props.sendTerminalInput).toHaveBeenCalledWith('cortex-dash-bench-fixture', 'queued-input');
+  });
+
+  it('does not forward probe replies from replayed scrollback, but preserves live replies and typing', async () => {
+    const panelRef = createRef<XtermPanelHandle>();
+    const props = { ...panelProps(true), sendTerminalVisibility: vi.fn() };
+    await act(async () => {
+      root.render(createElement(XtermPanel, { ...props, ref: panelRef }));
+      await Promise.resolve();
+    });
+    const epoch = props.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true)?.[2]?.epoch ?? -1;
+
+    // An attach-time query arrives while the historical snapshot is painting.
+    // Both are replay bytes, so neither answer belongs in the live shell.
+    xtermMock.completeWritesImmediately = false;
+    await act(async () => panelRef.current?.applyResync?.(btoa('old scrollback \x1b[c'), epoch, false, 'tmux'));
+    await act(async () => panelRef.current?.writeData(btoa('\x1b[c')));
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+    await act(async () => xtermMock.writeCallbacks[0]?.());
+    expect(new TextDecoder().decode(xtermMock.writes[1])).toBe('\x1b[c');
+    await act(async () => xtermMock.writeCallbacks[1]?.());
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+
+    // Once the replay is fully painted, current terminal output may query the
+    // emulator and user typing must still reach the selected session.
+    await act(async () => panelRef.current?.writeData(btoa('\x1b[c')));
+    expect(props.sendTerminalInput).toHaveBeenCalledTimes(2);
+    expect(props.sendTerminalInput).toHaveBeenNthCalledWith(1, 'cortex-dash-bench-fixture', '\x1b[?1');
+    expect(props.sendTerminalInput).toHaveBeenNthCalledWith(2, 'cortex-dash-bench-fixture', ';2c');
+
+    xtermMock.onData?.('typed');
+    expect(props.sendTerminalInput).toHaveBeenLastCalledWith('cortex-dash-bench-fixture', 'typed');
   });
 });

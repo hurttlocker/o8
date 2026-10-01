@@ -1,5 +1,5 @@
 /**
- * Panel-side surface for cloud workers (issue #514 v0 scaffolding).
+ * Panel-side surface for scoped cloud worker keys and recent connections.
  *
  * Auth: this route is UI-facing, so it rides the panel middleware gate
  * (loopback + ws-token). Individual cloud workers authenticate against
@@ -15,6 +15,7 @@ import {
   listCloudWorkerKeys,
   revokeCloudWorkerKey,
 } from '@/lib/cloud/worker-auth';
+import { listConnectedCloudWorkers } from '@/lib/cloud/worker-presence';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,9 +45,7 @@ export async function GET() {
     const keys = listCloudWorkerKeys().map(toPublicShape);
     return response({
       keys,
-      // Worker connection discovery lands in a follow-up — for v0 we don't
-      // surface live poll state yet because there is no worker CLI to connect.
-      connectedWorkers: [],
+      connectedWorkers: listConnectedCloudWorkers(),
     });
   } catch (error) {
     console.error('[panel-cloud-workers] failed to list keys:', error);

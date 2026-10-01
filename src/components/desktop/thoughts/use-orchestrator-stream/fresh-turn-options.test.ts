@@ -306,6 +306,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         await waitForPayload(1);
       });
       expect(historyUpdates).toEqual([tabId]);
+      expect(sentTurnPayloads()[0]?.threadId).toBe(tabId);
       expect(sentTurnPayloads()[0]?.repoPath).toBe(newRepo);
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
       const record = await GET_CHAT(new NextRequest(`http://127.0.0.1/api/v2/chat-history?tabId=${tabId}`));

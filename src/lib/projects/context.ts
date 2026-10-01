@@ -71,6 +71,14 @@ export interface ProjectContextOptions {
 export interface ProjectTaskBriefOptions extends ProjectContextOptions {
   taskTitle?: string | null;
   taskBody?: string | null;
+  includeLocalPaths?: boolean;
+}
+
+export class ProjectNotFoundError extends Error {
+  constructor(projectId: string) {
+    super(`Project ${projectId.trim()} does not exist.`);
+    this.name = 'ProjectNotFoundError';
+  }
 }
 
 const RAIL_IMPORT_PLACEHOLDER = 'Imported from the desktop project rail.';
@@ -141,7 +149,7 @@ function resolveExplicitProject(
   if (isVirtualRepoProjectId(requested)) {
     const panelProject = ledgerProjects.find((project) => project.id.toLowerCase() === requested);
     if (!panelProject) {
-      throw new Error(`Project ${requestedProjectId.trim()} does not exist.`);
+      throw new ProjectNotFoundError(requestedProjectId);
     }
     // Virtual single-repo ids represent their own ledger projection. A Settings
     // project with the same name is a different identity and owns different repos.
@@ -162,7 +170,7 @@ function resolveExplicitProject(
       ?? null;
 
   if (!panelProject) {
-    throw new Error(`Project ${requestedProjectId.trim()} does not exist.`);
+    throw new ProjectNotFoundError(requestedProjectId);
   }
 
   const matchedSettingsProject = settingsProject
@@ -446,10 +454,10 @@ export function buildProjectTaskBrief(context: ProjectContext, options: ProjectT
   const lines = [
     `Project: ${context.name} (${context.repos.length} repo${context.repos.length === 1 ? '' : 's'})`,
     context.primaryRepo
-      ? `Main repo: ${formatRepoLabel(context.primaryRepo)} at ${context.primaryRepo.localPath}`
+      ? `Main repo: ${formatRepoLabel(context.primaryRepo)}${options.includeLocalPaths === false ? '' : ` at ${context.primaryRepo.localPath}`}`
       : null,
     context.currentRepo && context.currentRepo.id !== context.primaryRepo?.id
-      ? `Current repo: ${formatRepoLabel(context.currentRepo)} at ${context.currentRepo.localPath}`
+      ? `Current repo: ${formatRepoLabel(context.currentRepo)}${options.includeLocalPaths === false ? '' : ` at ${context.currentRepo.localPath}`}`
       : null,
     siblingRepos.length > 0
       ? `Related repos: ${siblingRepos.map(formatRepoLabel).join(', ')}`
