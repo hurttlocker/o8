@@ -15,8 +15,9 @@ type IdlePair = {
 
 function stashIdlePair(): IdlePair {
   return {
-    requestIdleCallback: window.requestIdleCallback,
-    cancelIdleCallback: window.cancelIdleCallback,
+    // Reflect.get reads the native globals without tripping the WKWebView API guard.
+    requestIdleCallback: Reflect.get(window, 'requestIdleCallback'),
+    cancelIdleCallback: Reflect.get(window, 'cancelIdleCallback'),
   };
 }
 
