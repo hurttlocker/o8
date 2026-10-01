@@ -9,6 +9,27 @@ fn label(id: &str) -> Result<String, String> {
     Ok(format!("remote-preview-{id}"))
 }
 
+fn owned_preview_label(name: &str) -> bool {
+    name.strip_prefix("remote-preview-")
+        .is_some_and(|id| label(id).is_ok())
+}
+
+/// React cannot dispose child windows after its document has been replaced.
+/// Native ownership ends when the main document starts loading again.
+pub(crate) fn close_on_main_reload(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let owner = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        for (name, preview) in owner.webview_windows() {
+            if owned_preview_label(&name) {
+                if preview.destroy().is_err() {
+                    log::warn!("Could not dispose a remote preview during main reload");
+                }
+            }
+        }
+    });
+}
+
 fn preview_url(raw: &str) -> Result<tauri::Url, String> {
     let url: tauri::Url = raw.parse().map_err(|_| "Invalid remote preview URL")?;
     let ticket = url.query().and_then(|query| query.strip_prefix("ticket="));
@@ -138,5 +159,15 @@ mod tests {
         assert!(label(&"g".repeat(48)).is_err());
         assert!(valid_rect(0.0, 0.0, 300.0, 200.0).is_ok());
         assert!(valid_rect(f64::NAN, 0.0, 300.0, 200.0).is_err());
+    }
+
+    #[test]
+    fn reload_cleanup_selects_only_owned_preview_labels() {
+        assert!(owned_preview_label(&format!("remote-preview-{}", "a".repeat(48))));
+        for name in ["main", "browser-view", "dock", "remote-preview-main", "remote-preview-"] {
+            assert!(!owned_preview_label(name));
+        }
+        assert!(!owned_preview_label(&format!("remote-preview-{}", "g".repeat(48))));
+        assert!(!owned_preview_label(&format!("remote-preview-{}-other", "a".repeat(48))));
     }
 }

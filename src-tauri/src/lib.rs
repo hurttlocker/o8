@@ -7864,6 +7864,7 @@ pub fn run() {
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
             }
