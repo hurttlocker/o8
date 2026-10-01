@@ -3,9 +3,9 @@ import { queueOrchestratorSessionPrelude } from '@/lib/orchestrator/store';
 import {
   ORCHESTRATOR_CONTEXT_LIMIT,
   emitTokenUsage,
-  scoreTelemetryPath,
   type CompactResponsePayload,
 } from './shared';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 
 interface RefLike<T> {
   current: T;
@@ -13,22 +13,12 @@ interface RefLike<T> {
 
 interface RefreshTokenTelemetryOptions {
   repoPath: string | null;
+  threadId: string | null;
+  backend: OrchestratorBackendId | null;
   setRunningTotal: (value: number) => void;
   setTokenCount: (value: number) => void;
-  telemetrySessionKeyRef: RefLike<string | null>;
+  telemetryBindingRef: RefLike<string | null>;
   telemetryTotalRef: RefLike<number | null>;
-}
-
-interface RuntimeInventoryResponse {
-  agents?: Array<{
-    runtime?: string;
-    sessionKey?: string;
-    sessionKind?: string;
-    status?: string;
-    isCurrentSession?: boolean;
-    workspace?: string;
-    runtimeSurface?: { cwd?: string | null };
-  }>;
 }
 
 interface RuntimeTelemetryResponse {
@@ -44,47 +34,30 @@ export async function refreshOrchestratorTokenTelemetry(
   options: RefreshTokenTelemetryOptions,
 ): Promise<{ totalTokens: number | null; estimatedCostUsd: number | null; model: string | null } | null> {
   const activeRepoPath = options.repoPath;
-  if (!activeRepoPath) return null;
+  const threadId = options.threadId?.trim() ?? '';
+  const backend = options.backend;
+  if (!activeRepoPath || !threadId.startsWith('thoughts-') || (backend !== 'claude' && backend !== 'codex')) {
+    options.telemetryBindingRef.current = null;
+    options.telemetryTotalRef.current = null;
+    return null;
+  }
 
   try {
-    let sessionKey = options.telemetrySessionKeyRef.current;
-    if (!sessionKey) {
-      const inventoryResponse = await fetch('/api/runtime/inventory?fresh=1', { cache: 'no-store' });
-      const inventory = inventoryResponse.ok
-        ? await inventoryResponse.json() as RuntimeInventoryResponse
-        : null;
-      sessionKey = (inventory?.agents ?? [])
-        .map((agent) => {
-          if (agent.runtime !== 'claude-code' || !agent.sessionKey) {
-            return { score: -1, sessionKey: null as string | null };
-          }
-          const pathScore = Math.max(
-            scoreTelemetryPath(agent.workspace, activeRepoPath),
-            scoreTelemetryPath(agent.runtimeSurface?.cwd, activeRepoPath),
-          );
-          if (pathScore === 0) {
-            return { score: -1, sessionKey: null as string | null };
-          }
-          return {
-            score: pathScore * 10
-              + (agent.sessionKind === 'owned' ? 6 : 0)
-              + (agent.isCurrentSession ? 3 : 0)
-              + (agent.status === 'running' || agent.status === 'reviewing' || agent.status === 'idle' ? 1 : 0),
-            sessionKey: agent.sessionKey,
-          };
-        })
-        .sort((left, right) => right.score - left.score)[0]?.sessionKey ?? null;
-      options.telemetrySessionKeyRef.current = sessionKey;
+    const binding = `${threadId}\0${backend}`;
+    if (options.telemetryBindingRef.current !== binding) {
+      options.telemetryBindingRef.current = binding;
+      options.telemetryTotalRef.current = null;
     }
-    if (!sessionKey) return null;
-
-    const response = await fetch(`/api/runtime/telemetry?sessionKey=${encodeURIComponent(sessionKey)}`, { cache: 'no-store' });
+    const params = new URLSearchParams({ threadId, backend });
+    const response = await fetch(`/api/runtime/telemetry?${params.toString()}`, { cache: 'no-store' });
+    if (options.telemetryBindingRef.current !== binding) return null;
     if (!response.ok) {
-      options.telemetrySessionKeyRef.current = null;
+      options.telemetryTotalRef.current = null;
       return null;
     }
 
     const payload = await response.json() as RuntimeTelemetryResponse;
+    if (options.telemetryBindingRef.current !== binding) return null;
     // Runtime totalTokens is the billable rollup and may include native child
     // work. Auto-compact and the context meter use only the tokens that entered
     // this parent session's own window.
@@ -120,7 +93,6 @@ export async function refreshOrchestratorTokenTelemetry(
 export async function requestOrchestratorCompaction(
   activeRepoPath: string,
   nextRunningTotal: number,
-  nextMessages: MobileTranscriptEntry[],
   options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null },
 ): Promise<CompactResponsePayload | null> {
   const response = await fetch('/api/orchestrator/compact', {
@@ -130,7 +102,6 @@ export async function requestOrchestratorCompaction(
       repoPath: activeRepoPath,
       threadId: options?.threadId,
       runningTotal: nextRunningTotal,
-      messages: nextMessages,
       keepTailCount: options?.keepTailCount,
       trigger: options?.trigger,
     }),
@@ -150,6 +121,7 @@ interface PrimeCompactedSessionOptions {
   setTranscript?: boolean;
   telemetrySessionKeyRef: RefLike<string | null>;
   telemetryTotalRef: RefLike<number | null>;
+  isCurrent?: () => boolean;
 }
 
 export async function primeCompactedOrchestratorSession(
@@ -157,12 +129,14 @@ export async function primeCompactedOrchestratorSession(
 ) {
   const { payload, repoPath } = options;
   if (!payload.ok || !payload.applied || !Array.isArray(payload.transcript)) return null;
+  if (options.isCurrent && !options.isCurrent()) return null;
 
   await fetch('/api/orchestrator/reset-session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoPath, threadId: options.threadId }),
   }).catch(() => null);
+  if (options.isCurrent && !options.isCurrent()) return null;
 
   if (payload.resumePrelude) {
     queueOrchestratorSessionPrelude(repoPath, payload.resumePrelude, 'replace', options.threadId);

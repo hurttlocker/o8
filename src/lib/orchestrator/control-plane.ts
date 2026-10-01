@@ -4,12 +4,14 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { CODEX_AUTH_RECOVERY_LANE_LABEL, findCurrentAuthExit } from '@/lib/lane/current-auth-exit';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
 import { packetContextObservationFromEvent } from '@/lib/orchestrator/packet-context-telemetry';
+import { CODEX_AUTH_RECOVERY_MESSAGE, codexAuthRecoveryMessage } from '@/lib/runtimes/shared/codex-auth-failure';
 import {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
@@ -333,14 +335,28 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
     .map((lane) => {
       const events = getLaneEvents(lane.id, 100);
       const recovery = recoveryInfoFromLaneEvents(events);
-      const runtimeExited = hasUnreconciledRuntimeExit(lane, events);
+      const currentAuthExit = findCurrentAuthExit(lane, events);
+      const runtimeExited = currentAuthExit ? false : hasUnreconciledRuntimeExit(lane, events);
       const contextEvent = events.findLast((event) => event.verb === 'runtime_process_exit');
+      const failureMessage = currentAuthExit
+        ? CODEX_AUTH_RECOVERY_MESSAGE
+        : contextEvent?.payload.runtime === 'codex'
+        && contextEvent.payload.surfaceId === lane.sessionKey
+        && !events.slice(events.indexOf(contextEvent) + 1).some((event) => event.verb === 'attach_session')
+        && contextEvent.payload.runtimeOutcome === 'failed'
+        ? (contextEvent.payload.authRecoveryRequired === true ? CODEX_AUTH_RECOVERY_MESSAGE
+          : codexAuthRecoveryMessage(typeof contextEvent.payload.stderr === 'string' ? contextEvent.payload.stderr : ''))
+        : null;
       return {
         laneId: lane.id,
         packetId: lane.packetId!,
-        status: runtimeExited ? 'failed' : lane.status,
+        status: currentAuthExit ? 'awaiting_input' : runtimeExited ? 'failed' : lane.status,
         sessionKey: lane.sessionKey,
-        lastEventLabel: runtimeExited ? 'runtime_process_exit' : lane.lastEventLabel,
+        lastEventLabel: currentAuthExit
+          ? CODEX_AUTH_RECOVERY_LANE_LABEL
+          : runtimeExited ? 'runtime_process_exit' : lane.lastEventLabel,
+        failureMessage,
+        authRecoveryRequired: Boolean(currentAuthExit),
         recovery,
         contextObservation: contextEvent ? packetContextObservationFromEvent(contextEvent) : undefined,
         mergeMode: mergePolicy.mode,

@@ -339,6 +339,9 @@ export function useTileLayout({
     if (!result.closed) {
       return;
     }
+    if (tile?.type === 'leaf' && tile.content.kind === 'terminal') {
+      workspaceTerminalHandlesRef.current.get(tileId)?.closeRemoteTerminalTabs();
+    }
     const allTerminalPanes = collectLeafNodes(tileLayout.root).every((leaf) => leaf.content.kind === 'terminal');
     setTileLayout({
       ...tileLayout,
@@ -359,7 +362,7 @@ export function useTileLayout({
       const nextActive = (sibling && findTile(result.root, sibling.id)) ? sibling.id : getFirstLeaf(result.root).id;
       setActiveTileId(nextActive);
     }
-  }, [activeTileId, setActiveTileId, setTileLayout, tileLayout]);
+  }, [activeTileId, setActiveTileId, setTileLayout, tileLayout, workspaceTerminalHandlesRef]);
 
   const handleResizeSplit = useCallback((splitId: string, ratio: number) => {
     setTileLayout({
@@ -368,7 +371,7 @@ export function useTileLayout({
     });
   }, [setTileLayout, tileLayout]);
 
-  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal', placeBefore = false, exactPlacement = false) => {
+  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal' | 'remote', placeBefore = false, exactPlacement = false): string | null => {
     const ratio = direction === 'vertical' ? 0.55 : 0.62;
     // Split creates the same type: workspace splits → new terminal (chat), contextual splits → new contextual (shell)
     const sourceTile = findTile(tileLayout.root, tileId);
@@ -402,7 +405,7 @@ export function useTileLayout({
           exactPlacement || Boolean(largestPane),
         );
     if (!result.newTileId) {
-      return;
+      return null;
     }
     const nextLayout = {
       ...tileLayout,
@@ -410,6 +413,7 @@ export function useTileLayout({
     };
     setTileLayout(nextLayout);
     setActiveTileId(result.newTileId);
+    return result.newTileId;
   }, [setActiveTileId, setTileLayout, tileLayout]);
 
   const ensureTileKind = useCallback((

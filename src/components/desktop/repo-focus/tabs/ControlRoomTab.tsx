@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
-import { AlertCircle, Archive, CheckCircle2, Clock, ShieldCheck } from '../../lucide-shims';
-import {
-  REPO_FOCUS_FONT,
-} from '../utils';
+import { AlertCircle, Archive, CheckCircle2, Clock } from '../../lucide-shims';
+import { REPO_FOCUS_FONT } from '../utils';
 import type {
   ControlRoomTabProps,
   GitHubIssueIntake,
@@ -21,13 +19,17 @@ import {
   issueAge,
   issueKey,
   issueKind,
+  findDispatchSessionKey,
   isStaleTask,
   repoIssueParam,
   supervisorIncidentMatchesProject,
   taskMatchesProject,
+  taskSessionKey,
+  type PendingDispatch,
 } from './control-room/helpers';
 import {
   CollapsedTaskSection,
+  DispatchLockStrip,
   GitHubIntakeSection,
   NewTaskComposer,
   StatusMessage,
@@ -36,32 +38,8 @@ import {
   TaskSection,
   TaskStatusStrip,
 } from './control-room/components';
-import type { IdeWorkspaceSession } from '../types';
-
-interface PendingDispatch {
-  packetId: string | null;
-  laneId: string | null;
-  sessionKey: string | null;
-  startedAt: number;
-}
-
+import { createTaskRequest, type TaskExecutionRuntime } from './control-room/create-task-request';
 const PENDING_DISPATCH_TIMEOUT_MS = 30_000;
-
-function findDispatchSessionKey(
-  pending: PendingDispatch,
-  sessions: IdeWorkspaceSession[],
-): string | null {
-  for (const session of sessions) {
-    if (!session.sessionKey) continue;
-    if (pending.sessionKey && session.sessionKey === pending.sessionKey) {
-      return session.sessionKey;
-    }
-    if (pending.packetId && session.orchestrationPacket?.packetId === pending.packetId) {
-      return session.sessionKey;
-    }
-  }
-  return null;
-}
 
 export function ControlRoomTab({
   project,
@@ -224,6 +202,11 @@ export function ControlRoomTab({
       const payload = await response.json() as TaskPoolPayload;
       if (cancelled?.()) return;
       setTasks(payload.tasks ?? []);
+      setActionMenu((current) => {
+        if (!current) return current;
+        const latest = payload.tasks?.find((task) => task.id === current.task.id);
+        return latest ? { ...current, task: latest } : current;
+      });
       setError(null);
     } catch (err) {
       if (cancelled?.()) return;
@@ -336,7 +319,7 @@ export function ControlRoomTab({
     }
   }, [loadIssueIntake, project.id, refresh, selectedRepo?.localPath]);
 
-  const createControlTask = useCallback(async (dispatchAfterCreate = false) => {
+  const createControlTask = useCallback(async (dispatchAfterCreate = false, requestedRuntime: TaskExecutionRuntime = 'codex', model: string | null = null) => {
     const title = newTaskTitle.trim();
     if (!title) {
       setNotice('Add a short task title first.');
@@ -345,38 +328,15 @@ export function ControlRoomTab({
     setBusyKey(dispatchAfterCreate ? 'create-dispatch' : 'create');
     setNotice(null);
     try {
-      const response = await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          summary: newTaskSummary.trim() || null,
-          projectId: project.id,
-          repoPath: newTaskRepoPath || selectedRepo?.localPath || null,
-          workerIntent: newTaskIntent,
-        }),
-      });
-      const payload = await response.json().catch(() => ({})) as Partial<TaskMutationPayload> & { error?: string };
-      if (!response.ok || payload.ok === false || !payload.taskId) {
-        throw new Error(payload.error ?? payload.note ?? 'Task creation failed.');
-      }
-      let finalNote = payload.note ?? 'Task added to ready pool.';
-      if (dispatchAfterCreate) {
-        const dispatchResponse = await fetch(`/api/tasks/${encodeURIComponent(payload.taskId)}/dispatch`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            actor: 'orchestrator',
-            projectId: project.id,
-            repoPath: newTaskRepoPath || selectedRepo?.localPath || null,
-          }),
-        });
-        const dispatchPayload = await dispatchResponse.json().catch(() => ({})) as Partial<TaskMutationPayload> & { error?: string };
-        if (!dispatchResponse.ok || dispatchPayload.ok === false) {
-          throw new Error(dispatchPayload.error ?? dispatchPayload.note ?? 'Dispatch failed.');
-        }
-        finalNote = dispatchPayload.note ?? 'Task created and dispatched.';
-      }
+      const finalNote = await createTaskRequest({
+        title,
+        summary: newTaskSummary.trim() || null,
+        projectId: project.id,
+        repoPath: newTaskRepoPath || selectedRepo?.localPath || null,
+        workerIntent: newTaskIntent,
+        requestedRuntime,
+        model,
+      }, dispatchAfterCreate);
       setNewTaskTitle('');
       setNewTaskSummary('');
       setComposerOpen(false);
@@ -438,11 +398,12 @@ export function ControlRoomTab({
 
         const dispatchedPacketId = dispatchPayload.packetId ?? dispatchPayload.task?.packetId ?? payload.taskId ?? null;
         const dispatchedLaneId = dispatchPayload.laneId ?? dispatchPayload.task?.laneId ?? null;
-        const dispatchedSessionKey = dispatchPayload.task?.lane?.sessionKey ?? null;
+        const dispatchedSessionKey = dispatchPayload.task ? taskSessionKey(dispatchPayload.task) : null;
         const candidate: PendingDispatch = {
           packetId: dispatchedPacketId,
           laneId: dispatchedLaneId,
           sessionKey: dispatchedSessionKey,
+          requireExactSession: dispatchPayload.task?.runtime === 'cloud',
           startedAt: Date.now(),
         };
         const immediateKey = findDispatchSessionKey(candidate, ideWorkspaceSessions);
@@ -512,7 +473,10 @@ export function ControlRoomTab({
   ), [liveActiveTasks]);
   const openSessionKeys = useMemo(() => new Set(ideWorkspaceSessions.map((session) => session.sessionKey)), [ideWorkspaceSessions]);
   const sessionBound = useMemo(() => (
-    liveActiveTasks.filter((task) => task.lane?.sessionKey && openSessionKeys.has(task.lane.sessionKey)).length
+    liveActiveTasks.filter((task) => {
+      const sessionKey = taskSessionKey(task);
+      return Boolean(sessionKey && openSessionKeys.has(sessionKey));
+    }).length
   ), [liveActiveTasks, openSessionKeys]);
   const attentionTasks = useMemo(() => (
     [...grouped.blocked, ...grouped.review]
@@ -648,8 +612,8 @@ export function ControlRoomTab({
           onRepoPathChange={setNewTaskRepoPath}
           onWorkerIntentChange={setNewTaskIntent}
           onCancel={() => setComposerOpen(false)}
-          onCreate={() => { void createControlTask(false); }}
-          onCreateAndDispatch={() => { void createControlTask(true); }}
+          onCreate={(runtime, model) => { void createControlTask(false, runtime, model); }}
+          onCreateAndDispatch={(runtime, model) => { void createControlTask(true, runtime, model); }}
         />
       ) : null}
 
@@ -686,27 +650,7 @@ export function ControlRoomTab({
         onRefresh={() => { void refresh(false); }}
       />
 
-      <div
-        style={{
-          marginTop: 7,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          minHeight: 28,
-          borderBottom: '1px solid var(--t-divider-subtle)',
-          color: 'var(--t-text-muted)',
-          fontSize: 10.5,
-          lineHeight: '14px',
-        }}
-      >
-        <ShieldCheck size={14} strokeWidth={2} style={{ color: 'var(--t-accent)', flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          Codex-only dispatch lock
-        </span>
-        <span style={{ color: 'var(--t-text-faint)', flexShrink: 0 }}>
-          {activeLocks} locks - {sessionBound} open
-        </span>
-      </div>
+      <DispatchLockStrip activeLocks={activeLocks} sessionBound={sessionBound} />
 
       <div style={isWide ? { display: 'flex', gap: 14, alignItems: 'flex-start', marginTop: 4 } : { marginTop: 4 }}>
         <div style={isWide ? { flex: '1.6 1 0', minWidth: 0 } : undefined}>
@@ -821,8 +765,10 @@ export function ControlRoomTab({
       {actionMenu ? (
         <TaskActionMenu
           state={actionMenu}
+          boundaryElement={rootRef.current}
           busyKey={busyKey}
           onClose={() => setActionMenu(null)}
+          onRefreshTask={() => refresh(true)}
           onSelectSession={onSelectSession}
           onAction={(task, action, body) => { void mutateTask(task, action, body); }}
         />

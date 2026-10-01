@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
+import { workerLaunchPayload } from '@/lib/cloud/worker-payload';
 import { getJob, getJobMetrics, listJobControls, readJobEvents } from '@/lib/cloud/job-queue';
 
 export const runtime = 'nodejs';
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
     );
   }
   return NextResponse.json({
-    job,
+    job: { ...job, launch: workerLaunchPayload(job.launch) },
     metrics: getJobMetrics(auth.teamId, jobId),
     controls: listJobControls(auth.teamId, jobId),
     events: readJobEvents(auth.teamId, jobId, sinceId),

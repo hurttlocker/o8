@@ -259,7 +259,7 @@ export function UpdateCard() {
   const checkForUpdate = useCallback(async () => {
     if (!canUseTauriEvents()) return;
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
+      const { check } = await import('@/lib/app-update/check');
       const result = await check();
       if (result) {
         setUpdate({

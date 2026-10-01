@@ -4,7 +4,7 @@ import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
 import { normalizePacketSpendCap, normalizePacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import { normalizePacketContextTelemetry, reconcilePacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
-import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
+import { preferRuntimeRecoveryMessage, type DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { normalizePacketAlignmentResolvedAt } from '@/lib/orchestrator/packet-alignment-normalize';
@@ -40,7 +40,7 @@ import { normalizeReleaseStatePayload } from '@/lib/orchestrator/release-state-p
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 export type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
-  return isDispatchableRuntime(value) ? value : 'codex';
+  return isDispatchableRuntime(value) || value === 'cloud' ? value : 'codex';
 }
 if (typeof window !== 'undefined') installOrchestratorTurnPinFetchPatch();
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
@@ -997,7 +997,7 @@ export function reconcileOrchestratorMissionState(
 
     if (packet.status === 'failed' && (!domainLane || domainLane.status === 'failed')) {
       next.status = 'failed';
-      next.blockedReason = packet.blockedReason ?? null;
+      next.blockedReason = preferRuntimeRecoveryMessage(packet.blockedReason, domainLane?.failureMessage) ?? null;
       return next;
     }
 
@@ -1024,13 +1024,13 @@ export function reconcileOrchestratorMissionState(
       if (ds === 'recovering') { next.status = 'recovering'; next.blockedReason = domainLane.lastEventLabel ?? 'Lane recovering'; return next; }
       if (ds === 'failed') {
         next.status = 'failed';
-        next.blockedReason = packet.blockedReason ?? (domainLane.lastEventLabel === 'zero_diff_failed' ? 'no_changes_produced' : domainLane.lastEventLabel);
+        next.blockedReason = preferRuntimeRecoveryMessage(packet.blockedReason, domainLane.failureMessage) ?? (domainLane.lastEventLabel === 'zero_diff_failed' ? 'no_changes_produced' : domainLane.lastEventLabel);
         return next;
       }
       if (ds === 'running') { next.status = 'running'; return next; }
       if (ds === 'launching') { next.status = 'launching'; return next; }
       if (ds === 'awaiting_input') {
-        next.status = 'blocked';
+        next.status = 'blocked'; if (domainLane.authRecoveryRequired) next.queueState = 'held';
         // #1469 — preserve the REAL reason. The dag fold-back and the
         // rebase-conflict path both set a truthful blockedReason (conflicting
         // files, fetch failure) before the lane parks awaiting_input;
@@ -1038,7 +1038,7 @@ export function reconcileOrchestratorMissionState(
         // operator staring at 'Awaiting operator input' while the actual
         // error lived only in next-server.log. Mirrors the
         // awaiting_orchestrator branch below.
-        next.blockedReason = packet.blockedReason
+        next.blockedReason = preferRuntimeRecoveryMessage(packet.blockedReason, domainLane.failureMessage)
           ?? friendlyAwaitingInputReason(domainLane.lastEventLabel)
           ?? 'Awaiting operator input';
         return next;

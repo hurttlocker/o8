@@ -2,7 +2,7 @@
  * #2142 — false dispatch: the orchestrator narrates a dispatch it never made.
  *
  * `settleOrchestratorTurn` has always been able to SEE this: it holds both the
- * number of `cortex_launch_agent` calls the turn made and the assistant text the
+ * number of worker launch calls the turn made (`launchesWorker`) and the assistant text the
  * turn produced. When the text claims a dispatch and the call count is zero, the
  * turn is fiction — no lane, no worktree, no worker. Until now that produced a
  * `console.warn` in `ws-server.log` and then a normal `done`, so every consumer
@@ -49,7 +49,9 @@ const DISPATCH_VERB_PATTERN = /\b(?:dispatched|dispatching|launched|launching|ki
  * telling it to launch agents it deliberately did not launch — a false positive
  * that causes an unwanted dispatch. The guard is mandatory, not cosmetic.
  */
-const DISPATCH_NEGATION_PATTERN = /\b(?:no|not|n't|nothing|none|never|without|cannot|unable|instead of|rather than|before|would|should|could|will|can|if)\b/i;
+// A contraction's `n't` sits inside a word ("haven't", "didn’t"), where `\b`
+// never matches, so it is matched on its own without a leading boundary (#2940).
+const DISPATCH_NEGATION_PATTERN = /\b(?:no|not|nothing|none|never|without|cannot|unable|instead of|rather than|before|would|should|could|will|can|if)\b|n['’]t\b/i;
 
 /** Split on sentence terminators AND newlines — bullet lists rarely punctuate. */
 function sentences(text: string): string[] {
@@ -77,6 +79,27 @@ export function claimsDispatch(text: string): boolean {
  * and are excluded), produced no error, made ZERO launch calls, and still told
  * the operator it dispatched.
  */
+/**
+ * #2936 — tools that start a worker, matched on the bare tool name so every MCP
+ * server prefix counts (`mcp__cortex__`, `mcp__operator__`, Codex `cortex__`).
+ * `create_mission` dispatches unless called with `dispatch: false`.
+ * `retry_packet` is excluded: it salvages or archives and needs
+ * `dispatch_mission` to relaunch.
+ */
+const WORKER_LAUNCH_TOOLS = new Set(['cortex_launch_agent', 'dispatch_mission', 'rerun_with_feedback']);
+
+export function launchesWorker(toolName: string, input: unknown): boolean {
+  const separator = toolName.lastIndexOf('__');
+  const bare = separator === -1 ? toolName : toolName.slice(separator + 2);
+  if (bare === 'create_mission') {
+    const dispatch = input !== null && typeof input === 'object'
+      ? (input as { dispatch?: unknown }).dispatch
+      : undefined;
+    return dispatch !== false;
+  }
+  return WORKER_LAUNCH_TOOLS.has(bare);
+}
+
 export function isFalseDispatchTurn(input: {
   completedResult: boolean;
   error: Error | null;
@@ -112,15 +135,15 @@ export const FALSE_DISPATCH_RETRY_NOTICE =
  * session — it keeps the plan, names the contradiction, and asks for the call.
  */
 export const FALSE_DISPATCH_CORRECTION = [
-  'STOP. Your previous reply reported that you dispatched agents, but you made no `cortex_launch_agent` call in that turn, so nothing was launched: no lane, no worktree, no worker.',
-  'Registering or naming a mission does not launch anything, and there is no background dispatcher that picks packets up afterwards. `cortex_launch_agent` is the only thing that launches a worker.',
-  'Redo that turn now. Call `cortex_launch_agent` once per packet you described, using the same plan, then report the lane ids the tool actually returned.',
+  'STOP. Your previous reply reported that you dispatched agents, but that turn made no worker launch call (`create_mission`, `dispatch_mission`, or `cortex_launch_agent`), so nothing was launched: no lane, no worktree, no worker.',
+  'Describing or naming a mission in prose does not launch anything, and there is no background dispatcher that picks packets up afterwards. Only a launch tool call starts a worker.',
+  'Redo that turn now. Launch the packets you described with `create_mission` (one call carries every packet) or one `cortex_launch_agent` call per packet, using the same plan, then report the ids the tool actually returned.',
   'If you cannot launch — a tool error, a refused precondition, a missing repo — say exactly what blocked you. Do not report a dispatch you did not make.',
 ].join('\n');
 
 /** The thread-visible failure when the retry does not fix it either. */
 export const FALSE_DISPATCH_ERROR =
-  'Dispatch failed: the orchestrator reported launching agents but made no `cortex_launch_agent` call, '
+  'Dispatch failed: the orchestrator reported launching agents but made no worker launch call, '
   + 'on the original turn and again after an explicit correction. Nothing was launched — no lane, no worktree, no worker '
   + 'was created, and any mission id named above is registered but empty. Re-send the request, or dispatch the packets '
   + 'directly from the mission surface.';

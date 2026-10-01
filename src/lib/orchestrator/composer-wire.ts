@@ -1,3 +1,5 @@
+import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
+
 export type ComposerWireMode = 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
 
 export function isComposerWireMode(value: unknown): value is ComposerWireMode {
@@ -70,6 +72,34 @@ export function stripKnownComposerWirePreamble(message: string): string {
     if (message.startsWith(prefix)) return message.slice(prefix.length);
   }
   return message;
+}
+
+/**
+ * Single mode takes its one authoritative banner from the backend registry
+ * (`applyOrchestrationMode`), so the composer's copy repeats it, and a
+ * forced-single turn can carry the picked mode's dispatch directive, which
+ * contradicts it (#2899). Every other mode keeps the composer directive.
+ */
+export function modelFacingComposerMessage(
+  message: string,
+  executionMode: OrchestratorExecutionMode,
+): string {
+  return executionMode === 'single' ? stripKnownComposerWirePreamble(message) : message;
+}
+
+/**
+ * Puts a queued session prelude (compaction resume, /handoff) in front of the
+ * composer turn. The server's single-mode strip only looks at the start of the
+ * message, so a directive left behind the prelude would reach the model beside
+ * the registry banner (#2957). Scope the turn first, then add the prelude.
+ */
+export function withSessionPrelude(
+  wireMessage: string,
+  resumePrelude: string | null | undefined,
+  executionMode: OrchestratorExecutionMode,
+): string {
+  if (!resumePrelude) return wireMessage;
+  return `${resumePrelude}\n\nOperator message:\n${modelFacingComposerMessage(wireMessage, executionMode)}`;
 }
 
 export function isKnownComposerPreambleTitle(value: unknown): boolean {

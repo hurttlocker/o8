@@ -47,6 +47,16 @@ export type ToolSurface =
  */
 export type ToolProfile = 'full' | 'propose' | 'solo' | 'fable' | 'fable-solo';
 
+/**
+ * True when the profile keeps the operator server and full cortex: the
+ * dispatch, review, merge, and render surface. `buildToolRegistry` projects
+ * from this, and the orchestrator prompt drops its fleet sections without it
+ * (#2898), so the two cannot drift.
+ */
+export function toolProfileCanDispatch(profile: ToolProfile = 'full'): boolean {
+  return profile !== 'propose' && profile !== 'solo' && profile !== 'fable-solo';
+}
+
 /** Inert in Phase 1; the vault-phase credential-injection hook. */
 export interface SecretRef {
   vaultKey: string;

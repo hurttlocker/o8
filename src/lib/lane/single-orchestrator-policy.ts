@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  accessSync,
   chmodSync,
   closeSync,
   constants as fsConstants,
@@ -44,12 +45,46 @@ export function singleOrchestratorEnvironment(
   };
 }
 
+/**
+ * macOS stops a copy of an app-bundle executable: the ChatGPT app's bundled
+ * Codex exits 137 when copied out of CodexCLI.app (#2911). Solo runs a private
+ * copy, so it cannot use one.
+ */
+function isAppBundleExecutable(path: string): boolean {
+  return /\.app\/Contents\/MacOS\/[^/]+$/.test(path);
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const SOLO_BUNDLED_CODEX_MESSAGE = 'Solo mode cannot use the Codex CLI bundled in the ChatGPT app: '
+  + 'Solo runs a private copy of Codex, and macOS stops a copy of that one. '
+  + 'Install the standalone Codex CLI with `npm i -g @openai/codex`, then send the message again.';
+
 function resolvePrivateCodexSource(binary: string): {
   nativeBinary: string;
   denyReadPaths: string[];
   denyExecPaths: string[];
 } {
   const resolvedBinary = realpathSync(binary);
+  // The ChatGPT app's codex-cli/bin/codex is a shell script that runs
+  // ../CodexCLI.app/Contents/MacOS/codex; that executable is the real CLI.
+  const bundledBehindWrapper = join(dirname(dirname(resolvedBinary)), 'CodexCLI.app', 'Contents', 'MacOS', 'codex');
+  if (!resolvedBinary.endsWith('.js') && existsSync(bundledBehindWrapper)) {
+    const nativeBinary = realpathSync(bundledBehindWrapper);
+    return {
+      nativeBinary,
+      denyReadPaths: [binary, resolvedBinary, nativeBinary],
+      denyExecPaths: [binary, resolvedBinary, nativeBinary],
+    };
+  }
   if (!resolvedBinary.endsWith('.js')) {
     return {
       nativeBinary: resolvedBinary,
@@ -80,7 +115,32 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));
 }
 
-function discoverCodexInstallations(binary: string, env: NodeJS.ProcessEnv): {
+/**
+ * The Codex CLI a Solo turn runs. The selected binary is kept unless it is
+ * app-bundled; then the next relocatable install on PATH or the standalone
+ * install location is used, and with none the turn fails before launch.
+ */
+function selectSoloCodexBinary(binary: string, env: NodeJS.ProcessEnv): string {
+  if (!isAppBundleExecutable(resolvePrivateCodexSource(binary).nativeBinary)) return binary;
+  const alternates = uniqueStrings([
+    ...(env.PATH ?? '').split(delimiter).filter(Boolean).map((entry) => join(entry, 'codex')),
+    ...(env.HOME ? [join(env.HOME, '.codex', 'packages', 'standalone', 'current', 'bin', 'codex')] : []),
+  ].filter(existsSync));
+  const alternate = alternates.find((candidate) => {
+    try {
+      if (!isExecutableFile(candidate)) return false;
+      const source = resolvePrivateCodexSource(candidate);
+      return isExecutableFile(source.nativeBinary) && !isAppBundleExecutable(source.nativeBinary);
+    } catch {
+      return false;
+    }
+  });
+  if (!alternate) throw new Error(SOLO_BUNDLED_CODEX_MESSAGE);
+  console.log(`[single-orchestrator] ${binary} is app-bundled; Solo runs ${alternate}`);
+  return alternate;
+}
+
+function discoverCodexInstallations(binaries: string[], env: NodeJS.ProcessEnv): {
   cliPaths: string[];
   nativeBinaries: string[];
   denyReadPaths: string[];
@@ -88,12 +148,14 @@ function discoverCodexInstallations(binary: string, env: NodeJS.ProcessEnv): {
 } {
   const userApplications = env.HOME ? join(env.HOME, 'Applications') : null;
   const candidates = uniqueStrings([
-    binary,
+    ...binaries,
     ...(env.PATH ?? '').split(delimiter).filter(Boolean).map((entry) => join(entry, 'codex')),
     '/Applications/ChatGPT.app/Contents/Resources/codex',
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
     '/Applications/Codex.app/Contents/Resources/codex',
     ...(userApplications ? [
       join(userApplications, 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
+      join(userApplications, 'ChatGPT.app', 'Contents', 'Resources', 'codex-cli', 'bin', 'codex'),
       join(userApplications, 'Codex.app', 'Contents', 'Resources', 'codex'),
     ] : []),
   ].filter(existsSync));
@@ -224,8 +286,10 @@ export async function prepareSingleOrchestratorLaunch(input: {
     mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
     symlinkSync(sessionsDir, join(overlayHome, 'sessions'), 'dir');
 
-    const source = resolvePrivateCodexSource(input.binary);
-    const installations = discoverCodexInstallations(input.binary, input.env);
+    const binary = selectSoloCodexBinary(input.binary, input.env);
+    const source = resolvePrivateCodexSource(binary);
+    // The originally selected binary stays denied even when Solo runs another.
+    const installations = discoverCodexInstallations([binary, input.binary], input.env);
     const toolHosts = discoverCodexToolHosts(input.env);
     const selectedToolHost = selectedCodexToolHost(source.nativeBinary, installations.nativeBinaries);
     copyFileSync(source.nativeBinary, launchBinaryPath, fsConstants.COPYFILE_FICLONE);
