@@ -1582,6 +1582,17 @@
       ]
     },
     {
+      "path": "tests/cloud-worker-shutdown-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cold-start-runtime-spawn-routes.test.ts",
       "reasons": [
         "child-process",
@@ -3043,6 +3054,15 @@
         "network-listener",
         "process-signal",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/retired-owned-session-close-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
