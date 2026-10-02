@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 
 type PluginAction = { id: string; description: string; entry: string; args: string[]; timeoutMs: number };
-type Manifest = { id: string; name: string; version: string; description: string; supportedPlatforms: string[]; workspace: 'none' | 'registered-project'; actions: PluginAction[] };
+type PluginTrigger = { id: string; event: 'worktree.created'; actionId: string };
+type Manifest = { id: string; name: string; version: string; description: string; supportedPlatforms: string[]; workspace: 'none' | 'registered-project'; actions: PluginAction[]; triggers?: PluginTrigger[] };
 type Review = { manifest: Manifest; revision: string; files: Array<{ path: string; bytes: number; sha256: string; content: string }>; execution: { cwd: string; environmentKeys: string[]; principal: string } };
-type Installed = { manifest: Manifest; revision: string; enabled: boolean; linkedAt: string; workspaceRoot?: string | null; sourceDirectory?: string };
-type Receipt = { id: string; plugin_id: string; action_id: string; status: string; started_at: string; exit_code: number | null; stdout: string | null; stderr: string | null; error: string | null };
+type Installed = { manifest: Manifest; revision: string; enabled: boolean; enabledTriggers?: string[]; linkedAt: string; workspaceRoot?: string | null; sourceDirectory?: string };
+type Receipt = { id: string; plugin_id: string; action_id: string; status: string; started_at: string; exit_code: number | null; stdout: string | null; stderr: string | null; error: string | null; eventId?: string | null; triggerId?: string | null };
 type Inventory = { installed: Installed[]; damaged: string[]; receipts: Receipt[] };
 
 const buttonStyle: CSSProperties = { minHeight: 28, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)', borderRadius: 7, backgroundColor: 'var(--t-input-bg)', color: 'var(--t-text)', paddingTop: 5, paddingBottom: 5, paddingLeft: 10, paddingRight: 10, fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300, cursor: 'pointer' };
@@ -88,6 +89,11 @@ export default function PluginsTab({ repoPath }: { repoPath?: string | null }) {
       setNotice(`${plugin.manifest.name} ${action === 'remove' ? 'removed' : action === 'enable' ? 'enabled' : 'disabled'}.`);
     });
   };
+  const changeTrigger = (plugin: Installed, trigger: PluginTrigger, enabled: boolean) => {
+    void operate(`trigger:${plugin.manifest.id}:${trigger.id}`, { action: 'trigger', id: plugin.manifest.id, revision: plugin.revision, triggerId: trigger.id, enabled }, () => {
+      setNotice(`${trigger.event} trigger ${enabled ? 'enabled' : 'disabled'} for ${plugin.manifest.name}.`);
+    });
+  };
 
   return <section aria-label="Plugins" style={{ display: 'flex', flexDirection: 'column', gap: 20, color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
     <div><h2 style={{ marginTop: 0, marginBottom: 6, fontSize: 18, fontWeight: 400 }}>Action plugins</h2><p style={{ ...metaStyle, marginTop: 0, marginBottom: 0 }}>Link a local folder, review its exact files, then run an action. Actions run with your local user account.</p></div>
@@ -108,8 +114,9 @@ export default function PluginsTab({ repoPath }: { repoPath?: string | null }) {
           <pre style={{ ...metaStyle, backgroundColor: 'var(--t-input-bg)', whiteSpace: 'pre', overflow: 'auto', scrollbarWidth: 'none', maxHeight: 360, paddingTop: 10, paddingBottom: 10, paddingLeft: 12, paddingRight: 12, borderRadius: 7 }}>{file.content}</pre>
         </details>)}
         <div style={{ ...metaStyle, marginTop: 8 }}>Actions: {review.manifest.actions.map((action) => `${action.id} → ${action.entry}${action.args.length ? ` ${action.args.join(' ')}` : ''} (${action.timeoutMs} ms limit)`).join('; ')}</div>
+        {review.manifest.triggers?.length ? <div style={{ ...metaStyle, marginTop: 8 }}>Optional triggers: {review.manifest.triggers.map((trigger) => `${trigger.event} → ${trigger.actionId}`).join('; ')}. Linking leaves them off. Enable each trigger below after review; it runs when a new managed worktree is ready in the bound project. The triggered action runs from that worktree and receives its event ID, project, worktree path, branch, and creation time as JSON on stdin.</div> : null}
         <div style={{ ...metaStyle, marginTop: 8 }}>Platforms: {review.manifest.supportedPlatforms.join(', ')}. Workspace: {review.manifest.workspace === 'none' ? 'private plugin folder' : 'selected registered project'}.</div>
-        <div style={{ ...metaStyle, marginTop: 8 }}>Working directory: <code>{review.execution.cwd}</code></div>
+        <div style={{ ...metaStyle, marginTop: 8 }}>Manual run directory: <code>{review.execution.cwd}</code></div>
         <div style={{ ...metaStyle, marginTop: 8 }}>Process: {review.execution.principal}; environment keys: {review.execution.environmentKeys.join(', ') || 'none'}. This does not restrict file access.</div>
         <button type="button" onClick={linkSource} disabled={busy !== null} style={{ ...buttonStyle, marginTop: 14 }}>Link reviewed revision</button>
       </div> : null}
@@ -127,12 +134,19 @@ export default function PluginsTab({ repoPath }: { repoPath?: string | null }) {
       {plugin.sourceDirectory ? <div style={{ ...metaStyle, marginTop: 8 }}>Linked from <code>{plugin.sourceDirectory}</code></div> : null}
       {plugin.manifest.workspace === 'registered-project' ? <div style={{ ...metaStyle, marginTop: 8 }}>{plugin.workspaceRoot ? `Bound project: ${plugin.workspaceRoot}` : 'Project binding unavailable.'}</div> : null}
       {plugin.manifest.actions.map((action) => <div key={action.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', marginTop: 12, paddingTop: 12 }}><div><div style={{ fontSize: 12, fontWeight: 300 }}>{action.id}</div><div style={{ ...metaStyle, marginTop: 3 }}>{action.description}</div></div><button type="button" onClick={() => runAction(plugin, action)} disabled={!plugin.enabled || busy !== null || (plugin.manifest.workspace === 'registered-project' && repoPath !== plugin.workspaceRoot)} style={buttonStyle}>Run</button></div>)}
+      {plugin.manifest.triggers?.map((trigger) => {
+        const enabled = plugin.enabledTriggers?.includes(trigger.id) ?? false;
+        return <div key={trigger.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', marginTop: 12, paddingTop: 12 }}>
+          <div style={{ flex: '1 1 230px', minWidth: 0, overflowWrap: 'anywhere' }}><div style={{ fontSize: 12, fontWeight: 300 }}>{trigger.event} → {trigger.actionId}</div><div style={{ ...metaStyle, marginTop: 3 }}>{enabled ? 'On for this bound project' : 'Off by default'} · Receives the new worktree ID, path, branch, and creation time as JSON.</div></div>
+          <button type="button" onClick={() => changeTrigger(plugin, trigger, !enabled)} disabled={busy !== null || (!enabled && (!plugin.enabled || !plugin.workspaceRoot || repoPath !== plugin.workspaceRoot))} style={buttonStyle}>{enabled ? 'Turn off' : 'Turn on'}</button>
+        </div>;
+      })}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button type="button" onClick={() => changePlugin(plugin, plugin.enabled ? 'disable' : 'enable')} disabled={busy !== null} style={buttonStyle}>{plugin.enabled ? 'Disable' : 'Enable'}</button>
         {confirmRemove === plugin.manifest.id ? <><button type="button" onClick={() => changePlugin(plugin, 'remove')} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Confirm removal</button><button type="button" onClick={() => setConfirmRemove(null)} style={buttonStyle}>Cancel</button></> : <button type="button" onClick={() => setConfirmRemove(plugin.manifest.id)} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Remove</button>}
       </div>
     </div>)}
-    {inventory.receipts.length ? <div style={boxStyle}><div style={{ fontSize: 13, fontWeight: 300, marginBottom: 10 }}>Recent runs</div>{inventory.receipts.slice(0, 8).map((receipt) => <details key={receipt.id} style={{ borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', paddingTop: 9, paddingBottom: 9 }}><summary style={{ ...metaStyle, cursor: 'pointer' }}>{receipt.plugin_id} / {receipt.action_id} · {receipt.status} · {new Date(receipt.started_at).toLocaleString()}</summary><div style={{ ...metaStyle, marginTop: 8 }}>Exit {receipt.exit_code ?? 'none'}{receipt.error ? ` · ${receipt.error}` : ''}</div>{receipt.stdout ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stdout}</pre> : null}{receipt.stderr ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stderr}</pre> : null}</details>)}</div> : null}
+    {inventory.receipts.length ? <div style={boxStyle}><div style={{ fontSize: 13, fontWeight: 300, marginBottom: 10 }}>Recent runs</div>{inventory.receipts.slice(0, 8).map((receipt) => <details key={receipt.id} style={{ borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', paddingTop: 9, paddingBottom: 9 }}><summary style={{ ...metaStyle, cursor: 'pointer' }}>{receipt.plugin_id} / {receipt.action_id} · {receipt.status} · {new Date(receipt.started_at).toLocaleString()}</summary>{receipt.eventId ? <div style={{ ...metaStyle, marginTop: 8 }}>Trigger {receipt.triggerId ?? 'unknown'} · event <code>{receipt.eventId}</code></div> : null}<div style={{ ...metaStyle, marginTop: 8 }}>Exit {receipt.exit_code ?? 'none'}{receipt.error ? ` · ${receipt.error}` : ''}</div>{receipt.stdout ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stdout}</pre> : null}{receipt.stderr ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stderr}</pre> : null}</details>)}</div> : null}
     <button type="button" onClick={() => { setBusy('loading'); void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not refresh.')).finally(() => setBusy(null)); }} disabled={busy !== null} style={{ ...buttonStyle, alignSelf: 'flex-start' }}>Refresh plugins</button>
   </section>;
 }

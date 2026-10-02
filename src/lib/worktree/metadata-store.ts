@@ -136,6 +136,7 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
         && (entry.materializationIdentity.volumeId === undefined
           || (typeof entry.materializationIdentity.volumeId === 'string'
             && entry.materializationIdentity.volumeId.length > 0))))
+    && (entry.actionTriggerEventPending === undefined || typeof entry.actionTriggerEventPending === 'boolean')
     && (entry.materializationParentIdentity === undefined
       || (typeof entry.materializationParentIdentity === 'object'
         && entry.materializationParentIdentity !== null

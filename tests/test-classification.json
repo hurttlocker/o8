@@ -185,6 +185,16 @@
       ]
     },
     {
+      "path": "src/lib/action-plugins/worktree-trigger.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
       "reasons": [
         "child-process",

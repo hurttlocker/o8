@@ -47,6 +47,32 @@ describe('action plugin API and subprocess', () => {
     expect((await post({ action: 'review', directory: '/missing' })).status).toBe(401);
   });
 
+  it('requires an explicit authenticated opt-in for a reviewed worktree trigger', async () => {
+    const repo = path.join(state.root, 'repo');
+    mkdirSync(repo);
+    const { directory, manifest } = source();
+    writeFileSync(path.join(directory, 'o8-actions.json'), JSON.stringify({
+      ...manifest,
+      workspace: 'registered-project',
+      triggers: [{ id: 'on-create', event: 'worktree.created', actionId: 'run' }],
+    }));
+    const reviewed = await post({ action: 'review', directory, repo });
+    expect(reviewed.status).toBe(200);
+    const revision = (await reviewed.json()).review.revision as string;
+    expect((await post({ action: 'link', directory, expectedRevision: revision, repo })).status).toBe(200);
+    const before = (await (await GET(request())).json()).installed[0];
+    expect(before.enabledTriggers).toEqual([]);
+    state.auth.mockReturnValueOnce(Response.json({ error: 'Unauthorized' }, { status: 401 }));
+    expect((await post({ action: 'trigger', id: 'sample', revision, triggerId: 'on-create', enabled: true })).status).toBe(401);
+    expect((await post({ action: 'trigger', id: 'sample', revision: 'stale', triggerId: 'on-create', enabled: true })).status).toBe(409);
+    expect((await post({ action: 'trigger', id: 'sample', revision, triggerId: 'missing', enabled: true })).status).toBe(404);
+    expect((await (await GET(request())).json()).installed[0].enabledTriggers).toEqual([]);
+    expect((await post({ action: 'trigger', id: 'sample', revision, triggerId: 'on-create', enabled: true })).status).toBe(200);
+    expect((await (await GET(request())).json()).installed[0].enabledTriggers).toEqual(['on-create']);
+    expect((await post({ action: 'trigger', id: 'sample', revision, triggerId: 'on-create', enabled: false })).status).toBe(200);
+    expect((await (await GET(request())).json()).installed[0].enabledTriggers).toEqual([]);
+  });
+
   it('reviews, links exact bytes, invokes the stored snapshot, writes a durable receipt, disables and removes', async () => {
     const { directory } = source();
     const review = await post({ action: 'review', directory });

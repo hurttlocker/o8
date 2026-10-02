@@ -2,7 +2,7 @@
   "format": "o8-actions-v1",
   "id": "project-setup-check",
   "name": "Project setup check",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Check Git, Node, npm, and repository guidance in the selected project.",
   "supportedPlatforms": ["darwin", "linux"],
   "workspace": "registered-project",
@@ -11,5 +11,8 @@
   ],
   "actions": [
     { "id": "check", "description": "Read project setup signals", "entry": "check.sh", "args": [], "timeoutMs": 5000 }
+  ],
+  "triggers": [
+    { "id": "on-worktree-created", "event": "worktree.created", "actionId": "check" }
   ]
 }

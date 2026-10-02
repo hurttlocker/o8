@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z, ZodError } from 'zod';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { ActionPluginError, actionReceipts, changeActionPlugin, invokeActionPlugin, linkActionSource, listActionPlugins, reviewActionSource } from '@/lib/action-plugins/host';
+import { ActionPluginError, actionReceipts, changeActionPlugin, changeActionPluginTrigger, invokeActionPlugin, linkActionSource, listActionPlugins, reviewActionSource } from '@/lib/action-plugins/host';
 import { readCustomizeBody } from '@/lib/customize/http';
 import { CustomizeError } from '@/lib/customize/storage';
 
@@ -12,6 +12,7 @@ const inputSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('review'), directory: z.string().min(1), repo: z.string().optional() }).strict(),
   z.object({ action: z.literal('link'), directory: z.string().min(1), expectedRevision: z.string().regex(/^[a-f0-9]{64}$/), repo: z.string().optional() }).strict(),
   z.object({ action: z.literal('invoke'), id: z.string(), actionId: z.string(), revision: z.string(), repo: z.string().optional() }).strict(),
+  z.object({ action: z.literal('trigger'), id: z.string(), revision: z.string(), triggerId: z.string(), enabled: z.boolean() }).strict(),
   z.object({ action: z.enum(['enable', 'disable', 'remove']), id: z.string(), revision: z.string() }).strict(),
 ]);
 
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
     if (input.action === 'review') return NextResponse.json({ ok: true, review: await reviewActionSource(input.directory, input.repo) });
     if (input.action === 'link') return NextResponse.json({ ok: true, installed: await linkActionSource(input.directory, input.expectedRevision, input.repo) });
     if (input.action === 'invoke') return NextResponse.json({ ok: true, receipt: await invokeActionPlugin(input.id, input.actionId, 'local-operator', request.signal, input.revision, input.repo) });
+    if (input.action === 'trigger') return NextResponse.json({ ok: true, updated: changeActionPluginTrigger(input.id, input.revision, input.triggerId, input.enabled) });
     return NextResponse.json({ ok: true, ...changeActionPlugin(input.id, input.revision, input.action) });
   } catch (error) { return failure(error); }
 }

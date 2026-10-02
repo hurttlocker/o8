@@ -348,8 +348,29 @@ export class WorktreeManager {
           if (!entry || entry.claudeManaged) {
             throw new Error('Managed workspace metadata disappeared before ownership was receipted.');
           }
-          await transaction.save(created.id, { ...entry, materializationIdentity });
+          const ready = { ...entry, status: 'ready' as const, materializationIdentity, actionTriggerEventPending: true };
+          delete ready.creationOwner;
+          await transaction.save(created.id, ready);
         }));
+      try {
+        const { publishWorktreeCreated } = await import('@/lib/action-plugins/host');
+        publishWorktreeCreated({
+          repositoryPath: await realpath(this.repoRoot),
+          worktreeId: created.id,
+          worktreePath: created.path,
+          branch: created.branch,
+          createdAt: new Date(created.createdAt).toISOString(),
+        });
+        await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+          const entry = (await transaction.readAll())[created.id];
+          if (entry?.actionTriggerEventPending) await transaction.save(created.id, { ...entry, actionTriggerEventPending: false });
+        });
+      } catch (error) {
+        console.warn('[action-triggers] Worktree event publication failed', { error: String(error) });
+        void import('@/lib/action-plugins/host')
+          .then(({ reconcileWorktreeCreatedEvents }) => reconcileWorktreeCreatedEvents())
+          .catch((retryError) => console.warn('[action-triggers] Event reconciliation failed', { error: String(retryError) }));
+      }
       return created;
     });
   }
@@ -655,7 +676,6 @@ export class WorktreeManager {
     }
 
     info.status = 'ready';
-    await this.updateMetaStatus(taskId, 'ready');
     if (info.dependencyMaterialization) {
       queueDependencyImagePublication(worktreePath, info.dependencyMaterialization);
     }
@@ -856,7 +876,6 @@ export class WorktreeManager {
       await this.resetTrackedWorkspaceChanges(worktreePath);
 
       info.status = 'ready';
-      await this.updateMetaStatus(taskId, 'ready');
       if (info.dependencyMaterialization) {
         queueDependencyImagePublication(worktreePath, info.dependencyMaterialization);
       }
