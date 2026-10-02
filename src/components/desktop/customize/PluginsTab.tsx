@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { ActionRepositoryPicker, type ActionRepository } from './ActionRepositoryPicker';
 
 type PluginAction = { id: string; description: string; entry: string; args: string[]; timeoutMs: number };
 type Manifest = { id: string; name: string; version: string; description: string; supportedPlatforms: string[]; workspace: 'none' | 'registered-project'; actions: PluginAction[] };
@@ -22,10 +23,15 @@ async function request<T>(body?: Record<string, unknown>, signal?: AbortSignal):
   return payload;
 }
 
-export default function PluginsTab({ repoPath }: { repoPath?: string | null }) {
+export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
+  repoPath?: string | null;
+  repos?: ActionRepository[];
+  onSelectRepo?: (path: string | null) => void;
+}) {
   const [inventory, setInventory] = useState<Inventory>({ installed: [], damaged: [], receipts: [] });
   const [directory, setDirectory] = useState('');
-  const [review, setReview] = useState<Review | null>(null);
+  const [sourceReview, setReview] = useState<Review | null>(null);
+  const review = sourceReview && (sourceReview.manifest.workspace === 'none' || sourceReview.execution.cwd === repoPath) ? sourceReview : null;
   const [busy, setBusy] = useState<string | null>('loading');
   const [waitStage, setWaitStage] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -92,8 +98,9 @@ export default function PluginsTab({ repoPath }: { repoPath?: string | null }) {
   return <section aria-label="Plugins" style={{ display: 'flex', flexDirection: 'column', gap: 20, color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
     <div><h2 style={{ marginTop: 0, marginBottom: 6, fontSize: 18, fontWeight: 400 }}>Action plugins</h2><p style={{ ...metaStyle, marginTop: 0, marginBottom: 0 }}>Link a local folder, review its exact files, then run an action. Actions run with your local user account.</p></div>
     <div style={boxStyle}>
+      {onSelectRepo ? <div style={{ marginBottom: 16 }}><ActionRepositoryPicker repos={repos} repoPath={repoPath} onSelect={onSelectRepo} disabled={busy !== null} /></div> : null}
       <label htmlFor="action-plugin-folder" style={{ display: 'block', fontSize: 12, fontWeight: 300, marginBottom: 8 }}>Local plugin folder</label>
-      <div style={{ ...metaStyle, marginBottom: 8 }}>{repoPath ? `Selected project: ${repoPath}` : 'Select a project first for actions that need repository access.'}</div>
+      {!onSelectRepo ? <div style={{ ...metaStyle, marginBottom: 8 }}>{repoPath ? `Selected project: ${repoPath}` : 'Select a project first for actions that need repository access.'}</div> : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <input id="action-plugin-folder" value={directory} onChange={(event) => { setDirectory(event.target.value); setReview(null); }} placeholder="Absolute path to a local folder" disabled={busy !== null} style={{ flex: 1, minWidth: 0, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)', borderRadius: 7, backgroundColor: 'var(--t-input-bg)', color: 'var(--t-text)', paddingTop: 6, paddingBottom: 6, paddingLeft: 10, paddingRight: 10, fontFamily: 'var(--font-sans-system)', fontSize: 12 }} />
         <button type="button" onClick={reviewSource} disabled={busy !== null || !directory.trim()} style={buttonStyle}>Review files</button>

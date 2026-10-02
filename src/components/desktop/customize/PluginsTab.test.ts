@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PluginsTab from './PluginsTab';
@@ -118,5 +118,57 @@ describe('Customize extension views', () => {
     expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Run')?.disabled).toBe(true);
     await act(async () => root.render(createElement(PluginsTab, { repoPath: '/project/one' })));
     expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Run')?.disabled).toBe(false);
+  });
+
+  it('chooses a registered repository directly in Plugins and binds review, link and run to it', async () => {
+    const manifest = { id: 'check', name: 'Check', version: '1.0.0', description: 'Check setup', supportedPlatforms: ['darwin'], workspace: 'registered-project', actions: [{ id: 'check', description: 'Check setup', entry: 'check.sh', args: [], timeoutMs: 5000 }] };
+    const revision = 'c'.repeat(64);
+    let installed: unknown[] = [];
+    requests.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init?.method) return Response.json({ installed, damaged: [], receipts: [] });
+      const body = JSON.parse(String(init.body));
+      if (body.action === 'review') return Response.json({ review: { manifest, revision, files: [], execution: { cwd: body.repo, environmentKeys: ['PATH'], principal: 'local-user' } } });
+      if (body.action === 'link') installed = [{ manifest, revision, enabled: true, linkedAt: '', workspaceRoot: body.repo }];
+      return Response.json({ receipt: { status: 'succeeded' } });
+    });
+    function Harness() {
+      const [repoPath, onSelectRepo] = useState<string | null>(null);
+      return createElement(PluginsTab, { repoPath, onSelectRepo, repos: [{ name: 'First repo', localPath: '/project/one' }, { name: 'Second repo', localPath: '/project/two' }] });
+    }
+    await act(async () => root.render(createElement(Harness)));
+    await click('Choose repository');
+    await click('Second repo');
+    const input = host.querySelector<HTMLInputElement>('#action-plugin-folder')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '/plugins/check');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('Review files');
+    await click('Link reviewed revision');
+    await click('Run');
+    const commands = requests.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => JSON.parse(String(init.body)));
+    expect(commands.map((body) => [body.action, body.repo])).toEqual([['review', '/project/two'], ['link', '/project/two'], ['invoke', '/project/two']]);
+    await click('Second repo'); await click('First repo');
+    expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Run')?.disabled).toBe(true);
+  });
+
+  it('hides a late repository review after the selection changes', async () => {
+    let finishReview!: (value: Response) => void;
+    requests.mockImplementation(async (_url: string, init?: RequestInit) => init?.method
+      ? new Promise<Response>((resolve) => { finishReview = resolve; })
+      : Response.json({ installed: [], damaged: [], receipts: [] }));
+    await act(async () => root.render(createElement(PluginsTab, { repoPath: '/project/one' })));
+    const input = host.querySelector<HTMLInputElement>('#action-plugin-folder')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '/plugins/check');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('Review files');
+    await act(async () => root.render(createElement(PluginsTab, { repoPath: '/project/two' })));
+    await act(async () => finishReview(Response.json({ review: {
+      manifest: { id: 'check', name: 'Check', workspace: 'registered-project' }, revision: 'd'.repeat(64), files: [], execution: { cwd: '/project/one' },
+    } })));
+    expect(host.textContent).not.toContain('Link reviewed revision');
+    expect(host.textContent).not.toContain('d'.repeat(64));
   });
 });
