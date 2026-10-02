@@ -171,4 +171,34 @@ describe('Customize extension views', () => {
     expect(host.textContent).not.toContain('Link reviewed revision');
     expect(host.textContent).not.toContain('d'.repeat(64));
   });
+
+  it('reviews a pinned GitHub source and links only its returned staging folder without running it', async () => {
+    const source = { kind: 'github', repository: 'test-owner/actions', commit: 'e'.repeat(40), directory: 'package' };
+    const manifest = { id: 'source-check', name: 'Source check', version: '1.0.0', description: 'Source check', supportedPlatforms: ['darwin'], workspace: 'none', actions: [] };
+    const revision = 'f'.repeat(64);
+    requests.mockImplementation(async (_url: string, init?: RequestInit) => init?.method
+      ? Response.json(JSON.parse(String(init.body)).action === 'review-github' ? { review: { source, sourceDirectory: '/owned/source-snapshot', manifest, revision, files: [], execution: { cwd: '/owned/installed', environmentKeys: ['PATH'], principal: 'local-user' } } } : { ok: true })
+      : Response.json({ installed: [], damaged: [], receipts: [] }));
+    await act(async () => root.render(createElement(PluginsTab)));
+    await click('GitHub source');
+    const fill = async (label: string, value: string) => act(async () => {
+      const input = host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await fill('Public GitHub repository', source.repository);
+    await fill('Exact commit', source.commit);
+    await fill('Package directory (optional)', source.directory);
+    expect(requests).toHaveBeenCalledTimes(1);
+    await click('Review files');
+    expect(host.textContent).toContain(`GitHub: ${source.repository} @ ${source.commit} / package`);
+    await fill('Exact commit', '1'.repeat(40));
+    expect(host.textContent).not.toContain('Link reviewed revision');
+    await click('Review files');
+    await click('Link reviewed revision');
+    const commands = requests.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => JSON.parse(String(init.body)));
+    expect(commands[0]).toEqual({ action: 'review-github', repository: source.repository, commit: source.commit, directory: 'package' });
+    expect(commands[2]).toEqual({ action: 'link', directory: '/owned/source-snapshot', expectedRevision: revision });
+    expect(commands.map((entry) => entry.action)).toEqual(['review-github', 'review-github', 'link']);
+  });
 });

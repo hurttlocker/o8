@@ -1,8 +1,9 @@
 # Local action plugins
 
-Customize > Plugins links local executable actions. This is a separate contract
+Customize > Plugins links executable actions from local folders or public
+GitHub repositories at an exact commit. This is a separate contract
 from the instruction bundles in Customize > Skills. The first action host does
-not download marketplace packages, run startup hooks, subscribe to events, or
+not discover marketplace packages, run startup hooks, subscribe to events, or
 add terminal panes.
 
 ## Manifest
@@ -41,7 +42,9 @@ the old installation, review the new revision, and link it explicitly.
 
 ## Operator flow
 
-1. Open Customize > Plugins and enter an absolute local source folder.
+1. Open Customize > Plugins and enter an absolute local source folder, or
+   choose **GitHub source**, enter `owner/repository`, a full 40-character
+   commit SHA, and the optional package directory containing `o8-actions.json`.
 2. Select **Review files**. Expand the declared files and inspect their source,
    SHA-256 values, revision, entrypoint, fixed arguments, platform list, exact
    working directory, and environment keys exposed to the child process.
@@ -66,6 +69,20 @@ presence checks, a commit ID, and aggregate change counts.
 An invocation uses the panel-authenticated local API at
 `/api/customize/actions`. `GET` lists installations and receipts. `POST`
 accepts `review`, `link`, `invoke`, `enable`, `disable`, and `remove` operations.
+`review-github` acquires a pinned public source and returns the same file review
+with an owned staging directory and source metadata. GitHub acquisition uses
+fixed HTTPS hosts, refuses redirects and links, verifies Git object bytes and
+manifest digests, and bounds response sizes and total acquisition time. It
+does not use Git credentials, clone a checkout, run hooks, install dependencies,
+or execute package files. Cached files are compared with the pinned Git objects
+through GitHub on every review and link, including local-path access to a cached
+source. They are not downloaded again when unchanged. Offline or rate-limited
+verification refuses review/link and preserves existing installations;
+changing the commit or package directory selects a different snapshot.
+Repository, commit and package directory are part of the reviewed revision and
+remain visible after linking and restart, and on receipts after removal.
+Private repositories and automatic
+updates are not supported by this source flow.
 Mutation and invocation requests include the reviewed revision; stale revisions
 fail instead of silently using different code. Each run has a durable receipt
 with actor, action, revision, start/end state, exit status, and capped output.
@@ -74,12 +91,17 @@ The operator CLI exposes the same installed actions and receipts:
 
 ```text
 o8 plugin list
+o8 plugin source review --directory <local-folder> [--repo <registered-path>]
+o8 plugin source review --github <owner/repository> --commit <40-character-sha> --path <package-directory> [--repo <registered-path>]
+o8 plugin source link --directory <sourceDirectory-from-review> --revision <sha256> [--repo <registered-path>]
 o8 plugin action list --plugin project-setup-check
 o8 plugin action invoke project-setup-check check --revision <sha256> --repo <registered-path>
 o8 plugin log list --plugin project-setup-check
 ```
 
 The revision is required so a script cannot silently run a changed installation.
+Source review prints the exact executable text and its digests. Source link
+uses the returned snapshot folder and revision; it does not run an action.
 The CLI sends the existing operator bearer and refuses worker or explicitly
 present spectator credentials. Plugin-specific logs filter before the receipt
 cap is applied. An action failure still prints its receipt and exits nonzero.

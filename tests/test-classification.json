@@ -16,6 +16,13 @@
       ]
     },
     {
+      "path": "src/app/api/customize/actions/github-source.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener"
+      ]
+    },
+    {
       "path": "src/app/api/customize/actions/route.test.ts",
       "reasons": [
         "child-process",

@@ -8,6 +8,7 @@ type Installed = {
   revision: string;
   enabled: boolean;
   workspaceRoot: string | null;
+  source?: { kind: 'github'; repository: string; commit: string; directory: string };
 };
 type Receipt = {
   id: string;
@@ -23,9 +24,11 @@ type Receipt = {
   stdout: string | null;
   stderr: string | null;
   error: string | null;
+  source: Installed['source'] | null;
 };
 type Inventory = { installed: Installed[]; receipts: Receipt[] };
-type InvokeResult = { receipt: { id: string; pluginId: string; actionId: string; revision: string; status: string; actor: string; actorKind: 'authorization-class'; actorIdentity: null; exitCode: number | null; stdout: string; stderr: string; error: string | null } };
+type InvokeResult = { receipt: { id: string; pluginId: string; actionId: string; revision: string; status: string; actor: string; actorKind: 'authorization-class'; actorIdentity: null; exitCode: number | null; stdout: string; stderr: string; error: string | null; source: Installed['source'] | null } };
+type SourceReview = { manifest: { name: string }; revision: string; sourceDirectory: string; source?: Installed['source']; files: Array<{ path: string; content: string; sha256: string }>; execution: { cwd: string; environmentKeys: string[] } };
 
 function parse(args: string[], valueFlags: string[]) {
   const flags = new Map<string, string>();
@@ -68,10 +71,38 @@ function pluginList(mode: OutputMode, installed: Installed[]) {
       process.stdout.write(`  ${plugin.manifest.id}  ${plugin.enabled ? 'enabled' : 'disabled'}  ${plugin.revision}\n`);
       process.stdout.write(`    ${plugin.manifest.name} · ${plugin.manifest.workspace === 'none' ? 'private snapshot' : plugin.workspaceRoot ?? 'project unavailable'}\n`);
     }
-  } else printJson({ schema: 'o8/cli/plugin.list/v1', plugins: installed.map(({ manifest, revision, enabled, workspaceRoot }) => ({ manifest, revision, enabled, workspaceRoot })) });
+  } else printJson({ schema: 'o8/cli/plugin.list/v1', plugins: installed.map(({ manifest, revision, enabled, workspaceRoot, source }) => ({ manifest, revision, enabled, workspaceRoot, ...(source ? { source } : {}) })) });
 }
 
 export async function runPlugin(mode: OutputMode, group: string | undefined, rest: string[]): Promise<number> {
+  if (group === 'source' && rest[0] === 'review') {
+    const { positional, flags } = parse(rest.slice(1), ['--directory', '--github', '--commit', '--path', '--repo']);
+    const github = flags.get('--github');
+    const directory = flags.get('--directory');
+    if (positional.length || (!github === !directory) || (github ? !/^[a-f0-9]{40}$/.test(flags.get('--commit') ?? '') : flags.has('--commit') || flags.has('--path'))) {
+      throw new CliError('invalid_args', 'Use `o8 plugin source review --directory <local-folder>` or `--github <owner/repository> --commit <40-character-sha> [--path <package-directory>]`, with optional --repo.', EXIT.INVALID_ARGS);
+    }
+    const body = github ? { action: 'review-github', repository: github, commit: flags.get('--commit'), directory: flags.get('--path') ?? '' } : { action: 'review', directory };
+    const result = await apiFetch<{ review: SourceReview }>(operatorConfig(), '/api/customize/actions', { method: 'POST', timeoutMs: 45_000, body: { ...body, ...(flags.has('--repo') ? { repo: flags.get('--repo') } : {}) } });
+    if (!result.data?.review?.revision || !result.data.review.sourceDirectory) throw new CliError('invalid_response', 'The action host returned no source review.', EXIT.INVALID_ARGS);
+    const review = result.data.review;
+    if (mode.human) {
+      printHumanHeading('plugin source review');
+      printHumanKv([['plugin', review.manifest.name], ['revision', review.revision], ['directory', review.sourceDirectory], ['working directory', review.execution.cwd], ['environment', review.execution.environmentKeys.join(', ')]]);
+      if (review.source) printHumanKv([['source', `${review.source.repository}@${review.source.commit}/${review.source.directory}`]]);
+      for (const file of review.files) process.stdout.write(`\n${file.path} · ${file.sha256}\n${file.content}\n`);
+    } else printJson({ schema: 'o8/cli/plugin.source.review/v1', review });
+    return EXIT.OK;
+  }
+  if (group === 'source' && rest[0] === 'link') {
+    const { positional, flags } = parse(rest.slice(1), ['--directory', '--revision', '--repo']);
+    if (positional.length || !flags.get('--directory') || !/^[a-f0-9]{64}$/.test(flags.get('--revision') ?? '')) throw new CliError('invalid_args', 'Use `o8 plugin source link --directory <reviewed-folder> --revision <sha256> [--repo <registered-path>]`.', EXIT.INVALID_ARGS);
+    const result = await apiFetch<{ installed: Installed }>(operatorConfig(), '/api/customize/actions', { method: 'POST', body: { action: 'link', directory: flags.get('--directory'), expectedRevision: flags.get('--revision'), ...(flags.has('--repo') ? { repo: flags.get('--repo') } : {}) } });
+    if (!result.data?.installed) throw new CliError('invalid_response', 'The action host returned no installation.', EXIT.INVALID_ARGS);
+    if (mode.human) pluginList(mode, [result.data.installed]);
+    else printJson({ schema: 'o8/cli/plugin.source.link/v1', installed: result.data.installed });
+    return EXIT.OK;
+  }
   if (group === 'list') {
     const { positional, flags } = parse(rest, ['--plugin']);
     if (positional.length) throw new CliError('invalid_args', 'Use `o8 plugin list [--plugin ID]`.', EXIT.INVALID_ARGS);
@@ -125,5 +156,5 @@ export async function runPlugin(mode: OutputMode, group: string | undefined, res
     } else printJson({ schema: 'o8/cli/plugin.log.list/v1', receipts });
     return EXIT.OK;
   }
-  throw new CliError('unknown_plugin_subcommand', 'Use `o8 plugin list`, `o8 plugin action list|invoke`, or `o8 plugin log list`.', EXIT.INVALID_ARGS);
+  throw new CliError('unknown_plugin_subcommand', 'Use `o8 plugin source review|link`, `o8 plugin list`, `o8 plugin action list|invoke`, or `o8 plugin log list`.', EXIT.INVALID_ARGS);
 }

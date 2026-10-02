@@ -61,4 +61,21 @@ describe('o8 plugin CLI', () => {
     await expect(runPlugin({ human: false, verbose: false }, 'action', ['invoke', 'setup-check', 'check'])).rejects.toMatchObject({ code: 'invalid_args' });
     await expect(runPlugin({ human: false, verbose: false }, 'action', ['invoke', 'setup-check', 'check', '--revision', revision, '--actor', 'someone'])).rejects.toMatchObject({ code: 'invalid_args' });
   });
+
+  it('refuses mixed source forms and moving refs before an API call', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    const mode = { human: false, verbose: false };
+    await expect(runPlugin(mode, 'source', ['review', '--github', 'owner/repo', '--commit', 'main'])).rejects.toMatchObject({ code: 'invalid_args' });
+    await expect(runPlugin(mode, 'source', ['review', '--directory', '/source', '--github', 'owner/repo', '--commit', 'a'.repeat(40)])).rejects.toMatchObject({ code: 'invalid_args' });
+    await expect(runPlugin(mode, 'source', ['review', '--directory', '/source', '--path', 'package'])).rejects.toMatchObject({ code: 'invalid_args' });
+    await expect(runPlugin(mode, 'source', ['link', '--directory', '/source'])).rejects.toMatchObject({ code: 'invalid_args' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a worker credential for remote source acquisition', async () => {
+    vi.stubEnv('O8_WORKER_TOKEN', 'worker-test-token'); vi.stubEnv('O8_API_TOKEN', 'operator-test-token');
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    await expect(runPlugin({ human: false, verbose: false }, 'source', ['review', '--github', 'owner/repo', '--commit', 'a'.repeat(40)])).rejects.toMatchObject({ code: 'operator_required' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

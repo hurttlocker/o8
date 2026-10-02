@@ -8,6 +8,11 @@ import { z } from 'zod';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createBroadcastRedactionContext, redactBroadcastText } from '@/lib/broadcast/redaction';
 import { resolveScope } from '@/lib/customize/storage';
+import { ActionPluginError } from './errors';
+import { acquiredSource, githubSourceSchema, type GithubActionSource } from './source-storage';
+import { verifyGithubFiles } from './github-files';
+
+export { ActionPluginError } from './errors';
 
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64);
 const fileName = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).max(128).refine((name) => name !== '.' && name !== '..' && name !== 'installed.json' && name !== 'o8-actions.json');
@@ -55,12 +60,9 @@ export const actionManifestSchema = z.object({
   for (const action of manifest.actions) if (!manifest.files.some((file) => file.path === action.entry)) ctx.addIssue({ code: 'custom', message: 'Action entry is not a declared file' });
 });
 export type ActionManifest = z.infer<typeof actionManifestSchema>;
-type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null };
-export class ActionPluginError extends Error {
-  constructor(public code: string, message: string, public status = 400) { super(message); }
-}
+type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null; source?: GithubActionSource };
 function sha(data: Buffer | string) { return createHash('sha256').update(data).digest('hex'); }
-function revisionFor(manifest: ActionManifest, workspaceRoot: string | null, sourceDirectory: string) { return sha(JSON.stringify({ manifest, workspaceRoot, sourceDirectory })); }
+function revisionFor(manifest: ActionManifest, workspaceRoot: string | null, sourceDirectory: string, source?: GithubActionSource) { return sha(JSON.stringify({ manifest, workspaceRoot, sourceDirectory, ...(source ? { source } : {}) })); }
 function root(create: boolean) {
   let at = getDataDir();
   if (create && !existsSync(at)) mkdirSync(at, { recursive: true, mode: 0o700 });
@@ -94,14 +96,18 @@ function safeFile(dir: string, name: string, limit: number) {
     return data;
   } finally { closeSync(fd); }
 }
-export async function reviewActionSource(directory: string, repo?: string) {
+export async function reviewActionSource(directory: string, repo?: string, signal?: AbortSignal) {
   const dir = sourceDir(directory);
-  const manifest = actionManifestSchema.parse(JSON.parse(safeFile(dir, 'o8-actions.json', 64 * 1024).toString('utf8')));
+  const manifestBytes = safeFile(dir, 'o8-actions.json', 64 * 1024);
+  const manifest = actionManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8')));
+  const source = acquiredSource(dir, manifestBytes);
   if (manifest.workspace === 'registered-project' && repo === undefined) throw new ActionPluginError('invalid_workspace', 'Choose a registered repository for review.');
   const workspaceRoot = manifest.workspace === 'none' ? null : await resolveScope(repo);
   if (manifest.workspace === 'registered-project' && !workspaceRoot) throw new ActionPluginError('invalid_workspace', 'Choose a registered repository for review.');
+  const sourceFiles = [{ path: 'o8-actions.json', data: manifestBytes }];
   const files = manifest.files.map((file) => {
     const data = safeFile(dir, file.path, 1024 * 1024);
+    sourceFiles.push({ path: file.path, data });
     if (sha(data) !== file.sha256) throw new ActionPluginError('digest_mismatch', `File ${file.path} changed or does not match its digest.`, 409);
     let content: string;
     try { content = new TextDecoder('utf-8', { fatal: true }).decode(data); }
@@ -109,8 +115,9 @@ export async function reviewActionSource(directory: string, repo?: string) {
     if (content.includes('\0')) throw new ActionPluginError('unreviewable_file', `File ${file.path} contains NUL bytes and cannot be reviewed in this version.`);
     return { path: file.path, bytes: data.length, sha256: file.sha256, content };
   });
+  if (source) await verifyGithubFiles(source, sourceFiles, signal);
   return {
-    manifest, revision: revisionFor(manifest, workspaceRoot, dir), files, sourceDirectory: dir,
+    manifest, revision: revisionFor(manifest, workspaceRoot, dir, source), files, sourceDirectory: dir, ...(source ? { source } : {}),
     execution: { cwd: workspaceRoot ?? path.join(getDataDir(), 'customizations', 'actions', manifest.id), environmentKeys: ['PATH', 'NODE_ENV'], principal: 'local-user' as const },
     workspaceRoot,
   };
@@ -121,8 +128,9 @@ function readSaved(id: string): Saved {
   if (!lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink()) throw new ActionPluginError('unsafe_path', 'Invalid installation.');
   const saved = JSON.parse(safeFile(dir, 'installed.json', 64 * 1024).toString('utf8')) as Saved;
   const manifest = actionManifestSchema.parse(saved.manifest);
+  const source = saved.source === undefined ? undefined : githubSourceSchema.parse(saved.source);
   if (manifest.id !== id || typeof saved.sourceDirectory !== 'string' || (saved.workspaceRoot !== null && typeof saved.workspaceRoot !== 'string')
-    || saved.revision !== revisionFor(manifest, saved.workspaceRoot, saved.sourceDirectory) || typeof saved.enabled !== 'boolean') throw new ActionPluginError('damaged', 'Action installation is damaged.');
+    || saved.revision !== revisionFor(manifest, saved.workspaceRoot, saved.sourceDirectory, source) || typeof saved.enabled !== 'boolean') throw new ActionPluginError('damaged', 'Action installation is damaged.');
   return { ...saved, manifest };
 }
 function db() {
@@ -137,7 +145,11 @@ function db() {
   const stat = lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new ActionPluginError('unsafe_path', 'Invalid receipt storage file.');
   const database = new Database(file);
-  database.exec('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, action_id TEXT NOT NULL, actor TEXT NOT NULL, revision TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, exit_code INTEGER, stdout TEXT, stderr TEXT, error TEXT)');
+  database.exec('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, action_id TEXT NOT NULL, actor TEXT NOT NULL, revision TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, exit_code INTEGER, stdout TEXT, stderr TEXT, error TEXT, source_metadata TEXT)');
+  database.transaction(() => {
+    const columns = database.prepare('PRAGMA table_info(receipts)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'source_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN source_metadata TEXT');
+  }).immediate();
   return database;
 }
 function lifecycle<T>(action: (database: Database.Database) => T): T {
@@ -161,8 +173,8 @@ export function listActionPlugins() {
   }
   return { installed, damaged };
 }
-export async function linkActionSource(directory: string, expectedRevision: string, repo?: string) {
-  const reviewed = await reviewActionSource(directory, repo);
+export async function linkActionSource(directory: string, expectedRevision: string, repo?: string, signal?: AbortSignal) {
+  const reviewed = await reviewActionSource(directory, repo, signal);
   if (reviewed.manifest.workspace === 'none' && repo !== undefined) throw new ActionPluginError('invalid_workspace', 'This action does not use a repository.');
   if (reviewed.revision !== expectedRevision) throw new ActionPluginError('conflict', 'Source changed since review.', 409);
   return lifecycle(() => {
@@ -172,14 +184,16 @@ export async function linkActionSource(directory: string, expectedRevision: stri
     const stage = path.join(base, `.stage-${randomUUID()}`);
     mkdirSync(stage, { mode: 0o700 });
     try {
-      const currentManifest = actionManifestSchema.parse(JSON.parse(safeFile(sourceDir(directory), 'o8-actions.json', 64 * 1024).toString('utf8')));
-      if (revisionFor(currentManifest, reviewed.workspaceRoot, reviewed.sourceDirectory) !== expectedRevision) throw new ActionPluginError('conflict', 'Source changed during linking.', 409);
+      const currentBytes = safeFile(sourceDir(directory), 'o8-actions.json', 64 * 1024);
+      const currentManifest = actionManifestSchema.parse(JSON.parse(currentBytes.toString('utf8')));
+      const currentSource = acquiredSource(reviewed.sourceDirectory, currentBytes);
+      if (revisionFor(currentManifest, reviewed.workspaceRoot, reviewed.sourceDirectory, currentSource) !== expectedRevision) throw new ActionPluginError('conflict', 'Source changed during linking.', 409);
       for (const file of reviewed.manifest.files) {
         const data = safeFile(sourceDir(directory), file.path, 1024 * 1024);
         if (sha(data) !== file.sha256) throw new ActionPluginError('conflict', 'Source changed during linking.', 409);
         writeFileSync(path.join(stage, file.path), data, { flag: 'wx', mode: 0o700 });
       }
-      const saved: Saved = { manifest: reviewed.manifest, revision: reviewed.revision, enabled: true, linkedAt: new Date().toISOString(), sourceDirectory: reviewed.sourceDirectory, workspaceRoot: reviewed.workspaceRoot };
+      const saved: Saved = { manifest: reviewed.manifest, revision: reviewed.revision, enabled: true, linkedAt: new Date().toISOString(), sourceDirectory: reviewed.sourceDirectory, workspaceRoot: reviewed.workspaceRoot, ...(reviewed.source ? { source: reviewed.source } : {}) };
       writeFileSync(path.join(stage, 'installed.json'), JSON.stringify(saved), { flag: 'wx', mode: 0o600 });
       renameSync(stage, destination);
       return saved;
@@ -229,7 +243,7 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
       if (!currentAction) throw new ActionPluginError('not_found', 'Action does not exist.', 404);
       for (const file of fresh.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Action file changed after linking.', 409);
       refuseRunning(database, id);
-      database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(receiptId, id, actionId, actor, saved.revision, 'running', startedAt);
+      database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at, source_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(receiptId, id, actionId, actor, fresh.revision, 'running', startedAt, fresh.source ? JSON.stringify(fresh.source) : null);
       return { saved: fresh, action: currentAction };
   });
   const action = claimed.action;
@@ -291,7 +305,7 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
   } catch {
     safeResult = { ...result, stdout: '[redacted-output]', stderr: '[redacted-output]', error: result.error ? '[redacted-error]' : null };
   }
-  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, startedAt, finishedAt, ...safeResult };
+  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, source: claimed.saved.source ?? null, startedAt, finishedAt, ...safeResult };
   const finishDb = db();
   try { finishDb.prepare('UPDATE receipts SET status = ?, finished_at = ?, exit_code = ?, stdout = ?, stderr = ?, error = ? WHERE id = ?').run(safeResult.status, finishedAt, safeResult.exitCode, safeResult.stdout, safeResult.stderr, safeResult.error, receiptId); }
   finally { finishDb.close(); }
@@ -301,7 +315,12 @@ export function actionReceipts(id?: string) {
   const database = db();
   try {
     const rows = id ? database.prepare('SELECT * FROM receipts WHERE plugin_id = ? ORDER BY started_at DESC LIMIT 100').all(slug.parse(id)) : database.prepare('SELECT * FROM receipts ORDER BY started_at DESC LIMIT 100').all();
-    return rows.map((row) => ({ ...(row as Record<string, unknown>), actorKind: 'authorization-class' as const, actorIdentity: null }));
+    return rows.map((row) => {
+      const { source_metadata: metadata, ...receipt } = row as Record<string, unknown>;
+      let source: GithubActionSource | null = null;
+      try { if (typeof metadata === 'string') source = githubSourceSchema.parse(JSON.parse(metadata)); } catch { /* Never present malformed origin metadata as verified source. */ }
+      return { ...receipt, source, actorKind: 'authorization-class' as const, actorIdentity: null };
+    });
   }
   finally { database.close(); }
 }

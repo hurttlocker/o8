@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ActionRepositoryPicker, type ActionRepository } from './ActionRepositoryPicker';
+import { ActionSourceFields, type GithubSourceInput } from './ActionSourceFields';
 
 type PluginAction = { id: string; description: string; entry: string; args: string[]; timeoutMs: number };
 type Manifest = { id: string; name: string; version: string; description: string; supportedPlatforms: string[]; workspace: 'none' | 'registered-project'; actions: PluginAction[] };
-type Review = { manifest: Manifest; revision: string; files: Array<{ path: string; bytes: number; sha256: string; content: string }>; execution: { cwd: string; environmentKeys: string[]; principal: string } };
-type Installed = { manifest: Manifest; revision: string; enabled: boolean; linkedAt: string; workspaceRoot?: string | null; sourceDirectory?: string };
-type Receipt = { id: string; plugin_id: string; action_id: string; status: string; started_at: string; exit_code: number | null; stdout: string | null; stderr: string | null; error: string | null };
+type Source = { kind: 'github'; repository: string; commit: string; directory: string };
+type Review = { manifest: Manifest; revision: string; sourceDirectory?: string; source?: Source; files: Array<{ path: string; bytes: number; sha256: string; content: string }>; execution: { cwd: string; environmentKeys: string[]; principal: string } };
+type Installed = { manifest: Manifest; revision: string; enabled: boolean; linkedAt: string; workspaceRoot?: string | null; sourceDirectory?: string; source?: Source };
+type Receipt = { id: string; plugin_id: string; action_id: string; status: string; started_at: string; exit_code: number | null; stdout: string | null; stderr: string | null; error: string | null; source?: Source | null };
 type Inventory = { installed: Installed[]; damaged: string[]; receipts: Receipt[] };
 
 const buttonStyle: CSSProperties = { minHeight: 28, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)', borderRadius: 7, backgroundColor: 'var(--t-input-bg)', color: 'var(--t-text)', paddingTop: 5, paddingBottom: 5, paddingLeft: 10, paddingRight: 10, fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300, cursor: 'pointer' };
@@ -30,6 +32,7 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
 }) {
   const [inventory, setInventory] = useState<Inventory>({ installed: [], damaged: [], receipts: [] });
   const [directory, setDirectory] = useState('');
+  const [github, setGithub] = useState<GithubSourceInput | null>(null);
   const [sourceReview, setReview] = useState<Review | null>(null);
   const review = sourceReview && (sourceReview.manifest.workspace === 'none' || sourceReview.execution.cwd === repoPath) ? sourceReview : null;
   const [busy, setBusy] = useState<string | null>('loading');
@@ -73,11 +76,12 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
 
   const reviewSource = () => {
     setReview(null);
-    void operate('reviewing', { action: 'review', directory: directory.trim(), ...(repoPath ? { repo: repoPath } : {}) }, (result) => setReview((result as { review: Review }).review));
+    const source = github ? { action: 'review-github', repository: github.repository.trim(), commit: github.commit.trim(), directory: github.directory.trim() } : { action: 'review', directory: directory.trim() };
+    void operate(github ? 'acquiring' : 'reviewing', { ...source, ...(repoPath ? { repo: repoPath } : {}) }, (result) => setReview((result as { review: Review }).review));
   };
   const linkSource = () => {
     if (!review) return;
-    void operate('linking', { action: 'link', directory: directory.trim(), expectedRevision: review.revision, ...(review.manifest.workspace === 'registered-project' ? { repo: repoPath } : {}) }, () => {
+    void operate('linking', { action: 'link', directory: review.sourceDirectory ?? directory.trim(), expectedRevision: review.revision, ...(review.manifest.workspace === 'registered-project' ? { repo: repoPath } : {}) }, () => {
       setReview(null); setDirectory(''); setNotice('Action plugin linked. Run an action when you are ready.');
     });
   };
@@ -96,19 +100,16 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
   };
 
   return <section aria-label="Plugins" style={{ display: 'flex', flexDirection: 'column', gap: 20, color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
-    <div><h2 style={{ marginTop: 0, marginBottom: 6, fontSize: 18, fontWeight: 400 }}>Action plugins</h2><p style={{ ...metaStyle, marginTop: 0, marginBottom: 0 }}>Link a local folder, review its exact files, then run an action. Actions run with your local user account.</p></div>
+    <div><h2 style={{ marginTop: 0, marginBottom: 6, fontSize: 18, fontWeight: 400 }}>Action plugins</h2><p style={{ ...metaStyle, marginTop: 0, marginBottom: 0 }}>Review a local folder or a public GitHub source, link its exact files, then run an action. Actions run with your local user account.</p></div>
     <div style={boxStyle}>
       {onSelectRepo ? <div style={{ marginBottom: 16 }}><ActionRepositoryPicker repos={repos} repoPath={repoPath} onSelect={onSelectRepo} disabled={busy !== null} /></div> : null}
-      <label htmlFor="action-plugin-folder" style={{ display: 'block', fontSize: 12, fontWeight: 300, marginBottom: 8 }}>Local plugin folder</label>
       {!onSelectRepo ? <div style={{ ...metaStyle, marginBottom: 8 }}>{repoPath ? `Selected project: ${repoPath}` : 'Select a project first for actions that need repository access.'}</div> : null}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input id="action-plugin-folder" value={directory} onChange={(event) => { setDirectory(event.target.value); setReview(null); }} placeholder="Absolute path to a local folder" disabled={busy !== null} style={{ flex: 1, minWidth: 0, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)', borderRadius: 7, backgroundColor: 'var(--t-input-bg)', color: 'var(--t-text)', paddingTop: 6, paddingBottom: 6, paddingLeft: 10, paddingRight: 10, fontFamily: 'var(--font-sans-system)', fontSize: 12 }} />
-        <button type="button" onClick={reviewSource} disabled={busy !== null || !directory.trim()} style={buttonStyle}>Review files</button>
-      </div>
+      <ActionSourceFields directory={directory} github={github} disabled={busy !== null} onDirectory={(value) => { setDirectory(value); setReview(null); }} onGithub={(value) => { setGithub(value); setReview(null); }} onReview={reviewSource} />
       {review ? <div style={{ marginTop: 16, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', paddingTop: 14 }}>
         <div style={{ fontSize: 13, fontWeight: 300 }}>{review.manifest.name} · v{review.manifest.version}</div>
         <div style={{ ...metaStyle, marginTop: 4 }}>{review.manifest.description}</div>
         <div style={{ ...metaStyle, marginTop: 8 }}>Revision <code>{review.revision}</code></div>
+        {review.source ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>GitHub: {review.source.repository} @ <code>{review.source.commit}</code>{review.source.directory ? ` / ${review.source.directory}` : ''}</div> : null}
         <div style={{ ...metaStyle, marginTop: 8 }}>Review the executable text below before linking. These files run with your local user permissions.</div>
         {review.files.map((file) => <details key={file.path} style={{ borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', marginTop: 10, paddingTop: 10 }}>
           <summary style={{ ...metaStyle, cursor: 'pointer' }}>{file.path} ({file.bytes} bytes) · SHA-256 {file.sha256}</summary>
@@ -132,6 +133,7 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
       <div style={{ ...metaStyle, marginTop: 5 }}>{plugin.manifest.description}</div>
       <div style={{ ...metaStyle, marginTop: 8 }}>Revision <code>{plugin.revision.slice(0, 12)}</code></div>
       {plugin.sourceDirectory ? <div style={{ ...metaStyle, marginTop: 8 }}>Linked from <code>{plugin.sourceDirectory}</code></div> : null}
+      {plugin.source ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>GitHub: {plugin.source.repository} @ <code>{plugin.source.commit}</code>{plugin.source.directory ? ` / ${plugin.source.directory}` : ''}</div> : null}
       {plugin.manifest.workspace === 'registered-project' ? <div style={{ ...metaStyle, marginTop: 8 }}>{plugin.workspaceRoot ? `Bound project: ${plugin.workspaceRoot}` : 'Project binding unavailable.'}</div> : null}
       {plugin.manifest.actions.map((action) => <div key={action.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', marginTop: 12, paddingTop: 12 }}><div><div style={{ fontSize: 12, fontWeight: 300 }}>{action.id}</div><div style={{ ...metaStyle, marginTop: 3 }}>{action.description}</div></div><button type="button" onClick={() => runAction(plugin, action)} disabled={!plugin.enabled || busy !== null || (plugin.manifest.workspace === 'registered-project' && repoPath !== plugin.workspaceRoot)} style={buttonStyle}>Run</button></div>)}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
@@ -139,7 +141,7 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
         {confirmRemove === plugin.manifest.id ? <><button type="button" onClick={() => changePlugin(plugin, 'remove')} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Confirm removal</button><button type="button" onClick={() => setConfirmRemove(null)} style={buttonStyle}>Cancel</button></> : <button type="button" onClick={() => setConfirmRemove(plugin.manifest.id)} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Remove</button>}
       </div>
     </div>)}
-    {inventory.receipts.length ? <div style={boxStyle}><div style={{ fontSize: 13, fontWeight: 300, marginBottom: 10 }}>Recent runs</div>{inventory.receipts.slice(0, 8).map((receipt) => <details key={receipt.id} style={{ borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', paddingTop: 9, paddingBottom: 9 }}><summary style={{ ...metaStyle, cursor: 'pointer' }}>{receipt.plugin_id} / {receipt.action_id} · {receipt.status} · {new Date(receipt.started_at).toLocaleString()}</summary><div style={{ ...metaStyle, marginTop: 8 }}>Exit {receipt.exit_code ?? 'none'}{receipt.error ? ` · ${receipt.error}` : ''}</div>{receipt.stdout ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stdout}</pre> : null}{receipt.stderr ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stderr}</pre> : null}</details>)}</div> : null}
+    {inventory.receipts.length ? <div style={boxStyle}><div style={{ fontSize: 13, fontWeight: 300, marginBottom: 10 }}>Recent runs</div>{inventory.receipts.slice(0, 8).map((receipt) => <details key={receipt.id} style={{ borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', paddingTop: 9, paddingBottom: 9 }}><summary style={{ ...metaStyle, cursor: 'pointer' }}>{receipt.plugin_id} / {receipt.action_id} · {receipt.status} · {new Date(receipt.started_at).toLocaleString()}</summary><div style={{ ...metaStyle, marginTop: 8 }}>Exit {receipt.exit_code ?? 'none'}{receipt.error ? ` · ${receipt.error}` : ''}</div>{receipt.source ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>GitHub: {receipt.source.repository} @ <code>{receipt.source.commit}</code>{receipt.source.directory ? ` / ${receipt.source.directory}` : ''}</div> : null}{receipt.stdout ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stdout}</pre> : null}{receipt.stderr ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stderr}</pre> : null}</details>)}</div> : null}
     <button type="button" onClick={() => { setBusy('loading'); void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not refresh.')).finally(() => setBusy(null)); }} disabled={busy !== null} style={{ ...buttonStyle, alignSelf: 'flex-start' }}>Refresh plugins</button>
   </section>;
 }
