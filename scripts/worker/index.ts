@@ -105,11 +105,13 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   }, 1_000);
   const monitor = async () => {
     if (monitorFailure || abortControl || operation.signal.aborted) return;
+    let stage = 'heartbeat';
     try {
       const renewed = await stream.postEvent(job, 'heartbeat', { status: 'running' }, operation.signal);
       const nextExpiry = renewed ? Date.parse(renewed) : NaN;
       if (!Number.isFinite(nextExpiry)) throw new Error('[worker] heartbeat returned no lease expiry');
       leaseExpiresAt = nextExpiry;
+      stage = 'control poll';
       const control = await stream.pollControl(job, operation.signal);
       if (control?.type === 'abort') {
         abortControl = control;
@@ -119,7 +121,12 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
       // A one-shot Codex process cannot take a live steer. Completion keeps
       // the unacknowledged control and queues a durable follow-up instead.
     } catch (error) {
-      monitorFailure = error instanceof Error ? error : new Error(String(error));
+      // Aborting an in-flight renewal must not replace its watchdog cause.
+      // Operator cancellation, the absolute deadline and process shutdown own
+      // their existing cleanup paths rather than becoming monitoring failures.
+      if (!monitorFailure && !abortControl && !deadlineExpired && !shutdown.aborted) {
+        monitorFailure = new Error(`[worker] ${stage} failed: ${safeMessage(error)}`, { cause: error });
+      }
       operation.abort();
       codex?.abort();
     }
@@ -210,7 +217,9 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
       // Stop renewing the lease; restart recovers it through the durable queue.
       console.log(`[worker] stopped job ${job.id}; its lease remains recoverable`);
     } else if (failure || monitorFailure) {
-      await reportFailure(stream, job, failure ?? monitorFailure);
+      const cause = failure instanceof Error && failure.name === 'AbortError'
+        ? monitorFailure ?? failure : failure ?? monitorFailure;
+      await reportFailure(stream, job, cause);
     }
   }
 }

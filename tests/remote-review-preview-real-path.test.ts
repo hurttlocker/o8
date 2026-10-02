@@ -100,6 +100,7 @@ function openPreview(jobId: string, attempt: number, taskId = 'packet-review-pre
 }
 
 async function relayBridge() {
+  let rejectControl = false;
   const pollingWorkers = new Set<string>();
   const disconnectedWorkers = new Set<string>();
   const server = createServer(async (incoming, outgoing) => {
@@ -127,7 +128,8 @@ async function relayBridge() {
       if (isPoll) pollingWorkers.add(workerId);
       const response = isPoll ? await pollRoute.GET(request)
         : url.pathname === '/api/cloud/worker-stream' ? await streamRoute.POST(request)
-          : url.pathname === '/api/cloud/worker-control' ? incoming.method === 'POST' ? await controlRoute.POST(request) : await controlRoute.GET(request)
+          : url.pathname === '/api/cloud/worker-control' ? incoming.method === 'POST' ? await controlRoute.POST(request)
+            : rejectControl ? new Response(null, { status: 503 }) : await controlRoute.GET(request)
             : url.pathname === '/api/cloud/worker-preview' ? incoming.method === 'POST' ? await relayRoute.POST(request) : await relayRoute.GET(request)
               : new Response('Not found', { status: 404 });
       if (!outgoing.destroyed) {
@@ -142,6 +144,7 @@ async function relayBridge() {
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, pollingWorkers, disconnectedWorkers,
+    failControl: () => { rejectControl = true; },
     close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }) };
 }
 
@@ -317,6 +320,49 @@ describe('completed remote result preview sessions', () => {
       expect(output).not.toContain(key.plaintext);
     } finally { worker.kill('SIGCONT'); closePreviewServers(); await stop(); await bridge.close(); }
   }, 60_000);
+
+  it.skipIf(process.platform !== 'linux')('persists the control failure that stopped a healthy preview and closes its process', async () => {
+    const bin = join(dataDir, 'failure-bin'); mkdirSync(bin);
+    const invoked = join(dataDir, 'failure-unexpected-agent');
+    writeFileSync(join(bin, 'codex'), `#!/bin/sh\nprintf unexpected > '${invoked}'\nexit 91\n`);
+    chmodSync(join(bin, 'codex'), 0o755);
+    execFileSync(process.execPath, ['scripts/build-worker.mjs']);
+    const allocated = await openPreview(parentId, 1);
+    expect(allocated.status).toBe(202);
+    const failedChildId = (await allocated.json()).serviceJobId;
+    const bridge = await relayBridge();
+    const worker = spawn(process.execPath, [join(process.cwd(), 'dist/worker/o8-worker.mjs'),
+      '--o8-url', bridge.url, '--workspace-dir', join(dataDir, 'failure-worker'), '--worker-id', 'failure-worker',
+      '--poll-interval-ms', '60000', '--control-poll-interval-ms', '1000'], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, O8_CLOUD_WORKER_KEY: key.plaintext,
+        GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${bare}/.insteadOf`, GIT_CONFIG_VALUE_0: 'ssh://git@example.invalid/fixture.git' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let output = '';
+    worker.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+    try {
+      await waitFor(() => readJobEvents('team_default', failedChildId).some((event) => event.type === 'service'
+        && (event.payload as { state: string }).state === 'healthy') ? true : null, () => output);
+      bridge.failControl();
+      await waitFor(() => getJob('team_default', failedChildId)?.status === 'parked' ? true : null, () => output);
+      closeDb();
+      const failure = readJobEvents('team_default', failedChildId).find((event) => event.type === 'errored');
+      expect(failure?.payload).toMatchObject({ message: '[worker] control poll failed: [worker/cloud] /api/cloud/worker-control rejected with HTTP 503' });
+      const stopped = readJobEvents('team_default', failedChildId).filter((event) => event.type === 'service').at(-1);
+      expect(stopped?.payload).toMatchObject({ state: 'stopped' });
+      await expect(fetch(`http://127.0.0.1:${servicePort}/health`)).rejects.toThrow();
+      expect(existsSync(invoked)).toBe(false);
+      expect(getJob('team_default', parentId)!.status).toBe('completed');
+      expect(output).not.toContain(key.plaintext);
+    } finally {
+      closePreviewServers();
+      if (worker.exitCode === null && worker.signalCode === null) {
+        worker.kill('SIGTERM');
+        await new Promise<void>((resolve) => worker.once('exit', () => resolve()));
+      }
+      await bridge.close();
+    }
+  }, 25_000);
 
   it('rejects revoked child credentials and superseded parents after reopening persisted state', async () => {
     const opened = await openPreview(parentId, 1); expect(opened.status).toBe(202);
