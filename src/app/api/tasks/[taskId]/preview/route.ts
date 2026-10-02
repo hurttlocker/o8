@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
-import { requirePanelAuth } from '@/lib/panel/auth';
+import { isTrustedPanelRequest, requirePanelAuth } from '@/lib/panel/auth';
+import { isLoopbackHostname } from '@/lib/auth/loopback-request';
 import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 import { ensureReviewServiceJob, stopReviewServiceJob } from '@/lib/cloud/review-service-session';
 import { resolveTaskPreview } from '@/lib/cloud/preview-authority';
@@ -11,12 +12,27 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'no-store' };
 
+function coordinatorOrigin(request: NextRequest): string | null {
+  // The packaged Next server binds to 0.0.0.0, so nextUrl is not the client's
+  // origin. Socket-peer truth must still win over a spoofed loopback Host.
+  if (!isTrustedPanelRequest(request)) return null;
+  const host = request.headers.get('host');
+  if (!host) return null;
+  try {
+    const url = new URL(`${request.nextUrl.protocol}//${host}`);
+    return ['http:', 'https:'].includes(url.protocol) && isLoopbackHostname(url.hostname)
+      && url.host === host && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash
+      ? url.origin : null;
+  } catch { return null; }
+}
+
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
   if (requirePanelAuth(request) || resolveRequestPrincipalContext(request).role !== 'operator') {
     return NextResponse.json({ error: 'Operator authorization is required.' }, { status: 403, headers });
   }
   // This first transport serves the coordinator's native app, not off-host clients.
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(request.nextUrl.hostname)) {
+  const operatorOrigin = coordinatorOrigin(request);
+  if (!operatorOrigin) {
     return NextResponse.json({ error: 'Open this preview in the coordinator desktop app.' }, { status: 409, headers });
   }
   try {
@@ -48,7 +64,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ta
     if (requirePanelAuth(request) || resolveRequestPrincipalContext(request).role !== 'operator') {
       return NextResponse.json({ error: 'Operator authorization changed.' }, { status: 403, headers });
     }
-    const preview = await openPreviewServer(binding, request.nextUrl.origin);
+    const preview = await openPreviewServer(binding, operatorOrigin);
     if (requirePanelAuth(request) || resolveRequestPrincipalContext(request).role !== 'operator') {
       preview.close(true);
       return NextResponse.json({ error: 'Operator authorization changed.' }, { status: 403, headers });

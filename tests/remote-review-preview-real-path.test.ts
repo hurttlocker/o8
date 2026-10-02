@@ -95,7 +95,7 @@ async function waitFor<T>(read: () => T | null, diagnostics?: () => string): Pro
 
 function openPreview(jobId: string, attempt: number, taskId = 'packet-review-preview', token = getOrCreateWsToken()) {
   return previewRoute.POST(new NextRequest(`http://localhost/api/tasks/${taskId}/preview`, {
-    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ jobId, attempt }),
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', host: 'localhost' }, body: JSON.stringify({ jobId, attempt }),
   }), { params: Promise.resolve({ taskId }) });
 }
 
