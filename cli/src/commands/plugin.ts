@@ -103,6 +103,15 @@ export async function runPlugin(mode: OutputMode, group: string | undefined, res
     else printJson({ schema: 'o8/cli/plugin.source.link/v1', installed: result.data.installed });
     return EXIT.OK;
   }
+  if (group === 'state' && rest[0] === 'clear') {
+    const { positional, flags } = parse(rest.slice(1).filter((arg) => arg !== '--confirm'), ['--revision']);
+    if (positional.length !== 1 || rest.filter((arg) => arg === '--confirm').length !== 1 || !/^[a-f0-9]{64}$/.test(flags.get('--revision') ?? '')) throw new CliError('invalid_args', 'Use `o8 plugin state clear <plugin-id> --revision <sha256> --confirm`. This permanently clears this source and project’s saved data.', EXIT.INVALID_ARGS);
+    const result = await apiFetch<{ cleared: boolean; cleanupPending: boolean }>(operatorConfig(), '/api/customize/actions', { method: 'POST', body: { action: 'clear-state', id: positional[0], revision: flags.get('--revision'), confirmed: true } });
+    if (typeof result.data?.cleared !== 'boolean') throw new CliError('invalid_response', 'The action host returned no state result.', EXIT.INVALID_ARGS);
+    if (mode.human) printHumanKv([['cleared', String(result.data.cleared)], ['cleanup pending', String(result.data.cleanupPending)]]);
+    else printJson({ schema: 'o8/cli/plugin.state.clear/v1', ...result.data });
+    return EXIT.OK;
+  }
   if (group === 'list') {
     const { positional, flags } = parse(rest, ['--plugin']);
     if (positional.length) throw new CliError('invalid_args', 'Use `o8 plugin list [--plugin ID]`.', EXIT.INVALID_ARGS);
@@ -156,5 +165,5 @@ export async function runPlugin(mode: OutputMode, group: string | undefined, res
     } else printJson({ schema: 'o8/cli/plugin.log.list/v1', receipts });
     return EXIT.OK;
   }
-  throw new CliError('unknown_plugin_subcommand', 'Use `o8 plugin source review|link`, `o8 plugin list`, `o8 plugin action list|invoke`, or `o8 plugin log list`.', EXIT.INVALID_ARGS);
+  throw new CliError('unknown_plugin_subcommand', 'Use `o8 plugin source review|link`, `o8 plugin list`, `o8 plugin action list|invoke`, `o8 plugin log list`, or `o8 plugin state clear`.', EXIT.INVALID_ARGS);
 }

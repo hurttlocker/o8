@@ -9,7 +9,7 @@ add terminal panes.
 ## Manifest
 
 A source folder contains `o8-actions.json` and each declared file. The manifest
-uses `o8-actions-v1` and declares one or more named actions. The two examples
+uses `o8-actions-v1` and declares one or more named actions. The examples
 under `examples/action-plugins/` are ready to review in the app:
 
 - `project-setup-check` reports Git, Node, npm, and the presence of project
@@ -17,8 +17,10 @@ under `examples/action-plugins/` are ready to review in the app:
 - `verification-receipt` records the selected repository's commit and change
   counts. The host saves its output in a durable run receipt; the script does
   not write a file in the repository.
+- `persistent-counter` increments a counter in declared saved data. It needs
+  Node on the action's PATH and demonstrates an atomic write across runs.
 
-Both examples request `workspace: "registered-project"`. The operator must
+The first two examples request `workspace: "registered-project"`. The operator must
 select a registered project in Customize before review. The reviewed revision
 is bound to that project, and Run is enabled only while that same project is
 selected. The server resolves the repository from its registry; a
@@ -54,7 +56,7 @@ the old installation, review the new revision, and link it explicitly.
    The result appears in Recent runs with status, exit code, and bounded output.
 5. Use **Disable** to refuse future runs, or **Remove** and its confirmation
    step to remove the installed snapshot. Receipts remain available after
-   removal.
+   removal. Declared saved data also remains until explicitly cleared.
 
 Actions run as the current local user. The host limits runtime and output,
 uses an exact installed file snapshot, refuses concurrent runs of the same
@@ -68,7 +70,9 @@ presence checks, a commit ID, and aggregate change counts.
 
 An invocation uses the panel-authenticated local API at
 `/api/customize/actions`. `GET` lists installations and receipts. `POST`
-accepts `review`, `link`, `invoke`, `enable`, `disable`, and `remove` operations.
+accepts `review`, `link`, `invoke`, `enable`, `disable`, `remove`, and
+`clear-state` operations. Clearing requires `confirmed: true` and the exact
+installed revision.
 `review-github` acquires a pinned public source and returns the same file review
 with an owned staging directory and source metadata. GitHub acquisition uses
 fixed HTTPS hosts, refuses redirects and links, verifies Git object bytes and
@@ -97,6 +101,7 @@ o8 plugin source link --directory <sourceDirectory-from-review> --revision <sha2
 o8 plugin action list --plugin project-setup-check
 o8 plugin action invoke project-setup-check check --revision <sha256> --repo <registered-path>
 o8 plugin log list --plugin project-setup-check
+o8 plugin state clear persistent-counter --revision <sha256> --confirm
 ```
 
 The revision is required so a script cannot silently run a changed installation.
@@ -108,3 +113,42 @@ cap is applied. An action failure still prints its receipt and exits nonzero.
 Receipts label `actorKind: authorization-class` and `actorIdentity: null`:
 the local panel boundary authenticates an operator privilege class, not a
 specific person or agent. No client-provided actor label is accepted as proof.
+
+## Persistent action state
+
+An action package can request a separate durable data folder with this optional
+manifest field:
+
+```json
+"state": { "scope": "source-and-project" }
+```
+
+Review shows the exact state directory and additional `O8_PLUGIN_STATE_DIR`
+environment key before linking. Review and linking do not create the folder.
+An enabled action with the current reviewed revision creates it on its first
+explicit invocation. Legacy packages receive neither this key nor a state
+folder, and their revision calculation remains unchanged.
+
+The directory is under the app's private customization data, separate from
+source caches, installed executable files and project contents. Its namespace
+includes the plugin ID, canonical source identity and reviewed project. For a
+public GitHub package, the source identity is the case-insensitive repository
+name and case-sensitive package directory; changing the pinned commit after
+review can reuse state. For local packages, the source identity is the reviewed
+absolute folder. A different source folder, repository, package directory, ID
+or project gets different data. Moving a local source folder therefore creates
+a new namespace. An update still requires explicit removal, review and linking.
+
+State survives host/app restarts and disable/re-enable. **Remove** preserves it.
+Use **Clear saved data**, followed by **Confirm clear saved data**, or the CLI
+command above to clear the current installation's namespace. Clearing refuses
+a stale revision or a running action. Re-link a removed source and project to
+clear its preserved data through this control. Run receipts retain their
+requested state scope after clearing or removal.
+
+The host checks private directory ownership and refuses linked directories or
+changed/linked ownership metadata. This is lifecycle separation, not an OS
+sandbox, secret store, disk quota or a cross-machine synchronization feature.
+Actions have the current user's file access. Authors should cap their own data,
+use atomic writes and avoid secrets. The counter example uses a bounded read
+without following links and an exclusive temporary file plus atomic rename.

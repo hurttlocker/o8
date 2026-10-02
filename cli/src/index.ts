@@ -305,6 +305,7 @@ commands:
   plugin source review --directory <local-folder> [--repo <registered-path>]
   plugin source review --github <owner/repository> --commit <40-character-sha> [--path <package-directory>] [--repo <registered-path>]
   plugin source link   --directory <reviewed-folder> --revision <sha256> [--repo <registered-path>]
+  plugin state clear   <plugin-id> --revision <sha256> --confirm (clear saved data)
   plugin action list   list action IDs, revisions, and project bindings [--plugin ID]
   plugin action invoke <plugin-id> <action-id> --revision <sha256> [--repo <registered-path>]
   plugin log list      read persisted, bounded action receipts [--plugin ID] [--limit N]

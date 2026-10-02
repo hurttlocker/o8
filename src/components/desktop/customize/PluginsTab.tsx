@@ -5,11 +5,12 @@ import { ActionRepositoryPicker, type ActionRepository } from './ActionRepositor
 import { ActionSourceFields, type GithubSourceInput } from './ActionSourceFields';
 
 type PluginAction = { id: string; description: string; entry: string; args: string[]; timeoutMs: number };
-type Manifest = { id: string; name: string; version: string; description: string; supportedPlatforms: string[]; workspace: 'none' | 'registered-project'; actions: PluginAction[] };
+type PluginState = { scope: 'source-and-project'; environmentKey: 'O8_PLUGIN_STATE_DIR'; namespace: string; directory: string };
+type Manifest = { id: string; name: string; version: string; description: string; supportedPlatforms: string[]; workspace: 'none' | 'registered-project'; state?: { scope: 'source-and-project' }; actions: PluginAction[] };
 type Source = { kind: 'github'; repository: string; commit: string; directory: string };
-type Review = { manifest: Manifest; revision: string; sourceDirectory?: string; source?: Source; files: Array<{ path: string; bytes: number; sha256: string; content: string }>; execution: { cwd: string; environmentKeys: string[]; principal: string } };
-type Installed = { manifest: Manifest; revision: string; enabled: boolean; linkedAt: string; workspaceRoot?: string | null; sourceDirectory?: string; source?: Source };
-type Receipt = { id: string; plugin_id: string; action_id: string; status: string; started_at: string; exit_code: number | null; stdout: string | null; stderr: string | null; error: string | null; source?: Source | null };
+type Review = { manifest: Manifest; revision: string; sourceDirectory?: string; source?: Source; files: Array<{ path: string; bytes: number; sha256: string; content: string }>; execution: { cwd: string; environmentKeys: string[]; principal: string; state?: PluginState } };
+type Installed = { manifest: Manifest; revision: string; enabled: boolean; linkedAt: string; workspaceRoot?: string | null; sourceDirectory?: string; source?: Source; state?: PluginState };
+type Receipt = { id: string; plugin_id: string; action_id: string; status: string; started_at: string; exit_code: number | null; stdout: string | null; stderr: string | null; error: string | null; source?: Source | null; state?: PluginState | null };
 type Inventory = { installed: Installed[]; damaged: string[]; receipts: Receipt[] };
 
 const buttonStyle: CSSProperties = { minHeight: 28, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)', borderRadius: 7, backgroundColor: 'var(--t-input-bg)', color: 'var(--t-text)', paddingTop: 5, paddingBottom: 5, paddingLeft: 10, paddingRight: 10, fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300, cursor: 'pointer' };
@@ -40,6 +41,7 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState<string | null>(null);
   const runControllerRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -95,7 +97,15 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
   const changePlugin = (plugin: Installed, action: 'enable' | 'disable' | 'remove') => {
     void operate(`${action}:${plugin.manifest.id}`, { action, id: plugin.manifest.id, revision: plugin.revision }, () => {
       setConfirmRemove(null);
-      setNotice(`${plugin.manifest.name} ${action === 'remove' ? 'removed' : action === 'enable' ? 'enabled' : 'disabled'}.`);
+      setNotice(`${plugin.manifest.name} ${action === 'remove' ? 'removed' : action === 'enable' ? 'enabled' : 'disabled'}.${action === 'remove' && plugin.state ? ' Saved data was preserved.' : ''}`);
+    });
+  };
+
+  const clearState = (plugin: Installed) => {
+    void operate(`clearing:${plugin.manifest.id}`, { action: 'clear-state', id: plugin.manifest.id, revision: plugin.revision, confirmed: true }, (result) => {
+      const stateResult = result as { cleared: boolean; cleanupPending: boolean };
+      setConfirmClear(null);
+      setNotice(stateResult.cleanupPending ? `${plugin.manifest.name}: saved data detached, but deleting the old files is still pending. The next run starts with fresh data.` : stateResult.cleared ? `${plugin.manifest.name}: saved data cleared. The next run starts with fresh data.` : `${plugin.manifest.name}: no saved data to clear.`);
     });
   };
 
@@ -119,6 +129,7 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
         <div style={{ ...metaStyle, marginTop: 8 }}>Platforms: {review.manifest.supportedPlatforms.join(', ')}. Workspace: {review.manifest.workspace === 'none' ? 'private plugin folder' : 'selected registered project'}.</div>
         <div style={{ ...metaStyle, marginTop: 8 }}>Working directory: <code>{review.execution.cwd}</code></div>
         <div style={{ ...metaStyle, marginTop: 8 }}>Process: {review.execution.principal}; environment keys: {review.execution.environmentKeys.join(', ') || 'none'}. This does not restrict file access.</div>
+        {review.execution.state ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>Saved data: <code>{review.execution.state.directory}</code>. Separate for this source and selected project; survives updates from this source, restart, disable, and removal. Created on the first run.</div> : null}
         <button type="button" onClick={linkSource} disabled={busy !== null} style={{ ...buttonStyle, marginTop: 14 }}>Link reviewed revision</button>
       </div> : null}
     </div>
@@ -135,13 +146,15 @@ export default function PluginsTab({ repoPath, repos = [], onSelectRepo }: {
       {plugin.sourceDirectory ? <div style={{ ...metaStyle, marginTop: 8 }}>Linked from <code>{plugin.sourceDirectory}</code></div> : null}
       {plugin.source ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>GitHub: {plugin.source.repository} @ <code>{plugin.source.commit}</code>{plugin.source.directory ? ` / ${plugin.source.directory}` : ''}</div> : null}
       {plugin.manifest.workspace === 'registered-project' ? <div style={{ ...metaStyle, marginTop: 8 }}>{plugin.workspaceRoot ? `Bound project: ${plugin.workspaceRoot}` : 'Project binding unavailable.'}</div> : null}
+      {plugin.state ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>Saved data: <code>{plugin.state.directory}</code>. Removal preserves this data.</div> : null}
       {plugin.manifest.actions.map((action) => <div key={action.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', marginTop: 12, paddingTop: 12 }}><div><div style={{ fontSize: 12, fontWeight: 300 }}>{action.id}</div><div style={{ ...metaStyle, marginTop: 3 }}>{action.description}</div></div><button type="button" onClick={() => runAction(plugin, action)} disabled={!plugin.enabled || busy !== null || (plugin.manifest.workspace === 'registered-project' && repoPath !== plugin.workspaceRoot)} style={buttonStyle}>Run</button></div>)}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button type="button" onClick={() => changePlugin(plugin, plugin.enabled ? 'disable' : 'enable')} disabled={busy !== null} style={buttonStyle}>{plugin.enabled ? 'Disable' : 'Enable'}</button>
-        {confirmRemove === plugin.manifest.id ? <><button type="button" onClick={() => changePlugin(plugin, 'remove')} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Confirm removal</button><button type="button" onClick={() => setConfirmRemove(null)} style={buttonStyle}>Cancel</button></> : <button type="button" onClick={() => setConfirmRemove(plugin.manifest.id)} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Remove</button>}
+        {plugin.state ? (confirmClear === plugin.manifest.id ? <><button type="button" onClick={() => clearState(plugin)} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Confirm clear saved data</button><button type="button" onClick={() => setConfirmClear(null)} style={buttonStyle}>Cancel</button></> : <button type="button" onClick={() => { setConfirmRemove(null); setConfirmClear(plugin.manifest.id); }} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Clear saved data</button>) : null}
+        {confirmRemove === plugin.manifest.id ? <><button type="button" onClick={() => changePlugin(plugin, 'remove')} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Confirm removal</button><button type="button" onClick={() => setConfirmRemove(null)} style={buttonStyle}>Cancel</button></> : <button type="button" onClick={() => { setConfirmClear(null); setConfirmRemove(plugin.manifest.id); }} disabled={busy !== null} style={{ ...buttonStyle, color: 'var(--t-error, #ef4444)' }}>Remove</button>}
       </div>
     </div>)}
-    {inventory.receipts.length ? <div style={boxStyle}><div style={{ fontSize: 13, fontWeight: 300, marginBottom: 10 }}>Recent runs</div>{inventory.receipts.slice(0, 8).map((receipt) => <details key={receipt.id} style={{ borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', paddingTop: 9, paddingBottom: 9 }}><summary style={{ ...metaStyle, cursor: 'pointer' }}>{receipt.plugin_id} / {receipt.action_id} · {receipt.status} · {new Date(receipt.started_at).toLocaleString()}</summary><div style={{ ...metaStyle, marginTop: 8 }}>Exit {receipt.exit_code ?? 'none'}{receipt.error ? ` · ${receipt.error}` : ''}</div>{receipt.source ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>GitHub: {receipt.source.repository} @ <code>{receipt.source.commit}</code>{receipt.source.directory ? ` / ${receipt.source.directory}` : ''}</div> : null}{receipt.stdout ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stdout}</pre> : null}{receipt.stderr ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stderr}</pre> : null}</details>)}</div> : null}
+    {inventory.receipts.length ? <div style={boxStyle}><div style={{ fontSize: 13, fontWeight: 300, marginBottom: 10 }}>Recent runs</div>{inventory.receipts.slice(0, 8).map((receipt) => <details key={receipt.id} style={{ borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider)', paddingTop: 9, paddingBottom: 9 }}><summary style={{ ...metaStyle, cursor: 'pointer' }}>{receipt.plugin_id} / {receipt.action_id} · {receipt.status} · {new Date(receipt.started_at).toLocaleString()}</summary><div style={{ ...metaStyle, marginTop: 8 }}>Exit {receipt.exit_code ?? 'none'}{receipt.error ? ` · ${receipt.error}` : ''}</div>{receipt.source ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>GitHub: {receipt.source.repository} @ <code>{receipt.source.commit}</code>{receipt.source.directory ? ` / ${receipt.source.directory}` : ''}</div> : null}{receipt.state ? <div style={{ ...metaStyle, marginTop: 8, overflowWrap: 'anywhere' }}>Saved data scope: {receipt.state.scope} · <code>{receipt.state.namespace.slice(0, 12)}</code></div> : null}{receipt.stdout ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stdout}</pre> : null}{receipt.stderr ? <pre style={{ ...metaStyle, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflow: 'auto', scrollbarWidth: 'none' }}>{receipt.stderr}</pre> : null}</details>)}</div> : null}
     <button type="button" onClick={() => { setBusy('loading'); void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not refresh.')).finally(() => setBusy(null)); }} disabled={busy !== null} style={{ ...buttonStyle, alignSelf: 'flex-start' }}>Refresh plugins</button>
   </section>;
 }

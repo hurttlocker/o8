@@ -11,6 +11,7 @@ import { resolveScope } from '@/lib/customize/storage';
 import { ActionPluginError } from './errors';
 import { acquiredSource, githubSourceSchema, type GithubActionSource } from './source-storage';
 import { verifyGithubFiles } from './github-files';
+import { actionStateSchema, clearActionState, describeActionState, provisionActionState, type ActionState } from './state-storage';
 
 export { ActionPluginError } from './errors';
 
@@ -28,7 +29,7 @@ process.on('disconnect', stop);
 process.on('SIGTERM', stop);
 const timer = setTimeout(stop, Number(process.env.O8_ACTION_TIMEOUT_MS) + 1000);
 let action;
-try { action = spawn(entry, args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV } }); }
+try { action = spawn(entry, args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, ...(process.env.O8_PLUGIN_STATE_DIR ? { O8_PLUGIN_STATE_DIR: process.env.O8_PLUGIN_STATE_DIR } : {}) } }); }
 catch (error) { process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)); }
 if (action) {
   action.on('error', (error) => process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)));
@@ -46,6 +47,7 @@ export const actionManifestSchema = z.object({
   description: z.string().trim().min(1).max(500),
   supportedPlatforms: z.array(z.enum(['darwin', 'linux'])).min(1).max(2).refine((items) => new Set(items).size === items.length),
   workspace: z.enum(['none', 'registered-project']),
+  state: z.object({ scope: z.literal('source-and-project') }).strict().optional(),
   files: z.array(z.object({ path: fileName, sha256: digest }).strict()).min(1).max(12),
   actions: z.array(z.object({
     id: slug,
@@ -116,9 +118,10 @@ export async function reviewActionSource(directory: string, repo?: string, signa
     return { path: file.path, bytes: data.length, sha256: file.sha256, content };
   });
   if (source) await verifyGithubFiles(source, sourceFiles, signal);
+  const state = manifest.state ? describeActionState({ id: manifest.id, sourceDirectory: dir, workspaceRoot, source }) : undefined;
   return {
     manifest, revision: revisionFor(manifest, workspaceRoot, dir, source), files, sourceDirectory: dir, ...(source ? { source } : {}),
-    execution: { cwd: workspaceRoot ?? path.join(getDataDir(), 'customizations', 'actions', manifest.id), environmentKeys: ['PATH', 'NODE_ENV'], principal: 'local-user' as const },
+    execution: { cwd: workspaceRoot ?? path.join(getDataDir(), 'customizations', 'actions', manifest.id), environmentKeys: ['PATH', 'NODE_ENV', ...(state ? [state.environmentKey] : [])], principal: 'local-user' as const, ...(state ? { state } : {}) },
     workspaceRoot,
   };
 }
@@ -149,6 +152,7 @@ function db() {
   database.transaction(() => {
     const columns = database.prepare('PRAGMA table_info(receipts)').all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === 'source_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN source_metadata TEXT');
+    if (!columns.some((column) => column.name === 'state_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN state_metadata TEXT');
   }).immediate();
   return database;
 }
@@ -167,9 +171,12 @@ function refuseRunning(database: Database.Database, id: string) {
 export function listActionPlugins() {
   let dir: string;
   try { dir = root(false); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { installed: [], damaged: [] }; throw error; }
-  const installed: Saved[] = []; const damaged: string[] = [];
+  const installed: Array<Saved & { state?: ActionState }> = []; const damaged: string[] = [];
   for (const id of readdirSync(dir).filter((name) => slug.safeParse(name).success)) {
-    try { installed.push(readSaved(id)); } catch { damaged.push(id); }
+    try {
+      const saved = readSaved(id);
+      installed.push({ ...saved, ...(saved.manifest.state ? { state: describeActionState({ ...saved, id }) } : {}) });
+    } catch { damaged.push(id); }
   }
   return { installed, damaged };
 }
@@ -220,6 +227,15 @@ export function changeActionPlugin(id: string, revision: string, action: 'enable
     return { cleanupPending: false };
   });
 }
+export function clearActionPluginState(id: string, revision: string) {
+  return lifecycle((database) => {
+    refuseRunning(database, id);
+    const saved = readSaved(id);
+    if (saved.revision !== revision) throw new ActionPluginError('conflict', 'Plugin changed since review.', 409);
+    if (!saved.manifest.state) throw new ActionPluginError('state_not_declared', 'This plugin does not declare persistent state.', 409);
+    return clearActionState({ ...saved, id });
+  });
+}
 export async function invokeActionPlugin(id: string, actionId: string, actor = 'local-operator', signal?: AbortSignal, expectedRevision?: string, repo?: string) {
   if (process.platform === 'win32') throw new ActionPluginError('unsupported_platform', 'Executable actions are not available on Windows in this version.', 409);
   const saved = readSaved(id);
@@ -243,14 +259,16 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
       if (!currentAction) throw new ActionPluginError('not_found', 'Action does not exist.', 404);
       for (const file of fresh.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Action file changed after linking.', 409);
       refuseRunning(database, id);
-      database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at, source_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(receiptId, id, actionId, actor, fresh.revision, 'running', startedAt, fresh.source ? JSON.stringify(fresh.source) : null);
-      return { saved: fresh, action: currentAction };
+      if (fresh.manifest.state && signal?.aborted) throw new ActionPluginError('cancelled', 'Run cancelled before state provisioning.', 409);
+      const state = fresh.manifest.state ? provisionActionState({ ...fresh, id }) : undefined;
+      database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at, source_metadata, state_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(receiptId, id, actionId, actor, fresh.revision, 'running', startedAt, fresh.source ? JSON.stringify(fresh.source) : null, state ? JSON.stringify(state) : null);
+      return { saved: fresh, action: currentAction, state };
   });
   const action = claimed.action;
   const result = await new Promise<{ status: string; exitCode: number | null; stdout: string; stderr: string; error: string | null }>((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(process.execPath, ['-e', actionRunner, path.join(dir, action.entry), ...action.args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', NODE_ENV: process.env.NODE_ENV ?? 'production', O8_ACTION_TIMEOUT_MS: String(action.timeoutMs) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], detached: true });
+      child = spawn(process.execPath, ['-e', actionRunner, path.join(dir, action.entry), ...action.args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', NODE_ENV: process.env.NODE_ENV ?? 'production', O8_ACTION_TIMEOUT_MS: String(action.timeoutMs), ...(claimed.state ? { O8_PLUGIN_STATE_DIR: claimed.state.directory } : {}) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], detached: true });
     } catch (error) {
       resolve({ status: 'spawn_error', exitCode: null, stdout: '', stderr: '', error: error instanceof Error ? error.message : 'Could not start action.' });
       return;
@@ -305,7 +323,7 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
   } catch {
     safeResult = { ...result, stdout: '[redacted-output]', stderr: '[redacted-output]', error: result.error ? '[redacted-error]' : null };
   }
-  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, source: claimed.saved.source ?? null, startedAt, finishedAt, ...safeResult };
+  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, source: claimed.saved.source ?? null, state: claimed.state ?? null, startedAt, finishedAt, ...safeResult };
   const finishDb = db();
   try { finishDb.prepare('UPDATE receipts SET status = ?, finished_at = ?, exit_code = ?, stdout = ?, stderr = ?, error = ? WHERE id = ?').run(safeResult.status, finishedAt, safeResult.exitCode, safeResult.stdout, safeResult.stderr, safeResult.error, receiptId); }
   finally { finishDb.close(); }
@@ -316,10 +334,12 @@ export function actionReceipts(id?: string) {
   try {
     const rows = id ? database.prepare('SELECT * FROM receipts WHERE plugin_id = ? ORDER BY started_at DESC LIMIT 100').all(slug.parse(id)) : database.prepare('SELECT * FROM receipts ORDER BY started_at DESC LIMIT 100').all();
     return rows.map((row) => {
-      const { source_metadata: metadata, ...receipt } = row as Record<string, unknown>;
+      const { source_metadata: metadata, state_metadata: stateMetadata, ...receipt } = row as Record<string, unknown>;
       let source: GithubActionSource | null = null;
+      let state: ActionState | null = null;
       try { if (typeof metadata === 'string') source = githubSourceSchema.parse(JSON.parse(metadata)); } catch { /* Never present malformed origin metadata as verified source. */ }
-      return { ...receipt, source, actorKind: 'authorization-class' as const, actorIdentity: null };
+      try { if (typeof stateMetadata === 'string') state = actionStateSchema.parse(JSON.parse(stateMetadata)); } catch { /* Malformed historical state metadata is not an approved scope. */ }
+      return { ...receipt, source, state, actorKind: 'authorization-class' as const, actorIdentity: null };
     });
   }
   finally { database.close(); }

@@ -15,6 +15,21 @@ afterEach(() => {
 });
 
 describe('o8 plugin CLI', () => {
+  it('requires explicit confirmation for state clearing and refuses non-operator credentials', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, cleared: true, cleanupPending: false }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubEnv('O8_API_PORT', '47120'); vi.stubEnv('O8_API_TOKEN', 'operator-test-token');
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const mode = { human: false, verbose: false };
+    await expect(runPlugin(mode, 'state', ['clear', 'setup-check', '--revision', revision])).rejects.toMatchObject({ code: 'invalid_args' });
+    await expect(runPlugin(mode, 'state', ['clear', 'setup-check', '--revision', revision, '--confirm', '--confirm'])).rejects.toMatchObject({ code: 'invalid_args' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.stubEnv('O8_WORKER_TOKEN', 'worker-test-token');
+    await expect(runPlugin(mode, 'state', ['clear', 'setup-check', '--revision', revision, '--confirm'])).rejects.toMatchObject({ code: 'operator_required' });
+    expect(fetchMock).not.toHaveBeenCalled(); vi.stubEnv('O8_WORKER_TOKEN', '');
+    await expect(runPlugin(mode, 'state', ['clear', 'setup-check', '--revision', revision, '--confirm'])).resolves.toBe(0);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ action: 'clear-state', id: 'setup-check', revision, confirmed: true });
+  });
   it('lists bound actions and invokes an exact revision through the action API', async () => {
     vi.stubEnv('O8_API_PORT', '47120');
     vi.stubEnv('O8_API_TOKEN', 'operator-test-token');

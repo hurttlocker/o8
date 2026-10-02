@@ -24,6 +24,37 @@ describe('Customize extension views', () => {
     requests.mockResolvedValue({ ok: true, json: async () => ({ catalog: [PROJECT_GUIDE], installed: [] }) });
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  it('shows reviewed saved data and requires a separate confirmation to clear it', async () => {
+    const state = { scope: 'source-and-project', environmentKey: 'O8_PLUGIN_STATE_DIR', namespace: 'b'.repeat(64), directory: '/owned/action-state/namespace' };
+    const manifest = { id: 'counter', name: 'Counter', version: '1.0.0', description: 'Saved counter', supportedPlatforms: ['darwin'], workspace: 'none', state: { scope: 'source-and-project' }, actions: [] };
+    const revision = 'a'.repeat(64);
+    requests.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init?.method) return Response.json({ installed: [{ manifest, revision, enabled: true, linkedAt: '', state }], receipts: [], damaged: [] });
+      const body = JSON.parse(String(init.body));
+      if (body.action === 'review') return Response.json({ review: { manifest, revision, files: [], execution: { cwd: '/owned/package', environmentKeys: ['PATH', 'NODE_ENV', 'O8_PLUGIN_STATE_DIR'], principal: 'local-user', state } } });
+      return Response.json({ ok: true, cleared: true });
+    });
+    await act(async () => root.render(createElement(PluginsTab)));
+    expect(host.textContent).toContain('Removal preserves this data.');
+    const input = host.querySelector<HTMLInputElement>('#action-plugin-folder')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '/owned/source');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('Review files');
+    expect(host.textContent).toContain('O8_PLUGIN_STATE_DIR');
+    expect(host.textContent).toContain('Created on the first run.');
+    const before = requests.mock.calls.length;
+    await click('Clear saved data'); expect(requests.mock.calls).toHaveLength(before);
+    await click('Cancel'); expect(requests.mock.calls).toHaveLength(before);
+    await click('Clear saved data'); await click('Confirm clear saved data');
+    expect(JSON.parse(requests.mock.calls[before][1].body)).toEqual({ action: 'clear-state', id: 'counter', revision, confirmed: true });
+    expect(host.textContent).toContain('saved data cleared.');
+    requests.mockResolvedValueOnce(Response.json({ ok: true, cleared: true, cleanupPending: true }));
+    await click('Clear saved data'); await click('Confirm clear saved data');
+    expect(host.textContent).toContain('deleting the old files is still pending.');
+    expect(host.textContent).not.toContain('saved data cleared.');
+  });
   it('requires content review before installation and keeps a failed install retryable', async () => {
     await act(async () => root.render(createElement(InstructionBundlesPanel, { selectedRepo: '', onSelectRepo: vi.fn(), repos: [], onChanged: changed, onUseSkill: vi.fn() })));
     await click('Manage bundles');

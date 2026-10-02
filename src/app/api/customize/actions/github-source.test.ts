@@ -28,8 +28,10 @@ describe('immutable GitHub action sources through the operator route', () => {
   let script: Buffer;
   let manifest: Buffer;
   let entries: Array<{ path: string; mode: string; type: string; sha: string; size: number }>;
+  let pinnedCommit = commit;
   beforeEach(() => {
     state.root = realpathSync(mkdtempSync('/tmp/o8-github-action-'));
+    pinnedCommit = commit;
     mkdirSync(path.join(state.root, 'data'));
     state.auth.mockReset().mockReturnValue(null);
     script = Buffer.from('#!/bin/sh\nprintf "pinned source\\n"\n');
@@ -37,7 +39,7 @@ describe('immutable GitHub action sources through the operator route', () => {
     entries = [{ path: 'o8-actions.json', mode: '100644', type: 'blob', sha: blob(manifest), size: manifest.length }, { path: 'run.sh', mode: '100755', type: 'blob', sha: blob(script), size: script.length }];
     fetchSource.mockReset().mockImplementation(async (location: string) => {
       const url = String(location);
-      if (url.endsWith(`/git/commits/${commit}`)) return Response.json({ sha: commit, tree: { sha: rootTree } });
+      if (url.endsWith(`/git/commits/${pinnedCommit}`)) return Response.json({ sha: pinnedCommit, tree: { sha: rootTree } });
       if (url.endsWith(`/git/trees/${rootTree}`)) return Response.json({ sha: rootTree, truncated: false, tree: [{ path: 'package', mode: '040000', type: 'tree', sha: packageTree }] });
       if (url.endsWith(`/git/trees/${packageTree}`)) return Response.json({ sha: packageTree, truncated: false, tree: entries });
       if (url.endsWith('/package/o8-actions.json')) return new Response(manifest);
@@ -47,6 +49,35 @@ describe('immutable GitHub action sources through the operator route', () => {
     vi.stubGlobal('fetch', fetchSource);
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(state.root, { recursive: true, force: true }); });
+
+  it('retains declared state across a reviewed pinned-commit update and isolates another GitHub repository', async () => {
+    script = Buffer.from('#!/bin/sh\nset -eu\ncount=0\nif [ -f "$O8_PLUGIN_STATE_DIR/count" ]; then read -r count < "$O8_PLUGIN_STATE_DIR/count"; fi\ncount=$((count + 1))\nprintf "%s\\n" "$count" > "$O8_PLUGIN_STATE_DIR/count"\nprintf "count=%s\\n" "$count"\n');
+    const original = JSON.parse(manifest.toString());
+    manifest = Buffer.from(JSON.stringify({ ...original, state: { scope: 'source-and-project' }, files: [{ path: 'run.sh', sha256: hash(script) }] }));
+    const updateEntries = () => { entries = [{ path: 'o8-actions.json', mode: '100644', type: 'blob', sha: blob(manifest), size: manifest.length }, { path: 'run.sh', mode: '100755', type: 'blob', sha: blob(script), size: script.length }]; };
+    updateEntries();
+    const runSource = async (input: typeof reviewInput) => {
+      const response = await post(input); expect(response.status, await response.clone().text()).toBe(200);
+      const review = (await response.json()).review;
+      expect((await post({ action: 'link', directory: review.sourceDirectory, expectedRevision: review.revision })).status).toBe(200);
+      const invoked = await post({ action: 'invoke', id: 'source-check', actionId: 'run', revision: review.revision });
+      expect(invoked.status).toBe(200);
+      const receipt = (await invoked.json()).receipt;
+      expect(receipt.status).toBe('succeeded');
+      expect((await post({ action: 'remove', id: 'source-check', revision: review.revision })).status).toBe(200);
+      return { review, receipt };
+    };
+    const first = await runSource(reviewInput);
+    expect(first.receipt.stdout).toBe('count=1\n');
+    pinnedCommit = 'd'.repeat(40);
+    manifest = Buffer.from(JSON.stringify({ ...JSON.parse(manifest.toString()), version: '1.1.0' })); updateEntries();
+    const second = await runSource({ ...reviewInput, commit: pinnedCommit });
+    expect(second.review.revision).not.toBe(first.review.revision);
+    expect(second.receipt).toMatchObject({ stdout: 'count=2\n', state: first.receipt.state });
+    const other = await runSource({ ...reviewInput, commit: pinnedCommit, repository: 'test-owner/another-source' });
+    expect(other.receipt.stdout).toBe('count=1\n');
+    expect(other.receipt.state.namespace).not.toBe(first.receipt.state.namespace);
+  });
 
   it('acquires only pinned files, requires a separate link/run, persists origin, and re-reviews cached bytes after restart', async () => {
     const response = await post(reviewInput);

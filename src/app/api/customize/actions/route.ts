@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z, ZodError } from 'zod';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { ActionPluginError, actionReceipts, changeActionPlugin, invokeActionPlugin, linkActionSource, listActionPlugins, reviewActionSource } from '@/lib/action-plugins/host';
+import { ActionPluginError, actionReceipts, changeActionPlugin, clearActionPluginState, invokeActionPlugin, linkActionSource, listActionPlugins, reviewActionSource } from '@/lib/action-plugins/host';
 import { readCustomizeBody } from '@/lib/customize/http';
 import { CustomizeError } from '@/lib/customize/storage';
 import { reviewGithubActionSource } from '@/lib/action-plugins/github-source';
@@ -16,6 +16,7 @@ const inputSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('link'), directory: z.string().min(1), expectedRevision: z.string().regex(/^[a-f0-9]{64}$/), repo: z.string().optional() }).strict(),
   z.object({ action: z.literal('invoke'), id: z.string(), actionId: z.string(), revision: z.string(), repo: z.string().optional() }).strict(),
   z.object({ action: z.enum(['enable', 'disable', 'remove']), id: z.string(), revision: z.string() }).strict(),
+  z.object({ action: z.literal('clear-state'), id: z.string(), revision: z.string(), confirmed: z.literal(true) }).strict(),
 ]);
 
 function failure(error: unknown) {
@@ -45,6 +46,7 @@ export async function POST(request: NextRequest) {
     if (input.action === 'review-github') return NextResponse.json({ ok: true, review: await reviewGithubActionSource({ kind: 'github', repository: input.repository, commit: input.commit, directory: input.directory }, input.repo, request.signal) });
     if (input.action === 'link') return NextResponse.json({ ok: true, installed: await linkActionSource(input.directory, input.expectedRevision, input.repo, request.signal) });
     if (input.action === 'invoke') return NextResponse.json({ ok: true, receipt: await invokeActionPlugin(input.id, input.actionId, 'local-operator', request.signal, input.revision, input.repo) });
+    if (input.action === 'clear-state') return NextResponse.json({ ok: true, ...clearActionPluginState(input.id, input.revision) });
     return NextResponse.json({ ok: true, ...changeActionPlugin(input.id, input.revision, input.action) });
   } catch (error) { return failure(error); }
 }

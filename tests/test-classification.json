@@ -32,6 +32,14 @@
       ]
     },
     {
+      "path": "src/app/api/customize/actions/state.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/app/api/leases/route.test.ts",
       "reasons": [
         "apfs-tool",
