@@ -9,7 +9,7 @@ import { useOrchestratorData } from '../orchestrator-data-context';
 import { AgentStatusDot, agentStatusToDotState } from '../AgentStatusDot';
 import { NewTaskComposer } from '../repo-focus/tabs/control-room/NewTaskComposer';
 import { createTaskRequest, type TaskExecutionRuntime } from '../repo-focus/tabs/control-room/create-task-request';
-import { taskTimeLabel } from '../repo-focus/tabs/control-room/helpers';
+import { taskSessionKey, taskTimeLabel } from '../repo-focus/tabs/control-room/helpers';
 import type { TaskAction, TaskMutationPayload, TaskPoolTask } from '../repo-focus/tabs/control-room/types';
 import { THREAD_GROUPS, resolveThreadProject, scopeThreadAgents, scopeThreads, threadModelLabel, threadStatusLine } from './threads-model';
 import { useThreadsTasks } from './useThreadsTasks';
@@ -19,12 +19,13 @@ import { ThreadActions, ThreadActionButton } from './ThreadActions';
 
 const smallButtonStyle: React.CSSProperties = { height: 26, border: 0, borderRadius: 7, paddingLeft: 9, paddingRight: 9, fontSize: 12, fontWeight: 300, fontFamily: 'inherit', letterSpacing: '-0.1px', cursor: 'pointer', color: 'var(--t-text-muted)', background: 'transparent' };
 
-export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initialView = 'threads' }: {
+export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initialView = 'threads', boundSessionKey }: {
   active: boolean;
   repoPath: string | null;
   repos: RepoRegistryEntry[];
   allRepos?: boolean;
   initialView?: 'threads' | 'agents';
+  boundSessionKey?: string | null;
 }) {
   const context = useOrchestratorData();
   const projects = useProjects();
@@ -47,7 +48,13 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{ scopeKey: string; task: TaskPoolTask; action: TaskAction; body?: Record<string, unknown> } | null>(null);
-  const selected = selection?.scopeKey === scopeKey ? tasks.find((task) => task.id === selection.id) : null;
+  const selected = boundSessionKey ? tasks.find((task) => taskSessionKey(task) === boundSessionKey)
+    : selection?.scopeKey === scopeKey ? tasks.find((task) => task.id === selection.id) : null;
+  const missingSession = Boolean(boundSessionKey && !selected);
+  const backToThreads = () => {
+    if (boundSessionKey) context?.onOpenO8Panel?.({ repoPath, tab: 'threads' });
+    else setSelection(null);
+  };
   const waiting = tasks.filter((task) => task.group === 'blocked').length;
   const working = tasks.filter((task) => task.group === 'running').length;
   const resolved = tasks.filter((task) => task.group === 'done').length;
@@ -91,14 +98,18 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
   return (
     <div aria-label="Project threads panel" style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-sans-system)', color: 'var(--t-text)', background: 'transparent' }}>
       <div role="tablist" aria-label="Thread panel views" style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-        {(['threads', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') setSelection(null); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab === 'threads' ? 'Threads' : 'Agents'}</button>)}
+        {(boundSessionKey ? ['threads'] as const : ['threads', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') backToThreads(); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab === 'threads' ? 'Threads' : 'Agents'}</button>)}
         <span style={{ flex: 1 }} />
         <button type="button" onClick={pool.refresh} disabled={pool.loading} style={smallButtonStyle}>Refresh</button>
-        <button type="button" aria-label="Create thread" disabled={!canCreate || Boolean(busyKey)} onClick={() => { setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button>
+        {!boundSessionKey ? <button type="button" aria-label="Create thread" disabled={!canCreate || Boolean(busyKey)} onClick={() => { setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button> : null}
       </div>
       {notice ? <div role="status" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 11, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{notice}</div> : null}
       {pool.error ? <div role="alert" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 12 }}>{pool.error}</div> : null}
-      {view === 'threads' && selected ? <ThreadDetail key={`detail:${scopeKey}:${selected.id}`} task={selected} active={active} evidenceRevision={pool.evidenceRevision} onBack={() => setSelection(null)} actions={<ThreadActions task={selected} busy={Boolean(busyKey)} onSelectSession={context?.onSelectSession} onAction={actOnThread} />} /> : (
+      {view === 'threads' && missingSession ? (
+        <p role={pool.error ? 'alert' : 'status'} style={{ paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, fontSize: 13, color: 'var(--t-text-muted)' }}>
+          {pool.loading || projects.loading ? 'Reading this thread…' : pool.error ? 'Unable to read this session. Refresh to try again.' : 'This session is unavailable in this project. Open Threads to find the current attempt.'}
+        </p>
+      ) : view === 'threads' && selected ? <ThreadDetail key={`detail:${scopeKey}:${selected.id}`} task={selected} active={active} evidenceRevision={pool.evidenceRevision} onBack={backToThreads} actions={<ThreadActions task={selected} busy={Boolean(busyKey)} onSelectSession={boundSessionKey ? undefined : context?.onSelectSession} onAction={actOnThread} />} /> : (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
           {view === 'threads' ? <>
             <div style={{ fontSize: 18, fontWeight: 400, letterSpacing: '-0.2px', lineHeight: 1.25 }}>{project?.name || repoPath?.split('/').filter(Boolean).pop() || 'Your threads'}</div>

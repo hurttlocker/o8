@@ -14,6 +14,31 @@ const repo: RegisteredRepo = {
 };
 
 describe('workspace terminal focused CLI session', () => {
+  it('reuses a cloud session without rewriting its identity or inventing a local model', () => {
+    const first = computeCliChatSession({ runtime: 'cloud', repo, targetSessionKey: 'cloud:worker', label: 'Review worker' }, [], '');
+    const next = computeCliChatSession({ runtime: 'codex', repo, targetSessionKey: 'cloud:worker', label: 'Review worker' }, first.tabs, first.activeTabId);
+    expect(next.tabs).toHaveLength(1);
+    expect(next.activeTabId).toBe(first.activeTabId);
+    expect(next.tabs[0]).toMatchObject({ chatRuntime: 'cloud', chatSessionKey: 'cloud:worker', label: 'Review worker' });
+    expect(next.tabs[0].chatModel).toBeUndefined();
+  });
+
+  it.each(['codex:cloud:worker', 'cloud-owned:cloud:worker'])('repairs an existing malformed cloud tab: %s', (key) => {
+    const existing = computeCliChatSession({ runtime: 'codex', targetSessionKey: 'codex:old', label: 'Review worker' }, [], '');
+    existing.tabs[0].chatSessionKey = key;
+    const reopened = computeCliChatSession({ runtime: 'cloud', targetSessionKey: 'cloud:worker' }, existing.tabs, existing.activeTabId);
+    expect(reopened.tabs).toHaveLength(1);
+    expect(reopened.tabs[0]).toMatchObject({ chatRuntime: 'cloud', chatSessionKey: 'cloud:worker' });
+    expect(reopened.tabs[0].chatModel).toBeUndefined();
+  });
+
+  it('restores the selected cloud repository when reusing an unscoped tab', () => {
+    const existing = computeCliChatSession({ runtime: 'cloud', targetSessionKey: 'cloud:worker' }, [], '');
+    const reopened = computeCliChatSession({ runtime: 'cloud', targetSessionKey: 'cloud:worker', repo }, existing.tabs, existing.activeTabId);
+    expect(reopened.tabs).toHaveLength(1);
+    expect(reopened.tabs[0].repo).toEqual(repo);
+  });
+
   it('keeps a captured design region on the staged context card', () => {
     const previewImageDataUri = 'data:image/png;base64,captured-region';
     const result = computeCliChatSession(

@@ -22,6 +22,8 @@ The way we run issues, pull requests, and merges is written down in [docs/operat
 
 ## Claiming work
 
+Start with the [focus plan through October 27](./docs/operations/focus-through-2026-10-27.md#two-contributor-queues) for two bounded contributor queues. Recheck issue claims before starting; the dated plan does not reserve work.
+
 Find work through [`ROADMAP.md`](./ROADMAP.md). Each open arc there links to one tracking issue, and that issue's checklist lists its children. Pick an unchecked child labeled `claimable`: those have a brief that is complete enough to start from.
 
 Comment "claiming" on the child issue. A maintainer flips the label to `claimed`, which expires seven days after the claim comment if no pull request links to the issue. That keeps an issue from sitting reserved by someone who moved on, and reclaiming it later is fine.

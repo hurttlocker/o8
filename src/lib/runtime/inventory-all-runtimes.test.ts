@@ -62,8 +62,8 @@ vi.mock('@/lib/lane/registry', () => ({
   reconcileLanesWithSessions: () => [],
 }));
 
-// This fixture has no cloud lanes. Loading the real cloud persistence graph
-// can exhaust inventory's bounded wait before the mocked discovery settles.
+// Cloud reconciliation has its own durable-job tests; this suite supplies no lanes.
+// Keep its lazy import from pulling the job queue into the inventory build deadline.
 vi.mock('@/lib/lane/cloud-reconciliation', () => ({
   reconcileCloudJobLanes: () => {},
 }));

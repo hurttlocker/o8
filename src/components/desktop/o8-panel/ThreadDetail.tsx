@@ -6,7 +6,7 @@ import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt'
 import type { TaskPoolTask } from '../repo-focus/tabs/control-room/types';
 import { ActionButton } from '../repo-focus/tabs/control-room/shared';
 import { RemoteTaskPreview } from '../repo-focus/tabs/control-room/RemoteTaskPreview';
-import { threadModelLabel, threadStatusLine } from './threads-model';
+import { THREAD_GROUPS, threadModelLabel, threadStatusLine } from './threads-model';
 import { useOrchestratorData } from '../orchestrator-data-context';
 import { usePendingThreadSteer } from './thread-steer-state';
 import { ThreadActionButton } from './ThreadActions';
@@ -108,7 +108,7 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions }
         <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 300, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{task.title}</span>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
-        <div style={{ fontSize: 10, fontWeight: 260, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>{threadModelLabel(task)} · {task.execution || (task.workerRouting?.selectedRuntime ?? task.runtime) === 'cloud' ? 'Remote worker' : 'Local worker'}{task.branch ? ` · ${task.branch}` : ''}</div>
+        <div style={{ fontSize: 10, fontWeight: 260, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>{THREAD_GROUPS.find((group) => group.id === task.group)?.label ?? task.status} · {threadModelLabel(task)} · {task.execution || (task.workerRouting?.selectedRuntime ?? task.runtime) === 'cloud' ? 'Remote worker' : 'Local worker'}{task.branch ? ` · ${task.branch}` : ''}</div>
         <p style={{ fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, overflowWrap: 'anywhere' }}>{threadStatusLine(task)}</p>
         {actions}
         {/* Only the visible current attempt owns this entry. Hiding the panel

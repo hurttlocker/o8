@@ -3,6 +3,8 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WorkspaceChatPane } from '../workspace-terminal/WorkspaceChatPane';
+import { computeCliChatSession } from '../workspace-terminal/terminal-session-ops';
 import { O8ThreadsPane } from './O8ThreadsPane';
 import { O8HeaderTabs } from './O8HeaderTabs';
 import { ThreadDetail } from './ThreadDetail';
@@ -10,13 +12,14 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { TaskPoolTask } from '../repo-focus/tabs/control-room/types';
 
 const context = vi.hoisted(() => ({
-  activeProjectId: 'project', agents: [], missionState: { packets: [] }, onSelectSession: vi.fn(),
+  activeProjectId: 'project', agents: [], missionState: { packets: [] }, onSelectSession: vi.fn(), onOpenO8Panel: vi.fn(),
 }));
 const projectState = vi.hoisted(() => ({
   activeProject: { id: 'project', name: 'Project', repoPaths: ['/repo'] },
   ledger: { projects: [{ id: 'project', name: 'Project', repoPaths: ['/repo'] }, { id: 'focused-project', name: 'Focused project', repoPaths: ['/other'] }] },
   loading: false,
 }));
+vi.mock('../workspace-terminal/useWorkspaceChatPane', () => ({ useWorkspaceChatPane: () => { throw new Error('Cloud task entered local CLI chat'); } }));
 vi.mock('../orchestrator-data-context', () => ({ useOrchestratorData: () => context }));
 vi.mock('../repo-registry/useProjects', () => ({ useProjects: () => projectState }));
 vi.mock('@/lib/tauri/ipc-fetch', () => ({ ipcFetch: (...args: unknown[]) => fetch(...args as Parameters<typeof fetch>) }));
@@ -37,6 +40,7 @@ describe('contextual thread panel navigation', () => {
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     context.onSelectSession.mockClear();
+    context.onOpenO8Panel.mockClear();
     fetchMock = vi.fn(async () => json({ tasks: [task('Live'), task('Finished', 'done'), { ...task('Other', 'running', '/other'), project: { id: 'focused-project' } }] }));
     vi.stubGlobal('fetch', fetchMock);
     container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -46,6 +50,47 @@ describe('contextual thread panel navigation', () => {
     await act(async () => { root.render(createElement(O8ThreadsPane, { active, repoPath, repos: [repo, { ...repo, localPath: '/other' }] })); });
   };
   const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label)!;
+
+  it('opens the requested cloud session with recorded review state and model', async () => {
+    fetchMock.mockResolvedValue(json({ tasks: [{ ...task('Review worker', 'review'),
+      lane: { sessionKey: 'cloud:worker' }, execution: { sessionKey: 'cloud:worker' },
+    }] }));
+    const session = computeCliChatSession({ runtime: 'codex', targetSessionKey: 'cloud:worker', repo: { name: 'Repo', localPath: '/repo' }, label: 'Review worker' }, [], '');
+    await act(async () => root.render(createElement(WorkspaceChatPane, {
+      tab: session.tabs[0], active: true, onUpdateMessages: vi.fn(), onUpdateSessionKey: vi.fn(), onSelectModel: vi.fn(),
+      onConsumeDraftInjection: vi.fn(), onLinkedIssueChange: vi.fn(), onSaveCheckpoint: vi.fn(), onRestoreLatestCheckpoint: vi.fn(),
+    })));
+    expect(container.textContent).toContain('Remote worker');
+    expect(container.textContent).toContain('Ready for review');
+    expect(container.textContent).toContain('gpt-6.1-sol · medium');
+    expect(container.textContent).not.toContain('Codex working');
+    expect(container.querySelector('[aria-label="Steer this thread"]')).not.toBeNull();
+    expect(fetchMock.mock.calls.every((call) => !call[1]?.method || call[1].method === 'GET')).toBe(true);
+    act(() => button('Threads').click());
+    expect(context.onOpenO8Panel).toHaveBeenCalledWith({ repoPath: '/repo', tab: 'threads' });
+    expect(container.querySelector('[aria-label="Steer this thread"]')).not.toBeNull();
+    expect(container.textContent).toContain('Review worker');
+  });
+
+  it('shows an unavailable session instead of a fabricated running worker', async () => {
+    await act(async () => root.render(createElement(O8ThreadsPane, { active: true, repoPath: '/repo', repos: [repo], boundSessionKey: 'cloud:missing' })));
+    expect(container.textContent).toContain('This session is unavailable in this project.');
+    expect(container.querySelector('[aria-label="Steer this thread"]')).toBeNull();
+    act(() => button('Threads').click());
+    expect(context.onOpenO8Panel).toHaveBeenCalledWith({ repoPath: '/repo', tab: 'threads' });
+    expect(container.textContent).toContain('This session is unavailable in this project.');
+  });
+
+  it('does not open a replaced cloud attempt or a session from another project', async () => {
+    fetchMock.mockResolvedValue(json({ tasks: [{ ...task('Old attempt'),
+      lane: { sessionKey: 'cloud:worker' }, execution: { sessionKey: 'cloud:new-worker' },
+    }, { ...task('Other project', 'review', '/other'), project: { id: 'focused-project' },
+      lane: { sessionKey: 'cloud:worker' }, execution: { sessionKey: 'cloud:worker' },
+    }] }));
+    await act(async () => root.render(createElement(O8ThreadsPane, { active: true, repoPath: '/repo', repos: [repo], boundSessionKey: 'cloud:worker' })));
+    expect(container.textContent).toContain('This session is unavailable in this project.');
+    expect(container.querySelector('[aria-label="Steer this thread"]')).toBeNull();
+  });
 
   it('opens Threads through the panel header, without changing the workspace', async () => {
     const onTabChange = vi.fn();

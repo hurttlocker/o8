@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -100,5 +100,67 @@ describe('terminal state restore without a registered repo', () => {
     expect(restored.status).toBe(200);
     const state = await restored.json() as { tabs: Array<{ id: string }> };
     expect(state.tabs.map((tab) => tab.id)).toEqual(['global-shell']);
+  });
+});
+
+
+describe('terminal state restore through repository aliases', () => {
+  it.each(['global', 'canonical-request', 'alias-request'])('restores an alias-bound tab through %s', async (entry) => {
+    const fixture = mkdtempSync(path.join(dataDir, 'restore-alias-'));
+    try {
+      const repoPath = path.join(fixture, 'repo');
+      const aliasPath = path.join(fixture, 'alias');
+      mkdirSync(repoPath);
+      symlinkSync(repoPath, aliasPath, 'junction');
+      writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({ version: 1,
+        repos: [{ id: 'registered', name: 'repo', localPath: repoPath }],
+      }));
+      await listReposFresh();
+      const save = await POST(new Request(stateUrl, { method: 'POST', body: JSON.stringify({
+        version: 1, activeTabId: 'cloud-review', tabs: [
+          { id: 'cloud-review', kind: 'chat', label: 'Cloud review', chatRuntime: 'cloud', chatSessionKey: 'cloud:review', repoPath: aliasPath },
+        ],
+      }) }));
+      expect(save.status).toBe(200);
+      const requestUrl = entry === 'global' ? stateUrl
+        : `http://localhost/api/panel/terminal-state?scope=repo-current&repoPath=${encodeURIComponent(entry === 'alias-request' ? aliasPath : repoPath)}`;
+      const restored = await GET(new Request(requestUrl));
+      expect(restored.status).toBe(200);
+      expect(await restored.json()).toMatchObject({ activeTabId: 'cloud-review', tabs: [
+        { id: 'cloud-review', chatSessionKey: 'cloud:review', repoPath: aliasPath },
+      ] });
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('does not restore a tab whose path resolves outside the registered repository', async () => {
+    const fixture = mkdtempSync(path.join(dataDir, 'restore-alias-'));
+    try {
+      const repoPath = path.join(fixture, 'repo');
+      const outsidePath = path.join(fixture, 'outside');
+      mkdirSync(repoPath);
+      mkdirSync(outsidePath);
+      const escapedPath = path.join(repoPath, 'outside-link');
+      symlinkSync(outsidePath, escapedPath, 'junction');
+      writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({ version: 1,
+        repos: [{ id: 'registered', name: 'repo', localPath: repoPath }],
+      }));
+      await listReposFresh();
+      await POST(new Request(stateUrl, { method: 'POST', body: JSON.stringify({
+        version: 1, activeTabId: 'global-shell', tabs: [
+          { id: 'global-shell', kind: 'terminal', cliAgent: 'shell' },
+          { id: 'escaped-repo', kind: 'chat', chatRuntime: 'cloud', chatSessionKey: 'cloud:other', repoPath: escapedPath },
+        ],
+      }) }));
+      const restored = await GET(new Request(stateUrl));
+      expect(restored.status).toBe(200);
+      const state = await restored.json() as { tabs: Array<{ id: string }> };
+      expect(state.tabs.map((tab) => tab.id)).toEqual(['global-shell']);
+      const rejected = await GET(new Request(`${stateUrl}&repoPath=${encodeURIComponent(escapedPath)}`));
+      expect(rejected.status).toBe(204);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 });

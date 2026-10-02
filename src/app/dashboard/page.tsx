@@ -161,6 +161,7 @@ import {
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
+import { isOrchestratorRuntime, runtimeFromSessionKeyId } from '@/lib/orchestrator/runtime-capabilities';
 import { resolveFocusableLaneBinding } from './hooks/focusOrchestrationPacketLane';
 import { handleRepoWorkspaceFocusEvent } from './hooks/focusRepoWorkspace';
 import { useDesignMode } from '@/hooks/useDesignMode';
@@ -2528,10 +2529,14 @@ function DashboardInner() {
         || session.sessionId === sessionKey
         || session.runtimeSurface?.id === sessionKey
       )) ?? parsedAgents.find((agent) => agent.sessionKey === sessionKey || agent.id === sessionKey);
-      const sessionScope = selectedSession?.workspace
-        ?? selectedSession?.runtimeSurface?.cwd
-        ?? hint?.repoPath
-        ?? null;
+      const runtime = runtimeFromSessionKeyId(sessionKey)
+        ?? (isOrchestratorRuntime(selectedSession?.runtime) ? selectedSession.runtime : hint?.runtime)
+        ?? 'codex';
+      const knownScope = selectedSession?.workspace ?? selectedSession?.runtimeSurface?.cwd ?? hint?.repoPath;
+      // Search can return a cloud session before the sidebar inventory catches up.
+      const resolvedLane = runtime === 'cloud' && !knownScope
+        ? await resolveFocusableLaneBinding({ sessionKey, runtime }) : null;
+      const sessionScope = knownScope ?? resolvedLane?.repoPath ?? null;
       const targetRepo = sessionScope
         ? workspaceScopeEntries.find((repo) => (
           pathBelongsToRepoScope(sessionScope, repo.localPath)
@@ -2581,15 +2586,6 @@ function DashboardInner() {
         attempts: 20,
       });
       if (!primaryHandle) return;
-      const runtime = hint?.runtime ?? (selectedSession?.runtime === 'claude-code'
-        || selectedSession?.runtime === 'gemini'
-        || selectedSession?.runtime === 'opencode'
-        || selectedSession?.runtime === 'codex'
-        ? selectedSession.runtime
-        : sessionKey.startsWith('claude-code:') || sessionKey.startsWith('claude-code-owned:') ? 'claude-code'
-        : sessionKey.startsWith('gemini-owned:') ? 'gemini'
-        : sessionKey.startsWith('opencode-owned:') ? 'opencode'
-        : 'codex');
       // Canonical label — never an id slice. agentDisplayLabel falls back to
       // the runtime's human name ("Codex") rather than a raw `codex-owned:...`
       // key, so the old `sessionKey.split(':').pop()?.slice(0,12)` → literal
@@ -2610,6 +2606,9 @@ function DashboardInner() {
           registryRepoId: targetRepo.registryRepoId,
           isWorktree: targetRepo.isWorktree,
           worktreeStatus: targetRepo.worktreeStatus,
+        } : runtime === 'cloud' && sessionScope ? {
+          name: sessionScope.split(/[\\/]/).filter(Boolean).pop() ?? 'Repository',
+          localPath: sessionScope,
         } : undefined,
         targetSessionKey: sessionKey,
         label,
@@ -2834,13 +2833,7 @@ function DashboardInner() {
         laneId: laneId ?? '',
         packetId: packetId ?? '',
         sessionKey: sessionKey ?? '',
-        runtime: sessionKey?.startsWith('claude-code')
-          ? 'claude-code'
-          : sessionKey?.startsWith('gemini')
-            ? 'gemini'
-            : sessionKey?.startsWith('opencode')
-              ? 'opencode'
-              : 'codex',
+        runtime: runtimeFromSessionKeyId(sessionKey) ?? 'codex',
       });
       if (resolved?.sessionKey) {
         handleSelectSession(resolved.sessionKey, {
