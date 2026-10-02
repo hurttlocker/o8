@@ -83,7 +83,10 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   let stopPreview: (() => Promise<void>) | null = null;
   let abortControl: CloudWorkerControl | null = null;
   let monitorFailure: Error | null = null;
-  let leaseExpiresAt = Date.parse(job.leaseExpiresAt);
+  const session = job.launch.remoteServiceSession;
+  const serviceDeadline = session ? Date.parse(session.expiresAt) : Infinity;
+  let deadlineExpired = false;
+  let leaseExpiresAt = Math.min(Date.parse(job.leaseExpiresAt), serviceDeadline);
   if (!Number.isFinite(leaseExpiresAt)) {
     await reportFailure(stream, job, new Error('[worker] cloud job has no valid lease expiry'));
     return;
@@ -93,6 +96,8 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   if (shutdown.aborted) stop();
   const leaseMarginMs = Math.min(2_000, Math.max(10, Math.floor((leaseExpiresAt - Date.now()) / 5)));
   const watchdog = setInterval(() => {
+    if (Date.now() >= serviceDeadline) { deadlineExpired = true; operation.abort(); codex?.abort(); return; }
+    if (leaseExpiresAt === serviceDeadline) return;
     if (Date.now() < leaseExpiresAt - leaseMarginMs || monitorFailure || abortControl) return;
     monitorFailure = new Error('[worker] lease renewal was not confirmed before expiry');
     operation.abort();
@@ -124,7 +129,7 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   const timer = setInterval(() => { monitorChain = monitorChain.then(monitor); }, opts.controlPollIntervalMs);
   let failure: unknown = null;
   try {
-    if (job.launch.workMode === 'read-only') throw new Error('[worker] read-only cloud jobs are unsupported by this worker');
+    if (!session && job.launch.workMode === 'read-only') throw new Error('[worker] read-only cloud jobs are unsupported by this worker');
     const source = remoteSource(job);
     if (abortControl || monitorFailure || shutdown.aborted) return;
     // A recovered lease must never reuse a checkout still owned by an older attempt.
@@ -145,6 +150,14 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     if (services && job.launch.remotePreview) stopPreview = startPreviewRelay(job, stream, services, operation.signal);
     if (abortControl || monitorFailure || shutdown.aborted) return;
 
+    if (session) {
+      if (!services || !job.launch.remotePreview) throw new Error('[worker] service session has no preview service');
+      while (!operation.signal.aborted) {
+        if (!await services.ownsPreview(job.launch.remotePreview)) throw new Error('[worker] preview service lost health or socket ownership');
+        await delay(1_000, undefined, { signal: operation.signal });
+      }
+      return;
+    }
     codex = await startCodex({
       cwd: cloneDir,
       prompt: job.launch.prompt,
@@ -189,6 +202,9 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
       await stream.acknowledgeControl(job, abortControl).catch((error) => {
         console.error(`[worker] abort receipt failed: ${safeMessage(error)}`);
       });
+    } else if (deadlineExpired) {
+      // The coordinator durably cancels expired service sessions; never retry them.
+      await stream.postEvent(job, 'heartbeat', {}).catch(() => {});
     } else if (shutdown.aborted) {
       // Process shutdown is not a task cancellation or an execution failure.
       // Stop renewing the lease; restart recovers it through the durable queue.
@@ -208,6 +224,7 @@ async function main() {
   const stop = () => shutdown.abort();
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  const serviceJobs = new Set<Promise<void>>();
   try {
     while (!shutdown.signal.aborted) {
       try {
@@ -215,7 +232,14 @@ async function main() {
         if (shutdown.signal.aborted) break;
         if (!job) { await delay(opts.pollIntervalMs, undefined, { signal: shutdown.signal }); continue; }
         await state.advanceCursor(job.cursor);
-        await handleLaunch(job, stream, opts, shutdown.signal);
+        if (job.launch.remoteServiceSession) {
+          if (serviceJobs.size >= 2) { await reportFailure(stream, job, new Error('[worker] review preview capacity reached')); continue; }
+          const running = handleLaunch(job, stream, opts, shutdown.signal)
+            .catch((error) => reportFailure(stream, job, error)).finally(() => { serviceJobs.delete(running); });
+          serviceJobs.add(running);
+        } else {
+          await handleLaunch(job, stream, opts, shutdown.signal);
+        }
       } catch (error) {
         if (shutdown.signal.aborted) break;
         console.error(`[worker] poll failed: ${safeMessage(error)}`);
@@ -225,6 +249,8 @@ async function main() {
       }
     }
   } finally {
+    shutdown.abort();
+    await Promise.allSettled(serviceJobs);
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
   }

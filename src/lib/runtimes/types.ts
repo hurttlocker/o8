@@ -282,6 +282,8 @@ export interface LaunchOptions {
   remoteManifestHash?: string;
   /** Resolved exclusively from the reviewed immutable workspace manifest. */
   remotePreview?: import('@/lib/cloud/preview-contract').RemotePreviewService;
+  /** Coordinator-created service-only child; never supplied by a worker. */
+  remoteServiceSession?: import('@/lib/cloud/review-service-contract').RemoteServiceSession;
   /** Operator-facing task name for an owned worker surface. */
   taskName?: string;
   /** Stable caller correlation persisted before an owned process is spawned. */

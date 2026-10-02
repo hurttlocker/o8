@@ -1,3 +1,5 @@
+import { getSqlite } from '@/lib/db';
+import { serviceSessionCurrent, workerClaimKeyCurrent } from '@/lib/cloud/review-service-authority';
 import { NextResponse } from 'next/server';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -16,9 +18,12 @@ function authority(request: Request, value: Record<string, unknown>) {
   if (!auth.ok) return NextResponse.json({ error: 'Worker authorization rejected.' }, { status: auth.status, headers });
   const jobId = typeof value.jobId === 'string' ? value.jobId : '';
   const job = getJob(auth.teamId, jobId);
+  if (!workerClaimKeyCurrent(getSqlite(), jobId, auth.keyId)) return NextResponse.json({ error: 'Claim credential mismatch.' }, { status: 403, headers });
   const attempt = Number(value.attempt);
   if (!job || !Number.isSafeInteger(attempt) || attempt < 1 || job.claimCount !== attempt
     || job.claimedBy !== value.workerId || job.leaseToken !== value.leaseToken || job.status !== 'leased'
+    || !serviceSessionCurrent(getSqlite(), { id: job.id, team_id: job.teamId, parent_job_id: job.parentJobId ?? null,
+      packet_id: job.packetId ?? null, launch_json: JSON.stringify(job.launch), status: job.status })
     || Date.parse(job.leaseExpiresAt ?? '') <= Date.now() || !job.launch.remotePreview) {
     return NextResponse.json({ error: 'Current preview lease required.' }, { status: 409, headers });
   }

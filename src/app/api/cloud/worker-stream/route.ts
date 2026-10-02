@@ -1,3 +1,5 @@
+import { getSqlite } from '@/lib/db';
+import { workerClaimKeyCurrent } from '@/lib/cloud/review-service-authority';
 /**
  * Cloud worker stream endpoint
  *
@@ -106,6 +108,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (!workerClaimKeyCurrent(getSqlite(), jobId, auth.keyId)) return authErrorResponse(403, 'claim_credential_mismatch');
     if (type === 'service' && isRecord(body.payload)) {
       const job = getJob(auth.teamId, jobId);
       if (!job || job.claimCount !== body.payload.claimCount

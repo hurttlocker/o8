@@ -6,6 +6,7 @@ import { getTaskPoolTask } from '@/lib/tasks/pool';
 import { getJob, getLatestPacketJob } from './job-queue';
 import { listConnectedCloudWorkers } from './worker-presence';
 import { listCloudWorkerKeys } from './worker-auth';
+import { serviceSessionCurrent, workerClaimKeyCurrent } from './review-service-authority';
 import type { RemotePreviewService } from './preview-contract';
 
 export interface PreviewBinding {
@@ -14,6 +15,8 @@ export interface PreviewBinding {
   packetId: string;
   laneId: string;
   jobId: string;
+  parentJobId?: string;
+  parentAttempt?: number;
   attempt: number;
   workerId: string;
   workerKeyId: string;
@@ -27,12 +30,17 @@ export function previewBindingCurrent(binding: PreviewBinding): boolean {
   const job = getJob(binding.teamId, binding.jobId);
   const latest = getLatestPacketJob(binding.teamId, binding.packetId);
   const lane = getLane(binding.laneId);
-  if (!job || latest?.id !== job.id || job.packetId !== binding.packetId || job.claimCount !== binding.attempt
+  const primary = binding.parentJobId ? getJob(binding.teamId, binding.parentJobId) : job;
+  if (binding.parentJobId && (!job?.launch.remoteServiceSession || primary?.claimCount !== binding.parentAttempt
+    || !serviceSessionCurrent(getSqlite(), { id: job.id, team_id: job.teamId, parent_job_id: job.parentJobId ?? null,
+      packet_id: job.packetId ?? null, launch_json: JSON.stringify(job.launch), status: job.status }))) return false;
+  if (!job || latest?.id !== primary?.id || primary?.packetId !== binding.packetId || job.claimCount !== binding.attempt
     || job.status !== 'leased' || !(Date.parse(job.leaseExpiresAt ?? '') > Date.now())
     || job.claimedBy !== binding.workerId || job.leaseToken !== binding.leaseToken
+    || !workerClaimKeyCurrent(getSqlite(), job.id, binding.workerKeyId)
     || job.launch.remoteManifestHash !== binding.manifestHash
     || JSON.stringify(job.launch.remotePreview) !== JSON.stringify(binding.service)
-    || lane?.runtime !== 'cloud' || lane.packetId !== binding.packetId || lane.sessionKey !== `cloud:${job.sessionId}`
+    || lane?.runtime !== 'cloud' || lane.packetId !== binding.packetId || lane.sessionKey !== `cloud:${primary?.sessionId}`
     || !listConnectedCloudWorkers(Date.now(), binding.teamId).some((worker) => worker.workerId === binding.workerId)
     || !listCloudWorkerKeys().some((key) => key.id === binding.workerKeyId && key.teamId === binding.teamId && !key.revokedAt)) return false;
   const service = latestService(binding.jobId, binding.service.name);
@@ -55,15 +63,17 @@ function latestService(jobId: string, name: string): Record<string, unknown> | n
   } catch { return null; }
 }
 
-export async function resolveTaskPreview(teamId: string, taskId: string, jobId: string, attempt: number): Promise<PreviewBinding | null> {
+export async function resolveTaskPreview(teamId: string, taskId: string, jobId: string, attempt: number, serviceJobId?: string): Promise<PreviewBinding | null> {
   const task = await getTaskPoolTask(taskId);
-  const job = getJob(teamId, jobId);
+  const job = getJob(teamId, serviceJobId ?? jobId);
   if (!task?.packetId || !task.laneId || task.execution?.jobId !== jobId || task.execution.attempt !== attempt
     || !job?.launch.remotePreview || !job.launch.remoteManifestHash || !job.claimedBy || !job.leaseToken) return null;
-  const service = latestService(jobId, job.launch.remotePreview.name);
+  if (serviceJobId && job.parentJobId !== jobId) return null;
+  const service = latestService(job.id, job.launch.remotePreview.name);
   if (typeof service?.workerKeyId !== 'string') return null;
   const binding: PreviewBinding = {
-    teamId, taskId, packetId: task.packetId, laneId: task.laneId, jobId, attempt,
+    teamId, taskId, packetId: task.packetId, laneId: task.laneId, jobId: job.id, attempt: job.claimCount,
+    ...(serviceJobId ? { parentJobId: jobId, parentAttempt: attempt } : {}),
     workerId: job.claimedBy, workerKeyId: service.workerKeyId, leaseToken: job.leaseToken, manifestHash: job.launch.remoteManifestHash,
     service: job.launch.remotePreview,
   };

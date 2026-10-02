@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { RemotePreviewRequest, RemotePreviewResponse, RemotePreviewService } from '../../src/lib/cloud/preview-contract';
+import type { RemoteServiceSession } from '../../src/lib/cloud/review-service-contract';
 import type { ThinkingEffort } from '../../src/lib/orchestrator/thinking-effort';
 
 const INITIAL_BACKOFF_MS = 100;
@@ -48,7 +49,7 @@ export interface CloudWorkerJob {
   leaseToken: string;
   leaseExpiresAt: string;
   claimCount: number;
-  launch: { prompt: string; model?: string; effort?: ThinkingEffort; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; remotePreview?: RemotePreviewService; };
+  launch: { prompt: string; model?: string; effort?: ThinkingEffort; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; remotePreview?: RemotePreviewService; remoteServiceSession?: RemoteServiceSession; };
 }
 
 export interface CloudWorkerControl {

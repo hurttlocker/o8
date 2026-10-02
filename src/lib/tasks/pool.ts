@@ -1,6 +1,8 @@
 import 'server-only';
 
 import { basename } from 'node:path';
+import { getSqlite } from '@/lib/db';
+import { completedServiceResultSha } from '@/lib/cloud/review-service-authority';
 import { getLatestPacketJob } from '@/lib/cloud/job-queue';
 import type { CloudJob, CloudJobStatus } from '@/lib/cloud/job-store';
 import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
@@ -194,7 +196,9 @@ function toRemoteExecution(job: CloudJob | undefined, nowMs: number): TaskPoolRe
     leaseState,
     updatedAt: job.updatedAt,
     workspaceAccess: 'unavailable',
-    previewAccess: leaseState === 'active' && job.launch.remotePreview ? 'requestable' : 'unavailable',
+    previewAccess: job.launch.remotePreview && (leaseState === 'active' || (job.status === 'completed'
+      && job.launch.remoteSource && job.launch.remoteManifestHash && completedServiceResultSha(getSqlite(), job.id)))
+      ? 'requestable' : 'unavailable',
   };
 }
 
