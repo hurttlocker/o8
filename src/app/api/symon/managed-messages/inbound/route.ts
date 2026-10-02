@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
   if (outcome.state === 'needs_confirmation') {
     return NextResponse.json({ ok: true, state: 'awaiting_approval' }, { status: 202 });
   }
-  bindSymonTextEffectiveModel(turn.sessionId, outcome.result?.status === 'done' ? outcome.result.model : undefined);
+  bindSymonTextEffectiveModel(turn.sessionId, outcome.result?.model, outcome.result?.effort);
   if (
     outcome.state === 'done'
     && outcome.result?.status === 'done'

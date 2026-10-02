@@ -27,7 +27,7 @@ export interface SymonTextPlannerInfo {
 
 export interface SymonTextTurnBridgeResult {
   state?: 'pending' | 'done' | 'needs_confirmation' | 'error' | 'call_mismatch' | 'no_bridge';
-  result?: { status?: 'done' | 'interrupted'; text?: string; model?: string; effort?: string; activeMachine?: unknown };
+  result?: { status?: 'done' | 'interrupted' | 'error'; text?: string; detail?: string; model?: string; effort?: string; activeMachine?: unknown };
   confirmation?: unknown;
   detail?: string;
   error?: string;

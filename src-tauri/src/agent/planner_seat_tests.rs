@@ -589,5 +589,53 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{
     assert!(!old.allow_default_fallback);
     let pinned = run_symon_text_turn_with(None, "pinned".into(), "turn-1".into(),
         "Hello".into(), "codex".into(), "gpt-6.1-sol".into(), "high".into(), false).await;
-    assert!(pinned.is_err(), "unavailable explicit pins must remain explicit");
+    let pinned = pinned.unwrap();
+    assert_eq!(pinned.status, "error", "unavailable explicit pins must remain explicit");
+    assert_eq!(pinned.model, "gpt-6.1-sol");
+    assert!(pinned.detail.unwrap().contains("not supported"));
+}
+
+/// Tauri's bound entry retains the adapter's selection even if the retry fails
+/// or cancellation arrives while its blocking transport is still active.
+#[cfg(unix)]
+#[tokio::test]
+async fn bound_text_terminal_failure_and_interrupt_keep_fallback_selection() {
+    for interrupted in [false, true] {
+        let fixture = SeatFixture::new("codex");
+        let ready = fixture.dir.join("fallback-ready");
+        let release = fixture.dir.join("fallback-release");
+        let script = format!(r#"#!/bin/sh
+if [ "$1" = app-server ]; then exit 1; fi
+for arg in "$@"; do
+  if [ "$arg" = model=gpt-6.1-sol ]; then
+    printf '%s\n' 'The '\''gpt-6.1-sol'\'' model is not supported when using Codex with a ChatGPT account.' >&2
+    exit 1
+  fi
+done
+touch '{}'
+while [ ! -f '{}' ]; do sleep 0.01; done
+printf '%s\n' 'fixture failure mentions gpt-6.1-sol but does not define the effective model' >&2
+exit 1
+"#, ready.display(), release.display());
+        std::fs::write(fixture.dir.join("codex-fixture"), script).unwrap();
+        let turn = run_symon_text_turn_with(None, "terminal-fallback".into(), "turn-1".into(),
+            "Hello".into(), "codex".into(), "gpt-6.1-sol".into(), "high".into(), true);
+        let control = async {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !ready.exists() && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            if interrupted {
+                assert!(interrupt_symon_text_turn("terminal-fallback", "turn-1"));
+            }
+            std::fs::write(&release, "release").unwrap();
+            assert!(ready.exists(), "fixture must reach the compatibility transport");
+        };
+        let (result, ()) = tokio::join!(turn, control);
+        let wire = serde_json::to_value(result.unwrap()).unwrap();
+        assert_eq!(wire["status"], if interrupted { "interrupted" } else { "error" });
+        assert_eq!(wire["model"], "gpt-5.6-sol");
+        assert_eq!(wire["effort"], "high");
+        assert!(wire["detail"].as_str().unwrap().contains("fixture failure"));
+    }
 }

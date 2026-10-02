@@ -26,9 +26,10 @@ unavailable explicit phone selection returns an error.
 For a newly selected automatic default only, the exact ChatGPT-account rejection
 of `gpt-6.1-sol` permits one retry on `gpt-5.6-sol` at the same effort. Any output,
 reasoning/tool activity, later planner turn, or unrelated failure prevents this
-retry. A rejected thread is discarded before retry. The successful native result
-reports `model` and `effort`; the session store binds that effective model before
-the next turn. The text completion event includes the bound model and effort,
+retry. A rejected thread is discarded before retry. The terminal native result
+reports `model` and `effort` on success, failure and interruption; failures retain
+the planner error detail. The session store binds that effective model before
+consuming retry eligibility and starting the next turn. The text completion event includes the bound model and effort,
 and the planner prompt identifies the effective model for accurate replies.
 Older session records without retry eligibility stay fixed.
 

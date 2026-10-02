@@ -36,6 +36,7 @@
 //! of failing the task.
 
 use super::{claude::TextPlannerSession, ConfirmCorrelation, LoopResult, TaskCtx};
+use super::text_turn::EffectiveTextSelection;
 use base64::Engine;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -58,6 +59,7 @@ pub(crate) struct CodexSession {
     thread_id: Option<String>,
     allow_default_fallback: bool,
     progressed: bool,
+    effective_selection: Option<EffectiveTextSelection>,
 }
 
 impl CodexSession {
@@ -71,11 +73,17 @@ impl CodexSession {
             thread_id: None,
             allow_default_fallback: false,
             progressed: false,
+            effective_selection: None,
         }
     }
 
     pub(crate) fn with_default_fallback(mut self, allowed: bool) -> Self {
         self.allow_default_fallback = allowed;
+        self
+    }
+
+    pub(crate) fn observe_selection(mut self, selection: EffectiveTextSelection) -> Self {
+        self.effective_selection = Some(selection);
         self
     }
 
@@ -159,6 +167,11 @@ impl CodexSession {
             self.resident_attempted = false;
             self.thread_id = None;
             self.model = crate::models::CODEX_GPT_5_6_SOL.to_string();
+            // Publish before entering the retry: even its error or timeout must
+            // leave the bound surface on the effective selection.
+            if let Some(selection) = &self.effective_selection {
+                selection.bind(&self.model, &self.effort);
+            }
             let prompt = format!("{prompt}\n\n[SYSTEM] Your effective model is {} at {} effort. The automatic GPT-6.1 Sol default was rejected before execution; this session uses GPT-5.6 Sol. Report this accurately if asked.", self.model, self.effort);
             return self.send_turn_once(&prompt, image_b64);
         }
@@ -626,9 +639,12 @@ pub async fn run_phone_text_loop(
     ctx: &TaskCtx,
     correlation: ConfirmCorrelation,
     allow_default_fallback: bool,
+    effective_selection: EffectiveTextSelection,
 ) -> Result<LoopResult, String> {
     super::claude::run_text_planner_loop_correlated(
-        CodexSession::new(binary, model, effort).with_default_fallback(allow_default_fallback),
+        CodexSession::new(binary, model, effort)
+            .with_default_fallback(allow_default_fallback)
+            .observe_selection(effective_selection),
         model,
         intent,
         ctx,
@@ -640,4 +656,4 @@ pub async fn run_phone_text_loop(
 
 #[cfg(test)]
 #[path = "codex_tests.rs"]
-mod tests;
+pub(crate) mod tests;

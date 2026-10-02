@@ -14,6 +14,8 @@ const testState = vi.hoisted(() => ({
   codexInstalled: true,
   codexAuthenticated: true,
   evalCalls: [] as string[],
+  terminal: null as 'error' | 'interrupted' | null,
+  automatic: false,
 }));
 
 const defaultPlannerInfo = {
@@ -29,11 +31,20 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
     async evalJs(code: string) {
       testState.evalCalls.push(code);
       if (code.includes('A.text.plannerInfo')) {
-        const info = code.includes('gpt-6.1-sol')
+        const info = testState.automatic
+          ? { ...defaultPlannerInfo, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', allowDefaultFallback: true }
+          : code.includes('gpt-6.1-sol')
           ? { ...defaultPlannerInfo, engine: 'codex', model: 'gpt-6.1-sol', effort: 'xhigh' }
           : defaultPlannerInfo;
         return { result: JSON.stringify({ state: 'done', info }) };
       }
+      if (testState.terminal) return {
+        result: JSON.stringify({
+          state: testState.terminal === 'error' ? 'error' : 'done',
+          detail: 'fixture terminal failure',
+          result: { status: testState.terminal, model: 'gpt-5.6-sol', effort: 'high', text: '' },
+        }),
+      };
       return {
         result: JSON.stringify({
           state: 'done',
@@ -174,6 +185,8 @@ beforeEach(() => {
   testState.codexInstalled = true;
   testState.codexAuthenticated = true;
   testState.evalCalls.length = 0;
+  testState.terminal = null;
+  testState.automatic = false;
 });
 
 async function mint(model?: string) {
@@ -285,4 +298,39 @@ describe('Symon text-first say loop wire', () => {
     expect(unavailable.response.status).toBe(503);
     expect(unavailable.body.session).toBeUndefined();
   });
+});
+
+it.each(['error', 'interrupted'] as const)('reports fallback metadata on WS %s and binds the next turn', async (status) => {
+  testState.automatic = true;
+  testState.terminal = status;
+  const { body: minted } = await mint();
+  const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+  await once(socket, 'open');
+  const sendTurn = (turnId: string) => new Promise<Record<string, unknown>>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('missing terminal frame')), 10_000);
+    const receive = (raw: Buffer) => {
+      const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+      if (frame.type !== 'symon-text-done' || frame.turnId !== turnId) return;
+      clearTimeout(timer);
+      socket.off('message', receive);
+      resolve(frame);
+    };
+    socket.on('message', receive);
+    socket.send(JSON.stringify({ channel: 'symon', type: 'symon-text-turn',
+      sessionId: minted.session.sessionId, turnId, text: 'Hello' }));
+  });
+  try {
+    expect(await sendTurn('terminal-first')).toMatchObject({
+      status: status === 'error' ? 'failed' : 'interrupted', model: 'gpt-5.6-sol', effort: 'high',
+      ...(status === 'error' ? { detail: 'fixture terminal failure' } : {}),
+    });
+    testState.terminal = null;
+    testState.evalCalls.length = 0;
+    expect(await sendTurn('terminal-next')).toMatchObject({ status: 'done', model: 'gpt-5.6-sol', effort: 'high' });
+    const spawnEval = testState.evalCalls.find((code) => code.includes('A.text.runTurn'));
+    expect(spawnEval).toContain('"model":"gpt-5.6-sol"');
+    expect(spawnEval).toContain('"allowDefaultFallback":false');
+  } finally {
+    socket.close();
+  }
 });

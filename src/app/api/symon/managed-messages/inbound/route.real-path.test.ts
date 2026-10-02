@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -180,10 +181,80 @@ it('keeps a phone model pin explicit and rejects an unavailable pin before minti
 
 it('consumes new-session retry eligibility after a failed native turn', async () => {
   h.readPlanner.mockResolvedValue({ available: true, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', allowDefaultFallback: true });
-  h.pollTurn.mockResolvedValue({ state: 'error', detail: 'Failure after partial execution' });
+  h.pollTurn.mockResolvedValue({ state: 'error', detail: 'Failure after partial execution mentions gpt-5.6-sol/high' });
   await POST(request({ conversationId: 'direct-chat' }));
   const sessionId = store.getConversation('direct-chat').sessionId!;
   expect(loadSymonTextSession(sessionId)).toMatchObject({ model: 'gpt-6.1-sol', allowDefaultFallback: false });
   await POST(request({ conversationId: 'direct-chat', eventId: 'next', messageId: 'next' }));
   expect(h.pollTurn.mock.calls[1][0].planner.allowDefaultFallback).toBe(false);
+});
+
+it.each(['error', 'interrupted'] as const)(
+  'binds fallback after %s through persisted phone and managed routes', async (status) => {
+    h.readPlanner.mockResolvedValue({ available: true, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', allowDefaultFallback: true, tools: [] });
+    const terminal = { state: status === 'error' ? 'error' : 'done', detail: 'Planner connection lost after a tool',
+      result: { status, text: '', model: 'gpt-5.6-sol', effort: 'high' } };
+    h.pollTurn.mockResolvedValue(terminal);
+    await POST(request({ conversationId: 'direct-chat' }));
+    const managedId = store.getConversation('direct-chat').sessionId!;
+    expect(loadSymonTextSession(managedId)).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+    await POST(request({ conversationId: 'direct-chat' }));
+    expect(h.pollTurn).toHaveBeenCalledTimes(1); // terminal delivery does not replay execution
+    await POST(request({ conversationId: 'direct-chat', eventId: 'next', messageId: 'next' }));
+    expect(h.pollTurn.mock.calls[1][0].planner).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+    const { session } = await (await mintTextSession(request())).json();
+    const phoneRequest = (turnId: string, planner: unknown) => new NextRequest('http://localhost/api/mobile/symon/text-turn', {
+      method: 'POST', body: JSON.stringify({ sessionId: session.sessionId, turnId, prompt: 'Hello', planner }),
+    });
+    await runTextTurn(phoneRequest('phone-first', session));
+    const bound = loadSymonTextSession(session.sessionId)!;
+    expect(bound).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+    await runTextTurn(phoneRequest('phone-next', bound));
+    expect(h.pollTurn.mock.calls[3][0].planner).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+  },
+);
+
+it.each([
+  ['phone', 'error'], ['phone', 'interrupted'],
+  ['managed', 'error'], ['managed', 'interrupted'],
+])('carries %s %s metadata through the real eval/client bridge into disk', async (surface, status) => {
+  const nativeRun = vi.fn(async (..._args: unknown[]) => ({
+    status, text: '', model: 'gpt-5.6-sol', effort: 'high', detail: 'fixture planner failure',
+  }));
+  const context = { window: { __o8SymonAgent: { text: { runTurn: nativeRun } } } };
+  const clientGlobal = globalThis as typeof globalThis & { __o8SymonTextClient?: unknown };
+  const previousClient = clientGlobal.__o8SymonTextClient;
+  clientGlobal.__o8SymonTextClient = { evalJs: async (code: string) => ({ result: runInNewContext(code, context) }) };
+  const actual = await vi.importActual<typeof import('@/lib/mobile/symon-text-bridge-client')>('@/lib/mobile/symon-text-bridge-client');
+  h.pollTurn.mockImplementation(actual.pollSymonTextTurn);
+  h.readPlanner.mockResolvedValue({ available: true, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', allowDefaultFallback: true, tools: [] });
+  try {
+    let sessionId: string;
+    if (surface === 'phone') {
+      const { session } = await (await mintTextSession(request())).json();
+      sessionId = session.sessionId;
+      const phone = (turnId: string) => new NextRequest('http://localhost/api/mobile/symon/text-turn', {
+        method: 'POST', body: JSON.stringify({ sessionId, turnId, prompt: 'Hello', planner: loadSymonTextSession(sessionId) }),
+      });
+      const first = await (await runTextTurn(phone('first'))).json();
+      expect(first.state).toBe(status === 'error' ? 'error' : 'done');
+      if (status === 'error') expect(first.detail).toBe('fixture planner failure');
+      expect(first.result).toMatchObject({ status, model: 'gpt-5.6-sol', effort: 'high' });
+      await runTextTurn(phone('first'));
+      expect(nativeRun).toHaveBeenCalledTimes(1);
+      await runTextTurn(phone('next'));
+    } else {
+      const first = await (await POST(request({ conversationId: 'direct-chat' }))).json();
+      expect(first.text).toContain(status === 'error' ? 'fixture planner failure' : 'I stopped');
+      sessionId = store.getConversation('direct-chat').sessionId!;
+      await POST(request({ conversationId: 'direct-chat' }));
+      expect(nativeRun).toHaveBeenCalledTimes(1);
+      await POST(request({ conversationId: 'direct-chat', eventId: 'next', messageId: 'next' }));
+    }
+    expect(loadSymonTextSession(sessionId)).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+    expect(nativeRun.mock.calls[1][3]).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+  } finally {
+    if (previousClient === undefined) delete clientGlobal.__o8SymonTextClient;
+    else clientGlobal.__o8SymonTextClient = previousClient;
+  }
 });

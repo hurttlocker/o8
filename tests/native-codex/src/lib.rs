@@ -1,49 +1,62 @@
-//! Bounded transport harness: compiles the production Codex source and its tests.
-//! The desktop action loop is stubbed; no model, tools or credentials are used.
+//! Bounded native harness: production transport, planner control flow and terminal serialization.
+//! Desktop tools, prompt construction and machine identity are stubbed; no model calls.
 #![allow(dead_code)]
 static DATA_DIR_ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[path = "../../../src-tauri/src/models.rs"]
 mod models;
+#[derive(Clone)]
 struct ConfirmCorrelation;
-struct LoopResult;
-struct TaskCtx;
-mod claude {
-    use super::*;
-    pub(crate) trait TextPlannerSession: Send + 'static {
-        fn effective_model(&self) -> Option<&str> {
-            None
-        }
-        fn send_planner_turn(
-            &mut self,
-            prompt: &str,
-            image: Option<&str>,
-        ) -> Result<String, String>;
-    }
-    pub fn path_with_node_runtime() -> String {
-        std::env::var("PATH").unwrap_or_default()
-    }
-    pub async fn run_text_planner_loop<S: TextPlannerSession>(
-        _: S,
-        _: &str,
-        _: &str,
-        _: &TaskCtx,
-        _: &str,
-    ) -> Result<LoopResult, String> {
-        unreachable!()
-    }
-    pub async fn run_text_planner_loop_correlated<S: TextPlannerSession>(
-        _: S,
-        _: &str,
-        _: &str,
-        _: &TaskCtx,
-        _: &str,
-        _: ConfirmCorrelation,
-    ) -> Result<LoopResult, String> {
-        unreachable!()
+struct LoopResult {
+    result_text: String,
+    model_used: String,
+    tool_calls_json: String,
+    brain_sources: Vec<serde_json::Value>,
+}
+#[derive(Default)]
+struct TaskCtx {
+    task_id: String,
+    app: Option<()>,
+    screen: Option<Screen>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+struct Screen {
+    png_base64: String,
+}
+impl TaskCtx {
+    fn is_cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
+mod machine {
+    #[derive(serde::Serialize)]
+    pub struct MachineIdentity;
+}
+fn speak_filler_now() {}
+fn emit_agent_event(_: &(), _: serde_json::Value) {}
+async fn execute_text_tool_call(
+    ctx: &TaskCtx,
+    tool: &str,
+    _: serde_json::Value,
+    _: ConfirmCorrelation,
+) -> serde_json::Value {
+    if tool == "fixture_interrupt" {
+        ctx.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    serde_json::json!({ "ok": true })
+}
+async fn execute_cascaded_tool_call(
+    _: &TaskCtx,
+    _: &str,
+    _: serde_json::Value,
+    _: &mut bool,
+) -> serde_json::Value {
+    unreachable!("bound tests use the correlated tool seam")
+}
+mod claude;
 #[path = "../../../src-tauri/src/agent/codex.rs"]
 mod codex;
+#[path = "../../../src-tauri/src/agent/text_turn.rs"]
+mod text_turn;
 
 mod cli_locate {
     pub fn resolve_binary(_: &str, _: &[&str]) -> Option<String> {
@@ -62,3 +75,6 @@ mod front_brain {
 }
 #[path = "../../../src-tauri/src/agent/planner_route.rs"]
 mod planner_route;
+
+#[cfg(test)]
+mod terminal_tests;

@@ -1660,15 +1660,8 @@ pub struct SymonTextPlannerInfo {
     detail: Option<&'static str>,
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SymonTextTurnResult {
-    status: &'static str,
-    model: String,
-    effort: String,
-    text: String,
-    active_machine: machine::MachineIdentity,
-}
+mod text_turn;
+pub use text_turn::SymonTextTurnResult;
 
 fn text_task_id(session_id: &str, turn_id: &str) -> Result<String, String> {
     fn valid(value: &str) -> bool {
@@ -1792,6 +1785,9 @@ pub(crate) async fn run_symon_text_turn_with(
         session_id,
         call_id: turn_id,
     };
+    let effective_selection = text_turn::EffectiveTextSelection::new(
+        selection.model_label(), selection.effort,
+    );
     let result = match selection.provider.transport {
         planner_route::PlannerTransport::ClaudeStreamJson => {
             claude::run_phone_text_loop_with_binary(
@@ -1812,6 +1808,7 @@ pub(crate) async fn run_symon_text_turn_with(
                 &ctx,
                 correlation,
                 allow_default_fallback,
+                effective_selection.clone(),
             )
             .await
         }
@@ -1840,22 +1837,11 @@ pub(crate) async fn run_symon_text_turn_with(
     };
     let interrupted = ctx.is_cancelled();
     unregister_cancel(&task_id);
-    if interrupted {
-        return Ok(SymonTextTurnResult {
-            status: "interrupted",
-            model: selection.model_label().to_string(),
-            effort: selection.effort.to_string(),
-            text: String::new(),
-            active_machine: machine::active_machine(&ctx.machine_session_id),
-        });
-    }
-    result.map(|value| SymonTextTurnResult {
-        status: "done",
-        model: value.model_used,
-        effort: selection.effort.to_string(),
-        text: value.result_text,
-        active_machine: machine::active_machine(&ctx.machine_session_id),
-    })
+    Ok(effective_selection.finish(
+        result,
+        interrupted,
+        machine::active_machine(&ctx.machine_session_id),
+    ))
 }
 
 pub fn interrupt_symon_text_turn(session_id: &str, turn_id: &str) -> bool {

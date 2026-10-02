@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
       planner: selection,
     }, POLL_WINDOW_MS);
     if (result.state === 'done' || result.state === 'error') {
-      bindSymonTextEffectiveModel(sessionId, result.result?.status === 'done' ? result.result.model : undefined);
+      bindSymonTextEffectiveModel(sessionId, result.result?.model, result.result?.effort);
     }
     return NextResponse.json({ ok: result.state !== 'error', ...result });
   } catch (error) {

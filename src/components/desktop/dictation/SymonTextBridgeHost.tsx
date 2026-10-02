@@ -19,7 +19,8 @@ interface SymonTextPlannerInfo {
 }
 
 interface SymonTextTurnResult {
-  status: 'done' | 'interrupted';
+  status: 'done' | 'interrupted' | 'error';
+  detail?: string;
   text: string;
   model: string;
   effort: string;

@@ -143,6 +143,7 @@ export function appendSymonTextTranscript(
 export function bindSymonTextEffectiveModel(
   sessionId: string,
   model: unknown,
+  effort: unknown,
   now: number = Date.now(),
 ): SymonTextSessionRecord | null {
   const records = active(loadAll(), now);
@@ -150,7 +151,7 @@ export function bindSymonTextEffectiveModel(
   if (index < 0) return null;
   const record = records[index];
   const fallback = record.allowDefaultFallback === true && record.engine === 'codex'
-    && record.model === 'gpt-6.1-sol' && model === 'gpt-5.6-sol';
+    && record.model === 'gpt-6.1-sol' && model === 'gpt-5.6-sol' && effort === record.effort;
   records[index] = {
     ...record,
     model: fallback ? model : record.model,

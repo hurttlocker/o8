@@ -52,9 +52,9 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{
 "#;
 
 #[cfg(unix)]
-struct CodexFixture {
+pub(crate) struct CodexFixture {
     dir: std::path::PathBuf,
-    binary: std::path::PathBuf,
+    pub(crate) binary: std::path::PathBuf,
     capture: std::path::PathBuf,
     previous_codex_home: Option<std::ffi::OsString>,
     previous_app_server: Option<std::ffi::OsString>,
@@ -116,15 +116,15 @@ impl CodexFixture {
         fixture
     }
 
-    fn binary(&self) -> &str {
+    pub(crate) fn binary(&self) -> &str {
         self.binary.to_str().unwrap()
     }
 
-    fn captured(&self) -> String {
+    pub(crate) fn captured(&self) -> String {
         std::fs::read_to_string(&self.capture).unwrap_or_default()
     }
 
-    fn spawn_count(&self) -> usize {
+    pub(crate) fn spawn_count(&self) -> usize {
         self.captured()
             .lines()
             .filter(|line| *line == "__SPAWN__")
@@ -347,7 +347,7 @@ fn automatic_new_session_retries_only_the_rejected_model_and_keeps_effective_mod
 }
 
 #[cfg(unix)]
-fn rejection_fixture(app_server: bool, partial: bool, diagnostic: &str) -> CodexFixture {
+pub(crate) fn rejection_fixture(app_server: bool, partial: bool, diagnostic: &str) -> CodexFixture {
     let fixture = CodexFixture::new(app_server);
     let error = serde_json::to_string(&json!({ "message": diagnostic })).unwrap();
     let progress = if partial {
@@ -398,7 +398,7 @@ for arg in "$@"; do case "$arg" in *gpt-6.1-sol*) new_model=1;; esac; done"#,
     fixture
 }
 
-const UNSUPPORTED: &str =
+pub(crate) const UNSUPPORTED: &str =
     "The \"gpt-6.1-sol\" model is not supported when using Codex with a ChatGPT account.";
 
 #[cfg(unix)]

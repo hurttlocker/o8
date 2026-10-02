@@ -71,9 +71,13 @@ export function buildSymonTextTurnEval(
     }
     slot.lastTouched = Date.now();
     if (!slot.textTurn) return JSON.stringify({ state: 'call_mismatch' });
-    if (slot.done) return slot.error
-      ? JSON.stringify({ state: 'error', detail: slot.error })
-      : JSON.stringify({ state: 'done', result: slot.result });
+    if (slot.done) {
+      if (slot.error) return JSON.stringify({ state: 'error', detail: slot.error });
+      if (slot.result && slot.result.status === 'error') {
+        return JSON.stringify({ state: 'error', detail: slot.result.detail, result: slot.result });
+      }
+      return JSON.stringify({ state: 'done', result: slot.result });
+    }
     if (Array.isArray(A.pendingConfirmations)) {
       const hit = A.pendingConfirmations.find((candidate) => candidate && candidate.sessionId === sessionId && candidate.callId === callId);
       if (hit && hit.confirmationId !== slot.confirmationId) {
