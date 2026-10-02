@@ -3871,6 +3871,7 @@ type SymonTextTurnState = {
   sessionId: string;
   turnId: string;
   terminal: boolean;
+  interruptRequested?: boolean;
 };
 
 /** sessionId → socket, immutable scope, and negotiated additive protocol. */
@@ -4039,6 +4040,11 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
     pushSymonTextDone(turn, 'failed', 'Text session expired.');
     return;
   }
+  // A queued turn can be stopped before it ever reaches the native planner.
+  if (turn.interruptRequested) {
+    pushSymonTextDone(turn, 'interrupted');
+    return;
+  }
   const prompt = formatSymonTextPlannerPrompt(initial, text);
   if (!appendSymonTextTranscript(turn.sessionId, [{ role: 'user', text }])) {
     pushSymonTextDone(turn, 'failed', 'Text session expired.');
@@ -4131,7 +4137,10 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
     return;
   }
   if (!turn.terminal) {
-    await interruptSymonTextNative(turn.sessionId, turn.turnId);
+    if (!turn.interruptRequested) {
+      turn.interruptRequested = true;
+      await interruptSymonTextNative(turn.sessionId, turn.turnId);
+    }
     pushSymonTextDone(turn, 'failed', 'Planner turn timed out.');
   }
 }
@@ -4161,9 +4170,11 @@ async function handleSymonTextInterrupt(client: ClientState, msg: Record<string,
   const record = loadSymonTextSession(sessionId);
   if (!record || !symonTextClientMatches(record, client)) return;
   const turn = symonTextTurns.get(textTurnKey(sessionId, turnId));
-  if (!turn || turn.clientId !== client.id || turn.terminal) return;
+  if (!turn || turn.clientId !== client.id || turn.terminal || turn.interruptRequested) return;
+  turn.interruptRequested = true;
+  // Delivery is only an acknowledgement. Keep the existing polling/queue owner
+  // alive until the native terminal result persists the effective selection.
   await interruptSymonTextNative(sessionId, turnId);
-  pushSymonTextDone(turn, 'interrupted');
 }
 
 async function interruptSymonTool(call: PendingToolCall): Promise<boolean> {

@@ -1,9 +1,10 @@
 import { execFile, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
+import { runInNewContext } from 'node:vm';
 import { WebSocket } from 'ws';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +17,8 @@ const testState = vi.hoisted(() => ({
   evalCalls: [] as string[],
   terminal: null as 'error' | 'interrupted' | null,
   automatic: false,
+  evaluate: null as ((code: string) => string) | null,
+  turnReplies: [] as Array<{ method: string; turnId: string; state: string }>,
 }));
 
 const defaultPlannerInfo = {
@@ -30,6 +33,7 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
   O8WebviewClient: class {
     async evalJs(code: string) {
       testState.evalCalls.push(code);
+      if (testState.evaluate) return { result: testState.evaluate(code) };
       if (code.includes('A.text.plannerInfo')) {
         const info = testState.automatic
           ? { ...defaultPlannerInfo, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', allowDefaultFallback: true }
@@ -120,7 +124,7 @@ beforeAll(async () => {
   wsPort = await freePort();
 
   const { POST: mintTextSession } = await import('@/app/api/mobile/symon/text-session/route');
-  const { POST: runTextTurn } = await import('@/app/api/mobile/symon/text-turn/route');
+  const { POST: runTextTurn, DELETE: interruptTextTurn } = await import('@/app/api/mobile/symon/text-turn/route');
   apiServer = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${apiPort}`);
     const chunks: Buffer[] = [];
@@ -136,14 +140,17 @@ beforeAll(async () => {
       response.end(Buffer.from(await routeResponse.arrayBuffer()));
       return;
     }
-    if (url.pathname === '/api/mobile/symon/text-turn' && request.method === 'POST') {
-      const routeResponse = await runTextTurn(new NextRequest(url, {
-        method: 'POST',
+    if (url.pathname === '/api/mobile/symon/text-turn' && (request.method === 'POST' || request.method === 'DELETE')) {
+      const route = request.method === 'DELETE' ? interruptTextTurn : runTextTurn;
+      const routeResponse = await route(new NextRequest(url, {
+        method: request.method,
         headers: request.headers as HeadersInit,
         body,
       }));
+      const reply = await routeResponse.text();
+      testState.turnReplies.push({ method: request.method, turnId: JSON.parse(body.toString()).turnId, state: JSON.parse(reply).state });
       response.writeHead(routeResponse.status, Object.fromEntries(routeResponse.headers.entries()));
-      response.end(Buffer.from(await routeResponse.arrayBuffer()));
+      response.end(reply);
       return;
     }
     response.writeHead(404);
@@ -187,6 +194,8 @@ beforeEach(() => {
   testState.evalCalls.length = 0;
   testState.terminal = null;
   testState.automatic = false;
+  testState.evaluate = null;
+  testState.turnReplies.length = 0;
 });
 
 async function mint(model?: string) {
@@ -334,3 +343,72 @@ it.each(['error', 'interrupted'] as const)('reports fallback metadata on WS %s a
     socket.close();
   }
 });
+
+it('reconciles actual phone Stop before spawning a queued next turn', async () => {
+  let finishNative!: (result: Record<string, unknown>) => void;
+  const nativePending = new Promise<Record<string, unknown>>((resolve) => { finishNative = resolve; });
+  const bindingsAtSpawn: Array<Record<string, unknown> | undefined> = [];
+  const nativeRun = vi.fn(async (_prompt: string, sessionId: string, turnId: string, _planner: unknown) => {
+    bindingsAtSpawn.push((JSON.parse(readFileSync(join(dataDir, 'symon-text-sessions.json'), 'utf8')) as Array<Record<string, unknown>>)
+      .find((session) => session.sessionId === sessionId));
+    return turnId === 'stop-first' ? nativePending : { status: 'done', model: 'gpt-5.6-sol', effort: 'high', text: 'Next answer.' };
+  });
+  const nativeInterrupt = vi.fn(async () => true);
+  const context = { window: { __o8SymonAgent: { text: {
+    plannerInfo: async () => ({ ...defaultPlannerInfo, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', allowDefaultFallback: true }),
+    runTurn: nativeRun,
+    interruptTurn: nativeInterrupt,
+  } } } };
+  testState.evaluate = (code) => runInNewContext(code, context);
+  const { body: minted } = await mint();
+  const sessionId = minted.session.sessionId;
+  const sessionOnDisk = () => (JSON.parse(readFileSync(join(dataDir, 'symon-text-sessions.json'), 'utf8')) as Array<Record<string, unknown>>)
+    .find((session) => session.sessionId === sessionId);
+  const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+  await once(socket, 'open');
+  const frames: Array<Record<string, unknown>> = [];
+  socket.on('message', (raw) => { frames.push(JSON.parse(String(raw))); });
+  const send = (type: string, turnId: string) => socket.send(JSON.stringify({ channel: 'symon', type, sessionId, turnId, text: 'Hello' }));
+  const waitFor = async (condition: () => boolean) => {
+    const deadline = Date.now() + 8_000;
+    while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(condition()).toBe(true);
+  };
+  const terminal = () => frames.filter((frame) => frame.type === 'symon-text-done');
+  try {
+    send('symon-text-turn', 'stop-first');
+    await waitFor(() => nativeRun.mock.calls.length === 1);
+    expect(nativeRun.mock.calls[0][3]).toMatchObject({ model: 'gpt-6.1-sol', effort: 'high', allowDefaultFallback: true });
+    send('symon-text-interrupt', 'stop-first');
+    await waitFor(() => testState.turnReplies.some((reply) => reply.method === 'DELETE' && reply.state === 'done'));
+    send('symon-text-interrupt', 'stop-first'); // duplicate Stop must not redeliver cancellation
+    send('symon-text-turn', 'stop-next'); // queue while the native turn is still blocked
+    // The actual POST poll window must expire while native completion remains held.
+    await waitFor(() => testState.turnReplies.some((reply) => reply.method === 'POST' && reply.turnId === 'stop-first' && reply.state === 'pending'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(terminal(), 'DELETE acknowledgement must not fabricate native completion').toEqual([]);
+    expect(nativeRun).toHaveBeenCalledTimes(1);
+    expect(sessionOnDisk()).toMatchObject({ model: 'gpt-6.1-sol', allowDefaultFallback: true });
+    finishNative({ status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high', text: '' });
+    await waitFor(() => terminal().length === 2);
+    expect(terminal().map(({ turnId, status, model, effort }) => ({ turnId, status, model, effort }))).toEqual([
+      { turnId: 'stop-first', status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high' },
+      { turnId: 'stop-next', status: 'done', model: 'gpt-5.6-sol', effort: 'high' },
+    ]);
+    expect(sessionOnDisk()).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+    expect(nativeRun.mock.calls[1][3]).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+    expect(bindingsAtSpawn[1]).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
+    send('symon-text-turn', 'stop-first');
+    send('symon-text-turn', 'stop-next');
+    send('symon-text-interrupt', 'stop-first');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(terminal()).toHaveLength(2);
+    expect(nativeRun).toHaveBeenCalledTimes(2);
+    expect(nativeInterrupt).toHaveBeenCalledTimes(1);
+    expect(testState.turnReplies.filter((reply) => reply.method === 'DELETE')).toHaveLength(1);
+    expect(frames.filter((frame) => frame.type === 'symon-text-delta')).toHaveLength(1);
+  } finally {
+    finishNative({ status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high', text: '' });
+    socket.close();
+  }
+}, 20_000);
