@@ -281,7 +281,7 @@ pub fn show(app: &tauri::AppHandle) {
 /// (`inner_position()`, physical px, screen-space) and scales the CSS rect by the
 /// main window's `scale_factor()` (Retina: physical = CSS × scale).
 #[cfg(target_os = "macos")]
-fn reposition(app: &tauri::AppHandle, win: &tauri::WebviewWindow, x: f64, y: f64, w: f64, h: f64) {
+pub(crate) fn reposition(app: &tauri::AppHandle, win: &tauri::WebviewWindow, x: f64, y: f64, w: f64, h: f64) {
     use tauri::{Manager, PhysicalPosition, PhysicalSize};
     let Some(main) = app.get_webview_window("main") else {
         return;

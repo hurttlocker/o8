@@ -62,6 +62,12 @@ vi.mock('@/lib/lane/registry', () => ({
   reconcileLanesWithSessions: () => [],
 }));
 
+// This fixture has no cloud lanes. Loading the real cloud persistence graph
+// can exhaust inventory's bounded wait before the mocked discovery settles.
+vi.mock('@/lib/lane/cloud-reconciliation', () => ({
+  reconcileCloudJobLanes: () => {},
+}));
+
 vi.mock('@/lib/lane/sweep-orphan-sessions', () => ({
   sweepOrphanedOwnedSessions: async () => {},
 }));

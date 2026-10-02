@@ -7,6 +7,7 @@ mod spatial_ink_window;
 mod audio_ducker;
 mod background;
 mod browser_view;
+mod remote_preview;
 mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
@@ -7954,6 +7955,10 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            remote_preview::remote_preview_supported,
+            remote_preview::remote_preview_open,
+            remote_preview::remote_preview_set_rect,
+            remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
             #[cfg(target_os = "macos")]

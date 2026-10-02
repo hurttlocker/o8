@@ -9,6 +9,7 @@ import { EventStream, type CloudRemoteSource, type CloudWorkerControl, type Clou
 import { startCodex, type RunningCodex } from './run-codex';
 import { PersistentWorkerState } from './state';
 import { startWorkspaceServices, type RunningWorkspaceServices } from './workspace-services';
+import { startPreviewRelay } from './preview';
 
 interface WorkerCliOptions {
   o8Url: string;
@@ -79,6 +80,7 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   const operation = new AbortController();
   let codex: RunningCodex | null = null;
   let services: RunningWorkspaceServices | null = null;
+  let stopPreview: (() => Promise<void>) | null = null;
   let abortControl: CloudWorkerControl | null = null;
   let monitorFailure: Error | null = null;
   let leaseExpiresAt = Date.parse(job.leaseExpiresAt);
@@ -140,6 +142,7 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     }, operation.signal);
 
     services = await startWorkspaceServices({ cloneDir, job, stream, signal: operation.signal });
+    if (services && job.launch.remotePreview) stopPreview = startPreviewRelay(job, stream, services, operation.signal);
     if (abortControl || monitorFailure || shutdown.aborted) return;
 
     codex = await startCodex({
@@ -155,6 +158,8 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     if (monitorFailure) throw monitorFailure;
     if (result.aborted) throw new Error('[worker] Codex stopped before completion');
     if (result.exitCode !== 0) throw new Error(`[worker] codex exited with code ${result.exitCode}`);
+    await stopPreview?.();
+    stopPreview = null;
     const serviceStop = await services?.stop();
     services = null;
     if (serviceStop && !serviceStop.healthyUntilStop) {
@@ -175,6 +180,7 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     clearInterval(watchdog);
     shutdown.removeEventListener('abort', stop);
     await monitorChain;
+    await stopPreview?.();
     await services?.stop().catch((error) => {
       console.error(`[worker] service cleanup failed: ${safeMessage(error)}`);
     });

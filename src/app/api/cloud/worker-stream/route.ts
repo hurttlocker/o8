@@ -119,7 +119,9 @@ export async function POST(request: Request) {
       workerId,
       leaseToken,
       type,
-      payload: body.payload,
+      // Service credentials are recorded by the coordinator, never trusted
+      // from a worker payload. Preview grants can then honor key revocation.
+      payload: type === 'service' && isRecord(body.payload) ? { ...body.payload, workerKeyId: auth.keyId } : body.payload,
     });
     if (!result.accepted && result.reason === 'job_not_found') {
       // Either the job belongs to a different team or it was never enqueued.

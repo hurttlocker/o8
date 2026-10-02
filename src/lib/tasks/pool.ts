@@ -61,7 +61,7 @@ export interface TaskPoolRemoteExecution {
   leaseState: 'active' | 'expired' | 'none';
   updatedAt: string;
   workspaceAccess: 'unavailable';
-  previewAccess: 'unavailable';
+  previewAccess: 'requestable' | 'unavailable';
 }
 
 export interface TaskPoolTask {
@@ -194,7 +194,7 @@ function toRemoteExecution(job: CloudJob | undefined, nowMs: number): TaskPoolRe
     leaseState,
     updatedAt: job.updatedAt,
     workspaceAccess: 'unavailable',
-    previewAccess: 'unavailable',
+    previewAccess: leaseState === 'active' && job.launch.remotePreview ? 'requestable' : 'unavailable',
   };
 }
 

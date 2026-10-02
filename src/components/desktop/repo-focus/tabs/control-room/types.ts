@@ -75,7 +75,7 @@ export interface TaskPoolTask {
     leaseState: 'active' | 'expired' | 'none';
     updatedAt: string;
     workspaceAccess: 'unavailable';
-    previewAccess: 'unavailable';
+    previewAccess: 'requestable' | 'unavailable';
   } | null;
 }
 

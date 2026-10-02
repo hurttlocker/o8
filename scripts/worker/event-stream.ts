@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import type { RemotePreviewRequest, RemotePreviewResponse, RemotePreviewService } from '../../src/lib/cloud/preview-contract';
 import type { ThinkingEffort } from '../../src/lib/orchestrator/thinking-effort';
 
 const INITIAL_BACKOFF_MS = 100;
@@ -47,7 +48,7 @@ export interface CloudWorkerJob {
   leaseToken: string;
   leaseExpiresAt: string;
   claimCount: number;
-  launch: { prompt: string; model?: string; effort?: ThinkingEffort; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; };
+  launch: { prompt: string; model?: string; effort?: ThinkingEffort; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; remotePreview?: RemotePreviewService; };
 }
 
 export interface CloudWorkerControl {
@@ -124,5 +125,21 @@ export class EventStream {
       body: JSON.stringify({ jobId: job.id, workerId: this.workerId, leaseToken: job.leaseToken, controlId: control.id, deliveryToken: control.deliveryToken }),
     });
     if (!response.ok) throw responseError('/api/cloud/worker-control', response);
+  }
+
+  async pollPreview(job: CloudWorkerJob, signal: AbortSignal): Promise<RemotePreviewRequest | null> {
+    const params = new URLSearchParams({ jobId: job.id, workerId: this.workerId, leaseToken: job.leaseToken, attempt: String(job.claimCount) });
+    const response = await fetchWithRetry(`${this.baseUrl}/api/cloud/worker-preview?${params}`, { headers: this.headers(), signal });
+    if (response.status === 204) return null;
+    if (!response.ok) throw responseError('/api/cloud/worker-preview', response);
+    return (await response.json() as { request: RemotePreviewRequest }).request;
+  }
+
+  async answerPreview(job: CloudWorkerJob, result: RemotePreviewResponse, signal: AbortSignal): Promise<void> {
+    const response = await fetchWithRetry(`${this.baseUrl}/api/cloud/worker-preview`, {
+      method: 'POST', headers: this.headers(true), signal,
+      body: JSON.stringify({ jobId: job.id, workerId: this.workerId, leaseToken: job.leaseToken, attempt: job.claimCount, result }),
+    });
+    if (!response.ok) throw responseError('/api/cloud/worker-preview', response);
   }
 }
