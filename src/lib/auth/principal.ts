@@ -5,11 +5,13 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
 import { resolveSpectatorTokenRecord } from '@/lib/broadcast/spectator-token-store';
+import { resolvePluginToken, type PluginPrincipal } from './plugin-token';
 
-export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'spectator' | 'anonymous';
+export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'spectator' | 'plugin' | 'anonymous';
 
 export type RequestPrincipalContext =
   | { role: 'operator' }
+  | PluginPrincipal
   | {
       role: 'worker';
       packetId: string | null;
@@ -65,6 +67,8 @@ export function resolveRequestPrincipal(req: Request): RequestPrincipal {
 export function resolveRequestPrincipalContext(req: Request): RequestPrincipalContext {
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  const plugin = resolvePluginToken(bearer);
+  if (plugin) return plugin;
   if (isPacketWorkerToken(bearer)) {
     const worker = resolvePacketWorkerToken(bearer);
     return worker

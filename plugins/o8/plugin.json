@@ -1,0 +1,52 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "o8",
+  "version": "0.1.0",
+  "description": "Check coding-agent tasks and send follow-ups to your connected o8 computer, with local Codex workflows for scoped new work.",
+  "author": {
+    "name": "Rainwater Logic LLC",
+    "email": "hello@o8.run",
+    "url": "https://o8.run"
+  },
+  "homepage": "https://o8.run",
+  "repository": "https://github.com/hurttlocker/o8",
+  "license": "MIT",
+  "keywords": [
+    "coding agents",
+    "developer tools",
+    "task handoff",
+    "code review"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "o8",
+        "shortDescription": "Direct your coding agents",
+        "longDescription": "Connect ChatGPT or Codex to your running o8 computer to see coding-agent tasks that need attention, read compact task results, and send an explicitly requested follow-up to the right task. Sign in with your o8 account and enable the remote connection in o8. The computer must be online; requests are not queued while it is disconnected. Approvals, merges, and releases require the operator in o8. Account linking provides limited access, and features continue to follow your existing o8 plan. For local Codex tasks, the package also includes workflows that use the installed o8 CLI to check status and start scoped repository work using the backend, model, and effort you select. Codex and Claude Code runtimes must already be installed and authenticated for those local starts. A request receipt proves acceptance; report completion only after checking the recorded outcome. Hosted plugin calls and results pass through the o8 connection service in plaintext under TLS, as described in the privacy policy. The service does not log, store, or queue those payloads. The paired mobile connection retains its existing encryption.",
+        "developerName": "Rainwater Logic LLC",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Check connected task status",
+          "Read compact task results",
+          "Send a scoped follow-up",
+          "Start local repository work"
+        ],
+        "websiteURL": "https://o8.run",
+        "supportURL": "https://github.com/hurttlocker/o8/issues",
+        "privacyPolicyURL": "https://o8.run/privacy",
+        "termsOfServiceURL": "https://o8.run/terms",
+        "defaultPrompt": [
+          "Check o8 and tell me what needs my attention.",
+          "Read the result of my o8 task.",
+          "Send a follow-up to my existing o8 task."
+        ],
+        "composerIcon": "./assets/o8-icon.png",
+        "logo": "./assets/o8-icon.png"
+      },
+      "onboardingSkill": "./skills/connected-o8/SKILL.md",
+      "publication": {
+        "release_notes": "Initial connected task status, result summaries, and scoped follow-ups with a ten-minute retry window, plus local Codex workflows for repository work."
+      }
+    }
+  }
+}
