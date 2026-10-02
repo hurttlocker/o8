@@ -556,6 +556,9 @@ async fn run_loop_with_fallback(
 }
 
 pub(crate) trait TextPlannerSession: Send + 'static {
+    fn effective_model(&self) -> Option<&str> {
+        None
+    }
     fn send_planner_turn(
         &mut self,
         prompt: &str,
@@ -686,6 +689,7 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
             result => result?,
         };
 
+        let model = session.effective_model().unwrap_or(model);
         let parsed = extract_action(&raw);
         if turn == 0 {
             // One stable line per planner task — what the first turn carried and
@@ -814,7 +818,7 @@ async fn run_text_planner_loop_inner<S: TextPlannerSession>(
     Ok((
         LoopResult {
             result_text,
-            model_used: model.to_string(),
+            model_used: session.effective_model().unwrap_or(model).to_string(),
             tool_calls_json: Value::Array(tool_call_log).to_string(),
             brain_sources,
         },

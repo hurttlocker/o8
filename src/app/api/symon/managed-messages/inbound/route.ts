@@ -11,6 +11,7 @@ import {
 } from '@/lib/mobile/symon-text-bridge-client';
 import {
   appendSymonTextTranscript,
+  bindSymonTextEffectiveModel,
   createSymonTextSessionFromTranscript,
   formatSymonTextPlannerPrompt,
   loadSymonTextSession,
@@ -213,6 +214,7 @@ export async function POST(request: NextRequest) {
         engine: info.engine,
         model: info.model,
         effort: info.effort,
+        allowDefaultFallback: info.allowDefaultFallback === true,
         workspaceMode: 'o8',
         repoId: null,
         repoPath: null,
@@ -258,6 +260,7 @@ export async function POST(request: NextRequest) {
         engine: session.engine,
         model: session.model,
         effort: session.effort,
+        allowDefaultFallback: session.allowDefaultFallback === true,
       },
     }, POLL_WINDOW_MS);
   } catch (error) {
@@ -275,6 +278,7 @@ export async function POST(request: NextRequest) {
   if (outcome.state === 'needs_confirmation') {
     return NextResponse.json({ ok: true, state: 'awaiting_approval' }, { status: 202 });
   }
+  bindSymonTextEffectiveModel(turn.sessionId, outcome.result?.status === 'done' ? outcome.result.model : undefined);
   if (
     outcome.state === 'done'
     && outcome.result?.status === 'done'

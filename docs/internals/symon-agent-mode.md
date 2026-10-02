@@ -10,6 +10,33 @@ The operator holds a full voice conversation with Symon **through the phone** �
 
 The existing phone toggle (`GET/POST /api/mobile/symon`) remains shipped and unchanged — that is **Remote mode** (starts the Mac's own mic session). This document defines the new primary **Agent mode**.
 
+## Native text planner sessions
+
+New native Codex text sessions use `gpt-6.1-sol` at `high` when no model is
+pinned. This applies to app/phone text, authorized direct messages, and explicitly
+approved full-access groups. Voice, STT/TTS, and limited tool-free groups retain
+their existing routing. Owner, grant, and current-roster checks remain required.
+
+Persisted text sessions retain their bound model and effort. An existing session
+moves to the new default only when a new session is created, including after reset
+or the existing ten-minute inactivity expiry. Explicit model pins never receive a
+compatibility substitution. Phone Auto consults the native text registry; an
+unavailable explicit phone selection returns an error.
+
+For a newly selected automatic default only, the exact ChatGPT-account rejection
+of `gpt-6.1-sol` permits one retry on `gpt-5.6-sol` at the same effort. Any output,
+reasoning/tool activity, later planner turn, or unrelated failure prevents this
+retry. A rejected thread is discarded before retry. The successful native result
+reports `model` and `effort`; the session store binds that effective model before
+the next turn. The text completion event includes the bound model and effort,
+and the planner prompt identifies the effective model for accurate replies.
+Older session records without retry eligibility stay fixed.
+
+The bounded native transport/registry tests run with
+`cargo test --offline --manifest-path tests/native-codex/Cargo.toml`.
+This harness compiles the production transport and registry, with desktop-loop
+stubs. It does not prove installed-app or account-specific acceptance.
+
 ## Architecture: A — ephemeral-token WebRTC, tool relay
 
 Chosen over WS audio relay (B) because: WebRTC gives echo cancellation + jitter buffering for free; phone↔OpenAI is often faster than phone↔Mac over Tailscale; audio never transits our transport so the Mac adds zero audio latency. B (base64 PCM16 over the `symon` WS channel, `terminal`-channel style) is the documented fallback ONLY if ephemeral tokens cannot carry our session config — implementation must prove A before falling back, and a fallback is a contract change (see change control above).

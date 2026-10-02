@@ -8,6 +8,8 @@ export interface SymonTextPlannerSelection {
   engine: string;
   model: string;
   effort: string;
+  /** Only a newly selected automatic default may retry a pre-execution rejection. */
+  allowDefaultFallback?: boolean;
 }
 
 export function buildSymonTextPlannerInfoEval(selection?: SymonTextPlannerSelection): string {

@@ -29,8 +29,8 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
     async evalJs(code: string) {
       testState.evalCalls.push(code);
       if (code.includes('A.text.plannerInfo')) {
-        const info = code.includes('gpt-5.6-sol')
-          ? { ...defaultPlannerInfo, engine: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }
+        const info = code.includes('gpt-6.1-sol')
+          ? { ...defaultPlannerInfo, engine: 'codex', model: 'gpt-6.1-sol', effort: 'xhigh' }
           : defaultPlannerInfo;
         return { result: JSON.stringify({ state: 'done', info }) };
       }
@@ -200,7 +200,7 @@ describe('Symon text-first say loop wire', () => {
   it('binds an available public model override through mint and the real ws spawn seam', async () => {
     const { response, body: minted } = await mint('codex-sol-xhigh');
     expect(response.status).toBe(200);
-    expect(minted.session).toMatchObject({ model: 'gpt-5.6-sol', effort: 'xhigh', engine: 'codex' });
+    expect(minted.session).toMatchObject({ model: 'gpt-6.1-sol', effort: 'xhigh', engine: 'codex' });
     expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This Mac' });
     testState.evalCalls.length = 0;
 
@@ -249,6 +249,8 @@ describe('Symon text-first say loop wire', () => {
       channel: 'symon',
       type: 'symon-text-done',
       status: 'done',
+      model: 'gpt-6.1-sol',
+      effort: 'xhigh',
       activeMachine: { id: 'macbook', displayName: 'MacBook' },
     }));
     expect(frames[0]).toEqual(expect.objectContaining({
@@ -257,11 +259,11 @@ describe('Symon text-first say loop wire', () => {
     }));
     const spawnEval = testState.evalCalls.find((code) => code.includes('A.text.runTurn'));
     expect(spawnEval).toContain('"engine":"codex"');
-    expect(spawnEval).toContain('"model":"gpt-5.6-sol"');
+    expect(spawnEval).toContain('"model":"gpt-6.1-sol"');
     expect(spawnEval).toContain('"effort":"xhigh"');
   });
 
-  it('falls back to the live default for omitted, unknown, and unavailable selections', async () => {
+  it('uses the native default for omitted or unknown selections and refuses unavailable pins', async () => {
     const omitted = await mint();
     expect(omitted.response.status).toBe(200);
     expect(omitted.body.session).toMatchObject({
@@ -280,11 +282,7 @@ describe('Symon text-first say loop wire', () => {
 
     testState.codexAuthenticated = false;
     const unavailable = await mint('codex-sol-xhigh');
-    expect(unavailable.response.status).toBe(200);
-    expect(unavailable.body.session).toMatchObject({
-      engine: 'claude',
-      model: 'claude-opus-4-8',
-      effort: 'high',
-    });
+    expect(unavailable.response.status).toBe(503);
+    expect(unavailable.body.session).toBeUndefined();
   });
 });

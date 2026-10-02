@@ -16,6 +16,8 @@ export interface SymonTextPlannerInfo {
   engine?: string;
   model?: string;
   effort?: string;
+  /** Only a newly selected automatic default may retry a pre-execution rejection. */
+  allowDefaultFallback?: boolean;
   /** The seat named the way the Settings → Voice status line names it, e.g.
    *  `Codex · gpt-5.6-sol · high` or `opencode · runtime-configured`. */
   seat?: string;
@@ -25,7 +27,7 @@ export interface SymonTextPlannerInfo {
 
 export interface SymonTextTurnBridgeResult {
   state?: 'pending' | 'done' | 'needs_confirmation' | 'error' | 'call_mismatch' | 'no_bridge';
-  result?: { status?: 'done' | 'interrupted'; text?: string; activeMachine?: unknown };
+  result?: { status?: 'done' | 'interrupted'; text?: string; model?: string; effort?: string; activeMachine?: unknown };
   confirmation?: unknown;
   detail?: string;
   error?: string;

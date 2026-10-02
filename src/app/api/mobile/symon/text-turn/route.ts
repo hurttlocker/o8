@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { loadSymonTextSession, bindSymonTextEffectiveModel } from '@/lib/mobile/symon-text-session-store';
 import { type SymonTextPlannerSelection } from '@/lib/mobile/symon-text-eval';
 import {
   pollSymonTextInterrupt,
@@ -34,6 +35,11 @@ export async function POST(request: NextRequest) {
   if (!sessionId || !turnId || !prompt || !selection) {
     return NextResponse.json({ ok: false, state: 'error', error: 'bad_request' }, { status: 400 });
   }
+  // Eligibility comes from the persisted session, never from caller input.
+  const session = loadSymonTextSession(sessionId);
+  selection.allowDefaultFallback = session?.allowDefaultFallback === true
+    && session.engine === selection.engine && session.model === selection.model
+    && session.effort === selection.effort;
   try {
     const result = await pollSymonTextTurn({
       sessionId,
@@ -41,6 +47,9 @@ export async function POST(request: NextRequest) {
       prompt,
       planner: selection,
     }, POLL_WINDOW_MS);
+    if (result.state === 'done' || result.state === 'error') {
+      bindSymonTextEffectiveModel(sessionId, result.result?.status === 'done' ? result.result.model : undefined);
+    }
     return NextResponse.json({ ok: result.state !== 'error', ...result });
   } catch (error) {
     return NextResponse.json({
