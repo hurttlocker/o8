@@ -65,6 +65,7 @@ export async function pollSymonTextTurn(
     turnId: string;
     prompt: string;
     planner: SymonTextPlannerSelection;
+    reconcileOnly?: boolean;
   },
   windowMs: number = 3_000,
 ): Promise<SymonTextTurnBridgeResult> {
@@ -73,6 +74,7 @@ export async function pollSymonTextTurn(
     input.turnId,
     input.prompt,
     input.planner,
+    input.reconcileOnly,
   );
   const deadline = Date.now() + windowMs;
   while (Date.now() < deadline) {

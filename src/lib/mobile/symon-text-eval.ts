@@ -48,6 +48,7 @@ export function buildSymonTextTurnEval(
   turnId: string,
   prompt: string,
   planner: SymonTextPlannerSelection,
+  reconcileOnly: boolean = false,
 ): string {
   const session = JSON.stringify(sessionId);
   const turn = JSON.stringify(turnId);
@@ -62,6 +63,7 @@ export function buildSymonTextTurnEval(
     const key = JSON.stringify([sessionId, callId]);
     let slot = calls[key];
     if (!slot) {
+      if (${JSON.stringify(reconcileOnly)}) return JSON.stringify({ state: 'call_mismatch' });
       slot = calls[key] = { startedAt: Date.now(), lastTouched: Date.now(), done: false, textTurn: true };
       Promise.resolve().then(() => A.text.runTurn(${content}, sessionId, callId, ${selection})).then((result) => {
         Object.assign(slot, { done: true, completedAt: Date.now(), result });

@@ -8,6 +8,7 @@ import { runInNewContext } from 'node:vm';
 import { WebSocket } from 'ws';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildSymonTextTurnEval } from '@/lib/mobile/symon-text-eval';
 
 const testState = vi.hoisted(() => ({
   claudeInstalled: true,
@@ -159,7 +160,12 @@ beforeAll(async () => {
   apiServer.listen(apiPort, '127.0.0.1');
   await once(apiServer, 'listening');
 
+  const clockShim = join(dataDir, 'deadline-clock.mjs');
+  writeFileSync(clockShim, `const realNow = Date.now; let offset = 0;
+    Date.now = () => realNow() + offset;
+    process.on('SIGUSR2', () => { offset = offset ? 0 : 300001; });`);
   wsProcess = execFile(process.execPath, [
+    `--import=${clockShim}`,
     '--import=./scripts/register-server-only-stub.mjs',
     '--import=tsx',
     'src/ws-server.ts',
@@ -344,7 +350,7 @@ it.each(['error', 'interrupted'] as const)('reports fallback metadata on WS %s a
   }
 });
 
-it('reconciles actual phone Stop before spawning a queued next turn', async () => {
+it.each([false, true])('reconciles phone Stop before spawning a queued turn (deadline expired: %s)', async (deadlineExpired) => {
   let finishNative!: (result: Record<string, unknown>) => void;
   const nativePending = new Promise<Record<string, unknown>>((resolve) => { finishNative = resolve; });
   const bindingsAtSpawn: Array<Record<string, unknown> | undefined> = [];
@@ -375,6 +381,7 @@ it('reconciles actual phone Stop before spawning a queued next turn', async () =
     expect(condition()).toBe(true);
   };
   const terminal = () => frames.filter((frame) => frame.type === 'symon-text-done');
+  let clockAdvanced = false;
   try {
     send('symon-text-turn', 'stop-first');
     await waitFor(() => nativeRun.mock.calls.length === 1);
@@ -383,16 +390,28 @@ it('reconciles actual phone Stop before spawning a queued next turn', async () =
     await waitFor(() => testState.turnReplies.some((reply) => reply.method === 'DELETE' && reply.state === 'done'));
     send('symon-text-interrupt', 'stop-first'); // duplicate Stop must not redeliver cancellation
     send('symon-text-turn', 'stop-next'); // queue while the native turn is still blocked
+    if (deadlineExpired) {
+      wsProcess.kill('SIGUSR2');
+      clockAdvanced = true;
+    }
     // The actual POST poll window must expire while native completion remains held.
     await waitFor(() => testState.turnReplies.some((reply) => reply.method === 'POST' && reply.turnId === 'stop-first' && reply.state === 'pending'));
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(terminal(), 'DELETE acknowledgement must not fabricate native completion').toEqual([]);
+    if (deadlineExpired) {
+      await waitFor(() => terminal().length >= 1);
+      expect(terminal()[0]).toMatchObject({ turnId: 'stop-first', status: 'failed' });
+      expect(terminal()[0].model, 'an unresolved native result has no verified effective model').toBeUndefined();
+    } else {
+      expect(terminal(), 'DELETE acknowledgement must not fabricate native completion').toEqual([]);
+    }
     expect(nativeRun).toHaveBeenCalledTimes(1);
     expect(sessionOnDisk()).toMatchObject({ model: 'gpt-6.1-sol', allowDefaultFallback: true });
     finishNative({ status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high', text: '' });
     await waitFor(() => terminal().length === 2);
     expect(terminal().map(({ turnId, status, model, effort }) => ({ turnId, status, model, effort }))).toEqual([
-      { turnId: 'stop-first', status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high' },
+      deadlineExpired
+        ? { turnId: 'stop-first', status: 'failed', model: undefined, effort: undefined }
+        : { turnId: 'stop-first', status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high' },
       { turnId: 'stop-next', status: 'done', model: 'gpt-5.6-sol', effort: 'high' },
     ]);
     expect(sessionOnDisk()).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high', allowDefaultFallback: false });
@@ -408,7 +427,19 @@ it('reconciles actual phone Stop before spawning a queued next turn', async () =
     expect(testState.turnReplies.filter((reply) => reply.method === 'DELETE')).toHaveLength(1);
     expect(frames.filter((frame) => frame.type === 'symon-text-delta')).toHaveLength(1);
   } finally {
+    if (clockAdvanced) wsProcess.kill('SIGUSR2');
     finishNative({ status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high', text: '' });
     socket.close();
   }
 }, 20_000);
+
+it('does not replay a missing native call while reconciling a timed-out turn', async () => {
+  const runTurn = vi.fn(async () => ({ status: 'done', text: 'Must not run.' }));
+  const context = { window: { __o8SymonAgent: { text: { runTurn } } } };
+  const result = JSON.parse(runInNewContext(buildSymonTextTurnEval(
+    'missing-session', 'missing-turn', 'Hello', { engine: 'codex', model: 'gpt-6.1-sol', effort: 'high' }, true,
+  ), context));
+  await Promise.resolve();
+  expect(result).toEqual({ state: 'call_mismatch' });
+  expect(runTurn).not.toHaveBeenCalled();
+});

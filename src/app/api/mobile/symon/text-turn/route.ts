@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
       turnId,
       prompt,
       planner: selection,
+      reconcileOnly: body?.reconcileOnly === true,
     }, POLL_WINDOW_MS);
     if (result.state === 'done' || result.state === 'error') {
       bindSymonTextEffectiveModel(sessionId, result.result?.model, result.result?.effort);
