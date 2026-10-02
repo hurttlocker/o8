@@ -6,6 +6,7 @@ import { readCustomizeBody } from '@/lib/customize/http';
 import { CustomizeError } from '@/lib/customize/storage';
 import { reviewGithubActionSource } from '@/lib/action-plugins/github-source';
 import { githubSourceSchema } from '@/lib/action-plugins/source-storage';
+import { launchPluginTerminal, pluginTerminalReceipts, stopPluginTerminalRun } from '@/lib/action-plugins/host';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,8 @@ const inputSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('invoke'), id: z.string(), actionId: z.string(), revision: z.string(), repo: z.string().optional() }).strict(),
   z.object({ action: z.enum(['enable', 'disable', 'remove']), id: z.string(), revision: z.string() }).strict(),
   z.object({ action: z.literal('clear-state'), id: z.string(), revision: z.string(), confirmed: z.literal(true) }).strict(),
+  z.object({ action: z.literal('launch-terminal'), id: z.string(), terminalId: z.string(), revision: z.string().regex(/^[a-f0-9]{64}$/), requestId: z.string().uuid(), repo: z.string().optional() }).strict(),
+  z.object({ action: z.literal('stop-terminal'), receiptId: z.string().uuid() }).strict(),
 ]);
 
 function failure(error: unknown) {
@@ -32,7 +35,7 @@ export async function GET(request: NextRequest) {
   if (denied) return denied;
   try {
     const plugin = request.nextUrl.searchParams.get('plugin');
-    return NextResponse.json({ ok: true, ...listActionPlugins(), receipts: actionReceipts(plugin ?? undefined) });
+    return NextResponse.json({ ok: true, ...listActionPlugins(), receipts: actionReceipts(plugin ?? undefined), terminals: pluginTerminalReceipts(plugin ?? undefined) });
   }
   catch (error) { return failure(error); }
 }
@@ -47,6 +50,8 @@ export async function POST(request: NextRequest) {
     if (input.action === 'link') return NextResponse.json({ ok: true, installed: await linkActionSource(input.directory, input.expectedRevision, input.repo, request.signal) });
     if (input.action === 'invoke') return NextResponse.json({ ok: true, receipt: await invokeActionPlugin(input.id, input.actionId, 'local-operator', request.signal, input.revision, input.repo) });
     if (input.action === 'clear-state') return NextResponse.json({ ok: true, ...clearActionPluginState(input.id, input.revision) });
+    if (input.action === 'launch-terminal') return NextResponse.json({ ok: true, terminal: await launchPluginTerminal(input) });
+    if (input.action === 'stop-terminal') return NextResponse.json({ ok: true, terminal: stopPluginTerminalRun(input.receiptId) });
     return NextResponse.json({ ok: true, ...changeActionPlugin(input.id, input.revision, input.action) });
   } catch (error) { return failure(error); }
 }

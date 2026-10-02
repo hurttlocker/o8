@@ -12,6 +12,7 @@ import { ActionPluginError } from './errors';
 import { acquiredSource, githubSourceSchema, type GithubActionSource } from './source-storage';
 import { verifyGithubFiles } from './github-files';
 import { actionStateSchema, clearActionState, describeActionState, provisionActionState, type ActionState } from './state-storage';
+import { inspectPluginTerminal, pluginTerminalEnvironment, requirePluginTerminalRuntime, startPluginTerminal, stopPluginTerminal } from './terminal-runtime';
 
 export { ActionPluginError } from './errors';
 
@@ -55,11 +56,20 @@ export const actionManifestSchema = z.object({
     entry: fileName,
     args: z.array(z.string().max(256).refine((arg) => !arg.includes('\0'), 'Arguments cannot contain NUL characters.')).max(16).default([]),
     timeoutMs: z.number().int().min(100).max(30_000),
-  }).strict()).min(1).max(12),
+  }).strict()).max(12),
+  terminals: z.array(z.object({
+    id: slug,
+    description: z.string().trim().min(1).max(500),
+    entry: fileName,
+    args: z.array(z.string().max(256).refine((arg) => !arg.includes('\0'), 'Arguments cannot contain NUL characters.')).max(16).default([]),
+  }).strict()).min(1).max(12).optional(),
 }).strict().superRefine((manifest, ctx) => {
   if (new Set(manifest.files.map((file) => file.path)).size !== manifest.files.length) ctx.addIssue({ code: 'custom', message: 'Duplicate files' });
   if (new Set(manifest.actions.map((action) => action.id)).size !== manifest.actions.length) ctx.addIssue({ code: 'custom', message: 'Duplicate actions' });
   for (const action of manifest.actions) if (!manifest.files.some((file) => file.path === action.entry)) ctx.addIssue({ code: 'custom', message: 'Action entry is not a declared file' });
+  if (!manifest.actions.length && !manifest.terminals?.length) ctx.addIssue({ code: 'custom', message: 'Declare an action or a terminal' });
+  if (manifest.terminals && new Set(manifest.terminals.map((terminal) => terminal.id)).size !== manifest.terminals.length) ctx.addIssue({ code: 'custom', message: 'Duplicate terminals' });
+  for (const terminal of manifest.terminals ?? []) if (!manifest.files.some((file) => file.path === terminal.entry)) ctx.addIssue({ code: 'custom', message: 'Terminal entry is not a declared file' });
 });
 export type ActionManifest = z.infer<typeof actionManifestSchema>;
 type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null; source?: GithubActionSource };
@@ -121,7 +131,7 @@ export async function reviewActionSource(directory: string, repo?: string, signa
   const state = manifest.state ? describeActionState({ id: manifest.id, sourceDirectory: dir, workspaceRoot, source }) : undefined;
   return {
     manifest, revision: revisionFor(manifest, workspaceRoot, dir, source), files, sourceDirectory: dir, ...(source ? { source } : {}),
-    execution: { cwd: workspaceRoot ?? path.join(getDataDir(), 'customizations', 'actions', manifest.id), environmentKeys: ['PATH', 'NODE_ENV', ...(state ? [state.environmentKey] : [])], principal: 'local-user' as const, ...(state ? { state } : {}) },
+    execution: { cwd: workspaceRoot ?? path.join(getDataDir(), 'customizations', 'actions', manifest.id), environmentKeys: ['PATH', 'NODE_ENV', ...(state ? [state.environmentKey] : [])], principal: 'local-user' as const, ...(state ? { state } : {}), ...(manifest.terminals ? { terminalEnvironmentKeys: Object.keys(pluginTerminalEnvironment(state?.directory)) } : {}) },
     workspaceRoot,
   };
 }
@@ -149,6 +159,7 @@ function db() {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new ActionPluginError('unsafe_path', 'Invalid receipt storage file.');
   const database = new Database(file);
   database.exec('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, action_id TEXT NOT NULL, actor TEXT NOT NULL, revision TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, exit_code INTEGER, stdout TEXT, stderr TEXT, error TEXT, source_metadata TEXT)');
+  database.exec('CREATE TABLE IF NOT EXISTS terminal_receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, receipt_json TEXT NOT NULL)');
   database.transaction(() => {
     const columns = database.prepare('PRAGMA table_info(receipts)').all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === 'source_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN source_metadata TEXT');
@@ -162,11 +173,117 @@ function lifecycle<T>(action: (database: Database.Database) => T): T {
   finally { database.close(); }
 }
 function refuseRunning(database: Database.Database, id: string) {
+  for (const terminal of readTerminalReceipts(database, id)) {
+    if (['launching', 'running'].includes(refreshTerminalReceipt(database, terminal).status)) throw new ActionPluginError('busy', 'Stop this plugin’s active or pending terminal before changing its installation or saved data.', 409);
+  }
   const now = new Date().toISOString();
   database.prepare("UPDATE receipts SET status = 'interrupted', finished_at = ?, error = 'Host stopped before completion' WHERE plugin_id = ? AND status = 'running' AND started_at < ?")
     .run(now, id, new Date(Date.now() - 60_000).toISOString());
   const active = database.prepare("SELECT id FROM receipts WHERE plugin_id = ? AND status = 'running' LIMIT 1").get(id);
   if (active) throw new ActionPluginError('busy', 'An action from this plugin is running.', 409);
+}
+
+export type PluginTerminalReceipt = {
+  id: string; pluginId: string; terminalId: string; revision: string; sessionName: string;
+  label: string; workspaceRoot: string | null; source: GithubActionSource | null; state: ActionState | null;
+  actor: 'local-operator'; startedAt: string; finishedAt: string | null;
+  status: 'launching' | 'running' | 'exited' | 'ended' | 'stopped' | 'failed';
+  exitCode: number | null; error: string | null;
+};
+function readTerminalReceipts(database: Database.Database, pluginId?: string): PluginTerminalReceipt[] {
+  const rows = (pluginId
+    ? database.prepare('SELECT receipt_json FROM terminal_receipts WHERE plugin_id = ? ORDER BY rowid DESC').all(pluginId)
+    : database.prepare('SELECT receipt_json FROM terminal_receipts ORDER BY rowid DESC').all()) as Array<{ receipt_json: string }>;
+  return rows.map((row) => JSON.parse(row.receipt_json) as PluginTerminalReceipt);
+}
+function saveTerminalReceipt(database: Database.Database, receipt: PluginTerminalReceipt) {
+  database.prepare('INSERT INTO terminal_receipts (id, plugin_id, receipt_json) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET receipt_json = excluded.receipt_json')
+    .run(receipt.id, receipt.pluginId, JSON.stringify(receipt));
+  return receipt;
+}
+function refreshTerminalReceipt(database: Database.Database, receipt: PluginTerminalReceipt) {
+  if (!['launching', 'running', 'exited'].includes(receipt.status)) return receipt;
+  try {
+    const current = inspectPluginTerminal(receipt.sessionName);
+    // Missing does not mean a pending launch has finished: the host may have
+    // stopped before spawn, or another process may be between claim and spawn.
+    // Only explicit Stop cancels this claim. Replays never execute it again.
+    if (receipt.status === 'launching' && current.status === 'ended') return receipt;
+    return saveTerminalReceipt(database, { ...receipt, ...current, error: null, finishedAt: current.status === 'running' ? null : receipt.finishedAt ?? new Date().toISOString() });
+  } catch {
+    return saveTerminalReceipt(database, { ...receipt, error: 'Terminal status is unavailable. The session remains reserved; retry inspection or stop it before launching again.' });
+  }
+}
+export function pluginTerminalReceipts(pluginId?: string) {
+  return lifecycle((database) => readTerminalReceipts(database, pluginId).map((receipt) => refreshTerminalReceipt(database, receipt)));
+}
+export function pluginTerminalSessionReferences() {
+  if (!existsSync(path.join(getDataDir(), 'customizations', 'actions', 'receipts.sqlite'))) return [];
+  return pluginTerminalReceipts().filter((receipt) => ['launching', 'running', 'exited'].includes(receipt.status)).map((receipt) => receipt.sessionName);
+}
+export async function launchPluginTerminal(input: { id: string; terminalId: string; revision: string; requestId: string; repo?: string }) {
+  const requestId = z.string().uuid().parse(input.requestId).toLowerCase();
+  const dir = path.dirname(savedPath(input.id));
+  const cwd = input.repo === undefined ? dir : await resolveScope(input.repo);
+  if (!cwd) throw new ActionPluginError('invalid_workspace', 'Choose a registered repository for this terminal.');
+  const claim = lifecycle((database) => {
+    const saved = readSaved(input.id);
+    if (saved.revision !== input.revision) throw new ActionPluginError('conflict', 'Plugin changed since review.', 409);
+    if (!saved.enabled) throw new ActionPluginError('disabled', 'Plugin is disabled.', 409);
+    if (!saved.manifest.supportedPlatforms.includes(process.platform as 'darwin' | 'linux')) throw new ActionPluginError('unsupported_platform', 'This plugin does not support this platform.', 409);
+    if ((saved.manifest.workspace === 'registered-project') !== (input.repo !== undefined) || saved.workspaceRoot !== (input.repo === undefined ? null : cwd)) throw new ActionPluginError('invalid_workspace', 'Use the repository selected during review.', 409);
+    const terminal = saved.manifest.terminals?.find((item) => item.id === input.terminalId);
+    if (!terminal) throw new ActionPluginError('not_found', 'Terminal entrypoint does not exist.', 404);
+    const previous = readTerminalReceipts(database).find((receipt) => receipt.id === requestId);
+    if (previous) {
+      if (previous.pluginId !== input.id || previous.terminalId !== input.terminalId || previous.revision !== input.revision || previous.workspaceRoot !== saved.workspaceRoot) throw new ActionPluginError('conflict', 'Launch request belongs to another terminal.', 409);
+      return { receipt: refreshTerminalReceipt(database, previous), created: false };
+    }
+    if (['0', 'false', 'off', 'no'].includes(process.env.O8_PERSISTENT_TERMINALS?.trim().toLowerCase() ?? '')) throw new ActionPluginError('persistence_disabled', 'Enable persistent terminals before launching a plugin terminal.', 409);
+    for (const file of saved.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Plugin file changed after linking.', 409);
+    refuseRunning(database, input.id);
+    requirePluginTerminalRuntime();
+    const state = saved.manifest.state ? provisionActionState({ ...saved, id: input.id }) : null;
+    const receipt: PluginTerminalReceipt = {
+      id: requestId, pluginId: input.id, terminalId: input.terminalId, revision: input.revision,
+      sessionName: `cortex-dash-${requestId.replaceAll('-', '')}`, label: `${saved.manifest.name} / ${terminal.id}`,
+      workspaceRoot: saved.workspaceRoot, source: saved.source ?? null, state, actor: 'local-operator',
+      startedAt: new Date().toISOString(), finishedAt: null, status: 'launching', exitCode: null, error: null,
+    };
+    saveTerminalReceipt(database, receipt);
+    return { receipt, created: true };
+  });
+  if (!claim.created) return claim.receipt;
+  // The claim is durable before process creation. Holding a separate lifecycle
+  // lock across spawn serializes stop/remove/clear without rolling back that
+  // recovery record if the host dies before publishing the launch result.
+  return lifecycle((database) => {
+    const receipt = readTerminalReceipts(database).find((item) => item.id === requestId);
+    if (!receipt) throw new ActionPluginError('damaged', 'Terminal launch receipt is missing.', 409);
+    if (receipt.status !== 'launching') return receipt;
+    try {
+      const saved = readSaved(input.id);
+      if (!saved.enabled || saved.revision !== input.revision) throw new ActionPluginError('conflict', 'Plugin changed before terminal launch.', 409);
+      const terminal = saved.manifest.terminals?.find((item) => item.id === input.terminalId);
+      if (!terminal) throw new ActionPluginError('not_found', 'Terminal entrypoint does not exist.', 404);
+      for (const file of saved.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Plugin file changed before terminal launch.', 409);
+      const current = startPluginTerminal({ sessionName: receipt.sessionName, cwd, entry: path.join(dir, terminal.entry), args: terminal.args, stateDirectory: receipt.state?.directory });
+      return saveTerminalReceipt(database, { ...receipt, ...current });
+    } catch (error) {
+      // A tmux timeout may occur after creation. Keep the durable reservation
+      // until inspection proves its state or the operator explicitly stops it.
+      return refreshTerminalReceipt(database, saveTerminalReceipt(database, { ...receipt, error: error instanceof ActionPluginError ? error.message : 'Terminal launch outcome is unresolved. Inspect or stop this session before launching again.' }));
+    }
+  });
+}
+export function stopPluginTerminalRun(receiptId: string) {
+  return lifecycle((database) => {
+    const receipt = readTerminalReceipts(database).find((item) => item.id === receiptId.toLowerCase());
+    if (!receipt) throw new ActionPluginError('not_found', 'Terminal receipt does not exist.', 404);
+    if (receipt.status === 'stopped') return receipt;
+    stopPluginTerminal(receipt.sessionName);
+    return saveTerminalReceipt(database, { ...receipt, status: 'stopped', finishedAt: receipt.finishedAt ?? new Date().toISOString() });
+  });
 }
 export function listActionPlugins() {
   let dir: string;

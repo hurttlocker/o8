@@ -24,6 +24,33 @@ describe('Customize extension views', () => {
     requests.mockResolvedValue({ ok: true, json: async () => ({ catalog: [PROJECT_GUIDE], installed: [] }) });
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  it('retains a launched session when opening its view fails and retries opening without relaunch', async () => {
+    const manifest = { id: 'console', name: 'Console', version: '1.0.0', description: 'Interactive', supportedPlatforms: ['darwin'], workspace: 'none', actions: [], terminals: [{ id: 'interactive', description: 'Type here', entry: 'run.sh', args: [] }] };
+    const terminal = { id: 'launch-one', pluginId: 'console', terminalId: 'interactive', revision: 'a'.repeat(64), label: 'Console', sessionName: 'cortex-dash-test', workspaceRoot: null, status: 'running', exitCode: null, error: null };
+    let launched = false;
+    const onOpenTerminal = vi.fn().mockRejectedValueOnce(new Error('View unavailable')).mockResolvedValue(undefined);
+    requests.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init?.method) return Response.json({ installed: [{ manifest, revision: terminal.revision, enabled: true }], receipts: [], terminals: launched ? [terminal] : [] });
+      const body = JSON.parse(String(init.body));
+      if (body.action === 'stop-terminal') { terminal.status = 'stopped'; return Response.json({ terminal }); }
+      expect(body).toMatchObject({ action: 'launch-terminal', id: 'console', terminalId: 'interactive', revision: terminal.revision });
+      launched = true; return Response.json({ terminal });
+    });
+    await act(async () => root.render(createElement(PluginsTab, { onOpenTerminal })));
+    await click('Launch terminal');
+    expect(host.textContent).toContain('Use Open terminal to retry without starting another process.');
+    await click('Open terminal');
+    expect(onOpenTerminal).toHaveBeenCalledTimes(2);
+    expect(requests.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+    await click('Stop terminal'); await click('Cancel');
+    expect(requests.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+    await click('Stop terminal');
+    expect(host.textContent).toContain('discard this terminal’s retained output');
+    await click('Confirm stop');
+    const posts = requests.mock.calls.filter((call) => call[1]?.method === 'POST');
+    expect(posts).toHaveLength(2);
+    expect(JSON.parse(posts[1][1].body)).toEqual({ action: 'stop-terminal', receiptId: terminal.id });
+  });
   it('shows reviewed saved data and requires a separate confirmation to clear it', async () => {
     const state = { scope: 'source-and-project', environmentKey: 'O8_PLUGIN_STATE_DIR', namespace: 'b'.repeat(64), directory: '/owned/action-state/namespace' };
     const manifest = { id: 'counter', name: 'Counter', version: '1.0.0', description: 'Saved counter', supportedPlatforms: ['darwin'], workspace: 'none', state: { scope: 'source-and-project' }, actions: [] };

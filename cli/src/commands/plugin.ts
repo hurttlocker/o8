@@ -1,6 +1,7 @@
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../output.js';
+import { randomUUID } from 'node:crypto';
 
 type Action = { id: string; description: string; timeoutMs: number };
 type Installed = {
@@ -26,7 +27,8 @@ type Receipt = {
   error: string | null;
   source: Installed['source'] | null;
 };
-type Inventory = { installed: Installed[]; receipts: Receipt[] };
+type TerminalReceipt = { id: string; pluginId: string; terminalId: string; sessionName: string; status: string; label: string; error: string | null };
+type Inventory = { installed: Installed[]; receipts: Receipt[]; terminals?: TerminalReceipt[] };
 type InvokeResult = { receipt: { id: string; pluginId: string; actionId: string; revision: string; status: string; actor: string; actorKind: 'authorization-class'; actorIdentity: null; exitCode: number | null; stdout: string; stderr: string; error: string | null; source: Installed['source'] | null } };
 type SourceReview = { manifest: { name: string }; revision: string; sourceDirectory: string; source?: Installed['source']; files: Array<{ path: string; content: string; sha256: string }>; execution: { cwd: string; environmentKeys: string[] } };
 
@@ -75,6 +77,34 @@ function pluginList(mode: OutputMode, installed: Installed[]) {
 }
 
 export async function runPlugin(mode: OutputMode, group: string | undefined, rest: string[]): Promise<number> {
+  if (group === 'terminal' && rest[0] === 'list') {
+    const { positional, flags } = parse(rest.slice(1), ['--plugin']);
+    if (positional.length) throw new CliError('invalid_args', 'Use `o8 plugin terminal list [--plugin ID]`.', EXIT.INVALID_ARGS);
+    const terminals = (await inventory(flags.get('--plugin'))).terminals ?? [];
+    if (mode.human) {
+      printHumanHeading('plugin terminals');
+      for (const terminal of terminals) process.stdout.write(`  ${terminal.id}  ${terminal.label}  ${terminal.status}  ${terminal.sessionName}\n`);
+    } else printJson({ schema: 'o8/cli/plugin.terminal.list/v1', terminals });
+    return EXIT.OK;
+  }
+  if (group === 'terminal' && (rest[0] === 'launch' || rest[0] === 'stop')) {
+    const launch = rest[0] === 'launch';
+    const { positional, flags } = parse(rest.slice(1), launch ? ['--revision', '--repo', '--request'] : []);
+    if (positional.length !== (launch ? 2 : 1) || (launch && !/^[a-f0-9]{64}$/.test(flags.get('--revision') ?? ''))) throw new CliError('invalid_args', 'Use `o8 plugin terminal launch <plugin-id> <entry-id> --revision <sha256> [--repo <path>] [--request <uuid>]` or `o8 plugin terminal stop <receipt-id>`.', EXIT.INVALID_ARGS);
+    const requestId = flags.get('--request') ?? randomUUID();
+    const result = await apiFetch<{ terminal: TerminalReceipt }>(operatorConfig(), '/api/customize/actions', {
+      method: 'POST', timeoutMs: 30_000,
+      body: launch ? { action: 'launch-terminal', id: positional[0], terminalId: positional[1], revision: flags.get('--revision'), requestId, ...(flags.has('--repo') ? { repo: flags.get('--repo') } : {}) } : { action: 'stop-terminal', receiptId: positional[0] },
+    }).catch((error: unknown) => {
+      if (launch && error instanceof CliError) error.hint = `Inspect o8 plugin terminal list before retrying. Reuse --request ${requestId} to avoid a duplicate launch. ${error.hint ?? ''}`.trim();
+      throw error;
+    });
+    if (!result.data?.terminal) throw new CliError('invalid_response', `Terminal result unavailable. Inspect plugin terminal list before retrying${launch ? ` with --request ${requestId}` : ''}.`, EXIT.CONFLICT);
+    const terminal = result.data.terminal;
+    if (mode.human) printHumanKv([['receipt', terminal.id], ['terminal', terminal.sessionName], ['status', terminal.status], ['error', terminal.error ?? '(none)']]);
+    else printJson({ schema: `o8/cli/plugin.terminal.${rest[0]}/v1`, terminal });
+    return ['failed', 'launching'].includes(terminal.status) ? EXIT.CONFLICT : EXIT.OK;
+  }
   if (group === 'source' && rest[0] === 'review') {
     const { positional, flags } = parse(rest.slice(1), ['--directory', '--github', '--commit', '--path', '--repo']);
     const github = flags.get('--github');
@@ -165,5 +195,5 @@ export async function runPlugin(mode: OutputMode, group: string | undefined, res
     } else printJson({ schema: 'o8/cli/plugin.log.list/v1', receipts });
     return EXIT.OK;
   }
-  throw new CliError('unknown_plugin_subcommand', 'Use `o8 plugin source review|link`, `o8 plugin list`, `o8 plugin action list|invoke`, `o8 plugin log list`, or `o8 plugin state clear`.', EXIT.INVALID_ARGS);
+  throw new CliError('unknown_plugin_subcommand', 'Use `o8 plugin source review|link`, `o8 plugin list`, `o8 plugin action list|invoke`, `o8 plugin terminal list|launch|stop`, `o8 plugin log list`, or `o8 plugin state clear`.', EXIT.INVALID_ARGS);
 }

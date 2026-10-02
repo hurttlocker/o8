@@ -119,6 +119,7 @@ import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
+import { pluginTerminalSessionReferences } from '@/lib/action-plugins/host';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserProvider } from './lib/browser/inventory';
@@ -1613,6 +1614,7 @@ function reapOrphanDashSessions() {
   let referenced: Set<string>;
   try {
     referenced = collectPersistedTmuxSessions();
+    for (const sessionName of pluginTerminalSessionReferences()) referenced.add(sessionName);
   } catch {
     return;
   }

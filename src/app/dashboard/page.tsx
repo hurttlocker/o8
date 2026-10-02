@@ -5388,6 +5388,15 @@ function DashboardInner() {
                 key={(leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id ?? 'personal'}
                 project={leftPanelFocus.view?.project ?? dashboardProjects.activeProject}
                 registeredRepos={globalRepoEntries}
+                onOpenPluginTerminal={async (terminal) => {
+                  const target = await waitForWorkspaceTerminalTarget({ preferredTileId: activeTileId, fallbackToAnyExisting: true, activate: false });
+                  const repo = globalRepoEntries.find((entry) => entry.localPath === terminal.workspaceRoot) ?? null;
+                  const tabId = target.handle.openAttachedTerminalSession({ sessionKey: terminal.sessionName, tmuxSession: terminal.sessionName, label: terminal.label, readOnly: false }, repo ? { ...repo, remoteUrl: repo.remoteUrl ?? undefined } : null);
+                  if (!tabId) throw new Error('Workspace terminal view unavailable.');
+                  setActiveTileId(target.tileId);
+                  setActiveNavSection('agents');
+                  flashWorkspaceTab(tabId);
+                }}
                 onClose={() => setActiveNavSection('agents')}
               />
             </Suspense>

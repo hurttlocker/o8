@@ -309,6 +309,9 @@ commands:
   plugin action list   list action IDs, revisions, and project bindings [--plugin ID]
   plugin action invoke <plugin-id> <action-id> --revision <sha256> [--repo <registered-path>]
   plugin log list      read persisted, bounded action receipts [--plugin ID] [--limit N]
+  plugin terminal list list persistent plugin terminals [--plugin ID]
+  plugin terminal launch <plugin-id> <entry-id> --revision <sha256> [--repo <path>] [--request <uuid>]
+  plugin terminal stop <receipt-id> (stop the process, retain its receipt)
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval

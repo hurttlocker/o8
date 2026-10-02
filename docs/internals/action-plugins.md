@@ -4,12 +4,12 @@ Customize > Plugins links executable actions from local folders or public
 GitHub repositories at an exact commit. This is a separate contract
 from the instruction bundles in Customize > Skills. The first action host does
 not discover marketplace packages, run startup hooks, subscribe to events, or
-add terminal panes.
+install dependencies or grant a sandbox. Reviewed terminal entrypoints use the persistent terminal host.
 
 ## Manifest
 
 A source folder contains `o8-actions.json` and each declared file. The manifest
-uses `o8-actions-v1` and declares one or more named actions. The examples
+uses `o8-actions-v1` and declares named actions, terminal entrypoints, or both. The examples
 under `examples/action-plugins/` are ready to review in the app:
 
 - `project-setup-check` reports Git, Node, npm, and the presence of project
@@ -152,3 +152,49 @@ sandbox, secret store, disk quota or a cross-machine synchronization feature.
 Actions have the current user's file access. Authors should cap their own data,
 use atomic writes and avoid secrets. The counter example uses a bounded read
 without following links and an exclusive temporary file plus atomic rename.
+
+
+## Persistent terminal entrypoints
+
+A package can declare `terminals` alongside `actions`. Each terminal has an `id`,
+`description`, declared `entry` file and fixed `args`. A terminal-only package
+uses `actions: []`. Review shows the executable text, arguments, project and
+terminal environment before linking. The interactive console example under
+`examples/action-plugins/interactive-console` needs no model or network access.
+
+**Launch terminal** starts the reviewed executable in the existing persistent
+terminal host and opens its view in the workspace. **Open terminal** reconnects
+to the same session; it does not rerun the executable. If the view cannot open,
+the session and its receipt remain available in Plugins. **Stop terminal**
+stops that session and retains its receipt. A completed process retains its
+screen until stopped. Existing terminal attach, input and detach controls also
+work with this session identity.
+
+Terminal launches require persistent terminals and tmux. They do not silently
+fall back to a short captured action. The process receives PATH, HOME, TERM,
+NODE_ENV and, if declared, O8_PLUGIN_STATE_DIR. Other inherited environment
+variables are cleared, including the environment of an existing tmux server.
+It still runs as the local user, with access to that user's files. The first
+version allows one active operation per plugin. Stop the terminal before
+changing the installation or clearing its saved state.
+
+```text
+o8 plugin terminal launch interactive-console console --revision <sha256> --request <uuid>
+o8 plugin terminal list --plugin interactive-console
+o8 terminal attach <session-name>
+o8 plugin terminal stop <receipt-id>
+```
+
+Launch accepts an optional `--repo` for project-bound packages. Reusing the same
+request UUID returns the original receipt, including a stopped result, rather
+than starting another process. Preserve that UUID when retrying an uncertain
+request. Without it, the CLI generates a UUID for that launch. Non-operator
+credentials, stale revisions, modified files and a different project are refused.
+Terminal receipts retain the source revision, project, session identity and state
+namespace separately from the bounded output of short actions.
+
+Launch claims are committed before process creation. After an interrupted launch,
+the same request ID only inspects the existing reservation. An unresolved launch
+remains reserved until the operator explicitly stops it; it never silently launches
+a second process. Stop also discards retained terminal output and asks for confirmation
+in the app. Saved plugin data remains available.
