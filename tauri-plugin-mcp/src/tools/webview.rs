@@ -74,7 +74,7 @@ impl PendingResults {
 /// 1. Generates a UUID `correlation_id`.
 /// 2. Substitutes `{{correlationId}}` / `{{payload}}` into `js_template`.
 ///    The template MUST self-invoke and call
-///    `window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result',
+///    `window.__TAURI_INTERNALS__.invoke('mcp_result',
 ///    {correlationId, ok, data?, error?})` on both success and failure.
 /// 3. Resolves the webview by `window_label` via `app.get_webview_window` —
 ///    returns Err if missing. (This intentionally does NOT use the
@@ -326,14 +326,14 @@ pub async fn handle_get_dom<R: Runtime>(
     if (!dom) {
       throw new Error('Retrieved DOM string is empty');
     }
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data: dom,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -769,14 +769,14 @@ const GET_PAGE_MAP_JS: &str = r#"
     if (typeof options.maxDepth === 'number') result.maxDepth = options.maxDepth;
     if (deltaResult) result.delta = deltaResult;
 
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data: result,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -986,14 +986,14 @@ pub async fn handle_get_element_position<R: Runtime>(
         }
       }
     };
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -1236,14 +1236,14 @@ pub async fn handle_send_text_to_element<R: Runtime>(
         isEditable
       }
     };
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -1314,7 +1314,7 @@ pub async fn handle_get_page_state<R: Runtime>(
     })?;
 
     // JS body lifted from handleGetPageStateRequest in guest-js/index.ts.
-    // Wrapped in IIFE that calls plugin:mcp|mcp_result on resolve/throw.
+    // Wrapped in IIFE that calls the host mcp_result command on resolve/throw.
     let js_template = r#"
 (async () => {
   try {
@@ -1325,14 +1325,14 @@ pub async fn handle_get_page_state<R: Runtime>(
       scrollPosition: { x: window.scrollX, y: window.scrollY },
       viewport: { width: window.innerWidth, height: window.innerHeight }
     };
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -1395,14 +1395,14 @@ pub async fn handle_navigate_back<R: Runtime>(
       url: window.location.href,
       title: document.title
     };
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -1488,14 +1488,14 @@ pub async fn handle_scroll_page<R: Runtime>(
       pageHeight: document.documentElement.scrollHeight,
       viewport: { width: window.innerWidth, height: window.innerHeight }
     };
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -1678,14 +1678,14 @@ pub async fn handle_fill_form<R: Runtime>(
         submitResult = { clicked: false, error: 'Submit element ref=' + submitRef + ' not found' };
       }
     }
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data: { fields: results, submit: submitResult },
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -1911,14 +1911,14 @@ const TYPE_INTO_FOCUSED_JS: &str = r#"
       throw new Error('Cannot type into focused <' + el.tagName.toLowerCase() + '> element — unsupported element type.');
     }
 
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data: { element: elementInfo, charsTyped: text.length },
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
@@ -2129,14 +2129,14 @@ pub async fn handle_wait_for<R: Runtime>(
         finish(checkCondition());
       }, timeoutMs);
     });
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data: { found: result.found, elapsed: result.elapsed, timedOut: !result.found },
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,

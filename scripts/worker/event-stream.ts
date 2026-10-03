@@ -9,11 +9,19 @@ const MAX_ATTEMPTS = 5;
 const REQUEST_TIMEOUT_MS = 12_000;
 const LONG_POLL_WAIT_MS = REQUEST_TIMEOUT_MS - 2_000;
 const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENOTFOUND', 'UND_ERR_SOCKET']);
+const SERVICE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
 
 function isRetryable(error: unknown) {
   if (!(error instanceof Error) || error.name === 'AbortError' || error.name === 'TimeoutError') return false;
   const code = (error as Error & { cause?: { code?: string } }).cause?.code;
   return error.message === 'fetch failed' || (typeof code === 'string' && RETRYABLE_CODES.has(code));
+}
+
+export function isTransientTransportError(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === 'AbortError' || error.name === 'TimeoutError') return false;
+  const code = (error as Error & { cause?: { code?: string } }).cause?.code;
+  return typeof code === 'string' && SERVICE_TRANSPORT_CODES.has(code);
 }
 
 async function fetchWithRetry(input: string, init: RequestInit): Promise<Response> {

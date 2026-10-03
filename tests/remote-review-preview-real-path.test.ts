@@ -42,9 +42,9 @@ beforeAll(async () => {
   servicePort = (socket.address() as AddressInfo).port;
   await new Promise<void>((resolve) => socket.close(() => resolve()));
   mkdirSync(repoPath);
-  const manifest = { version: 1, services: [{ name: 'web', command: 'node service.js', port: { preferred: servicePort, env: 'PORT' }, health: { http: `http://127.0.0.1:${servicePort}/health` } }], preview: { url: `http://127.0.0.1:${servicePort}` } };
+  const manifest = { version: 1, services: [{ name: 'web', command: 'exec node service.js', port: { preferred: servicePort, env: 'PORT' }, health: { http: `http://127.0.0.1:${servicePort}/health` } }], preview: { url: `http://127.0.0.1:${servicePort}` } };
   writeFileSync(join(repoPath, 'o8.workspace.json'), JSON.stringify(manifest));
-  writeFileSync(join(repoPath, 'service.js'), `require('http').createServer((req,res)=>{res.setHeader('content-type','text/html');if(require('fs').existsSync('unhealthy'))res.statusCode=503;res.end(req.url==='/health'?'ok':'<h1>Owned remote preview</h1>')}).listen(process.env.PORT,'127.0.0.1')`);
+  writeFileSync(join(repoPath, 'service.js'), `require('http').createServer((req,res)=>{res.setHeader('content-type','text/html');res.setHeader('x-fixture-pid',String(process.pid));if(require('fs').existsSync('unhealthy'))res.statusCode=503;res.end(req.url==='/health'?'ok':'<h1>Owned remote preview</h1>')}).listen(process.env.PORT,'127.0.0.1')`);
   await updateOperatorDefaults({ workspaceManifestPolicy: 'auto' });
   git('init', '-b', 'main', repoPath);
   git('-C', repoPath, 'config', 'user.name', 'Test');
@@ -99,7 +99,27 @@ function openPreview(jobId: string, attempt: number, taskId = 'packet-review-pre
   }), { params: Promise.resolve({ taskId }) });
 }
 
-async function relayBridge() {
+async function relayBridge(options: { holdAfterFirstClaim?: boolean } = {}) {
+  let hasClaimed = false;
+  let rejectControl = false;
+  let interruptJobId: string | null = null;
+  let interruptMode: 'before' | 'after' | 'expired' | 'exhausted' | 'hung' = 'after';
+  const confirmedHeartbeats = new Map<string, string>();
+  const consumedHeartbeats = new Map<string, string>();
+  const heartbeatLoss = {
+    dropped: 0, recovered: false, lastConfirmedExpiry: '', renewedExpiry: '',
+    eventId: 0, healthAtDrop: 0, processAtDrop: '', droppedAt: 0, attempts: 0, heldClosed: false, persistedHeartbeatsAtLoss: 0,
+  };
+  const recordLoss = async (jobId: string, renewal?: { leaseExpiresAt: string; eventId: number }) => {
+    const health = await fetch(`http://127.0.0.1:${servicePort}/health`, { signal: AbortSignal.timeout(1_500) });
+    await health.body?.cancel();
+    Object.assign(heartbeatLoss, {
+      dropped: heartbeatLoss.dropped + 1, lastConfirmedExpiry: confirmedHeartbeats.get(jobId) ?? '',
+      renewedExpiry: renewal?.leaseExpiresAt ?? '', eventId: renewal?.eventId ?? 0,
+      healthAtDrop: health.status, processAtDrop: health.headers.get('x-fixture-pid'), droppedAt: Date.now(),
+      persistedHeartbeatsAtLoss: readJobEvents('team_default', jobId).filter((event) => event.type === 'heartbeat').length,
+    });
+  };
   const pollingWorkers = new Set<string>();
   const disconnectedWorkers = new Set<string>();
   const server = createServer(async (incoming, outgoing) => {
@@ -120,16 +140,74 @@ async function relayBridge() {
     try {
       const parts: Buffer[] = [];
       for await (const part of incoming) parts.push(Buffer.from(part));
+      const body = parts.length && url.pathname === '/api/cloud/worker-stream'
+        ? JSON.parse(Buffer.concat(parts).toString()) as { jobId: string; type: string } : null;
+      const targetedHeartbeat = body?.type === 'heartbeat' && body.jobId === interruptJobId;
+      if (targetedHeartbeat && !heartbeatLoss.recovered) {
+        heartbeatLoss.attempts += 1;
+        if ((interruptMode === 'before' && heartbeatLoss.dropped === 0) || interruptMode === 'exhausted') {
+          if (heartbeatLoss.dropped === 0) await recordLoss(body!.jobId);
+          else heartbeatLoss.dropped += 1;
+          outgoing.destroy();
+          return;
+        }
+      }
       const request = new NextRequest(url, {
         method: incoming.method, headers: new Headers(incoming.headers as HeadersInit), signal: controller.signal,
         ...(parts.length ? { body: Buffer.concat(parts) } : {}),
       });
       if (isPoll) pollingWorkers.add(workerId);
+      // Keep recovery observations bound to the original claim. Otherwise the
+      // parallel long poll can correctly reclaim an expired lease and its new
+      // heartbeat ACK would be mistaken for recovery of the rejected old one.
+      if (isPoll && options.holdAfterFirstClaim && hasClaimed) {
+        await new Promise<void>((resolve) => {
+          if (controller.signal.aborted) resolve();
+          else controller.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return;
+      }
       const response = isPoll ? await pollRoute.GET(request)
         : url.pathname === '/api/cloud/worker-stream' ? await streamRoute.POST(request)
-          : url.pathname === '/api/cloud/worker-control' ? incoming.method === 'POST' ? await controlRoute.POST(request) : await controlRoute.GET(request)
+          : url.pathname === '/api/cloud/worker-control' ? incoming.method === 'POST' ? await controlRoute.POST(request)
+            : rejectControl ? new Response(null, { status: 503 }) : await controlRoute.GET(request)
             : url.pathname === '/api/cloud/worker-preview' ? incoming.method === 'POST' ? await relayRoute.POST(request) : await relayRoute.GET(request)
               : new Response('Not found', { status: 404 });
+      if (isPoll && response.ok && response.status !== 204) hasClaimed = true;
+      if (body?.type === 'heartbeat' && response.ok) {
+        const renewal = await response.clone().json() as { leaseExpiresAt: string; eventId: number };
+        if (targetedHeartbeat && heartbeatLoss.dropped === 0) {
+          // Route persistence precedes socket loss. Do not send even response headers.
+          await recordLoss(body.jobId, renewal);
+          if (interruptMode === 'expired') {
+            // Lose coordinator authority explicitly, without altering the session deadline.
+            getSqlite().prepare('UPDATE cloud_jobs SET lease_expires_at = ? WHERE id = ?').run(Date.now() - 1, body.jobId);
+          }
+          if (interruptMode === 'hung') {
+            await new Promise<void>((resolve) => {
+              if (controller.signal.aborted) resolve();
+              else controller.signal.addEventListener('abort', () => resolve(), { once: true });
+            });
+            heartbeatLoss.heldClosed = true;
+            return;
+          }
+          outgoing.destroy();
+          return;
+        }
+        outgoing.once('finish', () => { confirmedHeartbeats.set(body.jobId, renewal.leaseExpiresAt); });
+      }
+      // A subsequent control GET proves the worker parsed a later heartbeat ACK.
+      if (url.pathname === '/api/cloud/worker-control' && incoming.method === 'GET' && response.status === 204) {
+        const jobId = url.searchParams.get('jobId')!;
+        const confirmed = confirmedHeartbeats.get(jobId);
+        if (confirmed) consumedHeartbeats.set(jobId, confirmed);
+      }
+      if (url.pathname === '/api/cloud/worker-control' && incoming.method === 'GET'
+        && url.searchParams.get('jobId') === interruptJobId && response.status === 204
+        && heartbeatLoss.dropped === 1
+        && Date.parse(confirmedHeartbeats.get(interruptJobId!) ?? '') > Date.parse(heartbeatLoss.renewedExpiry || heartbeatLoss.lastConfirmedExpiry)) {
+        heartbeatLoss.recovered = true;
+      }
       if (!outgoing.destroyed) {
         outgoing.writeHead(response.status, Object.fromEntries(response.headers));
         outgoing.end(Buffer.from(await response.arrayBuffer()));
@@ -142,6 +220,9 @@ async function relayBridge() {
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, pollingWorkers, disconnectedWorkers,
+    heartbeatLoss, confirmedAuthority: (jobId: string) => consumedHeartbeats.get(jobId),
+    interruptHeartbeat: (jobId: string, mode: typeof interruptMode = 'after') => { interruptJobId = jobId; interruptMode = mode; },
+    failControl: () => { rejectControl = true; },
     close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }) };
 }
 
@@ -317,6 +398,244 @@ describe('completed remote result preview sessions', () => {
       expect(output).not.toContain(key.plaintext);
     } finally { worker.kill('SIGCONT'); closePreviewServers(); await stop(); await bridge.close(); }
   }, 60_000);
+
+  it.skipIf(process.platform !== 'linux').each(['after', 'before', 'expired', 'exhausted', 'hung'] as const)(
+    'bounds healthy service heartbeat recovery under %s acknowledgement loss', async (mode) => {
+    const bin = join(dataDir, `heartbeat-loss-${mode}-bin`); mkdirSync(bin);
+    const invoked = join(dataDir, `heartbeat-loss-${mode}-unexpected-agent`);
+    writeFileSync(join(bin, 'codex'), `#!/bin/sh\nprintf unexpected > '${invoked}'\nexit 91\n`);
+    chmodSync(join(bin, 'codex'), 0o755);
+    const parentBefore = getJob('team_default', parentId)!;
+    const allocated = await openPreview(parentId, 1);
+    expect(allocated.status).toBe(202);
+    const access = await allocated.json();
+    const recoveryChildId = access.serviceJobId as string;
+    const bridge = await relayBridge({ holdAfterFirstClaim: true });
+    let worker: ReturnType<typeof spawn> | null = null;
+    let output = '';
+    let servicePid = 0;
+    let serviceStartTime: string | undefined;
+    let previewId: string | undefined;
+    let previewOrigin: string | undefined;
+    const originalLeaseMs = process.env.O8_CLOUD_JOB_LEASE_MS;
+    const healthyEvents = () => readJobEvents('team_default', recoveryChildId).filter((event) => event.type === 'service'
+      && (event.payload as { state: string }).state === 'healthy');
+    const diagnostics = () => JSON.stringify({ transport: bridge.heartbeatLoss,
+      child: (() => {
+        const job = getJob('team_default', recoveryChildId);
+        return { id: job?.id, status: job?.status, claim: job?.claimCount, worker: job?.claimedBy,
+          attempt: job?.executionAttempts, leaseExpiresAt: job?.leaseExpiresAt,
+          absoluteDeadline: job?.launch.remoteServiceSession?.expiresAt };
+      })(), events: readJobEvents('team_default', recoveryChildId).filter((event) => ['heartbeat', 'errored', 'service'].includes(event.type)), output });
+    const health = async () => {
+      const response = await fetch(`http://127.0.0.1:${servicePort}/health`, { signal: AbortSignal.timeout(1_500) });
+      await response.body?.cancel();
+      expect(response.status, diagnostics()).toBe(200);
+      return Number(response.headers.get('x-fixture-pid'));
+    };
+    const closePreview = () => previewRoute.DELETE(new NextRequest('http://localhost/api/tasks/packet-review-preview/preview', {
+      method: 'DELETE', headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ id: previewId, serviceJobId: recoveryChildId }),
+    }), { params: Promise.resolve({ taskId: 'packet-review-preview' }) });
+    try {
+      execFileSync(process.execPath, ['scripts/build-worker.mjs']);
+      worker = spawn(process.execPath, [join(process.cwd(), 'dist/worker/o8-worker.mjs'),
+        '--o8-url', bridge.url, '--workspace-dir', join(dataDir, `heartbeat-loss-${mode}-worker`), '--worker-id', `heartbeat-loss-${mode}-worker`,
+        '--poll-interval-ms', '60000', '--control-poll-interval-ms', '1000'], {
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, O8_CLOUD_WORKER_KEY: key.plaintext,
+          GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${bare}/.insteadOf`, GIT_CONFIG_VALUE_0: 'ssh://git@example.invalid/fixture.git' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      worker.stderr!.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+      await waitFor(() => healthyEvents().length === 1 ? true : null, diagnostics);
+      servicePid = await health();
+      expect(servicePid).toBeGreaterThan(0);
+      const serviceStat = readFileSync(`/proc/${servicePid}/stat`, 'utf8');
+      const serviceFields = serviceStat.slice(serviceStat.lastIndexOf(')') + 2).split(' ');
+      expect(Number(serviceFields[2])).toBe(servicePid);
+      serviceStartTime = serviceFields[19];
+      if (mode === 'before' || mode === 'after') {
+        const opened = await openPreview(parentId, 1);
+        expect(opened.status).toBe(200);
+        const preview = await opened.json();
+        expect(preview.serviceJobId).toBe(recoveryChildId);
+        expect(preview.expiresAt).toBe(access.expiresAt);
+        previewId = preview.id;
+        previewOrigin = new URL(preview.url).origin;
+        const handshake = await fetch(preview.url, { redirect: 'manual', signal: AbortSignal.timeout(1_500) });
+        await handshake.body?.cancel();
+        expect(handshake.status).toBe(303);
+      }
+      if (mode === 'hung') {
+        // First ACK a genuinely shorter coordinator lease, then hold the next
+        // renewal ACK. The worker must use the shorter known bound, not the
+        // longer renewal that will persist behind the held response.
+        const previous = bridge.confirmedAuthority(recoveryChildId);
+        process.env.O8_CLOUD_JOB_LEASE_MS = '6000';
+        await waitFor(() => {
+          const confirmed = bridge.confirmedAuthority(recoveryChildId);
+          return confirmed && confirmed !== previous ? true : null;
+        }, diagnostics);
+        process.env.O8_CLOUD_JOB_LEASE_MS = originalLeaseMs;
+      }
+      const before = getJob('team_default', recoveryChildId)!;
+      const healthyReceipt = healthyEvents()[0]!;
+      const heartbeatCount = readJobEvents('team_default', recoveryChildId).filter((event) => event.type === 'heartbeat').length;
+      bridge.interruptHeartbeat(recoveryChildId, mode);
+      await waitFor(() => bridge.heartbeatLoss.dropped >= 1 ? true : null, diagnostics);
+      const loss = bridge.heartbeatLoss;
+      // Raw evidence distinguishes a lost response from health or authority loss.
+      console.log('[heartbeat-loss] persisted renewal and last confirmed worker authority', diagnostics());
+      expect(loss.healthAtDrop).toBe(200);
+      expect(Number(loss.processAtDrop)).toBe(servicePid);
+      expect(Date.parse(loss.lastConfirmedExpiry)).toBeGreaterThan(loss.droppedAt);
+      if (mode !== 'before' && mode !== 'exhausted') {
+        expect(loss.persistedHeartbeatsAtLoss).toBe(heartbeatCount + 1);
+        expect(Date.parse(loss.renewedExpiry)).toBeGreaterThan(Date.parse(loss.lastConfirmedExpiry));
+        expect(Date.parse(loss.renewedExpiry)).toBeLessThanOrEqual(Date.parse(access.expiresAt));
+        expect(readJobEvents('team_default', recoveryChildId).find((event) => event.id === loss.eventId)?.type).toBe('heartbeat');
+      } else {
+        expect(loss.eventId).toBe(0);
+        expect(loss.persistedHeartbeatsAtLoss).toBe(heartbeatCount);
+      }
+      // Terminal state ends the barrier promptly on current immediate-abort code.
+      await waitFor(() => {
+        if (loss.recovered) return true;
+        if (mode === 'expired') return output.includes('heartbeat failed: [worker/cloud] /api/cloud/worker-stream rejected with HTTP 409') ? true : null;
+        return getJob('team_default', recoveryChildId)?.status !== 'leased' ? true : null;
+      }, diagnostics);
+      const recoverable = mode === 'after' || mode === 'before';
+      expect(loss.recovered, diagnostics()).toBe(recoverable);
+      closeDb();
+      const after = getJob('team_default', recoveryChildId)!;
+      expect(after).toMatchObject({ id: before.id, claimCount: before.claimCount,
+        launch: { remoteServiceSession: { expiresAt: access.expiresAt } } });
+      expect(healthyEvents()).toEqual([healthyReceipt]);
+      if (recoverable) {
+        expect(after).toMatchObject({ status: 'leased', claimedBy: before.claimedBy,
+          leaseToken: before.leaseToken, executionAttempts: before.executionAttempts });
+        expect(loss.attempts, diagnostics()).toBeGreaterThanOrEqual(2);
+        expect(loss.attempts, diagnostics()).toBeLessThanOrEqual(3);
+        expect(await health()).toBe(servicePid);
+        process.kill(servicePid, 0);
+      } else if (mode === 'expired') {
+        expect(after).toMatchObject({ status: 'pending', executionAttempts: before.executionAttempts,
+          leaseRecoveryCount: before.leaseRecoveryCount + 1 });
+        expect(after.leaseToken).toBeUndefined();
+        expect(loss.attempts).toBe(2);
+        expect(readJobEvents('team_default', recoveryChildId).filter((event) => event.type === 'heartbeat')).toHaveLength(heartbeatCount + 1);
+      } else {
+        expect(after).toMatchObject({ status: 'parked', executionAttempts: before.executionAttempts + 1 });
+        expect(loss.attempts).toBe(mode === 'exhausted' ? 3 : 1);
+        const failure = readJobEvents('team_default', recoveryChildId).find((event) => event.type === 'errored');
+        expect((failure?.payload as { message: string }).message).toContain(mode === 'exhausted'
+          ? 'heartbeat failed: fetch failed; heartbeat transport recovery exhausted after 3 attempts'
+          : 'lease renewal was not confirmed before expiry');
+        if (mode === 'hung') {
+          await waitFor(() => loss.heldClosed ? true : null, diagnostics);
+          expect(Date.parse(failure!.createdAt)).toBeLessThan(Date.parse(loss.lastConfirmedExpiry));
+          expect(Date.parse(loss.renewedExpiry)).toBeGreaterThan(Date.parse(loss.lastConfirmedExpiry));
+        }
+      }
+      if (recoverable) {
+        expect((await closePreview()).status).toBe(200);
+        await waitFor(() => getJob('team_default', recoveryChildId)?.status === 'cancelled' ? true : null, diagnostics);
+      }
+      // Product cleanup must finish while the worker remains online. SIGTERM
+      // in fallback teardown cannot satisfy these success-path assertions.
+      expect(worker.exitCode, diagnostics()).toBeNull();
+      expect(worker.signalCode, diagnostics()).toBeNull();
+      await waitFor(() => {
+        try { process.kill(servicePid, 0); return null; } catch { return true; }
+      }, diagnostics);
+      await expect(fetch(`http://127.0.0.1:${servicePort}/health`, { signal: AbortSignal.timeout(1_500) })).rejects.toThrow();
+      if (previewOrigin) await expect(fetch(previewOrigin, { signal: AbortSignal.timeout(1_500) })).rejects.toThrow();
+      expect(worker.exitCode, diagnostics()).toBeNull();
+      expect(worker.signalCode, diagnostics()).toBeNull();
+      closeDb();
+      // DELETE and expired authority clear the claim before a cleanup receipt
+      // can persist. Those cases prove cancellation/recovery plus live-worker
+      // PID/listener exit above; only still-authorized failures emit stopped.
+      if (mode === 'exhausted' || mode === 'hung') {
+        expect(readJobEvents('team_default', recoveryChildId).filter((event) => event.type === 'service').at(-1)?.payload)
+          .toMatchObject({ state: 'stopped' });
+      }
+      expect(getJob('team_default', parentId)).toEqual(parentBefore);
+      expect(existsSync(invoked)).toBe(false);
+      expect(output).not.toContain(key.plaintext);
+    } finally {
+      process.env.O8_CLOUD_JOB_LEASE_MS = originalLeaseMs;
+      // Close even on red; stop the worker before dropping the bridge so receipts can persist.
+      try {
+        try {
+          await closePreview();
+        } finally {
+          if (worker && worker.exitCode === null && worker.signalCode === null) {
+            worker.kill('SIGTERM');
+            await new Promise<void>((resolve) => {
+              const force = setTimeout(() => worker!.kill('SIGKILL'), 8_000);
+              worker!.once('exit', () => { clearTimeout(force); resolve(); });
+            });
+          }
+        }
+        expect(existsSync(invoked)).toBe(false);
+      } finally {
+        // Red-path fallback only: kill the owned exec fixture group if a broken
+        // worker left it behind. Start time prevents signalling a reused PID.
+        if (servicePid && serviceStartTime) {
+          try {
+            const stat = readFileSync(`/proc/${servicePid}/stat`, 'utf8');
+            const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+            if (fields[19] === serviceStartTime && Number(fields[2]) === servicePid) process.kill(-servicePid, 'SIGKILL');
+          } catch { /* The owned process already exited. */ }
+        }
+        closePreviewServers(); await bridge.close();
+      }
+    }
+  }, 60_000);
+
+  it.skipIf(process.platform !== 'linux')('persists the control failure that stopped a healthy preview and closes its process', async () => {
+    const bin = join(dataDir, 'failure-bin'); mkdirSync(bin);
+    const invoked = join(dataDir, 'failure-unexpected-agent');
+    writeFileSync(join(bin, 'codex'), `#!/bin/sh\nprintf unexpected > '${invoked}'\nexit 91\n`);
+    chmodSync(join(bin, 'codex'), 0o755);
+    execFileSync(process.execPath, ['scripts/build-worker.mjs']);
+    const allocated = await openPreview(parentId, 1);
+    expect(allocated.status).toBe(202);
+    const failedChildId = (await allocated.json()).serviceJobId;
+    const bridge = await relayBridge();
+    const worker = spawn(process.execPath, [join(process.cwd(), 'dist/worker/o8-worker.mjs'),
+      '--o8-url', bridge.url, '--workspace-dir', join(dataDir, 'failure-worker'), '--worker-id', 'failure-worker',
+      '--poll-interval-ms', '60000', '--control-poll-interval-ms', '1000'], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, O8_CLOUD_WORKER_KEY: key.plaintext,
+        GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${bare}/.insteadOf`, GIT_CONFIG_VALUE_0: 'ssh://git@example.invalid/fixture.git' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let output = '';
+    worker.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+    try {
+      await waitFor(() => readJobEvents('team_default', failedChildId).some((event) => event.type === 'service'
+        && (event.payload as { state: string }).state === 'healthy') ? true : null, () => output);
+      bridge.failControl();
+      await waitFor(() => getJob('team_default', failedChildId)?.status === 'parked' ? true : null, () => output);
+      closeDb();
+      const failure = readJobEvents('team_default', failedChildId).find((event) => event.type === 'errored');
+      expect(failure?.payload).toMatchObject({ message: '[worker] control poll failed: [worker/cloud] /api/cloud/worker-control rejected with HTTP 503' });
+      const stopped = readJobEvents('team_default', failedChildId).filter((event) => event.type === 'service').at(-1);
+      expect(stopped?.payload).toMatchObject({ state: 'stopped' });
+      await expect(fetch(`http://127.0.0.1:${servicePort}/health`)).rejects.toThrow();
+      expect(existsSync(invoked)).toBe(false);
+      expect(getJob('team_default', parentId)!.status).toBe('completed');
+      expect(output).not.toContain(key.plaintext);
+    } finally {
+      closePreviewServers();
+      if (worker.exitCode === null && worker.signalCode === null) {
+        worker.kill('SIGTERM');
+        await new Promise<void>((resolve) => worker.once('exit', () => resolve()));
+      }
+      await bridge.close();
+    }
+  }, 25_000);
 
   it('rejects revoked child credentials and superseded parents after reopening persisted state', async () => {
     const opened = await openPreview(parentId, 1); expect(opened.status).toBe(202);
