@@ -2,6 +2,8 @@
 
 import { ComposerPrimitive, MessagePrimitive, useAuiState, useComposerRuntime, type MessageState } from '@assistant-ui/react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import type { RippleChoice, RippleChoiceResolution } from '@/lib/mobile/ripple-contract';
+import { rememberRippleResolution, requestRippleResolution } from '@/lib/mobile/ripple-client';
 import { MobileMarkdown } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
@@ -22,6 +24,7 @@ import {
   type ModelOption,
 } from './mobile-approvals-shared';
 import { renderToolPart } from './mobile-tool-cards';
+import { MobileRippleOverlay } from './mobile-ripple-overlay';
 
 function StreamingDot({ palette }: { palette: MobilePalette }) {
   const [expanded, setExpanded] = useState(false);
@@ -306,9 +309,11 @@ export function EmptyState({
 export function ComposerBar({
   palette,
   selectedModel,
+  repoPath,
 }: {
   palette: MobilePalette;
   selectedModel: ModelOption;
+  repoPath: string | null;
 }) {
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const isLoading = useAuiState((state) => state.thread.isLoading);
@@ -318,6 +323,12 @@ export function ComposerBar({
 
   const voice = usePressToDictate();
   const baseTextAtRecordingStartRef = useRef('');
+  const composerTextRef = useRef(composerText ?? '');
+  const rippleRequestIdRef = useRef(0);
+  const [rippleResolution, setRippleResolution] = useState<RippleChoiceResolution | null>(null);
+  const [rippleUtterance, setRippleUtterance] = useState('');
+  const [rippleStartedAt, setRippleStartedAt] = useState(0);
+  composerTextRef.current = composerText ?? '';
   // Snapshot composer text on the rising edge of recording so the
   // transcript appends to whatever the user already typed.
   useEffect(() => {
@@ -327,16 +338,68 @@ export function ComposerBar({
   }, [voice.isRecording]);
 
   // Append final transcript into the composer when it lands. Don't
-  // auto-submit (packet acceptance #3 — user must tap to send).
+  // auto-submit (packet acceptance #3 — user must tap to send). Ripple
+  // asynchronously checks only the final voice draft and never blocks send.
   useEffect(() => {
     if (!voice.transcript) return;
     const base = baseTextAtRecordingStartRef.current;
     const sep = base && !base.endsWith(' ') ? ' ' : '';
-    composerRuntime.setText(`${base}${sep}${voice.transcript}`);
-  }, [voice.transcript, composerRuntime]);
+    const nextText = `${base}${sep}${voice.transcript}`;
+    composerRuntime.setText(nextText);
+    composerTextRef.current = nextText;
+
+    const requestId = rippleRequestIdRef.current + 1;
+    rippleRequestIdRef.current = requestId;
+    setRippleResolution(null);
+    setRippleUtterance(nextText);
+    const startedAt = Date.now();
+    setRippleStartedAt(startedAt);
+
+    const repoName = repoPath?.split(/[\\/]/).filter(Boolean).at(-1);
+    void requestRippleResolution({ utterance: nextText, repoName }).then((result) => {
+      if (rippleRequestIdRef.current !== requestId) return;
+      if (composerTextRef.current !== nextText) return;
+      if (result.kind === 'choice') {
+        setRippleResolution(result);
+      }
+    });
+  }, [voice.transcript, composerRuntime, repoPath]);
+
+  useEffect(() => {
+    if (!rippleResolution || !rippleUtterance) return;
+    if ((composerText ?? '') === rippleUtterance) return;
+    rippleRequestIdRef.current += 1;
+    setRippleResolution(null);
+    setRippleUtterance('');
+  }, [composerText, rippleResolution, rippleUtterance]);
+
+  const resolveRipple = (choice: RippleChoice) => {
+    if (!rippleResolution || !rippleUtterance) return;
+    rememberRippleResolution({
+      utterance: rippleUtterance,
+      resolution: rippleResolution,
+      choice,
+      resolutionMs: Math.max(0, Date.now() - rippleStartedAt),
+    });
+    setRippleResolution(null);
+    setRippleUtterance('');
+  };
 
   return (
-    <ComposerPrimitive.Root
+    <>
+      {rippleResolution ? (
+        <MobileRippleOverlay
+          palette={palette}
+          resolution={rippleResolution}
+          onResolve={resolveRipple}
+          onDismiss={() => {
+            rippleRequestIdRef.current += 1;
+            setRippleResolution(null);
+            setRippleUtterance('');
+          }}
+        />
+      ) : null}
+      <ComposerPrimitive.Root
       onSubmit={() => {
         if (!isRunning && !isComposerEmpty) {
           playSendClick();
@@ -488,7 +551,8 @@ export function ComposerBar({
           ) : null}
         </div>
       )}
-    </ComposerPrimitive.Root>
+      </ComposerPrimitive.Root>
+    </>
   );
 }
 
