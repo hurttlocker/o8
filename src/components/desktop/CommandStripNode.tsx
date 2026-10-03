@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment } from 'react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { BrainAnswerCitation, MobileTranscriptCommand, MobileTranscriptCommandChip } from '@/lib/mobile/types';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
@@ -174,6 +174,7 @@ export function CommandStripNode({
 }) {
   const hasBrainAnswer = Boolean(command.brainAnswer?.tokens);
   const [expanded, setExpanded] = useState(() => hasBrainAnswer);
+  const detailsId = useId();
   const details = command.details ?? [];
   const chips = command.chips ?? [];
   const hasDetails = details.length > 0 || chips.length > 0 || Boolean(timestampLabel) || hasBrainAnswer;
@@ -193,6 +194,7 @@ export function CommandStripNode({
           setExpanded((value) => !value);
         }}
         aria-expanded={hasDetails ? expanded : undefined}
+        aria-controls={expanded && hasDetails ? detailsId : undefined}
         title={command.summary}
         style={{
           width: '100%',
@@ -265,6 +267,7 @@ export function CommandStripNode({
 
       {expanded && hasDetails ? (
         <div
+          id={detailsId}
           style={{
             marginTop: 6,
             marginLeft: 12,
