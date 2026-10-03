@@ -190,4 +190,79 @@ export function execFileSync(command, args) {
       expect(readdirSync(f.root).filter(name => name.startsWith('o8-package-size-'))).toEqual([]);
     },
   );
+
+  it.each([false, true])('packages through the actual entry point with existing DMG parent=%s', (existingParent) => {
+    const f = fixture();
+    const bundle = dirname(dirname(f.app));
+    const dmgParent = join(bundle, 'dmg');
+    const dmg = join(dmgParent, 'o8_0.1.742_universal.dmg');
+    const sentinel = join(dmgParent, 'keep.txt');
+    if (existingParent) {
+      mkdirSync(dmgParent);
+      writeFileSync(sentinel, 'unrelated-output');
+      writeFileSync(dmg, 'previous-image');
+    }
+    expect(existsSync(dmgParent)).toBe(existingParent);
+    mkdirSync(join(f.root, '.tauri'));
+    writeFileSync(join(f.root, '.tauri/cortex-ide.key'), 'fixture-key');
+    const log = join(f.root, 'calls.jsonl');
+    // Real app/archive/filesystem validation runs. Only signing/notary and
+    // platform process edges are simulated; no Apple tool or credential is used.
+    const childProcess = `import { appendFileSync, existsSync, writeFileSync, readlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+const real = process.getBuiltinModule('node:child_process');
+export function execFileSync(command, args = [], options = {}) {
+  appendFileSync(process.env.O8_DMG_TEST_LOG, JSON.stringify({ command, args }) + '\\n');
+  if (['cat', 'du', 'tar'].includes(command)) return real.execFileSync(command, args, options);
+  if (command === 'hdiutil') {
+    if (args[0] !== 'create') throw new Error('unexpected image operation');
+    const destination = args.at(-1);
+    if (!existsSync(dirname(destination))) throw new Error('DMG_DESTINATION_PARENT_MISSING');
+    const staging = args[args.indexOf('-srcfolder') + 1];
+    if (!existsSync(join(staging, 'o8.app/Contents/MacOS/o8'))
+      || readlinkSync(join(staging, 'Applications')) !== '/Applications') throw new Error('invalid staging');
+    writeFileSync(destination, 'fixture-image');
+    return '';
+  }
+  if (command === 'cargo') { writeFileSync(args.at(-1) + '.sig', 'fixture-signature'); return ''; }
+  if (['file', 'codesign', 'ditto', 'xcrun'].includes(command)) return '';
+  throw new Error('unexpected process: ' + command);
+}`;
+    // The production script's fixed notary zip must never touch another fixture
+    // or host artifact. All other filesystem operations execute unchanged.
+    const fileSystem = `const fs = process.getBuiltinModule('node:fs');
+export const { appendFileSync, writeFileSync, readdirSync, statSync, readFileSync, mkdirSync, symlinkSync, cpSync,
+  lstatSync, mkdtempSync, readlinkSync, realpathSync, closeSync, openSync, readSync } = fs;
+export const existsSync = path => path === '/tmp/o8-notarize.zip' ? false : fs.existsSync(path);
+export const rmSync = (path, options) => {
+  if (path === '/tmp/o8-notarize.zip') throw new Error('unexpected shared zip removal');
+  return fs.rmSync(path, options);
+};`;
+    writeFileSync(join(f.root, 'loader.mjs'), `const modules = ${JSON.stringify({ 'node:child_process': childProcess, 'node:fs': fileSystem })};
+export async function load(url, context, nextLoad) {
+  return modules[url] ? { format: 'module', shortCircuit: true, source: modules[url] } : nextLoad(url, context);
+}`);
+    writeFileSync(join(f.root, 'register.mjs'), "import { register } from 'node:module'; register(new URL('./loader.mjs', import.meta.url));");
+    const result = spawnSync(process.execPath, ['--import', join(f.root, 'register.mjs'), join(sourceRoot, 'scripts/sign-and-notarize.mjs')], {
+      cwd: f.root, encoding: 'utf8', timeout: 15_000,
+      env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: f.root, TMPDIR: f.root,
+        APPLE_SIGNING_IDENTITY: 'fixture', APPLE_ID: 'fixture', APPLE_PASSWORD: 'fixture', APPLE_TEAM_ID: 'fixture',
+        O8_DMG_TEST_LOG: log },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(dmg, 'utf8')).toBe('fixture-image');
+    expect(existsSync(join(bundle, 'dmg-staging'))).toBe(false);
+    if (existingParent) expect(readFileSync(sentinel, 'utf8')).toBe('unrelated-output');
+    const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { command: string; args: string[] });
+    const image = calls.findIndex(call => call.command === 'hdiutil');
+    expect(calls[image].args).toEqual(['create', '-volname', 'o8 0.1.742', '-srcfolder', join(bundle, 'dmg-staging'), '-ov', '-format', 'UDZO', dmg]);
+    expect(calls[image - 1].command).toBe('cargo');
+    expect(calls.slice(image + 1).map(call => [call.command, ...call.args.slice(0, 2)])).toEqual([
+      ['codesign', '--force', '--sign'],
+      ['xcrun', 'notarytool', 'submit'],
+      ['xcrun', 'stapler', 'staple'],
+      ['xcrun', 'stapler', 'validate'],
+    ]);
+  });
+
 });

@@ -2794,6 +2794,7 @@
     {
       "path": "tests/packaging-preflight-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "native-build",
         "real-path"
