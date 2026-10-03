@@ -1,17 +1,29 @@
 # Product telemetry privacy
 
-Product telemetry is optional and defaults off. The single source of consent is
-`productTelemetryEnabled` in `~/.o8/operator-defaults.json` (or the active
-`CORTEX_IDE_DATA_DIR`). Missing, malformed, or legacy browser-only state never
-creates consent. Browser events and server events both re-check this persisted
-choice, and server egress remains blocked without it.
+Usage analytics are optional and default on for installs without an earlier
+choice. An earlier explicit off stays off after an update. The preference is
+`productTelemetryEnabled`: `null` means never chosen, `true` means explicitly
+on, and `false` means explicitly off. Unset resolves to on. The canonical file
+is `settings.toml` in the active data directory; `operator-defaults.json`
+remains the last-good fallback. In TOML, `telemetry.product_enabled = ""`
+means unset, and booleans retain their meaning. Unrelated settings saves
+preserve this distinction. The operator-defaults API reads and writes the
+same three values. Browser-only state never overrides the persisted choice.
 
-On first run, o8 asks separately about product usage and crash reports. Saving
-the card writes `productTelemetryEnabled`, `crashReportsEnabled`, and
-`telemetryConsentAnswered` in one operator-defaults update. The first two keys
-record the independent choices; the answered key prevents another prompt.
-Missing or malformed answered state means only that the card may appear. It
-never enables either sharing path.
+On first run, o8 lists exactly what usage events contain, shows an example,
+and provides one visible **Turn off** control. That click persists the opt-out
+immediately without changing crash sharing or waiting for the screen's save
+button. Completing the screen writes `productTelemetryEnabled`, the separate
+`crashReportsEnabled` choice, and `telemetryConsentAnswered` together. Leaving
+analytics at its default records `null`, not an explicit opt-in. Crash reports
+still require a separate choice.
+
+Default-on emits nothing until that screen is completed. The startup event
+`app.opened` is then sent once for the dashboard opening if analytics remain
+on. An existing explicit opt-in keeps working. Browser and server events both
+re-check persisted state before egress; Settings → General → Privacy turns
+sharing off immediately. Missing or malformed state cannot bypass the first-run
+gate. Crash-report consent and the always-on desktop update ping are unchanged.
 
 The wire allowlist is intentionally complete and small:
 
@@ -25,6 +37,20 @@ Code, prompts, repository names, paths, diffs, transcripts, file contents,
 credentials, user identity, and machine identity are never allowed. Crash-log
 upload, Sentry crash/error sharing, and user-initiated issue reports have their
 own controls and do not inherit product-telemetry consent.
+
+For example, adding a Git project with a remote sends this usage payload:
+
+```json
+{"event":"repo.added","props":{"hasRemote":true,"isGitRepo":true}}
+```
+
+Usage event payloads have no identity fields. No identity is collected beyond
+sign-in; authenticated delivery uses the existing sign-in entitlement.
+
+The default-on change must remain unmerged until the maintainer confirms that
+the [o8.run privacy page](https://o8.run/privacy) covers default-on analytics and
+approves the change. That page is maintained separately. The README and next
+release notes in this repository describe the same default before shipping.
 
 ## Crash-report initialization
 

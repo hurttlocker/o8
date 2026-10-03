@@ -129,7 +129,7 @@ export interface OperatorDefaults {
   targetingAction: TargetingTierUI;
   updateAutoApply: UpdateAutoApply;
   collideAggregator: CollideAggregator;
-  productTelemetryEnabled: boolean;
+  productTelemetryEnabled: boolean | null;
   telemetryConsentAnswered: boolean;
   telemetryOptIn: boolean;
   telemetryIngestUrl: string;
