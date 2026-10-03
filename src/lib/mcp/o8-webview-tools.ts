@@ -556,7 +556,8 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     }),
 
     o8_view_type: async (args) => withStructuredErrors(async () => {
-      const text = requiredString(args, 'text');
+      const text = args.text;
+      if (typeof text !== 'string' || !text.trim()) throw new Error('text is required');
       const client = getClient();
       const prepared = JSON.parse((await client.evalJs(buildPrepareComposerTargetScript())).result) as { ok?: boolean; error?: string };
       if (prepared.ok !== true) throw new Error(prepared.error ?? 'No visible editable target is available.');
