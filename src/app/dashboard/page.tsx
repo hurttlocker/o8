@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
@@ -2796,18 +2797,7 @@ function DashboardInner() {
     handleSelectIssue(issueNumber, repo);
   }, [handleSelectIssue]);
 
-  const handlePaletteSelectFile = useCallback((filePath: string, line?: number) => {
-    openCanvasTab({
-      id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-      kind: 'file',
-      label: filePath.split('/').pop() ?? filePath,
-      resourceId: filePath,
-      meta: {
-        ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-        ...(line ? { line: String(line) } : {}),
-      },
-    });
-  }, [activeWorkspace, openCanvasTab]);
+  const handlePaletteSelectFile = usePaletteFileSelection(activeWorkspace, openCanvasTab);
 
   const handlePaletteSelectAgent = useCallback((sessionKey: string) => {
     handleSelectSession(sessionKey);

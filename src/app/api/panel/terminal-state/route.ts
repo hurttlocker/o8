@@ -7,6 +7,7 @@ import { listRepos } from '@/lib/repos/registry';
 import { listLanes } from '@/lib/lane/registry';
 import { buildRepoStateScope, stripPersistedTabs } from '@/lib/terminal/tab-state';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { restoreFileTabContext } from '@/lib/terminal/restore-file-tabs';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = getDataDir();
@@ -127,7 +128,8 @@ function filterStateToRegisteredRepos(data: unknown, repoRoots: Set<string>) {
 }
 
 function sanitizeRestoredState(data: unknown, repoRoots: Set<string>) {
-  return stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(data, repoRoots)));
+  const restored = restoreFileTabContext(data, repoRoots);
+  return stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(restored, repoRoots)));
 }
 
 function stateMatchesRepoPath(data: unknown, repoPath: string) {
