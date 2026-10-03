@@ -1,3 +1,4 @@
+import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { captureMissionProject, resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import { aggregateMissionCost, laneSessionHistoryForMission } from '@/lib/orchestrator/cost-aggregator';
 import { projectMissionFunnel } from '@/lib/orchestrator/mission-funnel';
@@ -92,6 +93,7 @@ export function resolveMissionDispatchTarget(missionId?: string): string {
 }
 
 export async function createMission(input: CreateMissionInput) {
+  const sealedContract = resolveSealedMissionContract(input, input.issues?.length === 1 && isInlineIssue(input.issues[0])) ?? input.qualitySearch?.taskContract;
   const repoPath = ensureRepoPath(input.repoPath);
   const projectContext = await captureMissionProject(repoPath, input.projectId);
   if (!Array.isArray(input.issues) || input.issues.length === 0) {
@@ -257,15 +259,11 @@ export async function createMission(input: CreateMissionInput) {
       taskContractRequired: resolveTaskContractRequired({
         runtime: packetRouting.selectedRuntime,
         missionOptOut: input.taskContract === 'off',
-        explicit: Boolean(input.qualitySearch),
+        explicit: Boolean(sealedContract),
       }),
-      taskContractSource: input.qualitySearch ? 'explicit' : 'default',
-      ...(input.qualitySearch
-        ? {
-            taskContract: input.qualitySearch.taskContract,
-            qualitySearch: { version: 1 as const, role: null, repairAttempts: 0 },
-          }
-        : {}),
+      taskContractSource: sealedContract ? 'explicit' : 'default',
+      ...(sealedContract ? { taskContract: sealedContract } : {}),
+      ...(input.qualitySearch ? { qualitySearch: { version: 1 as const, role: null, repairAttempts: 0 } } : {}),
       // #1329 — carry the dispatching orchestrator thread id so the worker
       // inherits that thread's session rules via `buildPacketPrompt`.
       ...(typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()

@@ -3488,6 +3488,15 @@
       ]
     },
     {
+      "path": "tests/sealed-task-contract-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/server-only-stub-node-options.test.ts",
       "reasons": [
         "child-process"

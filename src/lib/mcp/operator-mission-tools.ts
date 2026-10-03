@@ -121,6 +121,7 @@ interface CreateMissionInput {
   useBrain?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
+  sealedTaskContract?: PacketTaskContract;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -158,6 +159,7 @@ interface CreateMissionInlineInput {
   useBrain?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
+  sealedTaskContract?: PacketTaskContract;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -424,6 +426,7 @@ export async function createMission(input: CreateMissionInput) {
           useBrain: input.useBrain,
           huddle: input.huddle,
           taskContract: input.taskContract,
+          sealedTaskContract: input.sealedTaskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
@@ -476,6 +479,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           useBrain: input.useBrain,
           huddle: input.huddle,
           taskContract: input.taskContract,
+          sealedTaskContract: input.sealedTaskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
