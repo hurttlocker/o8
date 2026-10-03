@@ -26,6 +26,8 @@ import {
   toAssistantUiToolCallPart,
   toProxyMessages,
 } from './mobile-assistant-chat-core';
+import { getRippleContextForMessage } from '@/lib/mobile/ripple-client';
+import { formatRippleSystemContext } from '@/lib/mobile/ripple-contract';
 
 type ContentEvent = {
   type: 'content';
@@ -323,6 +325,18 @@ export function createMobileChatModel(selectedModel: ModelOption, repoPath: stri
   return {
     run: async function* ({ messages, abortSignal }: ChatModelRunOptions) {
       try {
+        const proxyMessages = toProxyMessages(messages);
+        const lastUserMessage = [...proxyMessages].reverse().find((message) => message.role === 'user');
+        const ripplePatches = lastUserMessage
+          ? getRippleContextForMessage(lastUserMessage.content)
+          : [];
+        const messagesWithRipple = ripplePatches.length > 0
+          ? [
+              { role: 'system' as const, content: formatRippleSystemContext(ripplePatches) },
+              ...proxyMessages,
+            ]
+          : proxyMessages;
+
         const isCli = selectedModel.backend === 'cli' && selectedModel.cliRuntime;
         const endpoint = isCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
         const effort = effortOverride || selectedModel.defaultEffort;
@@ -330,14 +344,14 @@ export function createMobileChatModel(selectedModel: ModelOption, repoPath: stri
           ? {
               runtime: selectedModel.cliRuntime,
               model: selectedModel.id,
-              messages: toProxyMessages(messages),
+              messages: messagesWithRipple,
               ...(effort ? { effort } : {}),
               ...(repoPath ? { repoPath } : {}),
             }
           : {
               model: selectedModel.id || DEFAULT_MOBILE_CHAT_MODEL,
               provider: selectedModel.provider,
-              messages: toProxyMessages(messages),
+              messages: messagesWithRipple,
               stream: true,
               repoPath,
             };
