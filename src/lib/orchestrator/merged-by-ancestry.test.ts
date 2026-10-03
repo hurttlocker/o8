@@ -145,13 +145,13 @@ function writeFreshClaudeTranscript(sessionKey: string): void {
   resetOwnedSessionIndex();
 }
 
-function seedPacket(repoPath: string, packetId: string) {
+function seedPacket(repoPath: string, packetId: string, runtime: 'codex' | 'cloud' = 'codex', branch = 'packet') {
   const lane = createLane({
     repoPath,
     worktreePath: repoPath,
-    branch: 'packet',
+    branch,
     baseBranch: 'main',
-    runtime: 'codex',
+    runtime,
     packetId,
   });
   laneIds.push(lane.id);
@@ -161,7 +161,7 @@ function seedPacket(repoPath: string, packetId: string) {
     ...createEmptyOrchestratorMissionState(),
     missionId: `mission-${packetId}`,
     repoPath,
-    packets: [packetFixture(repoPath, packetId, lane.id)],
+    packets: [packetFixture(repoPath, packetId, lane.id, { branch })],
   });
   return lane;
 }
@@ -183,6 +183,46 @@ afterEach(() => {
 });
 
 describe('merged-by-ancestry reconciliation', () => {
+  it.each(['packet', 'binding', 'lane'] as const)(
+    'preserves remote completion when the %s records cloud ownership', async (owner) => {
+      const { clone } = makeRepo('o8-remote-ancestry');
+      const packetId = `pkt-remote-${owner}`;
+      const lane = seedPacket(clone, packetId, owner === 'lane' ? 'cloud' : 'codex', 'remote-only-branch');
+      // The remote branch is intentionally absent from the coordinator clone.
+      const state = readOrchestratorControlPlaneState();
+      const packet = state.packets[0]!;
+      packet.branchTarget = 'remote-only-branch';
+      if (owner === 'packet') { packet.runtime = 'cloud'; packet.workerRouting = undefined; }
+      if (owner === 'binding') packet.lane!.runtime = 'cloud';
+      updateLane(lane.id, {
+        worktreePath: null,
+      }, 'system');
+      writeOrchestratorControlPlaneState(state);
+      const before = getLaneEvents(lane.id);
+
+      await sweepPacketsMergedByAncestry();
+      await sweepPacketsMergedByAncestry();
+
+      expect(persistedPacket(packetId)).toMatchObject({
+        status: 'awaiting_review', releaseState: 'pending', archivedAt: null,
+      });
+      expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', outcome: null });
+      expect(getLaneEvents(lane.id)).toEqual(before);
+    },
+  );
+
+  it('preserves a settled remote lane after its mission leaves live state', async () => {
+    const { clone } = makeRepo('o8-remote-orphan-ancestry');
+    const lane = seedPacket(clone, 'pkt-remote-orphan', 'cloud', 'remote-only-branch');
+    updateLane(lane.id, { worktreePath: null }, 'system');
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    const before = getLaneEvents(lane.id);
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 0, merged: 0 });
+    expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', outcome: null });
+    expect(getLaneEvents(lane.id)).toEqual(before);
+  });
+
   it.each([
     { label: 'failed', laneStatus: 'failed', packetStatus: 'failed', eventLabel: 'agent_failed' },
     { label: 'stopped', laneStatus: 'paused', packetStatus: 'blocked', eventLabel: 'operator_stopped' },
