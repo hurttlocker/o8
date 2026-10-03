@@ -10,6 +10,7 @@ import { startCodex, type RunningCodex } from './run-codex';
 import { PersistentWorkerState } from './state';
 import { startWorkspaceServices, type RunningWorkspaceServices } from './workspace-services';
 import { startPreviewRelay } from './preview';
+import { HeartbeatAuthorityExpired, renewServiceHeartbeat } from './service-heartbeat';
 
 interface WorkerCliOptions {
   o8Url: string;
@@ -83,6 +84,7 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   let stopPreview: (() => Promise<void>) | null = null;
   let abortControl: CloudWorkerControl | null = null;
   let monitorFailure: Error | null = null;
+  let heartbeatTransportFailure: Error | null = null;
   const session = job.launch.remoteServiceSession;
   const serviceDeadline = session ? Date.parse(session.expiresAt) : Infinity;
   let deadlineExpired = false;
@@ -99,20 +101,27 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     if (Date.now() >= serviceDeadline) { deadlineExpired = true; operation.abort(); codex?.abort(); return; }
     if (leaseExpiresAt === serviceDeadline) return;
     if (Date.now() < leaseExpiresAt - leaseMarginMs || monitorFailure || abortControl) return;
-    monitorFailure = new Error('[worker] lease renewal was not confirmed before expiry');
+    monitorFailure = new Error(`[worker] ${heartbeatTransportFailure ? `heartbeat failed: ${safeMessage(heartbeatTransportFailure)}; ` : ''}lease renewal was not confirmed before expiry`);
     operation.abort();
     codex?.abort();
   }, 1_000);
+  const monitorStop = new AbortController();
+  const monitorSignal = AbortSignal.any([operation.signal, monitorStop.signal]);
   const monitor = async () => {
-    if (monitorFailure || abortControl || operation.signal.aborted) return;
+    if (monitorFailure || abortControl || monitorSignal.aborted) return;
     let stage = 'heartbeat';
     try {
-      const renewed = await stream.postEvent(job, 'heartbeat', { status: 'running' }, operation.signal);
+      const renewed = session ? await renewServiceHeartbeat(stream, job, {
+        signal: monitorSignal,
+        confirmedUntil: leaseExpiresAt === serviceDeadline ? serviceDeadline : Math.min(leaseExpiresAt - leaseMarginMs, serviceDeadline),
+        onTransportFailure: (error) => { heartbeatTransportFailure ??= error; },
+      }) : await stream.postEvent(job, 'heartbeat', { status: 'running' }, monitorSignal);
       const nextExpiry = renewed ? Date.parse(renewed) : NaN;
-      if (!Number.isFinite(nextExpiry)) throw new Error('[worker] heartbeat returned no lease expiry');
-      leaseExpiresAt = nextExpiry;
+      if (!Number.isFinite(nextExpiry) || nextExpiry <= Date.now()) throw new Error('[worker] heartbeat returned no valid lease expiry');
+      leaseExpiresAt = Math.min(nextExpiry, serviceDeadline);
+      heartbeatTransportFailure = null;
       stage = 'control poll';
-      const control = await stream.pollControl(job, operation.signal);
+      const control = await stream.pollControl(job, monitorSignal);
       if (control?.type === 'abort') {
         abortControl = control;
         operation.abort();
@@ -124,6 +133,8 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
       // Aborting an in-flight renewal must not replace its watchdog cause.
       // Operator cancellation, the absolute deadline and process shutdown own
       // their existing cleanup paths rather than becoming monitoring failures.
+      if (monitorSignal.aborted) return;
+      if (error instanceof HeartbeatAuthorityExpired && Date.now() >= serviceDeadline) deadlineExpired = true;
       if (!monitorFailure && !abortControl && !deadlineExpired && !shutdown.aborted) {
         monitorFailure = new Error(`[worker] ${stage} failed: ${safeMessage(error)}`, { cause: error });
       }
@@ -132,8 +143,14 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     }
   };
   await monitor();
-  let monitorChain = Promise.resolve();
-  const timer = setInterval(() => { monitorChain = monitorChain.then(monitor); }, opts.controlPollIntervalMs);
+  // One cycle at a time; hung requests cannot accumulate interval callbacks.
+  const monitorChain = (async () => {
+    while (!monitorSignal.aborted) {
+      try { await delay(opts.controlPollIntervalMs, undefined, { signal: monitorSignal }); }
+      catch { return; }
+      await monitor();
+    }
+  })();
   let failure: unknown = null;
   try {
     if (!session && job.launch.workMode === 'read-only') throw new Error('[worker] read-only cloud jobs are unsupported by this worker');
@@ -160,7 +177,9 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     if (session) {
       if (!services || !job.launch.remotePreview) throw new Error('[worker] service session has no preview service');
       while (!operation.signal.aborted) {
-        if (!await services.ownsPreview(job.launch.remotePreview)) throw new Error('[worker] preview service lost health or socket ownership');
+        const owned = await services.ownsPreview(job.launch.remotePreview);
+        if (operation.signal.aborted) break;
+        if (!owned) throw new Error('[worker] preview service lost health or socket ownership');
         await delay(1_000, undefined, { signal: operation.signal });
       }
       return;
@@ -188,7 +207,7 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
     const files = await commitWorkerChanges(cloneDir, source.baseSha, operation.signal);
     if (files.length > 0) await stream.postEvent(job, 'diff', { files }, operation.signal);
     const sha = await pushRemoteBranch(cloneDir, source.branch, operation.signal);
-    clearInterval(timer);
+    monitorStop.abort();
     await monitorChain;
     if (abortControl || shutdown.aborted) return;
     if (monitorFailure) throw monitorFailure;
@@ -196,7 +215,8 @@ async function handleLaunch(job: CloudWorkerJob, stream: EventStream, opts: Work
   } catch (error) {
     failure = error;
   } finally {
-    clearInterval(timer);
+    operation.abort();
+    monitorStop.abort();
     clearInterval(watchdog);
     shutdown.removeEventListener('abort', stop);
     await monitorChain;
