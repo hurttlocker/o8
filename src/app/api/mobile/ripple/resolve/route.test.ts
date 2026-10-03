@@ -1,11 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const resolveOpenRouterRoute = vi.fn();
+const mocks = vi.hoisted(() => ({
+  resolveOpenRouterRoute: vi.fn(),
+}));
 
 vi.mock('@/lib/cortex/qa/llm/inference-route', () => ({
-  resolveOpenRouterRoute,
+  resolveOpenRouterRoute: mocks.resolveOpenRouterRoute,
 }));
+
+const resolveOpenRouterRoute = mocks.resolveOpenRouterRoute;
 
 const { POST } = await import('./route');
 
@@ -20,6 +24,10 @@ function request(body: unknown) {
 beforeEach(() => {
   vi.restoreAllMocks();
   resolveOpenRouterRoute.mockReset();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('POST /api/mobile/ripple/resolve', () => {

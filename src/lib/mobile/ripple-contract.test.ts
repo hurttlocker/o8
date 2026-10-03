@@ -40,6 +40,17 @@ describe('ripple contract', () => {
       ],
       aodlPath: '../authority',
     })).toBeNull();
+
+    expect(parseRippleResolutionResult({
+      kind: 'choice',
+      id: 'r2',
+      question: 'Pick one',
+      options: [
+        { label: 'A', value: 'a' },
+        { label: 'B', value: 'b' },
+      ],
+      aodlPath: 'authority.delete',
+    })).toBeNull();
   });
 
   it('formats patches as resolved data without expanding authority', () => {

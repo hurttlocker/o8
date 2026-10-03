@@ -40,6 +40,7 @@ export type RippleEpisode = {
 };
 
 const AODL_PATH = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/i;
+const ALLOWED_AODL_ROOTS = new Set(['intent', 'constraints', 'references', 'verification']);
 
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -66,7 +67,8 @@ export function parseRippleResolutionDraft(value: unknown): RippleResolutionDraf
 
   const question = cleanString(value.question, 180);
   const aodlPath = cleanString(value.aodlPath, 96);
-  if (!question || !aodlPath || !AODL_PATH.test(aodlPath)) return null;
+  const aodlRoot = aodlPath?.split(/[._-]/, 1)[0];
+  if (!question || !aodlPath || !AODL_PATH.test(aodlPath) || !aodlRoot || !ALLOWED_AODL_ROOTS.has(aodlRoot)) return null;
   if (!Array.isArray(value.options)) return null;
 
   const options = value.options.map(parseChoice).filter((choice): choice is RippleChoice => Boolean(choice));
