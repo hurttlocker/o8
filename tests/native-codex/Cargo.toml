@@ -1,0 +1,12 @@
+[package]
+name = "symon-native-codex-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+serde_json = "1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "time", "macros"] }

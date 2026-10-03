@@ -3829,6 +3829,7 @@ type SymonTextTurnState = {
   sessionId: string;
   turnId: string;
   terminal: boolean;
+  interruptRequested?: boolean;
 };
 
 /** sessionId → socket, immutable scope, and negotiated additive protocol. */
@@ -3950,6 +3951,7 @@ function pushSymonTextDone(
   status: 'done' | 'failed' | 'interrupted',
   detail?: string,
   activeMachine?: SymonMachineIdentity,
+  selectionPending: boolean = false,
 ): void {
   if (turn.terminal) return;
   turn.terminal = true;
@@ -3962,6 +3964,10 @@ function pushSymonTextDone(
       turnId: turn.turnId,
       status,
       activeMachine: activeMachine ?? loadSymonTextSession(turn.sessionId)?.activeMachine ?? DEFAULT_SYMON_MACHINE,
+      ...(!selectionPending ? {
+        model: loadSymonTextSession(turn.sessionId)?.model,
+        effort: loadSymonTextSession(turn.sessionId)?.effort,
+      } : {}),
       ...(detail ? { detail } : {}),
     });
   }
@@ -3995,6 +4001,11 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
     pushSymonTextDone(turn, 'failed', 'Text session expired.');
     return;
   }
+  // A queued turn can be stopped before it ever reaches the native planner.
+  if (turn.interruptRequested) {
+    pushSymonTextDone(turn, 'interrupted');
+    return;
+  }
   const prompt = formatSymonTextPlannerPrompt(initial, text);
   if (!appendSymonTextTranscript(turn.sessionId, [{ role: 'user', text }])) {
     pushSymonTextDone(turn, 'failed', 'Text session expired.');
@@ -4012,83 +4023,102 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
     });
   }
   const deadline = Date.now() + 5 * 60_000;
-  const mirroredConfirmations = new Set<string>();
-  while (!turn.terminal && Date.now() < deadline) {
-    let outcome: SymonTextRelayResult;
-    try {
-      outcome = await fetchNextJson<SymonTextRelayResult>('/api/mobile/symon/text-turn', {
-        method: 'POST',
-        body: {
-          sessionId: turn.sessionId,
-          turnId: turn.turnId,
-          prompt,
-          planner: {
-            engine: initial.engine,
-            model: initial.model,
-            effort: initial.effort,
-          },
-        },
-        timeoutMs: 8_000,
-      });
-    } catch (error) {
-      pushSymonTextDone(turn, 'failed', error instanceof Error ? error.message : 'Planner bridge failed.');
-      return;
+  const pollNative = (reconcileOnly = false) => fetchNextJson<SymonTextRelayResult>('/api/mobile/symon/text-turn', {
+    method: 'POST',
+    body: {
+      sessionId: turn.sessionId,
+      turnId: turn.turnId,
+      prompt,
+      planner: { engine: initial.engine, model: initial.model, effort: initial.effort },
+      reconcileOnly,
+    },
+    timeoutMs: 8_000,
+  });
+  const reconcileSelection = async () => {
+    // Keep the serialized owner until the first native result consumes retry
+    // eligibility, or the session expires. Lookup-only polling cannot replay a
+    // call lost during webview teardown; a Stop delivery is not its result.
+    while (loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true) {
+      try {
+        await pollNative(true);
+      } catch {
+        // Transport failure does not establish the effective native selection.
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
     }
-    if (outcome.state === 'pending') continue;
-    if (outcome.state === 'needs_confirmation') {
-      const rawTool = outcome.confirmation && typeof outcome.confirmation === 'object'
-        ? (outcome.confirmation as Record<string, unknown>).tool
-        : null;
-      const confirmation = typeof rawTool === 'string'
-        ? parseSymonPendingConfirmation(outcome.confirmation, {
-          sessionId: turn.sessionId,
-          callId: turn.turnId,
-          tool: rawTool,
-        })
-        : null;
-      if (!confirmation) {
-        pushSymonTextDone(turn, 'failed', 'The desktop returned an uncorrelated confirmation.');
+  };
+  const mirroredConfirmations = new Set<string>();
+  try {
+    while (!turn.terminal && Date.now() < deadline) {
+      let outcome: SymonTextRelayResult;
+      try {
+        outcome = await pollNative();
+      } catch (error) {
+        pushSymonTextDone(turn, 'failed', error instanceof Error ? error.message : 'Planner bridge failed.');
         return;
       }
-      if (!mirroredConfirmations.has(confirmation.confirmationId)) {
-        if (!symonConfirmationTracker.register(confirmation, Date.now())) {
-          pushSymonTextDone(turn, 'failed', 'Confirmation identity collision.');
+      if (outcome.state === 'pending') continue;
+      if (outcome.state === 'needs_confirmation') {
+        const rawTool = outcome.confirmation && typeof outcome.confirmation === 'object'
+          ? (outcome.confirmation as Record<string, unknown>).tool
+          : null;
+        const confirmation = typeof rawTool === 'string'
+          ? parseSymonPendingConfirmation(outcome.confirmation, {
+            sessionId: turn.sessionId,
+            callId: turn.turnId,
+            tool: rawTool,
+          })
+          : null;
+        if (!confirmation) {
+          pushSymonTextDone(turn, 'failed', 'The desktop returned an uncorrelated confirmation.');
           return;
         }
-        mirroredConfirmations.add(confirmation.confirmationId);
-        pushSymonConfirmRequired(turn.clientId, confirmation);
+        if (!mirroredConfirmations.has(confirmation.confirmationId)) {
+          if (!symonConfirmationTracker.register(confirmation, Date.now())) {
+            pushSymonTextDone(turn, 'failed', 'Confirmation identity collision.');
+            return;
+          }
+          mirroredConfirmations.add(confirmation.confirmationId);
+          pushSymonConfirmRequired(turn.clientId, confirmation);
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        continue;
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
-      continue;
-    }
-    if (outcome.state === 'done' && outcome.result?.status === 'interrupted') {
-      pushSymonTextDone(turn, 'interrupted');
+      if (outcome.state === 'done' && outcome.result?.status === 'interrupted') {
+        pushSymonTextDone(turn, 'interrupted');
+        return;
+      }
+      if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
+        const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
+        if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
+        const answer = outcome.result.text;
+        appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
+        const owner = clients.get(turn.clientId);
+        if (owner && answer) {
+          send(owner, {
+            channel: 'symon',
+            type: 'symon-text-delta',
+            sessionId: turn.sessionId,
+            turnId: turn.turnId,
+            delta: answer,
+          });
+        }
+        pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
+        return;
+      }
+      pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
       return;
     }
-    if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
-      const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
-      if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
-      const answer = outcome.result.text;
-      appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
-      const owner = clients.get(turn.clientId);
-      if (owner && answer) {
-        send(owner, {
-          channel: 'symon',
-          type: 'symon-text-delta',
-          sessionId: turn.sessionId,
-          turnId: turn.turnId,
-          delta: answer,
-        });
+    if (!turn.terminal) {
+      if (!turn.interruptRequested) {
+        turn.interruptRequested = true;
+        await interruptSymonTextNative(turn.sessionId, turn.turnId);
       }
-      pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
-      return;
+      pushSymonTextDone(turn, 'failed', 'Planner turn timed out; its final result is still being reconciled.', undefined,
+        loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true);
     }
-    pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
-    return;
-  }
-  if (!turn.terminal) {
-    await interruptSymonTextNative(turn.sessionId, turn.turnId);
-    pushSymonTextDone(turn, 'failed', 'Planner turn timed out.');
+  } finally {
+    await reconcileSelection();
   }
 }
 
@@ -4117,9 +4147,11 @@ async function handleSymonTextInterrupt(client: ClientState, msg: Record<string,
   const record = loadSymonTextSession(sessionId);
   if (!record || !symonTextClientMatches(record, client)) return;
   const turn = symonTextTurns.get(textTurnKey(sessionId, turnId));
-  if (!turn || turn.clientId !== client.id || turn.terminal) return;
+  if (!turn || turn.clientId !== client.id || turn.terminal || turn.interruptRequested) return;
+  turn.interruptRequested = true;
+  // Delivery is only an acknowledgement. Keep the existing polling/queue owner
+  // alive until the native terminal result persists the effective selection.
   await interruptSymonTextNative(sessionId, turnId);
-  pushSymonTextDone(turn, 'interrupted');
 }
 
 async function interruptSymonTool(call: PendingToolCall): Promise<boolean> {

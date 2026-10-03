@@ -26,6 +26,7 @@ function requestBearer(request: NextRequest): string {
 
 async function resolveRequestedPlanner(value: unknown): Promise<SymonTextPlannerSelection | null> {
   const requestedModel = normalizeMobileAskModelId(value);
+  if (requestedModel === 'auto' || requestedModel === 'managed-free') return null;
   try {
     // The Tauri planner launches the native CLI. Stored gateway readiness belongs to
     // packet workers and must not make this native-only surface selectable.
@@ -39,16 +40,15 @@ async function resolveRequestedPlanner(value: unknown): Promise<SymonTextPlanner
       claude: claude.installed && claude.ready,
       codex: codex.installed && codex.ready,
     };
-    let route = resolveMobileAskRoute(requestedModel, readiness);
-    if (route.kind === 'managed') route = resolveMobileAskRoute('auto', readiness);
-    if (route.kind === 'managed') return null;
+    const route = resolveMobileAskRoute(requestedModel, readiness);
+    if (route.kind === 'managed') throw new Error('The selected native planner is unavailable.');
     return {
       engine: route.kind,
       model: route.cliModel,
       effort: route.effort,
     };
   } catch {
-    return null;
+    throw new Error('The selected native planner is unavailable. Choose another model explicitly.');
   }
 }
 
@@ -88,9 +88,9 @@ export async function POST(request: NextRequest) {
   // Symon brain setting actually resolves — since #2176 the text surface binds
   // by registry id, so an open runtime seats it the same way. The availability
   // gate below reports the native side's own reason when there is no seat.
-  const requestedPlanner = await resolveRequestedPlanner(context.model);
   let info: SymonTextPlannerInfo;
   try {
+    const requestedPlanner = await resolveRequestedPlanner(context.model);
     info = await readSymonTextPlannerInfo(requestedPlanner ?? undefined);
   } catch (error) {
     return NextResponse.json(
@@ -115,6 +115,7 @@ export async function POST(request: NextRequest) {
       engine: info.engine,
       model: info.model,
       effort: info.effort,
+      allowDefaultFallback: info.allowDefaultFallback === true,
       workspaceMode: scope.workspaceMode,
       repoId: scope.repoId,
       repoPath: scope.repoPath,
