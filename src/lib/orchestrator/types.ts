@@ -291,6 +291,8 @@ export interface OrchestratorPacket {
   referenceLabel: string;
   title: string;
   summary: string;
+  /** Project identity captured at task creation; independent of active UI selection. */
+  projectId?: string | null;
   /** Packet was created from the Design Mode element-edit loop. */
   origin?: 'design-mode';
   workspaceTargetPath: string | null;

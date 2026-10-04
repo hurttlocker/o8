@@ -5,9 +5,11 @@ import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import type { TaskPoolTask } from '../repo-focus/tabs/control-room/types';
 import { ActionButton } from '../repo-focus/tabs/control-room/shared';
+import { RemoteTaskPreview } from '../repo-focus/tabs/control-room/RemoteTaskPreview';
 import { THREAD_GROUPS, threadModelLabel, threadStatusLine } from './threads-model';
 import { useOrchestratorData } from '../orchestrator-data-context';
 import { usePendingThreadSteer } from './thread-steer-state';
+import { ThreadActionButton } from './ThreadActions';
 
 interface Evidence {
   jobId: string;
@@ -16,6 +18,14 @@ interface Evidence {
   files: { path: string; status: string; additions: number; deletions: number }[];
   logsTruncated: boolean;
   filesTruncated: boolean;
+}
+
+function ThreadPreview({ taskId, jobId, attempt }: { taskId: string; jobId: string; attempt: number }) {
+  const [open, setOpen] = useState(false);
+  return <div aria-label="Thread preview" style={{ marginBottom: 16 }}>
+    {open ? <RemoteTaskPreview taskId={taskId} jobId={jobId} attempt={attempt} onBack={() => setOpen(false)} />
+      : <ThreadActionButton label="Remote preview" onClick={() => setOpen(true)} />}
+  </div>;
 }
 
 export function ThreadDetail({ task, active, evidenceRevision, onBack, actions }: {
@@ -101,6 +111,10 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions }
         <div style={{ fontSize: 10, fontWeight: 260, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>{THREAD_GROUPS.find((group) => group.id === task.group)?.label ?? task.status} · {threadModelLabel(task)} · {task.execution || (task.workerRouting?.selectedRuntime ?? task.runtime) === 'cloud' ? 'Remote worker' : 'Local worker'}{task.branch ? ` · ${task.branch}` : ''}</div>
         <p style={{ fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, overflowWrap: 'anywhere' }}>{threadStatusLine(task)}</p>
         {actions}
+        {/* Only the visible current attempt owns this entry. Hiding the panel
+            unmounts its resource and returns to an explicit open on re-entry. */}
+        {active && task.group !== 'done' && task.execution?.previewAccess === 'requestable' && jobId && attempt !== undefined && attempt > 0
+          ? <ThreadPreview key={evidenceKey} taskId={task.id} jobId={jobId} attempt={attempt} /> : null}
         {task.summary && task.summary !== threadStatusLine(task) ? <details style={{ marginBottom: 16 }}>
           <summary style={{ fontSize: 12, color: 'var(--t-text-muted)', cursor: 'pointer' }}>Task brief</summary>
           <p style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{task.summary}</p>

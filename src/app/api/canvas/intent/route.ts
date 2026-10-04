@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
             body: JSON.stringify({
               repoPath,
               task,
-              count: typeof args.count === 'number' ? args.count : 1,
+              count: args.count,
               clientMutationId,
               ...(origin === 'symon' ? { origin } : {}),
             }),
