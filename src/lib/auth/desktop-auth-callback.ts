@@ -31,6 +31,12 @@ export interface ConsumeDesktopAuthCallbackOptions {
 const consumedTickets = new Set<string>();
 let exchangingTickets = 0;
 const exchangeListeners = new Set<() => void>();
+const browserSignInListeners = new Set<() => void>();
+
+export function subscribeDesktopBrowserSignIn(listener: () => void): () => void {
+  browserSignInListeners.add(listener);
+  return () => { browserSignInListeners.delete(listener); };
+}
 
 export function desktopAuthTicketExchangeInProgress(): boolean {
   return exchangingTickets > 0;
@@ -39,6 +45,17 @@ export function desktopAuthTicketExchangeInProgress(): boolean {
 export function subscribeDesktopAuthTicketExchange(listener: () => void): () => void {
   exchangeListeners.add(listener);
   return () => { exchangeListeners.delete(listener); };
+}
+
+export function waitForDesktopAuthTicketExchange(): Promise<void> {
+  if (!desktopAuthTicketExchangeInProgress()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsubscribe = subscribeDesktopAuthTicketExchange(() => {
+      if (desktopAuthTicketExchangeInProgress()) return;
+      unsubscribe();
+      resolve();
+    });
+  });
 }
 
 export function resetConsumedDesktopAuthTicketsForTest(): void {
@@ -139,6 +156,7 @@ export async function consumeDesktopAuthCallback(
         clearDesktopAuthError();
         // Retire the marker before the bridge can sync or enroll this session.
         await Promise.resolve(options.onSignInComplete?.()).catch(() => {});
+        browserSignInListeners.forEach((listener) => listener());
       },
     });
   } catch (err) {

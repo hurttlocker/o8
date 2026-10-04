@@ -1,4 +1,4 @@
-import { deviceRequestIsLocal, deviceResponse, requestDeviceService, validDeviceGrant } from '@/lib/auth/device-session-service';
+import { deviceRequestIsLocal, deviceResponse, requestDeviceService, revokeDeviceToken, validDeviceGrant } from '@/lib/auth/device-session-service';
 import { deviceSessionGeneration, readDeviceSession, writeDeviceSession } from '@/lib/auth/device-session-store';
 import { readAuthSignedOutAt } from '@/lib/auth/sign-out-marker';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const mismatch = data.clerkUserId !== body.clerkUserId.trim();
     if (mismatch || generation !== deviceSessionGeneration() || epoch !== readSignInEpoch()
       || priorToken !== readDeviceSession()?.token || readAuthSignedOutAt() !== null) {
-      await requestDeviceService('revoke', data.deviceToken).catch(() => {});
+      await revokeDeviceToken(data.deviceToken);
       return deviceResponse({ ok: false, reason: mismatch ? 'device_owner_mismatch' : 'device_state_changed' }, 409);
     }
     writeDeviceSession({ token: data.deviceToken, clerkUserId: data.clerkUserId, installId, idleExpiresAt: data.idleExpiresAt });

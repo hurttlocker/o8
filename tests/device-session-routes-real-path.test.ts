@@ -12,7 +12,7 @@ const owner = 'user_device';
 let dataDir: string;
 let server: Server;
 let calls: Array<{ path: string; authorization?: string; body: unknown }>;
-let respond: (path: string) => Promise<{ status: number; body: unknown }>;
+let respond: (path: string) => Promise<{ status: number; body: unknown; disconnect?: boolean }>;
 let credential: string;
 const idleExpiresAt = '2027-01-01T00:00:00.000Z';
 
@@ -49,6 +49,7 @@ describe('desktop device routes through a fake license server and persisted stat
       const raw = Buffer.concat(chunks).toString();
       calls.push({ path: req.url!, authorization: req.headers.authorization, body: raw ? JSON.parse(raw) : null });
       const reply = await respond(req.url!);
+      if (reply.disconnect) { res.destroy(); return; }
       res.writeHead(reply.status, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(reply.body));
     });
@@ -61,6 +62,7 @@ describe('desktop device routes through a fake license server and persisted stat
   afterEach(async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     rmSync(dataDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -139,14 +141,118 @@ describe('desktop device routes through a fake license server and persisted stat
     expect(store.readDeviceSession()).toBeNull();
   });
 
-  it('keeps the device on a transient upstream failure', async () => {
+  it('retires an unconfirmed rotation after three quick retries before backoff', async () => {
     const store = await seed();
     respond = async () => ({ status: 503, body: { error: credential } });
     const { POST } = await import('@/app/api/panel/auth/device/renew/route');
     const response = await POST(request('renew'));
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain(credential);
+    expect(calls.filter((call) => call.path.endsWith('/renew'))).toHaveLength(4);
+    expect(store.readDeviceSession()).toBeNull();
+  });
+
+  it.each(['lost-response', 'invalid-response', 'failed-write'] as const)('recovers a %s using the previous token within rotation grace', async (failure) => {
+    const store = await seed();
+    const rotated = randomBytes(32).toString('hex');
+    const ticket = randomBytes(24).toString('hex');
+    if (failure === 'failed-write') {
+      const write = store.writeDeviceSession;
+      let failed = false;
+      vi.spyOn(store, 'writeDeviceSession').mockImplementation((value) => {
+        if (value.token === rotated && !failed) { failed = true; throw new Error('Storage unavailable'); }
+        write(value);
+      });
+    }
+    respond = async () => {
+      const first = calls.length === 1;
+      return { status: 200, disconnect: first && failure === 'lost-response', body:
+        first && failure === 'invalid-response' ? {} : { deviceToken: rotated, ticket, clerkUserId: owner, idleExpiresAt } };
+    };
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const started = Date.now();
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    const response = await POST(request('renew'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ticket, clerkUserId: owner });
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.authorization === `Bearer ${credential}`)).toBe(true);
+    expect(timeout.mock.calls.some(([milliseconds]) => milliseconds === 30_000)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(60_000);
+    expect(store.readDeviceSession()?.token).toBe(rotated);
+  });
+
+  it('never replays the previous token after sleeping through the recovery deadline', async () => {
+    const store = await seed();
+    const started = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(started);
+    respond = async () => { now.mockReturnValue(started + 300_001); return { status: 200, body: {}, disconnect: true }; };
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(503);
+    expect(store.readDeviceSession()).toBeNull();
+    expect((await POST(request('renew'))).status).toBe(401);
+    expect(calls.filter((call) => call.path.endsWith('/renew'))).toHaveLength(1);
+  });
+
+  it('retires an uncertain rotation persisted by an earlier process without replaying it', async () => {
+    await seed();
+    const target = join(dataDir, 'device-session.json');
+    const previous = JSON.parse(readFileSync(target, 'utf8'));
+    writeFileSync(target, JSON.stringify({ ...previous, renewalStartedAt: Date.now() - 60_001 }));
+    vi.resetModules();
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(503);
+    expect(existsSync(target)).toBe(false);
+    expect(calls.map((call) => call.path)).toEqual(['/account/device/revoke']);
+  });
+
+  it('deletes the superseded token when only the sign-in epoch changes during rotation', async () => {
+    const store = await seed();
+    const rotated = randomBytes(32).toString('hex');
+    const managed = await import('@/lib/github-broker/managed');
+    respond = async (path) => {
+      if (path.endsWith('/renew')) managed.bumpSignInEpoch();
+      return { status: 200, body: { deviceToken: rotated, ticket: randomBytes(24).toString('hex'), clerkUserId: owner, idleExpiresAt } };
+    };
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(409);
+    expect(store.readDeviceSession()).toBeNull();
+    expect(calls[1]).toMatchObject({ path: '/account/device/revoke', authorization: `Bearer ${rotated}` });
+  });
+
+  it('persists abandoned-rotation revocation before removing the old credential', async () => {
+    const store = await seed();
+    const rotated = randomBytes(32).toString('hex');
+    const managed = await import('@/lib/github-broker/managed');
+    const queue = store.queueDeviceRevoke;
+    let tokenAtQueue: string | undefined;
+    vi.spyOn(store, 'queueDeviceRevoke').mockImplementation((token) => {
+      tokenAtQueue = store.readDeviceSession()?.token;
+      queue(token);
+    });
+    respond = async (path) => {
+      if (path.endsWith('/renew')) managed.bumpSignInEpoch();
+      return { status: 200, body: { deviceToken: rotated, ticket: randomBytes(24).toString('hex'), clerkUserId: owner, idleExpiresAt } };
+    };
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(409);
+    expect(tokenAtQueue).toBe(credential);
+    expect(store.readDeviceSession()).toBeNull();
+  });
+
+  it('retains a nonrenewable credential if persisting revoke intent fails after exhausted recovery', async () => {
+    const store = await seed();
+    const queue = vi.spyOn(store, 'queueDeviceRevoke').mockImplementation(() => { throw new Error('Storage unavailable'); });
+    respond = async () => ({ status: 503, body: {} });
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(503);
     expect(store.readDeviceSession()?.token).toBe(credential);
+    expect(store.readDeviceSession()?.renewalStartedAt).toBeLessThanOrEqual(Date.now() - 60_000);
+    queue.mockRestore();
+    respond = async () => ({ status: 200, body: {} });
+    expect((await POST(request('renew'))).status).toBe(503);
+    expect(calls.filter((call) => call.path.endsWith('/renew'))).toHaveLength(4);
+    expect(store.readDeviceSession()).toBeNull();
   });
 
   it('fails closed for a renewal response belonging to another owner', async () => {
@@ -166,7 +272,43 @@ describe('desktop device routes through a fake license server and persisted stat
     expect(store.readDeviceSession()).toBeNull();
     expect(calls[0]).toMatchObject({ path: '/account/device/revoke', authorization: `Bearer ${credential}` });
     expect(await (await POST(request('revoke'))).json()).toEqual({ ok: true });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+    const pending = join(dataDir, 'device-revoke-pending.json');
+    expect(JSON.parse(readFileSync(pending, 'utf8'))).toEqual([credential]);
+    expect(statSync(pending).mode & 0o777).toBe(0o600);
+  });
+
+  it.each([200, 401])('retries a pending revoke on the next launch and removes it on %s', async (status) => {
+    await seed();
+    respond = async () => ({ status: 503, body: {} });
+    const { POST } = await import('@/app/api/panel/auth/device/revoke/route');
+    await POST(request('revoke'));
+    const pending = join(dataDir, 'device-revoke-pending.json');
+    expect(existsSync(pending)).toBe(true);
+    vi.resetModules();
+    respond = async () => ({ status, body: {} });
+    const { GET } = await import('@/app/api/panel/auth/device/status/route');
+    expect(await (await GET(request('status'))).json()).toEqual({ present: false, clerkUserId: null });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].authorization).toBe(`Bearer ${credential}`);
+    expect(existsSync(pending)).toBe(false);
+  });
+
+  it('keeps failed pending revokes across launches without revoking a newly enrolled device', async () => {
+    await seed();
+    respond = async () => ({ status: 503, body: {} });
+    const { POST } = await import('@/app/api/panel/auth/device/revoke/route');
+    await POST(request('revoke'));
+    vi.resetModules();
+    const store = await import('@/lib/auth/device-session-store');
+    const newer = randomBytes(32).toString('hex');
+    store.writeDeviceSession({ token: newer, clerkUserId: owner, installId: 'install_device', idleExpiresAt });
+    const { GET } = await import('@/app/api/panel/auth/device/status/route');
+    await GET(request('status'));
+    expect(calls).toHaveLength(2);
+    expect(calls[1].authorization).toBe(`Bearer ${credential}`);
+    expect(store.readDeviceSession()?.token).toBe(newer);
+    expect(JSON.parse(readFileSync(join(dataDir, 'device-revoke-pending.json'), 'utf8'))).toEqual([credential]);
   });
 
   it.each(['enroll', 'renew'] as const)('never resurrects a device when revoke races an in-flight %s', async (action) => {

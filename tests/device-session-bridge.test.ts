@@ -31,7 +31,7 @@ const owner = 'user_device';
 let root: Root;
 let authState: O8AuthState;
 let render: () => void;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<(input: string, init?: RequestInit) => Promise<Response>>>;
 let events: string[];
 let present: boolean;
 let renewStatus: number;
@@ -44,8 +44,10 @@ async function focus() {
   });
 }
 
-async function mount(nativeMode = true) {
-  if (nativeMode) Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+async function mount(nativeMode = true, label: string | null = 'main') {
+  if (nativeMode) Object.defineProperty(window, '__TAURI_INTERNALS__', {
+    configurable: true, value: { metadata: { currentWindow: { label } } },
+  });
   const { O8AuthProvider, useO8Auth } = await import('@/components/auth/O8AuthProvider');
   const Probe = () => {
     const state = useO8Auth();
@@ -135,6 +137,45 @@ describe('mounted native Clerk bridge', () => {
     expect(events.filter((event) => event === 'enroll')).toHaveLength(1);
   });
 
+  it.each(['unavailable', 'disconnected'])('retries enrollment after a transient %s request', async (failure) => {
+    present = false;
+    mocks.signedIn = true;
+    mocks.user = { id: owner, reload: async () => {} };
+    mocks.clerk.user = mocks.user;
+    const normal = fetchMock.getMockImplementation()!;
+    let attempts = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (input.endsWith('/device/enroll') && ++attempts === 1) {
+        if (failure === 'disconnected') throw new Error('Unavailable');
+        return Response.json({ ok: false }, { status: 503 });
+      }
+      return normal(input, init);
+    });
+    await mount();
+    expect(attempts).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+    await focus();
+    expect(attempts).toBe(2);
+    expect(events.filter((event) => event === 'enroll')).toHaveLength(1);
+  });
+
+  it.each(['dock', 'browser-view', null])('never enrolls or renews in the auxiliary window %s', async (label) => {
+    await mount(true, label);
+    await focus();
+    mocks.signedIn = true;
+    mocks.user = { id: owner, reload: async () => {} };
+    mocks.clerk.user = mocks.user;
+    present = false;
+    await act(async () => { render(); });
+    mocks.signedIn = false;
+    mocks.user = null;
+    mocks.clerk.user = null;
+    await act(async () => { render(); });
+    await focus();
+    expect(fetchMock.mock.calls.map(([url]) => url).filter((url) => url.includes('/device/'))).toEqual([]);
+    expect(events).not.toContain('activate');
+  });
+
   it('renews after a non-explicit signed-in to signed-out flip', async () => {
     mocks.signedIn = true;
     mocks.user = { id: owner, reload: async () => {} };
@@ -216,6 +257,56 @@ describe('mounted native Clerk bridge', () => {
     await act(async () => { release(); await callback; });
     expect(events).toContain('enroll');
     expect(events.indexOf('clear-marker')).toBeLessThan(events.indexOf('license-sync'));
+  });
+
+  it('enrolls again after an external browser callback completes following explicit sign-out', async () => {
+    present = false;
+    mocks.signedIn = true;
+    mocks.user = { id: owner, reload: async () => {} };
+    mocks.clerk.user = mocks.user;
+    await mount();
+    await act(async () => { await authState.signOut(); });
+    const { consumeDesktopAuthCallback: consume } = await import('@/lib/auth/desktop-auth-callback');
+    await act(async () => {
+      await consume(`o8://auth/callback?ticket=${randomBytes(24).toString('hex')}&state=nonce`, {
+        signIn: mocks.signIn as unknown as Parameters<typeof consumeDesktopAuthCallback>[1]['signIn'],
+        clerk: mocks.clerk as unknown as Parameters<typeof consumeDesktopAuthCallback>[1]['clerk'],
+        getExpectedState: () => 'nonce', clearExpectedState: () => {},
+        onSignInComplete: async () => { events.push('clear-marker'); },
+      });
+    });
+    expect(authState.signedIn).toBe(true);
+    expect(events.filter((event) => event === 'enroll')).toHaveLength(2);
+    expect(events.lastIndexOf('enroll')).toBeGreaterThan(events.lastIndexOf('clear-marker'));
+  });
+
+  it('finishes explicit sign-out after an already-started browser callback without reenrollment', async () => {
+    present = false;
+    await mount();
+    const { consumeDesktopAuthCallback: consume } = await import('@/lib/auth/desktop-auth-callback');
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    mocks.signIn.ticket = vi.fn(async () => { await hold; return {}; });
+    let callback!: Promise<void>;
+    await act(async () => {
+      callback = consume(`o8://auth/callback?ticket=${randomBytes(24).toString('hex')}&state=nonce`, {
+        signIn: mocks.signIn as unknown as Parameters<typeof consumeDesktopAuthCallback>[1]['signIn'],
+        clerk: mocks.clerk as unknown as Parameters<typeof consumeDesktopAuthCallback>[1]['clerk'],
+        getExpectedState: () => 'nonce', clearExpectedState: () => {},
+        onSignInComplete: async () => { events.push('clear-marker'); },
+      });
+    });
+    let signingOut!: Promise<void>;
+    await act(async () => { signingOut = authState.signOut(); });
+    try {
+      expect(events).not.toContain('end-session');
+    } finally {
+      await act(async () => { release(); await callback; await signingOut; });
+    }
+    await focus();
+    expect(authState.signedIn).toBe(false);
+    expect(events).not.toContain('enroll');
+    expect(events.lastIndexOf('mark-signed-out')).toBeGreaterThan(events.indexOf('clear-marker'));
   });
 
   it('enrolls after browser sign-in supersedes an initial status request', async () => {
