@@ -5,6 +5,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CANVAS_CARD_KINDS } from './canvas-commands';
 import { useCanvasIntentBus } from './use-canvas-intent-bus';
+import { useCanvasSpawners } from './use-canvas-spawners';
+
+const mocks = vi.hoisted(() => ({ spawn: vi.fn(async () => [] as string[]) }));
+vi.mock('./spawn-prompt-client', () => ({ spawnCanvasAgents: mocks.spawn }));
 
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,6 +23,8 @@ describe('useCanvasIntentBus', () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    mocks.spawn.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -29,6 +35,7 @@ describe('useCanvasIntentBus', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.useRealTimers();
   });
 
   it('routes spawn and list intents through the real canvas event path', () => {
@@ -65,10 +72,18 @@ describe('useCanvasIntentBus', () => {
       openFilePicker: vi.fn(),
       showCanvasToast: vi.fn(),
       viewportSpawnOrigin: vi.fn(() => ({ x: 0, y: 0 })),
+      specCards: [],
+      brainCards: [],
+      timersRef: { current: [] },
+      symonSpawnWindowUntilRef: { current: 0 },
+      spawnChoreographyRef: { current: [] },
+      reducedMotion: () => true,
+      refreshLanes: vi.fn(),
     };
 
     function Probe() {
-      useCanvasIntentBus(deps as never);
+      const spawners = useCanvasSpawners(deps as never);
+      useCanvasIntentBus({ ...deps, spawnAgents: spawners.spawnAgents } as never);
       return null;
     }
 
@@ -90,5 +105,23 @@ describe('useCanvasIntentBus', () => {
       data: { count: 0 },
     });
     expect(spawnBrainCard).toHaveBeenCalledTimes(1);
+
+    // The real event listener and spawning hook must forward the exact value
+    // to the route: explicit fleets survive and malformed counts stay invalid.
+    for (const count of [20, 50, undefined]) {
+      act(() => window.dispatchEvent(new CustomEvent('o8:canvas-intent', {
+        detail: { verb: 'spawn-agents', args: { task: 'preserve count', count } },
+      })));
+      expect(mocks.spawn).toHaveBeenLastCalledWith(expect.objectContaining({ count }));
+    }
+    for (const count of ['20', null, 1.5, 0]) {
+      const beforeCalls = mocks.spawn.mock.calls.length;
+      act(() => window.dispatchEvent(new CustomEvent('o8:canvas-intent', {
+        detail: { verb: 'spawn-agents', args: { task: 'reject invalid count', count } },
+      })));
+      expect(mocks.spawn).toHaveBeenCalledTimes(beforeCalls);
+      expect((window as IntentWindow).__o8CanvasIntentLast).toMatchObject({ ok: false });
+    }
+    expect(deps.spawnChoreographyRef.current).toHaveLength(0);
   });
 });

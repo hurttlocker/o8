@@ -306,7 +306,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_launch_agent',
     description:
-      'Launch a worker session with a task prompt. Isolated workers use governed packets; Fast workers share this chat’s checkout and appear beside the orchestrator. ' +
+      'Launch a worker session for a new task. To start an existing prepared mission, call the operator dispatch_mission tool with its missionId; do not launch a worker to dispatch it. Isolated workers use governed packets; Fast workers share this chat’s checkout and appear beside the orchestrator. ' +
       'When runtime/model are omitted, the operator\'s saved dispatch defaults are used. Returns the selected routing receipt ' +
       'plus a surfaceId you can use with cortex_steer_agent and cortex_read_transcript.',
     inputSchema: {

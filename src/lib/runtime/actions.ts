@@ -1,3 +1,4 @@
+import { AutomaticRecoveryRefusedError, withAutomaticRecoveryRequest, withOwnedAutomaticRecovery } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes, updateLane } from '@/lib/lane/registry';
@@ -37,6 +38,8 @@ import { settleRuntimeLaunchGovernance } from '@/lib/runtime/launch-governance';
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
 
 export interface RuntimeActionRequest {
+  /** Restricts automated steering to this uninterrupted owned run. */
+  automaticRecoveryRunId?: string;
   action: RuntimeActionKind;
   surfaceId: string;
   clientMutationId?: string;
@@ -71,6 +74,8 @@ export interface RuntimeActionResult {
 }
 
 export interface RuntimeLaunchRequest {
+  automaticRecoverySurfaceId?: string;
+  automaticRecoveryRunId?: string;
   runtime: RuntimeId;
   prompt: string;
   model?: string;
@@ -154,6 +159,24 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+  if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
+    if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {
+      throw new Error('Automatic retry requires the original owned runtime and generation.');
+    }
+    try {
+      return await withOwnedAutomaticRecovery(payload.automaticRecoverySurfaceId, payload.automaticRecoveryRunId,
+        () => launchRuntimeSurfaceInner(payload));
+    } catch (error) {
+      if (!(error instanceof AutomaticRecoveryRefusedError)) throw error;
+      return { ok: false, runtime: payload.runtime, surfaceId: '', note: error.message,
+        clientMutationId: payload.clientMutationId, cwd: payload.cwd ?? '', repoPath: payload.repoPath ?? payload.cwd ?? '',
+        worktree: null, laneId: payload.existingLaneId ?? null };
+    }
+  }
+  return launchRuntimeSurfaceInner(payload);
+}
+
+async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
   const runtimeId = payload.runtime;
   const prompt = payload.prompt?.trim();
   const repoPath = payload.repoPath?.trim() || payload.cwd?.trim();
@@ -480,6 +503,22 @@ function actionUnavailable(
 }
 
 export async function performRuntimeAction(payload: RuntimeActionRequest): Promise<RuntimeActionResult> {
+  if (payload.automaticRecoveryRunId !== undefined) {
+    if ((payload.action !== 'steer' && payload.action !== 'send_input') || !payload.automaticRecoveryRunId.trim()) {
+      return actionUnavailable(payload, payload.surfaceId, '', 'Invalid automatic recovery action or generation.');
+    }
+    try {
+      return await withAutomaticRecoveryRequest(payload.surfaceId, payload.automaticRecoveryRunId,
+        () => performRuntimeActionInner(payload));
+    } catch (error) {
+      if (!(error instanceof AutomaticRecoveryRefusedError)) throw error;
+      return actionUnavailable(payload, payload.surfaceId, '', error.message);
+    }
+  }
+  return performRuntimeActionInner(payload);
+}
+
+async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise<RuntimeActionResult> {
   const surfaceId = payload.surfaceId?.trim();
   // Fix #3: return structured error instead of throwing across the API boundary (CLAUDE.md rule)
   if (!surfaceId) {

@@ -32,6 +32,8 @@ function canonicalLaunchRequest(
   clientMutationId: string,
 ): RuntimeLaunchRequest {
   return {
+    automaticRecoverySurfaceId: payload.automaticRecoverySurfaceId,
+    automaticRecoveryRunId: payload.automaticRecoveryRunId,
     runtime: runtimeName as RuntimeLaunchRequest['runtime'],
     prompt: payload.prompt?.trim() ?? '',
     model: trimmed(payload.model),
@@ -71,6 +73,12 @@ export async function POST(request: NextRequest) {
     || (payload.workMode !== undefined && payload.workMode !== 'edit' && payload.workMode !== 'read-only')
     || (payload.spendCap !== undefined && !normalizePacketSpendCap(payload.spendCap))) {
     return NextResponse.json({ error: 'Invalid carrier, work mode, or spend cap for this launch.' }, { status: 400 });
+  }
+
+  if ((payload.automaticRecoverySurfaceId !== undefined || payload.automaticRecoveryRunId !== undefined)
+    && (typeof payload.automaticRecoverySurfaceId !== 'string' || !payload.automaticRecoverySurfaceId.startsWith(`${runtimeName}-owned:`)
+      || typeof payload.automaticRecoveryRunId !== 'string' || !payload.automaticRecoveryRunId.trim())) {
+    return NextResponse.json({ error: 'Automatic retry requires the original owned runtime and generation.' }, { status: 400 });
   }
 
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);

@@ -4,7 +4,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLaneByPacket, findLaneByRepoAndBranch } from '@/lib/lane/registry';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import type {
@@ -43,6 +43,9 @@ import { storageAdmissionHeldMessage } from './storage-admission-held-message';
 export { observeRepoStorageEstimate } from './storage-estimate';
 export type { RepoStorageEstimate } from './storage-estimate';
 
+import { withIdempotency } from './idempotency-store';
+import { assertPacketCreationBaseAuthority, existingPacketCreationBase, resolvePacketCreationBase, type PacketCreationBaseAuthority, type PacketCreationBaseInput } from '@/lib/lane/packet-creation-base';
+
 const GIB = 1024 * 1024 * 1024;
 const LAUNCH_RESERVATION_LEASE_MS = 24 * 60 * 60_000;
 
@@ -55,8 +58,13 @@ export interface PacketStorageAdmissionLease {
   baselineWorkspacePaths: string[] | null;
 }
 
+export interface PacketStorageCreationContext {
+  creationBaseCommit: string;
+}
+
 export interface PacketStorageAdmissionCoordinator {
-  reserveForLaunch(packet: OrchestratorPacket, pressureRetryOrdinal?: number): Promise<PacketStorageAdmissionLease>;
+  prepareCreationBase?(packet: OrchestratorPacket, input: PacketCreationBaseInput): Promise<PacketCreationBaseAuthority>;
+  reserveForLaunch(packet: OrchestratorPacket, pressureRetryOrdinal?: number, context?: PacketStorageCreationContext): Promise<PacketStorageAdmissionLease>;
   commitAfterLaunch(lease: PacketStorageAdmissionLease): Promise<PacketStorageAdmissionReceipt>;
   settleFailedLaunch(
     packet: OrchestratorPacket,
@@ -82,7 +90,7 @@ export interface AdmissionCoordinatorDependencies {
   sqlite?: Database.Database;
   store?: StorageAdmissionStore;
   now?: () => number;
-  observeEstimate?: (repoPath: string) => Promise<RepoStorageEstimate>;
+  observeEstimate?: (repoPath: string, context?: PacketStorageCreationContext) => Promise<RepoStorageEstimate>;
   observeWorkspacePaths?: (repoPath: string) => Promise<string[]>;
   resolveReservationTarget?: (repoPath: string) => string;
   observeRootIdentity?: typeof observeManagedWorktreeRootIdentity;
@@ -261,7 +269,9 @@ export function createPacketStorageAdmissionCoordinator(
   const sqlite = dependencies.sqlite ?? getSqlite();
   const store = dependencies.store ?? new StorageAdmissionStore(sqlite);
   const now = dependencies.now ?? Date.now;
-  const estimate = dependencies.observeEstimate ?? observeRepoStorageEstimate;
+  const estimate = dependencies.observeEstimate ?? ((repoPath: string, context?: PacketStorageCreationContext) => (
+    observeRepoStorageEstimate(repoPath, { creationBaseCommit: context?.creationBaseCommit })
+  ));
   const paths = dependencies.observeWorkspacePaths ?? observeRepoWorkspacePaths;
   const resolveReservationTarget = dependencies.resolveReservationTarget
     ?? resolveManagedWorktreeStorageTarget;
@@ -276,7 +286,41 @@ export function createPacketStorageAdmissionCoordinator(
   });
 
   return {
-    async reserveForLaunch(packet, pressureRetryOrdinal = 0) {
+    async prepareCreationBase(packet, input) {
+      await reconcileExpiredPacketStorageReservations({ store, now });
+      const existing = existingPacketCreationBase(input);
+      if (existing) return existing;
+      const generation = await durableStorageLaunchGeneration(packet, store);
+      const key = `packet-storage-creation-base:${packet.id}:${generation}`;
+      const prior = getSqlite().prepare('SELECT result_json, expires_at FROM idempotency_keys WHERE key = ?')
+        .get(key) as { result_json: string | null; expires_at: number } | undefined;
+      if (prior?.result_json && prior.expires_at > now()) {
+        const authority = JSON.parse(prior.result_json) as PacketCreationBaseAuthority;
+        assertPacketCreationBaseAuthority(authority, input);
+        return Object.freeze(authority);
+      }
+      const reservation = store.getLatestReservationForOwner(packet.id);
+      if (reservation?.ownerGeneration === generation) {
+        throw new Error('Existing storage reservation has no immutable creation base receipt.');
+      }
+      const outcome = await withIdempotency({
+        key, verb: 'packet_storage_creation_base', scopeId: packet.id,
+        ttlMs: LAUNCH_RESERVATION_LEASE_MS, attachToInFlight: true,
+        reconcileUnresolved: async () => {
+          // A dead preparation owner cannot have launched before persisting this
+          // receipt. Prove no later effect exists before repeating the ref read.
+          if (store.getLatestReservationForOwner(packet.id)?.ownerGeneration === generation
+            || findLaneByRepoAndBranch(input.repoPath, input.branch)) return null;
+          return resolvePacketCreationBase(input);
+        },
+      }, () => resolvePacketCreationBase(input));
+      if (outcome.inProgress || outcome.persistenceDegraded) {
+        throw new Error('Packet creation base receipt could not be durably resolved.');
+      }
+      assertPacketCreationBaseAuthority(outcome.result, input);
+      return Object.freeze(outcome.result);
+    },
+    async reserveForLaunch(packet, pressureRetryOrdinal = 0, context) {
       if (!packet.workspaceTargetPath) {
         throw new Error('Packet has no workspace target for storage admission.');
       }
@@ -408,7 +452,7 @@ export function createPacketStorageAdmissionCoordinator(
         };
       }
 
-      const observed = await estimate(packet.workspaceTargetPath);
+      const observed = await estimate(packet.workspaceTargetPath, context);
       if (observed.status !== 'observed' || observed.exactBytes === null) {
         const receipt = unknownEstimateReceipt(
           packet,

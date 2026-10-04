@@ -412,6 +412,19 @@ replays them through the local operator gate. Phase 3 can therefore use
 machine connector replaces any web-supplied authorization with the local
 operator token before replay, so these routes do not gain a second auth path.
 
+`spawn-prompt` preserves an explicit positive safe-integer `count`, including
+counts above five. An omitted count defaults to one. Null, strings, fractions,
+zero, negative values, and unsafe integers return a structured `invalid_request`
+400 before runtime preflight or mission creation. A request that cannot be
+materialized within the server process's array, serialization, or available heap
+capacity returns `resource_limit` 400 without creating a partial mission. The
+allocation estimate counts escaped task text in summary, prompt, and issue body,
+constraints and file-reference warnings in summary and prompt, and the
+mission-level constraints. It reserves metadata/object overhead and simultaneous
+creation/persistence copies. This admission check does not change the saved
+operator parallel cap, storage admission, runtime readiness, or downstream
+approval gates.
+
 An offline machine stays selectable for inspection but cannot accept a prompt; the website must show the server-derived last-seen state and a clear offline result.
 
 ## Open decisions

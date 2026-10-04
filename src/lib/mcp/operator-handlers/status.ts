@@ -268,7 +268,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         parallelCap: {
           type: 'number',
-          description: 'Max packets running in parallel (1-32).',
+          description: 'Max packets running in parallel (positive safe integer).',
         },
         meteredPacketCostCapUsd: {
           type: 'number',

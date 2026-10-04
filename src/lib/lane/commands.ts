@@ -59,6 +59,8 @@ import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git'
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { enqueueLaneReview } from '@/lib/lane/review-queue';
+import { assertPacketCreationBaseAuthority, resolvePacketCreationBase, PacketCreationBaseError, type PacketCreationBaseAuthority } from '@/lib/lane/packet-creation-base';
+import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
@@ -100,6 +102,7 @@ export async function dispatch(
   dependencies: {
     afterWorkspaceMaterializationProof?: () => Promise<void>;
     repoActionLeaseMaxWaitMs?: number;
+    packetCreationBase?: PacketCreationBaseAuthority;
   } = {},
 ): Promise<LaneCommandResult> {
   if (command.verb === 'merge' || command.verb === 'create_pr') {
@@ -123,7 +126,7 @@ export async function dispatch(
 
 async function dispatchUnlocked(
   command: LaneCommand,
-  dependencies: { repoActionLeaseMaxWaitMs?: number } = {},
+  dependencies: { repoActionLeaseMaxWaitMs?: number; packetCreationBase?: PacketCreationBaseAuthority } = {},
 ): Promise<LaneCommandResult> {
   const actor: LaneEventActor = command.actor ?? 'user';
 
@@ -137,6 +140,15 @@ async function dispatchUnlocked(
         command.repoPath,
         command.branch,
       );
+      if (dependencies.packetCreationBase && command.packetId) {
+        assertPacketCreationBaseAuthority(dependencies.packetCreationBase, {
+          repoPath: command.repoPath, packetId: command.packetId, branch: command.branch,
+          baseBranch: command.baseBranch?.trim() || 'main',
+        });
+        if (existing && readPinnedLaneCreationBaseCommit(existing.id) !== dependencies.packetCreationBase.baseCommit) {
+          throw new Error('Existing lane creation base differs from the admitted checkout.');
+        }
+      }
       if (existing) {
         if (!listDispatchableRuntimes({ includeExperimental: true }).includes(existing.runtime) && !(existing.runtime === 'cloud' && command.packetId === existing.packetId)) {
           return {
@@ -154,42 +166,15 @@ async function dispatchUnlocked(
       const baseBranch = command.baseBranch?.trim() || 'main';
       let baseCommit: string | undefined;
       if (command.packetId) {
-        const [{ getWorktreeManager, WorktreeFetchUnreachableError }, fetchRecovery] = await Promise.all([
-          import('@/lib/worktree'),
-          import('@/lib/runtime/fetch-unreachable-recovery'),
-        ]);
-        const retryInSeconds = fetchRecovery.fetchUnreachableCooldownRetrySeconds(command.repoPath, {
-          packetId: command.packetId,
-          stage: 'pre_lane_receipt',
-        });
-        if (retryInSeconds != null) {
-          return {
-            ok: false,
-            laneId: '',
-            note: `Launch blocked: fetch_unreachable cooldown for ${command.repoPath}; retry in ${retryInSeconds}s`,
-            reason: 'fetch_unreachable',
-          };
-        }
         try {
-          baseCommit = await getWorktreeManager(command.repoPath)
-            .resolveCreationBaseCommit(baseBranch, command.branch);
-          fetchRecovery.recordFetchUnreachableRecoverySuccess(command.repoPath);
-        } catch (error) {
-          if (!(error instanceof WorktreeFetchUnreachableError)) throw error;
-          const recovery = fetchRecovery.recoverWorktreeFetchUnreachable({
-            error,
-            repoPath: command.repoPath,
-            packetId: command.packetId,
-            laneId: null,
-            runtime: workerRouting.selectedRuntime,
-            stage: 'pre_lane_receipt',
+          const authority = dependencies.packetCreationBase ?? await resolvePacketCreationBase({
+            repoPath: command.repoPath, packetId: command.packetId, branch: command.branch,
+            baseBranch, runtime: workerRouting.selectedRuntime,
           });
-          return {
-            ok: false,
-            laneId: '',
-            note: recovery.note,
-            reason: 'fetch_unreachable',
-          };
+          baseCommit = authority.baseCommit;
+        } catch (error) {
+          if (!(error instanceof PacketCreationBaseError)) throw error;
+          return { ok: false, laneId: '', note: error.message, reason: error.reason };
         }
       }
 
