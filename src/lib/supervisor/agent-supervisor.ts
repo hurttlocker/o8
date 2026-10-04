@@ -1,3 +1,4 @@
+import { resolveStatus, readOwnedRecoveryState } from './recovery-status';
 import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -276,9 +277,11 @@ export function getWatchedAgents(repoPath?: string): WatchedAgent[] {
  * Returns false when the surface isn't watched (registration was lost) so the
  * caller can re-register from the lane row and retry.
  */
-export async function ingestAgentCompletionSignal(surfaceId: string): Promise<boolean> {
+export async function ingestAgentCompletionSignal(surfaceId: string, runId?: string): Promise<boolean> {
   const watched = watchedAgents.get(surfaceId);
   if (!watched || !callbacks) return false;
+  const current = await readOwnedRecoveryState(surfaceId);
+  if (current.owned && (current.interrupted || current.outcome !== 'finished' || (runId && runId !== current.runId))) return true;
   await handleStatusChange(watched, 'finished', Date.now());
   return true;
 }
@@ -439,7 +442,10 @@ async function pollWatchedAgent(
   }
   watched.lastRuntimeStatus = runtimeAgent?.status ?? null;
 
-  const currentStatus = resolveStatus(runtimeAgent, watched, now);
+  const recovery = await readOwnedRecoveryState(watched.surfaceId);
+  const currentStatus = recovery.owned
+    ? recovery.interrupted ? 'interrupted' : !recovery.runId ? 'unavailable' : resolveStatus(runtimeAgent, watched, now)
+    : resolveStatus(runtimeAgent, watched, now);
 
   if (currentStatus === 'finished' && !watched.completionReported) {
     const confirmed = await confirmFinishedAgent(watched, transcriptStatus, now);
@@ -466,7 +472,7 @@ async function pollWatchedAgent(
   }
 
   if ((currentStatus === 'running' || currentStatus === 'waiting') && !watched.completionReported) {
-    await checkStuck(watched, transcriptStatus, now);
+    await checkStuck(watched, transcriptStatus, now, recovery.owned ? recovery.runId : undefined);
     if (!watchedAgents.has(watched.surfaceId)) {
       return;
     }
@@ -476,28 +482,6 @@ async function pollWatchedAgent(
 }
 
 // ── Status Resolution ──
-
-function resolveStatus(
-  agent: AgentStatusEntry | undefined,
-  watched: WatchedAgent,
-  now: number,
-): string {
-  if (!agent) {
-    // Not in fleet — if recently registered, may not have appeared yet
-    const age = now - watched.registeredAt;
-    if (age < 30_000) return 'launching';
-    // Old and missing — treat as finished or failed
-    return 'finished';
-  }
-
-  const status = agent.status;
-  if (status === 'running') return 'running';
-  if (status === 'failed' || status === 'blocked') return 'failed';
-  if (status === 'reviewing') return 'finished';
-  if (status === 'waiting') return 'waiting';
-  if (status === 'idle') return 'finished';
-  return status;
-}
 
 // ── Completion Grace ──
 
@@ -738,6 +722,7 @@ async function checkStuck(
   watched: WatchedAgent,
   transcriptStatus: TranscriptBatchStatus,
   now: number,
+  automaticRecoveryRunId?: string,
 ): Promise<void> {
   if (!callbacks) return;
   // Terminal state — don't escalate a stuck signal on top of a reported
@@ -773,7 +758,7 @@ async function checkStuck(
       : 'You are still stuck. Stop your current approach. Try the simplest possible solution to complete the task.';
 
     try {
-      await callbacks.steerAgent(watched.surfaceId, steerMessage);
+      await callbacks.steerAgent(watched.surfaceId, steerMessage, automaticRecoveryRunId);
     } catch (err) {
       console.error(`[supervisor] Steer failed for "${watched.name}":`, err);
     }

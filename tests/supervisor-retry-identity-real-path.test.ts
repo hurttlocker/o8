@@ -55,7 +55,9 @@ function fixture(runtime: 'claude-code' | 'codex', config?: Record<string, strin
   const session: OwnedSessionRecord = {
     surfaceId: surface, laneId: lane.id, sessionDir, cwd: worktree, repoPath: worktree,
     title: 'retry fixture', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    latestPrompt: 'read only', latestSummary: '', recentRuns: [], effort: 'high',
+    latestPrompt: 'read only', latestSummary: '', recentRuns: [{ id: `failed-${id}`, mode: 'launch',
+      prompt: 'read only', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+      pid: 0, stdoutPath: '', stderrPath: '', outcome: 'failed' }], effort: 'high',
     model: runtime === 'codex' || config?.modelSource === 'codex-subscription' ? 'gpt-5.6-sol' : 'claude-opus-5',
     runtimeConfig: config,
   };
@@ -172,6 +174,7 @@ describe('supervisor retry identity through persisted state and the launch route
       .toEqual({ status: 'launched', surfaceId: `${runtime}-owned:retried` });
     expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       runtime, model: f.session.model, effort: 'high', workMode: 'read-only',
+      automaticRecoverySurfaceId: f.surface, automaticRecoveryRunId: f.session.recentRuns[0].id,
       ...(carrier ? { claudeCodeModel: f.session.model, claudeCodeCarrier: carrier } : {}),
       repoPath: f.worktree, cwd: f.worktree, projectRepoPath: f.repo,
       isolate: false, skipSetup: true, existingLaneId: f.lane.id,

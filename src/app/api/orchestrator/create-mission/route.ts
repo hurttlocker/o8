@@ -1,3 +1,4 @@
+import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -380,6 +381,12 @@ export async function POST(request: NextRequest) {
   if (record.projectId !== undefined && (typeof record.projectId !== 'string' || !record.projectId.trim())) {
     return operatorError('invalid_request', 'projectId must be a non-empty project identifier.', 400);
   }
+  let sealedTaskContract;
+  try {
+    sealedTaskContract = resolveSealedMissionContract(record, issues.length === 1 && !issues[0].url && issues[0].number >= 90001);
+  } catch (error) {
+    return operatorError('invalid_request', error instanceof Error ? error.message : 'Invalid sealed task contract.', 400);
+  }
   const createInput = {
       issues,
       repoPath,
@@ -399,8 +406,9 @@ export async function POST(request: NextRequest) {
       sequential: record.sequential === true,
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
-      ...(!qualitySearch ? { huddle } : {}),
+      ...(!qualitySearch && !sealedTaskContract ? { huddle } : {}),
       ...(taskContract ? { taskContract } : {}),
+      ...(sealedTaskContract ? { sealedTaskContract } : {}),
       // #1329 — carry the dispatching orchestrator thread id so workers inherit
       // its session rules. Optional; thread-less callers omit it.
       ...(typeof record.orchestratorThreadId === 'string' && record.orchestratorThreadId.trim()

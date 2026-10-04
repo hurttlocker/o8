@@ -1,3 +1,4 @@
+import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { createMission, createMissionInline, dispatchMission } from '@/lib/mcp/operator-mission-tools';
 import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
 import { type McpToolResult, errorText, jsonResult, optionalString, parseIssueList, parseMissionRuntime, requiredString, textResult } from './shared';
@@ -34,6 +35,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const parentWorkspaceId = optionalString(args, 'parentWorkspaceId') || undefined;
     const caller = optionalString(args, 'caller') || undefined;
     const readOnly = args.readOnly === true;
+    const sealedTaskContract = resolveSealedMissionContract(args, inlineIssues?.length === 1 && !ghIssues);
     const candidateMode = parseMissionCandidateMode(args, huddle);
     if (!candidateMode.ok) return textResult(candidateMode.error, true);
     const { comparisonModels, qualitySearch } = candidateMode;
@@ -65,7 +67,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         useBrain,
         huddle, taskContract: parseTaskContractSetting(args.taskContract),
         comparisonModels,
-        qualitySearch,
+        qualitySearch, sealedTaskContract,
         orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
