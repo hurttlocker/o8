@@ -2986,6 +2986,12 @@
       ]
     },
     {
+      "path": "tests/pi-sdk-worker-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/plugin-terminal-recovery.test.ts",
       "reasons": [
         "child-process",
