@@ -10,8 +10,8 @@ import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '
 import { newReportId, recordReport, reportTitle } from '@/lib/feedback/report-ledger';
 import { verifyToken } from '@/lib/auth/jwt';
 import { resolveCrashReportsEnabledSync } from '@/lib/operator/defaults';
-import { ensureFreeEntitlement } from '@/lib/entitlement/bootstrap';
-import { configuredLicenseServerBaseUrl, readCachedEntitlement } from '@/lib/entitlement/license';
+import { postHostedPayload } from '@/lib/feedback/hosted-report';
+import { sendMinimalFeedback } from '@/lib/feedback/minimal-feedback';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,6 +33,9 @@ interface ParsedImage {
 }
 
 interface FeedbackBody {
+  kind?: unknown;
+  email?: unknown;
+  includeMetadata?: unknown;
   category?: unknown;
   message?: unknown;
   route?: unknown;
@@ -421,21 +424,6 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
 }
 
 async function postHostedReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest, client: ClientDiagnostics | null, report: Report): Promise<{ ok: true } | { ok: false; error: string }> {
-  const relayBaseUrl = configuredLicenseServerBaseUrl();
-  if (!relayBaseUrl) {
-    return { ok: false, error: 'Report intake is disabled because o8 hosted services are off.' };
-  }
-
-  // Every report reaches a hosted endpoint now, so authenticate it with the
-  // same signed, install-scoped entitlement used by other hosted operations.
-  // The downstream private-channel credential stays on the relay and never
-  // enters a packaged desktop build.
-  await ensureFreeEntitlement({ allowPinnedPlan: true });
-  const planToken = readCachedEntitlement()?.licenseKey?.trim();
-  if (!planToken) {
-    return { ok: false, error: 'Could not authenticate this report. Check your connection and try again.' };
-  }
-
   const embed = {
     ...buildEmbed(category, message, diagnostics, crashes, client, report),
     // Render the first screenshot inline in the embed; the rest ride along as
@@ -461,51 +449,8 @@ async function postHostedReport(category: FeedbackCategory, message: string, dia
     ? { bytes: Buffer.from(diagnosticsText, 'utf8'), mime: 'text/plain', filename: crashName }
     : null;
 
-  try {
-    let response: Response;
-    const files: ParsedImage[] = crashFile ? [...images, crashFile] : images;
-    if (files.length > 0) {
-      // Discord renders uploaded images via multipart/form-data: a `payload_json`
-      // part (the embed) + one `files[n]` part per attachment.
-      const form = new FormData();
-      form.append('payload_json', JSON.stringify(payload));
-      files.forEach((file, i) => {
-        form.append(`files[${i}]`, new Blob([file.bytes], { type: file.mime }), file.filename);
-      });
-      response = await fetch(`${relayBaseUrl}/v1/feedback`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${planToken}` },
-        body: form,
-        signal: AbortSignal.timeout(15_000),
-      });
-    } else {
-      response = await fetch(`${relayBaseUrl}/v1/feedback`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${planToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15_000),
-      });
-    }
-    if (!response.ok) {
-      if (response.status === 401) return { ok: false, error: 'Report authentication expired. Try again.' };
-      if (response.status === 429) return { ok: false, error: 'Too many reports were sent recently. Try again later.' };
-      if (response.status === 503) return { ok: false, error: 'Report intake is temporarily unavailable.' };
-      return { ok: false, error: `Report relay returned HTTP ${response.status}.` };
-    }
-    const receipt = (await response.json().catch(() => null)) as { ok?: unknown; reportId?: unknown } | null;
-    if (receipt?.ok !== true || receipt.reportId !== report.id) {
-      return { ok: false, error: 'Report relay returned an invalid receipt.' };
-    }
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : 'Report relay request failed.',
-    };
-  }
+  const files: ParsedImage[] = crashFile ? [...images, crashFile] : images;
+  return postHostedPayload(payload, report.id, files);
 }
 
 export async function POST(request: NextRequest) {
@@ -524,6 +469,24 @@ export async function POST(request: NextRequest) {
     body = (await request.json()) as FeedbackBody;
   } catch {
     return jsonError('Invalid JSON body.');
+  }
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return jsonError('Invalid report body.');
+  }
+  if (body.kind !== undefined) {
+    if (body.kind !== 'feedback') return jsonError('Invalid report kind.');
+    try {
+      const metadata = body.includeMetadata === true
+        ? { version: readServerVersion(), os: `${os.platform()} ${os.release()}` }
+        : undefined;
+      const result = await sendMinimalFeedback(body as Record<string, unknown>, metadata);
+      return result.ok
+        ? NextResponse.json(result)
+        : jsonError(result.error, result.status);
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : 'Failed to send feedback.', 500);
+    }
   }
 
   const validated = validateBody(body);
