@@ -3,7 +3,7 @@
 import { act, createElement, useLayoutEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { collectLeafNodes, createDefaultTileLayout, insertBalancedTerminalTile } from '@/lib/tiles/operations';
+import { collectLeafNodes, createDefaultTileLayout, findTile, insertBalancedTerminalTile } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
 import { useWorkspacePageLayouts } from './useWorkspacePageLayouts';
 
@@ -64,5 +64,29 @@ describe('workspace page layouts', () => {
     expect(collectLeafNodes(currentLayout.root)).toHaveLength(3);
     await act(async () => setTab('page-b'));
     expect(collectLeafNodes(currentLayout.root)).toHaveLength(2);
+  });
+
+  it('keeps the primary repository on a new page so an attached terminal is not replaced by another repository’s restore', async () => {
+    const first = createDefaultTileLayout();
+    if (first.root.type !== 'leaf') throw new Error('Expected a primary pane');
+    first.root.content = { kind: 'terminal', repoPath: '/repo/current' };
+    const split = insertBalancedTerminalTile(first.root, 'tile-root', 'vertical', {
+      kind: 'terminal', repoPath: '/repo/other',
+    });
+    await act(async () => root.render(createElement(Harness, {
+      initialLayout: { ...first, root: split.root }, initialTab: 'existing-page',
+    })));
+
+    await act(async () => setTab('plugin-terminal-page'));
+    expect(collectLeafNodes(currentLayout.root)).toHaveLength(1);
+    expect(findTile(currentLayout.root, 'tile-root')).toMatchObject({
+      content: { kind: 'terminal', repoPath: '/repo/current' },
+    });
+
+    await act(async () => setTab('existing-page'));
+    expect(collectLeafNodes(currentLayout.root).map((leaf) => leaf.content)).toEqual([
+      { kind: 'terminal', repoPath: '/repo/current' },
+      { kind: 'terminal', repoPath: '/repo/other' },
+    ]);
   });
 });

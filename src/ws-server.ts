@@ -119,6 +119,7 @@ import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
+import { pluginTerminalSessionReferences } from '@/lib/action-plugins/host';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserProvider } from './lib/browser/inventory';
@@ -227,6 +228,9 @@ import {
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
 import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
+import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
+import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
 import {
   findLeadThreadBinding,
   getLeadStatus,
@@ -1331,6 +1335,7 @@ interface OrchestratorAutoMessage {
   repoPath: string;
   message: string;
   createdAt: number;
+  reviewChat?: { lane: ReviewContinuationLane; origin: ReviewChatOrigin };
   symon?: {
     sessionId: string;
     callId: string;
@@ -1367,13 +1372,37 @@ function queueReviewContinuation(lane: ReviewContinuationLane): void {
     packetId: reviewLane.packetId,
     laneId: reviewLane.id,
     label: reviewLane.label,
-  }));
+  }), (reviewLane, origin) => {
+    queueChatReviewMessage(reviewLane, (repoPath, message) => {
+      if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) return;
+      orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now(), reviewChat: { lane: reviewLane, origin } });
+      void drainOrchestratorAutoQueue();
+    }, 'durable');
+  });
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {
   if (orchestratorAutoQueue.length === 0) return;
 
   const next = orchestratorAutoQueue[0];
+  if (next.reviewChat) {
+    const { lane, origin } = next.reviewChat;
+    const backend = getOrchestratorBackend(origin.backend);
+    const key = orchestratorAbortKey(next.repoPath, origin.backend, '', origin.threadId);
+    if (orchestratorInflightAborts.has(key) || backend.peekSession(next.repoPath, undefined, origin.threadId)?.status === 'busy') return;
+    orchestratorAutoQueue.shift();
+    await runReviewChatContinuation(lane, origin, next.message, {
+      registerAbort: (_repoPath, _origin, controller) => {
+        orchestratorInflightAborts.set(key, controller);
+        return () => { if (orchestratorInflightAborts.get(key) === controller) orchestratorInflightAborts.delete(key); };
+      },
+      publish: (sessionName, event, data) => broadcastToOrchestratorSession(
+        orchestratorRouteSessionName(sessionName, origin.threadId), JSON.stringify({ channel: 'orchestrator', event, data }),
+      ),
+    }).catch(error => console.warn('[review-continuation] Bound turn failed:', error));
+    void drainOrchestratorAutoQueue();
+    return;
+  }
   const backend = getActiveOrchestratorBackend();
   let session = backend.peekSession(next.repoPath);
   if (!session || session.status === 'dead') {
@@ -1613,6 +1642,7 @@ function reapOrphanDashSessions() {
   let referenced: Set<string>;
   try {
     referenced = collectPersistedTmuxSessions();
+    for (const sessionName of pluginTerminalSessionReferences()) referenced.add(sessionName);
   } catch {
     return;
   }
@@ -8180,7 +8210,7 @@ const httpServer = createServer((req, res) => {
     req.on('end', () => {
       void (async () => {
         try {
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { surfaceId?: string };
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { surfaceId?: string; runId?: string };
           const surfaceId = typeof body.surfaceId === 'string' ? body.surfaceId.trim() : '';
           if (!surfaceId) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -8197,12 +8227,13 @@ const httpServer = createServer((req, res) => {
             if (exit && watched) watchedAttemptIds.set(watched, workerExitAttemptId(exit));
           };
           stampAttempt();
-          let ingested = await ingestAgentCompletionSignal(surfaceId);
+          const runId = typeof body.runId === 'string' ? body.runId : undefined;
+          let ingested = await ingestAgentCompletionSignal(surfaceId, runId);
           if (!ingested) {
             if (lane && !isTerminalLaneStatus(lane.status)) {
               registerWatchedAgent(surfaceId, lane.repoPath, lane.label || lane.branch, '');
               stampAttempt();
-              ingested = await ingestAgentCompletionSignal(surfaceId);
+              ingested = await ingestAgentCompletionSignal(surfaceId, runId);
             }
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -9606,11 +9637,12 @@ async function bootstrapWsServer() {
           toolName: entry.toolName,
         }));
       },
-      async steerAgent(surfaceId, message) {
+      async steerAgent(surfaceId, message, automaticRecoveryRunId) {
         await fetchRuntimeAction({
           action: 'steer',
           surfaceId,
           message,
+          automaticRecoveryRunId,
           clientMutationId: randomUUID(),
         });
       },

@@ -1,3 +1,5 @@
+import { getSqlite } from '@/lib/db';
+import { workerClaimKeyCurrent } from '@/lib/cloud/review-service-authority';
 import { NextResponse } from 'next/server';
 
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
@@ -35,6 +37,7 @@ export async function GET(request: Request) {
       { status: 400, headers: NO_STORE_HEADERS },
     );
   }
+  if (!workerClaimKeyCurrent(getSqlite(), jobId, auth.keyId)) return authError(403, 'claim_credential_mismatch');
   const result = claimJobControl({
     teamId: auth.teamId,
     jobId,
@@ -63,6 +66,7 @@ export async function POST(request: Request) {
       { status: 400, headers: NO_STORE_HEADERS },
     );
   }
+  if (!workerClaimKeyCurrent(getSqlite(), jobId, auth.keyId)) return authError(403, 'claim_credential_mismatch');
   const result = acknowledgeJobControl({
     teamId: auth.teamId,
     jobId,
