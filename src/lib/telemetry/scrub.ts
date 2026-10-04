@@ -188,6 +188,9 @@ export function scrubSentryEvent<T extends SentryEventLike>(event: T, opts: Scru
         const msg = scrubString(crumb.message);
         if (msg !== undefined) crumb.message = msg;
         if (crumb.data && typeof crumb.data === 'object') {
+          // Console breadcrumbs keep the raw logged values; the scrubbed
+          // message already carries their formatted text.
+          delete crumb.data.arguments;
           const u = scrubString(crumb.data.url);
           if (u !== undefined) crumb.data.url = u;
           crumb.data = dropPiiKeys(crumb.data) as Record<string, unknown>;

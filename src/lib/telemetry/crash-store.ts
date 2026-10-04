@@ -268,6 +268,10 @@ export function readCrashRecords(): CrashRecord[] {
       try {
         const parsed = JSON.parse(trimmed) as CrashRecord;
         if (parsed && typeof parsed.ts === 'number' && typeof parsed.message === 'string') {
+          // Every upload and feedback path reads through here, so rows written
+          // before redaction (or by the boot-time writer) are redacted too.
+          parsed.message = redactSecrets(parsed.message);
+          if (typeof parsed.stack === 'string') parsed.stack = redactSecrets(parsed.stack);
           out.push(parsed);
         }
       } catch {

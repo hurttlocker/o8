@@ -6,6 +6,7 @@ import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 import { collectCrashDigest, type CrashDigest } from '@/lib/telemetry/crash-digest';
+import { redactSecrets } from '@/lib/telemetry/scrub';
 import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
 import { newReportId, recordReport, reportTitle } from '@/lib/feedback/report-ledger';
 import { verifyToken } from '@/lib/auth/jwt';
@@ -450,10 +451,10 @@ async function postHostedReport(category: FeedbackCategory, message: string, dia
   // Stack traces + the console ring buffer blow past Discord's 1024-char field
   // cap, so the full forensics ride as a file rather than inline. Image
   // filenames are caller-supplied, so step around one that claims our name.
-  const diagnosticsText = [
+  const diagnosticsText = redactSecrets([
     client ? renderClientDiagnostics(client) : '',
     crashes.text ? `── CRASHES (24h window) ──\n${crashes.text}` : '',
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n'));
   const taken = new Set(images.map((img) => img.filename));
   let crashName = 'diagnostics.txt';
   for (let i = 1; taken.has(crashName); i += 1) crashName = `diagnostics-${i}.txt`;

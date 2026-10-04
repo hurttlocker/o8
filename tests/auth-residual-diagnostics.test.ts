@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import vm from 'node:vm';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -134,6 +136,37 @@ describe('residual auth diagnostics', () => {
       stack: `Error: token eyJ${marker}.eyJ${marker}.${marker}\n    at Bearer ${marker}`,
     });
     expect(JSON.stringify(record)).not.toContain(marker);
+  });
+
+  it('Sentry events drop raw console breadcrumb arguments and redact the rest', async () => {
+    const { scrubSentryEvent } = await import('@/lib/telemetry/scrub');
+    const event = scrubSentryEvent({
+      message: `failed ?__clerk_ticket=${marker}`,
+      breadcrumbs: [{ message: `Clerk load failed Bearer ${marker}`, data: { arguments: [`stack eyJ${marker}.eyJ${marker}.${marker}`, { ticket: marker }], logger: 'console' } }],
+    });
+    expect(JSON.stringify(event)).not.toContain(marker);
+    expect(event?.breadcrumbs?.[0]?.data).not.toHaveProperty('arguments');
+  });
+
+  it('crash records read for upload or feedback are redacted, including rows written raw', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'o8-crash-redact-'));
+    vi.stubEnv('O8_DATA_DIR', dataDir);
+    vi.stubEnv('CORTEX_IDE_DATA_DIR', dataDir);
+    try {
+      mkdirSync(join(dataDir, 'telemetry'), { recursive: true });
+      writeFileSync(join(dataDir, 'telemetry', 'crashes.jsonl'), `${JSON.stringify({
+        ts: 1, source: 'boot', appVersion: 'test', kind: 'uncaughtException',
+        message: `boot failed Bearer ${marker}`, stack: `Error: eyJ${marker}.eyJ${marker}.${marker}`,
+      })}\n`);
+      vi.resetModules();
+      const { readCrashRecords } = await import('@/lib/telemetry/crash-store');
+      const rows = readCrashRecords();
+      expect(rows).toHaveLength(1);
+      expect(JSON.stringify(rows)).not.toContain(marker);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('account settings opens normally without diagnostics', async () => {
