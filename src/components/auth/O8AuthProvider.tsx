@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
-import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
+import { accountIdentity } from '@/lib/auth/account-identity';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
 import { purgeTauriClerkStore, shouldPurgeClerkStoreForEntitlementSync } from '@/lib/auth/tauri-clerk-store';
 import { scheduleManagedGithubRefresh } from '@/lib/github-broker/refresh-schedule';
@@ -327,14 +327,14 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
     syncAbortRef.current?.abort();
     syncAbortRef.current = controller;
     const githubId = user.externalAccounts?.find((a) => String(a.provider).includes('github'))?.providerUserId;
-    const avatarUrl = highResolutionAvatarUrl(user.imageUrl);
+    const { email, avatarUrl } = accountIdentity(user);
     void fetch('/api/panel/auth/clerk-provision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         clerkUserId: user.id,
         githubId,
-        email: user.primaryEmailAddress?.emailAddress ?? null,
+        email,
         name: user.fullName ?? user.username ?? null,
         avatarUrl,
       }),
@@ -414,8 +414,7 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
         ? {
             id: user.id,
             name: user.fullName ?? user.username ?? null,
-            email: user.primaryEmailAddress?.emailAddress ?? null,
-            avatarUrl: highResolutionAvatarUrl(user.imageUrl),
+            ...accountIdentity(user),
           }
         : null,
       signIn: () => {
