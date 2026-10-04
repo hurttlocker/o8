@@ -7,11 +7,13 @@ import type { Model } from '@earendil-works/pi-ai';
 import { createPiSdkSession } from '@/lib/pi/sdk/session';
 import { initializePiTestBudget, reservePiTestRequest, readPiTestBudget, type ManagedPiBillingContract } from '@/lib/pi/sdk/test-budget';
 import { createBudgetedPiTestTransport } from '@/lib/pi/sdk/test-transport';
-import { O8_MANAGED_FLASH_LITE_CONTRACT } from '@/lib/pi/sdk/live-contract';
+import { O8_MANAGED_FLASH_LITE_CONTRACT, O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
-  contextWindow: 16000, maxTokens: 128, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  contextWindow: 16000, maxTokens: 128, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  // Any model on the managed endpoint must send only the fields it accepts.
+  compat: O8_MANAGED_FLASH_LITE_MODEL.compat };
 function contract(): ManagedPiBillingContract {
   return { id: 'synthetic-v1', modelId: 'fixture', endpoint: 'https://managed.example/v1/inference',
     evidence: 'Offline synthetic contract, never a live pricing source', expiresAt: Date.now() + 60_000,
