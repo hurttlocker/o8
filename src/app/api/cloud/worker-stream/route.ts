@@ -1,3 +1,5 @@
+import { getSqlite } from '@/lib/db';
+import { workerClaimKeyCurrent } from '@/lib/cloud/review-service-authority';
 /**
  * Cloud worker stream endpoint
  *
@@ -106,6 +108,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (!workerClaimKeyCurrent(getSqlite(), jobId, auth.keyId)) return authErrorResponse(403, 'claim_credential_mismatch');
     if (type === 'service' && isRecord(body.payload)) {
       const job = getJob(auth.teamId, jobId);
       if (!job || job.claimCount !== body.payload.claimCount
@@ -119,7 +122,9 @@ export async function POST(request: Request) {
       workerId,
       leaseToken,
       type,
-      payload: body.payload,
+      // Service credentials are recorded by the coordinator, never trusted
+      // from a worker payload. Preview grants can then honor key revocation.
+      payload: type === 'service' && isRecord(body.payload) ? { ...body.payload, workerKeyId: auth.keyId } : body.payload,
     });
     if (!result.accepted && result.reason === 'job_not_found') {
       // Either the job belongs to a different team or it was never enqueued.

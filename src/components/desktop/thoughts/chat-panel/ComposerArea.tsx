@@ -1,5 +1,7 @@
 'use client';
 
+import { useComposerImageBridge } from './useComposerImageBridge';
+import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
@@ -26,7 +28,6 @@ import {
 import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
 import { ComposerContextRow } from './ComposerContextRow';
 import type { ThoughtsChatPermissionMode } from './types';
-
 interface ComposerAreaProps {
   activeComposer?: boolean;
   input: string;
@@ -74,7 +75,7 @@ interface ComposerAreaProps {
   onAttachedImageRemove?: (index: number) => void;
   onAttachedImageAnnotate?: (index: number) => void;
   onAttachedFileRemove?: (fileName: string) => void;
-  onUploadDiskFiles?: (files: FileList | File[]) => void;
+  onUploadDiskFiles?: FileUploadHandler;
   composerMode?: ComposerMode;
   onComposerModeChange?: (mode: ComposerMode) => void;
   composerModeStorageId?: string;
@@ -250,17 +251,16 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     if (!node) return;
     node.style.height = 'auto';
   }, [input, inputRef]);
-
   useEffect(() => {
     const composerCenter = composerCenterRef.current;
     if (!composerCenter || !activeComposer) return;
     return registerComposerCenter(composerCenter);
   }, [activeComposer]);
-
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   // Keep the textarea typeable during a running turn for steering.
   // The Send button itself still flips to Stop via `working` on InputButtons.
   const isDisabled = !acceptsDirectInput && !targetAgentExists;
+  useComposerImageBridge(composerCenterRef, activeComposer, isDisabled, JSON.stringify([repoPath, selectedRepoPath, sessionRulesThreadId, composerModeStorageId]), attachedImages, onUploadDiskFiles);
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
   const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
   let composerPlaceholder = `Message ${activeTargetLabel}…`;

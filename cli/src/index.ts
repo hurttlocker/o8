@@ -302,9 +302,16 @@ commands:
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
+  plugin source review --directory <local-folder> [--repo <registered-path>]
+  plugin source review --github <owner/repository> --commit <40-character-sha> [--path <package-directory>] [--repo <registered-path>]
+  plugin source link   --directory <reviewed-folder> --revision <sha256> [--repo <registered-path>]
+  plugin state clear   <plugin-id> --revision <sha256> --confirm (clear saved data)
   plugin action list   list action IDs, revisions, and project bindings [--plugin ID]
   plugin action invoke <plugin-id> <action-id> --revision <sha256> [--repo <registered-path>]
   plugin log list      read persisted, bounded action receipts [--plugin ID] [--limit N]
+  plugin terminal list list persistent plugin terminals [--plugin ID]
+  plugin terminal launch <plugin-id> <entry-id> --revision <sha256> [--repo <path>] [--request <uuid>]
+  plugin terminal stop <receipt-id> (stop the process, retain its receipt)
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval

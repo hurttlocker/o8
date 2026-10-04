@@ -7,6 +7,7 @@
  */
 
 import path from 'node:path';
+import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, registerOwnedRecoveryStore } from './automatic-recovery';
 import { randomUUID } from 'node:crypto';
 
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
@@ -105,6 +106,7 @@ export function createOwnedSessionStore(
     invalidateFleetCache,
   });
   registerOwnedStopHandler(surfacePrefix, io, withSurfaceLock, invalidateFleetCache);
+  registerOwnedRecoveryStore(surfacePrefix, io, withSurfaceLock);
   const runController = createOwnedRunController({
     adapter,
     runtimeId,
@@ -257,6 +259,8 @@ export function createOwnedSessionStore(
 
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
+    const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
+    if (automaticRunId) assertAutomaticRecoveryGeneration(session, automaticRunId);
     let coldRestored = false;
 
     if (!session) {
@@ -290,7 +294,7 @@ export function createOwnedSessionStore(
     };
 
     try {
-      await runController.refreshSession(session, true);
+      await runController.refreshSession(session, true, !automaticRunId);
 
       if (session.activeRun?.spawnState === 'prepared') {
         throw new Error(`This owned ${adapter.squadShortName} session has an unresolved prepared run. Wait for marker reconciliation before resuming it.`);
@@ -302,6 +306,7 @@ export function createOwnedSessionStore(
         throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
       }
 
+      if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume');
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();

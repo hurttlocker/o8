@@ -1,4 +1,4 @@
-import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
+import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType, normalizePacketWorkspaceIdentity } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
@@ -323,7 +323,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     referenceLabel,
     title: typeof packet.title === 'string' && packet.title.trim() ? packet.title : `Packet ${index + 1}`,
     summary: typeof packet.summary === 'string' ? packet.summary : '', origin: packet.origin === 'design-mode' ? 'design-mode' : undefined,
-    workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
+    ...normalizePacketWorkspaceIdentity(packet),
     branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
     runtime: workerRouting.selectedRuntime, model: typeof packet.model === 'string' && packet.model.trim() ? packet.model.trim() : null,
     dependencyLabels: Array.isArray(packet.dependencyLabels)
