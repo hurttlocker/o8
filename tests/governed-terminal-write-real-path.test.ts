@@ -286,4 +286,29 @@ describe('governed packet-worker terminal input through the real PTY path', () =
       result: 'attempted',
     });
   }, 30_000);
+
+  it('refuses an oversized request body before parsing it', async () => {
+    const limits = await import('@/lib/terminal/governed-agent-write');
+    // A full write with every byte JSON-escaped must still fit under the cap.
+    expect(limits.MAX_GOVERNED_TERMINAL_REQUEST_BYTES)
+      .toBeGreaterThan(6 * limits.MAX_GOVERNED_TERMINAL_WRITE_BYTES + 4096);
+    expect(600_000).toBeGreaterThan(limits.MAX_GOVERNED_TERMINAL_REQUEST_BYTES);
+
+    const oversized = await fetch(`http://127.0.0.1:${wsPort}/terminal-agent-input`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${workerTokenB}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId: governedSession,
+        data: '',
+        reason: 'oversized body probe',
+        padding: 'a'.repeat(600_000),
+      }),
+    });
+    expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toMatchObject({ error: 'request_too_large' });
+    expect((await fetch(`http://127.0.0.1:${wsPort}/health`)).ok).toBe(true);
+  }, 30_000);
 });

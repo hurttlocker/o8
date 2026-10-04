@@ -54,7 +54,11 @@ import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 import { TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
-import { GovernedTerminalWriteError, writeGovernedAgentTerminal } from '@/lib/terminal/governed-agent-write';
+import {
+  GovernedTerminalWriteError,
+  MAX_GOVERNED_TERMINAL_REQUEST_BYTES,
+  writeGovernedAgentTerminal,
+} from '@/lib/terminal/governed-agent-write';
 import { TerminalHiddenBuffer } from '@/lib/ws-server/terminal-hidden-buffer';
 import { resizeTerminalIfChanged } from '@/lib/ws-server/terminal-resize';
 import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/ws-server/terminal-resync-barrier';
@@ -8034,8 +8038,25 @@ const httpServer = createServer((req, res) => {
     }
 
     const chunks: Buffer[] = [];
-    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    let receivedBytes = 0;
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      receivedBytes += buffer.length;
+      if (receivedBytes > MAX_GOVERNED_TERMINAL_REQUEST_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(buffer);
+    });
     req.on('end', () => {
+      if (tooLarge) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'request_too_large' }));
+        return;
+      }
       let payload: { sessionId?: string; data?: string; reason?: string } | null = null;
       try {
         payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {

@@ -1,4 +1,8 @@
 export const MAX_GOVERNED_TERMINAL_WRITE_BYTES = 64 * 1024;
+// JSON escaping can expand one input byte to six (\u001b), so the request cap
+// leaves room for a full write plus its envelope and refuses anything larger
+// before it is buffered or parsed.
+export const MAX_GOVERNED_TERMINAL_REQUEST_BYTES = 8 * MAX_GOVERNED_TERMINAL_WRITE_BYTES;
 
 export type GovernedTerminalWriteErrorCode =
   | 'invalid_terminal_action'
