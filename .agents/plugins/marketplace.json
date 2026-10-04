@@ -1,0 +1,20 @@
+{
+  "name": "o8-local",
+  "interface": {
+    "displayName": "o8 local workflows"
+  },
+  "plugins": [
+    {
+      "name": "o8",
+      "source": {
+        "source": "local",
+        "path": "./plugins/o8"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

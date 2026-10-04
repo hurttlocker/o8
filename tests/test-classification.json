@@ -2992,6 +2992,19 @@
       ]
     },
     {
+      "path": "tests/plugin-principal-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/plugin-relay-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/plugin-terminal-recovery.test.ts",
       "reasons": [
         "child-process",
