@@ -15,6 +15,7 @@ export interface PiWriteParent {
 /** A child owns a pinned cwd because Node has no portable directory-relative open/rename API. */
 export async function commitPiWrite(root: string, path: string, parent: PiWriteParent,
   opened: OpenWorkspaceFileResult | null, before: Buffer | null, content: string, signal: AbortSignal) {
+  if (process.platform === 'win32') throw new Error('Approved Pi writes are not supported on Windows');
   const directory = await open(parent.path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     const stat = await directory.stat();

@@ -3,7 +3,7 @@ import { link, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, s
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
-import { createPiSdkSession, requirePiNode } from '@/lib/pi/sdk/session';
+import { createPiSdkSession, requirePiNode, requirePiPlatform } from '@/lib/pi/sdk/session';
 import { createManagedPiTransport } from '@/lib/pi/sdk/transport';
 import * as workspaceFiles from '@/lib/fs/workspace-file';
 
@@ -50,6 +50,9 @@ describe('managed Pi SDK real worker', () => {
   it('checks the prerequisite without installing or changing Node', () => {
     expect(() => requirePiNode('22.18.0')).toThrow('22.19');
     expect(() => requirePiNode('22.19.0')).not.toThrow();
+    expect(() => requirePiPlatform('win32')).toThrow('Windows');
+    expect(() => requirePiPlatform('darwin')).not.toThrow();
+    expect(() => requirePiPlatform('linux')).not.toThrow();
     expect(() => requirePiNode('24.19.0')).not.toThrow();
   });
   it('runs approved file tools, waits for settled, and resumes persisted history in a new child', async () => {
