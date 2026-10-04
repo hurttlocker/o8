@@ -3,6 +3,7 @@ import { isAbsolute, relative, sep } from 'node:path';
 import type { ManagedPiTransportOptions, PiModelTransport } from './transport';
 import { createManagedPiTransport } from './transport';
 import { finishPiTestRequest, reservePiTestRequest, validatePiBillingContract, type ManagedPiBillingContract } from './test-budget';
+import { O8_MANAGED_FLASH_LITE_CONTRACT } from './live-contract';
 
 export interface BudgetedPiTestOptions extends Omit<ManagedPiTransportOptions, 'maxOutputTokens' | 'observeRawUsage'> {
   ledgerPath: string;
@@ -11,8 +12,10 @@ export interface BudgetedPiTestOptions extends Omit<ManagedPiTransportOptions, '
   resolveContract?: () => Promise<ManagedPiBillingContract | null>;
 }
 
-/** No production contract is shipped: hosted all-in billing evidence is absent. */
-export async function resolveLivePiTestContract(): Promise<ManagedPiBillingContract | null> { return null; }
+/** The one verified hosted contract; validation still refuses it after expiry. */
+export async function resolveLivePiTestContract(): Promise<ManagedPiBillingContract | null> {
+  return structuredClone(O8_MANAGED_FLASH_LITE_CONTRACT);
+}
 
 export function createBudgetedPiTestTransport(options: BudgetedPiTestOptions): PiModelTransport {
   return async function* (context, signal) {

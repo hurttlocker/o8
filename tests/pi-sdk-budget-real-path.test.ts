@@ -7,6 +7,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import { createPiSdkSession } from '@/lib/pi/sdk/session';
 import { initializePiTestBudget, reservePiTestRequest, readPiTestBudget, type ManagedPiBillingContract } from '@/lib/pi/sdk/test-budget';
 import { createBudgetedPiTestTransport } from '@/lib/pi/sdk/test-transport';
+import { O8_MANAGED_FLASH_LITE_CONTRACT } from '@/lib/pi/sdk/live-contract';
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
@@ -31,11 +32,12 @@ async function collect(transport: ReturnType<typeof createBudgetedPiTestTranspor
   return events; }
 
 describe('managed Pi live-test budget boundary', () => {
-  it('denies the live default without a trusted hosted contract before any route or request', async () => {
+  it('refuses any model other than the verified live contract before any route or request', async () => {
     const f = await fixture(); let calls = 0;
+    initializePiTestBudget(f.ledgerPath, 1_000_000, O8_MANAGED_FLASH_LITE_CONTRACT);
     const transport = createBudgetedPiTestTransport({ model, ledgerPath: f.ledgerPath, workspace: f.workspace,
       resolveRoute: async () => { calls++; return route(); }, fetch: async () => { calls++; return answer(); } });
-    await expect(collect(transport)).rejects.toThrow('billing contract'); expect(calls).toBe(0);
+    await expect(collect(transport)).rejects.toThrow('does not match the trusted billing contract'); expect(calls).toBe(0);
   });
   it('reserves conservative complete-request cost before real SDK worker fetch and persists across sessions', async () => {
     const f = await fixture(); const c = contract(); initializePiTestBudget(f.ledgerPath, 40_000, c);
