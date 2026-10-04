@@ -1,17 +1,30 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { link, lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
 import { createPiSdkSession, requirePiNode } from '@/lib/pi/sdk/session';
 import { createManagedPiTransport } from '@/lib/pi/sdk/transport';
+import * as workspaceFiles from '@/lib/fs/workspace-file';
+
+// These seams exist only in Vitest's module mocks, never in session options.
+const race = vi.hoisted(() => ({ afterLstat: undefined as undefined | ((path: string) => Promise<void>) }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const fs = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...fs, lstat: async (...args: Parameters<typeof fs.lstat>) => {
+    const stat = await fs.lstat(...args);
+    await race.afterLstat?.(String(args[0]));
+    return stat;
+  } };
+});
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
   contextWindow: 16000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 const roots: string[] = [];
 const clients: Awaited<ReturnType<typeof createPiSdkSession>>[] = [];
-afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.close()));
+afterEach(async () => { race.afterLstat = undefined; vi.restoreAllMocks();
+  await Promise.all(clients.splice(0).map(client => client.close()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'o8-pi-sdk-')); roots.push(root);
@@ -126,6 +139,56 @@ describe('managed Pi SDK real worker', () => {
     await session.prompt('Exercise approval race');
     expect(await readFile(join(paths.workspace, 'note.txt'), 'utf8')).toBe('replacement');
     expect(await readFile(join(paths.workspace, 'original.txt'), 'utf8')).toBe('original');
+  }, 15000);
+  it('creates no outside file when a parent becomes a symlink after the final containment check', async () => {
+    const paths = await fixture(); const parent = join(paths.workspace, 'folder');
+    const outside = join(paths.root, 'outside'); await mkdir(parent); await mkdir(outside);
+    let parentChecks = 0; let swapped = false; let calls = 0;
+    race.afterLstat = async path => {
+      if (path !== parent || ++parentChecks !== 4) return;
+      await rename(parent, join(paths.workspace, 'original-folder'));
+      await symlink(outside, parent); swapped = true;
+    };
+    const session = await client({ ...paths, model, approve: async () => true,
+      transport: async function* () {
+        yield* events(++calls === 1 ? message([{ type: 'toolCall', id: 'create-race', name: 'write_file',
+          arguments: { path: 'folder/new.txt', content: 'approved bytes' } }], 'toolUse')
+          : message([{ type: 'text', text: 'Finished' }]));
+      } });
+    await session.prompt('Exercise parent swap');
+    expect(swapped).toBe(true);
+    expect(await readdir(outside)).toEqual([]);
+    expect(await readdir(join(paths.workspace, 'original-folder'))).toEqual([]);
+    expect(await readFile(session.sessionFile, 'utf8')).toContain('Host operation denied');
+  }, 15000);
+  it('refuses a hard link added after the async content recheck without modifying either alias', async () => {
+    const paths = await fixture(); const target = join(paths.workspace, 'note.txt');
+    const alias = join(paths.root, 'outside-alias'); const protectedAlias = join(paths.workspace, '.env');
+    await writeFile(target, 'original'); let snapshots = 0; let linked = false; let calls = 0;
+    const open = workspaceFiles.openWorkspaceFile;
+    vi.spyOn(workspaceFiles, 'openWorkspaceFile').mockImplementation(async (...args) => {
+      const opened = await open(...args); const read = opened.handle.read.bind(opened.handle);
+      vi.spyOn(opened.handle, 'read').mockImplementation(async (...readArgs: Parameters<typeof read>) => {
+        const result = await read(...readArgs);
+        if (result.bytesRead === 0 && ++snapshots === 2) {
+          await link(target, alias); await link(target, protectedAlias); linked = true;
+        }
+        return result;
+      });
+      return opened;
+    });
+    const session = await client({ ...paths, model, approve: async () => true,
+      transport: async function* () {
+        yield* events(++calls === 1 ? message([{ type: 'toolCall', id: 'link-race', name: 'write_file',
+          arguments: { path: 'note.txt', content: 'approved replacement' } }], 'toolUse')
+          : message([{ type: 'text', text: 'Finished' }]));
+      } });
+    await session.prompt('Exercise late hard link');
+    expect(linked).toBe(true); expect((await lstat(target)).nlink).toBe(3);
+    expect(await readFile(alias, 'utf8')).toBe('original');
+    expect(await readFile(protectedAlias, 'utf8')).toBe('original');
+    expect(await readFile(target, 'utf8')).toBe('original');
+    expect(await readFile(session.sessionFile, 'utf8')).toContain('Host operation denied');
   }, 15000);
   it('Stop prevents a late approval from writing and model-call budgets fail closed', async () => {
     const paths = await fixture(); let resolveApproval!: (value: boolean) => void; let entered!: () => void;
