@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
@@ -45,6 +46,7 @@ import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useT
 import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
 import { resolveThreadProject } from '@/components/desktop/o8-panel/threads-model';
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
+import { AddRepoFlowHost } from '@/components/desktop/repo-registry/AddRepoFlowHost';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { useCommandPaletteHotkey } from '@/components/desktop/use-command-palette-hotkey';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
@@ -771,6 +773,7 @@ function DashboardInner() {
   const [sidebarPreviewMaxHeight, setSidebarPreviewMaxHeight] = useState(0);
   const sidebarPreviewLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sidebarPreviewOverlayRef = useRef<HTMLDivElement | null>(null);
+  const addRepoDialogOpenRef = useRef(false);
 
   // Active-workspace map — each WorkspaceTerminalRoot broadcasts via
   // 'o8:workspace-active-label' with its stable workspaceId. We track
@@ -2830,18 +2833,7 @@ function DashboardInner() {
     handleSelectIssue(issueNumber, repo);
   }, [handleSelectIssue]);
 
-  const handlePaletteSelectFile = useCallback((filePath: string, line?: number) => {
-    openCanvasTab({
-      id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-      kind: 'file',
-      label: filePath.split('/').pop() ?? filePath,
-      resourceId: filePath,
-      meta: {
-        ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-        ...(line ? { line: String(line) } : {}),
-      },
-    });
-  }, [activeWorkspace, openCanvasTab]);
+  const handlePaletteSelectFile = usePaletteFileSelection(activeWorkspace, openCanvasTab);
 
   const handlePaletteSelectAgent = useCallback((sessionKey: string) => {
     handleSelectSession(sessionKey);
@@ -3866,7 +3858,7 @@ function DashboardInner() {
   const scheduleSidebarPreviewClose = useCallback(() => {
     cancelSidebarPreviewClose();
     sidebarPreviewLeaveTimerRef.current = setTimeout(() => {
-      setSidebarPreviewOpen(false);
+      if (!addRepoDialogOpenRef.current) setSidebarPreviewOpen(false);
       sidebarPreviewLeaveTimerRef.current = null;
     }, 220);
   }, [cancelSidebarPreviewClose]);
@@ -3874,6 +3866,7 @@ function DashboardInner() {
   useEffect(() => {
     if (!sidebarPreviewOpen) return;
     const handleClick = (event: MouseEvent) => {
+      if (addRepoDialogOpenRef.current) return;
       const overlay = sidebarPreviewOverlayRef.current;
       if (!overlay) return;
       if (event.target instanceof Node && overlay.contains(event.target)) return;
@@ -4829,7 +4822,6 @@ function DashboardInner() {
       onSelectCommit={handleSelectCommit}
       onSelectPR={handleSelectPR}
       onReviewPR={handleReviewPR}
-      onRepoAdded={handleRepoAddedFromPanel}
       onRepoRemoved={handleRepoRemoved}
       onOpenSpecInWorkspace={handleOpenSpecInWorkspace}
       onExpandWorkspace={handleExpandWorkspace}
@@ -5127,6 +5119,14 @@ function DashboardInner() {
           </Suspense>
         </div>
       )}
+      <AddRepoFlowHost
+        onRepoAdded={handleRepoAddedFromPanel}
+        onSelectRepo={(repoId) => { leaveNavTakeover(); handleAlignToRepo(repoId); }}
+        onOpenChange={(open) => {
+          addRepoDialogOpenRef.current = open;
+          if (open) cancelSidebarPreviewClose();
+        }}
+      />
       <ConfirmToastHost />
       <DesktopCloseCoordinator />
 

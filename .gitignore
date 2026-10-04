@@ -20,6 +20,7 @@ coverage/
 !assets/**/*.png
 !docs/**/*.png
 !.github/**/*.png
+!plugins/o8/assets/o8-icon.png
 artifacts/research/
 .playwright-mcp/
 

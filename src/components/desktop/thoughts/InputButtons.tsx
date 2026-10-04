@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ComposerChipCompactContext } from './composer-compact-context';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
+import { useRepoTargetMenu } from './useRepoTargetMenu';
 import { AttachFilesButton } from './AttachFilesButton';
 import { ComposerModeChip, FleetWorkerChip } from './ComposerFleetChips';
 import type { ComposerMode } from './composer-mode';
@@ -176,6 +177,7 @@ export function RepoTargetChip({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const { menuRef, focusMenu, closeMenu, onTriggerKeyDown, onMenuKeyDown } = useRepoTargetMenu(setOpen, buttonRef);
   const targets = useMemo(() => workspaceTargets ?? [], [workspaceTargets]);
   const targetGroups = useMemo(() => {
     const groups = new Map<string, {
@@ -224,13 +226,13 @@ export function RepoTargetChip({
   const showingAffordance = canSelect && (hovered || focused || open);
 
   if (!label) return null;
-
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
       <button
         ref={buttonRef}
         type="button"
         onClick={() => { if (canSelect) setOpen((value) => !value); }}
+        onKeyDown={onTriggerKeyDown}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         onFocus={() => setFocused(true)}
@@ -277,10 +279,12 @@ export function RepoTargetChip({
         ) : null}
       </button>
 
-      <ComposerPopover anchorRef={buttonRef} open={open} onClose={() => setOpen(false)} align="start">
+      <ComposerPopover anchorRef={buttonRef} open={open} onClose={closeMenu} onOpenReady={focusMenu} align="start">
         <div
+          ref={menuRef}
           role="listbox"
           aria-label="Project target"
+          onKeyDown={onMenuKeyDown}
           style={{
             width: REPO_TARGET_MENU_WIDTH,
             maxHeight: REPO_TARGET_MENU_HEIGHT,
@@ -347,7 +351,7 @@ export function RepoTargetChip({
                       aria-selected={active}
                       onClick={() => {
                         onSelectRepoPath?.(target.localPath);
-                        setOpen(false);
+                        closeMenu();
                       }}
                       style={{
                         width: '100%',
@@ -399,7 +403,7 @@ export function RepoTargetChip({
             );
           })}
           {onAddProject ? (
-            <button type="button" role="option" aria-selected={false} onClick={() => { onAddProject(); setOpen(false); }} style={{ width: '100%', paddingTop: 8, paddingRight: 9, paddingBottom: 8, paddingLeft: 12, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', textAlign: 'left', fontSize: 11.5, fontFamily: 'var(--font-sans-system)' }}>
+            <button type="button" role="option" aria-selected={false} onClick={() => { buttonRef.current?.focus(); onAddProject(); setOpen(false); }} style={{ width: '100%', paddingTop: 8, paddingRight: 9, paddingBottom: 8, paddingLeft: 12, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', textAlign: 'left', fontSize: 11.5, fontFamily: 'var(--font-sans-system)' }}>
               Add repository…
             </button>
           ) : null}
