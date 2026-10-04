@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,6 +15,8 @@ import { GET as audit } from '@/app/api/plugins/audit/route';
 import { mintPluginToken, resolvePluginToken } from '@/lib/auth/plugin-token';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { getDb, laneEvents, lanes, sessionOutcomes } from '@/lib/db';
+import { createLane } from '@/lib/lane/registry';
 import { readPluginAudit } from '@/lib/mcp/plugin-audit';
 import { __resetIdempotencyStoreForTests } from '@/lib/orchestrator/idempotency-store';
 import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -40,9 +44,93 @@ function seed(overrides: Partial<OrchestratorPacket> = {}) {
 }
 const selected = { machineId: 'machine-plugin', missionId: 'mission-plugin', packetId: 'packet-plugin' };
 
+function resultFixture(status: OrchestratorPacket['status'] = 'awaiting_review') {
+  const packetId = `plugin-result-${randomUUID()}`;
+  const sessionKey = `codex-owned:${randomUUID()}`;
+  const startedAt = new Date(Date.now() - 30_000).toISOString();
+  seed({ id: packetId, status, summary: 'ORIGINAL_TASK_INSTRUCTIONS', completionSummary: 'OLD_COMPLETION' });
+  const lane = createLane({
+    repoPath: '/test/project', projectId: 'plugin-test-project', branch: 'plugin-result',
+    runtime: 'codex', packetId, sessionKey, baseCommit: 'a'.repeat(40),
+  });
+  getDb()!.update(lanes).set({ createdAt: startedAt }).where(eq(lanes.id, lane.id)).run();
+  getDb()!.update(laneEvents).set({ timestamp: startedAt }).where(eq(laneEvents.laneId, lane.id)).run();
+  function outcome(overrides: Partial<typeof sessionOutcomes.$inferInsert> = {}) {
+    getDb()!.insert(sessionOutcomes).values({
+      id: randomUUID(), packetId, laneId: lane.id, sessionKey, repoPath: '/test/project',
+      runtime: 'codex', outcome: 'succeeded', summary: 'Outcome: Both totals recorded. Evidence: Exact bytes verified. Residual: Awaiting operator review.',
+      startedAt, completedAt: new Date(Date.now() - 1_000).toISOString(), changedFilesJson: '["north-total.txt"]',
+      ...overrides,
+    }).run();
+  }
+  return { lane, sessionKey, packetId, startedAt, outcome, args: { ...selected, packetId } };
+}
+
 beforeEach(() => { steer.mockClear(); __resetIdempotencyStoreForTests(); seed(); });
 
 describe('plugin principal through the real API and persisted state', () => {
+  it('returns the durable current worker report instead of task instructions or an old completion', async () => {
+    const fixture = resultFixture();
+    fixture.outcome();
+    const response = await POST(request('o8_result', fixture.args));
+    const task = (await response.json()).result.structuredContent.task;
+    expect(task).toMatchObject({
+      status: 'awaiting_review', needsOperator: true,
+      summary: expect.stringContaining('Both totals recorded'),
+      completion: { available: true, source: 'worker_report', outcome: 'succeeded', changedFileCount: 1 },
+    });
+    expect(task.summary).toContain('Exact bytes verified');
+    expect(task.summary).toContain('Awaiting operator review');
+    expect(JSON.stringify(task)).not.toMatch(/ORIGINAL_TASK_INSTRUCTIONS|OLD_COMPLETION/);
+  });
+
+  it('reports unavailable evidence when the result is missing, belongs to another session, or precedes a follow-up', async () => {
+    for (const invalid of ['missing', 'session', 'lane', 'repo', 'follow-up', 'future', 'malformed'] as const) {
+      const fixture = resultFixture();
+      if (invalid !== 'missing') fixture.outcome({
+        ...(invalid === 'session' ? { sessionKey: 'another-session' } : {}),
+        ...(invalid === 'lane' ? { laneId: 'another-lane' } : {}),
+        ...(invalid === 'repo' ? { repoPath: '/another/repo' } : {}),
+        ...(invalid === 'future' ? { completedAt: new Date(Date.now() + 60_000).toISOString() } : {}),
+        ...(invalid === 'malformed' ? { completedAt: 'invalid-time' } : {}),
+        ...(invalid === 'follow-up' ? { completedAt: new Date(Date.now() - 20_000).toISOString() } : {}),
+      });
+      if (invalid === 'follow-up') getDb()!.insert(laneEvents).values({
+        id: randomUUID(), laneId: fixture.lane.id, verb: 'steered_packet', actor: 'orchestrator',
+        timestamp: new Date(Date.now() - 10_000).toISOString(), payloadJson: '{}',
+      }).run();
+      const task = (await (await POST(request('o8_result', fixture.args))).json()).result.structuredContent.task;
+      expect(task.completion, invalid).toMatchObject({ available: false });
+      expect(task.summary, invalid).toContain('unavailable');
+      expect(JSON.stringify(task), invalid).not.toMatch(/ORIGINAL_TASK_INSTRUCTIONS|OLD_COMPLETION|Both totals recorded/);
+    }
+  });
+
+  it('keeps a running task separate from its previous completion receipt', async () => {
+    const fixture = resultFixture('running');
+    fixture.outcome();
+    const task = (await (await POST(request('o8_result', fixture.args))).json()).result.structuredContent.task;
+    expect(task.completion).toMatchObject({ available: false, reason: 'in_progress' });
+    expect(task.summary).not.toContain('Both totals recorded');
+  });
+
+  it('bounds worker reports and omits fenced code, credentials, private paths and transcript locations', async () => {
+    const fixture = resultFixture();
+    fixture.outcome({
+      summary: 'Evidence: north-total.txt verified. src/example.ts /Users/example/private/result.txt C:\\Users\\example\\secret.txt file:/Users/example/private/transcript.jsonl Path:/Users/example/private/transcript.jsonl file:///Users/example/private/result.txt ~/private/result.txt \\\\private-host\\share\\result.txt sk-proj-SYNTHETIC_NOT_A_REAL_SECRET_1234567890 token=private-value Bearer private-bearer https://example.invalid/report?code=private-code HTTPS://private-url-user:private-url-pass@example.invalid/upper?account=private-query#private-fragment ```secret code``` ' + 'x'.repeat(4_000),
+      transcriptPath: '/private/transcript.jsonl', changedFilesJson: '["/Users/example/private/result.txt"]',
+    });
+    const task = (await (await POST(request('o8_result', fixture.args))).json()).result.structuredContent.task;
+    expect(task.completion.available).toBe(true);
+    expect(task.summary.length).toBeLessThanOrEqual(1_200);
+    expect(task.summary).toContain('north-total.txt verified');
+    expect(task.summary).toContain('src/example.ts');
+    expect(task.summary).toContain('https://example.invalid/report');
+    expect(task.summary).toContain('https://example.invalid/upper');
+    expect(JSON.stringify(task)).not.toMatch(/private-value|private-bearer|private-code|private-url-user|private-url-pass|private-query|private-fragment|secret code|Users|transcript|private-host|SYNTHETIC_NOT_A_REAL_SECRET|codex-owned/);
+    expect(Buffer.byteLength(JSON.stringify(task))).toBeLessThan(4_000);
+  });
+
   it('reads bounded status and persists a plugin-attributed audit without payloads', async () => {
     const req = request('o8_attention', { machineId: 'machine-plugin' });
     expect(resolveRequestPrincipal(req)).toBe('plugin');

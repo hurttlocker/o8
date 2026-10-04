@@ -9,6 +9,7 @@ import { isPostEffectSteerFailure } from '@/lib/orchestrator/operator-mission-se
 import { readOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import { appendPluginAudit, type PluginAuditEntry } from './plugin-audit';
+import { readPluginCompletion } from './plugin-result';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -128,8 +129,12 @@ export async function callPluginTool(principal: PluginPrincipal, payload: unknow
       result = { ok: true, tasks: all.slice(offset, offset + 20), totalTasks: all.length, nextCursor: offset + 20 < all.length ? String(offset + 20) : null };
     } else if (tool === 'o8_result') {
       const selected = selectedPacket(args);
-      result = selected ? { ok: true, task: snapshot(selected.mission, selected.packet) }
-        : { ok: false, code: 'task_not_found' };
+      if (selected) {
+        const completion = readPluginCompletion(selected.mission, selected.packet);
+        result = { ok: true, task: { ...snapshot(selected.mission, selected.packet), completion,
+          summary: completion.available ? completion.summary : 'Current worker result is unavailable. Check the task in o8.',
+        } };
+      } else result = { ok: false, code: 'task_not_found' };
     } else {
       result = await followUp(principal, args);
     }
