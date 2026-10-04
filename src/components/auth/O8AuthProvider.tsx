@@ -5,6 +5,7 @@ import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { accountIdentity } from '@/lib/auth/account-identity';
+import { openAccountSettings } from '@/lib/auth/open-account-settings';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
 import { purgeTauriClerkStore, shouldPurgeClerkStoreForEntitlementSync } from '@/lib/auth/tauri-clerk-store';
 import { scheduleManagedGithubRefresh } from '@/lib/github-broker/refresh-schedule';
@@ -200,7 +201,7 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
         // Aborted (user change / sign-out) or transient — never blocks the UI and
         // never downgrades; entitlement re-reads on the next mount / focus.
         if ((err as { name?: string })?.name !== 'AbortError') {
-          console.log('[entitlement] account sync skipped:', (err as Error)?.message ?? err);
+          console.log('[entitlement] account sync skipped');
         }
       }
     },
@@ -423,10 +424,10 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
         if (nativeMode) enrolledDeviceUsers.clear();
         startDesktopSignIn();
       },
-      openManageAccount: () => {
-        clerk.openUserProfile();
-      },
-      signOut: () => fullSignOut(true),
+      openManageAccount: () => openAccountSettings(clerk),
+      signOut: () => fullSignOut(true).catch(() => {
+        throw new Error('Sign-out failed. Try again.');
+      }),
     }),
     [isLoaded, isSignedIn, user, clerk, nativeMode, fullSignOut],
   );
@@ -482,15 +483,15 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
     // Client-only dynamic import — the plugin touches Tauri globals, so it must
     // never load during Next's SSR/static export.
     import('tauri-plugin-clerk')
-      .then((m) => m.initClerk())
+      .then((m) => m.initClerk(undefined, m.noopLogger()))
       .then((clerk) => {
         installTauriClerkFetchGuard(nativeFetch);
         if (active) setEngine(clerk);
       })
-      .catch((err) => {
+      .catch(() => {
         // Fail-soft: if the native engine can't init, fall back to cookie mode so
         // the app still boots (sign-in just won't persist on desktop).
-        console.error('[auth] native Clerk init failed; using cookie mode', err);
+        console.error('[auth] native Clerk init failed; using cookie mode');
         if (active) setEngine('web');
       });
     return () => {

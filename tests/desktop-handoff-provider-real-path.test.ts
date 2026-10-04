@@ -24,7 +24,7 @@ vi.mock('@clerk/nextjs', () => ({
   useSignIn: () => ({ signIn: mocks.signIn }),
 }));
 vi.mock('@clerk/nextjs/server', () => ({ auth: async () => ({ userId: null }) }));
-vi.mock('tauri-plugin-clerk', () => ({ initClerk: async () => ({}) }));
+vi.mock('tauri-plugin-clerk', () => ({ initClerk: async () => ({}), noopLogger: () => ({ debug() {}, info() {}, warn() {}, error() {} }) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => [] }));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: async (name: string, listener: typeof mocks.callbacks) => {
@@ -251,7 +251,7 @@ describe('round 2 handoff through the native provider, real callback handler and
       if (input.endsWith('/device/revoke') || input.endsWith('/handoff?action=cancel')) throw new Error('Unavailable');
       return normal(input, init);
     });
-    await act(async () => { await expect(state.signOut()).rejects.toThrow('Sign-out could not be saved'); });
+    await act(async () => { await expect(state.signOut()).rejects.toThrow('Sign-out failed. Try again.'); });
     expect(state.signedIn).toBe(true);
   });
 

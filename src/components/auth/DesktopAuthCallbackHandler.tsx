@@ -6,6 +6,7 @@ import { useSignIn, useClerk } from '@clerk/nextjs';
 
 import { O8_AUTH_STATE_KEY, startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { consumeDesktopAuthCallback } from '@/lib/auth/desktop-auth-callback';
+import { reportDesktopAuthError } from '@/lib/auth/desktop-auth-error';
 import { completeDesktopSignIn } from '@/lib/auth/device-session-client';
 
 /**
@@ -73,6 +74,9 @@ export function DesktopAuthCallbackHandler() {
             await completeDesktopSignIn().catch(() => {});
           },
         });
+      } catch {
+        // Never let SDK/callback payloads reach the native unhandled-error latch.
+        reportDesktopAuthError('The sign-in callback failed. Try signing in again.');
       } finally {
         processingRef.current = false;
       }

@@ -84,6 +84,7 @@ For maintainers who build, verify, release, recover, or harden o8.
 | [Substrate evaluation gate](operations/substrate-eval-gate.md) | The thresholds and sustainment checks for memory and retrieval quality. |
 | [Governed task evaluation](operations/governed-task-evaluation.md) | The sealed paired protocol for final task outcomes, operator effort, recovery evidence, and overhead. |
 | [Dependency cache retention](operations/dependency-cache-retention.md) | Download-cache bounds, active-installer protection, legacy preservation, and maintenance receipts. |
+| [Sustained work and retirement](operations/sustained-work-retirement.md) | The twenty-check acceptance program for native execution, preservation, automatic retirement and verified restore on macOS and Linux. |
 
 Questions or problems? [Open an issue](https://github.com/hurttlocker/o8/issues) — the bug template asks for the details that make reports actionable.
 
