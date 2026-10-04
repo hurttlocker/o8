@@ -73,19 +73,9 @@ export function resetConsumedDesktopAuthTicketsForTest(): void {
   consumedTickets.clear();
 }
 
-function reasonFromUnknown(value: unknown, fallback: string): string {
-  if (!value) return fallback;
-  if (typeof value === 'string') return value;
-  if (value instanceof Error) return value.message || fallback;
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    for (const key of ['longMessage', 'message', 'detail', 'error']) {
-      const candidate = record[key];
-      if (typeof candidate === 'string' && candidate.trim()) return candidate;
-    }
-  }
-  return fallback;
-}
+// Only locally constructed messages may cross the auth error boundary. SDK
+// errors can contain response bodies, callback URLs, tokens, stacks and causes.
+class DesktopAuthFailure extends Error {}
 
 /** Shared by the state-checked deep link and the server-issued device ticket. */
 export async function exchangeDesktopAuthTicket(
@@ -93,24 +83,28 @@ export async function exchangeDesktopAuthTicket(
   options: { signIn: DesktopAuthSignIn; clerk: DesktopAuthClerk; onActivated?: () => Promise<void>; isCurrent?: () => boolean },
 ): Promise<void> {
   if (desktopAuthTicketExchangeInProgress()) {
-    throw new Error('A desktop sign-in is already in progress. Try signing in again.');
+    throw new DesktopAuthFailure('A desktop sign-in is already in progress. Try signing in again.');
   }
   exchangingTickets += 1;
   exchangeListeners.forEach((listener) => listener());
   try {
     const assertCurrent = () => {
-      if (options.isCurrent && !options.isCurrent()) throw new Error('The desktop sign-in was cancelled. Start sign-in again.');
+      if (options.isCurrent && !options.isCurrent()) throw new DesktopAuthFailure('The desktop sign-in was cancelled. Start sign-in again.');
     };
     assertCurrent();
-    const { error } = await options.signIn.ticket({ ticket });
+    const { error } = await options.signIn.ticket({ ticket }).catch(() => {
+      throw new DesktopAuthFailure('The sign-in ticket could not be exchanged. Try signing in again.');
+    });
     assertCurrent();
-    if (error) throw new Error(reasonFromUnknown(error, 'The sign-in ticket could not be exchanged.'));
+    if (error) throw new DesktopAuthFailure('The sign-in ticket could not be exchanged. Try signing in again.');
     if (options.signIn.status !== 'complete') {
-      throw new Error(`Clerk returned an incomplete sign-in status: ${options.signIn.status || 'unknown'}.`);
+      throw new DesktopAuthFailure('The sign-in is incomplete. Try signing in again.');
     }
-    const { error: finalizeError } = await options.signIn.finalize();
+    const { error: finalizeError } = await options.signIn.finalize().catch(() => {
+      throw new DesktopAuthFailure('The sign-in session could not be finalized. Try signing in again.');
+    });
     assertCurrent();
-    if (finalizeError) throw new Error(reasonFromUnknown(finalizeError, 'The sign-in session could not be finalized.'));
+    if (finalizeError) throw new DesktopAuthFailure('The sign-in session could not be finalized. Try signing in again.');
     try {
       if (options.signIn.createdSessionId) {
         await options.clerk.setActive({ session: options.signIn.createdSessionId });
@@ -118,9 +112,13 @@ export async function exchangeDesktopAuthTicket(
       await options.clerk.user?.reload?.();
       assertCurrent();
     } catch (error) {
-      throw new Error(reasonFromUnknown(error, 'The signed-in session could not be activated.'));
+      if (error instanceof DesktopAuthFailure) throw error;
+      throw new DesktopAuthFailure('The signed-in session could not be activated. Try signing in again.');
     }
     await options.onActivated?.();
+  } catch (error) {
+    if (error instanceof DesktopAuthFailure) throw error;
+    throw new DesktopAuthFailure('The sign-in ticket exchange failed. Try signing in again.');
   } finally {
     exchangingTickets -= 1;
     exchangeListeners.forEach((listener) => listener());
@@ -130,8 +128,8 @@ export async function exchangeDesktopAuthTicket(
 function regenerateDesktopSignIn(options: ConsumeDesktopAuthCallbackOptions): void {
   try {
     options.retrySignIn?.();
-  } catch (error) {
-    console.error('[auth] failed to regenerate desktop sign-in:', error);
+  } catch {
+    console.error('[auth] failed to regenerate desktop sign-in');
   }
 }
 
@@ -189,7 +187,8 @@ export async function consumeDesktopAuthCallback(
       },
     });
   } catch (err) {
-    const reason = reasonFromUnknown(err, 'The sign-in ticket exchange failed unexpectedly.');
+    const reason = err instanceof DesktopAuthFailure
+      ? err.message : 'The sign-in ticket exchange failed. Try signing in again.';
     reportDesktopAuthError(reason);
     if (isCurrent()) regenerateDesktopSignIn(options);
   }

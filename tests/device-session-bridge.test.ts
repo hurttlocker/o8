@@ -19,7 +19,7 @@ vi.mock('@clerk/nextjs', () => ({
   useClerk: () => mocks.clerk,
   useSignIn: () => ({ signIn: mocks.signIn }),
 }));
-vi.mock('tauri-plugin-clerk', () => ({ initClerk: async () => ({}) }));
+vi.mock('tauri-plugin-clerk', () => ({ initClerk: async () => ({}), noopLogger: () => ({ debug() {}, info() {}, warn() {}, error() {} }) }));
 vi.mock('@/components/auth/DesktopAuthCallbackHandler', () => ({ DesktopAuthCallbackHandler: () => null }));
 vi.mock('@/lib/auth/clerk-fetch-guard', () => ({ installTauriClerkFetchGuard: () => {} }));
 vi.mock('@/lib/auth/start-desktop-sign-in', () => ({ startDesktopSignIn: vi.fn() }));
