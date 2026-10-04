@@ -5,6 +5,7 @@ import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { accountIdentity } from '@/lib/auth/account-identity';
+import { openAccountSettings } from '@/lib/auth/open-account-settings';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
 import { purgeTauriClerkStore, shouldPurgeClerkStoreForEntitlementSync } from '@/lib/auth/tauri-clerk-store';
 import { scheduleManagedGithubRefresh } from '@/lib/github-broker/refresh-schedule';
@@ -423,9 +424,7 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
         if (nativeMode) enrolledDeviceUsers.clear();
         startDesktopSignIn();
       },
-      openManageAccount: () => {
-        clerk.openUserProfile();
-      },
+      openManageAccount: () => openAccountSettings(clerk),
       signOut: () => fullSignOut(true).catch(() => {
         throw new Error('Sign-out failed. Try again.');
       }),

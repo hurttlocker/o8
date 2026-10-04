@@ -1252,6 +1252,12 @@
       ]
     },
     {
+      "path": "tests/auth-native-logging.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/automatic-release-real-path.test.ts",
       "reasons": [
         "child-process",

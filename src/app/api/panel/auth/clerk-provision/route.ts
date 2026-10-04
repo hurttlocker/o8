@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, userId: user?.id ?? null, plan: user?.plan ?? 'free' });
   } catch (error) {
-    console.error('[clerk-provision] failed:', error);
+    console.error('[clerk-provision] failed:', error instanceof Error ? error.name : 'unknown error');
     return NextResponse.json({ ok: false, reason: 'error' });
   }
 }
