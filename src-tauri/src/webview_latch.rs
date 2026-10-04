@@ -56,6 +56,23 @@ const CONSOLE_ERROR_HOOK_JS: &str = r#"
   if (typeof window === 'undefined' || window.__o8ConsoleErrorHookInstalled) return;
   window.__o8ConsoleErrorHookInstalled = true;
 
+  // Captured text reaches native log files. Redact credential-shaped values
+  // before truncation so SDK errors, URLs and serialized objects cannot carry
+  // session tokens, tickets, device tokens or authorization headers there.
+  var REDACTIONS = [
+    [/eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g, '[redacted]'],
+    [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]+/gi, '$1 [redacted]'],
+    [/\bo8d_[A-Za-z0-9_-]+/g, 'o8d_[redacted]'],
+    [/\b(sk|rk)_(live|test)_[A-Za-z0-9]+/g, '$1_$2_[redacted]'],
+    [/([?&#;](?:__clerk_[A-Za-z_]+|__session|__client|ticket|token|code|state|jwt)=)[^&#\s"']+/gi, '$1[redacted]'],
+    [/("(?:token|jwt|ticket|authorization|cookie|session|secret|password|api[_-]?key)"\s*:\s*")[^"]*/gi, '$1[redacted]']
+  ];
+  function redact(text) {
+    var out = text;
+    for (var i = 0; i < REDACTIONS.length; i++) out = out.replace(REDACTIONS[i][0], REDACTIONS[i][1]);
+    return out;
+  }
+
   function safeInvoke(message, source, lineno) {
     try {
       if (
@@ -66,8 +83,8 @@ const CONSOLE_ERROR_HOOK_JS: &str = r#"
         return;
       }
       var payload = {
-        message: String(message == null ? '' : message).slice(0, 4000),
-        source: String(source == null ? '' : source).slice(0, 1000),
+        message: redact(String(message == null ? '' : message)).slice(0, 4000),
+        source: redact(String(source == null ? '' : source)).slice(0, 1000),
         lineno: typeof lineno === 'number' && isFinite(lineno) ? Math.floor(lineno) : 0,
       };
       var p = window.__TAURI_INTERNALS__.invoke('record_console_error', payload);

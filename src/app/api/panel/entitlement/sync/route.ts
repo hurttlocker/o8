@@ -119,8 +119,8 @@ async function syncManagedGithubApp(sessionToken: string): Promise<void> {
     } else if (data.installed === false) {
       writeManagedGithubState({ installed: false, installUrl: data.installUrl, ownerClerkUserId: owner });
     }
-  } catch (error) {
-    console.warn('[entitlement] managed GitHub App sync skipped:', error);
+  } catch {
+    console.warn('[entitlement] managed GitHub App sync skipped');
   }
 }
 
@@ -308,8 +308,8 @@ export async function POST(request: Request) {
       plan: entitlement.plan,
       source: typeof data.source === 'string' ? data.source : 'subscription',
     });
-  } catch (error) {
-    console.error('[entitlement] sync failed:', error);
+  } catch {
+    console.error('[entitlement] sync failed');
     return NextResponse.json({ ok: false, reason: 'error' });
   }
 }

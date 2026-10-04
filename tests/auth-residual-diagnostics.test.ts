@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ authError: null as Error | null }));
@@ -51,6 +54,36 @@ describe('residual auth diagnostics', () => {
     expect(logged(errors)).not.toContain(marker);
     expect(errors.mock.calls.every((args) => args.length === 1
       && args[0] === '[auth] failed to open account settings')).toBe(true);
+  });
+
+  it('native console capture redacts token-shaped values from every captured source', () => {
+    const hookSource = readFileSync('src-tauri/src/webview_latch.rs', 'utf8')
+      .match(/const CONSOLE_ERROR_HOOK_JS: &str = r#"([\s\S]*?)"#;/)![1];
+    const captured: Array<{ message: string; source: string }> = [];
+    const listeners: Record<string, (event: unknown) => void> = {};
+    const window = {
+      __TAURI_INTERNALS__: { invoke: (_cmd: string, payload: { message: string; source: string }) => {
+        captured.push(payload);
+        return Promise.resolve();
+      } },
+      addEventListener: (name: string, handler: (event: unknown) => void) => { listeners[name] = handler; },
+    };
+    const context = vm.createContext({ window, console: { error: () => {} }, JSON, String, Error, isFinite, Math });
+    vm.runInContext(hookSource, context);
+
+    const jwt = `eyJ${marker}.eyJ${marker}.${marker}`;
+    const url = `https://clerk.o8.run/v1/client?__clerk_ticket=${marker}&__clerk_db_jwt=${marker}&x=1`;
+    const consoleError = (context.console as { error: (...args: unknown[]) => void }).error;
+    consoleError('Clerk load failed', Object.assign(new Error(`token ${jwt}`), { stack: `Error: ${url}` }));
+    consoleError(`Authorization: Bearer ${marker} device o8d_${marker}`);
+    listeners.error({ message: `uncaught ${jwt}`, filename: url, lineno: 3 });
+    listeners.unhandledrejection({ reason: { ticket: jwt, header: `Bearer ${marker}` } });
+
+    expect(captured).toHaveLength(4);
+    for (const payload of captured) {
+      expect(`${payload.message} ${payload.source}`).not.toContain(marker);
+    }
+    expect(captured[0].message).toContain('[redacted]');
   });
 
   it('account settings opens normally without diagnostics', async () => {
