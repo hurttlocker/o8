@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchOnce, invalidateFetchOnce } from '@/lib/panel/fetch-cache';
 
 /** Window-level broadcast so every useProjects instance refreshes after any
  *  mutation (the palette + the AgentPanel + any future surface). Lets us
@@ -14,6 +14,7 @@ export const PROJECTS_UPDATED_EVENT = 'o8:projects-updated';
 
 export function broadcastProjectsUpdated() {
   if (typeof window === 'undefined') return;
+  invalidateFetchOnce('/api/panel/projects');
   window.dispatchEvent(new CustomEvent(PROJECTS_UPDATED_EVENT));
 }
 
@@ -68,20 +69,23 @@ export function useProjects(): UseProjectsResult {
   const [ledger, setLedger] = useState<ProjectsLedger | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const latestRead = useRef(0);
 
   const refresh = useCallback(async () => {
+    const read = ++latestRead.current;
     try {
       const res = await fetchOnce('/api/panel/projects');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
+      if (read !== latestRead.current) return;
       // Don't broadcast on refresh — that would feed back into every other
       // instance's refresh listener and loop forever. Mutations broadcast.
       setLedger(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load projects');
+      if (read === latestRead.current) setError(err instanceof Error ? err.message : 'Failed to load projects');
     } finally {
-      setLoading(false);
+      if (read === latestRead.current) setLoading(false);
     }
   }, []);
 
@@ -90,7 +94,10 @@ export function useProjects(): UseProjectsResult {
     if (typeof window === 'undefined') return;
     const handler = () => { void refresh(); };
     window.addEventListener(PROJECTS_UPDATED_EVENT, handler);
-    return () => { window.removeEventListener(PROJECTS_UPDATED_EVENT, handler); };
+    return () => {
+      latestRead.current += 1;
+      window.removeEventListener(PROJECTS_UPDATED_EVENT, handler);
+    };
   }, [refresh]);
 
   const switchActive = useCallback(async (projectId: string) => {

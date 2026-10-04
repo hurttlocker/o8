@@ -41,6 +41,9 @@ import { requestTerminalModeToggle } from '@/components/desktop/shell/TerminalMo
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
+import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
+import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
+import { resolveThreadProject } from '@/components/desktop/o8-panel/threads-model';
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { useCommandPaletteHotkey } from '@/components/desktop/use-command-palette-hotkey';
@@ -2501,6 +2504,37 @@ function DashboardInner() {
     setRightPanelKind('o8');
     openRightPanelFromUser();
   }, [openRightPanelFromUser, setO8Width]);
+
+  useThreadWorkspaceNavigation({
+    availability: () => threadPanelAvailability(
+      typeof window !== 'undefined' ? window.innerWidth : getResponsiveViewportWidth(),
+      RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH,
+    ),
+    resolve: (target) => {
+      const workspace = workspaceActiveMap.get(target.workspaceId);
+      if (!workspace?.tileId || !workspaceTerminalHandlesRef.current.has(workspace.tileId)
+        || !globalRepoEntries.some((repo) => repo.localPath === target.repoPath)) return null;
+      const project = resolveThreadProject(dashboardProjects.ledger?.projects ?? [], dashboardProjects.activeProject, target.repoPath, false);
+      return {
+        projectId: project?.id ?? null,
+        activate: () => {
+          setActiveTileId(workspace.tileId);
+          setO8AllRepos(false);
+          setO8CommitSha(null);
+          setO8CommitRepoPath(null);
+          setO8CommitRepoSlug(null);
+          handleOpenO8Panel({ repoPath: target.repoPath, tab: 'threads' });
+        },
+        isActive: () => workspaceHeaderActive.workspaceId === target.workspaceId,
+      };
+    },
+    readTasks: async () => {
+      const response = await fetch('/api/tasks?includeBrief=false&includeDone=true', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error('Unable to read threads.');
+      const body = await response.json();
+      return body.tasks ?? [];
+    },
+  });
 
   const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {
     if (repoPath) setO8RepoPathOverride(repoPath);
@@ -5381,6 +5415,15 @@ function DashboardInner() {
                 key={(leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id ?? 'personal'}
                 project={leftPanelFocus.view?.project ?? dashboardProjects.activeProject}
                 registeredRepos={globalRepoEntries}
+                onOpenPluginTerminal={async (terminal) => {
+                  const target = await waitForWorkspaceTerminalTarget({ preferredTileId: activeTileId, fallbackToAnyExisting: true, activate: false });
+                  const repo = globalRepoEntries.find((entry) => entry.localPath === terminal.workspaceRoot) ?? null;
+                  const tabId = target.handle.openAttachedTerminalSession({ sessionKey: terminal.sessionName, tmuxSession: terminal.sessionName, label: terminal.label, readOnly: false }, repo ? { ...repo, remoteUrl: repo.remoteUrl ?? undefined } : null);
+                  if (!tabId) throw new Error('Workspace terminal view unavailable.');
+                  setActiveTileId(target.tileId);
+                  setActiveNavSection('agents');
+                  flashWorkspaceTab(tabId);
+                }}
                 onClose={() => setActiveNavSection('agents')}
               />
             </Suspense>
@@ -5562,6 +5605,7 @@ function DashboardInner() {
                         onOpenO8Panel={handleOpenO8Panel}
                       >
                         <LazyO8Panel
+                          active={showRightPanelColumn && rightPanelKind === 'o8'}
                           repoPath={currentO8RepoPath}
                           registeredRepos={activeProjectRepoEntries}
                           onRepoPathChange={handleSelectO8RepoPath}

@@ -15,7 +15,7 @@ export function createModelCompatibilityRecovery({ adapter, io, withSurfaceLock,
     const recover = async () => {
       const current = await io.findSession(session.surfaceId);
       const run = current?.recentRuns[0];
-      if (!current || !current.model || !run || run.outcome !== 'failed' || current.activeRun
+      if (!current || !current.model || !run || run.id !== session.recentRuns[0]?.id || run.outcome !== 'failed' || current.activeRun
         || current.orphanedAt || current.detachedAt || run.interruptRequestedAt || run.sandboxDenial || run.modelFallback) return false;
       const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run);
       if (parsed.entries.some((entry) => entry.kind !== 'event')) return false;
