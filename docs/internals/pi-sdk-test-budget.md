@@ -100,3 +100,9 @@ No live model, auth flow, provider request, or payment is part of the suite.
 npx vitest run tests/pi-sdk-budget-real-path.test.ts --maxWorkers=1
 npm run test:integration -- tests/pi-sdk-budget-real-path.test.ts
 ```
+
+## Live acceptance
+
+`tests/pi-sdk-live-acceptance.test.ts` is skipped unless `O8_PI_LIVE_PAID=1`. It runs the real worker against the live contract with synthetic files: an approved edit, a denied read outside the workspace, resume of the persisted session in a new process, stop during a run, clean shutdown, and a ledger smaller than one request that refuses before any fetch. Set `O8_PI_LIVE_RECEIPT` to the receipt path; the runner hides test console output. `O8_PI_LIVE_LEDGER_MICRO_USD` sets the main ledger limit (at most 990,000).
+
+First passing run, 2026-10-04: every step passed. Five verified calls used 1,108 input and 56 output tokens. The stopped call stayed in the ledger as an unknown charge, which blocks further calls on that ledger.
