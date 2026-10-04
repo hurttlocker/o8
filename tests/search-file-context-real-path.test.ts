@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { act, createElement, useRef, useState, type HTMLAttributes, type ReactNode } from 'react';
@@ -156,7 +156,8 @@ async function persistAndRestore(tabs: CanvasTab[]) {
 }
 
 beforeEach(async () => {
-  fixture = mkdtempSync(path.join(tmpdir(), 'o8-search-context-'));
+  // The registry stores canonical roots; macOS tmpdir is a symlink (/var -> /private/var).
+  fixture = realpathSync(mkdtempSync(path.join(tmpdir(), 'o8-search-context-')));
   repos = ['alpha repo', 'beta repo'].map((name, i) => ({ id: `repo-${i}`, name, localPath: path.join(fixture, name) }));
   for (const repo of repos) {
     mkdirSync(path.join(repo.localPath, 'docs with spaces'), { recursive: true });
