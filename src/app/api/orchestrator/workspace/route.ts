@@ -17,6 +17,7 @@ import {
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+import '@/lib/runtimes';
 import { parkWorkspace } from '@/lib/workspace/hibernator';
 import { reconcileWorkspaceSnapshot } from '@/lib/workspace/reconciler';
 import { restoreWorkspace } from '@/lib/workspace/restorer';

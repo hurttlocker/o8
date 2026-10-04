@@ -7,6 +7,7 @@
  */
 
 import path from 'node:path';
+import { registerOwnedSessionLifecycle } from '../owned-session-lifecycle';
 import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, registerOwnedRecoveryStore } from './automatic-recovery';
 import { randomUUID } from 'node:crypto';
 
@@ -666,7 +667,7 @@ export function createOwnedSessionStore(
 
   void sweepRecentlyOrphanedActiveRuns().catch(() => {});
 
-  return {
+  const store: OwnedSessionStore = {
     runtimeId,
     surfaceIdPrefix: surfacePrefix,
     launch,
@@ -686,4 +687,13 @@ export function createOwnedSessionStore(
     setReviewDisposition,
     invalidateFleetCache,
   };
+  registerOwnedSessionLifecycle({
+    runtimeId,
+    surfaceIdPrefix: surfacePrefix,
+    commandLabel: adapter.binaryName,
+    rootEnvVar: adapter.rootEnvVar,
+    rootDefault: adapter.rootDefault,
+    store,
+  });
+  return store;
 }
