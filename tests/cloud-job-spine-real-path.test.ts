@@ -14,7 +14,7 @@ const repoPath = join(dataDir, 'source-repo');
 const bareRemotePath = join(dataDir, 'remote.git');
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
-process.env.O8_CLOUD_JOB_LEASE_MS = '100';
+process.env.O8_CLOUD_JOB_LEASE_MS = '30000';
 
 const runtimeRoute = await import('@/app/api/runtime/launch/route');
 const pollRoute = await import('@/app/api/cloud/worker-poll/route');
@@ -419,7 +419,7 @@ describe('durable cloud execution through the runtime launch path', () => {
 
     const firstPoll = await workerPoll('task-board-first');
     expect(firstPoll.status).toBe(200);
-    const firstJob = (await firstPoll.json() as { job: { id: string } }).job;
+    const firstJob = (await firstPoll.json() as { job: { id: string; leaseToken: string } }).job;
     expect(firstJob.id).toBe(jobId);
     const first = await taskRequest(packetId);
     const firstTask = (await first.json() as { task: Parameters<typeof taskSessionKey>[0] }).task;
@@ -443,7 +443,10 @@ describe('durable cloud execution through the runtime launch path', () => {
     expect((await reopened.json() as { task: { execution: unknown } }).task.execution).toMatchObject({
       jobId, status: 'leased', attempt: 1, workerId: 'task-board-first',
     });
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Expire the persisted claim deliberately; parallel fixture work must not
+    // race a 100 ms wall-clock lease before the recovery assertions begin.
+    expect(getSqlite().prepare('UPDATE cloud_jobs SET lease_expires_at = ? WHERE id = ? AND lease_token = ?')
+      .run(Date.now() - 1, jobId, firstJob.leaseToken).changes).toBe(1);
     const expired = await taskRequest(packetId);
     expect((await expired.json() as { task: { execution: unknown } }).task.execution).toMatchObject({
       jobId, status: 'leased', attempt: 1, workerId: null, leaseState: 'expired',
@@ -593,7 +596,8 @@ describe('durable cloud execution through the runtime launch path', () => {
       executionAttempts: 0,
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(getSqlite().prepare('UPDATE cloud_jobs SET lease_expires_at = ? WHERE id = ? AND lease_token = ?')
+      .run(Date.now() - 1, jobId, firstClaim?.leaseToken).changes).toBe(1);
     const recoveredPoll = await workerPoll('worker-recovery', 9_999);
     expect(recoveredPoll.status).toBe(200);
     const recoveredClaim = (await recoveredPoll.json() as PollResult['body'])?.job;
@@ -964,16 +968,20 @@ describe('durable cloud execution through the runtime launch path', () => {
         const pushedSha = execFileSync('git', [
           '--git-dir', bareRemotePath, 'rev-parse', `refs/heads/o8/worker-process-${index}`,
         ], { encoding: 'utf8' }).trim();
+        closeDb();
         const status = await jobStatus(jobId);
         expect(status.status).toBe(200);
         const receipt = await status.json() as {
           job: { launch: Record<string, unknown> };
-          events: Array<{ type: string; payload: { commitSha?: string } }>;
+          events: Array<{ type: string; payload: { commitSha?: string; checkout?: { cacheHit: boolean; durationMs: number } } }>;
         };
         expect(JSON.stringify(receipt.job.launch)).not.toContain(repoPath);
         expect(JSON.stringify(receipt.job.launch)).not.toContain(realpathSync.native(repoPath));
         expect(receipt.events).toEqual(expect.arrayContaining([
           expect.objectContaining({ type: 'completed', payload: expect.objectContaining({ commitSha: pushedSha }) }),
+          expect.objectContaining({ type: 'chunk', payload: expect.objectContaining({
+            checkout: expect.objectContaining({ cacheHit: index === 2, durationMs: expect.any(Number) }),
+          }) }),
         ]));
         if (index === 1) {
           worker.kill('SIGKILL');

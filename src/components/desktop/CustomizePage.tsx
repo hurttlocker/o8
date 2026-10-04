@@ -40,8 +40,9 @@ function openSettingsMcpTab() {
   window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
 }
 
-export function CustomizePage({ onClose, project = null, registeredRepos = [] }: {
+export function CustomizePage({ onClose, project = null, registeredRepos = [], onOpenPluginTerminal }: {
   onClose?: () => void;
+  onOpenPluginTerminal?: (terminal: { sessionName: string; label: string; workspaceRoot: string | null }) => Promise<void>;
   project?: ProjectRecord | null;
   registeredRepos?: CustomizeRepo[];
 }) {
@@ -165,7 +166,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [] }:
 
         {/* Keep section changes immediate. */}
         {tab === 'plugins' ? (
-          <PluginsTab repoPath={repoPath} />
+          <PluginsTab onOpenTerminal={onOpenPluginTerminal} repoPath={repoPath} repos={repos} onSelectRepo={(path) => setSelection({ projectId: project?.id, value: path ?? 'all' })} />
         ) : loading ? (
           <div style={{ paddingTop: 32, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Loading…</div>
         ) : inventoryError ? (

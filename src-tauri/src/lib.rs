@@ -7,6 +7,7 @@ mod spatial_ink_window;
 mod audio_ducker;
 mod background;
 mod browser_view;
+mod remote_preview;
 mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
@@ -7860,6 +7861,7 @@ pub fn run() {
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
             }
@@ -7954,6 +7956,10 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            remote_preview::remote_preview_supported,
+            remote_preview::remote_preview_open,
+            remote_preview::remote_preview_set_rect,
+            remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
             #[cfg(target_os = "macos")]

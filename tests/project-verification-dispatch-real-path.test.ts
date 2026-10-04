@@ -205,7 +205,7 @@ describe('target-project verification dispatch', () => {
       git(repoPath, 'add', '.');
       git(repoPath, '-c', 'user.name=o8 test', '-c', 'user.email=o8@test.invalid', 'commit', '-m', 'verification fixture');
       git(repoPath, 'push', 'origin', 'main');
-      await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
+      const registeredRepo = await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
       const [{ runDispatchTick }, laneRegistry, controlPlane] = await Promise.all([
         import('@/lib/orchestrator/scheduling'),
         import('@/lib/lane/registry'),
@@ -213,12 +213,29 @@ describe('target-project verification dispatch', () => {
       ]);
       const id = `pkt-verification-${kind}`;
       const initial = mission(repoPath, packet(repoPath, id));
+      let capturedProjectId: string | null = null;
+      if (kind === 'docs') {
+        const { createProject, addRepoToProject } = await import('@/lib/projects/store');
+        const { setActiveProject } = await import('@/lib/repos/projects');
+        const original = createProject({ name: 'Captured dispatch project' });
+        const alternate = createProject({ name: 'Active dispatch project' });
+        addRepoToProject(original.id, registeredRepo.id, null, 'manual');
+        addRepoToProject(alternate.id, registeredRepo.id, null, 'manual');
+        capturedProjectId = original.id;
+        initial.packets[0].projectId = original.id;
+        await setActiveProject(alternate.id);
+      }
       controlPlane.writeOrchestratorControlPlaneState(initial);
       const dispatched = await runDispatchTick(initial, {
         launchBudget: { maxLaunches: 1 },
       });
       expect(dispatched.packets[0].status).toBe('launching');
       const lane = laneRegistry.findLaneByPacket(id)!;
+      if (capturedProjectId) {
+        expect(lane.projectId).toBe(capturedProjectId);
+        const { getTaskPoolTask } = await import('@/lib/tasks/pool');
+        expect((await getTaskPoolTask(id))?.project?.id).toBe(capturedProjectId);
+      }
       const spawn = await waitFor(() => {
         if (!existsSync(capturePath)) return null;
         return readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean)

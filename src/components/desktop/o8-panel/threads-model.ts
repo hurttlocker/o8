@@ -1,3 +1,4 @@
+import { threadProjectMatches } from './thread-project-identity';
 import type { TaskPoolTask } from '../repo-focus/tabs/control-room/types';
 import type { FleetAgent } from '../thoughts/types';
 import type { ProjectRecord } from '../repo-registry/useProjects';
@@ -26,7 +27,7 @@ export function resolveThreadProject(projects: ProjectRecord[], active: ProjectR
 export function scopeThreads(tasks: TaskPoolTask[], scope: ThreadScope): TaskPoolTask[] {
   const paths = new Set(scope.repoPaths.map(normalizedPath));
   return tasks.filter((task) => {
-    if (scope.projectId && task.project && task.project.id !== scope.projectId) return false;
+    if (!threadProjectMatches(task.project, scope.projectId)) return false;
     return Boolean(task.repoPath && paths.has(normalizedPath(task.repoPath)));
   });
 }

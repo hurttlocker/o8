@@ -209,7 +209,8 @@ export function verifyUniversalMacUpdaterArchive(appPath, archivePath) {
   validateUpdaterArchiveMembers(archivePath);
   const extractionRoot = mkdtempSync(join(tmpdir(), 'o8-updater-inspection-'));
   try {
-    execFileSync('tar', ['xzf', archivePath, '-C', extractionRoot], { stdio: 'pipe' });
+    // Preserve archived modes so the caller's umask cannot change bundle identity.
+    execFileSync('tar', ['xzpf', archivePath, '-C', extractionRoot], { stdio: 'pipe' });
     const entries = readdirSync(extractionRoot).sort();
     if (entries.length !== 1 || entries[0] !== 'o8.app') {
       throw new Error('updater archive must contain exactly one top-level o8.app bundle');

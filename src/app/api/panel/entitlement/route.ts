@@ -42,7 +42,7 @@ export async function GET(request: Request) {
     const actualFounder = readFounderRecord();
     // View-as (#1517): when the dev override is downclamping the plan, present
     // the EFFECTIVE view so every consumer that reads `plan`/`flags`/`founder`
-    // (settings gates, canvas glass, use-founder-status) sees the free
+    // (settings gates, canvas glass, use-early-access) sees the free
     // experience with no per-callsite change. The real state stays available on
     // `actualPlan` + `actualFounder` for the management/dev-switch surfaces.
     const founder = entitlement.overrideActive ? null : actualFounder;

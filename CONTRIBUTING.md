@@ -22,6 +22,8 @@ The way we run issues, pull requests, and merges is written down in [docs/operat
 
 ## Claiming work
 
+Start with the [focus plan through October 27](./docs/operations/focus-through-2026-10-27.md#two-contributor-queues) for two bounded contributor queues. Recheck issue claims before starting; the dated plan does not reserve work.
+
 Find work through [`ROADMAP.md`](./ROADMAP.md). Each open arc there links to one tracking issue, and that issue's checklist lists its children. Pick an unchecked child labeled `claimable`: those have a brief that is complete enough to start from.
 
 Comment "claiming" on the child issue. A maintainer flips the label to `claimed`, which expires seven days after the claim comment if no pull request links to the issue. That keeps an issue from sitting reserved by someone who moved on, and reclaiming it later is fine.
@@ -34,7 +36,7 @@ Keep each pull request to one concern. Explain the problem, why the change belon
 
 Pull requests from forks wait for maintainer approval before CI reports appear. After approval, the review bot writes its report to the workflow run summary instead of posting a pull request comment because fork workflow tokens are read-only.
 
-Before submitting, run:
+Before submitting code changes, run:
 
 ```bash
 npx tsc --noEmit          # must be clean
@@ -43,12 +45,47 @@ npx eslint <files you changed>
 ```
 
 Rust changes also need the relevant Cargo check or test from `src-tauri/`.
+Documentation-only changes validate links and the checks relevant to the affected documentation.
+
+### Test lanes
+
+`npm test` is the hermetic unit completion gate, not the full suite. Its
+[unit configuration](./config/vitest/vitest.unit.config.ts) excludes the resource-owning tests listed in
+[`tests/test-classification.json`](./tests/test-classification.json). Use the same configuration for a focused unit test:
+
+```bash
+npm test
+npx vitest run --config config/vitest/vitest.unit.config.ts src/lib/agents/codename.test.ts
+```
+
+Tests that own real processes, Git repositories, network listeners, or native resources belong to the explicit integration lane.
+`npm run test:integration -- <file>` selects matching resource-owning test files and runs them serially with the
+[integration configuration](./config/vitest/vitest.integration.config.ts). For example:
+
+```bash
+npm run test:integration -- tests/test-classification.test.ts
+```
+
+A filter matching no resource-owning test fails instead of silently running the unit lane. With no file filter,
+`npm run test:integration` runs the integration lane; `npm run test:all` explicitly runs both unit and integration gates.
+
+When adding or changing tests, use the existing classifier rather than maintaining the manifest by hand. It derives
+resource ownership from [path and source markers](./scripts/lib/test-classification.mjs); tests without those markers stay in the unit lane.
+Regenerate the manifest when those markers change, review its diff, and check it before submitting:
+
+```bash
+npm run test:classify
+npm run test:classification:check
+```
+
+The check fails when the manifest does not match the current test sources. Keep the classification rules and integration
+failure baselines intact; do not weaken them to make a test pass.
 
 Three things about those gates that will otherwise waste your time:
 
 - **The suite prints alarming output on purpose.** Negative-path tests emit things like `LOCKOUT BREACH`, authorization failures, and timeouts to stderr while passing. The Vitest summary and exit code are the verdict.
 - **Treat repo-wide lint as a ratchet.** `npm run lint` permits the current warning baseline, and that ceiling only goes down. Keep lint fixes focused: when a pull request clears warnings, lower `--max-warnings` in `package.json` in the same pull request instead of leaving unused headroom.
-- **Tests are not yet fully isolated from a running install.** A few suites reach global paths outside `CORTEX_IDE_DATA_DIR`, so quit the desktop app before running the full suite, or expect flakes that are not your fault.
+- **Resource-owning integration tests can affect shared app state.** Some reach global paths outside `CORTEX_IDE_DATA_DIR`. Use isolated test state and quit the installed desktop app before running those tests. This caveat applies to the integration lane (including its part of `npm run test:all`), not the default hermetic `npm test` gate.
 
 Use one of the established commit prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `perf:`, or `refactor:`. Files have an 800-line ceiling unless an existing waiver applies. New TSX styling uses inline style objects rather than new CSS classes.
 

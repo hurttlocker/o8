@@ -320,6 +320,7 @@ export async function persistReleasedPacketToMission(
         releaseStatePayload: packet.releaseStatePayload,
         blockedReason: packet.blockedReason,
         recovery: packet.recovery,
+        ...(packet.review?.reviewedHeadSha === packet.releaseStatePayload?.headSha ? { review: packet.review } : {}),
         lastEventAt: packet.lastEventAt,
         lastEventLabel: packet.lastEventLabel,
         lane: packet.lane,

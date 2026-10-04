@@ -393,6 +393,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
     const packet: OrchestratorPacket = {
       id: packetId,
       referenceLabel: nextPacketReferenceLabel(current.packets),
+      projectId: context.id,
       title,
       summary,
       workspaceTargetPath: repoPath,

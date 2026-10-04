@@ -50,6 +50,10 @@ export function resolveAppleSigningIdentity(env = process.env) {
   return env.APPLE_SIGNING_IDENTITY?.trim() || DEFAULT_APPLE_SIGNING_IDENTITY;
 }
 
+export function resolveNativeBundleCacheRoot(cacheRoot, env = process.env) {
+  return resolve(cacheRoot ?? (env.O8_NATIVE_BUNDLE_CACHE_DIR?.trim() || join(homedir(), '.o8-build-cache', 'native')));
+}
+
 export function isMachOFile(filePath) {
   const header = Buffer.alloc(4);
   let descriptor;
@@ -125,7 +129,7 @@ export function signMachOBinaries(
     try {
       run('codesign', [
         '--force',
-        '--timestamp',
+        identity === '-' ? '--timestamp=none' : '--timestamp',
         '--options',
         'runtime',
         '--sign',
@@ -339,7 +343,7 @@ export function removeIncompatibleMacPrebuilds(serverRoot) {
 export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot } = {}) {
   const resolvedProjectRoot = resolve(projectRoot ?? process.cwd());
   const resolvedServerRoot = resolve(serverRoot ?? join(resolvedProjectRoot, 'out', 'server'));
-  const resolvedCacheRoot = resolve(cacheRoot ?? join(homedir(), '.o8-build-cache', 'native'));
+  const resolvedCacheRoot = resolveNativeBundleCacheRoot(cacheRoot);
   const nodeIndex = await loadNodeReleaseIndex(resolvedCacheRoot);
   const nodeAbis = deriveNodeAbis(nodeIndex.releases);
   const betterSqlite3 = await prepareBetterSqlite3Bundle({

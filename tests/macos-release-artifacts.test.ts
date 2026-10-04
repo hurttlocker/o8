@@ -5,6 +5,9 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -71,6 +74,25 @@ function archiveFixture(app: string) {
   const archive = join(dirname(app), 'o8.app.tar.gz');
   execFileSync('tar', ['czf', archive, '-C', dirname(app), 'o8.app']);
   return archive;
+}
+
+function verifyWithUmask(app: string, archive: string, mask: number, scratch: string) {
+  const moduleUrl = new URL('../scripts/lib/macos-release-artifacts.mjs', import.meta.url).href;
+  const script = `
+    const { verifyUniversalMacUpdaterArchive } = await import(${JSON.stringify(moduleUrl)});
+    process.umask(Number(process.argv[1]));
+    try {
+      console.log(JSON.stringify({ identity: verifyUniversalMacUpdaterArchive(process.argv[2], process.argv[3]) }));
+    } catch (error) {
+      console.log(JSON.stringify({ error: error.message }));
+    }
+  `;
+  return JSON.parse(execFileSync(process.execPath, [
+    '--input-type=module', '-e', script, String(mask), app, archive,
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, TMPDIR: scratch, TMP: scratch, TEMP: scratch },
+  }));
 }
 
 function signedAppFixture(version: string) {
@@ -151,6 +173,102 @@ describe('stable macOS release artifact identity', () => {
     expect(identity.updaterArchiveSha256).toHaveLength(64);
     expect(identity.bundleSha256).toHaveLength(64);
     expect(identity.binaries.every((binary) => binary.architectures.length === 2)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32').each([
+    { label: '077', mask: 0o077 },
+    { label: '022', mask: 0o022 },
+  ])(
+    'preserves archived modes under umask $label inside a private scratch ancestor',
+    ({ mask }) => {
+      const app = appFixture();
+      const root = dirname(app);
+      chmodSync(root, 0o700);
+      for (const path of [app, join(app, 'Contents'), join(app, 'Contents/MacOS')]) {
+        chmodSync(path, 0o755);
+      }
+      for (const name of ['o8', 'speech_recognizer', 'speech-local']) {
+        chmodSync(join(app, 'Contents/MacOS', name), 0o755);
+      }
+      const resources = join(app, 'Contents/Resources');
+      mkdirSync(resources, { mode: 0o755 });
+      chmodSync(resources, 0o755);
+      const metadata = join(resources, 'identity.txt');
+      writeFileSync(metadata, 'same archived bytes');
+      chmodSync(metadata, 0o644);
+      symlinkSync('identity.txt', join(resources, 'identity-link'));
+      const archive = archiveFixture(app);
+      const scratch = join(root, 'private-inspection');
+      mkdirSync(scratch, { mode: 0o700 });
+
+      const result = verifyWithUmask(app, archive, mask, scratch);
+
+      expect(result.error).toBeUndefined();
+      expect(result.identity.bundleSha256).toHaveLength(64);
+      expect(result.identity.updaterArchiveSha256).toHaveLength(64);
+      expect(result.identity.binaries.every((binary: { architectures: string[] }) =>
+        binary.architectures.length === 2)).toBe(true);
+      expect(statSync(root).mode & 0o7777).toBe(0o700);
+      expect(statSync(scratch).mode & 0o7777).toBe(0o700);
+      expect(readdirSync(scratch)).toEqual([]);
+      expect(statSync(metadata).mode & 0o7777).toBe(0o644);
+      expect(statSync(join(app, 'Contents/MacOS/o8')).mode & 0o7777).toBe(0o755);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32').each([
+    { label: '077', mask: 0o077 },
+    { label: '022', mask: 0o022 },
+  ])('refuses an archive with a mode-only difference under umask $label', ({ mask }) => {
+    const app = appFixture();
+    const binary = join(app, 'Contents/MacOS/o8');
+    chmodSync(binary, 0o755);
+    const archive = archiveFixture(app);
+    chmodSync(binary, 0o700);
+    const scratch = join(dirname(app), 'private-inspection');
+    mkdirSync(scratch, { mode: 0o700 });
+
+    expect(verifyWithUmask(app, archive, mask, scratch).error).toBe(
+      'updater archive contents do not match the inspected macOS app bundle',
+    );
+    expect(readdirSync(scratch)).toEqual([]);
+    expect(statSync(binary).mode & 0o7777).toBe(0o700);
+  });
+
+  it('refuses archived content changes at an otherwise identical path', () => {
+    const app = appFixture();
+    const metadata = join(app, 'Contents/identity.txt');
+    writeFileSync(metadata, 'old bytes');
+    const archive = archiveFixture(app);
+    writeFileSync(metadata, 'new bytes');
+
+    expect(() => verifyUniversalMacUpdaterArchive(app, archive)).toThrow(
+      'updater archive contents do not match the inspected macOS app bundle',
+    );
+  });
+
+  it('refuses archive members outside the app namespace before extraction', () => {
+    const app = appFixture();
+    const root = dirname(app);
+    writeFileSync(join(root, 'outside.txt'), 'outside member');
+    const archive = join(root, 'unsafe.tar.gz');
+    execFileSync('tar', ['czf', archive, '-C', root, 'o8.app', 'outside.txt']);
+
+    expect(() => verifyUniversalMacUpdaterArchive(app, archive)).toThrow(
+      'updater archive contains unsafe member "outside.txt"',
+    );
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses an archived symlink escaping the app', () => {
+    const app = appFixture();
+    const link = join(app, 'Contents/escape');
+    symlinkSync('../../outside.txt', link);
+    const archive = archiveFixture(app);
+    rmSync(link);
+
+    expect(() => verifyUniversalMacUpdaterArchive(app, archive)).toThrow(
+      'has an unsafe symlink target outside o8.app',
+    );
   });
 
   it('refuses a thin updater archive even when the loose app is universal', () => {

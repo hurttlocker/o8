@@ -71,7 +71,9 @@ export function CanvasCommandPalette({ commands, repo, fetchImpl }: CanvasComman
             : (repo ? fileCache.get(repo) ?? [] : [])
         ) : undefined}
         onSelectIssue={ignoreSelection}
-        onSelectFile={(filePath) => commands.spawnFile(filePath)}
+        onSelectFile={(filePath, _line, workspace) => commands.spawnFile(
+          workspace ? resolveCanvasFilePath(workspace, filePath) : filePath,
+        )}
         onSelectAgent={(sessionKey) => commands.spawnChat(sessionKey)}
         onSelectChat={(chatTabId) => commands.spawnChat(chatTabId)}
         onSelectPacket={ignoreSelection}
