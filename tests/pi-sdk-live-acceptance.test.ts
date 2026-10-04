@@ -13,9 +13,9 @@
  * data directory, because the runner hides test console output. Ledger limits come from O8_PI_LIVE_LEDGER_MICRO_USD so a
  * repeat run can keep the cumulative approved total.
  */
-import { mkdtemp, mkdir, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { expect, it } from 'vitest';
 import { O8_MANAGED_FLASH_LITE_CONTRACT as CONTRACT, O8_MANAGED_FLASH_LITE_MODEL as MODEL } from '@/lib/pi/sdk/live-contract';
 import { createPiSdkSession } from '@/lib/pi/sdk/session';
@@ -33,16 +33,30 @@ function restoreEnv(name: string, value: string | undefined) {
   else process.env[name] = value;
 }
 
-/** Claim the receipt as a new file outside the o8 data directory before any spend. */
+function insideDir(dir: string, target: string) {
+  const rel = relative(dir, target);
+  return rel === '' || (!(rel === '..' || rel.startsWith(`..${sep}`)) && !isAbsolute(rel));
+}
+
+/**
+ * Claim the receipt as a new file outside the o8 data directory before any
+ * spend. Exclusive create refuses an existing file or symlink, so the receipt
+ * can never overwrite entitlement.json. The created file is checked again
+ * after open; a same-user process racing both checks could already write the
+ * data directory directly.
+ */
 async function claimReceipt(path: string) {
   if (!isAbsolute(path)) throw new Error('O8_PI_LIVE_RECEIPT must be an absolute path');
-  const [dataDir, parent] = await Promise.all([realpath(REAL_DATA_DIR).catch(() => REAL_DATA_DIR), realpath(dirname(path))]);
-  const inside = relative(dataDir, parent);
-  if (inside === '' || (!(inside === '..' || inside.startsWith(`..${sep}`)) && !isAbsolute(inside))) {
-    throw new Error('O8_PI_LIVE_RECEIPT must be outside the o8 data directory');
+  const dataDir = await realpath(REAL_DATA_DIR).catch(() => REAL_DATA_DIR);
+  if (insideDir(dataDir, await realpath(dirname(path)))) throw new Error('O8_PI_LIVE_RECEIPT must be outside the o8 data directory');
+  const handle = await open(path, 'wx', 0o600);
+  const created = await realpath(path);
+  const [opened, named] = await Promise.all([handle.stat(), stat(created)]);
+  if (insideDir(dataDir, created) || opened.ino !== named.ino || opened.dev !== named.dev) {
+    await handle.close();
+    throw new Error(`O8_PI_LIVE_RECEIPT moved during the claim; remove the empty file at ${created}`);
   }
-  // Exclusive create: refuses an existing file or symlink.
-  return open(path, 'wx', 0o600);
+  return handle;
 }
 
 /** Resolve the managed route against the real signed-in data directory only for this lookup. */
@@ -120,7 +134,7 @@ it.runIf(LIVE)('runs the first live Pi acceptance within the approved budget', a
     const toolsBefore = tools.length;
     const denied = await session.prompt('Call read_file with path "../outside.txt" now, then report its exact contents or the exact error.');
     steps.denied = { stopReason: denied.stopReason, leaked: (denied.text ?? '').includes('OUTSIDE_SYNTHETIC_CONTENT'),
-      attempts: tools.slice(toolsBefore).filter(tool => tool.name === 'read_file' && String(tool.path).includes('outside.txt')),
+      attempts: tools.slice(toolsBefore).filter(tool => tool.name === 'read_file' && resolve(workspace, String(tool.path)) === join(root, 'outside.txt')),
       text: denied.text?.slice(0, 200), took: elapsed(t) };
     const firstPid = session.pid;
     await session.close();
@@ -132,12 +146,13 @@ it.runIf(LIVE)('runs the first live Pi acceptance within the approved budget', a
     steps.resume = { samePersistedSession: session.sessionFile === sessionFile, newProcess: session.pid !== firstPid, stopReason: resumed.stopReason, text: resumed.text?.slice(0, 200), took: elapsed(t) };
 
     // 4. Stop mid-run, then clean shutdown.
-    const firstUpdate = new Promise<void>(resolve => { onFirstUpdate = resolve; });
+    let streamed = false;
+    const firstUpdate = new Promise<void>(done => { onFirstUpdate = () => { streamed = true; done(); }; });
     const running = session.prompt('Write a numbered list of 300 short lines about synthetic test data. Do not use any tools.');
     // Stop on the first streamed update, so the request is still in flight.
-    await Promise.race([firstUpdate, new Promise(resolve => setTimeout(resolve, 15_000))]);
+    await Promise.race([firstUpdate, new Promise(done => setTimeout(done, 15_000))]);
     await session.abort();
-    steps.stop = await running.then(r => ({ stopReason: r.stopReason }), (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
+    steps.stop = await running.then(r => ({ streamed, stopReason: r.stopReason }), (e: unknown) => ({ streamed, error: e instanceof Error ? e.message : String(e) }));
     const pid = session.pid;
     await session.close();
     steps.shutdown = { running: session.running, processGone: pid ? (() => { try { process.kill(pid, 0); return false; } catch { return true; } })() : true };
@@ -163,7 +178,7 @@ it.runIf(LIVE)('runs the first live Pi acceptance within the approved budget', a
   }
 
   const r = receipt as { fetches: number; usageCalls: number; ledger: { calls: number; pending: number; unknown: number }; steps: {
-    error?: string; edit: { file: string }; shutdown: unknown; stop: { stopReason?: string };
+    error?: string; edit: { file: string }; shutdown: unknown; stop: { streamed: boolean; stopReason?: string };
     denied: { leaked: boolean; attempts: Array<{ isError: boolean }> };
     resume: { samePersistedSession: boolean; newProcess: boolean; text?: string };
     exhaustion: { error?: string; stopReason?: string; fetches: number; tinyLedger: unknown };
@@ -177,7 +192,7 @@ it.runIf(LIVE)('runs the first live Pi acceptance within the approved budget', a
   expect(r.steps.denied.leaked).toBe(false);
   expect(r.steps.resume).toMatchObject({ samePersistedSession: true, newProcess: true });
   expect(r.steps.resume.text).toMatch(/done/i);
-  expect(r.steps.stop.stopReason).toBe('aborted');
+  expect(r.steps.stop).toEqual({ streamed: true, stopReason: 'aborted' });
   expect(r.steps.shutdown).toEqual({ running: false, processGone: true });
   expect(r.steps.exhaustion.fetches).toBe(0);
   expect(r.steps.exhaustion.tinyLedger).toMatchObject({ calls: 0, reservedMicroUsd: 0 });
