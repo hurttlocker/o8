@@ -3,13 +3,15 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
-import { queueDeviceRevoke, readPendingDeviceRevokes, removePendingDeviceRevoke } from '@/lib/auth/device-session-store';
+import { deleteDeviceSession, invalidateDesktopAuthHandoff, queueDeviceRevoke, readDeviceSession, readPendingDeviceRevokes, removePendingDeviceRevoke } from '@/lib/auth/device-session-store';
 
 export function deviceResponse(body: unknown, status = 200): NextResponse {
   return NextResponse.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
 export function deviceRequestIsLocal(request: Request): boolean {
+  // HTTP has socket truth, not a trusted Tauri window identity. Middleware
+  // supplies the operator boundary; renderer window labels cannot strengthen it.
   return headersIndicateLoopback((name) => request.headers.get(name));
 }
 
@@ -33,22 +35,45 @@ let pendingRevokes: Promise<void> | null = null;
 export function retryPendingDeviceRevokes(): Promise<void> {
   if (!pendingRevokes) {
     pendingRevokes = (async () => {
-      for (const token of readPendingDeviceRevokes()) {
+      await Promise.all(readPendingDeviceRevokes().map(async (token) => {
         try {
           const response = await requestDeviceService('revoke', token);
           if (response.status === 200 || response.status === 401) removePendingDeviceRevoke(token);
         } catch {
           // Keep the durable intent for the next launch; never log credentials.
         }
-      }
+      }));
     })().finally(() => { pendingRevokes = null; });
   }
   return pendingRevokes;
 }
 
 export async function revokeDeviceToken(token: string): Promise<void> {
-  queueDeviceRevoke(token);
+  try {
+    queueDeviceRevoke(token);
+  } catch {
+    // This caller holds a certainly-current grant, so a direct attempt is safe.
+    await requestDeviceService('revoke', token).catch(() => {});
+    return;
+  }
   await retryPendingDeviceRevokes();
+}
+
+export async function revokeDesktopDeviceSession(): Promise<void> {
+  // Durable cancellation precedes every network await, including offline revoke.
+  invalidateDesktopAuthHandoff();
+  const session = readDeviceSession();
+  let directRevoke = false;
+  try {
+    if (session?.renewalStartedAt !== undefined) removePendingDeviceRevoke(session.token);
+    else if (session) {
+      try { queueDeviceRevoke(session.token); } catch { directRevoke = true; }
+    }
+  } finally {
+    deleteDeviceSession();
+  }
+  if (directRevoke && session) await requestDeviceService('revoke', session.token).catch(() => {});
+  else await retryPendingDeviceRevokes();
 }
 
 export function validDeviceGrant(data: Record<string, unknown>): boolean {

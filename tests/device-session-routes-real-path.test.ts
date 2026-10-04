@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { exportSPKI, generateKeyPair, SignJWT } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -201,9 +202,144 @@ describe('desktop device routes through a fake license server and persisted stat
     writeFileSync(target, JSON.stringify({ ...previous, renewalStartedAt: Date.now() - 60_001 }));
     vi.resetModules();
     const { POST } = await import('@/app/api/panel/auth/device/renew/route');
-    expect((await POST(request('renew'))).status).toBe(503);
+    expect((await POST(request('renew'))).status).toBe(401);
     expect(existsSync(target)).toBe(false);
-    expect(calls.map((call) => call.path)).toEqual(['/account/device/revoke']);
+    expect(calls.length).toBe(0);
+  });
+
+  it.each(['rollback', 'monotonic-expiry', 'wall-expiry', 'late-success'] as const)('round 2 clock: exhausts recovery on %s without another upstream request', async (scenario) => {
+    const store = await seed();
+    const wallStart = Date.now();
+    const wall = vi.spyOn(Date, 'now').mockReturnValue(wallStart);
+    const monotonic = vi.spyOn(performance, 'now').mockReturnValue(1_000);
+    respond = async () => {
+      wall.mockReturnValue(wallStart + (scenario === 'rollback' ? -1 : scenario === 'wall-expiry' ? 60_001 : 1));
+      monotonic.mockReturnValue(scenario === 'monotonic-expiry' || scenario === 'late-success' ? 301_001 : 1_001);
+      return { status: 200, disconnect: scenario !== 'late-success', body: {
+        deviceToken: randomBytes(32).toString('hex'), ticket: randomBytes(24).toString('hex'), clerkUserId: owner, idleExpiresAt,
+      } };
+    };
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    const response = await POST(request('renew'));
+    expect(response.status).toBe(503);
+    expect(calls.length).toBe(1);
+    expect(store.readDeviceSession()).toBeNull();
+    expect(existsSync(join(dataDir, 'device-revoke-pending.json'))).toBe(false);
+  });
+
+  it.each([1, -3_600_000, null, 'invalid'])('round 2 clock: never resumes persisted uncertainty %s in another process', async (offset) => {
+    await seed();
+    const target = join(dataDir, 'device-session.json');
+    const record = JSON.parse(readFileSync(target, 'utf8'));
+    writeFileSync(target, JSON.stringify({ ...record, renewalStartedAt: typeof offset === 'number' ? Date.now() - offset : offset }));
+    vi.resetModules();
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(401);
+    expect(calls.length).toBe(0);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it.each(['renew', 'revoke'] as const)('round 2 uncertainty: %s only deletes an uncertain device and never revokes it', async (action) => {
+    const store = await seed();
+    store.writeDeviceSession({ ...store.readDeviceSession()!, renewalStartedAt: Date.now() - 600_000 });
+    const route = action === 'renew'
+      ? await import('@/app/api/panel/auth/device/renew/route') : await import('@/app/api/panel/auth/device/revoke/route');
+    await route.POST(request(action));
+    expect(store.readDeviceSession()).toBeNull();
+    expect(calls.length).toBe(0);
+    expect(existsSync(join(dataDir, 'device-revoke-pending.json'))).toBe(false);
+  });
+
+  it('round 2 uncertainty: exhausting live recovery does not queue or send a revoke', async () => {
+    const store = await seed();
+    respond = async () => ({ status: 503, body: {} });
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(503);
+    expect(calls.map((call) => call.path)).toEqual(Array(4).fill('/account/device/renew'));
+    expect(store.readDeviceSession()).toBeNull();
+    expect(store.readPendingDeviceRevokes()).toEqual([]);
+  });
+
+  it.each(['status', 'revoke'] as const)('round 2 corruption: quarantines invalid pending JSON through %s with a content-free warning', async (action) => {
+    const store = await seed();
+    const target = join(dataDir, 'device-revoke-pending.json');
+    writeFileSync(target, `{${credential}`);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const response = action === 'status'
+      ? await (await import('@/app/api/panel/auth/device/status/route')).GET(request(action))
+      : await (await import('@/app/api/panel/auth/device/revoke/route')).POST(request(action));
+    expect(response.status).toBe(200);
+    expect(existsSync(target)).toBe(false);
+    expect(warning.mock.calls).toEqual([['[auth] discarded invalid pending device revocation state']]);
+    expect(calls.length).toBe(action === 'status' ? 0 : 1);
+    if (action === 'revoke') expect(store.readDeviceSession()).toBeNull();
+    vi.resetModules();
+    const { GET } = await import('@/app/api/panel/auth/device/status/route');
+    expect((await GET(request('status'))).status).toBe(200);
+  });
+
+  it('round 2 corruption: attempts direct revoke when persisting a current token fails', async () => {
+    const store = await seed();
+    vi.spyOn(store, 'queueDeviceRevoke').mockImplementation(() => { throw new Error('Storage unavailable'); });
+    const { POST } = await import('@/app/api/panel/auth/device/revoke/route');
+    const response = await POST(request('revoke'));
+    expect(response.status).toBe(200);
+    expect(calls.length).toBe(1);
+    expect(calls[0].path).toBe('/account/device/revoke');
+    expect(calls[0].authorization === `Bearer ${credential}`).toBe(true);
+    expect(store.readDeviceSession()).toBeNull();
+  });
+
+  it.each(['signed-out', 'persisted', 'exhausted'] as const)('round 2 cleanup: deletes an uncertain token despite pending cleanup failure in %s renewal', async (mode) => {
+    const store = await seed();
+    if (mode !== 'exhausted') store.writeDeviceSession({ ...store.readDeviceSession()!, renewalStartedAt: Date.now() });
+    if (mode === 'signed-out') (await import('@/lib/auth/sign-out-marker')).markAuthSignedOut();
+    vi.spyOn(store, 'removePendingDeviceRevoke').mockImplementation(() => { throw new Error('Storage unavailable'); });
+    respond = async () => ({ status: 503, body: {} });
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    expect((await POST(request('renew'))).status).toBe(503);
+    expect(store.readDeviceSession()).toBeNull();
+    expect(calls.filter((call) => call.path.endsWith('/revoke')).length).toBe(0);
+    expect(calls.length).toBe(mode === 'exhausted' ? 4 : 0);
+  });
+
+  it('round 2 uncertainty: discards legacy queue entries whose rotation status cannot be proven', async () => {
+    const target = join(dataDir, 'device-revoke-pending.json');
+    writeFileSync(target, JSON.stringify([credential]));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { GET } = await import('@/app/api/panel/auth/device/status/route');
+    expect((await GET(request('status'))).status).toBe(200);
+    expect(calls.length).toBe(0);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it('round 2 bounds: retains only the newest sixteen current pending revokes', async () => {
+    const store = await seed();
+    const tokens = Array.from({ length: 20 }, () => randomBytes(32).toString('hex'));
+    tokens.forEach((token) => store.queueDeviceRevoke(token));
+    respond = async () => ({ status: 503, body: {} });
+    const { GET } = await import('@/app/api/panel/auth/device/status/route');
+    expect((await GET(request('status'))).status).toBe(200);
+    expect(calls.length).toBe(16);
+    expect(store.readPendingDeviceRevokes()).toEqual(tokens.slice(-16));
+    expect(statSync(join(dataDir, 'device-revoke-pending.json')).mode & 0o777).toBe(0o600);
+  });
+
+  it('round 2 bounds: starts pending revokes in parallel so one slow attempt does not serialize the queue', async () => {
+    const store = await seed();
+    Array.from({ length: 3 }, () => randomBytes(32).toString('hex')).forEach((token) => store.queueDeviceRevoke(token));
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    respond = async () => { await hold; return { status: 200, body: {} }; };
+    const { GET } = await import('@/app/api/panel/auth/device/status/route');
+    const pending = GET(request('status'));
+    try {
+      await vi.waitFor(() => expect(calls.length).toBe(3));
+    } finally {
+      release();
+      await pending;
+    }
+    expect(store.readPendingDeviceRevokes()).toEqual([]);
   });
 
   it('deletes the superseded token when only the sign-in epoch changes during rotation', async () => {
@@ -240,17 +376,17 @@ describe('desktop device routes through a fake license server and persisted stat
     expect(store.readDeviceSession()).toBeNull();
   });
 
-  it('retains a nonrenewable credential if persisting revoke intent fails after exhausted recovery', async () => {
+  it('deletes uncertain credentials without needing to persist revoke intent', async () => {
     const store = await seed();
     const queue = vi.spyOn(store, 'queueDeviceRevoke').mockImplementation(() => { throw new Error('Storage unavailable'); });
     respond = async () => ({ status: 503, body: {} });
     const { POST } = await import('@/app/api/panel/auth/device/renew/route');
     expect((await POST(request('renew'))).status).toBe(503);
-    expect(store.readDeviceSession()?.token).toBe(credential);
-    expect(store.readDeviceSession()?.renewalStartedAt).toBeLessThanOrEqual(Date.now() - 60_000);
+    expect(store.readDeviceSession()).toBeNull();
+    expect(queue).not.toHaveBeenCalled();
     queue.mockRestore();
     respond = async () => ({ status: 200, body: {} });
-    expect((await POST(request('renew'))).status).toBe(503);
+    expect((await POST(request('renew'))).status).toBe(401);
     expect(calls.filter((call) => call.path.endsWith('/renew'))).toHaveLength(4);
     expect(store.readDeviceSession()).toBeNull();
   });
@@ -274,7 +410,7 @@ describe('desktop device routes through a fake license server and persisted stat
     expect(await (await POST(request('revoke'))).json()).toEqual({ ok: true });
     expect(calls).toHaveLength(2);
     const pending = join(dataDir, 'device-revoke-pending.json');
-    expect(JSON.parse(readFileSync(pending, 'utf8'))).toEqual([credential]);
+    expect(JSON.parse(readFileSync(pending, 'utf8'))).toEqual({ version: 1, tokens: [credential] });
     expect(statSync(pending).mode & 0o777).toBe(0o600);
   });
 
@@ -308,7 +444,7 @@ describe('desktop device routes through a fake license server and persisted stat
     expect(calls).toHaveLength(2);
     expect(calls[1].authorization).toBe(`Bearer ${credential}`);
     expect(store.readDeviceSession()?.token).toBe(newer);
-    expect(JSON.parse(readFileSync(join(dataDir, 'device-revoke-pending.json'), 'utf8'))).toEqual([credential]);
+    expect(JSON.parse(readFileSync(join(dataDir, 'device-revoke-pending.json'), 'utf8'))).toEqual({ version: 1, tokens: [credential] });
   });
 
   it.each(['enroll', 'renew'] as const)('never resurrects a device when revoke races an in-flight %s', async (action) => {

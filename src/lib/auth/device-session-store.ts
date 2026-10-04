@@ -36,8 +36,10 @@ export function readDeviceSession(): DeviceSession | null {
     return {
       token: value.token as string, clerkUserId: value.clerkUserId as string,
       installId: value.installId as string, idleExpiresAt: value.idleExpiresAt as string,
-      ...(typeof value.renewalStartedAt === 'number' && Number.isFinite(value.renewalStartedAt)
-        ? { renewalStartedAt: value.renewalStartedAt } : {}),
+      ...(Object.hasOwn(value, 'renewalStartedAt') ? {
+        renewalStartedAt: typeof value.renewalStartedAt === 'number' && Number.isFinite(value.renewalStartedAt)
+          ? value.renewalStartedAt : 0,
+      } : {}),
     };
   } catch {
     return null;
@@ -65,29 +67,65 @@ function pendingRevokePath(): string {
 }
 
 export function readPendingDeviceRevokes(): string[] {
+  let raw: string;
   try {
-    const record: unknown = JSON.parse(readFileSync(pendingRevokePath(), 'utf8'));
-    if (!Array.isArray(record) || record.some((token) => typeof token !== 'string' || !token.trim())) {
-      throw new Error('Invalid pending device revocation.');
-    }
-    return record;
+    raw = readFileSync(pendingRevokePath(), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
+  try {
+    const record = JSON.parse(raw) as { version?: unknown; tokens?: unknown } | null;
+    // Legacy arrays may contain superseded tokens queued by an older client.
+    if (!record || record.version !== 1 || !Array.isArray(record.tokens)
+      || record.tokens.some((token) => typeof token !== 'string' || !token.trim())) throw new Error('Invalid pending state');
+    const session = readDeviceSession();
+    return [...new Set<string>(record.tokens)].slice(-16)
+      .filter((token) => session?.renewalStartedAt === undefined || session.token !== token);
+  } catch {
+    // Never forward or print contents whose current-token provenance is unknown.
+    try { rmSync(pendingRevokePath(), { force: true }); } catch { /* fail closed */ }
+    console.warn('[auth] discarded invalid pending device revocation state');
+    return [];
+  }
 }
 
 export function queueDeviceRevoke(token: string): void {
-  writePrivateRecord(pendingRevokePath(), [...new Set([...readPendingDeviceRevokes(), token])]);
+  writePrivateRecord(pendingRevokePath(), { version: 1, tokens: [...new Set([...readPendingDeviceRevokes(), token])].slice(-16) });
 }
 
 export function removePendingDeviceRevoke(token: string): void {
   const remaining = readPendingDeviceRevokes().filter((pending) => pending !== token);
-  if (remaining.length) writePrivateRecord(pendingRevokePath(), remaining);
+  if (remaining.length) writePrivateRecord(pendingRevokePath(), { version: 1, tokens: remaining });
   else rmSync(pendingRevokePath(), { force: true });
 }
 
 export function deleteDeviceSession(): void {
   generation += 1;
   rmSync(sessionPath(), { force: true });
+}
+
+function handoffPath(): string {
+  return join(getDataDir(), 'desktop-auth-handoff.json');
+}
+
+export function beginDesktopAuthHandoff(): string {
+  const state = randomUUID();
+  writePrivateRecord(handoffPath(), { state });
+  return state;
+}
+
+export function invalidateDesktopAuthHandoff(): void {
+  rmSync(handoffPath(), { force: true });
+}
+
+export function consumeDesktopAuthHandoff(state: string): boolean {
+  try {
+    const record = JSON.parse(readFileSync(handoffPath(), 'utf8')) as { state?: unknown } | null;
+    if (!state || record?.state !== state) return false;
+    invalidateDesktopAuthHandoff();
+    return true;
+  } catch {
+    return false;
+  }
 }

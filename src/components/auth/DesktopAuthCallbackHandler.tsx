@@ -44,6 +44,12 @@ export function DesktopAuthCallbackHandler() {
         await consumeDesktopAuthCallback(raw, {
           signIn: si,
           clerk: clerkRef.current,
+          validateHandoff: async (state) => {
+            const response = await fetch('/api/panel/auth/handoff?action=validate', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }),
+            });
+            return response.ok && (await response.json())?.ok === true;
+          },
           getExpectedState: () => {
             // CSRF: the echoed state must match the nonce we stored at launch.
             try {

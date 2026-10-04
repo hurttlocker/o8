@@ -8,7 +8,7 @@ import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
 import { purgeTauriClerkStore, shouldPurgeClerkStoreForEntitlementSync } from '@/lib/auth/tauri-clerk-store';
 import { scheduleManagedGithubRefresh } from '@/lib/github-broker/refresh-schedule';
-import { desktopAuthTicketExchangeInProgress, subscribeDesktopAuthTicketExchange, subscribeDesktopBrowserSignIn, waitForDesktopAuthTicketExchange } from '@/lib/auth/desktop-auth-callback';
+import { desktopAuthTicketExchangeInProgress, invalidateDesktopAuthHandoffs, subscribeDesktopAuthTicketExchange, subscribeDesktopBrowserSignIn, waitForDesktopAuthTicketExchange } from '@/lib/auth/desktop-auth-callback';
 import { completeDesktopSignIn, DEVICE_RETRY_MS, deviceSessionDecision, renewDesktopSession, type DeviceSessionTrigger } from '@/lib/auth/device-session-client';
 import { canUseTauriEvents } from '@/lib/tauri/bridge';
 
@@ -118,6 +118,7 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
 
   const fullSignOut = useCallback(async (waitForDeviceAttempt = false) => {
     if (nativeMode) {
+      invalidateDesktopAuthHandoffs();
       signOutInProgressRef.current += 1;
       explicitSignOutRef.current = true;
       deviceGenerationRef.current += 1;
@@ -128,7 +129,13 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
     }
     try {
       if (nativeMode) {
-        await fetch('/api/panel/auth/device/revoke', { method: 'POST' }).catch(() => {});
+        const revoke = await fetch('/api/panel/auth/device/revoke', { method: 'POST' }).catch(() => null);
+        if (!revoke?.ok || (await revoke.json().catch(() => null))?.ok !== true) {
+          const cancelled = await fetch('/api/panel/auth/handoff?action=cancel', { method: 'POST' }).catch(() => null);
+          if (!cancelled?.ok || (await cancelled.json().catch(() => null))?.ok !== true) {
+            throw new Error('Sign-out could not be saved. Try again.');
+          }
+        }
         // Neither a browser nor a device ticket already inside Clerk can be
         // aborted. End that session after activation settles.
         if (waitForDeviceAttempt) {

@@ -18,6 +18,8 @@ export interface ConsumeDesktopAuthCallbackOptions {
   getExpectedState: () => string | null;
   clearExpectedState: () => void;
   retrySignIn?: () => void;
+  /** Native handler validates and consumes its durable, one-time handoff nonce. */
+  validateHandoff?: (state: string | null) => Promise<boolean>;
   /**
    * Fired once, after a fresh ticket sign-in fully activates. The handler uses
    * this to retire the server-side sign-out marker so it can't reject the
@@ -32,6 +34,15 @@ const consumedTickets = new Set<string>();
 let exchangingTickets = 0;
 const exchangeListeners = new Set<() => void>();
 const browserSignInListeners = new Set<() => void>();
+let handoffGeneration = 0;
+
+export function desktopAuthHandoffGeneration(): number {
+  return handoffGeneration;
+}
+
+export function invalidateDesktopAuthHandoffs(): void {
+  handoffGeneration += 1;
+}
 
 export function subscribeDesktopBrowserSignIn(listener: () => void): () => void {
   browserSignInListeners.add(listener);
@@ -79,7 +90,7 @@ function reasonFromUnknown(value: unknown, fallback: string): string {
 /** Shared by the state-checked deep link and the server-issued device ticket. */
 export async function exchangeDesktopAuthTicket(
   ticket: string,
-  options: { signIn: DesktopAuthSignIn; clerk: DesktopAuthClerk; onActivated?: () => Promise<void> },
+  options: { signIn: DesktopAuthSignIn; clerk: DesktopAuthClerk; onActivated?: () => Promise<void>; isCurrent?: () => boolean },
 ): Promise<void> {
   if (desktopAuthTicketExchangeInProgress()) {
     throw new Error('A desktop sign-in is already in progress. Try signing in again.');
@@ -87,18 +98,25 @@ export async function exchangeDesktopAuthTicket(
   exchangingTickets += 1;
   exchangeListeners.forEach((listener) => listener());
   try {
+    const assertCurrent = () => {
+      if (options.isCurrent && !options.isCurrent()) throw new Error('The desktop sign-in was cancelled. Start sign-in again.');
+    };
+    assertCurrent();
     const { error } = await options.signIn.ticket({ ticket });
+    assertCurrent();
     if (error) throw new Error(reasonFromUnknown(error, 'The sign-in ticket could not be exchanged.'));
     if (options.signIn.status !== 'complete') {
       throw new Error(`Clerk returned an incomplete sign-in status: ${options.signIn.status || 'unknown'}.`);
     }
     const { error: finalizeError } = await options.signIn.finalize();
+    assertCurrent();
     if (finalizeError) throw new Error(reasonFromUnknown(finalizeError, 'The sign-in session could not be finalized.'));
     try {
       if (options.signIn.createdSessionId) {
         await options.clerk.setActive({ session: options.signIn.createdSessionId });
       }
       await options.clerk.user?.reload?.();
+      assertCurrent();
     } catch (error) {
       throw new Error(reasonFromUnknown(error, 'The signed-in session could not be activated.'));
     }
@@ -133,6 +151,16 @@ export async function consumeDesktopAuthCallback(
   }
 
   if (!ticket) return;
+  const generation = handoffGeneration;
+  const isCurrent = () => generation === handoffGeneration;
+  if (options.validateHandoff) {
+    const valid = await options.validateHandoff(state).catch(() => false);
+    if (!valid || !isCurrent()) {
+      reportDesktopAuthError('This sign-in handoff expired. Start sign-in again.');
+      // A stale callback must never automatically begin a new handoff.
+      return;
+    }
+  }
   if (consumedTickets.has(ticket)) {
     reportDesktopAuthError('This sign-in link was already used. Try signing in again.');
     regenerateDesktopSignIn(options);
@@ -140,7 +168,7 @@ export async function consumeDesktopAuthCallback(
   }
 
   const expected = options.getExpectedState();
-  if (expected && state !== expected) {
+  if (!options.validateHandoff && expected && state !== expected) {
     console.warn('[auth] callback state mismatch — ignoring');
     reportDesktopAuthError('The sign-in response did not match this app session. Try signing in again.');
     regenerateDesktopSignIn(options);
@@ -151,6 +179,7 @@ export async function consumeDesktopAuthCallback(
   try {
     await exchangeDesktopAuthTicket(ticket, {
       ...options,
+      isCurrent,
       onActivated: async () => {
         options.clearExpectedState();
         clearDesktopAuthError();
@@ -162,6 +191,6 @@ export async function consumeDesktopAuthCallback(
   } catch (err) {
     const reason = reasonFromUnknown(err, 'The sign-in ticket exchange failed unexpectedly.');
     reportDesktopAuthError(reason);
-    regenerateDesktopSignIn(options);
+    if (isCurrent()) regenerateDesktopSignIn(options);
   }
 }
