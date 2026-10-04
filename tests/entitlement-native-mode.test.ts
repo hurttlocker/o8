@@ -12,9 +12,10 @@
  * The route resolves its data dir from CORTEX_IDE_DATA_DIR per call, so pointing
  * that at a temp dir with the persisted rows is enough to exercise the real path.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { exportSPKI, generateKeyPair, SignJWT } from 'jose';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -59,6 +60,39 @@ describe('GET /api/panel/entitlement — native-mode founder license survives (r
     if (dataDir) rmSync(dataDir, { recursive: true, force: true });
     dataDir = null;
     delete process.env.CORTEX_IDE_DATA_DIR;
+    vi.unstubAllEnvs();
+  });
+
+  it('applies a signed lifetime license and preserves its plan, benefits, and serial on read', async () => {
+    authMock.mockResolvedValue({ userId: null });
+    const { privateKey, publicKey } = await generateKeyPair('EdDSA');
+    vi.stubEnv('O8_LICENSE_PUBKEY', await exportSPKI(publicKey));
+    const licenseKey = await new SignJWT({ plan: 'founder' })
+      .setProtectedHeader({ alg: 'EdDSA' })
+      .setSubject('user_founder')
+      .setExpirationTime('1h')
+      .sign(privateKey);
+
+    const { GET, POST } = await import('@/app/api/panel/entitlement/route');
+    const applied = await POST(new Request('http://localhost/api/panel/entitlement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ licenseKey }),
+    }));
+    expect(await applied.json()).toMatchObject({ plan: 'founder', source: 'file' });
+    const persisted = readFileSync(entitlementPath(), 'utf8');
+    expect(JSON.parse(persisted)).toMatchObject({ plan: 'founder', licenseKey });
+
+    const response = await GET(new Request('http://localhost/api/panel/entitlement'));
+    expect(await response.json()).toMatchObject({
+      plan: 'founder', actualPlan: 'founder', source: 'file', overrideActive: false,
+      flags: {
+        'proxy.inference': true, 'relay.offNetwork': true, 'voice.liveBrain': true,
+        'team.shared': false, 'cloud.runners': false,
+      },
+      founder: { operatorNumber: 7 }, actualFounder: { operatorNumber: 7 },
+    });
+    expect(readFileSync(entitlementPath(), 'utf8')).toBe(persisted);
   });
 
   it('keeps the license and reports the founder plan when auth() has no cookie session', async () => {

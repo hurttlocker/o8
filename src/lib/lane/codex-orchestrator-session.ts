@@ -33,6 +33,7 @@ import { parseLocalModel } from '@/lib/codex/local-model';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
+import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupported } from '@/lib/codex/model-compatibility';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
@@ -160,7 +161,7 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
       options.onReboundEvent?.(record, event);
     };
     const handleLine = (line: string) => {
-      handleCodexJsonLine(line, lineState, emit, { isLocalModel });
+      handleCodexJsonLine(line, lineState, emit, { isLocalModel, model: record.model ?? undefined });
       if (lineState.threadId) session!.threadId = lineState.threadId;
     };
     const finishRecord = () => {
@@ -305,7 +306,9 @@ export async function sendToCodexOrchestrator(
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
 ): Promise<void> {
-  if (!session.threadId) {
+  const requestedModel = resolveOrchestratorModelSync(options.model);
+  const resumed = Boolean(session.threadId);
+  if (!resumed && requestedModel !== MODEL_IDS.raw.openAiGpt61Sol) {
     return sendToCodexOrchestratorAttempt(session, message, onEvent, options);
   }
 
@@ -317,12 +320,19 @@ export async function sendToCodexOrchestrator(
       if (event.type !== 'turn_receipt') streamed = true;
       onEvent(event);
     }
-  }, options);
+  }, options, () => { streamed = true; });
 
+  const unsupported = deferredTerminalEvents.some((event) => event.type === 'error'
+    && isCodexSolUnsupported(requestedModel, event.error));
+  if (!streamed && unsupported && !options.signal?.aborted) {
+    session.status = 'ready';
+    onEvent({ type: 'turn_retry', attempt: 2, reason: 'codex-model-unsupported', notice: CODEX_SOL_UPDATE_NOTICE });
+    return sendToCodexOrchestratorAttempt(session, message, onEvent, { ...options, model: CODEX_SOL_FALLBACK_MODEL });
+  }
   const terminalError = deferredTerminalEvents.find((event) => event.type === 'error');
   const missingRollout = terminalError?.type === 'error'
     && isMissingCodexRolloutResumeError(terminalError.error);
-  if (!streamed && missingRollout && !options.signal?.aborted) {
+  if (resumed && !streamed && missingRollout && !options.signal?.aborted) {
     console.warn(`[codex-orchestrator-session] Saved Codex thread is gone; retrying ${session.sessionName} fresh`);
     session.threadId = null;
     session.status = 'ready';
@@ -338,6 +348,7 @@ async function sendToCodexOrchestratorAttempt(
   message: string,
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
+  onActivity?: () => void,
 ): Promise<void> {
   // Fable is Claude-only — its native-tool lockout + BYO-key path live in the
   // Claude REPL (orchestrator-session.ts). The registry routes 'fable' to
@@ -590,7 +601,7 @@ async function sendToCodexOrchestratorAttempt(
     let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
     let sawFirstEvent = false;
     const handleCodexLine = (line: string) => {
-      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel });
+      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity });
       if (parsed) {
         sawFirstEvent = true;
         if (firstEventTimeout) {
@@ -693,7 +704,8 @@ async function sendToCodexOrchestratorAttempt(
       const diagnostic = (stderr || crashStderr).trim();
       // Startup warnings can fill the display limit before the resume failure.
       // Keep that diagnostic visible to the one-time missing-thread recovery.
-      const resumeDiagnostic = diagnostic.split(/\r?\n/).find(isMissingCodexRolloutResumeError);
+      const resumeDiagnostic = diagnostic.split(/\r?\n/).find((line) => isMissingCodexRolloutResumeError(line)
+        || isCodexSolUnsupported(model, line));
       const error = code === 0
         ? undefined
         : (resumeDiagnostic || diagnostic).slice(0, 500) || `codex exited with code ${code}`;

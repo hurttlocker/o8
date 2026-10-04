@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
@@ -41,7 +42,11 @@ import { requestTerminalModeToggle } from '@/components/desktop/shell/TerminalMo
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
+import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
+import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
+import { resolveThreadProject } from '@/components/desktop/o8-panel/threads-model';
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
+import { AddRepoFlowHost } from '@/components/desktop/repo-registry/AddRepoFlowHost';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { useCommandPaletteHotkey } from '@/components/desktop/use-command-palette-hotkey';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
@@ -161,6 +166,7 @@ import {
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
+import { isOrchestratorRuntime, runtimeFromSessionKeyId } from '@/lib/orchestrator/runtime-capabilities';
 import { resolveFocusableLaneBinding } from './hooks/focusOrchestrationPacketLane';
 import { handleRepoWorkspaceFocusEvent } from './hooks/focusRepoWorkspace';
 import { useDesignMode } from '@/hooks/useDesignMode';
@@ -204,6 +210,7 @@ const LazyReviewPanel = retryingLazy(() => import('@/components/desktop/review/R
 import { TileContainer } from '@/components/desktop/TileContainer';
 import { useWorkspacePageLayouts } from './hooks/useWorkspacePageLayouts';
 import { waitForWorkspaceTerminalHandle } from './hooks/workspace-terminal-readiness';
+import { createOnboardingCompletionHandler } from './hooks/onboarding-completion';
 import { DashboardHydrationMarker } from './DashboardHydrationMarker';
 import {
   selectRepoOrchestratorConversation,
@@ -581,6 +588,7 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     raw === 'workspace'
     || raw === 'browser'
     || raw === 'activity'
+    || raw === 'threads'
     || raw === 'resources'
     || raw === 'handoffs'
     || raw === 'inbox'
@@ -765,6 +773,7 @@ function DashboardInner() {
   const [sidebarPreviewMaxHeight, setSidebarPreviewMaxHeight] = useState(0);
   const sidebarPreviewLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sidebarPreviewOverlayRef = useRef<HTMLDivElement | null>(null);
+  const addRepoDialogOpenRef = useRef(false);
 
   // Active-workspace map — each WorkspaceTerminalRoot broadcasts via
   // 'o8:workspace-active-label' with its stable workspaceId. We track
@@ -2499,6 +2508,37 @@ function DashboardInner() {
     openRightPanelFromUser();
   }, [openRightPanelFromUser, setO8Width]);
 
+  useThreadWorkspaceNavigation({
+    availability: () => threadPanelAvailability(
+      typeof window !== 'undefined' ? window.innerWidth : getResponsiveViewportWidth(),
+      RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH,
+    ),
+    resolve: (target) => {
+      const workspace = workspaceActiveMap.get(target.workspaceId);
+      if (!workspace?.tileId || !workspaceTerminalHandlesRef.current.has(workspace.tileId)
+        || !globalRepoEntries.some((repo) => repo.localPath === target.repoPath)) return null;
+      const project = resolveThreadProject(dashboardProjects.ledger?.projects ?? [], dashboardProjects.activeProject, target.repoPath, false);
+      return {
+        projectId: project?.id ?? null,
+        activate: () => {
+          setActiveTileId(workspace.tileId);
+          setO8AllRepos(false);
+          setO8CommitSha(null);
+          setO8CommitRepoPath(null);
+          setO8CommitRepoSlug(null);
+          handleOpenO8Panel({ repoPath: target.repoPath, tab: 'threads' });
+        },
+        isActive: () => workspaceHeaderActive.workspaceId === target.workspaceId,
+      };
+    },
+    readTasks: async () => {
+      const response = await fetch('/api/tasks?includeBrief=false&includeDone=true', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error('Unable to read threads.');
+      const body = await response.json();
+      return body.tasks ?? [];
+    },
+  });
+
   const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {
     if (repoPath) setO8RepoPathOverride(repoPath);
     closeRightPanelFromUser();
@@ -2526,10 +2566,14 @@ function DashboardInner() {
         || session.sessionId === sessionKey
         || session.runtimeSurface?.id === sessionKey
       )) ?? parsedAgents.find((agent) => agent.sessionKey === sessionKey || agent.id === sessionKey);
-      const sessionScope = selectedSession?.workspace
-        ?? selectedSession?.runtimeSurface?.cwd
-        ?? hint?.repoPath
-        ?? null;
+      const runtime = runtimeFromSessionKeyId(sessionKey)
+        ?? (isOrchestratorRuntime(selectedSession?.runtime) ? selectedSession.runtime : hint?.runtime)
+        ?? 'codex';
+      const knownScope = selectedSession?.workspace ?? selectedSession?.runtimeSurface?.cwd ?? hint?.repoPath;
+      // Search can return a cloud session before the sidebar inventory catches up.
+      const resolvedLane = runtime === 'cloud' && !knownScope
+        ? await resolveFocusableLaneBinding({ sessionKey, runtime }) : null;
+      const sessionScope = knownScope ?? resolvedLane?.repoPath ?? null;
       const targetRepo = sessionScope
         ? workspaceScopeEntries.find((repo) => (
           pathBelongsToRepoScope(sessionScope, repo.localPath)
@@ -2579,15 +2623,6 @@ function DashboardInner() {
         attempts: 20,
       });
       if (!primaryHandle) return;
-      const runtime = hint?.runtime ?? (selectedSession?.runtime === 'claude-code'
-        || selectedSession?.runtime === 'gemini'
-        || selectedSession?.runtime === 'opencode'
-        || selectedSession?.runtime === 'codex'
-        ? selectedSession.runtime
-        : sessionKey.startsWith('claude-code:') || sessionKey.startsWith('claude-code-owned:') ? 'claude-code'
-        : sessionKey.startsWith('gemini-owned:') ? 'gemini'
-        : sessionKey.startsWith('opencode-owned:') ? 'opencode'
-        : 'codex');
       // Canonical label — never an id slice. agentDisplayLabel falls back to
       // the runtime's human name ("Codex") rather than a raw `codex-owned:...`
       // key, so the old `sessionKey.split(':').pop()?.slice(0,12)` → literal
@@ -2608,6 +2643,9 @@ function DashboardInner() {
           registryRepoId: targetRepo.registryRepoId,
           isWorktree: targetRepo.isWorktree,
           worktreeStatus: targetRepo.worktreeStatus,
+        } : runtime === 'cloud' && sessionScope ? {
+          name: sessionScope.split(/[\\/]/).filter(Boolean).pop() ?? 'Repository',
+          localPath: sessionScope,
         } : undefined,
         targetSessionKey: sessionKey,
         label,
@@ -2717,22 +2755,10 @@ function DashboardInner() {
   }, [activeTileId, flashWorkspaceTab, reportSpawnFailure, setActiveTileId, tileLayout.root, waitForWorkspaceTerminalTarget, workspaceTerminalHandlesRef]);
 
   const onboardingTargetRef = useRef<{ projectId: string; tileId: string; tabId: string; text: string } | null>(null);
-  const handleOnboardingComplete = useCallback(async (task?: import('@/components/desktop/onboarding/onboarding-progress').OnboardingTask) => {
-    if (task) {
-      await loadRegisteredRepos();
-      await handleSelectRegisteredRepo(task.project.id);
-      const target = await waitForWorkspaceTerminalTarget({ repoPath: task.project.localPath, preferredTileId: onboardingTargetRef.current?.tileId, fallbackToAnyExisting: true, activate: true });
-      const previous = onboardingTargetRef.current;
-      const tabId = previous?.projectId === task.project.id && previous.text === task.text && previous.tileId === target.tileId && target.handle.focusTab(previous.tabId)
-        ? previous.tabId : target.handle.openOrchestratorTab({ ...task.project, branch: task.project.defaultBranch });
-      if (task.text.trim() && (previous?.tabId !== tabId || previous.text !== task.text) && !target.handle.injectIntoOrchestrator(tabId, task.text, { autoSend: false })) throw new Error('Could not prepare the lead conversation. Try again.');
-      onboardingTargetRef.current = { projectId: task.project.id, tileId: target.tileId, tabId, text: task.text };
-      target.handle.focusTab(tabId);
-      setActiveTileId(target.tileId);
-      flashWorkspaceTab(tabId);
-    }
-    return handleSetupComplete();
-  }, [flashWorkspaceTab, handleSelectRegisteredRepo, handleSetupComplete, loadRegisteredRepos, setActiveTileId, waitForWorkspaceTerminalTarget]);
+  const handleOnboardingComplete = useMemo(() => createOnboardingCompletionHandler({
+    loadRegisteredRepos, handleSelectRegisteredRepo, waitForWorkspaceTerminalTarget,
+    onboardingTargetRef, setActiveTileId, flashWorkspaceTab, handleSetupComplete,
+  }), [flashWorkspaceTab, handleSelectRegisteredRepo, handleSetupComplete, loadRegisteredRepos, setActiveTileId, waitForWorkspaceTerminalTarget]);
 
   const handleCreateWorkspaceChat = useCallback(() => {
     void (async () => {
@@ -2807,18 +2833,7 @@ function DashboardInner() {
     handleSelectIssue(issueNumber, repo);
   }, [handleSelectIssue]);
 
-  const handlePaletteSelectFile = useCallback((filePath: string, line?: number) => {
-    openCanvasTab({
-      id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-      kind: 'file',
-      label: filePath.split('/').pop() ?? filePath,
-      resourceId: filePath,
-      meta: {
-        ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-        ...(line ? { line: String(line) } : {}),
-      },
-    });
-  }, [activeWorkspace, openCanvasTab]);
+  const handlePaletteSelectFile = usePaletteFileSelection(activeWorkspace, openCanvasTab);
 
   const handlePaletteSelectAgent = useCallback((sessionKey: string) => {
     handleSelectSession(sessionKey);
@@ -2844,13 +2859,7 @@ function DashboardInner() {
         laneId: laneId ?? '',
         packetId: packetId ?? '',
         sessionKey: sessionKey ?? '',
-        runtime: sessionKey?.startsWith('claude-code')
-          ? 'claude-code'
-          : sessionKey?.startsWith('gemini')
-            ? 'gemini'
-            : sessionKey?.startsWith('opencode')
-              ? 'opencode'
-              : 'codex',
+        runtime: runtimeFromSessionKeyId(sessionKey) ?? 'codex',
       });
       if (resolved?.sessionKey) {
         handleSelectSession(resolved.sessionKey, {
@@ -3849,7 +3858,7 @@ function DashboardInner() {
   const scheduleSidebarPreviewClose = useCallback(() => {
     cancelSidebarPreviewClose();
     sidebarPreviewLeaveTimerRef.current = setTimeout(() => {
-      setSidebarPreviewOpen(false);
+      if (!addRepoDialogOpenRef.current) setSidebarPreviewOpen(false);
       sidebarPreviewLeaveTimerRef.current = null;
     }, 220);
   }, [cancelSidebarPreviewClose]);
@@ -3857,6 +3866,7 @@ function DashboardInner() {
   useEffect(() => {
     if (!sidebarPreviewOpen) return;
     const handleClick = (event: MouseEvent) => {
+      if (addRepoDialogOpenRef.current) return;
       const overlay = sidebarPreviewOverlayRef.current;
       if (!overlay) return;
       if (event.target instanceof Node && overlay.contains(event.target)) return;
@@ -4812,7 +4822,6 @@ function DashboardInner() {
       onSelectCommit={handleSelectCommit}
       onSelectPR={handleSelectPR}
       onReviewPR={handleReviewPR}
-      onRepoAdded={handleRepoAddedFromPanel}
       onRepoRemoved={handleRepoRemoved}
       onOpenSpecInWorkspace={handleOpenSpecInWorkspace}
       onExpandWorkspace={handleExpandWorkspace}
@@ -5110,6 +5119,14 @@ function DashboardInner() {
           </Suspense>
         </div>
       )}
+      <AddRepoFlowHost
+        onRepoAdded={handleRepoAddedFromPanel}
+        onSelectRepo={(repoId) => { leaveNavTakeover(); handleAlignToRepo(repoId); }}
+        onOpenChange={(open) => {
+          addRepoDialogOpenRef.current = open;
+          if (open) cancelSidebarPreviewClose();
+        }}
+      />
       <ConfirmToastHost />
       <DesktopCloseCoordinator />
 
@@ -5398,6 +5415,15 @@ function DashboardInner() {
                 key={(leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id ?? 'personal'}
                 project={leftPanelFocus.view?.project ?? dashboardProjects.activeProject}
                 registeredRepos={globalRepoEntries}
+                onOpenPluginTerminal={async (terminal) => {
+                  const target = await waitForWorkspaceTerminalTarget({ preferredTileId: activeTileId, fallbackToAnyExisting: true, activate: false });
+                  const repo = globalRepoEntries.find((entry) => entry.localPath === terminal.workspaceRoot) ?? null;
+                  const tabId = target.handle.openAttachedTerminalSession({ sessionKey: terminal.sessionName, tmuxSession: terminal.sessionName, label: terminal.label, readOnly: false }, repo ? { ...repo, remoteUrl: repo.remoteUrl ?? undefined } : null);
+                  if (!tabId) throw new Error('Workspace terminal view unavailable.');
+                  setActiveTileId(target.tileId);
+                  setActiveNavSection('agents');
+                  flashWorkspaceTab(tabId);
+                }}
                 onClose={() => setActiveNavSection('agents')}
               />
             </Suspense>
@@ -5579,6 +5605,7 @@ function DashboardInner() {
                         onOpenO8Panel={handleOpenO8Panel}
                       >
                         <LazyO8Panel
+                          active={showRightPanelColumn && rightPanelKind === 'o8'}
                           repoPath={currentO8RepoPath}
                           registeredRepos={activeProjectRepoEntries}
                           onRepoPathChange={handleSelectO8RepoPath}

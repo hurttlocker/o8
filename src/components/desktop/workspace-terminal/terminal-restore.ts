@@ -39,11 +39,12 @@ export interface ApplyPersistedStateResult {
 export type RestoreValidationMode = 'optimistic' | 'validated';
 
 function unwrapRuntimeSessionKey(rawSessionKey: string): string {
-  for (const stalePrefix of ['codex:', 'claude-code:']) {
+  for (const stalePrefix of ['codex:', 'claude-code:', 'cloud-owned:']) {
     if (!rawSessionKey.startsWith(stalePrefix)) continue;
     const inner = rawSessionKey.slice(stalePrefix.length);
     if (
-      isOwnedOrchestratorSessionKey(inner)
+      inner.startsWith('cloud:')
+      || isOwnedOrchestratorSessionKey(inner)
       || inner.startsWith('codex-discovered:')
       || inner.startsWith('codex-live:')
     ) {
@@ -346,7 +347,10 @@ export async function computeRestoredTabs(
       if (ownedRuntime && effectiveRuntime !== ownedRuntime) {
         effectiveRuntime = ownedRuntime;
       }
-      if (ownedRuntime === 'gemini') {
+      if (unwrappedSessionKey.startsWith('cloud:')) {
+        effectiveRuntime = 'cloud';
+        effectiveModel = undefined;
+      } else if (ownedRuntime === 'gemini') {
         effectiveModel = 'gemini-3.1-pro-preview';
       } else if (ownedRuntime === 'opencode') {
         effectiveModel = 'opencode/deepseek-v4-flash-free';
@@ -378,7 +382,8 @@ export async function computeRestoredTabs(
       if (prefixedSessionKey) {
         seenRuntimeChats.add(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`);
       }
-      const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
+      const liveSessionKey = effectiveSessionKey.startsWith('cloud:') ? effectiveSessionKey
+        : prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
         ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey)
         : isOwnedOrchestratorSessionKey(effectiveSessionKey)
           ? effectiveSessionKey

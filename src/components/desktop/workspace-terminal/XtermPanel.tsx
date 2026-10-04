@@ -90,6 +90,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   const initialNeedsResyncRef = useRef(Boolean(sendTerminalVisibility));
   const visibilityEpochRef = useRef(1);
   const awaitingVisibilityRef = useRef(Boolean(sendTerminalVisibility && visible));
+  const snapshotReplayEpochRef = useRef<number | null>(null);
+  const snapshotReplayGenerationRef = useRef(0);
   const queuedInputRef = useRef<string[]>([]);
   const sourceDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
 
@@ -163,14 +165,18 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     });
   }, [tmuxSession]);
 
-  const flushHiddenBytes = useCallback((epoch: number) => {
+  const flushHiddenBytes = useCallback((epoch: number, afterWrite?: () => void) => {
     if (epoch !== visibilityEpochRef.current || !visibleRef.current) return;
     const bytes = hiddenBufferRef.current.drain();
     if (!termRef.current || bytes.byteLength === 0) {
+      afterWrite?.();
       finishRevealAfterPaint(epoch);
       return;
     }
-    termRef.current.write(bytes, () => finishRevealAfterPaint(epoch));
+    termRef.current.write(bytes, () => {
+      afterWrite?.();
+      finishRevealAfterPaint(epoch);
+    });
   }, [finishRevealAfterPaint]);
 
   useImperativeHandle(ref, () => ({
@@ -293,15 +299,39 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       hiddenBufferRef.current.clear();
       initialNeedsResyncRef.current = false;
       hiddenNeedsResyncRef.current = false;
+      const term = termRef.current;
+      const replayGeneration = ++snapshotReplayGenerationRef.current;
       try {
-        termRef.current.reset();
+        // Disable xterm's protocol answers before it parses historical bytes.
+        // An empty snapshot still gets a write callback, which orders this
+        // barrier after any earlier replay already queued in xterm.
+        snapshotReplayEpochRef.current = epoch;
+        term.options.disableStdin = true;
+        term.reset();
         const bytes = decodeTerminalBase64(data);
-        if (bytes.byteLength === 0) {
-          flushHiddenBytes(epoch);
-        } else {
-          termRef.current.write(bytes, () => flushHiddenBytes(epoch));
-        }
+        // A tmux snapshot is historical output. Replaying an old DA/DSR
+        // query must not send xterm's answer into the live shell as input.
+        // Bytes held behind the resync barrier can contain attach-time tmux
+        // probes as well. Paint them before restoring protocol answers.
+        term.write(bytes, () => {
+          if (termRef.current !== term || snapshotReplayGenerationRef.current !== replayGeneration) return;
+          const finishReplay = () => {
+            if (termRef.current !== term || snapshotReplayGenerationRef.current !== replayGeneration) return;
+            snapshotReplayEpochRef.current = null;
+            term.options.disableStdin = readOnly || inputLockedRef.current;
+          };
+          if (epoch !== visibilityEpochRef.current || !visibleRef.current) {
+            hiddenNeedsResyncRef.current = true;
+            finishReplay();
+            return;
+          }
+          flushHiddenBytes(epoch, finishReplay);
+        });
       } catch {
+        if (snapshotReplayGenerationRef.current === replayGeneration) {
+          snapshotReplayEpochRef.current = null;
+          term.options.disableStdin = readOnly || inputLockedRef.current;
+        }
         recordTerminalDiagnostic({ code: 'terminal_resync_failed', sessionName: tmuxSession });
       }
     },
@@ -339,7 +369,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   }, [tmuxSession, visible]);
 
   useEffect(() => {
-    if (termRef.current) termRef.current.options.disableStdin = readOnly || inputLocked;
+    if (termRef.current) termRef.current.options.disableStdin = readOnly || inputLocked || snapshotReplayEpochRef.current !== null;
   }, [inputLocked, readOnly]);
 
   useEffect(() => {
@@ -348,6 +378,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     visibilityEpochRef.current = epoch;
     awaitingVisibilityRef.current = visible;
     if (!visible) {
+      if (snapshotReplayEpochRef.current !== null) hiddenNeedsResyncRef.current = true;
       sendBenchTerminalVisibility(sendTerminalVisibility, tmuxSession, false, { epoch }, 'effect');
       return;
     }

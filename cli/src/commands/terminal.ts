@@ -4,6 +4,7 @@ import { CliError, EXIT, resolveWsBase } from '../api.js';
 import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
+import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
@@ -63,7 +64,7 @@ async function requireLiveSession(cfg: ResolvedConfig, id: string): Promise<void
 }
 
 /** A controller owns the writer slot only while this WebSocket is connected. */
-function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<number> {
+function control(cfg: ResolvedConfig, id: string, mode: OutputMode, filterProbeReplies = false): Promise<number> {
   const url = new URL('/ws', resolveWsBase(cfg));
   url.searchParams.set('token', cfg.token!);
   return new Promise((resolve, reject) => {
@@ -73,6 +74,8 @@ function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
     let attached = false;
     let settled = false;
     let lineBuffer = '';
+    const probeFilter = filterProbeReplies ? new TerminalProbeReplyFilter() : null;
+    let probeFlushTimer: ReturnType<typeof setTimeout> | null = null;
     const wasRaw = process.stdin.isTTY ? process.stdin.isRaw : false;
     const send = (frame: Record<string, unknown>) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
@@ -80,6 +83,7 @@ function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
     const dimensions = () => ({ cols: process.stdout.columns || 120, rows: process.stdout.rows || 30 });
     const cleanup = () => {
       clearTimeout(connectTimer);
+      if (probeFlushTimer) clearTimeout(probeFlushTimer);
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
       process.stdin.off('data', onInput);
@@ -113,7 +117,14 @@ function control(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
         const data = releaseAt < 0 ? input : input.subarray(0, releaseAt);
         if (data.length) {
           const text = inputDecoder.decode(data, { stream: true });
-          if (text) send({ type: 'terminal-input', sessionName: id, data: text });
+          const filtered = probeFilter ? probeFilter.push(text) : text;
+          if (filtered) send({ type: 'terminal-input', sessionName: id, data: filtered });
+          if (probeFlushTimer) clearTimeout(probeFlushTimer);
+          probeFlushTimer = probeFilter?.hasPending ? setTimeout(() => {
+            const remainder = probeFilter.flush();
+            if (remainder) send({ type: 'terminal-input', sessionName: id, data: remainder });
+            probeFlushTimer = null;
+          }, probeFilter.pendingDelayMs) : null;
         }
         if (releaseAt >= 0) stop();
         return;
@@ -338,9 +349,10 @@ export async function runTerminal(mode: OutputMode, sub: string | undefined, res
     return waitForTerminalOutput(cfg, id, match, timeoutMs, mode);
   }
   if (sub === 'observe' || sub === 'control') {
-    if (rest.length !== 1) throw new CliError('invalid_args', `terminal ${sub} takes one session ID.`, EXIT.INVALID_ARGS);
+    const filterProbeReplies = sub === 'control' && rest.length === 2 && rest[1] === '--filter-probe-replies';
+    if (rest.length !== 1 && !filterProbeReplies) throw new CliError('invalid_args', `terminal ${sub} takes one session ID.`, EXIT.INVALID_ARGS);
     await requireLiveSession(cfg, id);
-    return sub === 'control' ? control(cfg, id, mode) : observe(cfg, id, mode);
+    return sub === 'control' ? control(cfg, id, mode, filterProbeReplies) : observe(cfg, id, mode);
   }
   let lines = 200;
   if (rest.length > 1) {

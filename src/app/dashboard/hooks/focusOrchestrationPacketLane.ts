@@ -34,17 +34,27 @@ type LaneLookup = {
 function focusKnownTab({
   lane,
   packetId,
+  cloudRepo,
   setActiveTileId,
   workspaceTerminalHandlesRef,
 }: {
   lane: OrchestratorLaneBinding;
   packetId: string;
+  cloudRepo?: { name: string; localPath: string };
   setActiveTileId: Dispatch<SetStateAction<string | null>>;
   workspaceTerminalHandlesRef: MutableRefObject<Map<string, TerminalTabHandle>>;
 }): boolean {
+  const focus = (handle: TerminalTabHandle, tabId: string) => {
+    if (!handle.focusTab(tabId)) return false;
+    if (lane.runtime === 'cloud' && lane.sessionKey && cloudRepo) {
+      const sessionTabId = handle.openCliChatSession({ runtime: 'cloud', targetSessionKey: lane.sessionKey, repo: cloudRepo });
+      handle.focusTab(sessionTabId);
+    }
+    return true;
+  };
   if (lane.tileId && lane.tabId) {
     const handle = workspaceTerminalHandlesRef.current.get(lane.tileId);
-    if (handle?.focusTab(lane.tabId)) {
+    if (handle && focus(handle, lane.tabId)) {
       setActiveTileId(lane.tileId);
       return true;
     }
@@ -58,7 +68,7 @@ function focusKnownTab({
       || snapshot.sessionKey === key
       || snapshot.packetId === key
     )));
-    if (match && candidateHandle.focusTab(match.tabId)) {
+    if (match && focus(candidateHandle, match.tabId)) {
       setActiveTileId(match.tileId || tileId);
       return true;
     }
@@ -99,7 +109,8 @@ export async function fetchLaneBinding({
     return {
       laneId: lane.id,
       tabId: fallbackLane?.tabId ?? lane.sessionKey ?? '',
-      repoPath: lane.worktreePath ?? lane.repoPath ?? fallbackLane?.repoPath ?? fallbackRepoPath ?? null,
+      repoPath: (lane.runtime === 'cloud' ? lane.repoPath : lane.worktreePath ?? lane.repoPath)
+        ?? fallbackLane?.repoPath ?? fallbackRepoPath ?? null,
       worktreePath: lane.worktreePath ?? fallbackLane?.worktreePath ?? null,
       runtime: lane.runtime ?? fallbackLane?.runtime ?? fallbackRuntime,
       sessionKey: lane.sessionKey ?? fallbackLane?.sessionKey ?? null,
@@ -158,14 +169,18 @@ export function focusOrchestrationPacketLaneInWorkspace({
   waitForWorkspaceTerminalTarget,
   workspaceTerminalHandlesRef,
 }: FocusOrchestrationPacketLaneArgs) {
-  if (packet.lane && focusKnownTab({ lane: packet.lane, packetId: packet.id, setActiveTileId, workspaceTerminalHandlesRef })) return;
+  const repoPath = packet.workspaceTargetPath ?? packet.lane?.repoPath;
+  const cloudRepo = packet.runtime === 'cloud' && repoPath
+    ? { name: repoPath.split(/[\\/]/).filter(Boolean).pop() ?? 'Repository', localPath: repoPath }
+    : undefined;
+  if (packet.lane && focusKnownTab({ lane: packet.lane, packetId: packet.id, cloudRepo, setActiveTileId, workspaceTerminalHandlesRef })) return;
 
   const sessionKey = packet.lane?.sessionKey?.trim();
   if (!sessionKey) {
     void (async () => {
       const resolvedLane = await resolveLaneBinding(packet);
       if (!resolvedLane) return;
-      if (focusKnownTab({ lane: resolvedLane, packetId: packet.id, setActiveTileId, workspaceTerminalHandlesRef })) return;
+      if (focusKnownTab({ lane: resolvedLane, packetId: packet.id, cloudRepo, setActiveTileId, workspaceTerminalHandlesRef })) return;
       const resolvedSessionKey = resolvedLane.sessionKey?.trim();
       if (!resolvedSessionKey) return;
       const target = await waitForWorkspaceTerminalTarget({
@@ -175,6 +190,7 @@ export function focusOrchestrationPacketLaneInWorkspace({
       const hydratedPacket = { ...packet, lane: resolvedLane };
       const tabId = target.handle.openCliChatSession({
         runtime: resolvedLane.runtime,
+        repo: cloudRepo,
         targetSessionKey: resolvedSessionKey,
         label: packet.title,
         orchestrationPacket: buildOrchestrationPacketBadge(hydratedPacket),
@@ -188,7 +204,7 @@ export function focusOrchestrationPacketLaneInWorkspace({
   void (async () => {
     const resolvedLane = await resolveLaneBinding(packet);
     if (resolvedLane) {
-      if (focusKnownTab({ lane: resolvedLane, packetId: packet.id, setActiveTileId, workspaceTerminalHandlesRef })) return;
+      if (focusKnownTab({ lane: resolvedLane, packetId: packet.id, cloudRepo, setActiveTileId, workspaceTerminalHandlesRef })) return;
       const resolvedSessionKey = resolvedLane.sessionKey?.trim();
       if (resolvedSessionKey) {
         const target = await waitForWorkspaceTerminalTarget({
@@ -198,6 +214,7 @@ export function focusOrchestrationPacketLaneInWorkspace({
         const hydratedPacket = { ...packet, lane: resolvedLane };
         const tabId = target.handle.openCliChatSession({
           runtime: resolvedLane.runtime,
+          repo: cloudRepo,
           targetSessionKey: resolvedSessionKey,
           label: packet.title,
           orchestrationPacket: buildOrchestrationPacketBadge(hydratedPacket),
@@ -213,6 +230,7 @@ export function focusOrchestrationPacketLaneInWorkspace({
     if (!target) return;
     const tabId = target.handle.openCliChatSession({
       runtime: packet.runtime,
+      repo: cloudRepo,
       targetSessionKey: sessionKey,
       label: packet.title,
       orchestrationPacket: buildOrchestrationPacketBadge(packet),

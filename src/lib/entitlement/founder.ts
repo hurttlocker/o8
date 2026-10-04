@@ -7,14 +7,13 @@ import type { FounderInfo } from './types';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
- * Founding Operator local record (`~/.o8/founder.json`).
+ * Pro · Lifetime local record (`founder.json`, retained for compatibility).
  *
  * Written by the entitlement sync route when the license server reports a
  * `founding` source, cleared otherwise. PURELY cosmetic — the actual
- * entitlement is the signed `pro` plan in entitlement.json; this only powers the
- * "Founding Operator #N" badge + the soft grant figures (which are finalized
- * separately). Mirrors license.ts's cache style (mode 0600, ENOENT-tolerant,
- * never throws).
+ * entitlement is the signed `founder` plan in entitlement.json; this only powers
+ * the lifetime badge serial and legacy metadata. Mirrors license.ts's cache
+ * style (mode 0600, ENOENT-tolerant, never throws).
  */
 
 export interface FounderRecord extends FounderInfo {

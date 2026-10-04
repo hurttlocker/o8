@@ -1,12 +1,13 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
 import { listLanes } from '@/lib/lane/registry';
 import { buildRepoStateScope, stripPersistedTabs } from '@/lib/terminal/tab-state';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { restoreFileTabContext } from '@/lib/terminal/restore-file-tabs';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = getDataDir();
@@ -29,7 +30,14 @@ function noSavedState(): Response {
 function normalizeScopePath(value?: string | null) {
   const trimmed = value?.trim();
   if (!trimmed) return null;
-  return path.resolve(trimmed.replace(/^~(?=\/|$)/, HOME)).replace(/\/+$/, '');
+  const absolute = path.resolve(trimmed.replace(/^~(?=\/|$)/, HOME));
+  let normalized = absolute;
+  try {
+    normalized = realpathSync.native(absolute);
+  } catch {
+    // Keep unavailable repository paths comparable without inventing an alias.
+  }
+  return normalized === path.parse(normalized).root ? normalized : normalized.replace(/\/+$/, '');
 }
 
 function pathBelongsToRegisteredRepo(candidatePath?: string | null, repoRoots?: Set<string>) {
@@ -120,12 +128,13 @@ function filterStateToRegisteredRepos(data: unknown, repoRoots: Set<string>) {
 }
 
 function sanitizeRestoredState(data: unknown, repoRoots: Set<string>) {
-  return stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(data, repoRoots)));
+  const restored = restoreFileTabContext(data, repoRoots);
+  return stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(restored, repoRoots)));
 }
 
 function stateMatchesRepoPath(data: unknown, repoPath: string) {
   return Array.isArray((data as { tabs?: Array<{ repoPath?: string }> })?.tabs)
-    && (data as { tabs: Array<{ repoPath?: string }> }).tabs.some((tab) => tab.repoPath === repoPath);
+    && (data as { tabs: Array<{ repoPath?: string }> }).tabs.some((tab) => normalizeScopePath(tab.repoPath) === repoPath);
 }
 
 function canonicalRepoScopeFromState(data: unknown) {
@@ -145,7 +154,7 @@ function repoStateStats(data: unknown, repoPath: string) {
   const tabs = Array.isArray((data as { tabs?: Array<{ repoPath?: string; kind?: string }> })?.tabs)
     ? (data as { tabs: Array<{ repoPath?: string; kind?: string }> }).tabs
     : [];
-  const matchingTabs = tabs.filter((tab) => tab.repoPath === repoPath);
+  const matchingTabs = tabs.filter((tab) => normalizeScopePath(tab.repoPath) === repoPath);
   return {
     matchingCount: matchingTabs.length,
     llmChatOnly: matchingTabs.length > 0 && matchingTabs.every((tab) => tab.kind === 'llm-chat'),
@@ -231,7 +240,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const scope = sanitizeScope(url.searchParams.get('scope'));
-    const repoPath = url.searchParams.get('repoPath');
+    const repoPath = normalizeScopePath(url.searchParams.get('repoPath'));
     const repoRoots = new Set((await listRepos()).map((repo) => normalizeScopePath(repo.localPath)).filter((value): value is string => Boolean(value)));
     if (repoPath && !pathBelongsToRegisteredRepo(repoPath, repoRoots)) {
       return noSavedState();

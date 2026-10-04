@@ -26,6 +26,7 @@ export interface TaskPoolWorkerRouting {
   selectedProvider: string;
   selectedRuntime: string;
   selectedModel: string | null;
+  selectedEffort?: string | null;
   enforcement: string;
   confidence: string;
   reason: string;
@@ -34,6 +35,7 @@ export interface TaskPoolWorkerRouting {
 
 export interface TaskPoolProjectSummary {
   id: string;
+  panelProjectId?: string | null;
   name: string;
   slug: string;
 }
@@ -74,7 +76,7 @@ export interface TaskPoolTask {
     leaseState: 'active' | 'expired' | 'none';
     updatedAt: string;
     workspaceAccess: 'unavailable';
-    previewAccess: 'unavailable';
+    previewAccess: 'requestable' | 'unavailable';
   } | null;
 }
 

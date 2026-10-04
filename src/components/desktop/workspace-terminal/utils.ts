@@ -13,6 +13,7 @@ import {
   isDispatchableRuntime,
   isOwnedOrchestratorSessionKey,
   isOrchestratorRuntime,
+  runtimeFromSessionKeyId,
 } from '@/lib/orchestrator/runtime-capabilities';
 import type {
   MobileTranscriptEntry,
@@ -250,6 +251,9 @@ export function normalizeWorkspaceChatSessionKey(
   if (!runtime || !sessionKey) return null;
   const trimmed = sessionKey.trim();
   if (!trimmed) return null;
+  // Repair the two cloud wrappers written by the old local-chat fallback.
+  const wrappedCloud = /^(?:codex:|cloud-owned:)(cloud:.+)$/.exec(trimmed);
+  if (wrappedCloud) return wrappedCloud[1];
   // Defensive: if the sessionKey already carries a recognized runtime prefix,
   // trust it and pass through verbatim. Prevents double-prefix artifacts like
   // `codex:gemini-owned:...` when a caller passes runtime='codex' but the lane
@@ -257,10 +261,7 @@ export function normalizeWorkspaceChatSessionKey(
   // stale runtime hint).
   if (
     trimmed.startsWith('llm-chat:')
-    || trimmed.startsWith('claude-code:')
-    || trimmed.startsWith('codex:')
-    || isOwnedOrchestratorSessionKey(trimmed)
-    || trimmed.startsWith('codex-discovered:')
+    || runtimeFromSessionKeyId(trimmed) !== null
     || trimmed.startsWith('codex-live:')
   ) {
     return trimmed;
@@ -268,6 +269,7 @@ export function normalizeWorkspaceChatSessionKey(
   if (runtime === 'chat') return `llm-chat:${trimmed}`;
   if (runtime === 'claude-code') return `claude-code:${trimmed}`;
   if (runtime === 'codex') return `codex:${trimmed}`;
+  if (runtime === 'cloud') return `cloud:${trimmed}`;
   if (runtime === 'gemini') return `gemini-owned:${trimmed}`;
   if (runtime === 'opencode') return `opencode-owned:${trimmed}`;
   if (runtime === 'cursor') return `cursor-owned:${trimmed}`;

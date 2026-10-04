@@ -19,6 +19,7 @@ import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
 import { buildCheckList } from '@/lib/lane/preview-merge';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { handlePostRebaseVerifyFailure } from '@/lib/lane/worktree-side-merge-verify';
+import { prepareDurableMergeRelease } from '@/lib/lane/durable-merge-release';
 import { settleSuccessfulMergeWorktreeCleanup } from '@/lib/lane/successful-merge-worktree-cleanup';
 import {
   commitSpokenReviewSnapshotWithDriftRecovery,
@@ -421,6 +422,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
   if (!worktreePath) {
     return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
   }
+  const persistRelease = await prepareDurableMergeRelease(lane);
   const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
   let cleanupIntegrationWorktree: (() => Promise<void>) | undefined;
   try {
@@ -743,6 +745,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
       }
     }
+    await persistRelease(mergeSha, reviewedSnapshotSha ?? mergeSha);
     const worktreeRemoved = await settleSuccessfulMergeWorktreeCleanup({
       manager: mgr,
       lane,

@@ -264,6 +264,22 @@ export async function submitPacketReview(input: SubmitReviewInput) {
 
   const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
   const activeReviewTurn = verdictLane ? findActiveReviewTurn(verdictLane.id) : null;
+  if (verdictLane && input.approved && activeReviewTurn?.surface === 'auto-review' && activeReviewTurn.formatRetryRejecting) {
+    appendEvent(verdictLane.id, 'review_format_decision_rejected', 'system', {
+      packetId: input.packetId,
+      reviewTurnId: activeReviewTurn.id,
+      reason: 'A rejection format retry cannot authorize an approval.',
+    });
+    return {
+      recorded: false,
+      findingsCount: 0,
+      reviewedHeadSha: null,
+      warning: 'The format retry must preserve the original rejection. A new review is required to approve.',
+      auditEventType: null,
+      auditApprovalId: null,
+      ignoredReason: 'review_format_decision_conflict',
+    };
+  }
 
   // Explicit pin from the caller wins (#1363 — pass the headSha the diff was
   // read at). Fallback: capture the lane worktree HEAD at review time, which

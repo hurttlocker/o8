@@ -10,7 +10,9 @@
 
 o8 is an open-source control room for one person running several AI coding agents across their repositories, the governance layer above them. Claude Code, Codex, Grok Build, DeepSeek Harness, OpenCode, Gemini, and twelve more do the work in isolated git worktrees; o8 brings the work, the reviews, and the decisions into one place so you can direct the agents without following every terminal.
 
-[**Download for macOS**](https://github.com/hurttlocker/o8/releases) · [Build from source](#get-it)
+[**Download for macOS**](https://o8.run/download) · [Build from source](#get-it)
+
+The download page identifies the current Mac installer. A universal DMG runs natively on Apple Silicon and Intel; an Intel-only DMG needs Rosetta on Apple Silicon.
 
 macOS today. Linux compiles in CI, but nobody has yet installed it, launched it, and merged a packet on a mainstream distro. Windows is help wanted. Both are on the [roadmap](./ROADMAP.md).
 
@@ -82,9 +84,15 @@ The iPhone app is a remote control for the desktop: approve work, steer an agent
 
 o8 runs on your machine against your own subscriptions and keys; it is not in the path between your agents and their providers. Worktree isolation covers repository changes: today workers run under your user account and can read what you can read. Telemetry, crash reports, and error transmission are off by default and opt-in. [`SECURITY.md`](./SECURITY.md) covers what dispatched workers can reach and what the sandbox does and does not do today.
 
+### Telemetry
+
+Usage analytics, crash reports, and error transmission remain off by default and opt-in. Each desktop update check sends a random device identifier, app version, target, chip architecture, macOS version (on macOS), and release channel to o8's update service, as described on the [privacy page](https://o8.run/privacy). The identifier is saved locally at first launch and is separate from sign-in and hosted-model identifiers. The ping is always on as part of checking for updates, independent of the usage-analytics toggle. It sends no code, paths, repository names, prompts, or account details. The service contract prohibits storing IP addresses or linking the identifier to an account. GitHub remains the fallback, and update signature verification stays the same.
+
+The update service and active-install counts are tracked separately. This change implements the desktop client only.
+
 ## Free and paid
 
-Everything that runs on your machine is free and open source: the app, every runtime it detects, governance, memory, the Brain, mobile, and voice with your own keys. Pro is the optional managed edition for the things that run on our servers: higher daily managed-inference limits, early access to experimental features, and remote access to up to 10 Macs from a browser. Convenience, never capability. The first 250 Pro members pay once and become Founding Operators: [o8.run/pro](https://o8.run/pro).
+Everything that runs on your machine is free and open source: the app, every runtime it detects, governance, memory, the Brain, mobile, and voice with your own keys. Pro is the optional managed edition for the things that run on our servers: higher daily managed-inference limits, early access to experimental features, and remote access to up to 10 Macs from a browser. Convenience, never capability. [Pro · Lifetime](docs/founding-operator-tier.md) is the one-time purchase that keeps its included benefits for life. The future monthly plan is called Pro: [o8.run/pro](https://o8.run/pro).
 
 ## Voice
 

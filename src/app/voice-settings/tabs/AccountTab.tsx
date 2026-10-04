@@ -7,13 +7,14 @@
  * the main app's Plan & Billing — this is the voice-window summary.
  */
 import { useEffect, useState } from 'react';
+import { isPaidPlan } from '@/lib/entitlement/flags';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
+import type { Plan } from '@/lib/entitlement/types';
 import { ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, OK_GREEN, SECTION_BG, SECTION_BORDER } from '../tokens';
 import { SectionCard, SectionTitle, ControlRow, GhostButton, AccentButton, PageHeader } from '../primitives';
 
-type Plan = 'free' | 'pro' | 'team' | null;
-
 export default function AccountTab() {
-  const [plan, setPlan] = useState<Plan>(null);
+  const [plan, setPlan] = useState<Plan | null>(null);
   const [version, setVersion] = useState('');
 
   useEffect(() => {
@@ -24,8 +25,8 @@ export default function AccountTab() {
     import('@tauri-apps/api/app').then((m) => m.getVersion()).then(setVersion).catch(() => { /* noop */ });
   }, []);
 
-  const isPro = plan === 'pro' || plan === 'team';
-  const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : '—';
+  const isPro = isPaidPlan(plan ?? 'free');
+  const planLabel = plan ? PLAN_LABELS[plan] : '—';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>

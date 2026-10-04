@@ -471,6 +471,126 @@ describe('shared release build cache', () => {
       .toThrow();
   });
 
+  it('caches both native slices for a universal Tauri target without caching release bundles', async () => {
+    const { root, cacheRoot } = fixture();
+    const buildOptions = {
+      cargoTauriArgs: ['--target', 'universal-apple-darwin', '--', '--features', 'dev-mcp-plugin'],
+    };
+    const triples = ['x86_64-apple-darwin', 'aarch64-apple-darwin', 'universal-apple-darwin'];
+    for (const triple of triples) {
+      const release = join(root, 'src-tauri', 'target', triple, 'release');
+      mkdirSync(join(release, 'deps'), { recursive: true });
+      mkdirSync(join(release, 'bundle', 'macos'), { recursive: true });
+      writeFileSync(join(release, 'deps', `${triple}.rlib`), `compiler-${triple}`);
+      writeFileSync(join(release, 'bundle', 'macos', 'o8.app'), `bundle-${triple}`);
+    }
+
+    expect(await captureReleaseBuildCache(root, 'native', {
+      cacheRoot,
+      identity: nativeIdentity('universal-a'),
+      buildOptions,
+    })).toMatchObject({ status: 'captured' });
+    for (const triple of triples) {
+      rmSync(join(root, 'src-tauri', 'target', triple), { recursive: true, force: true });
+    }
+    expect(await restoreReleaseBuildCache(root, 'native', {
+      cacheRoot,
+      identity: nativeIdentity('universal-b'),
+      buildOptions,
+    })).toMatchObject({ status: 'hit_compatible' });
+
+    for (const triple of triples) {
+      const release = join(root, 'src-tauri', 'target', triple, 'release');
+      expect(readFileSync(join(release, 'deps', `${triple}.rlib`), 'utf8')).toBe(`compiler-${triple}`);
+      expect(existsSync(join(release, 'bundle'))).toBe(false);
+    }
+  });
+
+  it('ignores AppleDouble metadata when finalizing aggregate release cache receipts', () => {
+    const { root, cacheRoot } = fixture();
+    const runId = 'run-appledouble';
+
+    writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, {
+      phase: 'web',
+      restore: {
+        phase: 'web',
+        status: 'hit_exact',
+        reason: 'verified',
+        archiveBytes: 1024,
+        estimatedSavedMs: 10_000,
+        durationMs: 5,
+      },
+      buildDurationMs: 50,
+    });
+    writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, {
+      phase: 'speech',
+      restore: {
+        phase: 'speech',
+        status: 'miss',
+        reason: 'entry_missing',
+        durationMs: 3,
+      },
+      buildDurationMs: 75,
+    });
+    writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, {
+      phase: 'native',
+      restore: {
+        phase: 'native',
+        status: 'hit_compatible',
+        reason: 'verified',
+        archiveBytes: 2048,
+        estimatedSavedMs: 20_000,
+        durationMs: 8,
+      },
+      buildDurationMs: 100,
+    });
+
+    const runDir = join(cacheRoot, 'runs', runId);
+    writeFileSync(
+      join(runDir, '._native.json'),
+      Buffer.from([0x00, 0x05, 0x16, 0x07, 0x00, 0x02, 0x00, 0x00, 0xff, 0xfe]),
+    );
+    writeFileSync(
+      join(runDir, '._web.json'),
+      Buffer.from([0x00, 0x05, 0x16, 0x07, 0x62, 0x61, 0x64]),
+    );
+    writeFileSync(
+      join(runDir, 'noise.json'),
+      '{"phase":"noise","restore":{"status":"hit_exact","archiveBytes":999,"estimatedSavedMs":1}}\n',
+    );
+
+    expect(releaseBuildCacheInternals.isReleaseBuildCachePhaseReceiptName('native.json')).toBe(true);
+    expect(releaseBuildCacheInternals.isReleaseBuildCachePhaseReceiptName('._native.json')).toBe(false);
+    expect(releaseBuildCacheInternals.isReleaseBuildCacheJsonCandidate('entry-a.json')).toBe(true);
+    expect(releaseBuildCacheInternals.isReleaseBuildCacheJsonCandidate('._entry-a.json')).toBe(false);
+
+    const finalized = finalizeReleaseBuildCacheReceipt(
+      cacheRoot,
+      runId,
+      {
+        outcome: 'PASS',
+        source: { head: 'head-appledouble' },
+        buildDurationMs: 225,
+      },
+      { projectRoot: root },
+    );
+
+    expect(finalized.receipt.phases).toEqual(expect.objectContaining({
+      web: expect.objectContaining({ phase: 'web' }),
+      speech: expect.objectContaining({ phase: 'speech' }),
+      native: expect.objectContaining({ phase: 'native' }),
+    }));
+    expect(finalized.receipt.phases).not.toHaveProperty('noise');
+    expect(finalized.receipt.totals).toEqual({
+      archiveBytesRestored: 3072,
+      estimatedSavedMs: 30_000,
+      hits: 2,
+      misses: 1,
+    });
+    expect(JSON.stringify(finalized.receipt)).not.toContain('noise');
+    expect(existsSync(runDir)).toBe(false);
+  });
+
   it('bypasses dirty source and records phase totals without local paths', async () => {
     const { root, cacheRoot } = fixture();
     const dirty = identity('dirty');

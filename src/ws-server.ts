@@ -126,6 +126,7 @@ import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
+import { pluginTerminalSessionReferences } from '@/lib/action-plugins/host';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserProvider } from './lib/browser/inventory';
@@ -234,6 +235,9 @@ import {
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
 import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
+import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
+import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
 import {
   findLeadThreadBinding,
   getLeadStatus,
@@ -1014,7 +1018,7 @@ const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
 const TERMINAL_TMUX_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
-const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string }>();
+const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean }>();
 
 // ── Orchestrator channel state ──
 
@@ -1343,6 +1347,7 @@ interface OrchestratorAutoMessage {
   repoPath: string;
   message: string;
   createdAt: number;
+  reviewChat?: { lane: ReviewContinuationLane; origin: ReviewChatOrigin };
   symon?: {
     sessionId: string;
     callId: string;
@@ -1379,13 +1384,37 @@ function queueReviewContinuation(lane: ReviewContinuationLane): void {
     packetId: reviewLane.packetId,
     laneId: reviewLane.id,
     label: reviewLane.label,
-  }));
+  }), (reviewLane, origin) => {
+    queueChatReviewMessage(reviewLane, (repoPath, message) => {
+      if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) return;
+      orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now(), reviewChat: { lane: reviewLane, origin } });
+      void drainOrchestratorAutoQueue();
+    }, 'durable');
+  });
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {
   if (orchestratorAutoQueue.length === 0) return;
 
   const next = orchestratorAutoQueue[0];
+  if (next.reviewChat) {
+    const { lane, origin } = next.reviewChat;
+    const backend = getOrchestratorBackend(origin.backend);
+    const key = orchestratorAbortKey(next.repoPath, origin.backend, '', origin.threadId);
+    if (orchestratorInflightAborts.has(key) || backend.peekSession(next.repoPath, undefined, origin.threadId)?.status === 'busy') return;
+    orchestratorAutoQueue.shift();
+    await runReviewChatContinuation(lane, origin, next.message, {
+      registerAbort: (_repoPath, _origin, controller) => {
+        orchestratorInflightAborts.set(key, controller);
+        return () => { if (orchestratorInflightAborts.get(key) === controller) orchestratorInflightAborts.delete(key); };
+      },
+      publish: (sessionName, event, data) => broadcastToOrchestratorSession(
+        orchestratorRouteSessionName(sessionName, origin.threadId), JSON.stringify({ channel: 'orchestrator', event, data }),
+      ),
+    }).catch(error => console.warn('[review-continuation] Bound turn failed:', error));
+    void drainOrchestratorAutoQueue();
+    return;
+  }
   const backend = getActiveOrchestratorBackend();
   let session = backend.peekSession(next.repoPath);
   if (!session || session.status === 'dead') {
@@ -1625,6 +1654,7 @@ function reapOrphanDashSessions() {
   let referenced: Set<string>;
   try {
     referenced = collectPersistedTmuxSessions();
+    for (const sessionName of pluginTerminalSessionReferences()) referenced.add(sessionName);
   } catch {
     return;
   }
@@ -6926,7 +6956,7 @@ function materializePendingDashSession(
   const cwd = (pending.cwd && existsSync(pending.cwd) ? pending.cwd : undefined)
     ?? process.env.HOME ?? homedir() ?? '/tmp';
   const tmuxBacked = createDashTmuxSessionSync({
-    enabled: dashPersistentTerminalsEnabled(),
+    enabled: dashPersistentTerminalsEnabled() && !pending.directPty,
     sessionName,
     cols: nextCols,
     rows: nextRows,
@@ -6976,6 +7006,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
   const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
+  const directPty = msg.directPty === true;
   const ownerSessionName = dashSessionNameForOwnerKey(
     typeof msg.ownerKey === 'string' ? msg.ownerKey : undefined,
   );
@@ -6993,7 +7024,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     && (
       pendingDashSessions.has(ownerSessionName)
       || terminalAttachments.has(ownerSessionName)
-      || (dashPersistentTerminalsEnabled() && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
+      || (dashPersistentTerminalsEnabled() && !directPty && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
     )
   ) {
     console.log(`[ws-server] Reusing owned dashboard PTY session: ${ownerSessionName}`);
@@ -7013,7 +7044,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   }
 
   const sessionName = ownerSessionName ?? `cortex-dash-${randomUUID().slice(0, 8)}`;
-  pendingDashSessions.set(sessionName, { cols, rows, cwd });
+  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty });
   console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });
 }
@@ -7276,7 +7307,7 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   if (!attachment) {
     if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
       const pending = pendingDashSessions.get(sessionName);
-      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd });
+      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true });
     }
     return;
   }
@@ -8293,7 +8324,7 @@ const httpServer = createServer((req, res) => {
     req.on('end', () => {
       void (async () => {
         try {
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { surfaceId?: string };
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { surfaceId?: string; runId?: string };
           const surfaceId = typeof body.surfaceId === 'string' ? body.surfaceId.trim() : '';
           if (!surfaceId) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -8310,12 +8341,13 @@ const httpServer = createServer((req, res) => {
             if (exit && watched) watchedAttemptIds.set(watched, workerExitAttemptId(exit));
           };
           stampAttempt();
-          let ingested = await ingestAgentCompletionSignal(surfaceId);
+          const runId = typeof body.runId === 'string' ? body.runId : undefined;
+          let ingested = await ingestAgentCompletionSignal(surfaceId, runId);
           if (!ingested) {
             if (lane && !isTerminalLaneStatus(lane.status)) {
               registerWatchedAgent(surfaceId, lane.repoPath, lane.label || lane.branch, '');
               stampAttempt();
-              ingested = await ingestAgentCompletionSignal(surfaceId);
+              ingested = await ingestAgentCompletionSignal(surfaceId, runId);
             }
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -9719,11 +9751,12 @@ async function bootstrapWsServer() {
           toolName: entry.toolName,
         }));
       },
-      async steerAgent(surfaceId, message) {
+      async steerAgent(surfaceId, message, automaticRecoveryRunId) {
         await fetchRuntimeAction({
           action: 'steer',
           surfaceId,
           message,
+          automaticRecoveryRunId,
           clientMutationId: randomUUID(),
         });
       },

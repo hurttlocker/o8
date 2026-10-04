@@ -28,7 +28,7 @@ import {
 export { isSubscriptionProfile };
 import { normalizeModelPinUpdates, normalizeStoredModelPins } from './model-pins';
 
-import { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, sanitizeBranchPrefix, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator, type PrLinkDestination } from './defaults-env';
+import { isParallelCap, isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, sanitizeBranchPrefix, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator, type PrLinkDestination } from './defaults-env';
 import {
   isDispatchRuntime,
   isClassAComposer,
@@ -463,8 +463,8 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isSubscriptionProfile(stored.subscriptionProfile)) {
     result.subscriptionProfile = stored.subscriptionProfile;
   }
-  if (typeof stored.parallelCap === 'number' && Number.isFinite(stored.parallelCap) && stored.parallelCap > 0) {
-    result.parallelCap = Math.max(1, Math.min(32, Math.floor(stored.parallelCap)));
+  if (isParallelCap(stored.parallelCap)) {
+    result.parallelCap = stored.parallelCap;
   }
   if (stored.overlapGate === 'advisory' || stored.overlapGate === 'strict') {
     result.overlapGate = stored.overlapGate;
@@ -869,10 +869,10 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   }
 
   if (update.parallelCap !== undefined) {
-    if (!Number.isFinite(update.parallelCap) || update.parallelCap < 1) {
-      throw new Error('parallelCap must be a positive number.');
+    if (!isParallelCap(update.parallelCap)) {
+      throw new Error('parallelCap must be a positive safe integer.');
     }
-    stored.parallelCap = Math.max(1, Math.min(32, Math.floor(update.parallelCap)));
+    stored.parallelCap = update.parallelCap;
   }
   if (update.subscriptionProfile !== undefined) {
     if (!isSubscriptionProfile(update.subscriptionProfile)) {

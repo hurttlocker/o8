@@ -72,6 +72,8 @@ export interface OwnedRunRecord {
   /** Persisted so refresh/restart cannot re-emit the same denial event. */
   sandboxDenial?: SandboxDenial;
   childExit?: OwnedChildExitOutcome;
+  /** Compatibility retry receipt, shown once beside the rejected run. */
+  modelFallback?: { fromModel: string; toModel: string; notice: string };
 }
 
 export interface OwnedSessionRecord {
@@ -413,6 +415,9 @@ export interface OwnedRuntimeAdapter {
     failedRunRaw: string;
     currentModel: string | undefined;
   }): { nextModel: string; reason: string } | null;
+
+  /** One pre-turn model rejection may recover even when general auto-retry is disabled. */
+  modelCompatibilityFallback?(model: string | undefined, diagnostic: string): { nextModel: string; notice: string } | null;
 }
 
 // ── Store contract ───────────────────────────────────────────────────────────

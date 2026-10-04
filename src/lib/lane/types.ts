@@ -456,6 +456,7 @@ export type LaneEventVerb =
   // No approval is recorded; the successor HEAD must receive its own turn.
   // Payload: { packetId, reviewTurnId, expectedHeadSha, submittedHeadSha, currentHeadSha }
   | 'review_head_drift_rejected'
+  | 'review_format_decision_rejected'
   // Second-pass agreement dispatched a merge (#1856). Written BEFORE the
   // dispatch so a process that dies mid-transition still leaves a trace.
   // Payload: { packetId, approvalId, reviewedHeadSha, trigger }

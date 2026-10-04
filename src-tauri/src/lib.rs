@@ -7,6 +7,7 @@ mod spatial_ink_window;
 mod audio_ducker;
 mod background;
 mod browser_view;
+mod remote_preview;
 mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
@@ -16,6 +17,7 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod launch_updater;
+mod update_ping;
 #[cfg(target_os = "macos")]
 mod live_dictation;
 #[cfg(target_os = "macos")]
@@ -7859,6 +7861,7 @@ pub fn run() {
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
             }
@@ -7867,6 +7870,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            update_ping::check_app_update,
             get_desktop_info,
             get_running_bundle_integrity,
             check_port,
@@ -7952,6 +7956,10 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            remote_preview::remote_preview_supported,
+            remote_preview::remote_preview_open,
+            remote_preview::remote_preview_set_rect,
+            remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
             #[cfg(target_os = "macos")]
@@ -8055,6 +8063,9 @@ pub fn run() {
             background::open_system_settings,
         ])
         .setup(move |app| {
+            if let Err(err) = update_ping::initialize(app.handle()) {
+                log::warn!("[updater] update identity unavailable: {}", err);
+            }
             log::info!("[boot] setup() entered at {}ms (Builder + plugins done)", boot_ms());
             boot_trace("setup() entered (plugins INITIALISED)");
             match desktop_attach.decision {

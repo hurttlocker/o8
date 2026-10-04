@@ -68,6 +68,8 @@ export function buildMissionRenderItems(messages: MobileTranscriptEntry[]): Miss
 
 interface ChatMessageListProps {
   displayMessages: MobileTranscriptEntry[];
+  threadId?: string | null;
+  active?: boolean;
   displayWaiting: boolean;
   repoPath?: string | null;
   activeTargetLabel: string;
@@ -115,6 +117,8 @@ interface ChatMessageListProps {
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
   displayMessages: rawDisplayMessages,
   displayWaiting,
+  threadId,
+  active = false,
   repoPath,
   activeTargetLabel,
   activeTargetColor,
@@ -197,6 +201,8 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
 
   return (
     <div
+      data-o8-chat-thread={threadId || undefined}
+      data-o8-active-chat={active && threadId ? 'true' : undefined}
       className="thoughts-scroll cortex-scroll-fade-y cortex-themed-scroll"
       // Voice-playback scroll-follow yields to a manual scroll gesture here.
       onWheel={noteUserScroll}
@@ -300,13 +306,15 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
               {summaryAnchorsBefore && turnSummary ? (
                 <TurnSummaryCard summary={turnSummary} persistedEntry={turnSummaryReceiptEntry} />
               ) : null}
-              <DesktopAgentMessage
-                entry={msg}
-                isLast={index === displayMessages.length - 1 && !displayWaiting}
-                isStreaming={isLatestAssistant && !!displayWaiting}
-                repoPath={repoPath}
-                onRetryDelivery={onRetryDelivery}
-              />
+              <div data-o8-message-id={msg.id} style={{ display: 'contents' }}>
+                <DesktopAgentMessage
+                  entry={msg}
+                  isLast={index === displayMessages.length - 1 && !displayWaiting}
+                  isStreaming={isLatestAssistant && !!displayWaiting}
+                  repoPath={repoPath}
+                  onRetryDelivery={onRetryDelivery}
+                />
+              </div>
               {summaryAnchorsAfter && turnSummary ? (
                 <TurnSummaryCard summary={turnSummary} persistedEntry={turnSummaryReceiptEntry} />
               ) : null}

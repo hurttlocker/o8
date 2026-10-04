@@ -107,6 +107,40 @@ const PHASE_CONFIG = Object.freeze({
   }),
 });
 
+function explicitCargoTarget(buildOptions = {}) {
+  const args = Array.isArray(buildOptions.cargoTauriArgs) ? buildOptions.cargoTauriArgs : [];
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--') break;
+    if (argument === '--target') return typeof args[index + 1] === 'string' ? args[index + 1] : null;
+    if (typeof argument === 'string' && argument.startsWith('--target=')) return argument.slice('--target='.length);
+  }
+  return null;
+}
+
+function nativeCacheConfig(buildOptions = {}) {
+  const target = explicitCargoTarget(buildOptions);
+  const targetTriples = target === 'universal-apple-darwin'
+    ? ['x86_64-apple-darwin', 'aarch64-apple-darwin', 'universal-apple-darwin']
+    : target ? [target] : [];
+  if (targetTriples.length === 0) return PHASE_CONFIG.native;
+  const targets = targetTriples.map((triple) => `src-tauri/target/${triple}/release`);
+  return {
+    ...PHASE_CONFIG.native,
+    targets,
+    excludes: targets.flatMap((releaseDir) => [
+      `${releaseDir}/bundle`,
+      `${releaseDir}/server`,
+      `${releaseDir}/build-cache-receipt.json`,
+    ]),
+  };
+}
+
+function phaseConfig(phase, buildOptions = {}) {
+  if (phase === 'native') return nativeCacheConfig(buildOptions);
+  return PHASE_CONFIG[phase];
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -254,7 +288,7 @@ function operationCacheRoot(options) {
 }
 
 export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
-  const config = PHASE_CONFIG[phase];
+  const config = phaseConfig(phase, options.buildOptions);
   if (!config) throw new Error(`unsupported release cache phase: ${phase}`);
   const inputs = [];
   for (const path of config.recipeInputs) collectInputFiles(root, path, inputs);
@@ -401,7 +435,7 @@ function listArchive(root, archivePath) {
   return output.split('\n').filter(Boolean);
 }
 
-async function verifyCacheEntry(root, identity, manifestPath) {
+async function verifyCacheEntry(root, identity, manifestPath, config) {
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -416,9 +450,8 @@ async function verifyCacheEntry(root, identity, manifestPath) {
     || !Array.isArray(manifest.excludes)) {
     return { valid: false, reason: 'manifest_mismatch' };
   }
-  const expected = PHASE_CONFIG[identity.phase];
-  if (stableJson(manifest.targets) !== stableJson(expected.targets)
-    || stableJson(manifest.excludes) !== stableJson(expected.excludes)) {
+  if (stableJson(manifest.targets) !== stableJson(config.targets)
+    || stableJson(manifest.excludes) !== stableJson(config.excludes)) {
     return { valid: false, reason: 'target_contract_mismatch' };
   }
   if (identity.phase === 'native') {
@@ -450,10 +483,20 @@ async function verifyCacheEntry(root, identity, manifestPath) {
   return { valid: true, manifest, archivePath };
 }
 
+function isReleaseBuildCacheJsonCandidate(name) {
+  // macOS AppleDouble sidecars (._*.json) are binary metadata, not cache JSON.
+  return name.endsWith('.json') && !name.startsWith('._');
+}
+
+function isReleaseBuildCachePhaseReceiptName(name) {
+  if (!isReleaseBuildCacheJsonCandidate(name)) return false;
+  return RELEASE_BUILD_CACHE_PHASES.includes(basename(name, '.json'));
+}
+
 function cacheManifests(directory, preferredEntry) {
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
-    .filter((name) => name.endsWith('.json'))
+    .filter((name) => isReleaseBuildCacheJsonCandidate(name))
     .map((name) => join(directory, name))
     .sort((left, right) => {
       const leftPreferred = basename(left, '.json') === preferredEntry ? 1 : 0;
@@ -469,6 +512,7 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
     return { phase, status: 'bypass', reason: 'disabled', durationMs: Date.now() - started };
   }
   const identity = options.identity ?? collectReleaseBuildCacheIdentity(root, phase, options);
+  const config = phaseConfig(phase, options.buildOptions);
   const cacheRoot = operationCacheRoot(options);
   if (identity.source.worktreeClean === false) {
     return { phase, status: 'bypass', reason: 'dirty_worktree', durationMs: Date.now() - started };
@@ -480,7 +524,7 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
   }
   let lastReason = 'entry_invalid';
   for (const manifestPath of candidates) {
-    const verified = await verifyCacheEntry(root, identity, manifestPath);
+    const verified = await verifyCacheEntry(root, identity, manifestPath, config);
     if (!verified.valid) {
       lastReason = verified.reason;
       continue;
@@ -535,7 +579,7 @@ function tarArguments(root, config, archivePath) {
 function pruneEntries(directory, keepEntry, projectRoot) {
   assertOutsideProjectNodeModules(directory, projectRoot);
   const manifests = readdirSync(directory)
-    .filter((name) => name.endsWith('.json'))
+    .filter((name) => isReleaseBuildCacheJsonCandidate(name))
     .map((name) => ({ name, mtimeMs: statSync(join(directory, name)).mtimeMs }))
     .sort((left, right) => right.mtimeMs - left.mtimeMs);
   const ordered = [
@@ -642,11 +686,11 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
     return { phase, status: 'bypass', reason: 'disabled', durationMs: Date.now() - started };
   }
   const identity = options.identity ?? collectReleaseBuildCacheIdentity(root, phase, options);
+  const config = phaseConfig(phase, options.buildOptions);
   const cacheRoot = operationCacheRoot(options);
   if (identity.source.worktreeClean === false) {
     return { phase, status: 'bypass', reason: 'dirty_worktree', durationMs: Date.now() - started };
   }
-  const config = PHASE_CONFIG[phase];
   const missing = config.targets.filter((target) => !existsSync(join(root, target)));
   if (missing.length > 0) {
     return { phase, status: 'miss', reason: `target_missing:${missing[0]}`, durationMs: Date.now() - started };
@@ -658,7 +702,7 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
   const finalManifestPath = manifestPathFor(directory, identity.entrySha256);
   const finalArchivePath = archivePathFor(directory, identity.entrySha256);
   if (existsSync(finalManifestPath) && existsSync(finalArchivePath)) {
-    const verified = await verifyCacheEntry(root, identity, finalManifestPath);
+    const verified = await verifyCacheEntry(root, identity, finalManifestPath, config);
     if (verified.valid) {
       return {
         phase,
@@ -745,7 +789,7 @@ export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary, opti
   const directory = runDirectory(cacheRoot, runId);
   const phases = {};
   if (existsSync(directory)) {
-    for (const name of readdirSync(directory).filter((entry) => entry.endsWith('.json')).sort()) {
+    for (const name of readdirSync(directory).filter((entry) => isReleaseBuildCachePhaseReceiptName(entry)).sort()) {
       const receipt = JSON.parse(readFileSync(join(directory, name), 'utf8'));
       phases[receipt.phase] = receipt;
     }
@@ -780,8 +824,11 @@ export const releaseBuildCacheInternals = {
   PHASE_CONFIG,
   assertOutsideProjectNodeModules,
   collectWebEnvironmentFiles,
+  isReleaseBuildCacheJsonCandidate,
+  isReleaseBuildCachePhaseReceiptName,
   normalizeArchivePath,
   pathAllowed,
+  phaseConfig,
   pruneCacheToBudget,
   sha256File,
   stableJson,

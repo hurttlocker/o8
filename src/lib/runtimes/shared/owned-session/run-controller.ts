@@ -1,3 +1,5 @@
+import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
+import { createFailureRetry } from './failure-retry';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
@@ -24,8 +26,6 @@ import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
-  AUTO_RETRY_FRESHNESS_MS,
-  MAX_AUTO_RETRIES,
   RUNS_DIR,
   compactText,
   deriveRunOutcome,
@@ -36,6 +36,7 @@ import {
   pathExists,
 } from './helpers';
 import { stageMissingCliRun } from './missing-cli';
+import { createModelCompatibilityRecovery } from './model-compatibility';
 import { prependOwnedRun } from './run-ledger';
 import { probeOwnedRunMarker, resolveSpawnedProcessGroupId } from './run-process-proof';
 import { assertOwnedWorkspaceSpawnAvailable, type OwnedWorkspaceSpawnGuard } from './workspace-spawn-guard';
@@ -63,7 +64,7 @@ export interface OwnedRunController {
     parsed: ReturnType<OwnedRuntimeAdapter['parseRunLog']>;
   }>;
   readCostLine(run: OwnedRunRecord): Promise<string | undefined>;
-  refreshSession(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
+  refreshSession(session: OwnedSessionRecord, surfaceLockHeld?: boolean, allowRetry?: boolean): Promise<OwnedSessionRecord>;
   reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
   spawnOwnedRun(
     session: OwnedSessionRecord,
@@ -93,7 +94,6 @@ export function createOwnedRunController({
   workspaceSpawnGuard: OwnedWorkspaceSpawnGuard;
   invalidateFleetCache: () => void;
 }): OwnedRunController {
-  const pendingAutoRetries = new Set<string>();
   const runArtifactCache = new Map<string, {
     key: string;
     /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit. */
@@ -103,6 +103,9 @@ export function createOwnedRunController({
   }>();
   const RUN_ARTIFACT_CACHE_MAX = 48;
   const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
+  const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
+  const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
+    notify: emitRuntimeFallbackNotification, invalidateFleetCache, retryDelayMs });
   function recordSandboxDenialEvent(
     laneId: string,
     surfaceId: string,
@@ -262,6 +265,8 @@ export function createOwnedRunController({
     invalidateFleetCache();
 
     const recordedRun = exitedRun as OwnedRunRecord | null;
+    const recoverySession = !finishedClean && adapter.modelCompatibilityFallback ? await io.findSession(surfaceId) : null;
+    const recovered = recoverySession ? await recoverModelCompatibility(recoverySession) : false;
     const recordedArtifacts = artifacts as Awaited<ReturnType<typeof readRunArtifacts>> | null;
     if (laneId && recordedRun) {
       const stderr = compactText(recordedArtifacts?.stderrRaw || childExit.stderrTail || '', 4_000);
@@ -279,16 +284,21 @@ export function createOwnedRunController({
         } catch (error) {
           console.warn(`[owned-store] Failed to record sandbox_denied for lane ${laneId}:`, error);
         }
-      } else if (!finishedClean) {
+      } else if (recordedRun.outcome === 'failed' && !recovered) {
+        const failedLaneId = laneId;
         try {
           const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
-          await handleWorkerRuntimeFailure({
-            laneId,
-            runtime: runtimeId,
-            model,
-            surfaceId,
-            prompt: latestPrompt,
-            rawFailure: compactText(rawFailure, 4_000),
+          await withSurfaceLock(surfaceId, async () => {
+            const current = await io.findSession(surfaceId);
+            if (!current || currentRecoveryRun(current)?.id !== runId || recoveryInterrupted(current)) return;
+            await handleWorkerRuntimeFailure({
+              laneId: failedLaneId,
+              runtime: runtimeId,
+              model,
+              surfaceId,
+              prompt: latestPrompt,
+              rawFailure: compactText(rawFailure, 4_000),
+            });
           });
         } catch (error) {
           console.error(`[owned-store] Worker quota fallback handling failed for lane ${laneId}:`, error);
@@ -297,11 +307,11 @@ export function createOwnedRunController({
     }
 
     if (finishedClean) {
-      void notifySupervisorOfCleanExit(surfaceId);
+      void notifySupervisorOfCleanExit(surfaceId, runId);
     }
   }
 
-  async function notifySupervisorOfCleanExit(surfaceId: string): Promise<void> {
+  async function notifySupervisorOfCleanExit(surfaceId: string, runId: string): Promise<void> {
     try {
       const [{ resolvePortInfo }, { getOrCreateWsToken }] = await Promise.all([
         import('@/lib/panel/api-port'),
@@ -311,7 +321,7 @@ export function createOwnedRunController({
       await fetch(`http://127.0.0.1:${wsPort}/supervisor/completed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
-        body: JSON.stringify({ surfaceId }),
+        body: JSON.stringify({ surfaceId, runId }),
         signal: AbortSignal.timeout(3000),
       });
     } catch (err) {
@@ -373,7 +383,7 @@ export function createOwnedRunController({
     return session;
   }
 
-  async function refreshSession(session: OwnedSessionRecord) {
+  async function refreshSession(session: OwnedSessionRecord, surfaceLockHeld = false, allowRetry = true) {
     let dirty = false;
 
     for (const run of session.recentRuns) {
@@ -389,7 +399,7 @@ export function createOwnedRunController({
 
       const runAlive = await isOwnedRunAlive(run);
       if (runAlive) {
-        if (run.outcome !== 'running') {
+        if (run.outcome !== 'running' && !run.interruptRequestedAt && run.outcome !== 'interrupted') {
           run.outcome = 'running';
           dirty = true;
         }
@@ -434,50 +444,8 @@ export function createOwnedRunController({
       await io.saveSession(session);
     }
 
-    const retryBudget = adapter.chooseRetryModel ? MAX_AUTO_RETRIES : 1;
-    if (session.autoRetry && (session.retryCount ?? 0) < retryBudget) {
-      const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
-      if (latestFailedRun && !latestFailedRun.sandboxDenial && !session.activeRun) {
-        const failAge = latestFailedRun.finishedAt
-          ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
-          : Infinity;
-        if (failAge < AUTO_RETRY_FRESHNESS_MS && !pendingAutoRetries.has(session.surfaceId)) {
-          pendingAutoRetries.add(session.surfaceId);
-          if (adapter.chooseRetryModel) {
-            try {
-              const failedRaw = await readOwnedRunStdout(latestFailedRun);
-              const decision = adapter.chooseRetryModel({
-                failedRunRaw: failedRaw,
-                currentModel: session.model,
-              });
-              if (decision && decision.nextModel !== session.model) {
-                const fromModel = session.model ?? '(default)';
-                session.model = decision.nextModel;
-                dirty = true;
-                console.log(`[owned-store] ${runtimeId} fallback ${fromModel} → ${decision.nextModel} (${decision.reason})`);
-                void emitRuntimeFallbackNotification(session, fromModel, decision.nextModel, decision.reason);
-              }
-            } catch (hookErr) {
-              console.error(`[owned-store] chooseRetryModel hook failed for ${session.surfaceId}:`, hookErr);
-            }
-          }
-          session.retryCount = (session.retryCount ?? 0) + 1;
-          await io.saveSession(session);
-          console.log(`[owned-store] Auto-retrying ${runtimeId} session ${session.surfaceId} after failure (attempt ${session.retryCount})`);
-          setTimeout(async () => {
-            try {
-              await withSurfaceLock(session.surfaceId, () =>
-                spawnOwnedRun(session, session.latestPrompt, session.threadId ? 'resume' : 'launch'));
-              invalidateFleetCache();
-            } catch (err) {
-              console.error(`[owned-store] Auto-retry failed for ${session.surfaceId}:`, err);
-            } finally {
-              pendingAutoRetries.delete(session.surfaceId);
-            }
-          }, retryDelayMs);
-        }
-      }
-    }
+    if (allowRetry && await recoverModelCompatibility(session, surfaceLockHeld)) return session;
+    if (allowRetry) scheduleFailureRetry(session);
 
     return session;
   }

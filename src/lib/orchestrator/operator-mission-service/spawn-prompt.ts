@@ -1,12 +1,8 @@
+import { constants as bufferConstants } from 'node:buffer';
+import { getHeapStatistics } from 'node:v8';
+import { extractPacketFileReferences } from '@/lib/orchestrator/packet-file-validator';
 import { nextInlineIssueNumbers } from './shared';
 import type { LoadedIssue } from './types';
-
-/**
- * Voice/canvas spawn cap — "spawn N agents on X" tops out at 5 so a mishs-heard
- * number can't fan out a fleet. The orchestrator (DECOMPOSE) is the path for
- * larger, structured splits.
- */
-export const SPAWN_PROMPT_MAX_AGENTS = 5;
 
 const TITLE_MAX = 72;
 
@@ -17,9 +13,42 @@ function deriveTitle(task: string): string {
   return `${collapsed.slice(0, TITLE_MAX - 1).trimEnd()}…`;
 }
 
-export function clampSpawnCount(count: number | undefined): number {
-  if (!Number.isFinite(count)) return 1;
-  return Math.max(1, Math.min(SPAWN_PROMPT_MAX_AGENTS, Math.floor(count as number)));
+export function resolveSpawnCount(count: unknown): number {
+  if (count === undefined) return 1;
+  if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1) {
+    throw new Error('count must be a positive safe integer.');
+  }
+  return count;
+}
+
+/**
+ * This endpoint materializes the entire batch in arrays and serialized mission
+ * snapshots. Reject a request that cannot fit before allocating any issues.
+ * mission.ts stores task text in summary, prompt, and issue.body; constraints
+ * and file-reference warnings appear in both summary and prompt. Count escaped
+ * JSON characters for those fields without expanding count packets. Include all
+ * referenced paths as a warning upper bound, even if they exist. Reserve 4 Ki
+ * characters for each packet's titles/wrappers/metadata and the mission root.
+ * For heap admission, budget two bytes per character and eight simultaneous
+ * object/serialized copies during creation, dispatch, and persistence. Metadata
+ * and live-copy reserves are estimates, not a worker concurrency or fleet cap.
+ */
+export function assertSpawnBatchMaterializable(task: string, count: number, constraints = '', repoPath = ''): void {
+  const taskCharacters = JSON.stringify(task).length;
+  const constraintCharacters = JSON.stringify(constraints).length;
+  const repoCharacters = JSON.stringify(repoPath).length;
+  const references = new Set([...extractPacketFileReferences(task), ...extractPacketFileReferences(constraints)]);
+  // JSON-escaped header plus each escaped path, list prefix, and newline.
+  const warningCharacters = 40 + [...references].reduce((total, path) => total + JSON.stringify(path).length + 6, 0);
+  const packetCharacters = taskCharacters * 3 + constraintCharacters * 2
+    + warningCharacters * 2 + repoCharacters * 2 + 4096;
+  // Mission-level prompt and constraints also retain the constraint text.
+  const snapshotCharacters = packetCharacters * count + constraintCharacters * 2 + repoCharacters * 2 + 4096;
+  if (count > 0xffff_ffff
+    || snapshotCharacters > bufferConstants.MAX_STRING_LENGTH
+    || snapshotCharacters * 2 * 8 > getHeapStatistics().total_available_size) {
+    throw new Error('Spawn batch exceeds this process\'s array, serialization, or available heap capacity. Submit smaller batches; no tasks were created.');
+  }
 }
 
 /**
@@ -38,7 +67,8 @@ export function buildInlineIssuesFromPrompt(task: string, count = 1): LoadedIssu
     throw new Error('task is required.');
   }
   const baseTitle = deriveTitle(body) || 'Inline task';
-  const n = clampSpawnCount(count);
+  const n = resolveSpawnCount(count);
+  assertSpawnBatchMaterializable(body, n);
 
   const numbers = nextInlineIssueNumbers(n);
   return Array.from({ length: n }, (_unused, index) => ({

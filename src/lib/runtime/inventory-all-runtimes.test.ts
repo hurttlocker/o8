@@ -62,6 +62,12 @@ vi.mock('@/lib/lane/registry', () => ({
   reconcileLanesWithSessions: () => [],
 }));
 
+// Cloud reconciliation has its own durable-job tests; this suite supplies no lanes.
+// Keep its lazy import from pulling the job queue into the inventory build deadline.
+vi.mock('@/lib/lane/cloud-reconciliation', () => ({
+  reconcileCloudJobLanes: () => {},
+}));
+
 vi.mock('@/lib/lane/sweep-orphan-sessions', () => ({
   sweepOrphanedOwnedSessions: async () => {},
 }));

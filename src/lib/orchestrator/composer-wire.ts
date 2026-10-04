@@ -87,6 +87,21 @@ export function modelFacingComposerMessage(
   return executionMode === 'single' ? stripKnownComposerWirePreamble(message) : message;
 }
 
+/**
+ * Puts a queued session prelude (compaction resume, /handoff) in front of the
+ * composer turn. The server's single-mode strip only looks at the start of the
+ * message, so a directive left behind the prelude would reach the model beside
+ * the registry banner (#2957). Scope the turn first, then add the prelude.
+ */
+export function withSessionPrelude(
+  wireMessage: string,
+  resumePrelude: string | null | undefined,
+  executionMode: OrchestratorExecutionMode,
+): string {
+  if (!resumePrelude) return wireMessage;
+  return `${resumePrelude}\n\nOperator message:\n${modelFacingComposerMessage(wireMessage, executionMode)}`;
+}
+
 export function isKnownComposerPreambleTitle(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const title = value.trim();

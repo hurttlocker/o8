@@ -184,7 +184,7 @@ export function useWorkspaceTerminalController(
     }
     tabsRef.current = nextTabs;
   }, []);
-
+  const getTabInventory = useCallback(() => tabsRef.current.map(tab => tab.id), []);
   // A monotonic user-navigation version prevents a late restore from
   // replacing a newer tab selection.
   const userNavVersionRef = useRef(0);
@@ -426,7 +426,7 @@ export function useWorkspaceTerminalController(
     if (command) {
       pendingCliCommands.current.set(tabId, command);
     }
-    sendTerminalCreate(120, 30, requestId, undefined, `workspace:${tabId}`);
+    sendTerminalCreate(120, 30, requestId, undefined, `workspace:${tabId}`, Boolean(tabsRef.current.find((tab) => tab.id === tabId)?.remoteMachine));
   }, [sendTerminalCreate]);
 
   useEffect(() => {
@@ -1454,7 +1454,7 @@ export function useWorkspaceTerminalController(
     spawnFleetCanvasTab,
     handleUpdateTabMode,
     undoCleanup,
-    tabs,
+    tabs, getTabInventory,
     termWsConnected,
     visibleTabs,
   };

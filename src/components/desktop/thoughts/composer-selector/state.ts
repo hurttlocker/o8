@@ -93,8 +93,8 @@ export function composerEffortConsequence(
   backend: OrchestratorBackendSetting,
   effort: ThinkingEffort,
 ): string {
-  if (backend === 'o8') {
-    return `${THINKING_EFFORT_LABELS[effort].long} · ${effort === 'high' ? 'founders' : 'free'}`;
+  if (backend === 'o8' && effort === 'low') {
+    return `${THINKING_EFFORT_LABELS[effort].long} · free`;
   }
   return THINKING_EFFORT_LABELS[effort].detail;
 }
@@ -306,10 +306,10 @@ export function supportedEffortsForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
   adaptiveEnabled: boolean,
-  isFreePlan = false,
+  _isFreePlan = false,
   ultraEnabled = false,
 ): readonly ThinkingEffort[] {
-  if (backend === 'o8') return isFreePlan ? ['low'] : ['low', 'high'];
+  if (backend === 'o8') return ['low'];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
   const supportsMax = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'max');
@@ -356,7 +356,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
   const storedEffort = input.inSessionEffortByModel[input.leadModelId]
     ?? input.threadEffortByModel[input.leadModelId];
   const requestedEffort = input.leadBackend === 'o8'
-    ? input.isFreePlan ? 'low' : storedEffort ?? 'high'
+    ? storedEffort ?? 'low'
     : storedEffort ?? input.operatorDefaultEffort;
   const effortOptions = supportedEffortsForLead(
     input.leadBackend,
@@ -365,9 +365,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     input.isFreePlan,
     input.ultraEnabled,
   );
-  const lockedEffortOptions: readonly ThinkingEffort[] = input.leadBackend === 'o8' && input.isFreePlan
-    ? ['high']
-    : [];
+  const lockedEffortOptions: readonly ThinkingEffort[] = [];
   const clamped = clampEffortToLead(requestedEffort, effortOptions);
   const effort = clamped.effort;
   const clampedFrom = clamped.clampedFrom

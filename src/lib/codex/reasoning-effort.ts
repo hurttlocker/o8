@@ -12,6 +12,7 @@ import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/th
 
 const HIGH_END_EFFORTS = ['max', 'ultra'] as const satisfies readonly ManualThinkingEffort[];
 const MAX_EFFORTS = ['max'] as const satisfies readonly ManualThinkingEffort[];
+const SOL_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
 
 /**
  * Verified model-catalog receipt: ~/.codex/models_cache.json client_version
@@ -20,6 +21,8 @@ const MAX_EFFORTS = ['max'] as const satisfies readonly ManualThinkingEffort[];
  * do not infer support from a provider prefix, a future model name, or a version.
  */
 export const CODEX_HIGH_END_EFFORT_CATALOG: Readonly<Record<string, readonly ManualThinkingEffort[]>> = Object.freeze({
+  // CLI 0.159.x catalog, verified 2026-09-29.
+  'gpt-6.1-sol': HIGH_END_EFFORTS,
   'gpt-6-astra': HIGH_END_EFFORTS,
   'gpt-6-sol': HIGH_END_EFFORTS,
   'gpt-6-luna': MAX_EFFORTS,
@@ -31,6 +34,9 @@ export function codexSupportsReasoningEffort(
   model: string | null | undefined,
   effort: ManualThinkingEffort,
 ): boolean {
+  if (model?.trim().toLowerCase() === 'gpt-6.1-sol') {
+    return SOL_EFFORTS.includes(effort as typeof SOL_EFFORTS[number]);
+  }
   if (!HIGH_END_EFFORTS.includes(effort as typeof HIGH_END_EFFORTS[number])) return true;
   const normalized = model?.trim().toLowerCase();
   return Boolean(
@@ -58,6 +64,7 @@ export function resolveCodexReasoningEffort(
   effort: Exclude<ThinkingEffort, 'adaptive'>,
   model?: string | null,
 ): string {
+  if (model?.trim().toLowerCase() === 'gpt-6.1-sol' && !codexSupportsReasoningEffort(model, effort)) return 'low';
   return codexSupportsReasoningEffort(model, effort) ? effort : 'xhigh';
 }
 

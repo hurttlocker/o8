@@ -7,7 +7,7 @@
  * Only fires for urgent alerts (approval, error, context-critical).
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Gauge, ShieldCheck, X } from '@/components/desktop/lucide-shims';
 import type { Alert } from '@/lib/alerts/types';
 
@@ -48,6 +48,7 @@ export const AlertToast = memo(function AlertToast({
   onAction,
 }: AlertToastProps) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const detailIdPrefix = useId();
   const shownRef = useRef<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -125,6 +126,8 @@ export const AlertToast = memo(function AlertToast({
       {toasts.map(({ alert, exiting }) => {
         const Icon = ICON_MAP[alert.type] ?? AlertTriangle;
         const accent = ACCENT_BY_TYPE[alert.type] ?? 'var(--t-accent, #2563eb)';
+        const actionName = alert.actionLabel ? `${alert.actionLabel}: ${alert.title}` : alert.title;
+        const detailId = `${detailIdPrefix}-${alert.id}-detail`;
 
         return (
           <div
@@ -147,7 +150,6 @@ export const AlertToast = memo(function AlertToast({
               boxShadow: 'var(--t-shadow-card, 0 18px 45px rgba(15, 23, 42, 0.16))',
               width: 320,
               pointerEvents: 'auto',
-              cursor: 'pointer',
               opacity: exiting ? 0 : 1,
               transform: exiting
                 ? 'translateX(-120%) scale(0.95)'
@@ -156,46 +158,70 @@ export const AlertToast = memo(function AlertToast({
                 'opacity 300ms ease, transform 300ms cubic-bezier(0.32, 0.72, 0, 1)',
               fontFamily: 'var(--font-sans-system)',
             }}
-            onClick={() => {
-              if (onAction) onAction(alert);
-              dismissToast(alert.id);
-            }}
           >
-            <Icon size={18} strokeWidth={2} style={{ color: accent, flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  // Hurttlocker row title: 13.5/300/-0.1px (was 13/600).
-                  fontSize: 13.5,
-                  fontWeight: 300,
-                  letterSpacing: '-0.1px',
-                  color: 'var(--t-text)',
-                  lineHeight: 1.3,
-                }}
-              >
-                {alert.title}
-              </div>
-              <div
-                style={{
-                  // Hurttlocker meta: 9.5/260/-0.4 (was 12/normal).
-                  fontSize: 9.5,
-                  fontWeight: 260,
-                  letterSpacing: '-0.4px',
-                  color: 'var(--t-text-muted)',
-                  lineHeight: 1.35,
-                  marginTop: 2,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {alert.detail}
-              </div>
-            </div>
+            {/* Native action control — sibling of dismiss so no nested buttons;
+                keyboard users can focus/activate with Enter or Space. */}
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
+              aria-label={actionName}
+              aria-describedby={detailId}
+              onClick={() => {
+                if (exiting) return;
+                if (onAction) onAction(alert);
+                dismissToast(alert.id);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                flex: 1,
+                minWidth: 0,
+                margin: 0,
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                font: 'inherit',
+                color: 'inherit',
+                textAlign: 'left',
+              }}
+            >
+              <Icon size={18} strokeWidth={2} style={{ color: accent, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    // Hurttlocker row title: 13.5/300/-0.1px (was 13/600).
+                    fontSize: 13.5,
+                    fontWeight: 300,
+                    letterSpacing: '-0.1px',
+                    color: 'var(--t-text)',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {alert.title}
+                </div>
+                <div
+                  id={detailId}
+                  style={{
+                    // Hurttlocker meta: 9.5/260/-0.4 (was 12/normal).
+                    fontSize: 9.5,
+                    fontWeight: 260,
+                    letterSpacing: '-0.4px',
+                    color: 'var(--t-text-muted)',
+                    lineHeight: 1.35,
+                    marginTop: 2,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {alert.detail}
+                </div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 dismissToast(alert.id);
               }}
               aria-label="Dismiss"

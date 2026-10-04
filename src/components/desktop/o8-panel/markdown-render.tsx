@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { fromMarkdown } from 'mdast-util-from-markdown';
 import { useTheme } from '@/lib/theme/context';
 import { buildPreviewSrcdoc, type HtmlStylePalette } from '@/lib/spec/html-style-presets';
 import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
@@ -15,8 +16,9 @@ const getServerMountedSnapshot = () => false;
 // composer also emits these complete internal markers in its token stream.
 // This intentionally leaves an incomplete marker alone until a later stream
 // update supplies its closing bracket, and leaves all other bracketed Markdown
-// untouched.
-const BRAIN_CITATION_MARKER = /\s*\[(?:CITATION:[a-zA-Z0-9_#.:/-]+|O-outcome-[a-zA-Z0-9_#.:/-]+)\]/g;
+// untouched. Leading whitespace is horizontal-only so a blank line before a
+// marker (Markdown paragraph boundary) is preserved.
+const BRAIN_CITATION_MARKER = /[^\S\n]*\[(?:CITATION:[a-zA-Z0-9_#.:/-]+|O-outcome-[a-zA-Z0-9_#.:/-]+)\]/g;
 
 export function proseWithoutBrainCitationMarkers(content: string): string {
   return content.replace(BRAIN_CITATION_MARKER, '');
@@ -111,25 +113,59 @@ function segmentize(content: string): Segment[] {
   return out;
 }
 
+type MarkdownNode = ReturnType<typeof fromMarkdown>['children'][number];
+type MarkdownList = Extract<MarkdownNode, { type: 'list' }>;
+
+function nodeSource(node: MarkdownNode, text: string): string {
+  return text.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0);
+}
+
+function renderMarkdownList(list: MarkdownList, text: string, key: string): ReactNode {
+  const List = list.ordered ? 'ol' : 'ul';
+  return (
+    <List key={key} start={list.ordered ? list.start ?? 1 : undefined} style={{ marginTop: 4, marginBottom: 4, paddingLeft: 22, color: 'var(--t-text)' }}>
+      {list.children.map((item, itemIndex) => (
+        <li key={`${key}:${itemIndex}`} style={{ marginBottom: 4 }}>
+          {item.children.map((child, childIndex) => {
+            const childKey = `${key}:${itemIndex}:${childIndex}`;
+            if (child.type === 'list') return renderMarkdownList(child, text, childKey);
+            if (child.type === 'paragraph') {
+              return <p key={childKey} style={{ marginTop: 0, marginBottom: list.spread || item.spread ? 10 : 0 }}>{inline(nodeSource(child, text))}</p>;
+            }
+            if (child.type === 'code') return <CodeBlock key={childKey} code={child.value} />;
+            return <div key={childKey}>{renderMarkdownLines(nodeSource(child, text), childKey)}</div>;
+          })}
+        </li>
+      ))}
+    </List>
+  );
+}
+
 function renderMarkdownLines(text: string, keyPrefix: string): ReactNode[] {
   const blocks: ReactNode[] = [];
   const lines = text.split('\n');
+  // Reuse the editor's Markdown parser for list boundaries, starts and nesting.
+  // Only list ranges use its tree; other prose and the isolated HTML/SVG/iframe
+  // segments retain their existing rendering and security boundaries.
+  const lists = new Map(fromMarkdown(text).children
+    .filter((node): node is MarkdownList => node.type === 'list')
+    .map((list) => [(list.position?.start.line ?? 1) - 1, list]));
+  let listEndLine = 0;
   lines.forEach((line, index) => {
+    if (index < listEndLine) return;
     const k = `${keyPrefix}:${index}`;
+    const list = lists.get(index);
+    if (list) {
+      blocks.push(renderMarkdownList(list, text, k));
+      listEndLine = list.position?.end.line ?? index + 1;
+      return;
+    }
     const heading = line.match(/^(#{1,4})\s+(.+)$/);
     if (heading) {
       const level = heading[1]?.length ?? 1;
       const size = level === 1 ? 22 : level === 2 ? 18 : level === 3 ? 15 : 13;
       const Tag = `h${Math.min(level, 4)}` as 'h1' | 'h2' | 'h3' | 'h4';
       blocks.push(<Tag key={k} style={{ marginTop: level === 1 ? 4 : 18, marginBottom: 8, fontFamily: UI_FONT, fontSize: size, lineHeight: 1.25, color: 'var(--t-text)', fontWeight: 400, letterSpacing: '-0.2px' }}>{inline(heading[2] ?? '')}</Tag>);
-      return;
-    }
-
-    const unordered = line.match(/^\s*[-*]\s+(.+)$/);
-    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
-    if (unordered || ordered) {
-      const List = unordered ? 'ul' : 'ol';
-      blocks.push(<List key={k} style={{ marginTop: 4, marginBottom: 4, paddingLeft: 22, color: 'var(--t-text)' }}><li style={{ marginBottom: 4 }}>{inline((unordered ?? ordered)?.[1] ?? '')}</li></List>);
       return;
     }
 

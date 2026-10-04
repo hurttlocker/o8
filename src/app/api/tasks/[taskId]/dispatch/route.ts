@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 
-import { dispatchTask } from '@/lib/tasks/actions';
+import { dispatchTask, readTaskEffortSelection } from '@/lib/tasks/actions';
 import { runTaskMutationRoute } from '../mutation';
 
 export const runtime = 'nodejs';
@@ -26,6 +26,7 @@ export async function POST(
     repoPath: optionalString(body.repoPath),
     message: optionalString(body.message),
     model: optionalString(body.model),
+    requestedEffort: readTaskEffortSelection(body),
     workerIntent: optionalString(body.workerIntent),
     requestedProvider: optionalString(body.requestedProvider),
     requestedRuntime: optionalString(body.requestedRuntime),

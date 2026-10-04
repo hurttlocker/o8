@@ -74,6 +74,13 @@ export interface ProjectTaskBriefOptions extends ProjectContextOptions {
   includeLocalPaths?: boolean;
 }
 
+export class ProjectNotFoundError extends Error {
+  constructor(projectId: string) {
+    super(`Project ${projectId.trim()} does not exist.`);
+    this.name = 'ProjectNotFoundError';
+  }
+}
+
 const RAIL_IMPORT_PLACEHOLDER = 'Imported from the desktop project rail.';
 
 function normalizeRepoPath(inputPath: string) {
@@ -142,7 +149,7 @@ function resolveExplicitProject(
   if (isVirtualRepoProjectId(requested)) {
     const panelProject = ledgerProjects.find((project) => project.id.toLowerCase() === requested);
     if (!panelProject) {
-      throw new Error(`Project ${requestedProjectId.trim()} does not exist.`);
+      throw new ProjectNotFoundError(requestedProjectId);
     }
     // Virtual single-repo ids represent their own ledger projection. A Settings
     // project with the same name is a different identity and owns different repos.
@@ -163,7 +170,7 @@ function resolveExplicitProject(
       ?? null;
 
   if (!panelProject) {
-    throw new Error(`Project ${requestedProjectId.trim()} does not exist.`);
+    throw new ProjectNotFoundError(requestedProjectId);
   }
 
   const matchedSettingsProject = settingsProject

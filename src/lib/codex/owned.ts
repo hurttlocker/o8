@@ -41,6 +41,7 @@ import {
 } from '@/lib/mcp/worker-injection';
 import { codexModelArgs, parseLocalModel } from './local-model';
 import { resolveCodexReasoningEffort } from './reasoning-effort';
+import { codexSolCompatibilityFallback } from './model-compatibility';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { codexSandboxLaunchArgs, codexSandboxResumeArgs } from '@/lib/codex/read-only-args';
@@ -718,6 +719,7 @@ export const codexOwnedAdapter: OwnedRuntimeAdapter = {
   retryDelayMs: 5_000,
   launchGroupLabel: 'Launch turn',
   resumeGroupLabel: 'Resume turn',
+  modelCompatibilityFallback: codexSolCompatibilityFallback,
 };
 
 const codexStore = createOwnedSessionStore(codexOwnedAdapter);

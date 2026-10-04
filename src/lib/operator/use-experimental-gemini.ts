@@ -3,11 +3,11 @@
  *
  * When off, Gemini stays hidden from the dispatch picker and CLI runtime pickers.
  * Off by default for v1, mirroring the sibling flag in `use-experimental-opencode.ts`.
- * Founding Operators get it ON regardless (early-access perk) — see useFounderStatus.
+ * Paid plans get it ON regardless (early-access perk) — see useEarlyAccess.
  */
 'use client';
 
-import { useFounderStatus } from '@/lib/entitlement/use-founder-status';
+import { useEarlyAccess } from '@/lib/entitlement/use-early-access';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { useRetryingRemoteFlag, type FlagCache } from '@/lib/operator/use-remote-flag';
 
@@ -30,7 +30,7 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 }
 
 export function useExperimentalGeminiFlag(): boolean {
-  const isFounder = useFounderStatus();
-  // Founders get early access regardless of the operator default.
-  return useRetryingRemoteFlag(fetchFlag, cache) || isFounder;
+  const earlyAccess = useEarlyAccess();
+  // Paid plans get early access regardless of the operator default.
+  return useRetryingRemoteFlag(fetchFlag, cache) || earlyAccess;
 }

@@ -14,27 +14,23 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 6. **Runs where you are.** Light on the machine, on the machine you have. Mac today; Linux and Windows have compile evidence, while maintainer VM validation is paused. Windows help is welcome.
 7. **Ahead.** Longer-term bets, advanced when their next proof warrants it.
 
+## Current focus
+
+The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.md) is the execution order for this month: installed first-run acceptance, trustworthy funnel measurement, paid-tier behavior, and Symon reliability. It includes two bounded contributor queues and weekly checkpoints. The pillar tables below retain longer-term work; an open arc is not automatically permission to start it this month.
+
 ## Now
 
-The effort-compatibility fixes found by [#2520](https://github.com/hurttlocker/o8/issues/2520) shipped in version 0.1.761. The remaining inference-consumption repair found by the audit [#2522](https://github.com/hurttlocker/o8/issues/2522) has merged and awaits the next release.
+First-run acceptance is the immediate engineering priority. Published stable is 0.1.778. An unpublished signed universal 0.1.779 candidate has reached a reviewed fixture merge, but a fresh stall-free repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211), [#2862](https://github.com/hurttlocker/o8/issues/2862)
 
-Mobile approval-route parity and its completed-merge equality test have merged and await release. The next correctness and reliability queue is the remaining dispatch and lifecycle findings, then the dedicated Symon review [#2534](https://github.com/hurttlocker/o8/issues/2534). That review is queued, not claimed or started. Its scope is existing session, payer, model, tool-result, interruption, reconnect, and approval behavior; feature work stays in its separate program.
+Update-service source work has closed. Closure does not establish deployed endpoint behavior, delivery in the installed updater, or trustworthy active-install counts. New-install usage analytics, existing opt-out preservation and matching privacy documentation remain a separate delivery gate. [#2882](https://github.com/hurttlocker/o8/issues/2882)
 
-The typed judgment program measures and replays recorded answers before it adds a surface or promotes one. The replay labels shipped in 0.1.760; recorded labels do not establish a promotion decision. Managed judgment is a separately gated hosted-service change, and the bring-your-own-key path remains the current free path. [#2481](https://github.com/hurttlocker/o8/issues/2481)
+After first-run acceptance, verify paid-tier behavior through the installed app, then complete the existing Symon reliability review. Its scope includes sessions, models, tool results, interruptions, reconnect and approvals. Current Symon follow-ups retain their own prerequisite and acceptance evidence. [#2534](https://github.com/hurttlocker/o8/issues/2534)
 
-First-use and remote project operation remain product outcomes, not substitutes for this repair order. First-use needs a measured download-to-merge run; remote operation needs durable worker and recovery proof. [#2211](https://github.com/hurttlocker/o8/issues/2211), [#2282](https://github.com/hurttlocker/o8/issues/2282)
+Outside contributors should choose one open, unclaimed task from the [two contributor queues](./docs/operations/focus-through-2026-10-27.md#two-contributor-queues). Existing contributor PRs keep their owners; passing source checks and a merged PR are separate from release and installed acceptance.
 
-First-use has a repair order before its measured run. Stable macOS releases ship one x86_64 build, so an Apple Silicon Mac needs Rosetta before o8 opens for the first time; a native or universal build comes first. [#2873](https://github.com/hurttlocker/o8/issues/2873) The download path also needs a baseline. Update checks will go through o8's update service, with GitHub as the fallback, and count active installs, app versions and chip types without an account link. [#2881](https://github.com/hurttlocker/o8/issues/2881) Usage analytics will be on by default for new installs, with a first-run screen and a one-click off; an earlier choice to turn them off stays in effect, and the privacy page changes before this ships. [#2882](https://github.com/hurttlocker/o8/issues/2882)
+Broad remote-project expansion is outside this month's default queue. Existing separately scoped remote and plugin work keeps its own owner, bounded acceptance and release decision; it is not automatically part of the first-run candidate. Remote recovery and continuation proof remains incomplete. [#2282](https://github.com/hurttlocker/o8/issues/2282)
 
-A disposable packet exposed a review-evidence mismatch: process instructions were sealed as changed-file requirements, while a separate run recorded a missing default contract and proceeded without coverage. Both repairs merged in source; release and the exact installed-build rerun remain open. [#2682](https://github.com/hurttlocker/o8/issues/2682)
-
-The repository-scoped Handoffs pane, split-transcript peer events, visible codenames, and bounded conversation protocol merged in source. An installed two-agent run still has to prove the whole interaction. [#2690](https://github.com/hurttlocker/o8/issues/2690)
-
-Opt-in shared-checkout teams shipped in 0.1.771. Four real workers completed scoped edits in the packaged native app, followed by reviewed commit and team closure. Compact and large layouts, placement, reload, and cold restore passed. Ten real workers, collision handling and isolated-mode native acceptance remain open. [#2772](https://github.com/hurttlocker/o8/issues/2772)
-
-An outside agent chat can be readable through discovery without becoming the orchestrator chat in an o8 workspace. A read-only exact-session view comes first; linked worker placement and a writable handoff need parent identity and active-writer proof. [#2775](https://github.com/hurttlocker/o8/issues/2775)
-
-Linux and Windows maintainer-VM validation is paused; the install-to-merge proof remains outstanding. Do not start that work from this queue. [#1672](https://github.com/hurttlocker/o8/issues/1672), [#2204](https://github.com/hurttlocker/o8/issues/2204)
+Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-worker, collision and isolated-mode acceptance remain open. Linux and Windows product validation stay parked; running existing tests on Linux does not change that status. [#2772](https://github.com/hurttlocker/o8/issues/2772), [#1672](https://github.com/hurttlocker/o8/issues/1672), [#2204](https://github.com/hurttlocker/o8/issues/2204)
 
 ## What we need to prove
 
@@ -94,7 +90,7 @@ Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control p
 | --- | --- | --- | --- | --- |
 | Terminals as a workspace surface | A tmux or vim session survives an update and a pane switch byte for byte, and agent terminal actions go through a governed adapter. | open | CLI discovery is tracked in #2727, verified Codex turn events in #2729, repo-less reload in #2732, and cross-profile tmux ownership in #2733. Other CLI states, governed actions, and native multi-terminal add/close proof remain open. | [#1723](https://github.com/hurttlocker/o8/issues/1723) |
 | Settings take effect everywhere | An operator changes a setting once and every surface uses the new value on its next action, with no reload and no second place to set it. | open | Operator defaults are snapshotted at page load and cached per terminal server; the same bug has recurred under four names. | [#2217](https://github.com/hurttlocker/o8/issues/2217) |
-| Remote project operation | An operator reconnects to the same remote task, preview, diff, evidence, and approval path; a later packet can use another supported agent system with the same project rules. | open | The standalone worker uses the legacy protocol. Durable worker integration, remote workspace identity, and an operator-visible recovery and continuation proof remain open. | [#2282](https://github.com/hurttlocker/o8/issues/2282) |
+| Remote project operation | An operator reconnects to the same remote task, preview, diff, evidence, and approval path; a later packet can use another supported agent system with the same project rules. | open | Durable worker and preview work has advanced in source. The full operator-visible recovery and continuation proof remains open; broader expansion is outside the current focus window. | [#2282](https://github.com/hurttlocker/o8/issues/2282) |
 | Symon correctness and reliability | Existing desktop and phone flows have a recorded correctness and reliability review. Confirmed failures become bounded issues; resulting fixes are verified through their real entry points and shipped. | open | The review is queued after the repair batch. | [#2534](https://github.com/hurttlocker/o8/issues/2534) |
 
 ## 5. Smooth for people and for agents
