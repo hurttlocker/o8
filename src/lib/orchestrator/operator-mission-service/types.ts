@@ -170,6 +170,8 @@ export interface ResetPacketInput {
   scope?: {
     laneIds: string[];
     skipHoldIfStateMoved?: boolean;
+    /** Stop cleanup retains its dispatch barrier; explicit Reset clears it. */
+    preserveOperatorStopped?: boolean;
     expectedReleaseSource?: string;
   };
   /**

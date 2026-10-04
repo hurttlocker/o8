@@ -60,7 +60,7 @@ function withinScope(input: ResetPacketInput, laneId: string): boolean {
   return !input.scope || input.scope.laneIds.includes(laneId);
 }
 
-function markPacketResetHeld(packet: OrchestratorPacket) {
+function markPacketResetHeld(packet: OrchestratorPacket, preserveOperatorStopped = false) {
   // Reset packet to a CLEAN, NON-auto-dispatchable state.
   // #23 — queueState is 'held' (NOT 'queued') so the supervisor's headless
   // dispatch tick does NOT relaunch it on its own. reset is a CLEANUP, not a
@@ -91,7 +91,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   packet.typecheckAutoRetries = 0;
   packet.leaseWaitAutoRetries = 0;
   // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
-  // a reset gives a fresh stall budget and re-enables dispatch.
+  // Explicit Reset re-enables dispatch; Stop cleanup retains its stop barrier.
   packet.stallRetries = 0;
   // #2141 — and the zero-diff runtime-fault budget.
   packet.zeroDiffRuntimeRetries = 0;
@@ -100,7 +100,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   // #2195 — "Manual reset required" is only true if the reset actually refreshes
   // the dispatch-preflight refusal budget.
   packet.preflightRefusals = 0;
-  packet.operatorStopped = false;
+  packet.operatorStopped = preserveOperatorStopped;
   packet.tierEscalated = undefined;
   // #2045 — reset CONSUMES a still-armed alignment (stamps `alignmentResolvedAt`)
   // rather than clearing `huddle`: the operator's reset IS the alignment
@@ -346,7 +346,7 @@ async function resetRegistryPacket(
         },
       };
     }
-    markPacketResetHeld(packet);
+    markPacketResetHeld(packet, input.scope?.preserveOperatorStopped);
     log(`Reset registry packet ${packet.referenceLabel} (${input.packetId}). Reason: ${input.reason ?? 'operator reset'}`);
     return {
       state,
@@ -665,7 +665,7 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
   const heldPacket = await mutateResetPacketGeneration(
     retryScopedInput,
     missionId,
-    markPacketResetHeld,
+    (target) => markPacketResetHeld(target, input.scope?.preserveOperatorStopped),
     packet,
   );
   if (!heldPacket) {

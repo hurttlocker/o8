@@ -33,6 +33,7 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const route = await import('@/app/api/orchestrator/reset-packet/route');
+const stopRoute = await import('@/app/api/orchestrator/stop-packet/route');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
@@ -87,6 +88,25 @@ beforeEach(() => { h.afterRetirement = null; h.retirementCalls = 0; });
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('current mission reset durability through the authenticated route', () => {
+  it('keeps the selected operator-stop barrier after authenticated Stop background cleanup and database reopen', async () => {
+    const f = fixture('stop-current-cleanup');
+    const response = await stopRoute.POST(new NextRequest('http://localhost:3001/api/orchestrator/stop-packet', {
+      method: 'POST', headers: { host: 'localhost:3001', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ packetId: f.packetId }),
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, result: { killConfirmed: true } });
+    await vi.waitFor(() => {
+      expect(readMissionRegistryEntry(f.missionId)!.mission.packets[0]).toMatchObject({ lane: null, storageAdmissionEpoch: 2 });
+    }, { timeout: 10000 });
+    expect(existsSync(f.worktreePath)).toBe(false);
+    closeDb();
+    const durable = readMissionRegistryEntry(f.missionId)!.mission;
+    expect(durable.packets[0]).toMatchObject({ operatorStopped: true, queueState: 'held', lane: null });
+    expect(readOrchestratorControlPlaneState().packets[0].operatorStopped).toBe(true);
+    expect(durable.packets[1]).toMatchObject({ operatorStopped: true, queueState: 'held', storageAdmissionEpoch: 1 });
+  });
+
   it('reopens the selected held and unbound packet while preserving newer registry metadata and its stopped sibling', async () => {
     const f = fixture('reset-current-success');
     h.afterRetirement = async () => {
