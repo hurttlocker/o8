@@ -1,5 +1,14 @@
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 
+function warnOptionalStartupFailure(stage: 'telemetry' | 'transcript-repair'): void {
+  try {
+    // Fixed stage labels only: exception contents can contain private data.
+    console.warn('[startup] Optional initialization failed; continuing startup.', { stage });
+  } catch {
+    // A failed diagnostic must not turn optional initialization into a boot failure.
+  }
+}
+
 /**
  * Next.js 16 instrumentation hook — runs once when the server starts.
  *
@@ -47,7 +56,7 @@ export async function register(): Promise<void> {
     const { initSentryNode } = await import('@/lib/telemetry/sentry-node');
     void initSentryNode('server');
   } catch {
-    // never block boot on telemetry
+    warnOptionalStartupFailure('telemetry');
   }
 
   // One-time, marker-gated repair of transcripts flipped by the pre-v0.1.229
@@ -64,7 +73,7 @@ export async function register(): Promise<void> {
       repairFlippedOrchestratorTranscripts();
       repairComposerPreamblePollution();
     } catch {
-      // never blocks boot
+      warnOptionalStartupFailure('transcript-repair');
     }
   })();
 
