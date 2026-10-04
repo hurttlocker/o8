@@ -1609,6 +1609,15 @@
       ]
     },
     {
+      "path": "tests/close-current-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/close-packet-unmerged-preservation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1696,6 +1705,7 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "network-listener",
         "real-path"
       ]
     },
@@ -2666,6 +2676,14 @@
       ]
     },
     {
+      "path": "tests/mission-stop-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mission-supersession-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3290,6 +3308,14 @@
     {
       "path": "tests/rerun-operator-stop-admission-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/reset-current-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },

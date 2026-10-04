@@ -42,12 +42,12 @@ export async function runReviewChatContinuation(
     backend: backend.id, model: expected.model, receipt, sessionId, timestampMs: startedAt,
   });
   try {
+    if (!claimReviewChatContinuation(lane, expected)) return;
     const session = backend.ensureSession(lane.repoPath, undefined, expected.threadId);
     const selection = await readPersistedOrchestratorProjectSelection(expected.threadId);
     const project = await prepareOrchestratorProjectTurn({ message, repoPath: lane.repoPath, persistedProjectId: selection?.projectId });
     const fresh = resolveReviewChatOrigin(lane);
     if (controller.signal.aborted || fresh.kind !== 'bound' || JSON.stringify(fresh.origin) !== JSON.stringify(expected)) return;
-    if (!claimReviewChatContinuation(lane, expected)) return;
     appendMobileOrchestratorUserMessage({ tabId: expected.threadId, repoPath: lane.repoPath, message,
       messageId: `review-user-${assistantMessageId}`, backend: backend.id, timestampMs: startedAt });
     persist(null);
