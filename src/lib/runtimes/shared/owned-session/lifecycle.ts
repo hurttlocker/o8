@@ -1,3 +1,4 @@
+import { recoveryInterrupted } from './automatic-recovery';
 import type {
   AgentSummary,
   RuntimeSurfaceLifecycle,
@@ -140,10 +141,10 @@ export function deriveOwnedStatus(
   session: OwnedSessionRecord,
 ): AgentSummary['status'] {
   const lifecycle = deriveLifecycle(context, session);
+  if (recoveryInterrupted(session)) return 'blocked';
   if (lifecycle.availability === 'running') return 'running';
   if (lifecycle.lastOutcome === 'failed') return 'failed';
   if (lifecycle.availability === 'awaiting-thread') return 'waiting';
-  if (lifecycle.lastOutcome === 'interrupted') return 'waiting';
   if (lifecycle.availability === 'ready-for-resume') return 'reviewing';
 
   const latest = latestRun(session);

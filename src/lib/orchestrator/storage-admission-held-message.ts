@@ -48,7 +48,10 @@ function terminalReservationHoldSummary(
   };
 }
 
-function formatStorageGigabytes(bytes: number): string {
+function formatStorageBytes(bytes: number): string {
+  if (bytes > 0 && bytes < GIB / 10) {
+    return `${(Math.ceil(bytes / (1024 * 1024) * 10) / 10).toFixed(1)} MB`;
+  }
   return `${(bytes / GIB).toFixed(1)} GB`;
 }
 
@@ -77,15 +80,17 @@ function reserveBreachExplanation(
   const activeReserved = receipt.reservedBeforeBytes ?? 0;
   const policySummary = policy?.reserveRatio !== undefined
     && policy.absoluteFloorBytes !== undefined
-    ? `Storage policy keeps ${formatStorageReservePercent(policy.reserveRatio)}% of disk or ${formatStorageGigabytes(policy.absoluteFloorBytes)}, whichever is greater, unallocated.`
+    ? policy.reserveRatio === 0
+      ? `Storage policy keeps ${formatStorageBytes(policy.absoluteFloorBytes)} of critical free space.`
+      : `Storage policy keeps ${formatStorageReservePercent(policy.reserveRatio)}% of disk or ${formatStorageBytes(policy.absoluteFloorBytes)}, whichever is greater, unallocated.`
     : 'Storage policy requires the reported reserve to remain unallocated.';
   const reservationSummary = activeReserved > 0
-    ? ` ${formatStorageGigabytes(activeReserved)} is already reserved for other launches.`
+    ? ` ${formatStorageBytes(activeReserved)} is already reserved for other launches.`
     : '';
   const reserveSummary = reserveShortfall > 0
-    ? ` The volume is ${formatStorageGigabytes(reserveShortfall)} below that reserve.`
+    ? ` The volume is ${formatStorageBytes(reserveShortfall)} below that reserve.`
     : '';
-  return `${policySummary} This volume requires ${formatStorageGigabytes(requiredReserve)} free; ${formatStorageGigabytes(available)} is available.${reservationSummary}${reserveSummary} Free ${formatStorageGigabytes(dispatchShortfall)} more to dispatch this packet's ${formatStorageGigabytes(receipt.estimateBytes)} estimate while preserving the reserve.`;
+  return `${policySummary} This volume requires ${formatStorageBytes(requiredReserve)} free; ${formatStorageBytes(available)} is available.${reservationSummary}${reserveSummary} Free ${formatStorageBytes(dispatchShortfall)} more to dispatch this packet's ${formatStorageBytes(receipt.estimateBytes)} estimate while preserving the reserve.`;
 }
 
 /**
@@ -107,7 +112,7 @@ export function storagePressureCandidateSummary(
     const label = candidate.workspacePath ?? candidate.packetId;
     return candidate.measuredAllocatedBytes === null
       ? `${label} (size unknown)`
-      : `${label} (${formatStorageGigabytes(candidate.measuredAllocatedBytes)})`;
+      : `${label} (${formatStorageBytes(candidate.measuredAllocatedBytes)})`;
   });
   const remaining = reclaimable.length - listed.length;
   const tail = remaining > 0 ? `, and ${remaining} more` : '';

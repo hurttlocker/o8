@@ -49,6 +49,9 @@ interface CreateDashTmuxSessionInput {
   cwd: string;
   shell: string;
   env: NodeJS.ProcessEnv;
+  /** Reviewed fixed executable; omitted for the normal login-shell path. */
+  command?: { file: string; args: string[] };
+  retainExited?: boolean;
 }
 
 interface CreateDashTmuxSessionDependencies {
@@ -116,7 +119,10 @@ export function createDashTmuxSessionSync(
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
       'new-session', '-d', '-s', input.sessionName,
       '-x', String(input.cols), '-y', String(input.rows),
-      input.shell, '-l',
+      // tmux parses standalone semicolons even in execFile argv. Keep reviewed
+      // arguments inside one shell script, quoting every byte as literal data.
+      ...(input.command ? ['/bin/sh', '-c', `exec ${[input.command.file, ...input.command.args].map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(' ')}`] : [input.shell, '-l']),
+      ...(input.retainExited ? [';', 'set-option', '-t', input.sessionName, 'remain-on-exit', 'on'] : []),
     ), { windowsHide: true, cwd: input.cwd, timeout: 8000, env: input.env });
     created = true;
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(

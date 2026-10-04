@@ -289,12 +289,21 @@ async function finalizeMissionStop(
       admissionSource,
     );
     if ((readOrchestratorControlPlaneState().missionId ?? '').trim() === missionId) {
-      return withControlPlaneLock(() => {
+      return withControlPlaneLock(async () => {
         const fresh = readOrchestratorControlPlaneState();
         if ((fresh.missionId ?? '').trim() !== missionId) {
           throw new Error(`Mission ${missionId} changed before its stop result could be persisted.`);
         }
         writeOrchestratorControlPlaneState(apply(fresh));
+        // A headless tick can mirror a partial stop between packet interrupts.
+        // Finalize the registry's own fresh state before acknowledging the stop;
+        // no later tick is guaranteed once every packet is held.
+        if (readMissionRegistryEntry(missionId, { includeArchived: true })) {
+          await withMissionRegistryState(missionId, (registry) => ({
+            state: apply(registry),
+            result: undefined,
+          }));
+        }
         return stopped.result;
       });
     }

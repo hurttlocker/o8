@@ -75,6 +75,17 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     }
   }
 
+  it.each(BACKENDS)('teaches subject-bound review and receipt reconciliation on %s', backend => {
+    const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend, firstRunClarify: false });
+    expect(prompt).toContain('Generic readOnly delegation creates a new packet');
+    expect(prompt).toContain('does not grant access to a sibling checkout or materialize its commit');
+    expect(prompt).toContain('Before declaring not-merged or submitting another review');
+    expect(prompt).toContain('get_mission_status, get_packet_scope, cortex_list_approvals, and mission_tail');
+    expect(prompt).toContain('cannot enforce an extra reviewer prerequisite');
+    expect(prompt).toContain('report that limit before dispatch');
+    expect(namedTools(prompt).filter(name => !toolsFor(orchestratorPromptSurface({ backend })).has(name))).toEqual([]);
+  });
+
   it('keeps the fleet doctrine on a full turn and drops it on a Solo turn', () => {
     const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
     const solo = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false, toolProfile: 'solo' });

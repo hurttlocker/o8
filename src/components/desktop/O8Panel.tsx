@@ -39,6 +39,8 @@ import { retryingLazy } from '@/lib/react/retrying-lazy';
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
 interface O8PanelProps {
+  /** Mounted panels retain drafts, but hidden panels do not own live previews. */
+  active?: boolean;
   repoPath?: string | null;
   registeredRepos?: RepoRegistryEntry[];
   onRepoPathChange?: (repoPath: string) => void;
@@ -84,6 +86,7 @@ interface O8PanelProps {
 // ── Main Component ──
 
 export function O8Panel({
+  active = true,
   repoPath,
   registeredRepos = [],
   onRepoPathChange,
@@ -130,7 +133,7 @@ export function O8Panel({
     try { window.localStorage.setItem('o8:right-panel:split-ratio', String(splitRatio)); } catch { /* ignore */ }
   }, [splitRatio]);
   const paneStyle = (tab: O8Tab) => panelPaneStyle(tab, activeTab, secondaryTab, splitRatio);
-  const paneVisible = (tab: O8Tab) => panelPaneVisible(tab, activeTab, secondaryTab);
+  const paneVisible = (tab: O8Tab) => panelPaneVisible(tab, activeTab, secondaryTab, active);
   // Browser is EXCLUDED from the utility shell (Q ruling 2026-07-12) — it's
   // a first-class drawer state whose pages render in the header rail, so it
   // never earns a strip row. activeTab === 'browser' renders the dedicated

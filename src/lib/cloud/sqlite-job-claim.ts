@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 import type { ClaimCloudJobInput } from './job-store';
+import { serviceSessionDeadline } from './review-service-authority';
 
 function iso(nowMs: number): string {
   return new Date(nowMs).toISOString();
@@ -59,9 +60,10 @@ export function claimDurableJobRow<Row>(
       input.cursor,
       input.jobId ?? null,
       input.jobId ?? null,
-    ) as { id: string } | undefined;
+    ) as { id: string; launch_json: string } | undefined;
     if (!row) return null;
 
+    const boundedExpiry = Math.min(leaseExpiresAt, serviceSessionDeadline(row.launch_json));
     const leaseToken = randomUUID();
     const changed = sqlite.prepare(`
       UPDATE cloud_jobs
@@ -69,12 +71,12 @@ export function claimDurableJobRow<Row>(
           lease_expires_at = ?, claim_count = claim_count + 1,
           concurrent_count = ?, updated_at = ?
       WHERE id = ? AND status = 'pending'
-    `).run(now, input.workerId, leaseToken, leaseExpiresAt, active.count + 1, now, row.id);
+    `).run(now, input.workerId, leaseToken, boundedExpiry, active.count + 1, now, row.id);
     if (changed.changes !== 1) return null;
     sqlite.prepare(`
       INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)
       VALUES (?, 'claimed', ?, ?, ?)
-    `).run(row.id, JSON.stringify({ leaseExpiresAt: iso(leaseExpiresAt) }), input.workerId, now);
+    `).run(row.id, JSON.stringify({ leaseExpiresAt: iso(boundedExpiry), ...(input.workerKeyId ? { workerKeyId: input.workerKeyId } : {}) }), input.workerId, now);
     return sqlite.prepare('SELECT * FROM cloud_jobs WHERE id = ?').get(row.id) as Row;
   });
   return claim.immediate();

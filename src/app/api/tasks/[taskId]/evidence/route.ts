@@ -62,7 +62,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tas
       logsTruncated: evidence.logsTruncated,
       filesTruncated: evidence.filesTruncated,
       workspaceAccess: 'unavailable',
-      previewAccess: 'unavailable',
+      previewAccess: latest.status === 'leased' && Date.parse(latest.leaseExpiresAt ?? '') > Date.now() && latest.launch.remotePreview ? 'requestable' : 'unavailable',
     }, { headers });
   } catch {
     return NextResponse.json({ error: 'Unable to read remote task evidence.' }, { status: 500, headers });

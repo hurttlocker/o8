@@ -103,7 +103,7 @@ export async function GET(request: Request) {
     recordCloudWorkerPresence({ teamId: auth.teamId, keyId: auth.keyId, workerId });
     const leaseMs = cloudJobLeaseMs();
     // Fast path — job already waiting for this cursor.
-    const immediate = claimNextJob(auth.teamId, cursor, workerId, leaseMs);
+    const immediate = claimNextJob(auth.teamId, cursor, workerId, leaseMs, auth.keyId);
     if (immediate) {
       return NextResponse.json(
         { job: jobPayload(immediate) },
@@ -125,7 +125,7 @@ export async function GET(request: Request) {
       const current = verifyCloudWorkerKey(request.headers.get('authorization'));
       return current.ok && current.keyId === auth.keyId && current.teamId === auth.teamId;
     };
-    const waiter = waitForJob(auth.teamId, cursor, workerId, waitMs, leaseMs, canClaim);
+    const waiter = waitForJob(auth.teamId, cursor, workerId, waitMs, leaseMs, canClaim, auth.keyId);
     const abort = request.signal;
     if (abort.aborted) {
       waiter.cancel();

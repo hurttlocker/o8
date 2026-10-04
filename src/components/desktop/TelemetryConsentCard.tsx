@@ -41,11 +41,13 @@ function ShieldGlyph() {
 
 function ChoiceButton({
   label,
+  inverseColor,
   selected,
   disabled,
   onPress,
 }: {
   label: string;
+  inverseColor: string;
   selected: boolean;
   disabled: boolean;
   onPress: () => void;
@@ -79,7 +81,7 @@ function ChoiceButton({
           : hovered
             ? 'var(--t-hover)'
             : 'var(--t-chat-surface-bg)',
-        color: selected ? 'var(--t-chat-surface-bg)' : 'var(--t-text)',
+        color: selected ? inverseColor : 'var(--t-text)',
         fontFamily: 'var(--font-sans-system)',
         fontSize: 12.5,
         fontWeight: 400,
@@ -103,12 +105,14 @@ function DecisionButtons({
   value,
   shareLabel,
   declineLabel,
+  inverseColor,
   disabled,
   onChange,
 }: {
   value: ConsentChoice;
   shareLabel: string;
   declineLabel: string;
+  inverseColor: string;
   disabled: boolean;
   onChange: (value: boolean) => void;
 }) {
@@ -125,12 +129,14 @@ function DecisionButtons({
     >
       <ChoiceButton
         label={shareLabel}
+        inverseColor={inverseColor}
         selected={value === true}
         disabled={disabled}
         onPress={() => onChange(true)}
       />
       <ChoiceButton
         label={declineLabel}
+        inverseColor={inverseColor}
         selected={value === false}
         disabled={disabled}
         onPress={() => onChange(false)}
@@ -217,6 +223,7 @@ export function TelemetryConsentCard({
     {error ? <button type="button" onClick={() => { setError(null); setRevision((value) => value + 1); }}>Retry privacy choices</button> : null}
   </div> : null;
 
+  const inverseColor = embedded ? 'var(--t-onboarding-bg)' : 'var(--t-chat-surface-bg)';
   const canSave = crashReports !== null && productUsage !== null && !saving;
   const keepFocusInDialog = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -412,6 +419,7 @@ export function TelemetryConsentCard({
             </details>
             <DecisionButtons
               value={crashReports}
+              inverseColor={inverseColor}
               shareLabel="Share crash reports"
               declineLabel="Keep crash reports off"
               disabled={saving}
@@ -472,6 +480,7 @@ export function TelemetryConsentCard({
             </details>
             <DecisionButtons
               value={productUsage}
+              inverseColor={inverseColor}
               shareLabel="Share product usage"
               declineLabel="Keep product usage off"
               disabled={saving}
@@ -507,7 +516,7 @@ export function TelemetryConsentCard({
               border: '1px solid var(--t-text)',
               borderRadius: 10,
               background: canSave ? 'var(--t-text)' : 'var(--t-chat-surface-bg)',
-              color: canSave ? 'var(--t-chat-surface-bg)' : 'var(--t-text-faint)',
+              color: canSave ? inverseColor : 'var(--t-text-faint)',
               fontFamily: 'var(--font-sans-system)',
               fontSize: 12.5,
               fontWeight: 400,
