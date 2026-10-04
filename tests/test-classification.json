@@ -3290,6 +3290,14 @@
       ]
     },
     {
+      "path": "tests/reset-current-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/reset-lifecycle-retirement-real-path.test.ts",
       "reasons": [
         "child-process",

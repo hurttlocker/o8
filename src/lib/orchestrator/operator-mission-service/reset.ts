@@ -211,26 +211,52 @@ async function mutateResetPacketGeneration(
   input: ResetPacketInput,
   missionId: string,
   mutate: (packet: OrchestratorPacket) => void,
+  expectedPacket?: OrchestratorPacket,
 ): Promise<{ referenceLabel: string; stateChanged: boolean } | null> {
-  return withMissionHandoffBarrier(() => mutateResetPacketGenerationUnlocked(input, missionId, mutate));
+  return withMissionHandoffBarrier(() => mutateResetPacketGenerationUnlocked(input, missionId, mutate, expectedPacket));
 }
 
 async function mutateResetPacketGenerationUnlocked(
   input: ResetPacketInput,
   missionId: string,
   mutate: (packet: OrchestratorPacket) => void,
+  expectedPacket?: OrchestratorPacket,
 ): Promise<{ referenceLabel: string; stateChanged: boolean } | null> {
+  const generationMoved = (packet: OrchestratorPacket) => {
+    if (!expectedPacket) return false;
+    const order = (packet.storageAdmissionEpoch ?? 0) - (expectedPacket.storageAdmissionEpoch ?? 0)
+      || (packet.attemptCount ?? 0) - (expectedPacket.attemptCount ?? 0);
+    return order > 0 || (order === 0 && Boolean(packet.lane?.laneId && packet.lane.laneId !== expectedPacket.lane?.laneId));
+  };
   const apply = (packet: OrchestratorPacket) => {
-    if (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input)) {
+    if (generationMoved(packet) || (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input))) {
       return { referenceLabel: packet.referenceLabel, stateChanged: true };
     }
     mutate(packet);
     return { referenceLabel: packet.referenceLabel, stateChanged: false };
   };
   const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-  const { result } = await withLockedState((fresh) => {
+  const { result } = await withLockedState(async (fresh) => {
     if (fresh.missionId !== missionId) return null;
     const packet = fresh.packets.find((candidate) => candidate.id === input.packetId);
+    if (packet && expectedPacket && !generationMoved(packet)
+      && (!input.scope?.skipHoldIfStateMoved || scopedPacketGenerationMatches(packet, input))
+      && readMissionRegistryEntry(missionId, { includeArchived: true })) {
+      // Cleanup has retired the captured lane/worktree. Finalize only this
+      // packet in the registry's fresh state before acknowledging the reset.
+      // A failed registry write leaves the current packet's stop hold intact.
+      const { result: mirrored } = await withMissionRegistryState(missionId, (state) => {
+        const target = state.packets.find((candidate) => candidate.id === input.packetId);
+        if (!target || generationMoved(target)) {
+          return { state, result: { referenceLabel: packet.referenceLabel, stateChanged: true } };
+        }
+        target.storageAdmissionEpoch = packet.storageAdmissionEpoch;
+        target.attemptCount = packet.attemptCount;
+        mutate(target);
+        return { state, result: { referenceLabel: target.referenceLabel, stateChanged: false } };
+      });
+      if (mirrored.stateChanged) return mirrored;
+    }
     return packet ? apply(packet) : null;
   });
   if (result) return result;
@@ -640,6 +666,7 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
     retryScopedInput,
     missionId,
     markPacketResetHeld,
+    packet,
   );
   if (!heldPacket) {
     log(`Reset packet ${packet.referenceLabel} (${input.packetId}) — packet left mission state during cleanup; lanes cleaned, no hold to record.`);
