@@ -1,5 +1,5 @@
 import { mkdir, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtimes/shared/stdio-json-rpc';
@@ -36,7 +36,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
   const stateRelative = relative(root, stateDir);
-  if (stateRelative === '' || (!stateRelative.startsWith('..') && !isAbsolute(stateRelative))) {
+  if (stateRelative === '' || (!(stateRelative === '..' || stateRelative.startsWith(`..${sep}`)) && !isAbsolute(stateRelative))) {
     throw new Error('SDK state must be outside the tool workspace');
   }
   let sessionFile: string | undefined;

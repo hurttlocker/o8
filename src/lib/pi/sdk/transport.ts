@@ -8,6 +8,8 @@ export interface ManagedPiTransportOptions {
   fetch?: typeof fetch;
   maxOutputTokens?: number;
   timeoutMs?: number;
+  /** Host-only observer before Pi fills in missing usage fields. Never forwarded to the worker. */
+  observeRawUsage?: (usage: unknown) => void;
 }
 
 /** Credentials never cross into the SDK worker. Re-resolve entitlement each call. */
@@ -41,6 +43,11 @@ export function createManagedPiTransport(options: ManagedPiTransportOptions): Pi
     };
     const stream = streamSimple(options.model, context, {
       apiKey: 'host-transport-only', fetch: guardedFetch, signal: requestSignal,
+      onProviderStreamEvent: (chunk) => {
+        if (chunk && typeof chunk === 'object' && 'usage' in chunk && chunk.usage != null) {
+          options.observeRawUsage?.(chunk.usage);
+        }
+      },
       maxRetries: 0, maxTokens: options.maxOutputTokens ?? 4096, transport: 'sse',
     });
     for await (const event of stream) {
