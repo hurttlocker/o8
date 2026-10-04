@@ -3,7 +3,7 @@ import { act, createElement, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { O8AuthState } from '@/components/auth/O8AuthProvider';
-import { accountIdentity } from '@/lib/auth/account-identity';
+import { accountIdentity, type ClerkIdentitySource } from '@/lib/auth/account-identity';
 
 const SNAPSHOT_IMAGE = 'https://img.clerk.com/sign-up-snapshot';
 const SNAPSHOT_EMAIL = 'signup@example.invalid';
@@ -20,7 +20,7 @@ vi.mock('@clerk/nextjs', () => ({
 vi.mock('@clerk/nextjs/server', () => ({ auth: async () => ({ userId: null }) }));
 vi.mock('@/lib/auth/clerk-fetch-guard', () => ({ installTauriClerkFetchGuard: () => {} }));
 
-function clerkUser(externalAccounts: unknown[]) {
+function clerkUser(externalAccounts: NonNullable<ClerkIdentitySource['externalAccounts']>) {
   return {
     id: 'user_identity', fullName: 'Fixture User', username: null, imageUrl: SNAPSHOT_IMAGE,
     primaryEmailAddress: { emailAddress: SNAPSHOT_EMAIL }, externalAccounts, reload: async () => {},
