@@ -70,6 +70,15 @@ cover persistence/resume, Unicode text, approval denial and target drift,
 protected aliases, disabled ambient extensions, Stop, budgets, HTTP errors,
 SSE-error redaction and fragmented managed tool streaming.
 
+## Platform and concurrency limits
+
+macOS and Linux only: `createPiSdkSession` and the approved-write helper refuse
+Windows, which has no tested directory-descriptor write path. Approved writes
+hold against the model, which has no process or command tool. They do not yet
+hold against a separate process that renames, links or replaces workspace files
+during a write; #3243 tracks that hardening, which is required before any
+command or process tool is added and before the worker is offered to users.
+
 ## Remaining gates
 
 Before a user-facing integration, bind this API to the existing authenticated

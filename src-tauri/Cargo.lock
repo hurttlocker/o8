@@ -773,8 +773,6 @@ checksum = "4bfbf56724aa9eca8afa4fcfadeb479e722935bb2a0900c2d37e0cc477af0688"
 [[package]]
 name = "clerk-fapi-rs"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e239d6a45c0bc0725bd254dbdd6f89918ea27c634cc753c173caca2f5b60fd0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6522,8 +6520,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-clerk"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "732241dc88d07526e0f9c47339fcd72c3c137cfa0f461d3ae1ea2bc0214871bb"
 dependencies = [
  "clerk-fapi-rs",
  "log",

@@ -267,6 +267,27 @@ describe('POST /api/feedback/report', () => {
     expect(text).toContain('[workspace-spawn] orchestrator spawn failed: boom');
   });
 
+  it('redacts credential-shaped values from the attached diagnostics', async () => {
+    const secret = 'SYNTHETIC_FEEDBACK_SECRET_NOT_VALID';
+    const res = await postReport({
+      category: 'bug',
+      message: 'sign-in loop',
+      route: '/dashboard',
+      includeDiagnostics: true,
+      client: {
+        ui: { innerW: 1, innerH: 1, dpr: 1, uiZoom: '1', bodyScrollTop: 0, docScrollTop: 0, dashboardTop: 0, palette: 'dark', surface: 'glass' },
+        consoleErrors: [
+          { message: `Clerk load failed Bearer ${secret} ?__clerk_ticket=${secret} eyJ${secret}.eyJ${secret}.${secret}`, source: 'app', lineno: 1, timestamp: 1784168000000 },
+        ],
+        platform: 'MacIntel',
+      },
+    });
+    expect(res.status).toBe(200);
+    const text = await (captured.form!.get('files[0]') as File).text();
+    expect(text).toContain('Clerk load failed');
+    expect(text).not.toContain(secret);
+  });
+
   it('renders the workspace snapshot and spawn journal into the diagnostics file (GQXEZD forensics)', async () => {
     const res = await postReport({
       category: 'bug',

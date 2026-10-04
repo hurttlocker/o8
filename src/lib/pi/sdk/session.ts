@@ -29,8 +29,16 @@ export function requirePiNode(version = process.versions.node) {
   }
 }
 
+/** Approved writes rely on POSIX directory descriptors; Windows is refused until #3243 covers it. */
+export function requirePiPlatform(platform: NodeJS.Platform = process.platform) {
+  if (platform === 'win32') {
+    throw new Error('The Pi prototype does not support Windows yet. Use macOS or Linux.');
+  }
+}
+
 /** Opt-in host API, not registered as a default runtime or exposed as an HTTP route. */
 export async function createPiSdkSession(options: PiSdkSessionOptions) {
+  requirePiPlatform();
   requirePiNode();
   const root = await realpath(options.workspace);
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
