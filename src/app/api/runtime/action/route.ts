@@ -29,6 +29,7 @@ function runtimeActionIdempotencyBody(payload: RuntimeActionRequest): string {
     attachments: payload.attachments,
     auditSteer: payload.auditSteer,
     steerSource: payload.steerSource,
+    automaticRecoveryRunId: payload.automaticRecoveryRunId,
   });
 }
 
@@ -44,6 +45,11 @@ export async function POST(request: NextRequest) {
       { error: 'action, surfaceId, and clientMutationId are required' },
       { status: 400 },
     );
+  }
+
+  if (payload.automaticRecoveryRunId !== undefined && (typeof payload.automaticRecoveryRunId !== 'string'
+    || !payload.automaticRecoveryRunId.trim() || !['steer', 'send_input'].includes(action))) {
+    return NextResponse.json({ error: 'Invalid automatic recovery generation or action.' }, { status: 400 });
   }
 
   const canonicalBody = runtimeActionIdempotencyBody({ ...payload, surfaceId });

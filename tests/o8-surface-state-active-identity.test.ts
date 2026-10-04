@@ -196,6 +196,7 @@ const evalClient = {
 
 interface PublicSurfaceState {
   route: string;
+  activeWorkspaceId: string | null;
   activeWorkspaceRepo: string | null;
   activeTabKind: string | null;
   activeTabId: string | null;
@@ -330,6 +331,7 @@ describe('o8_view_surface_state active identity (#2307)', () => {
       root = createRoot(container);
     });
     const unmounted = await readSurfaceState();
+    expect(unmounted.activeWorkspaceId).toBeNull();
     expect(unmounted.activeTabId).toBeNull();
     expect(unmounted.activeTabKind).toBeNull();
     expect(unmounted.activeWorkspaceRepo).toBeNull();
@@ -363,6 +365,34 @@ describe('o8_view_surface_state active identity (#2307)', () => {
     expect(state.activeTabKind).toBe('terminal');
     expect(state.activeWorkspaceRepo).toBe('o8');
     expect(state.activeTabId).not.toBe('worker-pane-tab');
+  });
+
+  it('exposes the workspace ID accepted by the mounted pane selection route', async () => {
+    const selectLeft = vi.fn();
+    const selectRight = vi.fn();
+    for (const [scope, select] of [['left', selectLeft], ['right', selectRight]] as const) {
+      controllerHarness.byScope.set(scope, {
+        ...makeController({ activeRepo: O8_REPO, activeTab: ORCHESTRATOR_TAB, tabs: [ORCHESTRATOR_TAB] }),
+        handleSelectTab: select,
+      });
+    }
+    await act(async () => {
+      root.render(createElement('div', null,
+        createElement(WorkspaceTerminalRoot, rootProps('left', { activeWorkspaceSurface: false, canCloseTile: true })),
+        createElement(WorkspaceTerminalRoot, rootProps('right', { activeWorkspaceSurface: true, canCloseTile: true })),
+      ));
+    });
+
+    const state = await readSurfaceState();
+    expect(state.activeWorkspaceId).toEqual(expect.any(String));
+    expect(state.activeWorkspaceId).not.toBe('');
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('o8:request-select-tab', {
+        detail: { workspaceId: state.activeWorkspaceId, tabId: ORCHESTRATOR_TAB.id },
+      }));
+    });
+    expect(selectRight).toHaveBeenCalledExactlyOnceWith(ORCHESTRATOR_TAB.id);
+    expect(selectLeft).not.toHaveBeenCalled();
   });
 
   it('keeps the active identity fixed while extra worker tabs are running', async () => {
@@ -435,6 +465,7 @@ describe('o8_view_surface_state active identity (#2307)', () => {
     await mount(rootProps('inactive-only', { activeWorkspaceSurface: false }));
     const state = await readSurfaceState();
     expect(state.activeWorkspaceRepo).toBeNull();
+    expect(state.activeWorkspaceId).toBeNull();
     expect(state.activeTabId).toBeNull();
     expect(state.activeTabKind).toBeNull();
   });
@@ -447,6 +478,7 @@ describe('o8_view_surface_state active identity (#2307)', () => {
     });
     const state = await readSurfaceState();
     expect(state.activeWorkspaceRepo).toBeNull();
+    expect(state.activeWorkspaceId).toBeNull();
     expect(state.activeTabId).toBeNull();
     expect(state.activeTabKind).toBeNull();
   });
@@ -470,12 +502,15 @@ describe('o8_view_surface_state active identity (#2307)', () => {
 
     await renderSwap('swap-left');
     const left = await readSurfaceState();
+    expect(left.activeWorkspaceId).toEqual(expect.any(String));
     expect(left.activeTabId).toBe('left-tab');
     expect(left.activeTabKind).toBe('orchestrator');
     expect(left.activeWorkspaceRepo).toBe('notes-app');
 
     await renderSwap('swap-right');
     const right = await readSurfaceState();
+    expect(right.activeWorkspaceId).toEqual(expect.any(String));
+    expect(right.activeWorkspaceId).not.toBe(left.activeWorkspaceId);
     expect(right.activeTabId).toBe('right-tab');
     expect(right.activeTabKind).toBe('terminal');
     expect(right.activeWorkspaceRepo).toBe('o8');

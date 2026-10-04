@@ -328,8 +328,6 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
   } catch {
     return ledger;
   }
-  if (sqliteProjects.length === 0) return ledger;
-
   let repos;
   try {
     repos = await listRepos();

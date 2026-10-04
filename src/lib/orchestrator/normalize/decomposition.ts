@@ -78,3 +78,11 @@ export function normalizeDecompositionMetadata(value: unknown): OrchestratorPack
   }
   return { targetFile, postMergeSha, lineCount };
 }
+
+/** Preserve the task's project and workspace identity across state reloads. */
+export function normalizePacketWorkspaceIdentity(packet: Partial<OrchestratorPacket>): Pick<OrchestratorPacket, 'projectId' | 'workspaceTargetPath'> {
+  return {
+    projectId: typeof packet.projectId === 'string' && packet.projectId.trim() ? packet.projectId.trim() : undefined,
+    workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
+  };
+}

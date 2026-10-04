@@ -13,6 +13,7 @@ import { taskSessionKey, taskTimeLabel } from '../repo-focus/tabs/control-room/h
 import type { TaskAction, TaskMutationPayload, TaskPoolTask } from '../repo-focus/tabs/control-room/types';
 import { THREAD_GROUPS, resolveThreadProject, scopeThreadAgents, scopeThreads, threadModelLabel, threadStatusLine } from './threads-model';
 import { useThreadsTasks } from './useThreadsTasks';
+import { useThreadDetailNavigation } from './useThreadNavigation';
 import { useThreadRepos } from './useThreadRepos';
 import { ThreadDetail } from './ThreadDetail';
 import { ThreadActions, ThreadActionButton } from './ThreadActions';
@@ -50,6 +51,11 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
   const [confirmation, setConfirmation] = useState<{ scopeKey: string; task: TaskPoolTask; action: TaskAction; body?: Record<string, unknown> } | null>(null);
   const selected = boundSessionKey ? tasks.find((task) => taskSessionKey(task) === boundSessionKey)
     : selection?.scopeKey === scopeKey ? tasks.find((task) => task.id === selection.id) : null;
+  useThreadDetailNavigation({
+    active, repoPath, scopeKey, loading: pool.loading || projects.loading,
+    taskIds: tasks.map((task) => task.id), selectedId: view === 'threads' ? selected?.id ?? null : null, boundSessionKey,
+    select: (id) => { setView('threads'); setSelection({ scopeKey, id }); },
+  });
   const missingSession = Boolean(boundSessionKey && !selected);
   const backToThreads = () => {
     if (boundSessionKey) context?.onOpenO8Panel?.({ repoPath, tab: 'threads' });
