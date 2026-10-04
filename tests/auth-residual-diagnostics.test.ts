@@ -86,6 +86,56 @@ describe('residual auth diagnostics', () => {
     expect(captured[0].message).toContain('[redacted]');
   });
 
+  it('native capture and telemetry scrubbing redact the same encoded and nested forms', async () => {
+    const hookSource = readFileSync('src-tauri/src/webview_latch.rs', 'utf8')
+      .match(/const CONSOLE_ERROR_HOOK_JS: &str = r#"([\s\S]*?)"#;/)![1];
+    const captured: string[] = [];
+    const window = {
+      __TAURI_INTERNALS__: { invoke: (_cmd: string, payload: { message: string; source: string }) => {
+        captured.push(payload.message);
+        return Promise.resolve();
+      } },
+      addEventListener: () => {},
+    };
+    const context = vm.createContext({ window, console: { error: () => {} }, JSON, String, Error, isFinite, Math, parseInt });
+    vm.runInContext(hookSource, context);
+    const consoleError = (context.console as { error: (...args: unknown[]) => void }).error;
+    const { redactSecrets } = await import('@/lib/telemetry/scrub');
+
+    const samples = [
+      `callback o8://auth?%74icket=${marker}&next=1`,
+      `nested https://o8.run/cb?next=%2Fdone%3Fticket%3D${marker}`,
+      `double %253Fticket%253D${marker}`,
+      `jwt eyJ${marker}%2EeyJ${marker}%2E${marker}`,
+      JSON.stringify({ sessionToken: marker, session_token: marker, apiKey: marker }),
+      JSON.stringify({ response: JSON.stringify({ ticket: marker, nested: { token: marker } }) }),
+      JSON.stringify({ outer: JSON.stringify({ response: JSON.stringify({ ticket: marker }) }) }),
+      `headers authorization: Bearer ${marker}; cookie=__session=${marker}`,
+      `device o8d_${marker} key sk_live_${marker.replace(/_/g, '')} code ?code=${marker}`,
+    ];
+    for (const sample of samples) {
+      consoleError(sample);
+      const scrubbed = redactSecrets(sample);
+      expect(scrubbed, sample).not.toContain(marker);
+      expect(scrubbed, sample).not.toContain(marker.replace(/_/g, ''));
+    }
+    expect(captured).toHaveLength(samples.length);
+    captured.forEach((text, index) => {
+      expect(text, samples[index]).not.toContain(marker);
+      expect(text, samples[index]).toBe(redactSecrets(samples[index]));
+    });
+  });
+
+  it('crash records redact credentials before they are persisted', async () => {
+    const { buildCrashRecord } = await import('@/lib/telemetry/crash-store');
+    const record = buildCrashRecord({
+      source: 'webview', kind: 'window.error', appVersion: 'test',
+      message: `load failed ?__clerk_ticket=${marker}`,
+      stack: `Error: token eyJ${marker}.eyJ${marker}.${marker}\n    at Bearer ${marker}`,
+    });
+    expect(JSON.stringify(record)).not.toContain(marker);
+  });
+
   it('account settings opens normally without diagnostics', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const open = vi.fn();

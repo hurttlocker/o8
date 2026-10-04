@@ -30,6 +30,7 @@ import {
 import { appendFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { redactSecrets } from '@/lib/telemetry/scrub';
 
 export type CrashSource = string;
 
@@ -124,6 +125,10 @@ function truncate(value: unknown, max: number): string {
   return str.length > max ? `${str.slice(0, max)}…[truncated]` : str;
 }
 
+function redactUnknown(value: unknown): unknown {
+  return typeof value === 'string' ? redactSecrets(value) : value;
+}
+
 /**
  * Build a fully-sanitized record. Message + stack are truncated; nothing else
  * from the caller is trusted onto disk. JSON.stringify escapes any embedded
@@ -142,9 +147,9 @@ export function buildCrashRecord(input: {
     source: truncate(input.source || 'unknown', 64),
     appVersion: input.appVersion?.trim() || resolveAppVersion(),
     kind: input.kind,
-    message: truncate(input.message, MAX_MESSAGE_CHARS) || '(no message)',
+    message: truncate(redactUnknown(input.message), MAX_MESSAGE_CHARS) || '(no message)',
   };
-  const stack = truncate(input.stack, MAX_STACK_CHARS);
+  const stack = truncate(redactUnknown(input.stack), MAX_STACK_CHARS);
   if (stack) record.stack = stack;
   return record;
 }
