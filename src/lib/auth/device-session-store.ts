@@ -90,6 +90,19 @@ export function readPendingDeviceRevokes(): string[] {
   }
 }
 
+/**
+ * The stored session, unless its token is already queued for revocation. That
+ * only happens when a sign-out was interrupted between queueing and deleting.
+ * Rotating such a token would turn the queued revoke into a replay after grace,
+ * which the server treats as reuse, so the token is retired instead.
+ */
+export function readUsableDeviceSession(): DeviceSession | null {
+  const session = readDeviceSession();
+  if (!session || !readPendingDeviceRevokes().includes(session.token)) return session;
+  deleteDeviceSession();
+  return null;
+}
+
 export function queueDeviceRevoke(token: string): void {
   writePrivateRecord(pendingRevokePath(), { version: 1, tokens: [...new Set([...readPendingDeviceRevokes(), token])].slice(-16) });
 }

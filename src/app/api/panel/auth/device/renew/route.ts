@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { deviceRequestIsLocal, deviceResponse, requestDeviceService, retryPendingDeviceRevokes, validDeviceGrant } from '@/lib/auth/device-session-service';
-import { deleteDeviceSession, deviceSessionGeneration, queueDeviceRevoke, readDeviceSession, removePendingDeviceRevoke, writeDeviceSession } from '@/lib/auth/device-session-store';
+import { deleteDeviceSession, deviceSessionGeneration, queueDeviceRevoke, readDeviceSession, readUsableDeviceSession, removePendingDeviceRevoke, writeDeviceSession } from '@/lib/auth/device-session-store';
 import { readAuthSignedOutAt } from '@/lib/auth/sign-out-marker';
 import { readSignInEpoch } from '@/lib/github-broker/managed';
 
@@ -18,7 +18,7 @@ const MAX_RETRIES = 3;
 async function renew(): Promise<RenewalResult> {
   const fail = (reason: string, status: number): RenewalResult => ({ status, body: { ok: false, reason } });
   try {
-    const session = readDeviceSession();
+    const session = readUsableDeviceSession();
     if (readAuthSignedOutAt() !== null) {
       try {
         if (session?.renewalStartedAt !== undefined) removePendingDeviceRevoke(session.token);

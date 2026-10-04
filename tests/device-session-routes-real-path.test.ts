@@ -466,6 +466,27 @@ describe('desktop device routes through a fake license server and persisted stat
     expect(store.readDeviceSession()).toBeNull();
   });
 
+  it.each(['renew', 'status'] as const)('never rotates a token whose sign-out was interrupted after queueing its revoke (%s first)', async (first) => {
+    // Sign-out queues the revoke, then deletes the file. A crash between the two
+    // leaves both. Rotating that token would turn the queued revoke into a replay
+    // after grace, which the server treats as reuse and answers by signing the
+    // account out everywhere.
+    const store = await seed();
+    store.queueDeviceRevoke(credential);
+    respond = async (path) => path === '/account/device/revoke'
+      ? { status: 503, body: {} }
+      : { status: 200, body: { ticket: randomBytes(24).toString('hex'), clerkUserId: owner, deviceToken: randomBytes(32).toString('hex'), idleExpiresAt } };
+    const { POST } = await import('@/app/api/panel/auth/device/renew/route');
+    const { GET } = await import('@/app/api/panel/auth/device/status/route');
+    if (first === 'status') expect(await (await GET(request('status'))).json()).toEqual({ present: false, clerkUserId: null });
+    const response = await POST(request('renew'));
+    expect(response.status).toBe(401);
+    expect(calls.filter((call) => call.path === '/account/device/renew')).toEqual([]);
+    expect(existsSync(join(dataDir, 'device-session.json'))).toBe(false);
+    // The queued token was never rotated, so its later revoke is an ordinary one.
+    expect(store.readPendingDeviceRevokes()).toEqual([credential]);
+  });
+
   it('treats a corrupt persisted record as absent', async () => {
     writeFileSync(join(dataDir, 'device-session.json'), '{');
     const { GET } = await import('@/app/api/panel/auth/device/status/route');
