@@ -9,7 +9,7 @@ export interface DesktopAuthSignIn {
 
 export interface DesktopAuthClerk {
   setActive: (params: { session: string }) => Promise<unknown>;
-  user?: { reload?: () => Promise<unknown> } | null;
+  user?: { id?: string; reload?: () => Promise<unknown> } | null;
 }
 
 export interface ConsumeDesktopAuthCallbackOptions {
@@ -29,6 +29,17 @@ export interface ConsumeDesktopAuthCallbackOptions {
 
 // Module-level so remounts cannot reset the one-time-ticket guard.
 const consumedTickets = new Set<string>();
+let exchangingTickets = 0;
+const exchangeListeners = new Set<() => void>();
+
+export function desktopAuthTicketExchangeInProgress(): boolean {
+  return exchangingTickets > 0;
+}
+
+export function subscribeDesktopAuthTicketExchange(listener: () => void): () => void {
+  exchangeListeners.add(listener);
+  return () => { exchangeListeners.delete(listener); };
+}
 
 export function resetConsumedDesktopAuthTicketsForTest(): void {
   consumedTickets.clear();
@@ -46,6 +57,39 @@ function reasonFromUnknown(value: unknown, fallback: string): string {
     }
   }
   return fallback;
+}
+
+/** Shared by the state-checked deep link and the server-issued device ticket. */
+export async function exchangeDesktopAuthTicket(
+  ticket: string,
+  options: { signIn: DesktopAuthSignIn; clerk: DesktopAuthClerk; onActivated?: () => Promise<void> },
+): Promise<void> {
+  if (desktopAuthTicketExchangeInProgress()) {
+    throw new Error('A desktop sign-in is already in progress. Try signing in again.');
+  }
+  exchangingTickets += 1;
+  exchangeListeners.forEach((listener) => listener());
+  try {
+    const { error } = await options.signIn.ticket({ ticket });
+    if (error) throw new Error(reasonFromUnknown(error, 'The sign-in ticket could not be exchanged.'));
+    if (options.signIn.status !== 'complete') {
+      throw new Error(`Clerk returned an incomplete sign-in status: ${options.signIn.status || 'unknown'}.`);
+    }
+    const { error: finalizeError } = await options.signIn.finalize();
+    if (finalizeError) throw new Error(reasonFromUnknown(finalizeError, 'The sign-in session could not be finalized.'));
+    try {
+      if (options.signIn.createdSessionId) {
+        await options.clerk.setActive({ session: options.signIn.createdSessionId });
+      }
+      await options.clerk.user?.reload?.();
+    } catch (error) {
+      throw new Error(reasonFromUnknown(error, 'The signed-in session could not be activated.'));
+    }
+    await options.onActivated?.();
+  } finally {
+    exchangingTickets -= 1;
+    exchangeListeners.forEach((listener) => listener());
+  }
 }
 
 function regenerateDesktopSignIn(options: ConsumeDesktopAuthCallbackOptions): void {
@@ -88,53 +132,17 @@ export async function consumeDesktopAuthCallback(
 
   consumedTickets.add(ticket);
   try {
-    const { error } = await options.signIn.ticket({ ticket });
-    if (error) {
-      const reason = reasonFromUnknown(error, 'The sign-in ticket could not be exchanged.');
-      console.error('[auth] ticket sign-in failed:', error);
-      reportDesktopAuthError(reason);
-      regenerateDesktopSignIn(options);
-      return;
-    }
-
-    if (options.signIn.status !== 'complete') {
-      const status = options.signIn.status || 'unknown';
-      console.warn('[auth] ticket sign-in incomplete:', status);
-      reportDesktopAuthError(`Clerk returned an incomplete sign-in status: ${status}.`);
-      regenerateDesktopSignIn(options);
-      return;
-    }
-
-    const { error: finalizeError } = await options.signIn.finalize();
-    if (finalizeError) {
-      const reason = reasonFromUnknown(finalizeError, 'The sign-in session could not be finalized.');
-      console.error('[auth] finalize failed:', finalizeError);
-      reportDesktopAuthError(reason);
-      regenerateDesktopSignIn(options);
-      return;
-    }
-
-    try {
-      if (options.signIn.createdSessionId) {
-        await options.clerk.setActive({ session: options.signIn.createdSessionId });
-      }
-      await options.clerk.user?.reload?.();
-    } catch (activateErr) {
-      const reason = reasonFromUnknown(activateErr, 'The signed-in session could not be activated.');
-      console.error('[auth] post-finalize session activation failed:', activateErr);
-      reportDesktopAuthError(reason);
-      regenerateDesktopSignIn(options);
-      return;
-    }
-
-    options.clearExpectedState();
-    clearDesktopAuthError();
-    // Sign-in is fully activated; retiring the sign-out marker is best-effort
-    // and must not surface as a sign-in failure.
-    await Promise.resolve(options.onSignInComplete?.()).catch(() => {});
+    await exchangeDesktopAuthTicket(ticket, {
+      ...options,
+      onActivated: async () => {
+        options.clearExpectedState();
+        clearDesktopAuthError();
+        // Retire the marker before the bridge can sync or enroll this session.
+        await Promise.resolve(options.onSignInComplete?.()).catch(() => {});
+      },
+    });
   } catch (err) {
     const reason = reasonFromUnknown(err, 'The sign-in ticket exchange failed unexpectedly.');
-    console.error('[auth] ticket exchange threw:', err);
     reportDesktopAuthError(reason);
     regenerateDesktopSignIn(options);
   }
