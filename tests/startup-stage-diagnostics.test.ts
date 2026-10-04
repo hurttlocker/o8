@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const warning = '[startup] Optional initialization failed; continuing startup.';
 const calls: string[] = [];
 const importedModules: string[] = [];
+let failedImport: string | null = null;
 const mocks = {
   installProcessCrashCapture: vi.fn(),
   startTelemetryUploadLoop: vi.fn(),
@@ -14,6 +15,10 @@ const mocks = {
 };
 const warn = vi.fn();
 
+function failImportIfSelected(module: string): void {
+  if (failedImport === module) throw new Error('synthetic import failure');
+}
+
 beforeEach(() => {
   vi.resetModules();
   vi.resetAllMocks();
@@ -24,23 +29,28 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(warn);
   calls.length = 0;
   importedModules.length = 0;
+  failedImport = null;
   for (const [name, mock] of Object.entries(mocks)) {
     mock.mockImplementation(() => { calls.push(name); });
   }
 
   vi.doMock('@/lib/telemetry/crash-capture', () => {
+    failImportIfSelected('@/lib/telemetry/crash-capture');
     importedModules.push('crash-capture');
     return { installProcessCrashCapture: mocks.installProcessCrashCapture };
   });
   vi.doMock('@/lib/telemetry/uploader', () => {
+    failImportIfSelected('@/lib/telemetry/uploader');
     importedModules.push('uploader');
     return { startTelemetryUploadLoop: mocks.startTelemetryUploadLoop };
   });
   vi.doMock('@/lib/telemetry/sentry-node', () => {
+    failImportIfSelected('@/lib/telemetry/sentry-node');
     importedModules.push('sentry-node');
     return { initSentryNode: mocks.initSentryNode };
   });
   vi.doMock('@/lib/mobile/orchestrator-thread-history', () => {
+    failImportIfSelected('@/lib/mobile/orchestrator-thread-history');
     importedModules.push('transcript-repair');
     return {
       repairFlippedOrchestratorTranscripts: mocks.repairFlippedOrchestratorTranscripts,
@@ -129,7 +139,7 @@ describe('startup stage diagnostics through register', () => {
   });
 
   it.each(telemetryImports)('identifies telemetry import failure at %s and continues later work', async (module) => {
-    vi.doMock(module, () => { throw new Error('synthetic import failure'); });
+    failedImport = module;
 
     await registerAndSettle();
     expect(mocks.repairFlippedOrchestratorTranscripts).toHaveBeenCalledTimes(1);
@@ -149,9 +159,7 @@ describe('startup stage diagnostics through register', () => {
   });
 
   it('identifies transcript-repair import failure and continues delayed backfill', async () => {
-    vi.doMock('@/lib/mobile/orchestrator-thread-history', () => {
-      throw new Error('synthetic transcript import failure');
-    });
+    failedImport = '@/lib/mobile/orchestrator-thread-history';
 
     await registerAndSettle();
     expect(calls).toEqual([...telemetryInitializers]);

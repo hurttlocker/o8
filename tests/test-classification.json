@@ -3055,6 +3055,12 @@
       ]
     },
     {
+      "path": "tests/postship-cleanup.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/preflight-refusal-bound-real-path.test.ts",
       "reasons": [
         "child-process",
