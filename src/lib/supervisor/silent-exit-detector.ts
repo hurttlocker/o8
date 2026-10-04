@@ -565,7 +565,9 @@ async function silentExitTick(): Promise<void> {
   tickInFlight = true;
   try {
     const now = Date.now();
-    const lanes = listActiveLanes().filter((lane) => INTERESTING_LANE_STATUSES.has(lane.status));
+    // Cloud jobs have no local process or in-progress checkout. Their durable
+    // queue owns lease recovery and completion; local salvage cannot judge them.
+    const lanes = listActiveLanes().filter((lane) => lane.runtime !== 'cloud' && INTERESTING_LANE_STATUSES.has(lane.status));
 
     for (const lane of lanes) {
       if (!lane.sessionKey) continue;
@@ -592,6 +594,7 @@ async function silentExitTick(): Promise<void> {
       // bail out rather than stomp their work.
       const refreshed = getLane(lane.id);
       if (!refreshed) continue;
+      if (refreshed.runtime === 'cloud') continue;
       if (!INTERESTING_LANE_STATUSES.has(refreshed.status)) continue;
       if (refreshed.lastEventLabel?.startsWith(SILENT_EXIT_EVENT_PREFIX)) continue;
 

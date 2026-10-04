@@ -15,6 +15,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 import type { MachineRelayTicket } from './machine-registry';
+import { parsePluginRelayGrant, pluginReplayAuthorization, type PluginRelayGrant } from './plugin-relay';
 
 const P = '[connect]';
 const DEFAULT_HTTP_TIMEOUT_MS = 55_000;
@@ -34,6 +35,7 @@ interface MachineStreamState {
   pendingFrames: string[];
   pendingBytes: number;
   closing: boolean;
+  pluginGrant?: PluginRelayGrant;
 }
 
 export interface MachineRelayConnectorConfig {
@@ -182,6 +184,7 @@ export class MachineRelayConnector {
           headers: {
             authorization: `Bearer ${ticket.ticket}`,
             'x-o8-machine-id': this.config.machineId,
+            'x-o8-plugin-protocol': '1',
           },
         });
       } catch (error) {
@@ -315,7 +318,13 @@ export class MachineRelayConnector {
     );
     if (!frame) return;
     if (frame.t === 'mux-open' && typeof frame.sid === 'string') {
-      this.openStream(frame.sid);
+      if (frame.surface === 'plugin') {
+        const grant = parsePluginRelayGrant(frame.grant);
+        if (!grant) return;
+        this.openStream(frame.sid, grant);
+      } else if (frame.surface === undefined) {
+        this.openStream(frame.sid);
+      }
       return;
     }
     if (frame.t === 'mux-close' && typeof frame.sid === 'string') {
@@ -345,23 +354,31 @@ export class MachineRelayConnector {
     }
     if (message.t === 'http-req') {
       const apiBase = this.config.apiBase ?? localApiBase();
-      const operatorToken = this.localOperatorToken();
+      const authorization = state.pluginGrant
+        ? pluginReplayAuthorization(this.config.machineId, state.pluginGrant, message as HttpReqFrame)
+        : `Bearer ${this.localOperatorToken()}`;
+      if (!authorization) {
+        this.sendMux(sid, { t: 'http-res', rid: message.rid, status: 403, error: 'plugin_route_forbidden', last: true });
+        return;
+      }
       void replayRelayHttpRequest({
         sid,
         request: message as HttpReqFrame,
         apiBase,
         requestRegistry: this.httpRequests,
         timeoutMs: this.httpRequestTimeoutMs,
-        maxTunnelBytes: this.maxTunnelBytes,
+        maxTunnelBytes: state.pluginGrant ? 65_536 : this.maxTunnelBytes,
         isStreamActive: () => this.streams.get(sid) === state,
         send: (response) => this.sendMux(sid, response),
-        authorizationOverride: `Bearer ${operatorToken}`,
-        relaySurface: 'web-machine',
-        blockedResponseValues: [operatorToken],
+        authorizationOverride: authorization,
+        relaySurface: state.pluginGrant ? undefined : 'web-machine',
+        blockedResponseValues: [authorization.slice(7), this.localOperatorToken()],
         fetchImpl: this.config.fetchImpl,
       });
       return;
     }
+
+    if (state.pluginGrant) return;
 
     if (state.bridge?.readyState === WebSocket.OPEN) {
       try {
@@ -402,7 +419,7 @@ export class MachineRelayConnector {
     }
   }
 
-  private openStream(sid: string): void {
+  private openStream(sid: string, pluginGrant?: PluginRelayGrant): void {
     const existing = this.streams.get(sid);
     if (existing) {
       if (existing.bridge?.readyState === WebSocket.OPEN) {
@@ -417,7 +434,13 @@ export class MachineRelayConnector {
       pendingFrames: [],
       pendingBytes: 0,
       closing: false,
+      pluginGrant,
     };
+    if (pluginGrant) {
+      this.streams.set(sid, state);
+      this.sendControl({ t: 'mux-ready', sid });
+      return;
+    }
     this.streams.set(sid, state);
 
     let bridge: WebSocket;

@@ -177,6 +177,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/file-viewer/rich-markdown-images-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
       "reasons": [
         "native-build"
@@ -2157,6 +2163,15 @@
       ]
     },
     {
+      "path": "tests/governed-terminal-write-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/grok-acp-live-smoke.test.ts",
       "reasons": [
         "child-process",
@@ -2986,6 +3001,12 @@
       ]
     },
     {
+      "path": "tests/pi-sdk-approved-write.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/pi-sdk-budget-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2995,6 +3016,19 @@
     {
       "path": "tests/pi-sdk-worker-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/plugin-principal-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/plugin-relay-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },
@@ -3567,6 +3601,12 @@
         "child-process",
         "git-cli",
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/search-file-context-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
