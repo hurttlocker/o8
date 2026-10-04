@@ -1,3 +1,4 @@
+import { savedImageReadScript, type SavedImageTarget } from '@/lib/mcp/o8-saved-image-read';
 import { validateImageAttachment, validateComposerInspection, imageRequestId, type ImageAttachmentRequest } from '@/lib/composer/image-attachment';
 import { existsSync, readFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
@@ -48,6 +49,23 @@ export class O8WebviewClient {
 
     process.once('beforeExit', cleanup);
     process.once('exit', cleanup);
+  }
+
+  async inspectSavedImage(target: SavedImageTarget): Promise<Record<string, unknown>> {
+    return JSON.parse((await this.evalJs(savedImageReadScript(target))).result);
+  }
+
+  async hardReload(args: { operation: 'observe' | 'reload'; document_id?: string }): Promise<Record<string, unknown>> {
+    const observed = JSON.parse((await this.evalJs(savedImageReadScript())).result) as Record<string, unknown>;
+    if (observed.status !== 'ready') return observed;
+    if (args.operation === 'observe') return { ...observed, document_changed: args.document_id ? observed.document_id !== args.document_id : null };
+    if (observed.document_id !== args.document_id) return { status: 'error', code: 'stale_document', action_dispatched: false, document_id: observed.document_id };
+    try {
+      await this.navigateWebview({ action: 'reload' });
+      return { status: 'pending', document_id: args.document_id, action_dispatched: true, next: 'Observe document identity; never automatically replay reload' };
+    } catch {
+      return { status: 'unknown', document_id: args.document_id, action_dispatched: null, next: 'Observe document identity; never automatically replay reload' };
+    }
   }
 
   async inspectDirectoryDialog(): Promise<Record<string, unknown>> {

@@ -69,9 +69,11 @@ export function DesktopMediaImage({
   const { source, retry, fail } = useMediaSource(path);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const loaded = source.status === 'ready' && source.url === loadedUrl;
+  const savedImageId = /[\\/]orchestrator-images[\\/]([a-f0-9]{64}\.(?:png|jpg|gif|webp))$/.exec(path)?.[1];
 
   return (
-    <>
+    <div data-o8-saved-image={savedImageId} data-o8-media-path={savedImageId ? path : undefined}
+      data-o8-image-source-state={source.status} data-o8-image-url={savedImageId ? source.url : undefined} style={{ display: 'contents' }}>
       {source.status === 'ready' && source.url ? (
         <a href={source.url} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -101,6 +103,6 @@ export function DesktopMediaImage({
           Image unavailable · Retry
         </button>
       ) : null}
-    </>
+    </div>
   );
 }

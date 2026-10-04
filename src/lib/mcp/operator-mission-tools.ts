@@ -105,6 +105,7 @@ function getApiBaseLive(): string {
 interface CreateMissionInput {
   issues: string[];
   repoPath: string;
+  projectId?: string | null;
   runtime: OrchestratorRuntime;
   origin?: 'design-mode';
   workerIntent?: WorkerIntent;
@@ -120,6 +121,7 @@ interface CreateMissionInput {
   useBrain?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
+  sealedTaskContract?: PacketTaskContract;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -141,6 +143,7 @@ interface InlineIssue {
 interface CreateMissionInlineInput {
   issues_inline: InlineIssue[];
   repoPath: string;
+  projectId?: string | null;
   runtime: OrchestratorRuntime;
   origin?: 'design-mode';
   workerIntent?: WorkerIntent;
@@ -156,6 +159,7 @@ interface CreateMissionInlineInput {
   useBrain?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
+  sealedTaskContract?: PacketTaskContract;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -405,6 +409,7 @@ export async function createMission(input: CreateMissionInput) {
       {
           issues: loadedIssues,
           repoPath,
+          projectId: input.projectId,
           runtime: input.runtime,
           origin: input.origin,
           workerIntent: input.workerIntent,
@@ -421,6 +426,7 @@ export async function createMission(input: CreateMissionInput) {
           useBrain: input.useBrain,
           huddle: input.huddle,
           taskContract: input.taskContract,
+          sealedTaskContract: input.sealedTaskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
@@ -456,6 +462,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
       {
           issues: loadedIssues,
           repoPath,
+          projectId: input.projectId,
           runtime: input.runtime,
           origin: input.origin,
           workerIntent: input.workerIntent,
@@ -472,6 +479,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           useBrain: input.useBrain,
           huddle: input.huddle,
           taskContract: input.taskContract,
+          sealedTaskContract: input.sealedTaskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,

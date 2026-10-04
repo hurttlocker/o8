@@ -1,3 +1,5 @@
+import { THREAD_NAVIGATION_TOOLS, createThreadNavigationHandlers } from './o8-thread-navigation-tools';
+import { SAVED_IMAGE_TOOLS, createSavedImageHandlers } from '@/lib/mcp/o8-saved-image-tools';
 import { COMPOSER_IMAGE_TOOLS, createComposerImageHandlers } from '@/lib/mcp/o8-composer-image-tools';
 import { DIRECTORY_DIALOG_TOOLS, createDirectoryDialogHandlers } from '@/lib/mcp/o8-directory-dialog-tools';
 import { O8_WEBVIEW_PRIMITIVE_TOOLS } from '@/lib/mcp/o8-webview-tool-catalog';
@@ -394,6 +396,8 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   ...O8_WEBVIEW_PRIMITIVE_TOOLS,
   ...DIRECTORY_DIALOG_TOOLS,
   ...COMPOSER_IMAGE_TOOLS,
+  ...THREAD_NAVIGATION_TOOLS,
+  ...SAVED_IMAGE_TOOLS,
 ];
 
 /**
@@ -518,6 +522,8 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     ...createO8WebviewBrowserHandlers(),
     ...createDirectoryDialogHandlers(getClient),
     ...createComposerImageHandlers(getClient),
+    ...createThreadNavigationHandlers(getClient),
+    ...createSavedImageHandlers(getClient),
     o8_view_screenshot: async () => withStructuredErrors(async () => {
       const screenshot = await getClient().screenshot();
       const path = persistScreenshot(screenshot.imageBase64, screenshot.mimeType);
@@ -556,7 +562,8 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     }),
 
     o8_view_type: async (args) => withStructuredErrors(async () => {
-      const text = requiredString(args, 'text');
+      const text = args.text;
+      if (typeof text !== 'string' || !text.trim()) throw new Error('text is required');
       const client = getClient();
       const prepared = JSON.parse((await client.evalJs(buildPrepareComposerTargetScript())).result) as { ok?: boolean; error?: string };
       if (prepared.ok !== true) throw new Error(prepared.error ?? 'No visible editable target is available.');
