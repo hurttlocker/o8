@@ -184,7 +184,7 @@ export function useWorkspaceTerminalController(
     }
     tabsRef.current = nextTabs;
   }, []);
-
+  const getTabInventory = useCallback(() => tabsRef.current.map(tab => tab.id), []);
   // A monotonic user-navigation version prevents a late restore from
   // replacing a newer tab selection.
   const userNavVersionRef = useRef(0);
@@ -1454,7 +1454,7 @@ export function useWorkspaceTerminalController(
     spawnFleetCanvasTab,
     handleUpdateTabMode,
     undoCleanup,
-    tabs,
+    tabs, getTabInventory,
     termWsConnected,
     visibleTabs,
   };

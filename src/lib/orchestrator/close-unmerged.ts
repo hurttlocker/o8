@@ -15,11 +15,14 @@ import {
   killLaneSessionsConfirmed,
   LaneSessionArchiveUnconfirmedError,
 } from '@/lib/lane/reap-sessions';
-import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { withLockedState } from '@/lib/orchestrator/control-plane';
+import { readMissionRegistryEntry, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { withMissionHandoffBarrier, withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import {
   holdPacketLifecycleMutation,
   markPacketLifecycleFailure,
-  mutatePacketLifecycleGuard,
+  packetLifecycleGuardMatches,
   restorePacketLifecycleGuard,
   type PacketLifecycleGuard,
 } from '@/lib/orchestrator/packet-lifecycle-guard';
@@ -187,7 +190,10 @@ async function markPacketClosed(
   closedAt: string,
   worktreeCleanup: 'missing' | 'removed' | 'preserved',
 ): Promise<boolean> {
-  const closed = await mutatePacketLifecycleGuard(guard, (packet) => {
+  const sameGeneration = (packet: OrchestratorPacket) => packet.storageAdmissionEpoch === guard.previousPacket.storageAdmissionEpoch
+    && packet.attemptCount === guard.previousPacket.attemptCount
+    && packet.lane?.laneId === guard.previousPacket.lane?.laneId;
+  const archive = (packet: OrchestratorPacket) => {
     packet.status = 'archived';
     packet.queueState = 'held';
     packet.operatorStopped = true;
@@ -200,9 +206,45 @@ async function markPacketClosed(
     packet.lastEventLabel = worktreeCleanup === 'missing'
       ? 'discarded_worktree_missing'
       : 'closed_unmerged';
-    return true;
+  };
+  return withMissionHandoffBarrier(async () => {
+    const { result } = await withLockedState<boolean | null>(async (state) => {
+      if (state.missionId !== guard.missionId) return null;
+      const packet = state.packets.find((candidate) => candidate.id === guard.packetId);
+      if (!packet || !sameGeneration(packet) || !packetLifecycleGuardMatches(packet, guard)) return false;
+      if (readMissionRegistryEntry(guard.missionId, { includeArchived: true })) {
+        const { result: mirrored } = await withMissionRegistryState(guard.missionId, (registry) => {
+          const target = registry.packets.find((candidate) => candidate.id === guard.packetId);
+          const previous = guard.previousPacket;
+          // The current hold may not have reached the registry. Accept that
+          // captured lifecycle only; never overwrite a newer owner/generation.
+          const captured = target
+            && target.releaseStatePayload?.source === previous.releaseStatePayload?.source
+            && target.status === previous.status
+            && target.queueState === previous.queueState
+            && target.operatorStopped === previous.operatorStopped;
+          if (!target
+            || !sameGeneration(target)
+            || (!packetLifecycleGuardMatches(target, guard) && !captured)) {
+            return { state: registry, result: false };
+          }
+          archive(target);
+          return { state: registry, result: true };
+        });
+        if (!mirrored) return false;
+      }
+      archive(packet);
+      return true;
+    });
+    if (result !== null) return result;
+    const { result: closed } = await withMissionRegistryState(guard.missionId, (state) => {
+      const packet = state.packets.find((candidate) => candidate.id === guard.packetId);
+      if (!packet || !sameGeneration(packet) || !packetLifecycleGuardMatches(packet, guard)) return { state, result: false };
+      archive(packet);
+      return { state, result: true };
+    });
+    return closed;
   });
-  return closed.matched && closed.result === true;
 }
 
 async function closePacketUnmergedUnlocked(input: {

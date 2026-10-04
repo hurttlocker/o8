@@ -1,3 +1,4 @@
+import { PACKET_TASK_CONTRACT_INPUT_SCHEMA, SEALED_TASK_CONTRACT_INPUT_SCHEMA } from '@/lib/orchestrator/sealed-task-contract';
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
 
@@ -17,40 +18,7 @@ export const QUALITY_SEARCH_INPUT_SCHEMA = {
   type: 'object',
   description: 'Bounded quality search for one task. Two isolated candidates receive different implementation roles from one sealed contract; o8 filters by review and merge evidence before using blast radius as a tie-breaker. Cannot be combined with huddle or comparisonModels.',
   properties: {
-    taskContract: {
-      type: 'object',
-      properties: {
-        version: { type: 'number', enum: [1] },
-        requirements: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              source: { type: 'string' },
-              expectedBehavior: { type: 'string' },
-              productionPath: { type: 'string' },
-              verification: { type: 'string' },
-            },
-            required: ['id', 'source', 'expectedBehavior', 'productionPath', 'verification'],
-          },
-        },
-        smallestRoute: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              path: { type: 'string' },
-              requirements: { type: 'array', items: { type: 'string' } },
-              reason: { type: 'string' },
-            },
-            required: ['path', 'requirements', 'reason'],
-          },
-        },
-        exclusions: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['version', 'requirements', 'smallestRoute', 'exclusions'],
-    },
+    taskContract: PACKET_TASK_CONTRACT_INPUT_SCHEMA,
   },
   required: ['taskContract'],
 } as const;
@@ -93,3 +61,11 @@ export function parseMissionCandidateMode(args: Record<string, unknown>, huddle:
     qualitySearch: taskContract ? { taskContract } : undefined,
   };
 }
+
+export const MISSION_CONTRACT_INPUT_PROPERTIES = {
+  taskContract: TASK_CONTRACT_SETTING_SCHEMA,
+  sealedTaskContract: SEALED_TASK_CONTRACT_INPUT_SCHEMA,
+  qualitySearch: QUALITY_SEARCH_INPUT_SCHEMA,
+} as const;
+
+export const SEALED_TASK_CONTRACT_GUIDANCE = ' For one inline task with an explicit contract and exactly one packet, use sealedTaskContract, not qualitySearch. Example: create_mission({repoPath: "/path/to/repo", issues_inline: [{title: "Fix behavior"}], sealedTaskContract: {version: 1, requirements: [{id: "R1", source: "Fix behavior", expectedBehavior: "Behavior works", productionPath: "entry -> handler", verification: "Real entry test"}], smallestRoute: [{path: "src/handler.ts", requirements: ["R1"], reason: "Handler owns behavior"}], exclusions: []}}). qualitySearch ALWAYS creates two candidates; comparisonModels deliberately creates multiple candidates.';

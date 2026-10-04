@@ -1,3 +1,4 @@
+import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
@@ -183,9 +184,13 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', message, 400);
   }
 
+  if (record.projectId !== undefined && (typeof record.projectId !== 'string' || !record.projectId.trim())) {
+    return operatorError('invalid_request', 'projectId must be a non-empty project identifier.', 400);
+  }
   const createInput = {
       issues,
       repoPath,
+      ...(typeof record.projectId === 'string' ? { projectId: record.projectId.trim() } : {}),
       runtime: workerRouting.selectedRuntime,
       workerIntent: workerRouting.workerIntent,
       requestedProvider: workerRouting.requestedProvider,
@@ -267,6 +272,7 @@ export async function POST(request: NextRequest) {
       inProgress: outcome.inProgress || undefined,
     }, outcome.inProgress ? 202 : 201);
   } catch (error) {
+    if (error instanceof MissionProjectScopeError) return operatorError(error.code, error.message, 400);
     const message = error instanceof Error ? error.message : 'Unable to spawn agents.';
     return operatorError('spawn_prompt_failed', message, 500, error);
   }
