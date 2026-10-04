@@ -781,7 +781,7 @@ export function GlassModal({
           width: `min(${width}px, calc(100vw - 28px))`,
           maxHeight: 'calc(100vh - 28px)',
           zIndex: 9999,
-          background: 'rgba(255, 255, 255, 0.18)',
+          background: 'var(--t-panel-solid)',
           backdropFilter: 'blur(80px) saturate(2.2)',
           WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
           border: '1px solid rgba(255, 255, 255, 0.2)',
