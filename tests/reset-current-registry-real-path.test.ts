@@ -50,7 +50,10 @@ function fixture(name: string) {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
   git('init', '--initial-branch=main', repoPath);
   git('-C', repoPath, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture');
-  git('-C', repoPath, 'worktree', 'add', '-b', branch, worktreePath);
+  // Match the independent checkout used by the installed desktop surface.
+  // Retirement and branch deletion run through production cleanup.
+  git('-C', repoPath, 'branch', branch);
+  git('clone', '--no-hardlinks', '--branch', branch, repoPath, worktreePath);
   const missionId = `mission-${name}`;
   const packets = [0, 1].map((index) => {
     const id = `${name}-cmp-${index}`;
@@ -90,7 +93,7 @@ describe('current mission reset durability through the authenticated route', () 
       await withMissionRegistryState(f.missionId, (state) => ({ state: { ...state, constraints: 'concurrent-registry-metadata' }, result: undefined }));
     };
     const response = await route.POST(request(f.packetId, 'reset-current-success'));
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, result: { reset: true, worktreePruned: true, branchDeleted: true } });
     expect(existsSync(f.worktreePath)).toBe(false);
     closeDb();
