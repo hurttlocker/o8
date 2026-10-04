@@ -2134,6 +2134,15 @@
       ]
     },
     {
+      "path": "tests/governed-terminal-write-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/grok-acp-live-smoke.test.ts",
       "reasons": [
         "child-process",

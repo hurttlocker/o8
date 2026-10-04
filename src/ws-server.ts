@@ -54,6 +54,7 @@ import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 import { TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
+import { GovernedTerminalWriteError, writeGovernedAgentTerminal } from '@/lib/terminal/governed-agent-write';
 import { TerminalHiddenBuffer } from '@/lib/ws-server/terminal-hidden-buffer';
 import { resizeTerminalIfChanged } from '@/lib/ws-server/terminal-resize';
 import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/ws-server/terminal-resync-barrier';
@@ -114,6 +115,8 @@ import {
 } from '@/lib/symon/machine-registry';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
+import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
+import { recordLaneEvent } from '@/lib/lane/events';
 import { resolveAppVersion } from '@/lib/telemetry/crash-store';
 import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
@@ -976,6 +979,9 @@ interface TerminalAttachment {
   streamEndOffset: number;
   cwd?: string;
   commandHint?: string;
+  /** Trusted ownership metadata stamped by the owned-runtime bridge. */
+  ownerPacketId?: string;
+  ownerLaneId?: string;
 }
 
 interface InternalTerminalSpawnPayload {
@@ -985,6 +991,8 @@ interface InternalTerminalSpawnPayload {
   cols?: number;
   rows?: number;
   env?: Record<string, string>;
+  packetId?: string;
+  laneId?: string;
 }
 
 interface InternalTerminalSignalPayload {
@@ -7568,6 +7576,12 @@ function isAuthorizedInternalRequest(req: import('http').IncomingMessage) {
   return wsTokenMatches(token);
 }
 
+function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
+  const auth = req.headers.authorization ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  return resolvePacketWorkerToken(token);
+}
+
 // ── Server startup ──
 
 const httpServer = createServer((req, res) => {
@@ -7621,6 +7635,8 @@ const httpServer = createServer((req, res) => {
       const cwd = payload?.cwd?.trim();
       const cols = typeof payload?.cols === 'number' ? payload.cols : 120;
       const rows = typeof payload?.rows === 'number' ? payload.rows : 30;
+      const ownerPacketId = payload?.packetId?.trim() || undefined;
+      const ownerLaneId = payload?.laneId?.trim() || undefined;
       if (!sessionName || !shellCommand || !cwd) {
         res.writeHead(400);
         res.end('sessionName, shellCommand, and cwd are required');
@@ -7631,6 +7647,13 @@ const httpServer = createServer((req, res) => {
         res.end('invalid session name');
         return;
       }
+      if ((ownerPacketId && !ownerLaneId) || (!ownerPacketId && ownerLaneId)
+        || (ownerPacketId && !/^[A-Za-z0-9_-]{1,160}$/.test(ownerPacketId))
+        || (ownerLaneId && !/^[A-Za-z0-9_-]{1,200}$/.test(ownerLaneId))) {
+        res.writeHead(400);
+        res.end('packetId and laneId must be supplied together and valid');
+        return;
+      }
       if (!terminalHost) {
         res.writeHead(503);
         res.end('node-pty unavailable');
@@ -7638,6 +7661,12 @@ const httpServer = createServer((req, res) => {
       }
       if (terminalAttachments.has(sessionName)) {
         const existing = terminalAttachments.get(sessionName);
+        if ((ownerPacketId || ownerLaneId)
+          && (existing?.ownerPacketId !== ownerPacketId || existing?.ownerLaneId !== ownerLaneId)) {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'terminal_owner_mismatch' }));
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, sessionName, pid: existing?.ptyProcess?.pid ?? null }));
         return;
@@ -7668,6 +7697,8 @@ const httpServer = createServer((req, res) => {
           streamEndOffset: 0,
           cwd,
           commandHint: shellCommand,
+          ownerPacketId,
+          ownerLaneId,
         };
         terminalAttachments.set(sessionName, attachment);
         registerTerminalAttachment(attachment);
@@ -7992,6 +8023,68 @@ const httpServer = createServer((req, res) => {
       } catch (error) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to signal terminal session' }));
+      }
+    });
+    return;
+  }
+
+  if (req.url === '/terminal-agent-input' && req.method === 'POST') {
+    const worker = resolvePacketWorkerRequest(req);
+    if (!worker) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'packet_worker_required' }));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: { sessionId?: string; data?: string; reason?: string } | null = null;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
+          sessionId?: string;
+          data?: string;
+          reason?: string;
+        };
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid_json' }));
+        return;
+      }
+
+      try {
+        const receipt = writeGovernedAgentTerminal({
+          packetId: worker.packetId,
+          sessionId: typeof payload?.sessionId === 'string' ? payload.sessionId : '',
+          data: typeof payload?.data === 'string' ? payload.data : '',
+          reason: typeof payload?.reason === 'string' ? payload.reason : '',
+        }, {
+          resolveTarget: (sessionId) => {
+            const attachment = terminalAttachments.get(sessionId);
+            if (!attachment) return null;
+            return {
+              sessionId,
+              packetId: attachment.ownerPacketId ?? null,
+              laneId: attachment.ownerLaneId ?? null,
+              controlHeld: Boolean(attachment.controlClientId),
+              write: (data) => attachment.ptyProcess.write(data),
+              markInput: (at) => { attachment.lastInputAt = at; },
+            };
+          },
+          record: (laneId, event) => {
+            recordLaneEvent(laneId, 'terminal_action', 'orchestrator', event);
+          },
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, receipt }));
+      } catch (error) {
+        if (error instanceof GovernedTerminalWriteError) {
+          res.writeHead(error.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: error.code, message: error.message }));
+          return;
+        }
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'terminal_agent_input_failed' }));
       }
     });
     return;
