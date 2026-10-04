@@ -710,6 +710,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
           </div>
         ) : content !== null ? (
           <MarkdownEditorMount
+            filePath={filePath}
             controller={richMarkdown}
             language={getMonacoLanguage(filePath)}
             value={editContent}

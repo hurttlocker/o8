@@ -228,6 +228,9 @@ import {
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
 import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
+import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
+import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
 import {
   findLeadThreadBinding,
   getLeadStatus,
@@ -1332,6 +1335,7 @@ interface OrchestratorAutoMessage {
   repoPath: string;
   message: string;
   createdAt: number;
+  reviewChat?: { lane: ReviewContinuationLane; origin: ReviewChatOrigin };
   symon?: {
     sessionId: string;
     callId: string;
@@ -1368,13 +1372,37 @@ function queueReviewContinuation(lane: ReviewContinuationLane): void {
     packetId: reviewLane.packetId,
     laneId: reviewLane.id,
     label: reviewLane.label,
-  }));
+  }), (reviewLane, origin) => {
+    queueChatReviewMessage(reviewLane, (repoPath, message) => {
+      if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) return;
+      orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now(), reviewChat: { lane: reviewLane, origin } });
+      void drainOrchestratorAutoQueue();
+    }, 'durable');
+  });
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {
   if (orchestratorAutoQueue.length === 0) return;
 
   const next = orchestratorAutoQueue[0];
+  if (next.reviewChat) {
+    const { lane, origin } = next.reviewChat;
+    const backend = getOrchestratorBackend(origin.backend);
+    const key = orchestratorAbortKey(next.repoPath, origin.backend, '', origin.threadId);
+    if (orchestratorInflightAborts.has(key) || backend.peekSession(next.repoPath, undefined, origin.threadId)?.status === 'busy') return;
+    orchestratorAutoQueue.shift();
+    await runReviewChatContinuation(lane, origin, next.message, {
+      registerAbort: (_repoPath, _origin, controller) => {
+        orchestratorInflightAborts.set(key, controller);
+        return () => { if (orchestratorInflightAborts.get(key) === controller) orchestratorInflightAborts.delete(key); };
+      },
+      publish: (sessionName, event, data) => broadcastToOrchestratorSession(
+        orchestratorRouteSessionName(sessionName, origin.threadId), JSON.stringify({ channel: 'orchestrator', event, data }),
+      ),
+    }).catch(error => console.warn('[review-continuation] Bound turn failed:', error));
+    void drainOrchestratorAutoQueue();
+    return;
+  }
   const backend = getActiveOrchestratorBackend();
   let session = backend.peekSession(next.repoPath);
   if (!session || session.status === 'dead') {

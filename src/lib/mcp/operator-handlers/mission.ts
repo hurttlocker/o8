@@ -105,7 +105,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         dispatch: {
           type: 'boolean',
-          description: 'When true (default), immediately dispatches all packets after creation. Set false to create without dispatching.',
+          description: 'When true (default), immediately dispatches all packets after creation. Set false to prepare without launching; then call dispatch_mission with the returned missionId when ready.',
         },
         useBrain: {
           type: 'boolean',
@@ -139,7 +139,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'dispatch_mission',
     description:
-      'USE THIS RARELY — create_mission already dispatches by default. Only call this after reset_packet to relaunch a packet, or if the user explicitly says "redispatch". Example: dispatch_mission() dispatches current mission. dispatch_mission({missionId: "mission-abc123"}) dispatches a specific one.',
+      'Dispatch the existing packets of a prepared mission created with dispatch:false. Pass the exact missionId returned by create_mission: dispatch_mission({missionId: "mission-abc123"}). This starts that mission without creating a new mission or generic delegate packet. Also use after reset_packet or retry_packet when a relaunch is needed, or for explicit redispatch. Omit runtime to preserve the prepared routing and contract. create_mission dispatches by default; do not dispatch it again unless it was prepared or needs relaunch. Omitted missionId selects the current stored mission.',
     inputSchema: {
       type: 'object',
       properties: {

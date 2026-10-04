@@ -177,6 +177,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/file-viewer/rich-markdown-images-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
       "reasons": [
         "native-build"
@@ -1609,6 +1615,15 @@
       ]
     },
     {
+      "path": "tests/close-current-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/close-packet-unmerged-preservation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1696,6 +1711,7 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "network-listener",
         "real-path"
       ]
     },
@@ -1904,11 +1920,24 @@
       ]
     },
     {
+      "path": "tests/desktop-handoff-provider-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dev-stack-cleanup-real-path.test.ts",
       "reasons": [
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/device-session-routes-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },
@@ -2653,6 +2682,14 @@
       ]
     },
     {
+      "path": "tests/mission-stop-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mission-supersession-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2973,6 +3010,17 @@
       ]
     },
     {
+      "path": "tests/prepared-mission-dispatch-guidance-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/preship-cleanup-residuals.test.ts",
       "reasons": [
         "child-process",
@@ -3266,6 +3314,14 @@
     {
       "path": "tests/rerun-operator-stop-admission-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/reset-current-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
