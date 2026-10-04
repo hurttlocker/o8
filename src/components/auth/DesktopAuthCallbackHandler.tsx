@@ -6,6 +6,7 @@ import { useSignIn, useClerk } from '@clerk/nextjs';
 
 import { O8_AUTH_STATE_KEY, startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { consumeDesktopAuthCallback } from '@/lib/auth/desktop-auth-callback';
+import { completeDesktopSignIn } from '@/lib/auth/device-session-client';
 
 /**
  * Consumes the `o8://auth/callback?ticket=...&state=...` deep link that the Tauri
@@ -63,11 +64,7 @@ export function DesktopAuthCallbackHandler() {
           // active, so the follow-up license sync isn't rejected as stale and
           // auto-signed-out (#1483). Fire-and-forget; never blocks sign-in.
           onSignInComplete: async () => {
-            await fetch('/api/panel/entitlement/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ clearSignInMarker: true }),
-            }).catch(() => {});
+            await completeDesktopSignIn().catch(() => {});
           },
         });
       } finally {

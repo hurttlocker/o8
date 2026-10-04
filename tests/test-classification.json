@@ -1913,6 +1913,13 @@
       ]
     },
     {
+      "path": "tests/device-session-routes-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/direct-merge-canonical-repo-real-path.test.ts",
       "reasons": [
         "apfs-tool",
