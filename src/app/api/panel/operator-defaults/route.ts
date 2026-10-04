@@ -33,7 +33,7 @@ import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/oper
 import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { resolveJudgmentPath } from '@/lib/judgment/route';
 import { getEntitlementSync } from '@/lib/entitlement/store';
-import { isDispatchRuntime } from '@/lib/operator/defaults-env';
+import { isDispatchRuntime, isParallelCap } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import { projectAgentRoleRoutes } from '@/lib/operator/role-routing';
@@ -159,12 +159,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     const parsed = typeof raw === 'number'
       ? raw
       : typeof raw === 'string'
-        ? Number.parseInt(raw, 10)
+        ? Number(raw)
         : Number.NaN;
-    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 32) {
-      throw new Error('parallelCap must be an integer between 1 and 32.');
+    if (!isParallelCap(parsed)) {
+      throw new Error('parallelCap must be a positive safe integer.');
     }
-    update.parallelCap = Math.floor(parsed);
+    update.parallelCap = parsed;
   }
 
   for (const field of ['meteredPacketCostCapUsd', 'meteredPacketInputTokenCap'] as const) {

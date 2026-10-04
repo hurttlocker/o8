@@ -35,6 +35,7 @@ export interface TaskPoolWorkerRouting {
 
 export interface TaskPoolProjectSummary {
   id: string;
+  panelProjectId?: string | null;
   name: string;
   slug: string;
 }

@@ -132,11 +132,15 @@ export function sanitizeBranchPrefix(raw: unknown): string | null {
 
 // ── Env overrides ──
 
+export function isParallelCap(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
 export function envParallelCap(): number | null {
   const raw = process.env.O8_MAX_PARALLEL_DISPATCHES;
   if (!raw) return null;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const parsed = Number(raw);
+  return isParallelCap(parsed) ? parsed : null;
 }
 
 export function envSubscriptionProfile(): SubscriptionProfile | null {

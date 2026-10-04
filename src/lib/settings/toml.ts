@@ -20,6 +20,7 @@ import {
   isBrainRoutingMode,
   isCollideAggregator,
   isDispatchRuntime,
+  isParallelCap,
   isOrchestratorBackendSetting,
   isPrLinkDestination,
   isReviewerBackendSetting,
@@ -253,7 +254,7 @@ function targetingTierField(section: string, key: string): TomlField<OperatorDef
  */
 export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   subscriptionProfile: enumField('operator', 'subscription_profile', 'one of "both", "claude-only", or "codex-only"', isSubscriptionProfile),
-  parallelCap: numberField('operator', 'parallel_cap', 'an integer between 1 and 32', (value) => Number.isInteger(value) && value >= 1 && value <= 32),
+  parallelCap: numberField('operator', 'parallel_cap', 'a positive safe integer', isParallelCap),
   meteredPacketCostCapUsd: numberField('operator', 'metered_packet_cost_cap_usd', 'a number greater than 0', (value) => value > 0),
   meteredPacketInputTokenCap: numberField('operator', 'metered_packet_input_token_cap', 'an integer greater than 0', (value) => Number.isInteger(value) && value > 0),
   uiLoopMaxIterations: numberField('uiLoop', 'max_iterations', 'an integer greater than 0', (value) => Number.isSafeInteger(value) && value > 0),

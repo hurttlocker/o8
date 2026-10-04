@@ -1,3 +1,4 @@
+import { resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import 'server-only';
 
 import { resolveClaudeCodeWorkerSelection, selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
@@ -225,7 +226,9 @@ export async function launchPacketWithStorageAdmission(input: {
   const launchContext = bindWorkerLaunchParent(packet.launchContext, {
     threadId: packet.orchestratorThreadId,
   });
-  const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
+  const projectContext = packet.projectId
+    ? await resolveCapturedMissionProject(packet.workspaceTargetPath!, packet.projectId)
+    : await getProjectContext({ repoPath: packet.workspaceTargetPath });
   let baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
   let carrierPreflight: ExecutionCarrierPreflightEvidence | null = null;
   try {
