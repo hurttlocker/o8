@@ -416,6 +416,7 @@ export function AddRepoDialog({
         >
           <input
             id="add-repo-path"
+            autoFocus
             value={repoPathInput}
             onChange={(event) => {
               setRepoPathInput(event.currentTarget.value);

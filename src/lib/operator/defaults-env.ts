@@ -132,11 +132,15 @@ export function sanitizeBranchPrefix(raw: unknown): string | null {
 
 // ── Env overrides ──
 
+export function isParallelCap(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
 export function envParallelCap(): number | null {
   const raw = process.env.O8_MAX_PARALLEL_DISPATCHES;
   if (!raw) return null;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const parsed = Number(raw);
+  return isParallelCap(parsed) ? parsed : null;
 }
 
 export function envSubscriptionProfile(): SubscriptionProfile | null {
@@ -403,8 +407,10 @@ export function envWorktreeMaxTotalGb(): number | null {
 }
 
 export function envStorageReserveRatio(): number | null {
-  const value = envPositiveNumber('O8_STORAGE_RESERVE_RATIO');
-  return value !== null && value <= 1 ? value : null;
+  const raw = process.env.O8_STORAGE_RESERVE_RATIO?.trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 }
 
 export function envStorageReserveFloorGb(): number | null {

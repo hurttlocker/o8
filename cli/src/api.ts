@@ -310,14 +310,28 @@ export async function apiFetch<T = unknown>(
   if (res.status === 401 || res.status === 403) {
     const json = parseResponseJson(responseText);
     const error = asErrorRecord(json?.error);
-    const detail = typeof error?.message === 'string' ? error.message : '';
+    const serverDetail = typeof json?.error === 'string' ? json.error
+      : typeof error?.message === 'string' ? error.message : '';
+    const detail = boundedErrorText(serverDetail).replace(/\p{Cc}/gu, ' ');
     const typedCode = typeof error?.code === 'string' ? error.code : '';
-    const spectatorDenied = typedCode.startsWith('spectator_');
+    const spectatorDenied = typedCode.startsWith('spectator_') || cfg.source.token === 'spectator';
+    if (res.status === 403) {
+      throw new CliError(
+        'forbidden',
+        `Server refused this operation (403)${detail ? `: ${detail}` : '.'}`,
+        EXIT.UNAUTHORIZED,
+        cfg.source.token === 'worker'
+          ? 'Use scoped operations for your assigned packet; ask the lead to reconcile global mission or contract state.'
+          : spectatorDenied
+          ? 'Check O8_SPECTATOR_TOKEN and the repository grants attached to that bearer.'
+          : 'This principal lacks permission for the operation. Check the required capability with the operator.',
+      );
+    }
     throw new CliError(
       'unauthorized',
-      `Server rejected the bearer token (${res.status})${detail ? `: ${detail}` : '.'}`,
+      `Server rejected the bearer token (401)${detail ? `: ${detail}` : '.'}`,
       EXIT.UNAUTHORIZED,
-      spectatorDenied || cfg.source.token === 'spectator'
+      spectatorDenied
         ? 'Check O8_SPECTATOR_TOKEN and the repository grants attached to that bearer.'
         : cfg.token
         ? 'Token did not match ~/.o8/ws-token on the server. Refresh O8_API_TOKEN or rerun from a loopback host.'

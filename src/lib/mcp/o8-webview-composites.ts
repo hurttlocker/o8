@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { freshSessionScript } from '@/lib/mcp/o8-fresh-session-scripts';
+import type { FreshOrchestratorRequest } from '@/lib/desktop/fresh-orchestrator-action';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 
 type TextContent = { type: 'text'; text: string };
@@ -15,6 +18,7 @@ type McpTool = {
 type ToolHandler = (args: Record<string, unknown>) => Promise<McpToolResult>;
 
 type CompositeStep =
+  | 'require_fresh_session'
   | 'navigate_dashboard'
   | 'select_repo'
   | 'open_new_tab_menu'
@@ -92,46 +96,6 @@ function isOk(value: Record<string, unknown>): boolean {
   return value.ok === true;
 }
 
-async function waitForState(
-  client: O8WebviewClient,
-  predicate: (state: Record<string, unknown>) => boolean,
-  timeoutMs: number,
-): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + timeoutMs;
-  let latest: Record<string, unknown> = {};
-  while (Date.now() <= deadline) {
-    latest = await evalJson(client, SURFACE_STATE_SCRIPT);
-    if (isOk(latest) && predicate(latest)) {
-      return latest;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-  return latest;
-}
-
-async function runActionThenVerify(
-  client: O8WebviewClient,
-  step: CompositeStep,
-  action: () => Promise<unknown>,
-  verify: (state: Record<string, unknown>) => boolean,
-): Promise<Record<string, unknown> | McpToolResult> {
-  try {
-    await action();
-  } catch (error) {
-    const state = await waitForState(client, verify, 1_500);
-    if (verify(state)) {
-      return { ok: true, warning: error instanceof Error ? error.message : String(error), state };
-    }
-    return toolError(step, error, state);
-  }
-
-  const state = await waitForState(client, verify, 5_000);
-  if (!verify(state)) {
-    return toolError(step, 'verification did not pass before timeout', state);
-  }
-  return state;
-}
-
 function visibleDomHelpers(): string {
   return `
     const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
@@ -199,14 +163,23 @@ function buildSurfaceStateScript({ focusComposer }: { focusComposer: boolean }):
           ? 'orchestrator'
           : null;
     const activeTabId = rootAttr('data-o8-active-tab-id');
+    const activeWorkspaceId = rootAttr('data-o8-workspace-id');
     const activeWorkspaceRepo = rootAttr('data-o8-active-repo');
+    let tabInventory = null;
+    let freshSessionReceipt = null;
+    try { tabInventory = JSON.parse(rootAttr('data-o8-tab-inventory') || 'null'); } catch (_) {}
+    try { freshSessionReceipt = JSON.parse(rootAttr('data-o8-fresh-session-receipt') || 'null'); } catch (_) {}
+
     if (${focusComposer ? 'true' : 'false'} && composer && !composer.hasAttribute('disabled')) {
       try { composer.focus({ preventScroll: true }); } catch (_) {}
     }
     return JSON.stringify({
       ok: true,
       route,
+      activeWorkspaceId,
       activeWorkspaceRepo,
+      tabInventory,
+      freshSessionReceipt,
       activeTabKind,
       activeTabId,
       openDialogs: dialogs,
@@ -217,8 +190,6 @@ function buildSurfaceStateScript({ focusComposer }: { focusComposer: boolean }):
 }
 
 export const SURFACE_STATE_SCRIPT = buildSurfaceStateScript({ focusComposer: false });
-const FOCUS_SURFACE_STATE_SCRIPT = buildSurfaceStateScript({ focusComposer: true });
-
 export function buildPickMenuTriggerScript(menuLabel: string): string {
   return buildJsonEval(`
     ${visibleDomHelpers()}
@@ -276,41 +247,6 @@ function buildMenuOptionClosedScript(optionLabel: string): string {
     const popovers = Array.from(document.querySelectorAll('[role="menu"], [role="listbox"], [data-radix-popper-content-wrapper], [data-composer-overlay]')).filter(isVisible);
     return JSON.stringify({ ok: true, closed: !option && popovers.length === 0, optionVisible: !!option, popoverCount: popovers.length });
   `);
-}
-
-function buildSelectRepoScript(repo: string): string {
-  return buildJsonEval(`
-    ${visibleDomHelpers()}
-    const needle = ${JSON.stringify(repo.toLowerCase())};
-    const candidates = Array.from(document.querySelectorAll('button, [role="button"], a[href]')).filter(isVisible);
-    const target = candidates.find((el) => lower(labelFor(el)) === needle)
-      || candidates.find((el) => lower(labelFor(el)).includes(needle));
-    if (!target) return JSON.stringify({ ok: false, error: 'repo target not found', repo: ${JSON.stringify(repo)} });
-    clickElement(target);
-    return JSON.stringify({ ok: true, repo: labelFor(target) });
-  `);
-}
-
-async function ensureDashboard(client: O8WebviewClient): Promise<Record<string, unknown> | McpToolResult> {
-  return runActionThenVerify(
-    client,
-    'navigate_dashboard',
-    () => client.navigate('/dashboard'),
-    (state) => typeof state.route === 'string' && state.route.startsWith('/dashboard'),
-  );
-}
-
-async function clickAndRequireOk(client: O8WebviewClient, step: CompositeStep, code: string): Promise<Record<string, unknown> | McpToolResult> {
-  try {
-    const result = await evalJson(client, code);
-    if (!isOk(result)) {
-      return toolError(step, typeof result.error === 'string' ? result.error : 'action returned ok:false', result);
-    }
-    return result;
-  } catch (error) {
-    const state = await evalJson(client, SURFACE_STATE_SCRIPT).catch(() => undefined);
-    return toolError(step, error, state);
-  }
 }
 
 async function evalActionThenVerify(
@@ -385,11 +321,11 @@ async function waitForEval(
 export const O8_WEBVIEW_COMPOSITE_TOOLS: McpTool[] = [
   {
     name: 'o8_view_new_orchestrator_session',
-    description: 'USE THIS WHEN you need a fresh o8 orchestrator tab ready for input. Opens the real New tab menu, picks Orchestrator, focuses the composer, and returns structured state instead of relying on screenshots.',
+    description: 'Creates a genuinely fresh orchestrator through the fixed workspace-scoped fresh-orchestrator action. Verifies a new ID against the full prior tab inventory and focuses its enabled composer. Ordinary New session menu reuse is unchanged. After uncertainty, observe state; never replay the spawn.',
     inputSchema: {
       type: 'object',
       properties: {
-        repo: { type: 'string', description: 'Optional repo/workspace label to select before opening the orchestrator tab. Omit or pass an empty string to use the current workspace.' },
+        repo: { type: 'string', description: 'Optional exact active workspace label or repo path guard. Refuses if it differs; select the desired project before calling.' },
       },
       required: [],
       additionalProperties: false,
@@ -423,61 +359,46 @@ export const O8_WEBVIEW_COMPOSITE_TOOLS: McpTool[] = [
 export function createO8WebviewCompositeHandlers(getClient: () => O8WebviewClient): Record<string, ToolHandler> {
   return {
     o8_view_new_orchestrator_session: async (args) => {
-      const client = getClient();
-      const repo = optionalString(args, 'repo');
-
-      const dashboard = await ensureDashboard(client);
-      if (isMcpToolResult(dashboard)) return dashboard;
-
-      if (repo) {
-        const selected = await clickAndRequireOk(client, 'select_repo', buildSelectRepoScript(repo));
-        if (isMcpToolResult(selected)) return selected;
+      const requestId = randomUUID();
+      let attempted = false;
+      try {
+        if (!args || Object.getPrototypeOf(args) !== Object.prototype || Object.keys(args).some(key => key !== 'repo')
+          || (args.repo !== undefined && (typeof args.repo !== 'string' || args.repo.length > 2_048))) {
+          return jsonResult({ ok: false, code: 'invalid_schema', actionDispatched: false, requestId }, true);
+        }
+        const client = getClient();
+        const current = await evalJson(client, freshSessionScript('inspect'));
+        if (!isOk(current)) return jsonResult({ ...current, requestId }, true);
+        const repo = optionalString(args, 'repo');
+        if (repo && repo !== current.repoLabel && repo !== current.repoPath) {
+          return jsonResult({ ok: false, code: 'requested_project_not_active', actionDispatched: false, requestId }, true);
+        }
+        const request: FreshOrchestratorRequest = {
+          requestId, expiresAt: Date.now() + 5_000,
+          capability: current.capability as string,
+          workspaceId: current.workspaceId as string,
+          repoPath: current.repoPath as string,
+          activeTabId: current.activeTabId as string,
+          tabIds: current.tabIds as string[],
+        };
+        attempted = true;
+        let warning: string | undefined;
+        try {
+          const dispatched = await evalJson(client, freshSessionScript('dispatch', request));
+          if (!isOk(dispatched)) return jsonResult(dispatched, true);
+        } catch (error) {
+          warning = error instanceof Error ? error.message : String(error);
+        }
+        // A pending app callback receipt is not completion. Observe React's
+        // full inventory and active enabled composer; never repeat dispatch.
+        const observed = await waitForEval(client, freshSessionScript('observe', request), value => value.ok === true, 7_500);
+        if (!isOk(observed)) return jsonResult({ ok: false, requestId, ...observed, automaticReplay: false, ...(observed.status === 'pending' ? {} : { mutationOutcome: 'unknown' }) }, true);
+        const focused = await evalJson(client, freshSessionScript('focus', request));
+        return jsonResult({ ...focused, ...(warning ? { warning } : {}) }, !isOk(focused));
+      } catch (error) {
+        return jsonResult({ ok: false, requestId, error: error instanceof Error ? error.message : String(error), ...(attempted
+          ? { mutationOutcome: 'unknown', automaticReplay: false } : { actionDispatched: false }) }, true);
       }
-
-      // The spawn entry moved from a workspace "New tab" menu to the left
-      // rail's "New session" row (2026-07). Try the current trigger first,
-      // keep "New tab" as a fallback for older shells (#1571).
-      let opened = await evalActionThenWaitFor(
-        client,
-        'open_new_tab_menu',
-        'wait_for_popover',
-        buildPickMenuTriggerScript('New session'),
-        buildMenuOptionVisibleScript('Orchestrator'),
-        (value) => value.optionVisible === true,
-        5_000,
-      );
-      if (isMcpToolResult(opened)) {
-        opened = await evalActionThenWaitFor(
-          client,
-          'open_new_tab_menu',
-          'wait_for_popover',
-          buildPickMenuTriggerScript('New tab'),
-          buildMenuOptionVisibleScript('Orchestrator'),
-          (value) => value.optionVisible === true,
-          5_000,
-        );
-      }
-      if (isMcpToolResult(opened)) return opened;
-
-      const option = await evalActionThenVerify(
-        client,
-        'pick_orchestrator',
-        buildPickMenuOptionScript('Orchestrator'),
-        FOCUS_SURFACE_STATE_SCRIPT,
-        (value) => value.composerFocusable === true && value.activeTabKind === 'orchestrator',
-        7_500,
-      );
-      if (isMcpToolResult(option)) return option;
-
-      const state = await waitForState(
-        client,
-        (current) => current.composerFocusable === true && current.activeTabKind === 'orchestrator',
-        7_500,
-      );
-      if (state.composerFocusable !== true) {
-        return toolError('wait_for_composer', 'composer was not focusable before timeout', state);
-      }
-      return jsonResult({ ok: true, tabId: typeof state.activeTabId === 'string' ? state.activeTabId : undefined, state });
     },
 
     o8_view_pick_menu_option: async (args) => {

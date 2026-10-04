@@ -11,6 +11,7 @@ describe('task execution placement', () => {
   let root: Root;
   const onCreate = vi.fn();
   const onDispatch = vi.fn();
+  const onCancel = vi.fn();
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -20,13 +21,13 @@ describe('task execution placement', () => {
   });
   afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 
-  async function show(available: boolean) {
+  async function show(available: boolean, busy = false) {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ available, connectedWorkers: available ? 1 : 0, detail: available ? '1 remote worker connected.' : 'No remote worker connected.' }) })));
     await act(async () => root.render(createElement(NewTaskComposer, {
       repos: [{ id: 'repo', name: 'Repo', localPath: '/tmp/fixture', remoteUrl: null, defaultBranch: 'main' }],
-      title: 'Task', summary: '', repoPath: '/tmp/fixture', workerIntent: 'light_worker', busy: false,
+      title: 'Task', summary: '', repoPath: '/tmp/fixture', workerIntent: 'light_worker', busy,
       onTitleChange: vi.fn(), onSummaryChange: vi.fn(), onRepoPathChange: vi.fn(), onWorkerIntentChange: vi.fn(),
-      onCancel: vi.fn(), onCreate, onCreateAndDispatch: onDispatch,
+      onCancel, onCreate, onCreateAndDispatch: onDispatch,
     })));
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="Task execution location"]')!;
     act(() => { select.value = 'cloud'; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -66,6 +67,31 @@ describe('task execution placement', () => {
     expect(onCreate).toHaveBeenCalledWith('cloud', 'gpt-6.1-sol', 'medium');
     act(() => button('Add + dispatch').click());
     expect(onDispatch).toHaveBeenCalledWith('cloud', 'gpt-6.1-sol', 'medium');
+  });
+
+  it('only calls cancellation for an unconsumed, non-repeated Escape inside the composer', async () => {
+    await show(true);
+    const title = container.querySelector<HTMLInputElement>('input')!;
+    title.focus();
+    act(() => title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    act(() => title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, repeat: true })));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    act(() => button('Cancel').click());
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(onDispatch).not.toHaveBeenCalled();
+  });
+
+  it('blocks every dismissal control and callback while creation is in flight', async () => {
+    await show(true, true);
+    expect(button('Cancel').disabled).toBe(true);
+    act(() => { button('Cancel').click(); button('Add').click(); button('Add + dispatch').click(); });
+    const title = container.querySelector<HTMLInputElement>('input')!;
+    act(() => title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(onDispatch).not.toHaveBeenCalled();
   });
 
   it('preserves placement across create and dispatch, and surfaces a server refusal without retrying locally', async () => {

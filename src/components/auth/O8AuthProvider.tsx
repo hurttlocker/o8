@@ -1,13 +1,19 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ClerkProvider, useUser, useClerk } from '@clerk/nextjs';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
-import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
+import { accountIdentity } from '@/lib/auth/account-identity';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
 import { purgeTauriClerkStore, shouldPurgeClerkStoreForEntitlementSync } from '@/lib/auth/tauri-clerk-store';
 import { scheduleManagedGithubRefresh } from '@/lib/github-broker/refresh-schedule';
+import { desktopAuthTicketExchangeInProgress, invalidateDesktopAuthHandoffs, subscribeDesktopAuthTicketExchange, subscribeDesktopBrowserSignIn, waitForDesktopAuthTicketExchange } from '@/lib/auth/desktop-auth-callback';
+import { completeDesktopSignIn, DEVICE_RETRY_MS, deviceSessionDecision, renewDesktopSession, type DeviceSessionTrigger } from '@/lib/auth/device-session-client';
+import { canUseTauriEvents } from '@/lib/tauri/bridge';
+
+// Survives bridge remounts; explicit sign-out permits a fresh enrollment.
+const enrolledDeviceUsers = new Set<string>();
 
 // The Clerk publishable key is app-wide and public, baked into the build at ship
 // time. When it's absent (fresh build with no Clerk app yet), Clerk is disabled
@@ -71,9 +77,25 @@ export function useO8Auth(): O8AuthState {
  * Bridges Clerk's hooks into O8AuthContext. Only mounted when Clerk is enabled
  * (i.e. inside <ClerkProvider>), so the Clerk hooks always have their provider.
  */
-function ClerkAuthBridge({ children }: { children: ReactNode }) {
+function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode; nativeMode?: boolean }) {
+  const deviceMode = nativeMode && canUseTauriEvents();
   const { isLoaded, isSignedIn, user } = useUser();
   const clerk = useClerk();
+  const { signIn } = useSignIn();
+  const ticketExchanging = useSyncExternalStore(
+    subscribeDesktopAuthTicketExchange, desktopAuthTicketExchangeInProgress, () => false,
+  );
+  const [deviceRenewing, setDeviceRenewing] = useState(false);
+  const deviceRenewingRef = useRef(false);
+  const explicitSignOutRef = useRef(false);
+  const signOutInProgressRef = useRef(0);
+  const deviceGenerationRef = useRef(0);
+  const deviceRetryAfterRef = useRef(0);
+  const deviceAttemptRef = useRef<Promise<void> | null>(null);
+  const pendingDeviceTriggerRef = useRef<DeviceSessionTrigger | null>(null);
+  const previousUserRef = useRef<string | null>(null);
+  const authRef = useRef({ isLoaded, isSignedIn, user, clerk, signIn });
+  authRef.current = { isLoaded, isSignedIn, user, clerk, signIn };
   const provisionedRef = useRef<string | null>(null);
   const syncAbortRef = useRef<AbortController | null>(null);
   // Wall-clock of the last entitlement-sync ATTEMPT. Gates the focus re-sync so
@@ -94,6 +116,46 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     }).catch(() => {});
   }, []);
 
+  const fullSignOut = useCallback(async (waitForDeviceAttempt = false) => {
+    if (nativeMode) {
+      invalidateDesktopAuthHandoffs();
+      signOutInProgressRef.current += 1;
+      explicitSignOutRef.current = true;
+      deviceGenerationRef.current += 1;
+      // Renewal may be signed out or have activated a mismatching user. Reset
+      // the enrollment history for the revoked device owner as well.
+      enrolledDeviceUsers.clear();
+      pendingDeviceTriggerRef.current = null;
+    }
+    try {
+      if (nativeMode) {
+        const revoke = await fetch('/api/panel/auth/device/revoke', { method: 'POST' }).catch(() => null);
+        if (!revoke?.ok || (await revoke.json().catch(() => null))?.ok !== true) {
+          const cancelled = await fetch('/api/panel/auth/handoff?action=cancel', { method: 'POST' }).catch(() => null);
+          if (!cancelled?.ok || (await cancelled.json().catch(() => null))?.ok !== true) {
+            throw new Error('Sign-out could not be saved. Try again.');
+          }
+        }
+        // Neither a browser nor a device ticket already inside Clerk can be
+        // aborted. End that session after activation settles.
+        if (waitForDeviceAttempt) {
+          await deviceAttemptRef.current?.catch(() => {});
+          await waitForDesktopAuthTicketExchange();
+        }
+      }
+      await purgeTauriClerkStore();
+      await clearSignedOutEntitlement();
+      try {
+        await clerk.signOut();
+      } finally {
+        await purgeTauriClerkStore();
+        await clearSignedOutEntitlement();
+      }
+    } finally {
+      if (nativeMode) signOutInProgressRef.current -= 1;
+    }
+  }, [nativeMode, clerk, clearSignedOutEntitlement]);
+
   // Pull THIS account's license from the license server and cache it locally so
   // the plan flips without a reload. Shared by the sign-in effect and the
   // focus re-sync. Best-effort + fail-soft — NEVER downgrades a cached license
@@ -105,7 +167,8 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
   // client must forward its own short-lived session token. The license server
   // verifies it against the Clerk JWKS either way; this header is just transport.
   const runEntitlementSync = useCallback(
-    async (activeUser: { id: string }, signal?: AbortSignal) => {
+    async (activeUser: { id: string }, signal?: AbortSignal, afterSignIn = false) => {
+      if (nativeMode && desktopAuthTicketExchangeInProgress() && !afterSignIn) return;
       // Stamp at attempt time — rate-limits the focus re-sync regardless of outcome.
       lastEntitlementSyncRef.current = Date.now();
       try {
@@ -123,8 +186,11 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
         });
         const data = (await res.json().catch(() => null)) as EntitlementSyncResult | null;
         if (shouldPurgeClerkStoreForEntitlementSync(data?.reason)) {
-          void purgeTauriClerkStore();
-          void clearSignedOutEntitlement();
+          if (nativeMode) await fullSignOut();
+          else {
+            void purgeTauriClerkStore();
+            void clearSignedOutEntitlement();
+          }
           return;
         }
         if (data?.ok && data.plan && data.plan !== 'free') {
@@ -138,12 +204,119 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
         }
       }
     },
-    [clerk, clearSignedOutEntitlement],
+    [clerk, clearSignedOutEntitlement, nativeMode, fullSignOut],
   );
+
+  const attemptDeviceSession = useCallback((trigger: DeviceSessionTrigger): void => {
+    if (!deviceMode || !authRef.current.isLoaded || explicitSignOutRef.current || signOutInProgressRef.current
+      || Date.now() < deviceRetryAfterRef.current) return;
+    if (deviceAttemptRef.current) {
+      pendingDeviceTriggerRef.current = trigger;
+      return;
+    }
+    if (desktopAuthTicketExchangeInProgress()) return;
+    const generation = deviceGenerationRef.current;
+    const isCurrent = () => generation === deviceGenerationRef.current && !explicitSignOutRef.current;
+    const attempt = async () => {
+      try {
+        const statusResponse = await fetch('/api/panel/auth/device/status', { cache: 'no-store' });
+        if (!statusResponse.ok) throw new Error('Device status unavailable.');
+        const status = await statusResponse.json();
+        if (!isCurrent() || desktopAuthTicketExchangeInProgress()) return;
+        const current = authRef.current;
+        const userId = current.isSignedIn ? current.user?.id ?? null : null;
+        const owner = status.present && typeof status.clerkUserId === 'string' ? status.clerkUserId : null;
+        const decision = deviceSessionDecision({
+          nativeMode, loaded: current.isLoaded, userId, deviceOwner: owner,
+          explicitSignOut: explicitSignOutRef.current, busy: false,
+          enrolled: userId ? enrolledDeviceUsers.has(userId) : false,
+          retryAfter: deviceRetryAfterRef.current, now: Date.now(), trigger,
+        });
+        if (decision === 'enroll' && userId) {
+          const sessionToken = await current.clerk.session?.getToken();
+          if (!sessionToken || !isCurrent() || desktopAuthTicketExchangeInProgress()) return;
+          const response = await fetch('/api/panel/auth/device/enroll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-clerk-session-token': sessionToken },
+            body: JSON.stringify({ clerkUserId: userId }),
+          });
+          if (response.status !== 200) throw new Error('Device enrollment failed.');
+          if (isCurrent()) enrolledDeviceUsers.add(userId);
+        } else if (decision === 'renew' && owner) {
+          if (!current.signIn) throw new Error('Sign-in is not ready.');
+          deviceRenewingRef.current = true;
+          setDeviceRenewing(true);
+          await renewDesktopSession({
+            owner, signIn: current.signIn, clerk: current.clerk, isCurrent,
+            signOut: () => fullSignOut(),
+            onSignInComplete: () => completeDesktopSignIn(async () => {
+              // Same fresh-sign-in boundary as the browser callback: retire
+              // the marker and bump the managed identity epoch before syncing.
+              if (isCurrent()) await runEntitlementSync({ id: owner }, undefined, true);
+            }),
+          });
+        }
+      } catch {
+        // No raw upstream errors: credentials must never enter renderer logs.
+        deviceRetryAfterRef.current = Date.now() + DEVICE_RETRY_MS;
+      } finally {
+        deviceRenewingRef.current = false;
+        setDeviceRenewing(false);
+      }
+    };
+    deviceAttemptRef.current = attempt().finally(() => {
+      deviceAttemptRef.current = null;
+      const pending = pendingDeviceTriggerRef.current;
+      pendingDeviceTriggerRef.current = null;
+      if (pending) attemptDeviceSession(pending);
+    });
+  }, [nativeMode, deviceMode, fullSignOut, runEntitlementSync]);
+
+  useEffect(() => {
+    if (!deviceMode) return;
+    return subscribeDesktopBrowserSignIn(() => {
+      if (signOutInProgressRef.current) return;
+      explicitSignOutRef.current = false;
+      deviceRetryAfterRef.current = 0;
+      enrolledDeviceUsers.clear();
+    });
+  }, [deviceMode]);
+
+  useEffect(() => {
+    if (!deviceMode || !isLoaded) return;
+    const nextUser = isSignedIn ? user?.id ?? null : null;
+    const priorUser = previousUserRef.current;
+    if (nextUser && nextUser !== priorUser && !deviceRenewingRef.current) {
+      deviceGenerationRef.current += 1;
+    }
+    previousUserRef.current = nextUser;
+    attemptDeviceSession(priorUser && !nextUser ? 'signed-out' : 'initial');
+  }, [deviceMode, isLoaded, isSignedIn, user?.id, attemptDeviceSession, ticketExchanging]);
+
+  useEffect(() => {
+    if (!deviceMode) return;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const onFocus = () => {
+      if (document.visibilityState === 'hidden' || debounce) return;
+      debounce = setTimeout(() => {
+        debounce = null;
+        attemptDeviceSession('focus');
+      }, 400);
+    };
+    const onVisibility = () => { if (document.visibilityState === 'visible') onFocus(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (debounce) clearTimeout(debounce);
+    };
+  }, [deviceMode, attemptDeviceSession]);
 
   // Mirror the active Clerk user into the local users table, once per user.
   // The route re-derives the authoritative id from the verified session.
   useEffect(() => {
+    if (deviceRenewingRef.current || (nativeMode && desktopAuthTicketExchangeInProgress())) return;
     if (!isSignedIn || !user) {
       provisionedRef.current = null;
       return;
@@ -154,14 +327,14 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     syncAbortRef.current?.abort();
     syncAbortRef.current = controller;
     const githubId = user.externalAccounts?.find((a) => String(a.provider).includes('github'))?.providerUserId;
-    const avatarUrl = highResolutionAvatarUrl(user.imageUrl);
+    const { email, avatarUrl } = accountIdentity(user);
     void fetch('/api/panel/auth/clerk-provision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         clerkUserId: user.id,
         githubId,
-        email: user.primaryEmailAddress?.emailAddress ?? null,
+        email,
         name: user.fullName ?? user.username ?? null,
         avatarUrl,
       }),
@@ -174,7 +347,7 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     return () => {
       controller.abort();
     };
-  }, [isSignedIn, user, runEntitlementSync]);
+  }, [isSignedIn, user, runEntitlementSync, deviceRenewing, nativeMode, ticketExchanging]);
 
   // Re-sync on window focus when the cached entitlement is stale (>15min). The
   // desktop otherwise only learns a plan change at sign-in, so an app left open
@@ -241,23 +414,21 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
         ? {
             id: user.id,
             name: user.fullName ?? user.username ?? null,
-            email: user.primaryEmailAddress?.emailAddress ?? null,
-            avatarUrl: highResolutionAvatarUrl(user.imageUrl),
+            ...accountIdentity(user),
           }
         : null,
-      signIn: startDesktopSignIn,
+      signIn: () => {
+        explicitSignOutRef.current = false;
+        deviceRetryAfterRef.current = 0;
+        if (nativeMode) enrolledDeviceUsers.clear();
+        startDesktopSignIn();
+      },
       openManageAccount: () => {
         clerk.openUserProfile();
       },
-      signOut: async () => {
-        await purgeTauriClerkStore();
-        await clearSignedOutEntitlement();
-        await clerk.signOut();
-        await purgeTauriClerkStore();
-        await clearSignedOutEntitlement();
-      },
+      signOut: () => fullSignOut(true),
     }),
-    [isLoaded, isSignedIn, user, clerk, clearSignedOutEntitlement],
+    [isLoaded, isSignedIn, user, clerk, nativeMode, fullSignOut],
   );
 
   return (
@@ -341,7 +512,7 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
 
   return (
     <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine}>
-      <ClerkAuthBridge>{children}</ClerkAuthBridge>
+      <ClerkAuthBridge nativeMode>{children}</ClerkAuthBridge>
     </ClerkProvider>
   );
 }
