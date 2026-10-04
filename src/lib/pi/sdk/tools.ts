@@ -1,6 +1,7 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
+import { commitPiWrite } from './approved-write';
 
 export const PI_SDK_TOOLS = [
   { name: 'read_file', description: 'Read a UTF-8 file in the selected workspace.', parameters: {
@@ -23,6 +24,8 @@ async function checkPath(root: string, path: string) {
   if (isAbsolute(path) || protectedPath(path)) throw new Error('Invalid workspace path');
   const rel = relative(root, resolve(root, path));
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('Invalid workspace path');
+  const rootStat = await lstat(root);
+  if (!rootStat.isDirectory() || await realpath(root) !== root) throw new Error('Invalid workspace root');
   // Narrow prototype policy: even in-root symlink aliases are refused.
   let current = root;
   for (const part of rel.split(/[\\/]/)) {
@@ -39,7 +42,7 @@ async function checkPath(root: string, path: string) {
     throw new Error('Invalid workspace parent');
   }
   const parent = await lstat(parentPath);
-  return { path: parentPath, dev: parent.dev, ino: parent.ino };
+  return { path: parentPath, dev: parent.dev, ino: parent.ino, root: { dev: rootStat.dev, ino: rootStat.ino } };
 }
 async function snapshot(root: string, opened: OpenWorkspaceFileResult) {
   if (protectedPath(relative(root, opened.realPath)) || opened.stat.nlink !== 1) {
@@ -86,7 +89,8 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
     }
     signal.throwIfAborted();
     const currentParent = await checkPath(root, path);
-    if (currentParent.path !== parent.path || currentParent.dev !== parent.dev || currentParent.ino !== parent.ino) {
+    if (currentParent.path !== parent.path || currentParent.dev !== parent.dev || currentParent.ino !== parent.ino
+      || currentParent.root.dev !== parent.root.dev || currentParent.root.ino !== parent.root.ino) {
       throw new Error('Workspace parent changed during approval');
     }
     if (opened) {
@@ -94,18 +98,9 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
       const current = await opened.handle.stat();
       if (target.dev !== opened.stat.dev || target.ino !== opened.stat.ino || current.nlink !== 1
         || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
-    } else {
-      // Creation happens only after approval. Refuse to overwrite a target that
-      // appeared while approval was pending. The descriptor helper validates IO.
-      opened = await openWorkspaceFile(root, path, 'read-write', { create: true });
-      if (!opened.created) throw new Error('File appeared during approval');
-      await snapshot(root, opened);
     }
     signal.throwIfAborted();
-    const bytes = Buffer.from(args.content, 'utf8');
-    await opened.handle.truncate(0);
-    if (bytes.length) await opened.handle.writeFile(bytes);
-    await opened.handle.sync();
+    await commitPiWrite(root, path, parent, opened, before, args.content, signal);
     return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
   } finally { await opened?.handle.close(); }
 }

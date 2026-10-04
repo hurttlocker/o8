@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { link, lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
@@ -17,6 +17,7 @@ vi.mock('node:fs/promises', async importOriginal => {
     return stat;
   } };
 });
+vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
@@ -27,7 +28,7 @@ afterEach(async () => { race.afterLstat = undefined; vi.restoreAllMocks();
   await Promise.all(clients.splice(0).map(client => client.close()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'o8-pi-sdk-')); roots.push(root);
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'o8-pi-sdk-'))); roots.push(root);
   const workspace = join(root, 'workspace'); await mkdir(workspace);
   return { root, workspace, stateDir: join(root, 'state') };
 }
@@ -69,6 +70,35 @@ describe('managed Pi SDK real worker', () => {
     expect(second.sessionId).toBe(first.sessionId); expect(second.surfaceId).toBe(first.surfaceId);
     expect((await second.prompt('Continue')).text).toBe('Resumed');
   }, 20000);
+  it.each(['approve', 'reject'] as const)('uses the default persisted inbox to %s an exact-content write', async action => {
+    const paths = await fixture(); const target = join(paths.workspace, 'note.txt');
+    await writeFile(target, 'original', { mode: 0o640 }); const initial = await lstat(target); let calls = 0;
+    const { listApprovals, getApproval } = await import('@/lib/approvals/store');
+    const { resolveApproval } = await import('@/lib/approvals/resolution');
+    const session = await client({ ...paths, model,
+      transport: async function* () {
+        yield* events(++calls === 1 ? message([{ type: 'toolCall', id: 'inbox-write', name: 'write_file',
+          arguments: { path: 'note.txt', content: 'approved π' } }], 'toolUse')
+          : message([{ type: 'text', text: 'Finished' }]));
+      } });
+    const pending = session.prompt('Write through the inbox');
+    let approval!: ReturnType<typeof listApprovals>[number];
+    await vi.waitFor(() => {
+      const rows = listApprovals({ status: 'pending', projectId: null, sessionKey: session.surfaceId });
+      expect(rows).toHaveLength(1); approval = rows[0];
+    }, { timeout: 10000, interval: 20 });
+    expect(approval).toMatchObject({ editable: false, toolName: 'write_file',
+      args: { path: 'note.txt', content: 'approved π' },
+      diff: { path: 'note.txt', before: 'original', after: 'approved π' } });
+    expect(await readFile(target, 'utf8')).toBe('original');
+    resolveApproval(approval.id, action, 'desktop'); await pending;
+    expect(getApproval(approval.id)?.status).toBe(action === 'approve' ? 'approved' : 'rejected');
+    expect(await readFile(target, 'utf8')).toBe(action === 'approve' ? 'approved π' : 'original');
+    const after = await lstat(target);
+    expect(after.mode & 0o777).toBe(initial.mode & 0o777);
+    expect(after.ino === initial.ino).toBe(action !== 'approve');
+    expect(await readdir(paths.workspace)).toEqual(['note.txt']);
+  }, 30000);
   it('denies unapproved writes and outside-root reads without loading workspace extensions', async () => {
     const paths = await fixture(); await writeFile(join(paths.root, 'outside'), 'private fixture');
     await symlink('../outside', join(paths.workspace, 'link'));
@@ -159,7 +189,7 @@ describe('managed Pi SDK real worker', () => {
     expect(swapped).toBe(true);
     expect(await readdir(outside)).toEqual([]);
     expect(await readdir(join(paths.workspace, 'original-folder'))).toEqual([]);
-    expect(await readFile(session.sessionFile, 'utf8')).toContain('Host operation denied');
+    expect(await readFile(session.sessionFile, 'utf8')).toContain('Host operation failed');
   }, 15000);
   it('refuses a hard link added after the async content recheck without modifying either alias', async () => {
     const paths = await fixture(); const target = join(paths.workspace, 'note.txt');
@@ -188,7 +218,7 @@ describe('managed Pi SDK real worker', () => {
     expect(await readFile(alias, 'utf8')).toBe('original');
     expect(await readFile(protectedAlias, 'utf8')).toBe('original');
     expect(await readFile(target, 'utf8')).toBe('original');
-    expect(await readFile(session.sessionFile, 'utf8')).toContain('Host operation denied');
+    expect(await readFile(session.sessionFile, 'utf8')).toContain('Host operation failed');
   }, 15000);
   it('Stop prevents a late approval from writing and model-call budgets fail closed', async () => {
     const paths = await fixture(); let resolveApproval!: (value: boolean) => void; let entered!: () => void;
