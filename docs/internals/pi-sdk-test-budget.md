@@ -103,6 +103,8 @@ npm run test:integration -- tests/pi-sdk-budget-real-path.test.ts
 
 ## Live acceptance
 
-`tests/pi-sdk-live-acceptance.test.ts` is skipped unless `O8_PI_LIVE_PAID=1`. It runs the real worker against the live contract with synthetic files: an approved edit, a denied read outside the workspace, resume of the persisted session in a new process, stop during a run, clean shutdown, and a ledger smaller than one request that refuses before any fetch. Set `O8_PI_LIVE_RECEIPT` to the receipt path; the runner hides test console output. `O8_PI_LIVE_LEDGER_MICRO_USD` sets the main ledger limit (at most 990,000).
+`tests/pi-sdk-live-acceptance.test.ts` is skipped unless `O8_PI_LIVE_PAID=1`. It runs the real worker against the live contract with synthetic files: an approved edit, an attempted read outside the workspace that the host refuses, resume of the persisted session in a new process, stop on the first streamed update, clean shutdown, and a ledger smaller than one request that refuses with no network request. Every network request must match one ledger reservation. `O8_PI_LIVE_RECEIPT` must be a new file outside the o8 data directory; the runner hides test console output. `O8_PI_LIVE_LEDGER_MICRO_USD` sets the main ledger limit (at most 990,000).
 
-First passing run, 2026-10-04: every step passed. Five verified calls used 1,108 input and 56 output tokens. The stopped call stayed in the ledger as an unknown charge, which blocks further calls on that ledger.
+The contract model sets `supportsLongCacheRetention: false`, and the guarded transport refuses any body field outside the endpoint's accepted set before reserving, so `PI_CACHE_RETENTION=long` cannot add a rejected field after money is reserved.
+
+Passing run, 2026-10-04: every step passed. Seven requests matched seven reservations. Six completed calls used 1,463 input and 124 output tokens. The stopped call stayed in the ledger as an unknown charge, which blocks further calls on that ledger.

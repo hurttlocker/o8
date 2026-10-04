@@ -3,7 +3,7 @@ import { isAbsolute, relative, sep } from 'node:path';
 import type { ManagedPiTransportOptions, PiModelTransport } from './transport';
 import { createManagedPiTransport } from './transport';
 import { finishPiTestRequest, reservePiTestRequest, validatePiBillingContract, type ManagedPiBillingContract } from './test-budget';
-import { O8_MANAGED_FLASH_LITE_CONTRACT } from './live-contract';
+import { MANAGED_INFERENCE_BODY_FIELDS, O8_MANAGED_FLASH_LITE_CONTRACT } from './live-contract';
 
 export interface BudgetedPiTestOptions extends Omit<ManagedPiTransportOptions, 'maxOutputTokens' | 'observeRawUsage'> {
   ledgerPath: string;
@@ -56,6 +56,9 @@ export function createBudgetedPiTestTransport(options: BudgetedPiTestOptions): P
           throw new Error('Request exceeds the trusted billing contract');
         }
         const body = JSON.parse(init.body) as Record<string, unknown>;
+        if (Object.keys(body).some(key => !MANAGED_INFERENCE_BODY_FIELDS.has(key))) {
+          throw new Error('Request field is outside the billing contract');
+        }
         const outputLimit = body.max_completion_tokens ?? body.max_tokens;
         if (body.model !== contract.modelId || body.models !== undefined || (body.n !== undefined && body.n !== 1)
           || !Number.isSafeInteger(outputLimit) || Number(outputLimit) <= 0 || Number(outputLimit) > contract.maxBillableOutputTokens) {

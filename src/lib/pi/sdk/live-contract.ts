@@ -28,11 +28,16 @@ export const O8_MANAGED_FLASH_LITE_CONTRACT: ManagedPiBillingContract = {
   maxCalls: 8,
 };
 
+/** Body fields the hosted endpoint accepts, plus stream_options and usage, which it strips first. */
+export const MANAGED_INFERENCE_BODY_FIELDS: ReadonlySet<string> = new Set(['model', 'messages', 'max_tokens', 'stream',
+  'temperature', 'top_p', 'tools', 'tool_choice', 'response_format', 'stop', 'stream_options', 'usage']);
+
 /**
  * The managed model as Pi must describe it. The server accepts only model,
  * messages, max_tokens, stream, temperature, top_p, tools, tool_choice,
  * response_format and stop (it strips stream_options), so Pi must send
- * max_tokens, omit store, and use the system role.
+ * max_tokens, omit store, use the system role, and never add prompt cache
+ * fields, even when PI_CACHE_RETENTION=long.
  */
 export const O8_MANAGED_FLASH_LITE_MODEL: Model<'openai-completions'> = {
   id: O8_MANAGED_FLASH_LITE_CONTRACT.modelId,
@@ -50,5 +55,6 @@ export const O8_MANAGED_FLASH_LITE_MODEL: Model<'openai-completions'> = {
     supportsDeveloperRole: false,
     supportsReasoningEffort: false,
     maxTokensField: 'max_tokens',
+    supportsLongCacheRetention: false,
   },
 };
