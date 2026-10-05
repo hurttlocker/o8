@@ -7,7 +7,7 @@ import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materializ
 import { captureExactDirectoryManifest, purgeExactDirectory, type ExactDirectoryManifest } from './exact-directory-purge';
 import { renameExactChildDirectory } from './exact-parent-operation';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
-import { admitRetirementAuthority, verifyRetirementAuthority, type ManagedRetirementReason } from './retirement-authority';
+import { admitRetirementAuthority, verifyRetirementAuthority, withRetirementAuthorityLock, type ManagedRetirementReason } from './retirement-authority';
 import {
   listExactWorkspaceClaims,
   prepareExactWorkspaceClaim,
@@ -151,6 +151,17 @@ async function prepareRetirement(
 }
 
 async function finishClaim(
+  initial: ExactWorkspaceClaimRecord,
+  beforeRetirementRename?: () => Promise<void>,
+  afterRetirementRename?: () => Promise<void>,
+  beforeRetirementPurge?: (candidatePath: string) => Promise<void>,
+): Promise<void> {
+  return withRetirementAuthorityLock(initial.authority, () => finishClaimUnlocked(
+    initial, beforeRetirementRename, afterRetirementRename, beforeRetirementPurge,
+  ));
+}
+
+async function finishClaimUnlocked(
   initial: ExactWorkspaceClaimRecord,
   beforeRetirementRename?: () => Promise<void>,
   afterRetirementRename?: () => Promise<void>,

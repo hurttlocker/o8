@@ -476,22 +476,6 @@ async function closePacketUnmergedUnlocked(input: {
         detachedSessionRollbacks.push(() => lifecycle.setDetachedSession!(survivor.sessionKey, null));
       }
     }
-    try {
-      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id)));
-    } catch (error) {
-      if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
-      await restoreDetachedSessions();
-      await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
-      return {
-        ok: false,
-        code: 'session_archive_unconfirmed',
-        message: error.message,
-        status: 409,
-      };
-    }
-    for (const candidate of lanesToClose.filter((target) => !survivorLaneIds.has(target.id))) {
-      if (candidate.sessionKey?.trim()) unregisterWatchedAgent(candidate.sessionKey.trim());
-    }
     let worktreeRemoved = false;
     for (const candidate of survivors.length === 0 ? lanesToClose : []) {
       const worktreePath = candidate.worktreePath?.trim();
@@ -526,6 +510,22 @@ async function closePacketUnmergedUnlocked(input: {
           status: 409,
         };
       }
+    }
+    try {
+      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id)));
+    } catch (error) {
+      if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
+      await restoreDetachedSessions();
+      await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
+      return {
+        ok: false,
+        code: 'session_archive_unconfirmed',
+        message: error.message,
+        status: 409,
+      };
+    }
+    for (const candidate of lanesToClose.filter((target) => !survivorLaneIds.has(target.id))) {
+      if (candidate.sessionKey?.trim()) unregisterWatchedAgent(candidate.sessionKey.trim());
     }
     const primaryWorktreePath = lane.worktreePath?.trim();
     const worktreeCleanup = primaryWorktreePath

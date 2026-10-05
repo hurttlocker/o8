@@ -63,6 +63,7 @@ import {
 } from '@/lib/workspace/exact-managed-directory-retirement';
 import { readExactWorkspaceClaim } from '@/lib/workspace/exact-workspace-claim-state';
 import { assertWorkspaceRetentionReleased } from '@/lib/workspace/retention-holds';
+import { assertManagedRetirementQuiescence, withManagedRetirementOwnership } from '@/lib/workspace/retirement-process-authority';
 import {
   confirmWorkspaceMaterializationRetirement,
   finishWorkspaceMaterializationRetirement,
@@ -1799,6 +1800,16 @@ export class WorktreeManager {
    * Checks for uncommitted changes first and auto-commits to preserve agent work.
    */
   async cleanup(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
+    try {
+      const worktreePath = await this.resolveManagedWorktreePath(worktreeId);
+      return await withManagedRetirementOwnership(this.repoRoot, worktreePath, () => this.cleanupOwned(worktreeId, opts));
+    } catch (error) {
+      console.error(`[worktree-cleanup] REFUSED lifecycle authority for ${worktreeId}: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  private async cleanupOwned(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
     const meta = await this.loadAllMeta();
     const entry = meta[worktreeId];
 
@@ -1907,6 +1918,10 @@ export class WorktreeManager {
         cleanupIdentity = entry?.materializationIdentity
           ? await assertWorktreeMaterializationIdentity(worktreePath, entry.materializationIdentity)
           : await captureWorktreeMaterializationIdentity(worktreePath);
+        await assertManagedRetirementQuiescence({
+          repositoryPath: this.repoRoot, worktreeId, sourcePath: worktreePath,
+          candidatePath: worktreePath, identity: cleanupIdentity,
+        });
         const preserved = await withWorktreeMaterializationExecution(
           worktreePath,
           cleanupIdentity,

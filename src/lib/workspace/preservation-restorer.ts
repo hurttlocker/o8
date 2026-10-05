@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { getWorkspaceSnapshot } from '@/lib/worktree/snapshot-state';
-import { restoreIgnoredArtifacts, type ArtifactRestoreEvent, type ArtifactRestoreFileReceipt } from './ignored-artifact-io';
+import { inspectArtifactRestoreRevision, restoreIgnoredArtifacts, type ArtifactRestoreEvent, type ArtifactRestoreFileReceipt } from './ignored-artifact-io';
 import { readWorkspacePreservation } from './preservation-store';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
 import { resolveMaterializedRecoveryTarget } from './recovery-target';
@@ -97,8 +97,12 @@ async function restoreIntoLockedSuccessor(input: {
   if (processReceipt.state !== 'quiescent') {
     throw new Error('The successor process is live or unknown; artifacts were not restored.');
   }
+  const destinationRevision = await inspectArtifactRestoreRevision({
+    workspacePath: target.identity.canonicalPath, identity: target.identity,
+  });
   const sqlite = getSqlite();
-  const selectionSha256 = hash(JSON.stringify(selections));
+  const selectionSha256 = hash(JSON.stringify({ paths: selections, ...destinationRevision }));
+  const legacySelectionSha256 = hash(JSON.stringify(selections));
   const restoreId = hash(JSON.stringify({
     repositoryUuid: target.repo.id, targetPacketId: input.targetPacketId,
     clientMutationId: input.clientMutationId,
@@ -131,8 +135,23 @@ async function restoreIntoLockedSuccessor(input: {
     if (!row || row.preservation_id !== receipt.preservationId || row.repository_uuid !== target.repo.id
       || row.target_packet_id !== input.targetPacketId || row.target_lane_id !== target.lane.id
       || row.workspace_path !== target.identity.canonicalPath || row.source_device !== target.identity.device
-      || row.source_inode !== target.identity.inode || row.selection_sha256 !== selectionSha256) {
+      || row.source_inode !== target.identity.inode) {
       throw new Error('Artifact recovery conflicts with its persisted target or selection.');
+    }
+    if (row.selection_sha256 === legacySelectionSha256) {
+      const published = sqlite.prepare('SELECT 1 FROM workspace_artifact_restore_files WHERE restore_id = ? LIMIT 1')
+        .get(restoreId);
+      // Earlier writers only accepted the source revision. Empty interrupted
+      // intents can bind the successor; published receipts retain that check.
+      if ((row.state !== 'preparing' || published)
+        && (destinationRevision.headCommit !== payload.capture.headCommit
+          || destinationRevision.treeSha !== payload.capture.treeSha)) {
+        throw new Error('Earlier artifact recovery is bound to the retired source revision.');
+      }
+      sqlite.prepare('UPDATE workspace_artifact_restores SET selection_sha256 = ? WHERE restore_id = ? AND selection_sha256 = ?')
+        .run(selectionSha256, restoreId, legacySelectionSha256);
+    } else if (row.selection_sha256 !== selectionSha256) {
+      throw new Error('Artifact recovery conflicts with its persisted target revision or selection.');
     }
   }).immediate();
   const ownedFiles = sqlite.prepare(`
@@ -166,7 +185,7 @@ async function restoreIntoLockedSuccessor(input: {
   };
   const result = await restoreIgnoredArtifacts({
     workspacePath: target.identity.canonicalPath, identity: target.identity,
-    capture, ownedFiles, onReceipt,
+    capture, destinationRevision, ownedFiles, onReceipt,
   });
   const completed = sqlite.prepare(`
     SELECT COUNT(*) AS total FROM workspace_artifact_restore_files WHERE restore_id = ? AND phase = 'complete'
@@ -183,5 +202,6 @@ async function restoreIntoLockedSuccessor(input: {
     handoffSha256: receipt.handoffSha256, restoredFiles: result.restoredFiles,
     restoredBytes: result.bytes, paths: selections, restoreId, holdId: hold.holdId,
     retained: true,
+    targetHeadCommit: destinationRevision.headCommit, targetTreeSha: destinationRevision.treeSha,
   };
 }

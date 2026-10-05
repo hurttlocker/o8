@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-preservation-cli-real-path-'));
 const dataDir = path.join(root, 'data');
@@ -35,6 +36,8 @@ const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 const { getWorkspaceSnapshot, listWorkspaceSnapshotTransitions } = await import('@/lib/worktree/snapshot-state');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const repoPath = path.join(root, 'repo');
 let server: Server;
 let port = 0;
@@ -121,7 +124,11 @@ beforeAll(async () => {
       });
       let route: Response;
       if (next.nextUrl.pathname === '/api/setup/status') route = (await import('@/app/api/setup/status/route')).GET();
-      else if (next.nextUrl.pathname === '/api/lanes') route = await lanesRoute.GET(next);
+      else if (next.nextUrl.pathname === '/api/lanes') {
+        route = request.method === 'POST' ? await lanesRoute.POST(next) : await lanesRoute.GET(next);
+      } else if (next.nextUrl.pathname === '/api/orchestrator/discard-packet') {
+        route = await (await import('@/app/api/orchestrator/discard-packet/route')).POST(next);
+      }
       else if (next.nextUrl.pathname === '/api/orchestrator/workspace/retention') {
         const retention = await import('@/app/api/orchestrator/workspace/retention/route');
         route = request.method === 'GET' ? await retention.GET(next) : await retention.POST(next);
@@ -155,6 +162,146 @@ afterAll(async () => {
 });
 
 describe('workspace preservation compiled CLI and persisted owner', () => {
+  it('stops and closes through the CLI only after retention release and restores bytes into a newer successor', async () => {
+    finished = false;
+    const packetId = 'close-preservation-source';
+    const repo = await addRepo(repoPath);
+    const source = await ownedWorkspace(repo, packetId, 'main');
+    const head = git(source.workspacePath, 'rev-parse', 'HEAD');
+    const binary = Buffer.from([0, 255, 254, 71, 0, 128]);
+    const note = 'Continue the unfinished task from this exact checkpoint.\n';
+    mkdirSync(path.join(source.workspacePath, '.o8'));
+    writeFileSync(path.join(source.workspacePath, '.o8', 'checkpoint.bin'), binary, { mode: 0o400 });
+    writeFileSync(path.join(source.workspacePath, '.o8', 'remaining.md'), note);
+    setLaneStatus(source.lane.id, 'running');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-close-preservation', repoPath: repo.localPath, runtime: 'codex',
+      packets: [{
+        id: packetId, referenceLabel: '#3278', title: 'Close preservation regression',
+        summary: 'Retire through the supported stop and close commands.',
+        workspaceTargetPath: repo.localPath, branchTarget: source.lane.branch, runtime: 'codex',
+        dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+        status: 'running', blockedReason: null, review: null,
+        lane: { tileId: source.lane.id, tabId: source.lane.id, repoPath: repo.localPath,
+          worktreePath: source.workspacePath, runtime: 'codex', laneId: source.lane.id },
+      } as OrchestratorPacket], updatedAt: new Date().toISOString(),
+    });
+    const hold = await cli(['packet', 'retain', packetId, '--reason', 'Preserve unfinished checkpoint',
+      '--idempotency-key', 'close-preservation-hold']);
+    expect(hold.exitCode, hold.stderr + hold.stdout).toBe(0);
+    const stop = await cli(['packet', 'stop', packetId]);
+    expect(stop.exitCode, stop.stderr + stop.stdout).toBe(0);
+    const closeArgs = ['packet', 'close', packetId, '--reason', 'superseded',
+      '--note', 'Continue in a distinct successor', '--idempotency-key', 'close-preservation-held'];
+    const heldClose = await cli(closeArgs);
+    expect(heldClose.exitCode, heldClose.stderr + heldClose.stdout).toBe(5);
+    expect(readFileSync(path.join(source.workspacePath, '.o8', 'checkpoint.bin'))).toEqual(binary);
+    expect(existsSync(path.join(root, 'sessions', 'codex-owned-' + packetId, 'session.json'))).toBe(true);
+    closeDb();
+    const released = await cli(['packet', 'release-retention', packetId, '--hold-id', 'close-preservation-hold',
+      '--idempotency-key', 'close-preservation-release']);
+    expect(released.exitCode, released.stderr + released.stdout).toBe(0);
+    closeArgs[closeArgs.length - 1] = 'close-preservation-released';
+    const closed = await cli(closeArgs);
+    expect(closed.exitCode, closed.stderr + closed.stdout).toBe(0);
+    expect(JSON.parse(closed.stdout)).toMatchObject({ packet: { id: packetId, worktreeRemoved: true, worktreeCleanup: 'removed' } });
+    expect(existsSync(source.workspacePath)).toBe(false);
+    expect(getWorkspaceSnapshot(repo.id, packetId)).toMatchObject({ state: 'retired', headCommit: head });
+    const terminal = listWorkspaceSnapshotTransitions(repo.id, packetId).findLast((entry) => entry.toState === 'retired');
+    expect(terminal?.receipt?.preservationId).toMatch(/^[a-f0-9]{64}$/);
+    closeDb();
+    const archiveResponse = await fetch('http://127.0.0.1:' + port + '/api/orchestrator/workspace/preservation?packetId=' + packetId, {
+      headers: { authorization: 'Bearer ' + token },
+    });
+    expect(archiveResponse.status).toBe(200);
+    expect((await archiveResponse.json()).result).toMatchObject({ artifactCount: 2,
+      artifactBytes: binary.length + Buffer.byteLength(note), headCommit: head });
+    writeFileSync(path.join(repo.localPath, 'newer-source.txt'), 'Successor uses a newer source revision.\n');
+    git(repo.localPath, 'add', 'newer-source.txt');
+    git(repo.localPath, 'commit', '-qm', 'newer successor source');
+    const newerHead = git(repo.localPath, 'rev-parse', 'HEAD');
+    const newerTree = git(repo.localPath, 'rev-parse', 'HEAD^{tree}');
+    expect(newerHead).not.toBe(head);
+    const successor = await ownedWorkspace(repo, 'close-preservation-successor', newerHead);
+    const restoreArgs = ['packet', 'restore-artifacts', packetId, '--to', 'close-preservation-successor',
+      '--paths-json', '[".o8/checkpoint.bin",".o8/remaining.md"]', '--idempotency-key', 'close-preservation-restore'];
+    const restored = await cli(restoreArgs);
+    expect(restored.exitCode, restored.stderr + restored.stdout).toBe(0);
+    expect(JSON.parse(restored.stdout)).toMatchObject({ restoredFiles: 2, retained: true,
+      targetHeadCommit: newerHead, targetTreeSha: newerTree });
+    expect(readFileSync(path.join(successor.workspacePath, '.o8', 'checkpoint.bin'))).toEqual(binary);
+    expect(readFileSync(path.join(successor.workspacePath, '.o8', 'remaining.md'), 'utf8')).toBe(note);
+    expect(git(successor.workspacePath, 'rev-parse', 'HEAD')).toBe(newerHead);
+    expect(getWorkspaceSnapshot(repo.id, packetId)?.headCommit).toBe(head);
+    const checkpoint = path.join(successor.workspacePath, '.o8', 'checkpoint.bin');
+    const before = statSync(checkpoint);
+    git(successor.workspacePath, 'commit', '--allow-empty', '-qm', 'successor advanced after recovery');
+    closeDb();
+    const revised = await cli(restoreArgs);
+    expect(revised.exitCode).toBe(5);
+    expect(revised.stderr + revised.stdout).toContain('persisted target revision');
+    expect(readFileSync(checkpoint)).toEqual(binary);
+    expect(statSync(checkpoint).ino).toBe(before.ino);
+    expect(statSync(checkpoint).mtimeMs).toBe(before.mtimeMs);
+    expect(existsSync(spawnReceipt)).toBe(false);
+    finished = true;
+  }, 60_000);
+
+  it('keeps a manager refusal authoritative at the merge tail even after the durable path is cleared', async () => {
+    finished = false;
+    const repo = await addRepo(repoPath);
+    const source = await ownedWorkspace(repo, 'merge-tail-held', 'main');
+    const note = 'Unique unfinished merge evidence.\n';
+    mkdirSync(path.join(source.workspacePath, '.o8'));
+    writeFileSync(path.join(source.workspacePath, '.o8', 'remaining.md'), note);
+    const held = await cli(['packet', 'retain', 'merge-tail-held', '--reason', 'Review unfinished merge evidence',
+      '--idempotency-key', 'merge-tail-retention']);
+    expect(held.exitCode, held.stderr + held.stdout).toBe(0);
+    const manager = new WorktreeManager(repo.localPath);
+    const { updateLane } = await import('@/lib/lane/registry');
+    const { removeMergedWorktree, withSynchronousWorktreeCleanup } = await import('@/lib/orchestrator/worktree-cleanup');
+    const result = await withSynchronousWorktreeCleanup('merge-tail-held', async () => {
+      expect(await manager.cleanup(source.worktreeId, { workspaceRetirementAction: 'merge' })).toBe(false);
+      return { merged: true };
+    });
+    expect(result).toEqual({ merged: true });
+    expect(readFileSync(path.join(source.workspacePath, '.o8', 'remaining.md'), 'utf8')).toBe(note);
+    updateLane(source.lane.id, { worktreePath: null }, 'system');
+    expect(await removeMergedWorktree(source.lane)).toMatchObject({ removed: false, reason: 'ownership-unavailable' });
+    expect(readFileSync(path.join(source.workspacePath, '.o8', 'remaining.md'), 'utf8')).toBe(note);
+    finished = true;
+  }, 30_000);
+
+  it('refuses crash replay when the persisted owned binding was archived after exact rename', async () => {
+    finished = false;
+    const repo = await addRepo(repoPath);
+    const source = await ownedWorkspace(repo, 'retirement-replay-owner', 'main');
+    mkdirSync(path.join(source.workspacePath, '.o8'));
+    writeFileSync(path.join(source.workspacePath, '.o8', 'checkpoint.bin'), Buffer.from([0, 255, 128]));
+    const { prepareWorkspaceMaterializationRetirement } = await import('@/lib/workspace/workspace-materialization-retirement');
+    const { retireExactManagedDirectory, finishPendingExactManagedDirectoryRetirements } = await import('@/lib/workspace/exact-managed-directory-retirement');
+    const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
+    const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
+    await prepareWorkspaceMaterializationRetirement(repo.localPath, source.workspacePath, 'cleanup');
+    const parent = await captureWorktreeMaterializationIdentity(path.dirname(source.workspacePath));
+    await expect(retireExactManagedDirectory({
+      repositoryPath: repo.localPath, worktreeId: source.worktreeId, directoryPath: source.workspacePath,
+      identity: source.identity, parentIdentity: parent,
+      afterRetirementRename: async () => { throw new Error('Interrupted after exact rename'); },
+    })).rejects.toThrow('Interrupted after exact rename');
+    const claim = readExactWorkspaceClaim('managed-retirement', repo.localPath, source.worktreeId)!;
+    expect(readFileSync(path.join(claim.claimPath, '.o8', 'checkpoint.bin'))).toEqual(Buffer.from([0, 255, 128]));
+    const lifecycle = getOwnedSessionLifecycle(source.lane.sessionKey!)!;
+    expect((await lifecycle.archiveSession(source.lane.sessionKey!)).archived).toBe(true);
+    closeDb();
+    expect(await finishPendingExactManagedDirectoryRetirements(repo.localPath, path.dirname(source.workspacePath), parent))
+      .toEqual({ completed: 0, refused: 1 });
+    expect(readFileSync(path.join(claim.claimPath, '.o8', 'checkpoint.bin'))).toEqual(Buffer.from([0, 255, 128]));
+    expect(readExactWorkspaceClaim('managed-retirement', repo.localPath, source.worktreeId)).not.toBeNull();
+    finished = true;
+  }, 30_000);
+
   it('holds retirement, preserves unique binary content, and restores a retained idle successor after DB reopen', async () => {
     const repo = await addRepo(repoPath);
     const source = await ownedWorkspace(repo, 'preservation-source', 'main');
@@ -206,8 +353,11 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     expect(readFileSync(path.join(successor.workspacePath, '.o8', 'proof.bin'))).toEqual(binary);
     expect(readFileSync(path.join(successor.workspacePath, '.o8', 'resume.md'), 'utf8')).toBe(note);
     expect(statSync(path.join(successor.workspacePath, '.o8', 'proof.bin')).mode & 0o777).toBe(0o400);
-    expect(getSqlite().prepare("SELECT COUNT(*) AS total FROM workspace_artifact_restore_files WHERE phase = 'complete'").get()).toEqual({ total: 2 });
+    expect(getSqlite().prepare("SELECT COUNT(*) AS total FROM workspace_artifact_restore_files WHERE phase = 'complete' AND restore_id = ?").get(receipt.restoreId)).toEqual({ total: 2 });
     const beforeReplay = statSync(path.join(successor.workspacePath, '.o8', 'proof.bin'));
+    // Simulate the selection-only binding persisted by an earlier release.
+    getSqlite().prepare('UPDATE workspace_artifact_restores SET selection_sha256 = ? WHERE restore_id = ?')
+      .run(createHash('sha256').update(JSON.stringify(['.o8/proof.bin', '.o8/resume.md'])).digest('hex'), receipt.restoreId);
     closeDb();
     const replayed = await cli(args);
     expect(replayed.exitCode, replayed.stderr + replayed.stdout).toBe(0);
@@ -223,6 +373,86 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     }));
     finished = true;
   }, 60_000);
+
+  it('binds a newer successor revision when resuming an earlier intent that published no files', async () => {
+    finished = false;
+    const repo = await addRepo(repoPath);
+    const snapshot = getWorkspaceSnapshot(repo.id, 'preservation-source')!;
+    const successor = await ownedWorkspace(repo, 'preservation-legacy-empty', snapshot.headCommit);
+    git(successor.workspacePath, 'commit', '--allow-empty', '-qm', 'newer recovery destination');
+    const targetHead = git(successor.workspacePath, 'rev-parse', 'HEAD');
+    const key = 'legacy-empty-restore';
+    const restoreId = createHash('sha256').update(JSON.stringify({
+      repositoryUuid: repo.id, targetPacketId: 'preservation-legacy-empty', clientMutationId: key,
+    })).digest('hex');
+    const preservation = getSqlite().prepare('SELECT preservation_id FROM workspace_preservations WHERE packet_id = ?')
+      .get('preservation-source') as { preservation_id: string };
+    const selection = createHash('sha256').update(JSON.stringify(['.o8/proof.bin'])).digest('hex');
+    getSqlite().prepare(`INSERT INTO workspace_artifact_restores (
+      restore_id, preservation_id, repository_uuid, target_packet_id, target_lane_id, workspace_path,
+      source_device, source_inode, selection_sha256, state, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'preparing', ?, ?)`).run(
+      restoreId, preservation.preservation_id, repo.id, 'preservation-legacy-empty', successor.lane.id,
+      successor.workspacePath, successor.identity.device, successor.identity.inode, selection, Date.now(), Date.now(),
+    );
+    closeDb();
+    const restored = await cli(['packet', 'restore-artifacts', 'preservation-source', '--to', 'preservation-legacy-empty',
+      '--paths-json', '[".o8/proof.bin"]', '--idempotency-key', key]);
+    expect(restored.exitCode, restored.stderr + restored.stdout).toBe(0);
+    expect(JSON.parse(restored.stdout)).toMatchObject({ restoreId, restoredFiles: 1, targetHeadCommit: targetHead });
+    expect(readFileSync(path.join(successor.workspacePath, '.o8', 'proof.bin')))
+      .toEqual(Buffer.from([0, 255, 254, 128, 65, 0, 239, 191, 189]));
+    expect(getSqlite().prepare('SELECT state FROM workspace_artifact_restores WHERE restore_id = ?').get(restoreId))
+      .toEqual({ state: 'complete' });
+    expect(getSqlite().prepare('SELECT phase FROM workspace_artifact_restore_files WHERE restore_id = ?').all(restoreId))
+      .toEqual([{ phase: 'complete' }]);
+    finished = true;
+  }, 30_000);
+
+  it('refuses a dirty newer successor before creating a recovery intent', async () => {
+    finished = false;
+    const repo = await addRepo(repoPath);
+    const source = getWorkspaceSnapshot(repo.id, 'preservation-source')!;
+    const successor = await ownedWorkspace(repo, 'preservation-dirty-newer', source.headCommit);
+    git(successor.workspacePath, 'commit', '--allow-empty', '-qm', 'newer dirty recovery destination');
+    const tracked = path.join(successor.workspacePath, 'tracked.txt');
+    writeFileSync(tracked, 'Unbanked successor source must remain untouched.\n');
+    const before = readFileSync(tracked);
+    const refused = await cli(['packet', 'restore-artifacts', 'preservation-source', '--to', 'preservation-dirty-newer',
+      '--paths-json', '[".o8/proof.bin"]', '--idempotency-key', 'dirty-newer-restore']);
+    expect(refused.exitCode).toBe(5);
+    expect(readFileSync(tracked)).toEqual(before);
+    expect(existsSync(path.join(successor.workspacePath, '.o8', 'proof.bin'))).toBe(false);
+    expect(getSqlite().prepare('SELECT restore_id FROM workspace_artifact_restores WHERE target_packet_id = ?')
+      .all('preservation-dirty-newer')).toEqual([]);
+    finished = true;
+  }, 30_000);
+
+  it('keeps an earlier published recovery bound to its original source revision', async () => {
+    finished = false;
+    const repo = await addRepo(repoPath);
+    const source = getWorkspaceSnapshot(repo.id, 'preservation-source')!;
+    const successor = await ownedWorkspace(repo, 'preservation-legacy-published', source.headCommit);
+    const args = ['packet', 'restore-artifacts', 'preservation-source', '--to', 'preservation-legacy-published',
+      '--paths-json', '[".o8/proof.bin"]', '--idempotency-key', 'legacy-published-restore'];
+    const restored = await cli(args);
+    expect(restored.exitCode, restored.stderr + restored.stdout).toBe(0);
+    const receipt = JSON.parse(restored.stdout);
+    getSqlite().prepare('UPDATE workspace_artifact_restores SET selection_sha256 = ? WHERE restore_id = ?')
+      .run(createHash('sha256').update(JSON.stringify(['.o8/proof.bin'])).digest('hex'), receipt.restoreId);
+    const destination = path.join(successor.workspacePath, '.o8', 'proof.bin');
+    const before = statSync(destination);
+    const bytes = readFileSync(destination);
+    git(successor.workspacePath, 'commit', '--allow-empty', '-qm', 'legacy destination advanced');
+    closeDb();
+    const refused = await cli(args);
+    expect(refused.exitCode).toBe(5);
+    expect(refused.stderr + refused.stdout).toContain('bound to the retired source revision');
+    expect(readFileSync(destination)).toEqual(bytes);
+    expect(statSync(destination).ino).toBe(before.ino);
+    expect(statSync(destination).mtimeMs).toBe(before.mtimeMs);
+    finished = true;
+  }, 30_000);
 
   it('refuses an occupied successor file and denies worker access before mutation', async () => {
     finished = false;

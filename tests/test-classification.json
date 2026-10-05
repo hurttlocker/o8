@@ -2924,6 +2924,14 @@
       ]
     },
     {
+      "path": "tests/owned-marker-process-proof-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packaged-server-smoke-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3589,6 +3597,8 @@
     {
       "path": "tests/runtime-action-idempotency-real-path.test.ts",
       "reasons": [
+        "child-process",
+        "network-listener",
         "real-path"
       ]
     },

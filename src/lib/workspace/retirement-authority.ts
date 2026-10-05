@@ -9,8 +9,21 @@ import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { readWorkspacePreservation, verifyPreservedArtifactsAtPath } from './preservation-store';
 import { getWorkspaceRetirementPreservationId } from './workspace-materialization-retirement';
 import { admitStandaloneRetirement, verifyStandaloneRetirement } from './standalone-retirement-authority';
+import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { assertManagedRetirementQuiescence } from './retirement-process-authority';
 
 export type ManagedRetirementReason = 'terminal' | 'creation-rollback' | 'empty-orphan';
+
+/** Crash replay must retain the same lifecycle exclusion as the original terminal. */
+export async function withRetirementAuthorityLock<T>(
+  authority: Record<string, unknown> | null,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (authority?.retirementReason !== 'terminal') return operation();
+  if (typeof authority.preservationId !== 'string') throw new Error('Terminal retirement has no preservation owner.');
+  const { payload } = await readWorkspacePreservation(authority.preservationId);
+  return withPacketLifecycleSpawnLock(payload.packetId, operation);
+}
 
 export async function admitRetirementAuthority(input: {
   repositoryPath: string;
@@ -77,7 +90,17 @@ export async function verifyRetirementAuthority(input: {
   verifyContents: boolean;
 }): Promise<void> {
   const reason = input.authority?.retirementReason;
-  if (reason === 'standalone-clean') return verifyStandaloneRetirement({ ...input, authority: input.authority! });
+  if (reason === 'standalone-clean') {
+    const authority = input.authority!;
+    if (typeof authority.repositoryPath !== 'string' || typeof authority.worktreeId !== 'string') {
+      throw new Error('Standalone retirement has no durable manager process authority.');
+    }
+    await assertManagedRetirementQuiescence({
+      repositoryPath: authority.repositoryPath, worktreeId: authority.worktreeId,
+      sourcePath: input.sourcePath, candidatePath: input.candidatePath, identity: input.identity,
+    });
+    return verifyStandaloneRetirement({ ...input, authority });
+  }
   if (reason === 'creation-rollback') return verifyCreationAuthority(input.authority!);
   if (reason === 'empty-orphan') return;
   const preservationId = input.authority?.preservationId;
@@ -85,9 +108,18 @@ export async function verifyRetirementAuthority(input: {
     || getWorkspaceRetirementPreservationId(input.sourcePath) !== preservationId) {
     throw new Error('Exact retirement lacks its durable preservation or creation reason.');
   }
-  const { receipt } = await readWorkspacePreservation(preservationId);
+  const { receipt, payload } = await readWorkspacePreservation(preservationId);
   if (receipt.sourceDevice !== input.identity.device || receipt.sourceInode !== input.identity.inode) {
     throw new Error('Exact retirement preservation materialization changed.');
+  }
+  const owner = await assertManagedRetirementQuiescence({
+    repositoryPath: payload.repositoryPath, worktreeId: payload.worktreeId,
+    sourcePath: input.sourcePath, candidatePath: input.candidatePath, identity: input.identity,
+  });
+  if (owner.repositoryUuid !== payload.repositoryUuid || owner.packetId !== payload.packetId || owner.laneId !== payload.laneId
+    || !payload.handoff.sessionIdentities.some((identity) => identity.kind === 'owned-session'
+      && identity.identity === owner.sessionKey)) {
+    throw new Error('Terminal preservation process owner changed after capture.');
   }
   if (input.verifyContents) {
     await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {

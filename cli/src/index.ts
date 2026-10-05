@@ -323,7 +323,7 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   session checkpoint <key> save a durable provider position for later forks
   session fork <key>   create a new provider session from a checkpoint
   session rewind <key> create a new continuation while preserving the original
-  session resume <key> --message <text>  continue a durable provider session
+  session resume <key> --message <text> [--idempotency-key <key>]  admit a continuation turn
   session dismiss-pending <key> --confirm-no-continuation  clear an unresolved attempt after provider inspection
   task list            current task pool grouped by ready/running/review/etc.
   task create          add a project-backed task to the ready pool

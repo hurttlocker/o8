@@ -250,6 +250,35 @@ describe('owned process probes', () => {
     }));
   });
 
+  it('keeps retirement unknown when the environment scan fails with every other primitive clear', async () => {
+    const surfaceId = 'probe-marker-command-failure:session';
+    const receipt = binding(surfaceId, 4241);
+    receipt.activeRun = null;
+    receipt.retainedRuns[0]!.outcome = 'finished';
+    register('probe-marker-command-failure:', receipt);
+
+    const result = await probeOwnedSessionProcessQuiescence(surfaceId, '/tmp/probe-workspace', {
+      run: async (command, args) => {
+        if (command === 'ps' && !args.includes('-p')) {
+          return { code: 127, stdout: '', stderr: 'environment scan unavailable' };
+        }
+        return { code: 1, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.state).toBe('unknown');
+    expect(result.probes).toContainEqual(expect.objectContaining({
+      primitive: 'owned_marker',
+      state: 'unknown',
+    }));
+    expect(result.probes.filter((probe) => probe.primitive !== 'owned_marker'))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ primitive: 'pid', state: 'clear' }),
+        expect.objectContaining({ primitive: 'process_group', state: 'clear' }),
+        expect.objectContaining({ primitive: 'retained_run_ledger', state: 'clear' }),
+      ]));
+  });
+
   it('fails closed after run seventeen even when all sixteen retained identities are clear', async () => {
     const surfaceId = 'probe-incomplete-ledger:session';
     const receipt = binding(surfaceId);

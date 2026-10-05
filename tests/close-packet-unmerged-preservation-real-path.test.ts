@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
@@ -9,11 +9,14 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session';
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-close-preservation-'));
 const operatorToken = 'operator-close-preservation-0123456789';
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+process.env.O8_WORKTREE_ROOT = join(dataDir, 'worktrees');
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'sessions');
 writeFileSync(join(dataDir, 'ws-token'), `${operatorToken}\n`, 'utf8');
 
 const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
@@ -24,6 +27,10 @@ const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { listStoredPacketReceipts } = await import('@/lib/receipts/packet-receipt');
+const { addRepo } = await import('@/lib/repos/registry');
+const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
+const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
+const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 
 const roots: string[] = [dataDir];
 
@@ -48,11 +55,46 @@ function makeRepo(name: string) {
   return { root, repoPath };
 }
 
+async function makeManagedWorktree(repoPath: string, packetId: string, branch: string) {
+  const repo = await addRepo(repoPath);
+  const worktreeId = `packet-${packetId}`;
+  const worktreePath = join(resolveWorktreeRootLayout(repoPath).primaryBase, worktreeId);
+  mkdirSync(join(worktreePath, '..'), { recursive: true });
+  git(repoPath, ['worktree', 'add', '-b', branch, worktreePath]);
+  const sessionKey = `codex-owned:codex-owned-${packetId}`;
+  const sessionDir = join(dataDir, 'sessions', `codex-owned-${packetId}`);
+  mkdirSync(sessionDir, { recursive: true });
+  const now = new Date().toISOString();
+  const session: OwnedSessionRecord = {
+    surfaceId: sessionKey, packetId, sessionDir, cwd: worktreePath, repoPath: worktreePath,
+    branch, head: git(worktreePath, ['rev-parse', 'HEAD']), title: 'Close preservation owned fixture',
+    createdAt: now, updatedAt: now, recentRuns: [],
+    latestPrompt: 'Verify close preservation.', latestSummary: 'Owned idle close fixture.',
+    runIdentityLedger: { version: 1, totalRuns: 0, complete: true },
+    workspaceBinding: {
+      logicalWorkspaceId: `packet:${packetId}`, repositoryUuid: repo.id, packetId,
+      cwd: worktreePath, version: 1, verifiedAt: now,
+    },
+    threadId: '12345678-1234-1234-1234-123456789abc',
+  };
+  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify(session));
+  const materializationIdentity = await captureWorktreeMaterializationIdentity(worktreePath);
+  const materializationParentIdentity = await captureWorktreeMaterializationIdentity(join(worktreePath, '..'));
+  await withWorktreeMetaTransaction(repoPath, (transaction) => transaction.save(worktreeId, {
+    id: worktreeId, agentType: 'codex', sessionKey, baseBranch: 'main', createdAt: Date.now(),
+    claudeManaged: false, taskName: packetId, branchName: branch, status: 'ready', isolationKind: 'git-worktree',
+    materializationIdentity,
+    materializationParentIdentity,
+  }));
+  return { worktreePath, sessionKey };
+}
+
 function persistPacket(input: {
   packetId: string;
   repoPath: string;
   worktreePath: string | null;
   branch: string;
+  sessionKey?: string;
 }) {
   const lane = createLane({
     repoPath: input.repoPath,
@@ -62,6 +104,8 @@ function persistPacket(input: {
     runtime: 'codex',
     packetId: input.packetId,
     label: `Close ${input.branch}`,
+    sessionKey: input.sessionKey,
+    ownership: 'managed',
   });
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
   writeOrchestratorControlPlaneState({
@@ -142,14 +186,13 @@ describe('close_packet_unmerged preservation classification — real route', () 
   it('closes when the branch tip is already an ancestor of main and records already-merged', async () => {
     const packetId = 'pkt-close-already-merged';
     const branch = 'inline/close-already-merged';
-    const { root, repoPath } = makeRepo('o8-close-already-merged');
-    const worktreePath = join(root, 'worktree');
-    git(repoPath, ['worktree', 'add', '-b', branch, worktreePath]);
+    const { repoPath } = makeRepo('o8-close-already-merged');
+    const { worktreePath, sessionKey } = await makeManagedWorktree(repoPath, packetId, branch);
     writeFileSync(join(worktreePath, 'feature.txt'), 'merged\n');
     git(worktreePath, ['add', 'feature.txt']);
     git(worktreePath, ['commit', '-m', 'merged feature']);
     git(repoPath, ['merge', '--ff-only', branch]);
-    const lane = persistPacket({ packetId, repoPath, worktreePath, branch });
+    const lane = persistPacket({ packetId, repoPath, worktreePath, branch, sessionKey });
 
     const response = await closeRoute.POST(closeRequest(packetId));
     const payload = await response.json();
@@ -204,14 +247,13 @@ describe('close_packet_unmerged preservation classification — real route', () 
   it('banks an unmerged branch, closes with its disposition, and is idempotent', async () => {
     const packetId = 'pkt-close-real-unmerged';
     const branch = 'inline/close-real-unmerged';
-    const { root, repoPath } = makeRepo('o8-close-real-unmerged');
-    const worktreePath = join(root, 'worktree');
-    git(repoPath, ['worktree', 'add', '-b', branch, worktreePath]);
+    const { repoPath } = makeRepo('o8-close-real-unmerged');
+    const { worktreePath, sessionKey } = await makeManagedWorktree(repoPath, packetId, branch);
     writeFileSync(join(worktreePath, 'unmerged.txt'), 'unmerged\n');
     git(worktreePath, ['add', 'unmerged.txt']);
     git(worktreePath, ['commit', '-m', 'unmerged feature']);
     const branchHead = git(worktreePath, ['rev-parse', 'HEAD']);
-    const lane = persistPacket({ packetId, repoPath, worktreePath, branch });
+    const lane = persistPacket({ packetId, repoPath, worktreePath, branch, sessionKey });
 
     const response = await closeRoute.POST(closeRequest(packetId, 'adopted_elsewhere'));
     const payload = await response.json();
@@ -270,14 +312,13 @@ describe('close_packet_unmerged preservation classification — real route', () 
   it('refuses an unmerged branch when no preserved ref can be created', async () => {
     const packetId = 'pkt-close-preservation-failed';
     const branch = 'inline/close-preservation-failed';
-    const { root, repoPath } = makeRepo('o8-close-preservation-failed');
-    const worktreePath = join(root, 'worktree');
-    git(repoPath, ['worktree', 'add', '-b', branch, worktreePath]);
+    const { repoPath } = makeRepo('o8-close-preservation-failed');
+    const { worktreePath, sessionKey } = await makeManagedWorktree(repoPath, packetId, branch);
     writeFileSync(join(worktreePath, 'unmerged.txt'), 'unmerged\n');
     git(worktreePath, ['add', 'unmerged.txt']);
     git(worktreePath, ['commit', '-m', 'unmerged feature']);
     writeFileSync(join(repoPath, '.git', 'refs', 'heads', 'preserved'), 'blocked\n');
-    const lane = persistPacket({ packetId, repoPath, worktreePath, branch });
+    const lane = persistPacket({ packetId, repoPath, worktreePath, branch, sessionKey });
 
     const response = await closeRoute.POST(closeRequest(packetId, 'superseded'));
     const payload = await response.json();

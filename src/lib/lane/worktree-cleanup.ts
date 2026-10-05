@@ -1,12 +1,10 @@
 import { execFile } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { getWorktreeManager } from '@/lib/worktree/launch';
-import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 import { preserveAndRecordLaneRecovery } from './merge-recovery';
-import { removeCortexWorktreePath } from './worktree-clone-removal';
 import { checkPruneGate } from './prune-gate';
 import type { Lane } from './types';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
@@ -51,25 +49,6 @@ export async function worktreeIsNotGitRepository(worktreePath: string): Promise<
     const stderr = (error as { stderr?: unknown }).stderr;
     return /not a git repository/i.test(typeof stderr === 'string' ? stderr : formatError(error));
   }
-}
-
-async function removeNonGitWorktreeDir(
-  lane: CleanupLane,
-  worktreePath: string,
-  overrideLiveGuard?: true,
-): Promise<boolean> {
-  if (!(await allowWorktreeRemoval(worktreePath, { logPrefix: 'lane-worktree', overrideLiveGuard }))) {
-    return false;
-  }
-  try {
-    rmSync(worktreePath, { recursive: true, force: true });
-  } catch (error) {
-    console.warn(`[lane-worktree] Failed to remove non-git directory ${worktreePath} for ${lane.id}: ${formatError(error)}`);
-    return false;
-  }
-  if (existsSync(worktreePath)) return false;
-  console.log(`[lane-worktree] Removed ${worktreePath} for ${lane.id}: not a git repository, nothing to preserve.`);
-  return true;
 }
 
 /**
@@ -143,10 +122,8 @@ export async function cleanupLaneWorktree(
   // cannot be confirmed.
   if (terminal || force) {
     if (await worktreeIsNotGitRepository(worktreePath)) {
-      return settleRemovedWorktreeReservation(
-        lane,
-        await removeNonGitWorktreeDir(lane, worktreePath, opts.overrideLiveGuard),
-      );
+      console.warn(`[lane-worktree] Retaining non-git directory ${worktreePath}: preservation authority is unavailable.`);
+      return false;
     }
     if (!(await preserveHeadBeforeRemoval(lane, worktreePath))) return false;
   }
@@ -167,16 +144,8 @@ export async function cleanupLaneWorktree(
     console.warn(`[lane-worktree] Manager cleanup failed for ${lane.id}: ${formatError(error)}`);
   }
 
-  const removed = await removeCortexWorktreePath({
-    repoRoot: lane.repoPath,
-    worktreePath,
-    laneId: lane.id,
-    logPrefix: 'lane-worktree',
-    // Already gated above — don't double-gate (avoids a duplicate prune_forced).
-    skipPruneGate: true,
-    overrideLiveGuard: opts.overrideLiveGuard,
-  });
-  return settleRemovedWorktreeReservation(lane, removed);
+  // A missing manager or a refused/failed cleanup never grants raw deletion.
+  return false;
 }
 
 export async function pruneRepoWorktrees(repoPath: string): Promise<string[]> {

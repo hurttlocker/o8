@@ -1,13 +1,9 @@
-import { execFile } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 
 import { checkPruneGate } from './prune-gate';
 import { markLaneWorktreeOrphaned } from './orphaned-lane';
-import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
-
-const execFileAsync = promisify(execFile);
+import { getWorktreeManager } from '@/lib/worktree/launch';
+import { readManagedWorkspaceMaterialization } from '@/lib/workspace/managed-materialization-identity';
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -29,18 +25,6 @@ function markOwningLaneOrphaned(laneId: string | undefined, logPrefix: string) {
     }
   } catch (error) {
     console.warn(`[${logPrefix}] failed to mark lane ${laneId} orphaned: ${formatError(error)}`);
-  }
-}
-
-async function pruneWorktrees(repoRoot: string, logPrefix: string) {
-  try {
-    await execFileAsync('git', ['worktree', 'prune'], {
-      windowsHide: true,
-      cwd: repoRoot,
-      timeout: 10_000,
-    });
-  } catch (error) {
-    console.warn(`[${logPrefix}] git worktree prune failed for ${repoRoot}: ${formatError(error)}`);
   }
 }
 
@@ -86,42 +70,17 @@ export async function removeCortexWorktreePath(input: {
     }
   }
 
-  if (!existsSync(input.worktreePath)) {
-    console.warn(`[${logPrefix}] Worktree ${input.worktreePath}${label} is already absent.`);
-    markOwningLaneOrphaned(input.laneId, logPrefix);
-    await pruneWorktrees(input.repoRoot, logPrefix);
-    return true;
-  }
-
-  if (!(await allowWorktreeRemoval(input.worktreePath, {
-    logPrefix,
-    overrideLiveGuard: input.overrideLiveGuard,
-  }))) return false;
-
   try {
-    await execFileAsync('git', ['worktree', 'remove', '--force', input.worktreePath], {
-      windowsHide: true,
-      cwd: input.repoRoot,
-      timeout: 15_000,
-    });
-    markOwningLaneOrphaned(input.laneId, logPrefix);
-    await pruneWorktrees(input.repoRoot, logPrefix);
-    return true;
-  } catch (error) {
-    console.warn(`[${logPrefix}] git worktree remove failed for ${input.worktreePath}: ${formatError(error)}`);
-  }
-
-  try {
-    if (!(await allowWorktreeRemoval(input.worktreePath, {
-      logPrefix: `${logPrefix}-fallback`,
+    const managed = await readManagedWorkspaceMaterialization(input.repoRoot, input.worktreePath);
+    const removed = await getWorktreeManager(input.repoRoot).cleanup(managed.metadata.id, {
+      force: input.operatorForce,
+      deleteBranch: false,
       overrideLiveGuard: input.overrideLiveGuard,
-    }))) return false;
-    rmSync(input.worktreePath, { recursive: true, force: true });
-    markOwningLaneOrphaned(input.laneId, logPrefix);
-    await pruneWorktrees(input.repoRoot, logPrefix);
-    return !existsSync(input.worktreePath);
+    });
+    if (removed) markOwningLaneOrphaned(input.laneId, logPrefix);
+    return removed;
   } catch (error) {
-    console.warn(`[${logPrefix}] fs.rmSync fallback failed for ${input.worktreePath}: ${formatError(error)}`);
+    console.warn(`[${logPrefix}] Retaining ${input.worktreePath}${label}: exact manager retirement refused (${formatError(error)}).`);
     return false;
   }
 }

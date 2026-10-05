@@ -14,9 +14,12 @@ export interface IgnoredArtifactEntry {
   content: string | null;
 }
 
-export interface IgnoredArtifactCapture {
+export interface ArtifactRevision {
   headCommit: string;
   treeSha: string;
+}
+
+export interface IgnoredArtifactCapture extends ArtifactRevision {
   entries: IgnoredArtifactEntry[];
   bytes: number;
 }
@@ -131,10 +134,9 @@ function git(args) {
   for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[key];
   return execFileSync('git', args, { encoding: 'utf8', env, timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
 }
-function verifyGit(input) {
+function readRevision() {
   const headCommit = git(['rev-parse', '--verify', 'HEAD^{commit}']).trim();
   const treeSha = git(['rev-parse', '--verify', 'HEAD^{tree}']).trim();
-  if (headCommit !== input.headCommit || treeSha !== input.treeSha) throw new Error('Artifact workspace revision changed.');
   if (git(['ls-files', '-v', '-z']).split('\0').some((line) => /^[a-zS] /.test(line))) {
     throw new Error('Artifact capture refuses hidden index flags.');
   }
@@ -142,6 +144,18 @@ function verifyGit(input) {
     throw new Error('Artifact capture requires separate submodule preservation.');
   }
   return { headCommit, treeSha };
+}
+function verifyGit(input) {
+  const truth = readRevision();
+  if (truth.headCommit !== input.headCommit || truth.treeSha !== input.treeSha) throw new Error('Artifact workspace revision changed.');
+  return truth;
+}
+function inspectRestoreRevision() {
+  const truth = readRevision();
+  if (git(['status', '--porcelain=v1', '-z', '--untracked-files=all'])) {
+    throw new Error('Artifact restore destination has unbanked source changes.');
+  }
+  return truth;
 }
 function capture(input) {
   const truth = verifyGit(input);
@@ -304,7 +318,8 @@ async function restore(input) {
 }
 (async () => {
   const input = JSON.parse(await nextLine());
-  const result = mode === 'capture' ? capture(input) : await restore(input);
+  const result = mode === 'revision' ? inspectRestoreRevision()
+    : mode === 'capture' ? capture(input) : await restore(input);
   process.stdout.write('O8_ARTIFACT_RESULT ' + Buffer.from(JSON.stringify(result)).toString('base64url') + '\n');
   fs.closeSync(rootFd);
   process.exit(0);
@@ -317,7 +332,7 @@ async function restore(input) {
 async function runArtifactIo<T>(input: {
   workspacePath: string;
   identity: WorktreeMaterializationIdentity;
-  mode: 'capture' | 'restore';
+  mode: 'capture' | 'restore' | 'revision';
   request: unknown;
   onReceipt?: (event: ArtifactRestoreEvent) => void;
 }): Promise<T> {
@@ -396,11 +411,19 @@ export function restoreIgnoredArtifacts(input: {
   workspacePath: string;
   identity: WorktreeMaterializationIdentity;
   capture: IgnoredArtifactCapture;
+  destinationRevision: ArtifactRevision;
   ownedFiles: ArtifactRestoreFileReceipt[];
   onReceipt: (event: ArtifactRestoreEvent) => void;
 }): Promise<{ restoredFiles: number; bytes: number }> {
   return runArtifactIo({
     ...input, mode: 'restore',
-    request: { ...input.capture, ownedFiles: input.ownedFiles },
+    request: { ...input.capture, ...input.destinationRevision, ownedFiles: input.ownedFiles },
   });
+}
+
+export function inspectArtifactRestoreRevision(input: {
+  workspacePath: string;
+  identity: WorktreeMaterializationIdentity;
+}): Promise<ArtifactRevision> {
+  return runArtifactIo({ ...input, mode: 'revision', request: {} });
 }
