@@ -421,6 +421,18 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(readFileSync(join(f.parent, name), 'utf8')).toBe('original');
   });
 
+  it('a refusal lists where entries may be when the folder moved and no run could report', async () => {
+    const f = fixture('original', [{ at: 'after-publish', action: 'editor-save' }, { at: 'captured', action: 'die' },
+      { run: 2, at: 'start', action: 'move-parent-outside' }, { run: 2, at: 'start', action: 'die' },
+      { run: 3, at: 'start', action: 'die' }, { run: 4, at: 'start', action: 'die' }]);
+    const error = await write(f).catch((caught: Error) => caught);
+    expect(allFired(f)).toBe(true);
+    const places = (error as Error).message.split('may be kept as ')[1].split(', ');
+    expect(places.filter(name => existsSync(join(f.outside, name))).map(name => readFileSync(join(f.outside, name), 'utf8')))
+      .toEqual(['original']);
+    expect(note(f, f.outside)).toBe('editor');
+  });
+
   it('recovery finishes a rollback that was killed after taking the publication off the name', async () => {
     const f = fixture('original', [{ at: 'before-publish', action: 'editor-save' }, { at: 'after-publish', action: 'die' },
       { run: 2, at: 'captured', action: 'die' }]);

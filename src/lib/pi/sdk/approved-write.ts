@@ -152,6 +152,13 @@ export async function commitPiWrite(root: string, path: string, parent: PiWriteP
         throw new Error(`Approved file commit refused; the previous file was kept as ${kept[0]}`);
       }
       if (kept.length) throw new Error(`Approved file commit refused; moved entries were kept as ${kept.join(', ')}`);
+      // The folder moved and no run finished with a report of its own: the
+      // lookups above could not see the hidden names, so list them unverified.
+      const here = await lstat(parent.path).catch(() => null);
+      const places = [...new Set([...(opened ? [stageName] : []), ...progress.captures.map(capture => capture.name)])];
+      if ((here?.dev !== parent.dev || here?.ino !== parent.ino) && result?.code !== 1 && places.length) {
+        throw new Error(`Approved file commit refused; the folder moved, so moved entries may be kept as ${places.join(', ')}`);
+      }
       signal.throwIfAborted();
       throw new Error('Approved file commit refused');
     } finally { await stage.close(); }
