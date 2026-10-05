@@ -47,6 +47,10 @@ function act(action) {
     fs.writeFileSync(name, 'victim'); fs.writeFileSync(new URL('planted', dir), name);
   } else if (action === 'editor-save') editorSave();
   else if (action === 'editor-create') fs.writeFileSync(N, 'editor');
+  else if (action === 'editor-edit-in-place') fs.writeFileSync(N, 'editor edit');
+  else if (action === 'chmod-alias-die') { fs.chmodSync(N, 0o444); real.linkSync(N, plan.alias); die(); }
+  else if (action === 'hardlink-replace') { real.linkSync(plan.victim, N + '.tmp-link'); real.renameSync(N + '.tmp-link', N); }
+  else if (action === 'lock-dir') fs.chmodSync('.', 0o555);
   else if (action === 'block') {
     fs.writeFileSync(new URL('reached', dir), '');
     const cell = new Int32Array(new SharedArrayBuffer(4));
@@ -75,6 +79,7 @@ fs.renameSync = (from, to) => {
   if (removing) hit('rollback-name'); else if (restoring) hit('restore-name'); else if (touches) hit('publish');
   const result = real.renameSync(from, to);
   if (touches) hit('publish', true);
+  if (published && prefixed(from, '.o8-pi-write-') && prefixed(to, '.o8-pi-q-')) hit('capture-stage', true);
   return result;
 };
 fs.linkSync = (from, to) => {
@@ -104,7 +109,8 @@ syncBuiltinESMExports();
 await import(plan.helper);
 `;
 
-type At = 'start' | 'stage-write' | 'fsync' | 'publish' | 'link-publish' | 'rollback-name' | 'restore-name' | 'after-commit-unlink';
+type At = 'start' | 'stage-write' | 'fsync' | 'publish' | 'link-publish' | 'rollback-name' | 'restore-name'
+  | 'after-commit-unlink' | 'capture-stage';
 interface Step { at: At; action: string; after?: boolean; run?: number }
 const roots: string[] = [];
 afterEach(() => {
@@ -363,5 +369,51 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(readFileSync(join(f.helperDir, 'runs'), 'utf8')).toBe('3');
     expect(note(f)).toBe(null);
     expect(leftovers(f.parent)).toEqual([]);
+  });
+
+  it('an edit made after a finished write survives recovery', async () => {
+    const f = fixture(null, [{ at: 'after-commit-unlink', after: true, action: 'die' },
+      { run: 2, at: 'start', action: 'editor-edit-in-place' }]);
+    await expect(write(f)).resolves.toMatchObject(WROTE);
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('editor edit');
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
+  it('a kill while cleanup holds the stage under a captured name still finishes the write', async () => {
+    const f = fixture('original', [{ at: 'capture-stage', after: true, action: 'die' }]);
+    await expect(write(f)).resolves.toMatchObject(WROTE);
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('approved bytes');
+    expect(lstatSync(join(f.parent, 'note.txt')).nlink).toBe(1);
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
+  it('recovery wipes a publication made read-only and hard-linked outside after a kill', async () => {
+    const f = fixture('original', [{ at: 'link-publish', after: true, action: 'chmod-alias-die' }]);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
+    expect(allFired(f)).toBe(true);
+    expect(readFileSync(f.alias, 'utf8')).toBe('');
+    expect(note(f)).toBe('original');
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
+  it('rollback keeps a replacement that is a hard link to another file', async () => {
+    const f = fixture(null, [{ at: 'publish', action: 'edit-stage' }, { at: 'rollback-name', action: 'hardlink-replace' }]);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('victim');
+    expect(lstatSync(join(f.parent, 'note.txt')).ino).toBe(lstatSync(f.victim).ino);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a restore blocked by permissions still reports where the original is kept', async () => {
+    const f = fixture('original', [{ at: 'link-publish', action: 'lock-dir' }]);
+    try {
+      const error = await write(f).catch((caught: Error) => caught);
+      expect(allFired(f)).toBe(true);
+      expect((error as Error).message).toMatch(/kept as \.o8-pi-backup-/);
+      const kept = (error as Error).message.split('kept as ')[1];
+      expect(readFileSync(join(f.parent, kept), 'utf8')).toBe('original');
+    } finally { chmodSync(f.parent, 0o755); }
   });
 });

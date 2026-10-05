@@ -12,20 +12,23 @@
 //   without overwriting.
 // - Any uncommitted failure wipes the stage inode through its descriptor, so a
 //   hard-link alias keeps no approved bytes.
-// - The helper reports the stage identity and backup name on stdout, so the host
-//   can run a recovery pass if a signal ends this process.
+// - The helper reports the stage identity, the backup name, every captured name
+//   and the commit point on stdout, so the host can run a recovery pass if a
+//   signal ends this process. After the commit point recovery never rolls back.
 // Without directory-relative syscalls, a hostile process racing these random
 // names within microseconds can still leave entries behind; see the PR notes.
 import { randomUUID } from 'node:crypto';
 import {
   closeSync, constants, fchmodSync, fstatSync, fsyncSync, ftruncateSync, linkSync, lstatSync,
-  openSync, readlinkSync, readSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeSync,
+  openSync, readlinkSync, readSync, realpathSync, renameSync, statSync, symlinkSync, unlinkSync, writeSync,
 } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 const MAX_BYTES = 50_000;
 const STAGE = /^\.o8-pi-write-[0-9a-f-]{36}$/;
 const BACKUP = /^\.o8-pi-backup-[0-9a-f-]{36}$/;
+const CAPTURE = /^\.o8-pi-q-[0-9a-f-]{36}$/;
+const PROBE = /^\.o8-pi-probe-[0-9a-f-]{36}$/;
 const same = (a, b) => Boolean(a && b) && a.dev === b.dev && a.ino === b.ino;
 const protectedPath = path => path.split(/[\\/]/).some(part => part === '..'
   || part.toLowerCase() === '.git' || part.toLowerCase().startsWith('.env'));
@@ -107,6 +110,7 @@ function checkStage() {
 // a check-then-unlink race. Returns null when the name is empty.
 function capture(name) {
   const held = `.o8-pi-q-${randomUUID()}`;
+  report({ capture: held, from: name });
   try { renameSync(name, held); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   return { name: held, stat: lstatSync(held) };
 }
@@ -122,11 +126,13 @@ function putBack(captured, name) {
     else if (stat.isFile()) {
       linkSync(captured.name, name);
       if (!same(entry(name), stat)) {
-        // macOS link() follows a symlink swapped in at the source; that alias
-        // names an inode with another name, so removing it destroys nothing.
-        // Anything else that took the name goes back.
+        // macOS link() follows a symlink swapped in at the source. Remove only
+        // that alias, proven by where the source points; anything else that
+        // took the name goes back.
         const alias = capture(name);
-        if (alias && alias.stat.nlink >= 2) discard(alias);
+        let followed = false;
+        try { followed = same(alias?.stat, statSync(captured.name)); } catch { /* Source gone. */ }
+        if (alias && followed) discard(alias);
         else if (alias) putBack(alias, name);
         return false;
       }
@@ -160,6 +166,7 @@ async function commit() {
   await safePoint();
   stageFd = openSync(stage, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   stageId = fstatSync(stageFd);
+  stageWritable = true;
   report({ stage: { dev: stageId.dev, ino: stageId.ino } });
   let offset = 0;
   while (offset < bytes.length) offset += writeSync(stageFd, bytes, offset, bytes.length - offset, offset);
@@ -187,30 +194,39 @@ async function commit() {
   }
   checkParent();
   committed = true;
+  report({ committed: true });
   finish();
 }
 // After a verified publication: apply the target's mode (deferred so recovery can
 // always reopen the stage), then remove the stage name and the replaced target.
 function finish() {
   const { target, stage } = request;
-  if (target) fchmodSync(stageFd, fstatSync(4).mode & 0o777);
+  if (target && stageFd !== undefined) fchmodSync(stageFd, fstatSync(4).mode & 0o777);
   removeIf(stage, stageId);
   if (target && backup) removeIf(backup, target);
 }
 
 function restoreAside() {
   const current = entry(backup);
-  if (!same(current, aside)) return;
-  if (!putBack({ name: backup, stat: current }, request.name)) report({ kept: backup });
+  if (same(current, aside)) putBack({ name: backup, stat: current }, request.name);
+}
+// Our publication: the stage inode, or whatever the stage pathname names now,
+// directly or through a symlink that macOS link() followed. Link count alone
+// proves nothing: an unrelated replacement may be a hard link too.
+function fromStage(stat) {
+  if (same(stat, stageId)) return true;
+  for (const look of [lstatSync, statSync]) {
+    try { if (same(stat, look(request.stage))) return true; } catch { /* Stage name gone. */ }
+  }
+  return false;
 }
 function rollback() {
   if (published) {
-    // Remove the publication only when that destroys nothing: it is our stage
-    // inode, or an inode that still has another name. Anything else, such as an
-    // editor's save that replaced it, goes back to the name.
+    // Remove the publication only when it is provably ours. Anything else, such
+    // as an editor's save that replaced it, goes back to the name.
     const captured = capture(request.name);
     if (captured) {
-      if (same(captured.stat, stageId) || captured.stat.nlink >= 2) discard(captured);
+      if (fromStage(captured.stat)) discard(captured);
       else putBack(captured, request.name);
     }
   }
@@ -224,38 +240,70 @@ function cleanupStage() {
   closeSync(stageFd);
 }
 
+// Open our inode through a name, verifying identity: for writing when the mode
+// allows, else read-only. Non-blocking, so a FIFO swapped in at a name cannot
+// stall recovery.
+const OPEN = constants.O_NOFOLLOW | constants.O_NONBLOCK;
+let stageWritable = false;
 function openOurs(name, id) {
   for (const flags of [constants.O_RDWR, constants.O_RDONLY]) {
     let fd;
-    // Non-blocking, so a FIFO swapped in at a name cannot stall recovery.
-    try { fd = openSync(name, flags | constants.O_NOFOLLOW | constants.O_NONBLOCK); } catch { continue; }
-    if (same(fstatSync(fd), id)) return fd;
+    try { fd = openSync(name, flags | OPEN); } catch (error) {
+      if (error.code === 'EACCES' && flags === constants.O_RDWR) continue;
+      return undefined;
+    }
+    if (same(fstatSync(fd), id)) { stageWritable = flags === constants.O_RDWR; return fd; }
     closeSync(fd);
     return undefined;
   }
   return undefined;
 }
-// After a signal ended the commit: finish a verified publication of our own
-// inode, otherwise roll back. Ownership comes only from the identity the commit
-// reported, never from what a name holds now. Exit 0 only when the approved
-// bytes are published.
+// Before wiping an uncommitted stage reached only read-only (a mode change after
+// publication), restore owner write permission through the verified descriptor
+// and reopen it for writing. Committed files keep whatever mode they now have.
+function makeWritable(candidates) {
+  if (stageFd === undefined || stageWritable) return;
+  fchmodSync(stageFd, (fstatSync(stageFd).mode & 0o777) | 0o600);
+  for (const candidate of candidates) {
+    const fd = openOurs(candidate, stageId);
+    if (fd === undefined) continue;
+    if (stageWritable) { closeSync(stageFd); stageFd = fd; return; }
+    closeSync(fd);
+  }
+}
+// Settle an entry the commit had captured when the signal came. Ours goes;
+// after the commit point so does the replaced target; anything else goes back.
+function settleCapture({ name: held, from }) {
+  const stat = entry(held);
+  if (!stat) return;
+  if (same(stat, stageId) || (committed && same(stat, request.target))) discard({ name: held, stat });
+  else putBack({ name: held, stat }, from);
+}
+// After a signal ended the commit. Ownership comes only from the identity the
+// commit reported, never from what a name holds now. Past the commit point,
+// recovery only finishes cleanup: later edits to the published file are kept.
+// Before it, recovery finishes a verified publication or rolls back. Exit 0 only
+// when the approved bytes were published.
 function recover() {
   const { name, stage, parent } = request;
   if (!same(fstatSync(3), parent) || !same(lstatSync('.'), parent)) throw new Error('Parent changed');
   stageId = request.stageId;
   backup = request.backup ?? undefined;
-  stageFd = openOurs(name, stageId) ?? openOurs(stage, stageId);
-  if (stageFd !== undefined && same(entry(name), stageId)) {
+  const captures = request.captures ?? [];
+  stageFd = [name, stage, ...captures.map(captured => captured.name)]
+    .reduce((fd, candidate) => fd ?? openOurs(candidate, stageId), undefined);
+  if (request.committed) {
+    committed = true;
+  } else if (stageFd !== undefined && same(entry(name), stageId)) {
     const names = 1 + (same(entry(stage), stageId) ? 1 : 0);
     let inside = true;
     try { checkParent(); } catch { inside = false; }
-    if (inside && fstatSync(stageFd).nlink === names && readBytes(stageFd).equals(bytes)) {
-      committed = true;
-      finish();
-      return;
-    }
-    published = true;
+    if (inside && fstatSync(stageFd).nlink === names && readBytes(stageFd).equals(bytes)) committed = true;
+    else published = true;
   }
+  if (!committed) makeWritable([name, stage, ...captures.map(captured => captured.name)]);
+  for (const captured of captures) settleCapture(captured);
+  if (committed) { finish(); return; }
   // Whatever the commit moved aside goes back to the name.
   if (backup) aside = entry(backup) ?? undefined;
   throw new Error('Commit rolled back');
@@ -264,6 +312,11 @@ function recover() {
 function validIdentity(value) {
   return Boolean(value) && Number.isSafeInteger(value.dev) && Number.isSafeInteger(value.ino);
 }
+function validCaptures(captures) {
+  return captures === undefined || (Array.isArray(captures) && captures.every(captured => captured
+    && CAPTURE.test(captured.name) && (captured.from === request.name || captured.from === request.stage
+      || BACKUP.test(captured.from) || PROBE.test(captured.from))));
+}
 try {
   request = JSON.parse(input);
   const { mode, name, content, stage } = request;
@@ -271,7 +324,8 @@ try {
     || /[\\/]/.test(name) || protectedPath(name) || typeof content !== 'string'
     || Buffer.byteLength(content) > MAX_BYTES || !STAGE.test(stage)
     || (mode === 'recover' && (!validIdentity(request.stageId)
-      || (request.backup != null && !BACKUP.test(request.backup))))) {
+      || (request.backup != null && !BACKUP.test(request.backup))
+      || !validCaptures(request.captures)))) {
     throw new Error('Invalid commit');
   }
   bytes = Buffer.from(content);
@@ -281,6 +335,8 @@ try {
   if (!committed) {
     process.exitCode = 1;
     try { rollback(); } catch { /* Leave anything that cannot be verified. */ }
+    // Whatever stopped restoration, name where the original was kept.
+    try { if (aside && same(entry(backup), aside)) report({ kept: backup }); } catch { /* Best effort. */ }
   }
 } finally {
   cleanupStage();
