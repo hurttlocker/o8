@@ -21,6 +21,11 @@ function fixture() {
   mkdirSync(join(home, '.tauri'), { recursive: true });
   writeFileSync(join(home, '.tauri', 'cortex-ide.key'), 'test-key');
   const head = 'a'.repeat(40);
+  writeFileSync(join(root, 'o8.release.json'), JSON.stringify({
+    clerkPublishableKey: 'pk_test_synthetic',
+    githubOAuthClientId: 'synthetic-client-id',
+    sentryDsn: 'https://synthetic@example.invalid/1',
+  }));
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
@@ -30,10 +35,44 @@ function fixture() {
     APPLE_TEAM_ID: 'TEAMTEST',
     O8_RELEASE_MIN_FREE_GIB: '0.001',
   };
+  delete env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  delete env.GITHUB_OAUTH_CLIENT_ID;
+  delete env.SENTRY_DSN;
   return { root, home, head, env };
 }
 
+function passingRun(head: string) {
+  return (command: string, args: string[]) => {
+    if (command === 'git' && (args[0] === 'rev-parse' || args[0] === 'rev-list')) return { status: 0, stdout: `${head}\n`, stderr: '' };
+    if (command === 'git' && args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+    if (command === 'git' && args[0] === 'remote') return { status: 0, stdout: 'git@github.com:example/release-repo.git\n', stderr: '' };
+    if (command === 'git' && args[0] === 'ls-remote') return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
+    if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
+    if (command === 'ps') return { status: 0, stdout: `${process.pid} 1 node scripts/ship-preflight.mjs\n`, stderr: '' };
+    return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
+  };
+}
+
 describe('ship preflight', () => {
+  it('refuses to build when the desktop release configuration is missing', () => {
+    const { root, head, env } = fixture();
+    rmSync(join(root, 'o8.release.json'));
+    let message = '';
+    try { performShipPreflight({ root, version: '0.1.999', env, run: passingRun(head) }); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain('missing desktop release configuration: clerkPublishableKey, githubOAuthClientId, sentryDsn');
+  });
+
+  it('accepts the desktop release configuration from the environment and never reports its values', () => {
+    const { root, head, env } = fixture();
+    rmSync(join(root, 'o8.release.json'));
+    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_from_env';
+    env.GITHUB_OAUTH_CLIENT_ID = 'client-from-env';
+    env.SENTRY_DSN = 'https://env@example.invalid/2';
+    const receipt = performShipPreflight({ root, version: '0.1.999', env, run: passingRun(head) });
+    expect(receipt.releaseConfigKeys).toEqual(['clerkPublishableKey', 'githubOAuthClientId', 'sentryDsn']);
+    expect(JSON.stringify(receipt)).not.toMatch(/pk_test_from_env|client-from-env|env@example/);
+  });
+
   it('proves tag, remote, credentials, disk, tools, and a clear build owner before work starts', () => {
     const { root, head, env } = fixture();
     const calls: string[] = [];

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspectIntakeReconciliation } from './intake-reconciliation.mjs';
+import { resolveReleaseConfig } from './release-config.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
@@ -47,6 +48,20 @@ function parseRemoteTagHead(output, tag) {
 function repositoryFromRemote(remoteUrl) {
   const match = remoteUrl.trim().match(/(?:github\.com[/:])([^/\s]+\/[^/\s]+?)(?:\.git)?$/i);
   return match?.[1] ?? null;
+}
+
+// A desktop build without these ships with account sign-in, GitHub sign-in and
+// crash reporting switched off. Values stay out of Git in o8.release.json or the
+// environment; only the key names are reported.
+const REQUIRED_RELEASE_CONFIG = ['clerkPublishableKey', 'githubOAuthClientId', 'sentryDsn'];
+
+function checkReleaseConfig(root, env) {
+  const config = resolveReleaseConfig(root, env);
+  const missing = REQUIRED_RELEASE_CONFIG.filter((key) => !config[key]);
+  if (missing.length > 0) {
+    throw new Error(`missing desktop release configuration: ${missing.join(', ')}; add o8.release.json to the release worktree or set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, GITHUB_OAUTH_CLIENT_ID and SENTRY_DSN`);
+  }
+  return [...REQUIRED_RELEASE_CONFIG];
 }
 
 function checkCredentialNames(env) {
@@ -211,6 +226,7 @@ export function performShipPreflight(options) {
   }
 
   const credentialNames = checkCredentialNames(env);
+  const releaseConfigKeys = checkReleaseConfig(root, env);
   const signingKey = join(env.HOME || '', '.tauri', 'cortex-ide.key');
   if (!env.HOME || !existsSync(signingKey)) {
     throw new Error('Tauri updater signing key is missing');
@@ -258,6 +274,7 @@ export function performShipPreflight(options) {
     availableGiB: Number(availableGiB.toFixed(2)),
     minFreeGiB,
     credentialNames,
+    releaseConfigKeys,
     signingKeyPresent: true,
     intakeReconciliation: inspectIntakeReconciliation({ env }),
     toolchains: {
