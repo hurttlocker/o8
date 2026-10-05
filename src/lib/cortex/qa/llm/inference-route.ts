@@ -17,6 +17,8 @@
 
 import 'server-only';
 
+import { decodeJwt } from 'jose';
+
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { ensureFreeEntitlement } from '@/lib/entitlement/bootstrap';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
@@ -264,6 +266,14 @@ export async function resolveOpenRouterRoute(
   return null;
 }
 
+function tokenPlanClaim(token: string): unknown {
+  try {
+    return decodeJwt(token).plan;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Pi worker route (#3256): the entitled managed proxy, else the install's free
  * allowance on the same relay. Never local, BYOK, or CLI tiers: the relay owns
@@ -271,10 +281,16 @@ export async function resolveOpenRouterRoute(
  * managed-model request, so a keyless install provisions its allowance here.
  */
 export async function resolvePiInferenceRoute(): Promise<InferenceRoute | null> {
-  let token = planToken() ?? freeAllowanceToken();
+  let token = planToken();
   if (!token) {
-    await ensureFreeEntitlement();
-    token = freeAllowanceToken();
+    let freeToken = freeAllowanceToken();
+    if (!freeToken) {
+      await ensureFreeEntitlement();
+      freeToken = freeAllowanceToken();
+    }
+    // An O8_PLAN pin can resolve a paid install as free; its paid token must
+    // not ride the free route. The relay still verifies the signature.
+    token = freeToken && tokenPlanClaim(freeToken) === 'free' ? freeToken : null;
   }
   return token
     ? {

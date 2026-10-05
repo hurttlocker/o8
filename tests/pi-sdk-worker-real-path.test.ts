@@ -246,7 +246,8 @@ describe('managed Pi SDK real worker', () => {
       resolveRoute: async () => ({ via: 'proxy', url: 'https://managed.example/v1/inference', headers: {} }),
       fetch: async () => { attempts++; return new Response('sensitive upstream body', { status }); } });
     const session = await client({ ...paths, model, transport });
-    expect((await session.prompt('Try managed inference')).stopReason).toBe('error');
+    expect(await session.prompt('Try managed inference')).toMatchObject({ stopReason: 'error',
+      errorMessage: `Managed inference rejected request (${status})` });
     expect(attempts).toBe(1);
     expect(await readFile(session.sessionFile, 'utf8')).not.toContain('sensitive upstream body');
   }, 15000);

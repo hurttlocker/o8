@@ -5,7 +5,7 @@ import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtime
 import { createPiApproval } from './approval';
 import { piSdkScriptPath } from './scripts';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval } from './tools';
-import { createManagedPiTransport, type PiModelTransport } from './transport';
+import { createManagedPiTransport, PI_ALLOWANCE_EXHAUSTED_MESSAGE, type PiModelTransport } from './transport';
 
 export interface PiSdkSessionOptions {
   workspace: string;
@@ -20,8 +20,16 @@ export interface PiSdkSessionOptions {
   maxToolCalls?: number;
   runTimeoutMs?: number;
 }
-/** `errorMessage` carries only o8-written failure text, never provider bodies. */
+/** `errorMessage` is o8's own failure text; anything else becomes a generic failure. */
 export interface PiRunResult { text?: string; stopReason?: string; errorMessage?: string; messageCount: number }
+
+const PI_FAILURE_TEXT = /^(?:Stopped|Managed inference (?:unavailable|failed|rejected request \(\d{3}\)))$/;
+// Pi core turns internal exceptions (paths, persistence errors) into assistant
+// errorMessage text, so only o8's own failure messages leave the session.
+function o8FailureText(message: unknown): string {
+  return typeof message === 'string' && (message === PI_ALLOWANCE_EXHAUSTED_MESSAGE || PI_FAILURE_TEXT.test(message))
+    ? message : 'Pi run failed';
+}
 
 export function requirePiNode(version = process.versions.node) {
   const [major, minor] = version.split('.').map(Number);
@@ -130,6 +138,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       try {
         const result = await peer.request<PiRunResult>('prompt', { message }, timeoutMs + 5_000);
         if (!settled) throw new Error('Worker returned before settled completion');
+        if (result.errorMessage !== undefined) result.errorMessage = o8FailureText(result.errorMessage);
         return result;
       } catch (error) {
         run.abort();

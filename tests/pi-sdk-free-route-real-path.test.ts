@@ -110,6 +110,14 @@ describe('Pi free-plan route through the real worker', () => {
     expect(hits).toEqual({ issue: 0, inference: [], other: [] });
   }, 15000);
 
+  it('fails closed when an O8_PLAN pin makes a paid install resolve as free', async () => {
+    vi.stubEnv('O8_PLAN', 'free');
+    await writeFile(join(dataDir, 'entitlement.json'), JSON.stringify({ plan: 'pro', status: 'active', licenseKey: await license('pro', 'account-pinned') }));
+    const hits = network({ issuedLicense: await license('free', 'install-unused'), inference: () => answer('Unexpected answer') });
+    expect((await (await session()).prompt('Say hello')).stopReason).toBe('error');
+    expect(hits).toEqual({ issue: 0, inference: [], other: [] });
+  }, 15000);
+
   it('ends the run with a clear message and no retry when the daily allowance is used up', async () => {
     const freeLicense = await license('free', 'install-exhausted');
     const hits = network({ issuedLicense: freeLicense, inference: () => Response.json(
@@ -121,5 +129,39 @@ describe('Pi free-plan route through the real worker', () => {
     expect(hits.inference).toEqual([`Bearer ${freeLicense}`]);
     expect(hits.other).toEqual([]);
     expect(await readFile(pi.sessionFile, 'utf8')).not.toContain('spentMicroUsd');
+  }, 15000);
+
+  it('treats an oversized 402 body as a generic rejection', async () => {
+    const hits = network({ issuedLicense: await license('free', 'install-oversized'), inference: () => new Response(
+      JSON.stringify({ error: 'daily cap reached', padding: 'x'.repeat(8192) }), { status: 402 }) });
+    const result = await (await session()).prompt('Say hello');
+    expect(result).toMatchObject({ stopReason: 'error', errorMessage: 'Managed inference rejected request (402)' });
+    expect(hits.inference).toHaveLength(1);
+  }, 15000);
+
+  it('cancels a stalled 402 body read when the run is stopped', async () => {
+    let cancelled = false; let reading!: () => void;
+    const readPending = new Promise<void>(resolve => { reading = resolve; });
+    // highWaterMark 0: pull runs only once the transport is waiting on a read.
+    network({ issuedLicense: await license('free', 'install-stalled'), inference: () => new Response(new ReadableStream({
+      pull() { reading(); return new Promise<void>(() => {}); }, cancel() { cancelled = true; } }, { highWaterMark: 0 }), { status: 402 }) });
+    const pi = await session();
+    const run = pi.prompt('Say hello'); await readPending;
+    await pi.abort(); await run;
+    await vi.waitFor(() => expect(cancelled).toBe(true));
+  }, 15000);
+
+  it('replaces failure text that o8 did not write', async () => {
+    const { createPiSdkSession } = await import('@/lib/pi/sdk/session');
+    const pi = await createPiSdkSession({ workspace: join(root, 'workspace'), stateDir: join(root, 'state'), model,
+      // Stands in for Pi core turning an internal exception into assistant error text.
+      transport: async function* () {
+        yield { type: 'error', reason: 'error', error: { role: 'assistant', content: [], api: model.api, provider: model.provider,
+          model: model.id, timestamp: Date.now(), stopReason: 'error', errorMessage: `EACCES: ${root}/state/private.jsonl`,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } };
+      } });
+    sessions.push(pi);
+    expect(await pi.prompt('Say hello')).toMatchObject({ stopReason: 'error', errorMessage: 'Pi run failed' });
   }, 15000);
 });

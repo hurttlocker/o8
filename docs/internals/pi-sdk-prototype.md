@@ -38,10 +38,13 @@ cooperative-to-forced child shutdown ladder.
 `createManagedPiTransport` resolves `resolvePiInferenceRoute()` for every model
 request. A paid plan uses its plan token on the managed relay. A free install uses
 its free allowance token on the same relay, and requests that token on first use
-when it has none. No token means no request, and there is no local, BYOK or
-subscription fallback. Credentials remain in the host. When the relay reports
-that the daily allowance is used up, the run ends after that one call with a
-plain message in `errorMessage`; there is no retry. Pi's full OpenAI
+when it has none. The free route accepts only a token whose plan claim is free,
+so a paid install pinned to the free plan fails closed. No token means no
+request, and there is no local, BYOK or subscription fallback. Credentials
+remain in the host. When the relay reports that the daily allowance is used up,
+the run ends after that one call with a plain message in `errorMessage`; there
+is no retry. The run result passes on only o8's own failure messages; any other
+text, such as an SDK exception, becomes "Pi run failed". Pi's full OpenAI
 stream parser handles text and fragmented tool calls, but a host-owned fetch
 adapter fixes destination, credential headers, HTTP method and redirect policy.
 The desktop UI proxy stream is not used as a model endpoint.
@@ -76,7 +79,8 @@ cover persistence/resume, Unicode text, approval denial and target drift,
 protected aliases, disabled ambient extensions, Stop, budgets, HTTP errors,
 SSE-error redaction and fragmented managed tool streaming.
 `tests/pi-sdk-free-route-real-path.test.ts` covers the free, paid, no-entitlement,
-view-as-free and used-up allowance routes with signed synthetic tokens.
+view-as-free, pinned-plan and used-up allowance routes with signed synthetic
+tokens, plus oversized and stalled 402 bodies.
 
 ## Platform and concurrency limits
 

@@ -12,23 +12,32 @@ export interface ManagedPiTransportOptions {
   observeRawUsage?: (usage: unknown) => void;
 }
 
-const PI_ALLOWANCE_EXHAUSTED_MESSAGE = 'Your daily o8 model allowance is used up. It resets at midnight UTC.';
+export const PI_ALLOWANCE_EXHAUSTED_MESSAGE = 'Your daily o8 model allowance is used up. It resets at midnight UTC.';
 
-/** The relay's over-cap reply is small JSON; read at most 4 KiB of it. */
-async function isDailyCapResponse(response: Response): Promise<boolean> {
-  const reader = response.body?.getReader();
-  if (!reader) return false;
-  const chunks: Uint8Array[] = [];
-  let size = 0;
+/** The relay's over-cap reply is small JSON. Read at most 4 KiB, and stop reading when the run stops. */
+async function isDailyCapResponse(response: Response, signal: AbortSignal): Promise<boolean> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const stop = () => { void reader?.cancel().catch(() => {}); };
+  signal.addEventListener('abort', stop, { once: true });
   try {
-    while (size <= 4096) {
+    reader = response.body?.getReader();
+    if (!reader || signal.aborted) return false;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(value); size += value.byteLength;
+      size += value.byteLength;
+      if (size > 4096) return false;
+      chunks.push(value);
     }
-  } finally { await reader.cancel().catch(() => {}); }
-  try { return (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { error?: unknown }).error === 'daily cap reached'; }
-  catch { return false; }
+    return (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { error?: unknown }).error === 'daily cap reached';
+  } catch {
+    return false;
+  } finally {
+    signal.removeEventListener('abort', stop);
+    await reader?.cancel().catch(() => {});
+  }
 }
 
 /** Credentials never cross into the SDK worker. Re-resolve entitlement each call. */
@@ -58,7 +67,7 @@ export function createManagedPiTransport(options: ManagedPiTransportOptions): Pi
       if (!response.ok) {
         // An exhausted allowance stays exhausted until the relay's daily reset; Pi
         // retries are off, so this one failed call ends the run.
-        if (response.status === 402) allowanceExhausted = await isDailyCapResponse(response);
+        if (response.status === 402) allowanceExhausted = await isDailyCapResponse(response, requestSignal);
         else await response.body?.cancel();
         throw new Error(`Managed inference rejected request (${response.status})`);
       }
