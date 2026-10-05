@@ -79,21 +79,25 @@ Windows, which has no tested directory-descriptor write path.
 
 Approved writes go through a native helper (#3289) that works relative to the
 verified parent directory descriptor, so it follows the directory if it moves.
-A new file is published with a no-replace rename. A replacement is one atomic
-exchange, so the name is never absent. Before its commit point the helper
-verifies the published inode, its link count, its bytes and the parent location,
-and applies the target's mode. An uncommitted stage is wiped through a
-descriptor, so a hard-link alias keeps no approved bytes. The helper removes or
-moves an entry only after capturing it under a random name and proving it is its
-own; anything else goes back without overwriting. If a signal ends the helper,
-the host runs a recovery pass with the stage identity, captured names and commit
-point it reported. `tests/pi-sdk-approved-write-races-real-path.test.ts` drives
-the real helper at named points with concurrent renames, links, edits, mode
-changes and kills.
+The host creates the stage file and holds it open across the commit and every
+recovery run, so an uncommitted stage is always wiped through a descriptor and
+a hard-link alias keeps no approved bytes. A new file is published with a
+no-replace rename. A replacement is one atomic exchange, so the name is never
+absent. The helper applies the target's mode, verifies the published inode, its
+link count, the parent location and the bytes, and only then reports its commit
+point. Rollback only takes the helper's own inode off the name. Other entries are
+removed or moved only after being captured under a random name and checked, and
+otherwise go back without overwriting. If a signal ends the helper, the host runs
+a recovery pass with the captured names and commit point it reported.
+`tests/pi-sdk-approved-write-races-real-path.test.ts` drives the real helper at
+named points with concurrent renames, links, edits, mode changes and kills.
 
-Known limit: a process that renames the hidden stage away keeps a name for that
-inode. If the helper is then killed, recovery has no name through which to wipe
-it. A process with that access can already write the workspace directly.
+Known limit: the helper's hidden names are random but visible. A process that
+rebinds one of them between two of the helper's system calls can misdirect a
+removal, a restoration or a check, because POSIX has no rename or unlink
+conditioned on an inode. An entry swapped in at the stage name just before
+publication is published, and the write is refused. A process with that access
+can already write the workspace directly.
 
 ## Remaining gates
 

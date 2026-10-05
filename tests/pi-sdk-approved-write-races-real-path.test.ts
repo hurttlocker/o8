@@ -53,6 +53,7 @@ function act(action) {
   else if (action === 'lock-alias-die') { fs.linkSync(N, plan.alias); fs.chmodSync(N, 0o000); die(); }
   else if (action === 'hardlink-replace') { fs.linkSync(plan.victim, N + '.tmp-link'); fs.renameSync(N + '.tmp-link', N); }
   else if (action === 'lock-dir') fs.chmodSync(P, 0o555);
+  else if (action === 'remove-helper-die') { fs.unlinkSync(plan.helper); die(); }
   else if (action === 'probe') {
     fs.appendFileSync(new URL('probe', dir), JSON.stringify({ at, name: read(N), stage: read(stage()) }) + '\\n');
   } else if (action === 'block') {
@@ -73,7 +74,7 @@ plan.steps.forEach((step, index) => {
 `;
 
 type At = 'start' | 'staged' | 'synced' | 'before-publish' | 'after-publish' | 'committed' | 'captured'
-  | 'before-rollback' | 'before-restore';
+  | 'before-rollback' | 'before-restore' | 'finished';
 interface Step { at: At; action: string; run?: number }
 let hooked: string;
 beforeAll(() => { hooked = buildPiWriteHelper({ hooks: true }); }, 600_000);
@@ -98,7 +99,7 @@ function fixture(original: string | null, steps: Step[]) {
   const alias = join(base, 'outside-alias');
   const victim = join(base, 'victim.txt'); writeFileSync(victim, 'victim');
   const unapproved = join(base, 'unapproved.txt'); writeFileSync(unapproved, 'unapproved');
-  writeFileSync(join(helperDir, 'plan.json'), JSON.stringify({ steps, name: 'note.txt', parent, outside, alias, victim, unapproved }));
+  writeFileSync(join(helperDir, 'plan.json'), JSON.stringify({ steps, name: 'note.txt', parent, outside, alias, victim, unapproved, helper }));
   vi.stubEnv('O8_PI_WRITE_BIN', helper);
   return { base, workspace, parent, outside, alias, victim, unapproved, helperDir, steps };
 }
@@ -189,44 +190,41 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(note(f)).toBe('');
   });
 
-  it.each([['replace-stage', null], ['replace-stage', 'original'], ['edit-stage', null], ['edit-stage', 'original']] as const)(
-    'window 3: %s after the final check never publishes unapproved bytes (target %s)', async (action, original) => {
+  it.each([null, 'original'])('window 3: an edit to the stage after the final check is refused and wiped (target %s)', async original => {
+    const f = fixture(original, [{ at: 'before-publish', action: 'edit-stage' }]);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe(original);
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
+  // A process that renames the hidden stage away and puts its own entry there
+  // in the microseconds before publication gets that entry published. It could
+  // write the name directly. The helper never claims the write, never moves the
+  // entry again (it cannot tell it from an editor save), wipes the approved bytes
+  // through the descriptor it holds, and reports where the original went.
+  it.each([['replace-stage', null], ['replace-stage', 'original'], ['stage-symlink', null], ['stage-symlink', 'original']] as const)(
+    'window 3: an entry swapped in at the hidden stage (%s) is refused, wiped and reported (target %s)', async (action, original) => {
       const f = fixture(original, [{ at: 'before-publish', action }]);
-      await expect(write(f)).rejects.toThrow('Approved file commit refused');
+      const error = await write(f).catch((caught: Error) => caught);
+      expect(error).toBeInstanceOf(Error);
       expect(allFired(f)).toBe(true);
-      expect(note(f)).toBe(original);
-      if (action === 'edit-stage') {
-        expect(leftovers(f.parent)).toEqual([]);
-        return;
-      }
-      // The helper never deletes what it cannot verify as its own: the concurrent
-      // replacement keeps its bytes, and the renamed stage inode holds no approved bytes.
-      const [replacement, held] = leftovers(f.parent).sort();
-      expect(held).toBe(`${replacement}.held`);
-      expect(readFileSync(join(f.parent, replacement), 'utf8')).toBe('unapproved');
+      const held = leftovers(f.parent).find(name => name.endsWith('.held'))!;
       expect(readFileSync(join(f.parent, held), 'utf8')).toBe('');
+      if (action === 'replace-stage') expect(note(f)).toBe('unapproved');
+      else expect(lstatSync(join(f.parent, 'note.txt')).isSymbolicLink()).toBe(true);
+      expect(readFileSync(f.unapproved, 'utf8')).toBe('unapproved');
+      if (original !== null) expect(readFileSync(join(f.parent, kept(error)), 'utf8')).toBe('original');
+      else expect((error as Error).message).toBe('Approved file commit refused');
     });
 
-  it.each([null, 'original'])('window 3: recovery after a kill takes a swapped-in stage entry back off the name (target %s)', async original => {
-    const f = fixture(original, [{ at: 'before-publish', action: 'replace-stage' }, { at: 'after-publish', action: 'die' }]);
+  it('window 3: after a kill, recovery still wipes a stage renamed away', async () => {
+    const f = fixture(null, [{ at: 'before-publish', action: 'replace-stage' }, { at: 'after-publish', action: 'die' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(runs(f)).toBe('2');
-    expect(note(f)).toBe(original);
-    // The entry goes back to the stage name it was swapped in at. The process
-    // that renamed the stage away still holds it; recovery has no name to wipe.
-    const [replacement, held] = leftovers(f.parent).sort();
-    expect(held).toBe(`${replacement}.held`);
-    expect(readFileSync(join(f.parent, replacement), 'utf8')).toBe('unapproved');
-  });
-
-  it.each([null, 'original'])('window 3: a symlink swapped in at the stage leaves nothing unapproved published (target %s)', async original => {
-    const f = fixture(original, [{ at: 'before-publish', action: 'stage-symlink' }]);
-    await expect(write(f)).rejects.toThrow('Approved file commit refused');
-    expect(allFired(f)).toBe(true);
-    expect(note(f)).toBe(original);
-    expect(lstatSync(join(f.parent, 'note.txt'), { throwIfNoEntry: false })?.isSymbolicLink() ?? false).toBe(false);
-    expect(readFileSync(f.unapproved, 'utf8')).toBe('unapproved');
+    const held = leftovers(f.parent).find(name => name.endsWith('.held'))!;
+    expect(readFileSync(join(f.parent, held), 'utf8')).toBe('');
   });
 
   it('window 4: a target replaced before publication is never overwritten', async () => {
@@ -350,12 +348,22 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(leftovers(f.parent)).toEqual([]);
   });
 
-  it('recovery never truncates a file swapped in at the stage name', async () => {
+  it('recovery never truncates a file swapped in at the stage name, and wipes the stage moved outside', async () => {
     const f = fixture(null, [{ at: 'synced', action: 'swap-stage-for-victim-and-die' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(readFileSync(f.victim, 'utf8')).toBe('victim');
+    expect(readFileSync(f.alias, 'utf8')).toBe('');
     expect(note(f)).toBe(null);
+  });
+
+  it('a kept receipt survives a recovery run that cannot start', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'edit-stage' }, { at: 'before-rollback', action: 'editor-save' },
+      { at: 'finished', action: 'remove-helper-die' }]);
+    const error = await write(f).catch((caught: Error) => caught);
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('editor');
+    expect(readFileSync(join(f.parent, kept(error)), 'utf8')).toBe('original');
   });
 
   it('a recovery run that dies is retried until the stage is removed', async () => {

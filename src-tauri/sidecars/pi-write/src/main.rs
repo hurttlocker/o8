@@ -1,31 +1,38 @@
 //! Approved-write helper for the o8 Pi SDK worker (#3289).
 //!
-//! The host passes the verified parent directory as fd 3 and, when replacing,
-//! the opened target as fd 4. Every mutation is relative to fd 3, so it follows
-//! the directory itself even if another process moves it, and a recovery run
-//! given the same descriptor still reaches it.
+//! The host passes the verified parent directory as fd 3, the opened target as
+//! fd 4 when replacing, and the stage file it created as fd 5. The host keeps
+//! fd 5 open across the commit and every recovery run, so the stage inode can
+//! always be wiped through a descriptor, whatever happens to its names or mode.
+//! Every mutation is relative to fd 3, so it follows the directory itself even
+//! if another process moves it.
 //!
 //! - A new file is published with a no-replace rename: nothing at the name is
 //!   ever overwritten.
 //! - A replacement is one atomic exchange of the stage and the target, so the
 //!   name is never absent. The swapped-out entry must be the approved target,
 //!   or the publication is rolled back.
-//! - The published inode, its link count, its bytes and the parent's location
-//!   are verified before the commit point. The target's mode is applied before
-//!   it too, so recovery past that point never touches the published file.
-//! - Names are removed only after being captured under a fresh random name and
-//!   checked; anything that is not ours goes back without overwriting.
-//! - Any uncommitted failure wipes the stage inode through a descriptor before
-//!   its last hidden name is dropped, so a hard-link alias keeps no approved
-//!   bytes.
-//! - The helper reports its stage identity, every captured name and the commit
-//!   point on stdout, so the host can recover after a signal ends it.
+//! - The target's mode is applied, then the published inode, its link count,
+//!   the parent's location and its bytes are verified, then the commit point is
+//!   reported. Recovery past that point never touches the published file.
+//! - Rollback only ever takes the stage inode off the name. Names are removed
+//!   only after being captured under a fresh random name and checked; anything
+//!   that is not ours goes back without overwriting.
+//! - Any uncommitted failure wipes the stage inode through fd 5 before its
+//!   hidden names are dropped, so a hard-link alias keeps no approved bytes.
+//! - The helper reports every captured name and the commit point on stdout, so
+//!   the host can recover after a signal ends it.
+//!
+//! Hidden names are random but visible. A process that rebinds one of them
+//! between two of the helper's syscalls can misdirect a removal, restoration or
+//! check; POSIX has no rename or unlink conditioned on an inode. Such a process
+//! can already write the workspace directly.
 //!
 //! Request on stdin (JSON); exit 0 only when the approved bytes are published.
 
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,6 +44,7 @@ use serde_json::{json, Value};
 const MAX_BYTES: usize = 50_000;
 const DIR: libc::c_int = 3;
 const TARGET: libc::c_int = 4;
+const STAGE: libc::c_int = 5;
 
 #[cfg(target_os = "macos")]
 const NOREPLACE: libc::c_uint = libc::RENAME_EXCL;
@@ -86,8 +94,7 @@ struct Request {
     before: Option<String>,
     content: String,
     stage: String,
-    stage_id: Option<Id>,
-    published_id: Option<Id>,
+    stage_id: Id,
     committed: Option<bool>,
     captures: Option<Vec<Capture>>,
 }
@@ -165,15 +172,6 @@ fn lstat_path(path: &Path) -> io::Result<Stat> {
     Ok(stat_from(&raw))
 }
 
-fn open_at(name: &str, flags: libc::c_int, mode: libc::c_uint) -> io::Result<libc::c_int> {
-    let name = cstring(name)?;
-    check(unsafe { libc::openat(DIR, name.as_ptr(), flags | libc::O_CLOEXEC | libc::O_NOFOLLOW, mode) })
-}
-
-fn close(fd: libc::c_int) {
-    unsafe { libc::close(fd) };
-}
-
 fn rename_with(from: &str, to: &str, flags: libc::c_uint) -> io::Result<()> {
     let (from, to) = (cstring(from)?, cstring(to)?);
     #[cfg(target_os = "macos")]
@@ -234,10 +232,6 @@ fn write_all(fd: libc::c_int, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-fn fchmod(fd: libc::c_int, mode: u32) -> io::Result<()> {
-    check(unsafe { libc::fchmod(fd, mode as libc::mode_t) }).map(|_| ())
-}
-
 #[cfg(target_os = "macos")]
 fn dir_path() -> io::Result<PathBuf> {
     let mut buffer = vec![0u8; libc::PATH_MAX as usize];
@@ -260,10 +254,15 @@ fn random_name(prefix: &str) -> io::Result<String> {
     Ok(format!("{prefix}{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]))
 }
 
-fn report(message: Value) {
-    let mut out = io::stdout().lock();
-    let _ = writeln!(out, "{message}");
-    let _ = out.flush();
+/// One line per report, written with a single checked write.
+fn report(message: Value) -> io::Result<()> {
+    let line = format!("{message}\n");
+    let written = unsafe { libc::write(libc::STDOUT_FILENO, line.as_ptr().cast(), line.len()) };
+    if written == line.len() as isize {
+        Ok(())
+    } else {
+        Err(refuse("Report failed"))
+    }
 }
 
 /// Test builds run `<helper dir>/hook <point> <pid>` at named points and wait
@@ -320,15 +319,13 @@ fn txn_name(name: &str, prefix: &str) -> bool {
 fn validate(request: &Request) -> io::Result<()> {
     let name = Path::new(&request.name);
     let single = name.components().count() == 1 && matches!(name.components().next(), Some(Component::Normal(_)));
-    let recover = request.mode == "recover";
-    let valid = (request.mode == "commit" || recover)
+    let valid = (request.mode == "commit" || request.mode == "recover")
         && single
         && !request.name.contains('/')
         && !protected(name)
         && request.content.len() <= MAX_BYTES
         && txn_name(&request.stage, ".o8-pi-write-")
         && request.target.is_some() == request.before.is_some()
-        && (!recover || request.stage_id.is_some())
         && request.captures.as_ref().is_none_or(|captures| {
             captures
                 .iter()
@@ -341,7 +338,7 @@ fn validate(request: &Request) -> io::Result<()> {
     }
 }
 
-/// Unlink a captured name only while it still holds the entry that was judged.
+/// Unlink a captured name while it still holds the entry that was judged.
 fn discard(name: &str, id: Id) -> io::Result<()> {
     if id_at(name) == Some(id) {
         let name = cstring(name)?;
@@ -354,12 +351,10 @@ struct Txn<'a> {
     request: &'a Request,
     bytes: Vec<u8>,
     before: Option<Vec<u8>>,
-    stage_fd: Option<libc::c_int>,
-    writable: bool,
-    stage_id: Option<Id>,
-    /// What the publication step moved to the name: our stage inode, unless
-    /// another process swapped something in at the stage name.
-    published: Option<Id>,
+    /// The stage inode, the one fd 5 holds.
+    id: Id,
+    /// The publication step moved the stage name to the name.
+    published: bool,
     /// Replacement only: what the exchange left at the stage name.
     swapped_out: Option<Id>,
     /// Every captured name, from earlier runs and this one.
@@ -381,14 +376,16 @@ impl<'a> Txn<'a> {
             }
             None => None,
         };
+        let held = fstat(STAGE)?;
+        if !held.is(libc::S_IFREG) || held.id != request.stage_id {
+            return Err(refuse("Stage descriptor changed"));
+        }
         Ok(Txn {
             request,
             bytes: request.content.as_bytes().to_vec(),
             before,
-            stage_fd: None,
-            writable: false,
-            stage_id: request.stage_id,
-            published: None,
+            id: request.stage_id,
+            published: false,
             swapped_out: None,
             captures: request.captures.clone().unwrap_or_default(),
             stranded: Vec::new(),
@@ -452,39 +449,32 @@ impl<'a> Txn<'a> {
         }
     }
 
-    fn check_stage(&self) -> io::Result<()> {
-        let (Some(fd), Some(id)) = (self.stage_fd, self.stage_id) else {
-            return Err(refuse("No stage"));
-        };
-        let held = fstat(fd)?;
-        if !held.is(libc::S_IFREG) || held.nlink != 1 || held.id != id || id_at(&self.request.stage) != Some(id) || read_all(fd)? != self.bytes {
+    /// The stage name holds the stage inode alone, with the expected bytes.
+    fn check_stage(&self, bytes: &[u8]) -> io::Result<()> {
+        let named = stat_at(&self.request.stage)?;
+        if !named.is_some_and(|stat| stat.id == self.id && stat.nlink == 1 && stat.is(libc::S_IFREG)) || read_all(STAGE)? != bytes {
             return Err(refuse("Staging file changed"));
         }
         Ok(())
     }
 
-    /// Our inode is at the name with the approved bytes and no other names, and
-    /// the parent is still where it was approved.
-    fn publication_verified(&self) -> io::Result<bool> {
-        let (Some(fd), Some(id)) = (self.stage_fd, self.stage_id) else {
-            return Ok(false);
-        };
-        if id_at(&self.request.name) != Some(id) {
-            return Ok(false);
-        }
-        let held = fstat(fd)?;
-        Ok(held.nlink == 1 && read_all(fd)? == self.bytes && self.check_parent().is_ok())
-    }
-
-    /// The target's mode is applied before the commit is reported, so recovery
-    /// past this point never changes the published file.
+    /// Apply the target's mode, verify the publication, then report the commit
+    /// point. One no-follow stat of the name gives both its inode and its link
+    /// count; the bytes are read last, right before the report.
     fn commit_point(&mut self) -> io::Result<()> {
         if self.request.target.is_some() {
-            let fd = self.stage_fd.ok_or_else(|| refuse("No stage"))?;
-            fchmod(fd, fstat(TARGET)?.mode & 0o7777)?;
+            check(unsafe { libc::fchmod(STAGE, (fstat(TARGET)?.mode & 0o7777) as libc::mode_t) })?;
         }
+        let at_name = stat_at(&self.request.name)?;
+        if !at_name.is_some_and(|stat| stat.id == self.id && stat.nlink == 1) {
+            return Err(refuse("Publication changed"));
+        }
+        self.check_parent()?;
+        if read_all(STAGE)? != self.bytes {
+            return Err(refuse("Publication changed"));
+        }
+        report(json!({ "committed": true }))?;
         self.committed = true;
-        report(json!({ "committed": true }));
         hook("committed");
         Ok(())
     }
@@ -493,39 +483,29 @@ impl<'a> Txn<'a> {
         let request = self.request;
         self.check_parent()?;
         self.check_target()?;
+        self.check_stage(&[])?;
         aborted()?;
-        let fd = open_at(&request.stage, libc::O_RDWR | libc::O_CREAT | libc::O_EXCL, 0o600)?;
-        self.stage_fd = Some(fd);
-        self.writable = true;
-        let id = fstat(fd)?.id;
-        self.stage_id = Some(id);
-        report(json!({ "stage": { "dev": id.dev, "ino": id.ino } }));
         hook("staged");
-        write_all(fd, &self.bytes)?;
-        check(unsafe { libc::fsync(fd) })?;
+        write_all(STAGE, &self.bytes)?;
+        check(unsafe { libc::fsync(STAGE) })?;
         safe_point("synced")?;
         self.check_target()?;
         self.check_parent()?;
-        self.check_stage()?;
+        self.check_stage(&self.bytes)?;
         hook("before-publish");
         // Publication. No safe point until it is committed or rolled back.
         if request.target.is_some() {
             exchange(&request.stage, &request.name)?;
-            self.published = Some(id_at(&request.name).unwrap_or(id));
+            self.published = true;
             self.swapped_out = id_at(&request.stage);
+            hook("after-publish");
+            if !self.approved_target(stat_at(&request.stage)?)? {
+                return Err(refuse("Target changed"));
+            }
         } else {
             rename_noreplace(&request.stage, &request.name)?;
-            self.published = Some(id_at(&request.name).unwrap_or(id));
-        }
-        if let Some(published) = self.published {
-            report(json!({ "published": { "dev": published.dev, "ino": published.ino } }));
-        }
-        hook("after-publish");
-        if request.target.is_some() && !self.approved_target(stat_at(&request.stage)?)? {
-            return Err(refuse("Target changed"));
-        }
-        if !self.publication_verified()? {
-            return Err(refuse("Publication changed"));
+            self.published = true;
+            hook("after-publish");
         }
         self.commit_point()?;
         self.finish()
@@ -541,10 +521,11 @@ impl<'a> Txn<'a> {
     }
 
     /// Move whatever holds `name` to a fresh random name so it can be judged
-    /// without a check-then-unlink race. The destination is reported first.
+    /// without a check-then-unlink race at the visible name. The destination is
+    /// reported first.
     fn capture(&mut self, name: &str) -> io::Result<Option<(String, Stat)>> {
         let held = random_name(".o8-pi-q-")?;
-        report(json!({ "capture": held, "from": name }));
+        report(json!({ "capture": held, "from": name }))?;
         self.captures.push(Capture { name: held.clone(), from: name.to_string() });
         match rename_noreplace(name, &held) {
             Ok(()) => {}
@@ -583,23 +564,23 @@ impl<'a> Txn<'a> {
         }
     }
 
-    /// Take what the publication moved off the name and, for a replacement, put
-    /// the swapped-out entry back without overwriting a save made since. Our
-    /// inode stays under a captured name until cleanup has wiped it; anything
-    /// else the publication moved goes back to the stage name it came from.
+    /// Take the stage inode off the name and, for a replacement, put the
+    /// swapped-out entry back without overwriting a save made since. Anything
+    /// else at the name stays. The stage inode stays under a captured name until
+    /// cleanup has wiped it.
     fn rollback(&mut self) -> io::Result<()> {
         let request = self.request;
-        let Some(published) = self.published else {
+        if !self.published {
             return Ok(());
-        };
+        }
         hook("before-rollback");
-        if id_at(&request.name) != Some(published) {
+        if id_at(&request.name) != Some(self.id) {
             return Ok(());
         }
         let Some((held, stat)) = self.capture(&request.name)? else {
             return Ok(());
         };
-        if stat.id != published {
+        if stat.id != self.id {
             return self.put_back(&held, stat.id, &request.name);
         }
         if let Some(swapped) = self.swapped_out {
@@ -611,46 +592,7 @@ impl<'a> Txn<'a> {
                 }
             }
         }
-        if Some(published) != self.stage_id {
-            self.put_back(&held, published, &request.stage)?;
-        }
         Ok(())
-    }
-
-    /// Open our inode through a name that still holds it, verifying identity:
-    /// for writing when the mode allows, else read-only. If a mode change left it
-    /// unreadable and the name is one of ours, restore owner access there first.
-    fn open_ours(&self, name: &str, id: Id, hidden: bool) -> Option<(libc::c_int, bool)> {
-        let stat = stat_at(name).ok().flatten()?;
-        if stat.id != id || !stat.is(libc::S_IFREG) {
-            return None;
-        }
-        let verified = |fd: libc::c_int, writable: bool| {
-            if fstat(fd).ok().map(|held| held.id) == Some(id) {
-                Some((fd, writable))
-            } else {
-                close(fd);
-                None
-            }
-        };
-        for (flags, writable) in [(libc::O_RDWR, true), (libc::O_RDONLY, false)] {
-            match open_at(name, flags | libc::O_NONBLOCK, 0) {
-                Ok(fd) => return verified(fd, writable),
-                Err(error) if is_errno(&error, libc::EACCES) => continue,
-                Err(_) => return None,
-            }
-        }
-        if !hidden {
-            return None;
-        }
-        let path = cstring(name).ok()?;
-        #[cfg(target_os = "macos")]
-        let flags = libc::AT_SYMLINK_NOFOLLOW;
-        #[cfg(target_os = "linux")]
-        let flags = 0;
-        unsafe { libc::fchmodat(DIR, path.as_ptr(), 0o600, flags) };
-        let fd = open_at(name, libc::O_RDWR | libc::O_NONBLOCK, 0).ok()?;
-        verified(fd, true)
     }
 
     fn hidden_names(&self) -> Vec<String> {
@@ -659,33 +601,14 @@ impl<'a> Txn<'a> {
         names
     }
 
-    /// Get a writable descriptor for our inode: restore owner write access
-    /// through the descriptor held, then reopen through one of our hidden names.
-    fn reopen_writable(&mut self, id: Id) {
-        if let Some(fd) = self.stage_fd {
-            if let Ok(held) = fstat(fd) {
-                let _ = fchmod(fd, (held.mode & 0o777) | 0o600);
-            }
-        }
-        for name in self.hidden_names() {
-            if let Some((fd, true)) = self.open_ours(&name, id, true) {
-                if let Some(old) = self.stage_fd.replace(fd) {
-                    close(old);
-                }
-                self.writable = true;
-                return;
-            }
-        }
-    }
-
     /// Put entries of others that an earlier run captured back where they were.
-    /// With `committed`, also drop captured names of the replaced target.
+    /// With `committed`, drop captured names of the stage and the replaced target.
     fn settle_captures(&mut self, committed: bool) -> io::Result<()> {
         for captured in self.captures.clone() {
             let Some(stat) = stat_at(&captured.name)? else {
                 continue;
             };
-            let ours = Some(stat.id) == self.stage_id;
+            let ours = stat.id == self.id;
             if committed && (ours || Some(stat.id) == self.request.target) {
                 discard(&captured.name, stat.id)?;
             } else if !ours {
@@ -695,23 +618,12 @@ impl<'a> Txn<'a> {
         Ok(())
     }
 
-    /// After a signal ended a run. Ownership comes only from the identity the
-    /// commit reported. Past the commit point, recovery only finishes cleanup.
-    /// Before it, recovery finishes a verified publication or rolls back.
+    /// After a signal ended a run. Past the commit point, recovery only finishes
+    /// cleanup. Before it, recovery finishes a verified publication or rolls back.
     fn recover(&mut self) -> io::Result<()> {
         let request = self.request;
         if fstat(DIR)?.id != self.parent_id() {
             return Err(refuse("Parent changed"));
-        }
-        let id = request.stage_id.ok_or_else(|| refuse("No stage"))?;
-        let mut names = vec![(request.name.clone(), false)];
-        names.extend(self.hidden_names().into_iter().map(|name| (name, true)));
-        for (name, hidden) in names {
-            if let Some((fd, writable)) = self.open_ours(&name, id, hidden) {
-                self.stage_fd = Some(fd);
-                self.writable = writable;
-                break;
-            }
         }
         if request.committed == Some(true) {
             self.committed = true;
@@ -719,42 +631,33 @@ impl<'a> Txn<'a> {
             return self.finish();
         }
         self.settle_captures(false)?;
-        let at_name = id_at(&request.name);
-        if at_name.is_some() && (at_name == Some(id) || at_name == request.published_id) {
-            self.published = at_name;
-            let swapped = stat_at(&request.stage)?;
+        if id_at(&request.name) == Some(self.id) {
+            self.published = true;
             if request.target.is_some() {
-                self.swapped_out = swapped.map(|stat| stat.id);
+                self.swapped_out = id_at(&request.stage);
+                if !self.approved_target(stat_at(&request.stage)?)? {
+                    return Err(refuse("Target changed"));
+                }
             }
-            let verified = self.publication_verified()? && (request.target.is_none() || self.approved_target(swapped)?);
-            if verified {
-                self.commit_point()?;
-                self.settle_captures(true)?;
-                return self.finish();
-            }
+            self.commit_point()?;
+            self.settle_captures(true)?;
+            return self.finish();
         }
         Err(refuse("Commit rolled back"))
     }
 
-    /// Wipe an uncommitted stage inode through a writable descriptor, then drop
-    /// our hidden names. Without a wipe the names stay, so nothing approved is
-    /// left unreachable.
+    /// Wipe an uncommitted stage inode through fd 5, then drop our hidden names.
     fn cleanup(&mut self) {
-        if let (false, Some(id)) = (self.committed, self.stage_id) {
-            if !self.writable {
-                self.reopen_writable(id);
-            }
-            let wiped = self.writable && self.stage_fd.is_some_and(|fd| unsafe { libc::ftruncate(fd, 0) } == 0);
-            if wiped {
-                for captured in self.captures.clone() {
-                    let _ = discard(&captured.name, id);
-                }
-                let _ = self.remove_if(&self.request.stage, id);
-            }
+        if self.committed {
+            return;
         }
-        if let Some(fd) = self.stage_fd.take() {
-            close(fd);
+        if unsafe { libc::ftruncate(STAGE, 0) } != 0 {
+            return;
         }
+        for captured in self.captures.clone() {
+            let _ = discard(&captured.name, self.id);
+        }
+        let _ = self.remove_if(&self.request.stage, self.id);
     }
 
     /// Report where the entry that held the name before publication now is,
@@ -762,9 +665,9 @@ impl<'a> Txn<'a> {
     fn report_kept(&self) {
         let mut wanted: Vec<Id> = self.request.target.into_iter().chain(self.swapped_out).collect();
         wanted.extend(self.stranded.iter().copied());
-        for id in wanted.into_iter().filter(|id| Some(*id) != self.stage_id) {
+        for id in wanted.into_iter().filter(|id| *id != self.id) {
             if let Some(name) = self.hidden_names().into_iter().find(|name| id_at(name) == Some(id)) {
-                report(json!({ "kept": name }));
+                let _ = report(json!({ "kept": name }));
                 return;
             }
         }
@@ -789,6 +692,7 @@ fn run() -> io::Result<bool> {
     if !txn.committed {
         txn.report_kept();
     }
+    hook("finished");
     // A failure after the commit point leaves the write published.
     let _ = outcome;
     Ok(txn.committed)
