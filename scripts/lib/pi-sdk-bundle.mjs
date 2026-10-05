@@ -19,6 +19,8 @@ export function bundlePiSdk({ root, outDir }) {
     platform: 'node',
     format: 'esm',
     target: 'node22',
+    // Minified to keep the update archive under its ceiling (footprint budget v3).
+    minify: true,
     banner: { js: REQUIRE_BANNER },
     absWorkingDir: root,
     logLevel: 'warning',

@@ -13,7 +13,6 @@ import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
 import { canonicalizeServerOnlyStubEnv } from './run-lib.mjs';
 import { assertTauriExportInputsSafe } from './lib/tauri-export-safety.mjs';
-import { bundlePiSdk } from './lib/pi-sdk-bundle.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -677,8 +676,10 @@ compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NAT
 // ── Bundle the Pi SDK worker (#3255) ──
 // The packaged server runs from Resources/server; piSdkScriptPath() looks for
 // the worker and the approved-write helper in pi-sdk/ there. One file each, so
-// the Pi packages' node_modules never ship.
+// the Pi packages' node_modules never ship. Loaded here, like esbuild above, so
+// the input guards run before any build tooling is resolved.
 try {
+  const { bundlePiSdk } = await import('./lib/pi-sdk-bundle.mjs');
   bundlePiSdk({ root, outDir: join(server, 'pi-sdk') });
   console.log('📦 Bundled pi-sdk/worker.mjs + approved-write.mjs');
 } catch (e) {
