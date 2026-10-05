@@ -527,6 +527,7 @@ impl<'a> Txn<'a> {
         let held = random_name(".o8-pi-q-")?;
         report(json!({ "capture": held, "from": name }))?;
         self.captures.push(Capture { name: held.clone(), from: name.to_string() });
+        hook("capturing");
         match rename_noreplace(name, &held) {
             Ok(()) => {}
             Err(error) if is_errno(&error, libc::ENOENT) => return Ok(None),
@@ -660,15 +661,18 @@ impl<'a> Txn<'a> {
         let _ = self.remove_if(&self.request.stage, self.id);
     }
 
-    /// Report where the entry that held the name before publication now is,
-    /// when a failed write could not put it back: the approved target first.
+    /// Report where entries a failed write could not put back are now: the
+    /// approved target first, then anything else that was stranded.
     fn report_kept(&self) {
         let mut wanted: Vec<Id> = self.request.target.into_iter().chain(self.swapped_out).collect();
         wanted.extend(self.stranded.iter().copied());
+        let mut reported = Vec::new();
         for id in wanted.into_iter().filter(|id| *id != self.id) {
-            if let Some(name) = self.hidden_names().into_iter().find(|name| id_at(name) == Some(id)) {
-                let _ = report(json!({ "kept": name }));
-                return;
+            for name in self.hidden_names() {
+                if id_at(&name) == Some(id) && !reported.contains(&name) {
+                    let _ = report(json!({ "kept": name }));
+                    reported.push(name);
+                }
             }
         }
     }

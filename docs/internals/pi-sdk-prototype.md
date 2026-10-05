@@ -92,12 +92,20 @@ a recovery pass with the captured names and commit point it reported.
 `tests/pi-sdk-approved-write-races-real-path.test.ts` drives the real helper at
 named points with concurrent renames, links, edits, mode changes and kills.
 
-Known limit: the helper's hidden names are random but visible. A process that
-rebinds one of them between two of the helper's system calls can misdirect a
-removal, a restoration or a check, because POSIX has no rename or unlink
-conditioned on an inode. An entry swapped in at the stage name just before
-publication is published, and the write is refused. A process with that access
-can already write the workspace directly.
+Known limit: the guarantees hold against ordinary concurrent saves, edits,
+renames and links, and against the helper being killed at any point. They do not
+hold against a process that deliberately races the helper's own steps:
+
+- rebinding one of its random hidden names between two system calls can misdirect
+  a removal, a restoration or a check, because POSIX has no rename or unlink
+  conditioned on an inode;
+- moving the parent or editing the published file back and forth between the
+  checks of the name, the parent and the bytes can make a publication that was
+  never whole pass them.
+
+An entry swapped in at the stage name just before publication is published, and
+the write is refused. A process with that access can already write the workspace
+directly.
 
 ## Remaining gates
 

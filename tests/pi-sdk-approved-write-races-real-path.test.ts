@@ -54,6 +54,11 @@ function act(action) {
   else if (action === 'hardlink-replace') { fs.linkSync(plan.victim, N + '.tmp-link'); fs.renameSync(N + '.tmp-link', N); }
   else if (action === 'lock-dir') fs.chmodSync(P, 0o555);
   else if (action === 'remove-helper-die') { fs.unlinkSync(plan.helper); die(); }
+  else if (action === 'alias-save-remove-helper-die') {
+    fs.linkSync(N, plan.alias);
+    fs.writeFileSync(N + '.editor-tmp', 'editor'); fs.renameSync(N + '.editor-tmp', N);
+    fs.unlinkSync(plan.helper); die();
+  } else if (action === 'tool-create') fs.writeFileSync(N, 'tool', { flag: 'wx' });
   else if (action === 'probe') {
     fs.appendFileSync(new URL('probe', dir), JSON.stringify({ at, name: read(N), stage: read(stage()) }) + '\\n');
   } else if (action === 'block') {
@@ -74,7 +79,7 @@ plan.steps.forEach((step, index) => {
 `;
 
 type At = 'start' | 'staged' | 'synced' | 'before-publish' | 'after-publish' | 'committed' | 'captured'
-  | 'before-rollback' | 'before-restore' | 'finished';
+  | 'before-rollback' | 'before-restore' | 'capturing' | 'finished';
 interface Step { at: At; action: string; run?: number }
 let hooked: string;
 beforeAll(() => { hooked = buildPiWriteHelper({ hooks: true }); }, 600_000);
@@ -118,7 +123,7 @@ function leftovers(dir: string) {
 function allFired(f: Fixture) { return f.steps.every((_, index) => existsSync(join(f.helperDir, `fired-${index}`))); }
 function runs(f: Fixture) { return readFileSync(join(f.helperDir, 'runs'), 'utf8'); }
 function kept(error: unknown) {
-  expect((error as Error).message).toMatch(/kept as \.o8-pi-write-[0-9a-f-]{36}$/);
+  expect((error as Error).message).toMatch(/kept as \.o8-pi-(write|q)-[0-9a-f-]{36}$/);
   return (error as Error).message.split('kept as ')[1];
 }
 async function waitFor(file: string) {
@@ -355,6 +360,53 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(readFileSync(f.victim, 'utf8')).toBe('victim');
     expect(readFileSync(f.alias, 'utf8')).toBe('');
     expect(note(f)).toBe(null);
+  });
+
+  it('a write whose recovery cannot start still wipes its stage and says where the original may be', async () => {
+    const f = fixture('original', [{ at: 'after-publish', action: 'alias-save-remove-helper-die' }]);
+    const error = await write(f).catch((caught: Error) => caught);
+    expect(allFired(f)).toBe(true);
+    expect(readFileSync(f.alias, 'utf8')).toBe('');
+    expect(note(f)).toBe('editor');
+    expect((error as Error).message).toMatch(/may be kept as|kept as/);
+    expect(readFileSync(join(f.parent, kept(error)), 'utf8')).toBe('original');
+  });
+
+  it('a committed write whose recovery cannot start is still reported written', async () => {
+    const f = fixture('original', [{ at: 'committed', action: 'remove-helper-die' }]);
+    await expect(write(f)).resolves.toMatchObject(WROTE);
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('approved bytes');
+    // Cleanup did not run, so the replaced file is still under the stage name.
+    expect(leftovers(f.parent).map(name => readFileSync(join(f.parent, name), 'utf8'))).toEqual(['original']);
+  });
+
+  it('a helper that cannot start leaves no stage behind', async () => {
+    const f = fixture('original', []);
+    chmodSync(join(f.helperDir, 'o8-pi-write'), 0o644);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
+    expect(note(f)).toBe('original');
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
+  it('every entry rollback could not put back is reported', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'edit-stage' }, { at: 'capturing', action: 'editor-save' },
+      { at: 'captured', action: 'tool-create' }]);
+    const error = await write(f).catch((caught: Error) => caught);
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('tool');
+    const names = (error as Error).message.split('moved entries were kept as ')[1].split(', ');
+    expect(names.map(name => readFileSync(join(f.parent, name), 'utf8'))).toEqual(['original', 'editor']);
+  });
+
+  it('a kept receipt follows an entry a later killed run moved', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'edit-stage' }, { at: 'before-rollback', action: 'editor-save' },
+      { at: 'finished', action: 'die' }, { run: 2, at: 'captured', action: 'remove-helper-die' }]);
+    const error = await write(f).catch((caught: Error) => caught);
+    expect(allFired(f)).toBe(true);
+    const name = kept(error);
+    expect(name).toMatch(/^\.o8-pi-q-/);
+    expect(readFileSync(join(f.parent, name), 'utf8')).toBe('original');
   });
 
   it('a kept receipt survives a recovery run that cannot start', async () => {
