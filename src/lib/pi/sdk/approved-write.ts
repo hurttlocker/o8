@@ -19,8 +19,6 @@ interface HelperProgress {
   kept?: string[];
   committed?: boolean;
   captures?: { name: string; from: string }[];
-  /** Captures reported after the run's last kept report. */
-  movedSinceKept?: { name: string; from: string }[];
 }
 interface HelperRun extends HelperProgress { code: number | null }
 
@@ -32,14 +30,10 @@ function readProgress(line: string, progress: HelperProgress) {
   try { message = JSON.parse(line); } catch { return; }
   if (!message || typeof message !== 'object') return;
   const { kept, committed, capture, from } = message as Record<string, unknown>;
-  if (typeof kept === 'string' && HIDDEN.test(kept)) {
-    if (!progress.kept?.includes(kept)) (progress.kept ??= []).push(kept);
-    progress.movedSinceKept = [];
-  }
+  if (typeof kept === 'string' && HIDDEN.test(kept) && !progress.kept?.includes(kept)) (progress.kept ??= []).push(kept);
   if (committed === true) progress.committed = true;
   if (typeof capture === 'string' && /^\.o8-pi-q-[0-9a-f-]{36}$/.test(capture) && typeof from === 'string') {
     (progress.captures ??= []).push({ name: capture, from });
-    (progress.movedSinceKept ??= []).push({ name: capture, from });
   }
 }
 
@@ -114,22 +108,13 @@ export async function commitPiWrite(root: string, path: string, parent: PiWriteP
       const progress: { committed: boolean; captures: { name: string; from: string }[]; kept: string[] } =
         { committed: false, captures: [], kept: [] };
       // Each run inherits everything earlier runs reported, including a commit
-      // point a recovery run reached. A run that finished reports where kept
-      // entries are now; a run that was killed may have captured one after its
-      // last report, so those capture names become places to look too.
+      // point a recovery run reached.
       const absorb = (run: HelperRun) => {
         progress.committed ||= run.committed ?? false;
         progress.captures.push(...run.captures ?? []);
-        if (run.code !== null) progress.kept = [...run.kept ?? []];
-        else {
-          progress.kept = [...new Set([...progress.kept, ...run.kept ?? []])];
-          for (const capture of run.movedSinceKept ?? []) {
-            if (progress.kept.includes(capture.from)) progress.kept.push(capture.name);
-          }
-        }
+        progress.kept = [...new Set([...progress.kept, ...run.kept ?? []])];
       };
       let result: HelperRun | undefined;
-      let unrecovered = false;
       try {
         result = await runHelper(helper, stdio, { mode: 'commit', ...request }, signal, timeouts);
         absorb(result);
@@ -138,10 +123,9 @@ export async function commitPiWrite(root: string, path: string, parent: PiWriteP
         try {
           result = await runHelper(helper, stdio, { mode: 'recover', ...request,
             committed: progress.committed, captures: progress.captures }, undefined, timeouts);
-        } catch { unrecovered = true; break; }
+        } catch { break; }
         absorb(result);
       }
-      if (result?.code === null) unrecovered = true;
       // The commit receipt is the commit point: once reported, the approved
       // bytes were published, even if cleanup did not finish.
       if (result?.code === 0 || progress.committed) return;
@@ -152,12 +136,18 @@ export async function commitPiWrite(root: string, path: string, parent: PiWriteP
       if (leftover && leftover.dev === stageStat.dev && leftover.ino === stageStat.ino) {
         await unlink(join(parent.path, stageName)).catch(() => {});
       }
-      // A kept original is reported even when the run was aborted. Places to
-      // look that are empty now are dropped, unless none is left.
-      const candidates = progress.kept.length ? progress.kept : unrecovered && opened ? [stageName] : [];
-      const present = (await Promise.all(candidates.map(name => lstat(join(parent.path, name)).then(() => name, () => null))))
-        .filter((name): name is string => name !== null);
-      const kept = present.length ? present : candidates;
+      // Report what is under the write's hidden names now, whichever run left
+      // it there: the original target first. A kept original is reported even
+      // when the run was aborted.
+      const hidden = [...new Set([stageName, ...progress.captures.map(capture => capture.name), ...progress.kept])];
+      const found: { name: string; target: boolean }[] = [];
+      for (const name of hidden) {
+        const entry = await lstat(join(parent.path, name)).catch(() => null);
+        if (!entry || (entry.dev === stageStat.dev && entry.ino === stageStat.ino)) continue;
+        found.push({ name, target: Boolean(opened && entry.dev === opened.stat.dev && entry.ino === opened.stat.ino) });
+      }
+      const kept = found.length ? [...found.filter(item => item.target), ...found.filter(item => !item.target)].map(item => item.name)
+        : progress.kept;
       if (kept.length === 1) {
         throw new Error(`Approved file commit refused; the previous file was kept as ${kept[0]}`);
       }

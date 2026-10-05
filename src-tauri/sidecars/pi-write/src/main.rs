@@ -644,6 +644,19 @@ impl<'a> Txn<'a> {
             self.settle_captures(true)?;
             return self.finish();
         }
+        // An earlier rollback took the stage inode off the name and was killed
+        // before putting the swapped-out entry back: finish that step.
+        let taken_off = self.captures.iter().any(|captured| captured.from == request.name && id_at(&captured.name) == Some(self.id));
+        if request.target.is_some() && taken_off {
+            if let Some(entry) = id_at(&request.stage).filter(|entry| *entry != self.id) {
+                self.swapped_out = Some(entry);
+                hook("before-restore");
+                match rename_noreplace(&request.stage, &request.name) {
+                    Err(error) if is_errno(&error, libc::EEXIST) => self.stranded.push(entry),
+                    result => result?,
+                }
+            }
+        }
         Err(refuse("Commit rolled back"))
     }
 

@@ -409,6 +409,28 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(readFileSync(join(f.parent, name), 'utf8')).toBe('original');
   });
 
+  it('a refusal names the capture that holds the original when every recovery run is killed', async () => {
+    const f = fixture('original', [{ at: 'after-publish', action: 'editor-save' }, { at: 'captured', action: 'die' },
+      { run: 2, at: 'start', action: 'die' }, { run: 3, at: 'start', action: 'die' }, { run: 4, at: 'start', action: 'die' }]);
+    const error = await write(f).catch((caught: Error) => caught);
+    expect(allFired(f)).toBe(true);
+    expect(runs(f)).toBe('4');
+    expect(note(f)).toBe('editor');
+    const name = kept(error);
+    expect(name).toMatch(/^\.o8-pi-q-/);
+    expect(readFileSync(join(f.parent, name), 'utf8')).toBe('original');
+  });
+
+  it('recovery finishes a rollback that was killed after taking the publication off the name', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'editor-save' }, { at: 'after-publish', action: 'die' },
+      { run: 2, at: 'captured', action: 'die' }]);
+    await expect(write(f)).rejects.toThrow(/^Approved file commit refused$/);
+    expect(allFired(f)).toBe(true);
+    expect(runs(f)).toBe('3');
+    expect(note(f)).toBe('editor');
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
   it('a kept receipt survives a recovery run that cannot start', async () => {
     const f = fixture('original', [{ at: 'before-publish', action: 'edit-stage' }, { at: 'before-rollback', action: 'editor-save' },
       { at: 'finished', action: 'remove-helper-die' }]);
