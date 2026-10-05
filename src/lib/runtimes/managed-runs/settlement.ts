@@ -1,5 +1,5 @@
 import type { ManagedRunRecord } from './types';
-export { parseSettlementBinding, settlementBindingDigest, validProviderSessionId } from './settlement-contract.mjs';
+export { parseSettlementBinding, settlementBindingDigest, validProviderSessionId } from './settlement-contract';
 
 export function externalSettlementQuiet(record: ManagedRunRecord): boolean {
   const settlement = record.settlement;

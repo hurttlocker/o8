@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { CliError, EXIT, apiFetch } from '../api.js';
-import { parseSettlementBinding } from '../../../src/lib/runtimes/managed-runs/settlement-contract.mjs';
-export { settlementBindingDigest } from '../../../src/lib/runtimes/managed-runs/settlement-contract.mjs';
+import { parseSettlementBinding } from '../../../src/lib/runtimes/managed-runs/settlement-contract.js';
+export { settlementBindingDigest } from '../../../src/lib/runtimes/managed-runs/settlement-contract.js';
 import type { resolveConfig } from '../config.js';
 
 /** Host-only reservation input; never forward the file path into a worker. */
