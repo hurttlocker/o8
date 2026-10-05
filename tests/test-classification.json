@@ -3024,6 +3024,14 @@
       ]
     },
     {
+      "path": "tests/pi-sdk-approved-write-races-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-sdk-approved-write.test.ts",
       "reasons": [
         "child-process"

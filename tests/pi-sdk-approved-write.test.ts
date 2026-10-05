@@ -13,7 +13,9 @@ function helperFixture(content: string) {
   const stat = lstatSync(workspace);
   const request = Buffer.from(JSON.stringify({ root: workspace, parent: { path: workspace,
     dev: stat.dev, ino: stat.ino, root: { dev: stat.dev, ino: stat.ino } },
-    name: 'note.txt', target: null, before: null, content }));
+    name: 'note.txt', target: null, before: null, content, mode: 'commit',
+    stage: '.o8-pi-write-00000000-0000-4000-8000-000000000000',
+    backup: '.o8-pi-backup-00000000-0000-4000-8000-000000000000' }));
   return { workspace, request };
 }
 const helper = fileURLToPath(new URL('../scripts/pi-sdk/approved-write.mjs', import.meta.url));
