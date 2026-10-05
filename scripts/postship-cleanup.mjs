@@ -8,6 +8,7 @@ export const POSTSHIP_GENERATED_DIRS = [
   '.next',
   'src-tauri/target',
   'src-tauri/sidecars/speech-local/.build',
+  'src-tauri/sidecars/pi-write/target',
 ];
 
 // `out` is the verified release artifact, not disposable scratch space. Its
