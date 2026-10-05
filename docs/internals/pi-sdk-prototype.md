@@ -54,7 +54,9 @@ persisted transcript receives them.
 
 Use Node 22.19 or newer for the SDK. The repository currently declares Node 22.x
 for its full application gates. The prototype never installs or changes Node.
-After the normal repository dependency setup, run:
+Approved writes need the native helper in `src-tauri/sidecars/pi-write`; the
+tests build it with cargo, so a Rust toolchain is required. After the normal
+repository dependency setup, run:
 
 ```sh
 npx vitest run tests/pi-sdk-worker-real-path.test.ts --maxWorkers=1
@@ -73,11 +75,25 @@ SSE-error redaction and fragmented managed tool streaming.
 ## Platform and concurrency limits
 
 macOS and Linux only: `createPiSdkSession` and the approved-write helper refuse
-Windows, which has no tested directory-descriptor write path. Approved writes
-hold against the model, which has no process or command tool. They do not yet
-hold against a separate process that renames, links or replaces workspace files
-during a write; #3243 tracks that hardening, which is required before any
-command or process tool is added and before the worker is offered to users.
+Windows, which has no tested directory-descriptor write path.
+
+Approved writes go through a native helper (#3289) that works relative to the
+verified parent directory descriptor, so it follows the directory if it moves.
+A new file is published with a no-replace rename. A replacement is one atomic
+exchange, so the name is never absent. Before its commit point the helper
+verifies the published inode, its link count, its bytes and the parent location,
+and applies the target's mode. An uncommitted stage is wiped through a
+descriptor, so a hard-link alias keeps no approved bytes. The helper removes or
+moves an entry only after capturing it under a random name and proving it is its
+own; anything else goes back without overwriting. If a signal ends the helper,
+the host runs a recovery pass with the stage identity, captured names and commit
+point it reported. `tests/pi-sdk-approved-write-races-real-path.test.ts` drives
+the real helper at named points with concurrent renames, links, edits, mode
+changes and kills.
+
+Known limit: a process that renames the hidden stage away keeps a name for that
+inode. If the helper is then killed, recovery has no name through which to wipe
+it. A process with that access can already write the workspace directly.
 
 ## Remaining gates
 

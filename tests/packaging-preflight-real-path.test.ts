@@ -50,7 +50,7 @@ function fixture() {
     mkdirSync(dirname(join(server, file)), { recursive: true });
     writeFileSync(join(server, file), `runtime:${file}`);
   }
-  for (const name of ['o8', 'speech_recognizer', 'speech-local']) {
+  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
     mkdirSync(join(app, 'Contents/MacOS'), { recursive: true });
     writeFileSync(join(app, 'Contents/MacOS', name), universalMachO());
   }

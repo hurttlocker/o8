@@ -1,1 +1,1 @@
-export function bundlePiSdk(options: { root: string; outDir: string }): { worker: string; approvedWrite: string };
+export function bundlePiSdk(options: { root: string; outDir: string }): { worker: string };

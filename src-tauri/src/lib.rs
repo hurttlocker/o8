@@ -1775,6 +1775,14 @@ fn compile_cache_dir() -> String {
     format!("{}/compile-cache", o8_data_dir())
 }
 
+/// The native approved-write helper for Pi workers (#3289), shipped as an
+/// externalBin next to the app binary. The packaged servers refuse approved
+/// writes without it.
+fn pi_write_helper() -> Option<std::path::PathBuf> {
+    let helper = std::env::current_exe().ok()?.parent()?.join("o8-pi-write");
+    helper.is_file().then_some(helper)
+}
+
 fn open_child_log(name: &str) -> Option<std::fs::File> {
     let dir = format!("{}/logs", o8_data_dir());
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -6726,6 +6734,9 @@ impl BundledNextSpawn {
             .env("WS_PORT", self.ws_port.to_string())
             .env("O8_SIDECAR_PID", std::process::id().to_string())
             .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = pi_write_helper() {
+            command.env("O8_PI_WRITE_BIN", path);
+        }
         if let Some(path) = self.bundled_operator_mcp.as_ref() {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
@@ -6788,6 +6799,9 @@ impl BundledWsSpawn {
             .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
             .env("O8_SIDECAR_PID", std::process::id().to_string())
             .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = pi_write_helper() {
+            command.env("O8_PI_WRITE_BIN", path);
+        }
         if let Some(path) = self.bundled_operator_mcp.as_ref() {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);

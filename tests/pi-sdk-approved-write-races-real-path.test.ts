@@ -1,139 +1,105 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { executePiTool } from '@/lib/pi/sdk/tools';
 import { commitPiWrite } from '@/lib/pi/sdk/approved-write';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
-// Each test installs a wrapper as the packaged approved-write helper. The wrapper
-// performs concurrent same-user mutations at exact filesystem calls inside the
-// real helper, then the real helper continues unchanged (#3243). Steps can be
-// limited to one helper process: run 1 is the commit, later runs are recovery.
-const realHelper = fileURLToPath(new URL('../scripts/pi-sdk/approved-write.mjs', import.meta.url));
-const WRAPPER = `import fs from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
+// Each test copies the test build of the native helper (#3289) into its own
+// directory next to a hook. The helper runs the hook at named points and waits
+// for it, so the hook performs concurrent same-user mutations at exact steps of
+// the real helper. Runs are numbered by helper process: run 1 is the commit,
+// later runs are recovery.
+const HOOK = `import fs from 'node:fs';
+import { join } from 'node:path';
 const dir = new URL('.', import.meta.url);
 const plan = JSON.parse(fs.readFileSync(new URL('plan.json', dir), 'utf8'));
-const runs = new URL('runs', dir);
-const run = (fs.existsSync(runs) ? Number(fs.readFileSync(runs, 'utf8')) : 0) + 1;
-fs.writeFileSync(runs, String(run));
-const real = { renameSync: fs.renameSync, linkSync: fs.linkSync, unlinkSync: fs.unlinkSync,
-  symlinkSync: fs.symlinkSync, writeSync: fs.writeSync, fsyncSync: fs.fsyncSync };
-const N = plan.name;
-const stage = () => fs.readdirSync('.').find(name => /^\\.o8-pi-write-[0-9a-f-]{36}$/.test(name));
-const prefixed = (path, prefix) => typeof path === 'string' && path.startsWith(prefix);
-const die = () => process.kill(process.pid, 'SIGKILL');
-function editorSave() {
-  fs.writeFileSync(N + '.editor-tmp', 'editor'); real.renameSync(N + '.editor-tmp', N);
+const [at, pid] = process.argv.slice(2);
+const pidsFile = new URL('pids', dir);
+const pids = fs.existsSync(pidsFile) ? fs.readFileSync(pidsFile, 'utf8').split('\\n').filter(Boolean) : [];
+if (!pids.includes(pid)) {
+  pids.push(pid);
+  fs.writeFileSync(pidsFile, pids.join('\\n'));
+  fs.writeFileSync(new URL('runs', dir), String(pids.length));
 }
+const run = pids.indexOf(pid) + 1;
+const P = plan.parent;
+const N = join(P, plan.name);
+const stage = () => join(P, fs.readdirSync(P).find(name => /^\\.o8-pi-write-[0-9a-f-]{36}$/.test(name)));
+const die = () => process.kill(Number(pid), 'SIGKILL');
+const alive = () => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
+const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const read = path => fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : null;
 function act(action) {
   if (action === 'die') die();
-  else if (action === 'move-parent-outside') real.renameSync(plan.parent, plan.outside);
-  else if (action === 'link-stage-outside') real.linkSync(stage(), plan.alias);
+  else if (action === 'move-parent-outside') fs.renameSync(P, plan.outside);
+  else if (action === 'link-stage-outside') fs.linkSync(stage(), plan.alias);
   else if (action === 'replace-stage') {
-    const name = stage(); real.renameSync(name, name + '.held'); fs.writeFileSync(name, 'unapproved');
+    const name = stage(); fs.renameSync(name, name + '.held'); fs.writeFileSync(name, 'unapproved');
   } else if (action === 'edit-stage') fs.writeFileSync(stage(), 'unapproved edit');
-  else if (action === 'replace-target') { real.renameSync(N, N + '.moved'); fs.writeFileSync(N, 'concurrent'); }
-  else if (action === 'replace-target-with-symlink') { real.renameSync(N, N + '.moved'); real.symlinkSync('elsewhere', N); }
+  else if (action === 'replace-target') { fs.renameSync(N, N + '.moved'); fs.writeFileSync(N, 'concurrent'); }
+  else if (action === 'replace-target-with-symlink') { fs.renameSync(N, N + '.moved'); fs.symlinkSync('elsewhere', N); }
   else if (action === 'stage-symlink') {
-    const name = stage(); real.renameSync(name, name + '.held'); real.symlinkSync(plan.unapproved, name);
+    const name = stage(); fs.renameSync(name, name + '.held'); fs.symlinkSync(plan.unapproved, name);
   } else if (action === 'swap-stage-for-victim-and-die') {
-    const name = stage(); real.renameSync(name, plan.alias); real.linkSync(plan.victim, name); die();
-  } else if (action === 'alias-name-and-outside') { real.linkSync(stage(), N); real.linkSync(stage(), plan.alias); }
-  else if (action === 'plant-backup') {
-    const name = stage().replace('.o8-pi-write-', '.o8-pi-backup-');
-    fs.writeFileSync(name, 'victim'); fs.writeFileSync(new URL('planted', dir), name);
-  } else if (action === 'editor-save') editorSave();
-  else if (action === 'editor-create') fs.writeFileSync(N, 'editor');
+    const name = stage(); fs.renameSync(name, plan.alias); fs.linkSync(plan.victim, name); die();
+  } else if (action === 'alias-name-and-outside') { const name = stage(); fs.linkSync(name, N); fs.linkSync(name, plan.alias); }
+  else if (action === 'editor-save') { fs.writeFileSync(N + '.editor-tmp', 'editor'); fs.renameSync(N + '.editor-tmp', N); }
   else if (action === 'editor-edit-in-place') fs.writeFileSync(N, 'editor edit');
-  else if (action === 'chmod-alias-die') { fs.chmodSync(N, 0o444); real.linkSync(N, plan.alias); die(); }
-  else if (action === 'hardlink-replace') { real.linkSync(plan.victim, N + '.tmp-link'); real.renameSync(N + '.tmp-link', N); }
-  else if (action === 'lock-dir') fs.chmodSync('.', 0o555);
-  else if (action === 'block') {
+  else if (action === 'chmod-name') fs.chmodSync(N, 0o600);
+  else if (action === 'chmod-alias-die') { fs.chmodSync(N, 0o444); fs.linkSync(N, plan.alias); die(); }
+  else if (action === 'lock-alias-die') { fs.linkSync(N, plan.alias); fs.chmodSync(N, 0o000); die(); }
+  else if (action === 'hardlink-replace') { fs.linkSync(plan.victim, N + '.tmp-link'); fs.renameSync(N + '.tmp-link', N); }
+  else if (action === 'lock-dir') fs.chmodSync(P, 0o555);
+  else if (action === 'probe') {
+    fs.appendFileSync(new URL('probe', dir), JSON.stringify({ at, name: read(N), stage: read(stage()) }) + '\\n');
+  } else if (action === 'block') {
     fs.writeFileSync(new URL('reached', dir), '');
-    const cell = new Int32Array(new SharedArrayBuffer(4));
-    while (!fs.existsSync(new URL('go', dir))) Atomics.wait(cell, 0, 0, 20);
+    while (!fs.existsSync(new URL('go', dir))) pause(20);
   } else if (action === 'hang') {
     fs.writeFileSync(new URL('reached', dir), '');
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+    while (alive()) pause(20);
   }
 }
-function hit(at, after = false) {
-  plan.steps.forEach((step, index) => {
-    if (step.at !== at || (step.run ?? 1) !== run || Boolean(step.after) !== after) return;
-    const fired = new URL('fired-' + index, dir);
-    if (fs.existsSync(fired)) return;
-    fs.writeFileSync(fired, '');
-    act(step.action);
-  });
-}
-let published = false;
-fs.writeSync = (...args) => { hit('stage-write'); return real.writeSync(...args); };
-fs.fsyncSync = fd => { real.fsyncSync(fd); hit('fsync'); };
-fs.renameSync = (from, to) => {
-  const removing = from === N && (prefixed(to, '.o8-pi-q-'));
-  const restoring = to === N && (prefixed(from, '.o8-pi-backup-') || prefixed(from, '.o8-pi-q-'));
-  const touches = !removing && !restoring && (from === N || to === N);
-  if (removing) hit('rollback-name'); else if (restoring) hit('restore-name'); else if (touches) hit('publish');
-  const result = real.renameSync(from, to);
-  if (touches) hit('publish', true);
-  if (published && prefixed(from, '.o8-pi-write-') && prefixed(to, '.o8-pi-q-')) hit('capture-stage', true);
-  return result;
-};
-fs.linkSync = (from, to) => {
-  if (plan.noLinks) throw Object.assign(new Error('EPERM: operation not permitted, link'), { code: 'EPERM' });
-  const restoring = to === N && (prefixed(from, '.o8-pi-backup-') || prefixed(from, '.o8-pi-q-'));
-  const publishing = to === N && prefixed(from, '.o8-pi-write-');
-  const touches = !restoring && (from === N || to === N);
-  if (restoring) hit('restore-name');
-  else if (touches) { hit('publish'); if (publishing) hit('link-publish'); }
-  const result = real.linkSync(from, to);
-  if (publishing) published = true;
-  if (touches) { hit('publish', true); if (publishing) hit('link-publish', true); }
-  return result;
-};
-fs.unlinkSync = path => {
-  if (path === N) hit('rollback-name');
-  const result = real.unlinkSync(path);
-  if (published && path !== N) hit('after-commit-unlink', true);
-  return result;
-};
-fs.symlinkSync = (target, path, type) => {
-  if (path === N) hit('restore-name');
-  return real.symlinkSync(target, path, type);
-};
-hit('start');
-syncBuiltinESMExports();
-await import(plan.helper);
+plan.steps.forEach((step, index) => {
+  if (step.at !== at || (step.run ?? 1) !== run) return;
+  const fired = new URL('fired-' + index, dir);
+  if (fs.existsSync(fired)) return;
+  fs.writeFileSync(fired, '');
+  act(step.action);
+});
 `;
 
-type At = 'start' | 'stage-write' | 'fsync' | 'publish' | 'link-publish' | 'rollback-name' | 'restore-name'
-  | 'after-commit-unlink' | 'capture-stage';
-interface Step { at: At; action: string; after?: boolean; run?: number }
+type At = 'start' | 'staged' | 'synced' | 'before-publish' | 'after-publish' | 'committed' | 'captured'
+  | 'before-rollback' | 'before-restore';
+interface Step { at: At; action: string; run?: number }
+let hooked: string;
+beforeAll(() => { hooked = buildPiWriteHelper({ hooks: true }); }, 600_000);
 const roots: string[] = [];
 afterEach(() => {
   vi.unstubAllEnvs();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(original: string | null, steps: Step[], options: { noLinks?: boolean } = {}) {
+function fixture(original: string | null, steps: Step[]) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'o8-pi-write-race-'))); roots.push(base);
   const workspace = join(base, 'workspace');
   const parent = join(workspace, 'sub');
   mkdirSync(parent, { recursive: true });
   if (original !== null) { writeFileSync(join(parent, 'note.txt'), original); chmodSync(join(parent, 'note.txt'), 0o640); }
   const helperDir = join(base, 'helper'); mkdirSync(helperDir);
-  writeFileSync(join(helperDir, 'approved-write.mjs'), WRAPPER);
+  const helper = join(helperDir, 'o8-pi-write');
+  copyFileSync(hooked, helper); chmodSync(helper, 0o755);
+  writeFileSync(join(helperDir, 'hook.mjs'), HOOK);
+  writeFileSync(join(helperDir, 'hook'), `#!/bin/sh\nexec '${process.execPath}' '${join(helperDir, 'hook.mjs')}' "$@"\n`, { mode: 0o755 });
   const outside = join(base, 'outside-sub');
   const alias = join(base, 'outside-alias');
   const victim = join(base, 'victim.txt'); writeFileSync(victim, 'victim');
   const unapproved = join(base, 'unapproved.txt'); writeFileSync(unapproved, 'unapproved');
-  writeFileSync(join(helperDir, 'plan.json'), JSON.stringify({ helper: realHelper, steps, noLinks: options.noLinks ?? false,
-    name: 'note.txt', parent, outside, alias, victim, unapproved }));
-  vi.stubEnv('O8_PACKAGED_APP', '1');
-  vi.stubEnv('O8_PI_SDK_DIR', helperDir);
+  writeFileSync(join(helperDir, 'plan.json'), JSON.stringify({ steps, name: 'note.txt', parent, outside, alias, victim, unapproved }));
+  vi.stubEnv('O8_PI_WRITE_BIN', helper);
   return { base, workspace, parent, outside, alias, victim, unapproved, helperDir, steps };
 }
 type Fixture = ReturnType<typeof fixture>;
@@ -149,6 +115,11 @@ function leftovers(dir: string) {
   return readdirSync(dir).filter(name => name.startsWith('.o8-pi-'));
 }
 function allFired(f: Fixture) { return f.steps.every((_, index) => existsSync(join(f.helperDir, `fired-${index}`))); }
+function runs(f: Fixture) { return readFileSync(join(f.helperDir, 'runs'), 'utf8'); }
+function kept(error: unknown) {
+  expect((error as Error).message).toMatch(/kept as \.o8-pi-write-[0-9a-f-]{36}$/);
+  return (error as Error).message.split('kept as ')[1];
+}
 async function waitFor(file: string) {
   for (let i = 0; i < 500 && !existsSync(file); i++) await sleep(10);
   expect(existsSync(file)).toBe(true);
@@ -165,8 +136,19 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(leftovers(f.parent)).toEqual([]);
   });
 
+  it('a replacement exchanges the names in one step, so the name always holds a file', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'probe' }, { at: 'after-publish', action: 'probe' }]);
+    await expect(write(f)).resolves.toMatchObject(WROTE);
+    const probes = readFileSync(join(f.helperDir, 'probe'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(probes).toEqual([
+      { at: 'before-publish', name: 'original', stage: 'approved bytes' },
+      { at: 'after-publish', name: 'approved bytes', stage: 'original' },
+    ]);
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
   it.each([null, 'original'])('window 1: parent moved outside at publication is rolled back (target %s)', async original => {
-    const f = fixture(original, [{ at: 'publish', action: 'move-parent-outside' }]);
+    const f = fixture(original, [{ at: 'before-publish', action: 'move-parent-outside' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(note(f, f.outside)).toBe(original);
@@ -174,14 +156,22 @@ describe('approved writes under concurrent workspace mutation', () => {
   });
 
   it('window 1: a failed write removes its stage after the parent moves outside', async () => {
-    const f = fixture(null, [{ at: 'fsync', action: 'move-parent-outside' }]);
+    const f = fixture(null, [{ at: 'synced', action: 'move-parent-outside' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(note(f, f.outside)).toBe(null);
     expect(leftovers(f.outside)).toEqual([]);
   });
 
-  it.each([['stage-write', null], ['publish', null], ['publish', 'original']] as const)(
+  it.each([null, 'original'])('recovery reaches a parent moved outside after a kill and rolls back there (target %s)', async original => {
+    const f = fixture(original, [{ at: 'after-publish', action: 'die' }, { run: 2, at: 'start', action: 'move-parent-outside' }]);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
+    expect(allFired(f)).toBe(true);
+    expect(note(f, f.outside)).toBe(original);
+    expect(leftovers(f.outside)).toEqual([]);
+  });
+
+  it.each([['staged', null], ['before-publish', null], ['before-publish', 'original']] as const)(
     'window 2: an outside hard link to the stage made at %s keeps no approved bytes (target %s)', async (at, original) => {
       const f = fixture(original, [{ at, action: 'link-stage-outside' }]);
       await expect(write(f)).rejects.toThrow('Approved file commit refused');
@@ -192,7 +182,7 @@ describe('approved writes under concurrent workspace mutation', () => {
     });
 
   it('window 2: aliases made at the target name before the target check keep no approved bytes', async () => {
-    const f = fixture(null, [{ at: 'fsync', action: 'alias-name-and-outside' }]);
+    const f = fixture(null, [{ at: 'synced', action: 'alias-name-and-outside' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(readFileSync(f.alias, 'utf8')).toBe('');
@@ -201,7 +191,7 @@ describe('approved writes under concurrent workspace mutation', () => {
 
   it.each([['replace-stage', null], ['replace-stage', 'original'], ['edit-stage', null], ['edit-stage', 'original']] as const)(
     'window 3: %s after the final check never publishes unapproved bytes (target %s)', async (action, original) => {
-      const f = fixture(original, [{ at: 'publish', action }]);
+      const f = fixture(original, [{ at: 'before-publish', action }]);
       await expect(write(f)).rejects.toThrow('Approved file commit refused');
       expect(allFired(f)).toBe(true);
       expect(note(f)).toBe(original);
@@ -217,8 +207,21 @@ describe('approved writes under concurrent workspace mutation', () => {
       expect(readFileSync(join(f.parent, held), 'utf8')).toBe('');
     });
 
+  it.each([null, 'original'])('window 3: recovery after a kill takes a swapped-in stage entry back off the name (target %s)', async original => {
+    const f = fixture(original, [{ at: 'before-publish', action: 'replace-stage' }, { at: 'after-publish', action: 'die' }]);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
+    expect(allFired(f)).toBe(true);
+    expect(runs(f)).toBe('2');
+    expect(note(f)).toBe(original);
+    // The entry goes back to the stage name it was swapped in at. The process
+    // that renamed the stage away still holds it; recovery has no name to wipe.
+    const [replacement, held] = leftovers(f.parent).sort();
+    expect(held).toBe(`${replacement}.held`);
+    expect(readFileSync(join(f.parent, replacement), 'utf8')).toBe('unapproved');
+  });
+
   it.each([null, 'original'])('window 3: a symlink swapped in at the stage leaves nothing unapproved published (target %s)', async original => {
-    const f = fixture(original, [{ at: 'link-publish', action: 'stage-symlink' }]);
+    const f = fixture(original, [{ at: 'before-publish', action: 'stage-symlink' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe(original);
@@ -227,7 +230,7 @@ describe('approved writes under concurrent workspace mutation', () => {
   });
 
   it('window 4: a target replaced before publication is never overwritten', async () => {
-    const f = fixture('original', [{ at: 'publish', action: 'replace-target' }]);
+    const f = fixture('original', [{ at: 'before-publish', action: 'replace-target' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe('concurrent');
@@ -235,56 +238,36 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(leftovers(f.parent)).toEqual([]);
   });
 
-  it('window 4: a file planted at the paired backup name is never overwritten', async () => {
-    const f = fixture('original', [{ at: 'fsync', action: 'plant-backup' }]);
-    await expect(write(f)).resolves.toMatchObject(WROTE);
+  it('window 4: an edit to the target just before publication stays at the name', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'editor-edit-in-place' }]);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
-    expect(note(f)).toBe('approved bytes');
-    const planted = readFileSync(join(f.helperDir, 'planted'), 'utf8');
-    expect(readFileSync(join(f.parent, planted), 'utf8')).toBe('victim');
+    expect(note(f)).toBe('editor edit');
+    expect(leftovers(f.parent)).toEqual([]);
   });
 
   it.each([null, 'original'])('rollback keeps an editor save made while it removes the publication (target %s)', async original => {
-    const f = fixture(original, [{ at: 'publish', action: 'edit-stage' }, { at: 'rollback-name', action: 'editor-save' }]);
+    const f = fixture(original, [{ at: 'before-publish', action: 'edit-stage' }, { at: 'before-rollback', action: 'editor-save' }]);
     const error = await write(f).catch((caught: Error) => caught);
     expect(error).toBeInstanceOf(Error);
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe('editor');
-    if (original !== null) {
-      expect((error as Error).message).toMatch(/kept as \.o8-pi-backup-/);
-      const kept = (error as Error).message.split('kept as ')[1];
-      expect(readFileSync(join(f.parent, kept), 'utf8')).toBe('original');
-    }
+    if (original !== null) expect(readFileSync(join(f.parent, kept(error)), 'utf8')).toBe('original');
   });
 
-  it('restoring a moved-aside entry never overwrites an editor save', async () => {
-    const f = fixture('original', [{ at: 'publish', action: 'replace-target-with-symlink' },
-      { at: 'restore-name', action: 'editor-save' }]);
-    await expect(write(f)).rejects.toThrow(/kept as \.o8-pi-backup-/);
+  it('restoring the swapped-out entry never overwrites an editor save', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'replace-target-with-symlink' },
+      { at: 'before-restore', action: 'editor-save' }]);
+    const error = await write(f).catch((caught: Error) => caught);
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe('editor');
     expect(readFileSync(join(f.parent, 'note.txt.moved'), 'utf8')).toBe('original');
-  });
-
-  it('an editor save between moving the target aside and publication keeps both versions', async () => {
-    const f = fixture('original', [{ at: 'link-publish', action: 'editor-create' }]);
-    const error = await write(f).catch((caught: Error) => caught);
-    expect(allFired(f)).toBe(true);
-    expect((error as Error).message).toMatch(/kept as \.o8-pi-backup-/);
-    expect(note(f)).toBe('editor');
-    const kept = (error as Error).message.split('kept as ')[1];
-    expect(readFileSync(join(f.parent, kept), 'utf8')).toBe('original');
-  });
-
-  it('a filesystem without hard links never strands the original', async () => {
-    const f = fixture('original', [], { noLinks: true });
-    await expect(write(f)).rejects.toThrow('Approved file commit refused');
-    expect(note(f)).toBe('original');
-    expect(leftovers(f.parent)).toEqual([]);
+    // The symlink that held the name when it was exchanged is reported where it was kept.
+    expect(lstatSync(join(f.parent, kept(error))).isSymbolicLink()).toBe(true);
   });
 
   it('an abort while the helper runs removes the stage and publishes nothing', async () => {
-    const f = fixture(null, [{ at: 'fsync', action: 'block' }]);
+    const f = fixture(null, [{ at: 'synced', action: 'block' }]);
     const controller = new AbortController();
     const settled = write(f, controller.signal).catch((error: Error) => error);
     await waitFor(join(f.helperDir, 'reached'));
@@ -297,35 +280,29 @@ describe('approved writes under concurrent workspace mutation', () => {
   });
 
   it('a helper that stops responding is killed and its stage removed', async () => {
-    const f = fixture(null, [{ at: 'fsync', action: 'hang' }]);
+    const f = fixture(null, [{ at: 'synced', action: 'hang' }]);
     const parentStat = lstatSync(f.parent);
     const workspaceStat = lstatSync(f.workspace);
     const parent = { path: f.parent, dev: parentStat.dev, ino: parentStat.ino, root: { dev: workspaceStat.dev, ino: workspaceStat.ino } };
     await expect(commitPiWrite(f.workspace, 'sub/note.txt', parent, null, null, 'approved bytes',
-      new AbortController().signal, { timeoutMs: 300, killGraceMs: 300 })).rejects.toThrow('Approved file commit refused');
+      new AbortController().signal, { timeoutMs: 2_000, killGraceMs: 500 })).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe(null);
     expect(leftovers(f.parent)).toEqual([]);
   }, 30_000);
 
-  it.each([null, 'original'])('a helper killed after its first publication step is recovered (target %s)', async original => {
-    const f = fixture(original, [{ at: 'publish', after: true, action: 'die' }]);
-    if (original === null) {
-      // Killed after the exclusive link: recovery verifies and finishes the publication.
-      await expect(write(f)).resolves.toMatchObject(WROTE);
-      expect(note(f)).toBe('approved bytes');
-      expect(lstatSync(join(f.parent, 'note.txt')).nlink).toBe(1);
-    } else {
-      // Killed after moving the target aside: recovery restores it.
-      await expect(write(f)).rejects.toThrow('Approved file commit refused');
-      expect(note(f)).toBe('original');
-    }
+  it.each([null, 'original'])('a helper killed right after publication is recovered and finished (target %s)', async original => {
+    const f = fixture(original, [{ at: 'after-publish', action: 'die' }]);
+    await expect(write(f)).resolves.toMatchObject(WROTE);
     expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('approved bytes');
+    expect(lstatSync(join(f.parent, 'note.txt')).nlink).toBe(1);
+    if (original !== null) expect(statSync(join(f.parent, 'note.txt')).mode & 0o777).toBe(0o640);
     expect(leftovers(f.parent)).toEqual([]);
   });
 
-  it.each([null, 'original'])('a helper killed after removing its stage still reports the finished write (target %s)', async original => {
-    const f = fixture(original, [{ at: 'after-commit-unlink', after: true, action: 'die' }]);
+  it.each([null, 'original'])('a helper killed after its commit point still reports the finished write (target %s)', async original => {
+    const f = fixture(original, [{ at: 'committed', action: 'die' }]);
     await expect(write(f)).resolves.toMatchObject(WROTE);
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe('approved bytes');
@@ -333,8 +310,27 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(leftovers(f.parent)).toEqual([]);
   });
 
+  it('a recovery run that finishes the write reports its commit point to later runs', async () => {
+    const f = fixture(null, [{ at: 'after-publish', action: 'die' }, { run: 2, at: 'committed', action: 'die' },
+      { run: 3, at: 'start', action: 'editor-edit-in-place' }]);
+    await expect(write(f)).resolves.toMatchObject(WROTE);
+    expect(allFired(f)).toBe(true);
+    expect(runs(f)).toBe('3');
+    expect(note(f)).toBe('editor edit');
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
+  it('committed recovery never reapplies the target mode over a later change', async () => {
+    const f = fixture('original', [{ at: 'committed', action: 'die' }, { run: 2, at: 'start', action: 'chmod-name' }]);
+    await expect(write(f)).resolves.toMatchObject(WROTE);
+    expect(allFired(f)).toBe(true);
+    expect(note(f)).toBe('approved bytes');
+    expect(statSync(join(f.parent, 'note.txt')).mode & 0o777).toBe(0o600);
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
   it('a target made read-only during approval is still finished after a kill', async () => {
-    const f = fixture('original', [{ at: 'link-publish', after: true, action: 'die' }]);
+    const f = fixture('original', [{ at: 'after-publish', action: 'die' }]);
     const approve = async () => { chmodSync(join(f.parent, 'note.txt'), 0o444); return true; };
     await expect(write(f, new AbortController().signal, approve)).resolves.toMatchObject(WROTE);
     expect(allFired(f)).toBe(true);
@@ -344,8 +340,8 @@ describe('approved writes under concurrent workspace mutation', () => {
   });
 
   it('a target made read-only during approval does not stop recovery from wiping an aliased stage', async () => {
-    const f = fixture('original', [{ at: 'link-publish', action: 'link-stage-outside' },
-      { at: 'link-publish', after: true, action: 'die' }]);
+    const f = fixture('original', [{ at: 'before-publish', action: 'link-stage-outside' },
+      { at: 'after-publish', action: 'die' }]);
     const approve = async () => { chmodSync(join(f.parent, 'note.txt'), 0o444); return true; };
     await expect(write(f, new AbortController().signal, approve)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
@@ -355,7 +351,7 @@ describe('approved writes under concurrent workspace mutation', () => {
   });
 
   it('recovery never truncates a file swapped in at the stage name', async () => {
-    const f = fixture(null, [{ at: 'fsync', action: 'swap-stage-for-victim-and-die' }]);
+    const f = fixture(null, [{ at: 'synced', action: 'swap-stage-for-victim-and-die' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(readFileSync(f.victim, 'utf8')).toBe('victim');
@@ -363,25 +359,24 @@ describe('approved writes under concurrent workspace mutation', () => {
   });
 
   it('a recovery run that dies is retried until the stage is removed', async () => {
-    const f = fixture(null, [{ at: 'fsync', action: 'die' }, { run: 2, at: 'start', action: 'die' }]);
+    const f = fixture(null, [{ at: 'synced', action: 'die' }, { run: 2, at: 'start', action: 'die' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
-    expect(readFileSync(join(f.helperDir, 'runs'), 'utf8')).toBe('3');
+    expect(runs(f)).toBe('3');
     expect(note(f)).toBe(null);
     expect(leftovers(f.parent)).toEqual([]);
   });
 
   it('an edit made after a finished write survives recovery', async () => {
-    const f = fixture(null, [{ at: 'after-commit-unlink', after: true, action: 'die' },
-      { run: 2, at: 'start', action: 'editor-edit-in-place' }]);
+    const f = fixture(null, [{ at: 'committed', action: 'die' }, { run: 2, at: 'start', action: 'editor-edit-in-place' }]);
     await expect(write(f)).resolves.toMatchObject(WROTE);
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe('editor edit');
     expect(leftovers(f.parent)).toEqual([]);
   });
 
-  it('a kill while cleanup holds the stage under a captured name still finishes the write', async () => {
-    const f = fixture('original', [{ at: 'capture-stage', after: true, action: 'die' }]);
+  it('a kill while cleanup holds the replaced target under a captured name still finishes the write', async () => {
+    const f = fixture('original', [{ at: 'captured', action: 'die' }]);
     await expect(write(f)).resolves.toMatchObject(WROTE);
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe('approved bytes');
@@ -390,7 +385,7 @@ describe('approved writes under concurrent workspace mutation', () => {
   });
 
   it('recovery wipes a publication made read-only and hard-linked outside after a kill', async () => {
-    const f = fixture('original', [{ at: 'link-publish', after: true, action: 'chmod-alias-die' }]);
+    const f = fixture('original', [{ at: 'after-publish', action: 'chmod-alias-die' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(readFileSync(f.alias, 'utf8')).toBe('');
@@ -398,22 +393,42 @@ describe('approved writes under concurrent workspace mutation', () => {
     expect(leftovers(f.parent)).toEqual([]);
   });
 
+  it.skipIf(process.getuid?.() === 0)('recovery wipes a publication made unreadable and hard-linked outside after a kill', async () => {
+    const f = fixture('original', [{ at: 'after-publish', action: 'lock-alias-die' }]);
+    await expect(write(f)).rejects.toThrow('Approved file commit refused');
+    expect(allFired(f)).toBe(true);
+    expect(statSync(f.alias).size).toBe(0);
+    expect(note(f)).toBe('original');
+    expect(leftovers(f.parent)).toEqual([]);
+  });
+
   it('rollback keeps a replacement that is a hard link to another file', async () => {
-    const f = fixture(null, [{ at: 'publish', action: 'edit-stage' }, { at: 'rollback-name', action: 'hardlink-replace' }]);
+    const f = fixture(null, [{ at: 'before-publish', action: 'edit-stage' }, { at: 'before-rollback', action: 'hardlink-replace' }]);
     await expect(write(f)).rejects.toThrow('Approved file commit refused');
     expect(allFired(f)).toBe(true);
     expect(note(f)).toBe('victim');
     expect(lstatSync(join(f.parent, 'note.txt')).ino).toBe(lstatSync(f.victim).ino);
   });
 
-  it.skipIf(process.getuid?.() === 0)('a restore blocked by permissions still reports where the original is kept', async () => {
-    const f = fixture('original', [{ at: 'link-publish', action: 'lock-dir' }]);
+  it.skipIf(process.getuid?.() === 0)('a rollback blocked by permissions still reports where the original is kept', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'edit-stage' }, { at: 'before-rollback', action: 'lock-dir' }]);
     try {
       const error = await write(f).catch((caught: Error) => caught);
       expect(allFired(f)).toBe(true);
-      expect((error as Error).message).toMatch(/kept as \.o8-pi-backup-/);
-      const kept = (error as Error).message.split('kept as ')[1];
-      expect(readFileSync(join(f.parent, kept), 'utf8')).toBe('original');
+      expect(readFileSync(join(f.parent, kept(error)), 'utf8')).toBe('original');
+      // The refused publication could not be moved, so its inode was wiped in place.
+      expect(note(f)).toBe('');
+    } finally { chmodSync(f.parent, 0o755); }
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a recovery blocked by permissions still reports where the original is kept', async () => {
+    const f = fixture('original', [{ at: 'before-publish', action: 'edit-stage' }, { at: 'after-publish', action: 'die' },
+      { run: 2, at: 'start', action: 'lock-dir' }]);
+    try {
+      const error = await write(f).catch((caught: Error) => caught);
+      expect(allFired(f)).toBe(true);
+      expect(readFileSync(join(f.parent, kept(error)), 'utf8')).toBe('original');
+      expect(note(f)).toBe('');
     } finally { chmodSync(f.parent, 0o755); }
   });
 });

@@ -3042,7 +3042,8 @@
     {
       "path": "tests/pi-sdk-approved-write.test.ts",
       "reasons": [
-        "child-process"
+        "child-process",
+        "executable-fixture"
       ]
     },
     {
@@ -3068,6 +3069,7 @@
     {
       "path": "tests/pi-sdk-worker-real-path.test.ts",
       "reasons": [
+        "native-build",
         "real-path"
       ]
     },

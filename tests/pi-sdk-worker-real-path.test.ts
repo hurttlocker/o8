@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { link, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-w
 import { createPiSdkSession, requirePiNode, requirePiPlatform } from '@/lib/pi/sdk/session';
 import { createManagedPiTransport } from '@/lib/pi/sdk/transport';
 import * as workspaceFiles from '@/lib/fs/workspace-file';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 // These seams exist only in Vitest's module mocks, never in session options.
 const race = vi.hoisted(() => ({ afterLstat: undefined as undefined | ((path: string) => Promise<void>) }));
@@ -22,6 +23,8 @@ vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
   contextWindow: 16000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+// Approved writes go through the native helper from the source checkout's cargo build.
+beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 const roots: string[] = [];
 const clients: Awaited<ReturnType<typeof createPiSdkSession>>[] = [];
 afterEach(async () => { race.afterLstat = undefined; vi.restoreAllMocks();

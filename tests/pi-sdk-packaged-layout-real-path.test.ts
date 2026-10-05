@@ -7,7 +7,8 @@ import { dirname, join, sep } from 'node:path';
 import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
 import { bundlePiSdk } from '../scripts/lib/pi-sdk-bundle.mjs';
 import { createPiSdkSession } from '@/lib/pi/sdk/session';
-import { piSdkScriptPath } from '@/lib/pi/sdk/scripts';
+import { piSdkScriptPath, piWriteHelperPath } from '@/lib/pi/sdk/scripts';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
 
@@ -33,6 +34,7 @@ function hasNodeModulesAbove(path: string) {
 
 let exportRoot: string;
 let piDir: string;
+let writeHelper: string;
 const roots: string[] = [];
 const sessions: Awaited<ReturnType<typeof createPiSdkSession>>[] = [];
 
@@ -41,7 +43,8 @@ beforeAll(async () => {
   exportRoot = await realpath(await mkdtemp(join(tmpdir(), 'o8-pi-packaged-')));
   piDir = join(exportRoot, 'server', 'pi-sdk');
   bundlePiSdk({ root: process.cwd(), outDir: piDir });
-}, 120_000);
+  writeHelper = buildPiWriteHelper();
+}, 600_000);
 afterAll(async () => { await rm(exportRoot, { recursive: true, force: true }); });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -54,7 +57,6 @@ describe('Pi SDK in the packaged server layout', () => {
     expect(piSdkScriptPath('worker.mjs', {})).toBe(join(process.cwd(), 'scripts', 'pi-sdk', 'worker.mjs'));
     const packaged = { O8_PACKAGED_APP: '1', O8_PI_SDK_DIR: piDir };
     expect(piSdkScriptPath('worker.mjs', packaged)).toBe(join(piDir, 'worker.mjs'));
-    expect(piSdkScriptPath('approved-write.mjs', packaged)).toBe(join(piDir, 'approved-write.mjs'));
     const empty = await realpath(await mkdtemp(join(tmpdir(), 'o8-pi-empty-'))); roots.push(empty);
     expect(() => piSdkScriptPath('worker.mjs', { O8_PACKAGED_APP: '1', O8_PI_SDK_DIR: empty }))
       .toThrow('Pi SDK worker.mjs is missing from this build');
@@ -62,9 +64,17 @@ describe('Pi SDK in the packaged server layout', () => {
     expect(hasNodeModulesAbove(join(piDir, 'worker.mjs'))).toBe(false);
   });
 
+  it('resolves the native write helper the shell ships and refuses a packaged app without it', () => {
+    expect(piWriteHelperPath({})).toBe(writeHelper);
+    expect(piWriteHelperPath({ O8_PACKAGED_APP: '1', O8_PI_WRITE_BIN: writeHelper })).toBe(writeHelper);
+    expect(() => piWriteHelperPath({ O8_PACKAGED_APP: '1' })).toThrow('Pi write helper is missing from this build');
+    expect(() => piWriteHelperPath({ O8_PI_WRITE_BIN: join(exportRoot, 'missing') })).toThrow('Pi write helper is missing from this build');
+  });
+
   it('runs an approved write through the bundled worker and helper with no Pi packages installed', async () => {
     vi.stubEnv('O8_PACKAGED_APP', '1');
     vi.stubEnv('O8_PI_SDK_DIR', piDir);
+    vi.stubEnv('O8_PI_WRITE_BIN', writeHelper);
     const root = await realpath(await mkdtemp(join(tmpdir(), 'o8-pi-packaged-run-'))); roots.push(root);
     const workspace = join(root, 'workspace'); await mkdir(workspace);
     let calls = 0; let approved = 0;

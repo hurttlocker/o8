@@ -3,7 +3,7 @@
 // desktop export and the packaged-layout test both call this, so the test runs
 // the same build the app ships.
 import { buildSync } from 'esbuild';
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Some Pi dependencies are CommonJS and call require(); ESM output has none.
@@ -25,8 +25,5 @@ export function bundlePiSdk({ root, outDir }) {
     absWorkingDir: root,
     logLevel: 'warning',
   });
-  // The write helper imports Node built-ins only, so it ships as is.
-  const approvedWrite = join(outDir, 'approved-write.mjs');
-  copyFileSync(join(root, 'scripts', 'pi-sdk', 'approved-write.mjs'), approvedWrite);
-  return { worker, approvedWrite };
+  return { worker };
 }
