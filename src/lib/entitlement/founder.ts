@@ -9,9 +9,9 @@ import { getDataDir } from '@/lib/data-dir-migration';
 /**
  * Pro · Lifetime local record (`founder.json`, retained for compatibility).
  *
- * Written by the entitlement sync route when the license server reports a
- * `founding` source, cleared otherwise. PURELY cosmetic — the actual
- * entitlement is the signed `founder` plan in entitlement.json; this only powers
+ * Written by the entitlement sync route when the license server reports
+ * lifetime-seat metadata, cleared otherwise. The actual entitlement remains
+ * the signed license plan in entitlement.json; this record powers
  * the lifetime badge serial and legacy metadata. Mirrors license.ts's cache
  * style (mode 0600, ENOENT-tolerant, never throws).
  */

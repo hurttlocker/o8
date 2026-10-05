@@ -290,9 +290,9 @@ export async function POST(request: Request) {
     // later reload (#1483).
     clearAuthSignOutMarker();
 
-    // Founding Operator → stamp the local badge record; otherwise clear it.
+    // Persist lifetime-seat metadata independently of the signed license source.
     const founder = data.founder;
-    if (data.source === 'founding' && founder && typeof founder.operatorNumber === 'number') {
+    if (founder && typeof founder.operatorNumber === 'number') {
       writeFounderRecord({
         operatorNumber: founder.operatorNumber,
         tier: typeof founder.tier === 'number' ? founder.tier : null,
