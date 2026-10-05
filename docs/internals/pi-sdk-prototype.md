@@ -35,9 +35,13 @@ cooperative-to-forced child shutdown ladder.
 
 ## Managed inference boundary
 
-`createManagedPiTransport` resolves `resolveOpenRouterRoute({ managedOnly: true })`
-for every model request. No entitlement means no request, and there is no local,
-BYOK or subscription fallback. Credentials remain in the host. Pi's full OpenAI
+`createManagedPiTransport` resolves `resolvePiInferenceRoute()` for every model
+request. A paid plan uses its plan token on the managed relay. A free install uses
+its free allowance token on the same relay, and requests that token on first use
+when it has none. No token means no request, and there is no local, BYOK or
+subscription fallback. Credentials remain in the host. When the relay reports
+that the daily allowance is used up, the run ends after that one call with a
+plain message in `errorMessage`; there is no retry. Pi's full OpenAI
 stream parser handles text and fragmented tool calls, but a host-owned fetch
 adapter fixes destination, credential headers, HTTP method and redirect policy.
 The desktop UI proxy stream is not used as a model endpoint.
@@ -71,6 +75,8 @@ provider, consume credits, obtain credentials or claim model quality. Fixtures
 cover persistence/resume, Unicode text, approval denial and target drift,
 protected aliases, disabled ambient extensions, Stop, budgets, HTTP errors,
 SSE-error redaction and fragmented managed tool streaming.
+`tests/pi-sdk-free-route-real-path.test.ts` covers the free, paid, no-entitlement,
+view-as-free and used-up allowance routes with signed synthetic tokens.
 
 ## Platform and concurrency limits
 

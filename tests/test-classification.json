@@ -3054,6 +3054,12 @@
       ]
     },
     {
+      "path": "tests/pi-sdk-free-route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-sdk-live-acceptance.test.ts",
       "reasons": [
         "process-signal"

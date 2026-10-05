@@ -265,6 +265,27 @@ export async function resolveOpenRouterRoute(
 }
 
 /**
+ * Pi worker route (#3256): the entitled managed proxy, else the install's free
+ * allowance on the same relay. Never local, BYOK, or CLI tiers: the relay owns
+ * the model policy and the daily cap for both. Starting a Pi run is an explicit
+ * managed-model request, so a keyless install provisions its allowance here.
+ */
+export async function resolvePiInferenceRoute(): Promise<InferenceRoute | null> {
+  let token = planToken() ?? freeAllowanceToken();
+  if (!token) {
+    await ensureFreeEntitlement();
+    token = freeAllowanceToken();
+  }
+  return token
+    ? {
+      url: `${proxyBaseUrl()}/v1/inference`,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      via: 'proxy',
+    }
+    : null;
+}
+
+/**
  * Gemini embeddings route for `embedContent`. Direct (local Gemini key, key in
  * the query string) → proxy (plan token, Bearer) → null. Managed Brain
  * requests set `managedOnly` so query-time cache embeddings cannot switch

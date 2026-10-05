@@ -20,7 +20,8 @@ export interface PiSdkSessionOptions {
   maxToolCalls?: number;
   runTimeoutMs?: number;
 }
-export interface PiRunResult { text?: string; stopReason?: string; messageCount: number }
+/** `errorMessage` carries only o8-written failure text, never provider bodies. */
+export interface PiRunResult { text?: string; stopReason?: string; errorMessage?: string; messageCount: number }
 
 export function requirePiNode(version = process.versions.node) {
   const [major, minor] = version.split('.').map(Number);
