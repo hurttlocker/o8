@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
+import { piSdkScriptPath } from './scripts';
 
 export interface PiWriteParent {
   path: string;
@@ -23,7 +23,7 @@ export async function commitPiWrite(root: string, path: string, parent: PiWriteP
       throw new Error('Workspace parent changed before write');
     }
     signal.throwIfAborted();
-    const helper = fileURLToPath(new URL('../../../../scripts/pi-sdk/approved-write.mjs', import.meta.url));
+    const helper = piSdkScriptPath('approved-write.mjs');
     await new Promise<void>((resolve, reject) => {
       const child = spawn(process.execPath, [helper], {
         cwd: parent.path, env: { NODE_ENV: 'production' }, signal, timeout: 10_000,

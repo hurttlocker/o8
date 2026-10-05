@@ -1,9 +1,9 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtimes/shared/stdio-json-rpc';
 import { createPiApproval } from './approval';
+import { piSdkScriptPath } from './scripts';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval } from './tools';
 import { createManagedPiTransport, type PiModelTransport } from './transport';
 
@@ -56,7 +56,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   let surfaceId = '';
   const approve: PiApproval = options.approve ?? ((call, signal) => createPiApproval(surfaceId, root)(call, signal));
   const transport = options.transport ?? createManagedPiTransport({ model: options.model });
-  const workerPath = fileURLToPath(new URL('../../../../scripts/pi-sdk/worker.mjs', import.meta.url));
+  const workerPath = piSdkScriptPath('worker.mjs');
   const peer = new StdioJsonRpcPeer({ command: process.execPath, args: [workerPath], cwd: stateDir,
     // No inherited provider keys, NODE_OPTIONS, user extension paths or proxy variables.
     env: { NODE_ENV: 'production', HOME: stateDir, USERPROFILE: stateDir, PI_OFFLINE: '1', NO_COLOR: '1' } });

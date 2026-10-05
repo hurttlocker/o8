@@ -3043,6 +3043,13 @@
       ]
     },
     {
+      "path": "tests/pi-sdk-packaged-layout-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-sdk-worker-real-path.test.ts",
       "reasons": [
         "real-path"
