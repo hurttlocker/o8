@@ -4,6 +4,8 @@ import type {
   ManagedRunTerminationReceipt,
   ManagedRunTerminationSignal,
 } from './types';
+import { externalSettlementQuiet } from './settlement';
+import { findManagedRun, requestManagedRunStop, retainManagedRunTermination } from './registry';
 
 interface CommandReceipt {
   code: number;
@@ -101,7 +103,7 @@ async function markerProbe(
   if (!/^[A-Za-z0-9._-]{1,160}$/.test(marker)) {
     return { state: 'unknown', pids: [], error: 'owned process marker is invalid' };
   }
-  const receipt = await deps.run('ps', ['eww', '-axo', 'pid=,command='], 3_000);
+  const receipt = await deps.run('ps', ['axeww', '-o', 'pid=,command='], 3_000);
   if (receipt.code !== 0) {
     return {
       state: 'unknown',
@@ -127,6 +129,16 @@ async function probeOwnedRun(record: ManagedRunRecord, deps: ManagedRunTerminati
   return { session, marker, confirmedDead };
 }
 
+function defaultDependencies(): ManagedRunTerminationDeps {
+  return { run: defaultRun, signalProcess: defaultSignalProcess, signalGroup: defaultSignalGroup,
+    sleep: defaultSleep, now: () => new Date() };
+}
+
+/** Signal-free process-tree verification, also used before natural completion. */
+export async function inspectOwnedManagedRun(record: ManagedRunRecord): Promise<boolean> {
+  return (await probeOwnedRun(record, defaultDependencies())).confirmedDead;
+}
+
 export async function terminateManagedRun(
   record: ManagedRunRecord,
   options: {
@@ -135,6 +147,7 @@ export async function terminateManagedRun(
     deps?: Partial<ManagedRunTerminationDeps>;
   },
 ): Promise<ManagedRunTerminationReceipt> {
+  if (record.settlement) record = requestManagedRunStop(record.id) ?? record;
   const deps: ManagedRunTerminationDeps = {
     run: options.deps?.run ?? defaultRun,
     signalProcess: options.deps?.signalProcess ?? defaultSignalProcess,
@@ -143,9 +156,27 @@ export async function terminateManagedRun(
     now: options.deps?.now ?? (() => new Date()),
   };
   const requestedAt = deps.now().toISOString();
+  const externalQuiet = () => externalSettlementQuiet(findManagedRun(record.id) ?? record);
+  const settle = (receipt: ManagedRunTerminationReceipt) => {
+    if (record.settlement) {
+      receipt.externalSettlement = externalQuiet() ? 'quiet' : 'unknown';
+      receipt.confirmedDead = receipt.confirmedDead && receipt.externalSettlement === 'quiet';
+      if (!receipt.confirmedDead) receipt.confirmedAt = null;
+      retainManagedRunTermination(record.id, receipt);
+    }
+    return receipt;
+  };
+  const waitForExternal = async () => {
+    // A coordinator needs time to stop remote/independently contained work.
+    // The operator callback can run concurrently; workers cannot write it.
+    for (let elapsed = 0; record.settlement && !externalQuiet() && elapsed < 10_000; elapsed += 250) {
+      await deps.sleep(250);
+    }
+  };
   const before = await probeOwnedRun(record, deps);
   if (before.confirmedDead) {
-    return {
+    await waitForExternal();
+    return settle({
       schema: 'o8/managed-run-termination/v1',
       reason: options.reason,
       exitCode: options.exitCode,
@@ -154,7 +185,7 @@ export async function terminateManagedRun(
       confirmedDead: true,
       alreadyDead: true,
       steps: [],
-    };
+    });
   }
 
   const steps: ManagedRunTerminationReceipt['steps'] = [];
@@ -189,6 +220,7 @@ export async function terminateManagedRun(
     }
 
     await deps.sleep(step.waitMs);
+    if (record.settlement && step.signal === 'SIGINT') await waitForExternal();
     const after = await probeOwnedRun(record, deps);
     steps.push({
       signal: step.signal,
@@ -199,7 +231,7 @@ export async function terminateManagedRun(
       errors,
     });
     if (after.confirmedDead) {
-      return {
+      return settle({
         schema: 'o8/managed-run-termination/v1',
         reason: options.reason,
         exitCode: options.exitCode,
@@ -208,11 +240,11 @@ export async function terminateManagedRun(
         confirmedDead: true,
         alreadyDead: false,
         steps,
-      };
+      });
     }
   }
 
-  return {
+  return settle({
     schema: 'o8/managed-run-termination/v1',
     reason: options.reason,
     exitCode: options.exitCode,
@@ -221,7 +253,7 @@ export async function terminateManagedRun(
     confirmedDead: false,
     alreadyDead: false,
     steps,
-  };
+  });
 }
 
 export const managedRunTerminationInternals = {

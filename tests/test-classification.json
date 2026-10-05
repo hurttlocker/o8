@@ -2433,6 +2433,12 @@
       ]
     },
     {
+      "path": "tests/managed-run-external-settlement-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/managed-run-registry-termination.test.ts",
       "reasons": [
         "process-signal"
@@ -2440,6 +2446,17 @@
     },
     {
       "path": "tests/managed-run-routing-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/managed-run-settlement-cli-real-path.test.ts",
       "reasons": [
         "child-process",
         "executable-fixture",

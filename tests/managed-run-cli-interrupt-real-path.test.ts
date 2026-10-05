@@ -25,7 +25,7 @@ const tsxImport = import.meta.resolve('tsx');
 
 function markerPids(marker: string): number[] {
   try {
-    const output = execFileSync('ps', ['eww', '-axo', 'pid=,command='], { encoding: 'utf8' });
+    const output = execFileSync('ps', ['axeww', '-o', 'pid=,command='], { encoding: 'utf8' });
     return output.split('\n').flatMap((line) => {
       if (!line.includes(`O8_MANAGED_RUN_MARKER=${marker}`)) return [];
       const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0] ?? '', 10);
@@ -34,6 +34,15 @@ function markerPids(marker: string): number[] {
   } catch {
     return [];
   }
+}
+
+function tmuxSessionNames(): Set<string> {
+  const probe = spawnSync('tmux', ['list-sessions', '-F', '#{session_name}'], { encoding: 'utf8' });
+  if (probe.status === 0) return new Set(probe.stdout.trim().split('\n').filter(Boolean));
+  if (probe.status === 1 && /no server running|error connecting .*No such file or directory/.test(probe.stderr)) {
+    return new Set();
+  }
+  throw new Error(`fixture could not inspect tmux sessions: ${probe.stderr}`);
 }
 
 async function waitFor<T>(read: () => T | null, timeoutMs = 10_000): Promise<T> {
@@ -371,9 +380,7 @@ try {
   process.exit(typeof error === 'object' && error && 'exit' in error ? Number(error.exit) : 1);
 }
 `);
-    const beforeSessions = new Set(execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
-      encoding: 'utf8',
-    }).trim().split('\n').filter(Boolean));
+    const beforeSessions = tmuxSessionNames();
     const cli = spawn(process.execPath, [
       '--import', tsxImport,
       harnessPath,
@@ -396,9 +403,7 @@ try {
     cli.stderr?.on('data', (chunk) => { stderr += String(chunk); });
     const status = await new Promise<number | null>((resolve) => cli.once('exit', resolve));
     children.pop();
-    const afterSessions = new Set(execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
-      encoding: 'utf8',
-    }).trim().split('\n').filter(Boolean));
+    const afterSessions = tmuxSessionNames();
 
     expect(status, stderr).toBe(5);
     expect(stderr).toContain('Packet-bound run was not started');
