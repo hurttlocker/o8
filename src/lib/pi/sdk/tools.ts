@@ -2,7 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
 import { commitPiWrite } from './approved-write';
-import { PI_COMMAND_MAX_BYTES, runPiCommand, type PiCommandOptions } from './command';
+import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
 
 export const PI_SDK_TOOLS = [
   { name: 'read_file', description: 'Read a UTF-8 file in the selected workspace.', parameters: {
@@ -85,9 +85,9 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
     risk: policy.risk, policyRuleId: policy.ruleId }, signal)) {
     throw new Error('Command was not approved');
   }
-  signal.throwIfAborted();
-  if (await realpath(root) !== root) throw new Error('Invalid workspace root');
-  return { content: [{ type: 'text' as const, text: await runPiCommand(root, command, signal, options) }] };
+  // The launcher checks the physical working directory at spawn time.
+  return { content: [{ type: 'text' as const,
+    text: await withPiExclusive(() => runPiCommand(root, command, signal, options)) }] };
 }
 
 export async function executePiTool(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
@@ -116,23 +116,29 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
     if (typeof args.content !== 'string' || Buffer.byteLength(args.content) > MAX_BYTES) {
       throw new Error('Invalid file content or prototype size limit exceeded');
     }
+    const content = args.content;
     if (!await approve({ name: call.name, args: structuredClone(args), before: before?.toString('utf8') }, signal)) {
       throw new Error('File write was not approved');
     }
-    signal.throwIfAborted();
-    const currentParent = await checkPath(root, path);
-    if (currentParent.path !== parent.path || currentParent.dev !== parent.dev || currentParent.ino !== parent.ino
-      || currentParent.root.dev !== parent.root.dev || currentParent.root.ino !== parent.root.ino) {
-      throw new Error('Workspace parent changed during approval');
-    }
-    if (opened) {
-      const target = await lstat(opened.lexicalPath);
-      const current = await opened.handle.stat();
-      if (target.dev !== opened.stat.dev || target.ino !== opened.stat.ino || current.nlink !== 1
-        || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
-    }
-    signal.throwIfAborted();
-    await commitPiWrite(root, path, parent, opened, before, args.content, signal);
-    return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
+    // Checks and commit run under the host-wide lock, so no command from any
+    // session is running between the final checks and the commit.
+    return await withPiExclusive(async () => {
+      signal.throwIfAborted();
+      if (piCommandCleanupUnconfirmed()) throw new Error('Earlier command processes could not be confirmed stopped. Restart o8 before writing.');
+      const currentParent = await checkPath(root, path);
+      if (currentParent.path !== parent.path || currentParent.dev !== parent.dev || currentParent.ino !== parent.ino
+        || currentParent.root.dev !== parent.root.dev || currentParent.root.ino !== parent.root.ino) {
+        throw new Error('Workspace parent changed during approval');
+      }
+      if (opened) {
+        const target = await lstat(opened.lexicalPath);
+        const current = await opened.handle.stat();
+        if (target.dev !== opened.stat.dev || target.ino !== opened.stat.ino || current.nlink !== 1
+          || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
+      }
+      signal.throwIfAborted();
+      await commitPiWrite(root, path, parent, opened, before, content, signal);
+      return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
+    });
   } finally { await opened?.handle.close(); }
 }

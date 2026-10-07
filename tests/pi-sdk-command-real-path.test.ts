@@ -1,14 +1,29 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
 import { createPiSdkSession } from '@/lib/pi/sdk/session';
 import type { PiToolCall } from '@/lib/pi/sdk/tools';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { piCommandCleanupUnconfirmed } from '@/lib/pi/sdk/command';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
+// Test-only seam: make the host's process-table read fail.
+const ps = vi.hoisted(() => ({ fail: false }));
+vi.mock('node:child_process', async importOriginal => {
+  const cp = await importOriginal<typeof import('node:child_process')>();
+  return { ...cp, execFile: ((file: string, ...rest: unknown[]) => {
+    if (ps.fail && file === 'ps') {
+      const callback = rest.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+      setImmediate(() => callback(new Error('synthetic process table failure'), '', ''));
+      return undefined;
+    }
+    return (cp.execFile as (...args: unknown[]) => unknown)(file, ...rest);
+  }) as typeof cp.execFile };
+});
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
@@ -60,11 +75,19 @@ async function client(options: Parameters<typeof createPiSdkSession>[0]) {
 function alive(pid: number) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
-async function pids(dir: string, ...names: string[]) {
+const TREE_PIDS = ['group.pid', 'job.pid', 'hard.pid'];
+async function pids(dir: string, names = TREE_PIDS) {
   return Promise.all(names.map(async name => Number((await readFile(join(dir, name), 'utf8')).trim())));
 }
-// A background child in the command's group and a job-control child in its own group.
-const TREE = 'sleep 30 & echo $! > group.pid; sh -c \'set -m; sleep 30 & echo $! > job.pid; wait\' & sleep 0.3';
+function pgid(pid: number) { return Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim()); }
+async function allEnded(dir: string, names = TREE_PIDS) {
+  for (const pid of await pids(dir, names)) await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 8_000 });
+}
+// Three processes the tree must end: a background child in the command's group,
+// a child in its own group, and a child in its own group that ignores TERM and
+// whose parent dies on TERM, so it is reparented during cleanup.
+const TREE = `sleep 30 & echo $! > group.pid; perl -e 'setpgrp(0,0); sleep 30' & echo $! > job.pid; `
+  + `sh -c 'perl -e "\\$SIG{TERM}=q(IGNORE); setpgrp(0,0); sleep 30" & echo $! > hard.pid; wait' & sleep 0.3`;
 
 describe('Pi governed command tool through the real worker', () => {
   it('runs an approved command in the workspace with a cleaned environment', async () => {
@@ -116,7 +139,7 @@ describe('Pi governed command tool through the real worker', () => {
     await session.prompt('Run a slow command');
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(results[0]).toContain('stopped after 1 second');
-    for (const pid of await pids(paths.workspace, 'group.pid', 'job.pid')) await vi.waitFor(() => expect(alive(pid)).toBe(false));
+    await allEnded(paths.workspace);
   }, 20000);
 
   it('ends the whole process tree when the output cap is reached', async () => {
@@ -126,7 +149,7 @@ describe('Pi governed command tool through the real worker', () => {
     await session.prompt('Run a loud command');
     expect(results[0]).toContain('more than 50000 bytes of output');
     expect(Buffer.byteLength(results[0])).toBeLessThan(52_000);
-    for (const pid of await pids(paths.workspace, 'group.pid', 'job.pid')) await vi.waitFor(() => expect(alive(pid)).toBe(false));
+    await allEnded(paths.workspace);
   }, 20000);
 
   it('ends the whole process tree on Stop', async () => {
@@ -135,8 +158,10 @@ describe('Pi governed command tool through the real worker', () => {
       transport: scripted([command('stop', `${TREE}; touch started; sleep 30`)]) });
     const run = session.prompt('Run until stopped');
     await vi.waitFor(() => readFile(join(paths.workspace, 'started')), { timeout: 10_000, interval: 50 });
+    const [group, job, hard] = await pids(paths.workspace);
+    expect(new Set([pgid(group), pgid(job), pgid(hard)]).size).toBe(3);
     await session.abort(); await run;
-    for (const pid of await pids(paths.workspace, 'group.pid', 'job.pid')) await vi.waitFor(() => expect(alive(pid)).toBe(false));
+    await allEnded(paths.workspace);
   }, 20000);
 
   it('ends background processes before a write from the same turn starts', async () => {
@@ -144,8 +169,8 @@ describe('Pi governed command tool through the real worker', () => {
     const session = await client({ ...paths, model,
       approve: async call => {
         if (call.name === 'write_file') {
-          const [group, job] = await pids(paths.workspace, 'group.pid', 'job.pid');
-          atWrite.push({ ran: (await readdir(paths.workspace)).includes('ran.txt'), groupAlive: alive(group), jobAlive: alive(job) });
+          const [group, job, hard] = await pids(paths.workspace);
+          atWrite.push({ ran: (await readdir(paths.workspace)).includes('ran.txt'), groupAlive: alive(group), jobAlive: alive(job) || alive(hard) });
         }
         return true;
       },
@@ -156,4 +181,74 @@ describe('Pi governed command tool through the real worker', () => {
     expect(atWrite).toEqual([{ ran: true, groupAlive: false, jobAlive: false }]);
     expect(await readFile(join(paths.workspace, 'note.txt'), 'utf8')).toBe('written');
   }, 20000);
+
+  it('stops output that fills the cap exactly and then continues', async () => {
+    const paths = await fixture(); const results: string[] = [];
+    const session = await client({ ...paths, model, approve: async () => true,
+      transport: scripted([command('exact', 'head -c 50000 /dev/zero | tr "\\000" x; sleep 0.3; echo more >&2; sleep 30')], results) });
+    const started = Date.now();
+    await session.prompt('Fill the cap');
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(results[0]).toContain('more than 50000 bytes of output');
+  }, 20000);
+
+  it.each(['approve', 'reject'] as const)('uses the persisted inbox to %s an exact command', async action => {
+    const paths = await fixture();
+    const { listApprovals } = await import('@/lib/approvals/store');
+    const { resolveApproval } = await import('@/lib/approvals/resolution');
+    const session = await client({ ...paths, model, transport: scripted([command('inbox', 'echo ran > inbox.txt')]) });
+    const run = session.prompt('Run through the inbox');
+    let approval!: ReturnType<typeof listApprovals>[number];
+    await vi.waitFor(() => {
+      const rows = listApprovals({ status: 'pending', projectId: null, sessionKey: session.surfaceId });
+      expect(rows).toHaveLength(1); approval = rows[0];
+    }, { timeout: 10000, interval: 20 });
+    expect(approval).toMatchObject({ toolName: 'run_command', command: 'echo ran > inbox.txt', title: 'Run a command',
+      editable: false, args: { command: 'echo ran > inbox.txt' } });
+    expect(await readdir(paths.workspace)).toEqual([]);
+    resolveApproval(approval.id, action, 'desktop'); await run;
+    expect(await readdir(paths.workspace)).toEqual(action === 'approve' ? ['inbox.txt'] : []);
+  }, 30000);
+
+  it('keeps a write from another session on the same workspace out of a running command', async () => {
+    const paths = await fixture(); const results: string[] = [];
+    const runner = await client({ ...paths, model, approve: async () => true,
+      transport: scripted([command('watch', 'touch started; for i in 1 2 3 4 5 6 7 8 9 10; do [ -e note.txt ] && echo S""EEN; sleep 0.1; done; echo finished')], results) });
+    const writer = await client({ ...paths, stateDir: join(paths.root, 'state-writer'), model, approve: async () => true,
+      transport: scripted([{ type: 'toolCall', id: 'write', name: 'write_file', arguments: { path: 'note.txt', content: 'written' } }]) });
+    const running = runner.prompt('Watch the workspace');
+    await vi.waitFor(() => readFile(join(paths.workspace, 'started')), { timeout: 10_000, interval: 20 });
+    await Promise.all([running, writer.prompt('Write a note')]);
+    expect(results[0]).toContain('finished');
+    expect(results[0]).not.toContain('SEEN');
+    expect(await readFile(join(paths.workspace, 'note.txt'), 'utf8')).toBe('written');
+  }, 30000);
+
+  it('refuses to start when the workspace is replaced by a symlink after approval', async () => {
+    const paths = await fixture(); const results: string[] = []; const outside = join(paths.root, 'outside');
+    await mkdir(outside);
+    const session = await client({ ...paths, model, transport: scripted([command('swap', 'echo ran > ran.txt')], results),
+      approve: async () => {
+        await rename(paths.workspace, join(paths.root, 'moved'));
+        await symlink(outside, paths.workspace);
+        return true;
+      } });
+    await session.prompt('Run after the swap');
+    expect(results[0]).toContain('Exit code 126');
+    expect(results[0]).toContain('The workspace changed before the command started.');
+    expect(await readdir(outside)).toEqual([]);
+  }, 20000);
+
+  // Last: an unconfirmed cleanup refuses commands and writes for the rest of the host process.
+  it('ends the group and refuses later commands and writes when the process table cannot be read', async () => {
+    const paths = await fixture();
+    const session = await client({ ...paths, model, approve: async () => true,
+      transport: scripted([command('blind', 'sleep 30 & echo $! > group.pid; echo started'),
+        { type: 'toolCall', id: 'write', name: 'write_file', arguments: { path: 'note.txt', content: 'refused' } }]) });
+    ps.fail = true;
+    try { await session.prompt('Run without a process table'); } finally { ps.fail = false; }
+    expect(piCommandCleanupUnconfirmed()).toBe(true);
+    await allEnded(paths.workspace, ['group.pid']);
+    expect(await readdir(paths.workspace)).toEqual(['group.pid']);
+  }, 30000);
 });

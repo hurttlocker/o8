@@ -45,23 +45,35 @@ it. A denied or expired approval never starts the command.
 The host runs `/bin/sh -c` at the workspace root in a new process group. Its
 environment is an allowlist (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, locale
 and `TMPDIR`, plus non-interactive pager and Git settings), so provider keys, host
-tokens, o8 internals and the SSH agent socket are not inherited. Stdout and stderr
-share one 50 KB buffer. The default limit is 120 seconds, set by the host only.
-The timeout, the output cap, Stop and a normal exit each end the whole tree: the
-process group and every live descendant, including children that started their
-own group, get TERM, then KILL after a grace period. No background process
-outlives the tool call.
+tokens, o8 internals and the SSH agent socket are not inherited. The launcher
+checks that its physical working directory is still the workspace before the
+command starts, so a root replaced by a symlink after the host's checks is
+refused. Stdout and stderr share one 50 KB buffer; any output past it stops the
+command. The default limit is 120 seconds, set by the host only.
+
+The host reads the process table every 250 ms while a command runs and tracks
+the process group and every descendant by pid and start time, so a child that
+starts its own group stays tracked after its parent exits. The timeout, the
+output cap, Stop and a normal exit each end the whole tracked tree: TERM, then
+KILL on a fixed schedule. If the process table cannot be read, the group still
+gets TERM and KILL on that schedule, the tool call fails, and later commands
+and writes are refused until o8 restarts.
 
 Pi runs tool calls from one message in parallel by default. The host runs one
-tool call at a time per session, so no command process is alive while an
-approved write commits.
+tool call at a time per session, and one command or write commit at a time
+across every Pi session in the host process, so no command process is alive
+while an approved write commits.
 
 Known limits: approval is the boundary, not a sandbox. An approved command can
-read anything the user can, including files under `HOME`. A process that detaches
-into a new session and is reparented before the tree is ended escapes cleanup.
-`tests/pi-sdk-command-real-path.test.ts` covers approval, denial, policy block and
-operator allow, the working directory and environment, timeout, output cap,
-Stop, and ordering against an approved write.
+read anything the user can, including files under `HOME`. A process that leaves
+the tree and is reparented between two process-table reads (under 250 ms)
+escapes tracking. A pid can be reused between a read and a signal. The lock
+covers one host process, not other processes writing the same workspace.
+`tests/pi-sdk-command-real-path.test.ts` covers inbox approval and rejection,
+denial, policy block and operator allow, the working directory, a swapped root,
+the environment, timeout, the output cap (including output that fills it
+exactly), Stop, a TERM-ignoring child in its own group, an unreadable process
+table, and ordering against approved writes in the same and another session.
 
 ## Managed inference boundary
 
