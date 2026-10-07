@@ -8,6 +8,7 @@ import { canonical, exactKeys, normalizedText, object, parseTaskDraftContract, T
 import { contractHash, readTaskDraft, readTaskDraftSnapshot, taskDraftKey, withTaskDraftLock,
   writeTaskDraft, writeTaskDraftSnapshot, type TaskDraftRecord } from './task-draft-store';
 import { captureTaskDraftWorkspace, taskDraftChoices, verifyFiles } from './task-draft-workspace';
+import { readTaskExecution } from './task-execution-store';
 
 function catalog() {
   return (['codex', 'claude-code'] as const).map((runtime) => ({
@@ -22,10 +23,31 @@ function catalog() {
 }
 
 function receipt(draft: TaskDraftRecord, replayed: boolean) {
-  return {
-    ok: true, accepted: true, state: 'held', executionEnabled: false, dispatched: false, completed: false,
+  const prepared = {
+    ok: true, accepted: true, executionEnabled: false,
     taskId: draft.taskId, replayed, runtime: draft.contract.runtime,
     model: draft.contract.model, effort: draft.contract.effort, workMode: 'read-only',
+  };
+  let execution: ReturnType<typeof readTaskExecution>;
+  try { execution = readTaskExecution(draft); }
+  catch (error) {
+    if (!(error instanceof TaskDraftError) || error.code !== 'execution_uncertain') throw error;
+    return { ...prepared, state: 'uncertain', dispatched: null, completed: false,
+      executionEvidence: 'unavailable', errorCode: 'execution_uncertain',
+      message: 'Task draft exists, but its desktop execution receipt is unavailable or invalid. This preparation request did not start or retry a worker.' };
+  }
+  if (execution) {
+    // Session identity is reserved before spawn. Only a confirmed running or
+    // completed receipt proves dispatch; a reserved/uncertain run stays unknown.
+    const dispatched = execution.runId
+      ? execution.surfaceId && ['running', 'completed'].includes(execution.state) ? true : null
+      : false;
+    return { ...prepared, state: execution.state, attemptId: execution.attemptId,
+      dispatched, completed: execution.state === 'completed',
+      executionEvidence: 'persisted', errorCode: execution.errorCode ?? null,
+      message: `Task draft exists. Persisted desktop execution state: ${execution.state}. This preparation request did not start or retry a worker.` };
+  }
+  return { ...prepared, state: 'held', dispatched: false, completed: false,
     message: 'Task draft prepared and held. No worker has started. Operator review and a separate dispatch capability are required before execution.',
   };
 }
@@ -58,8 +80,7 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
   const key = taskDraftKey(account.accountId, principal.clientId, principal.machineId, contract.idempotencyKey);
   async function replay(previous: TaskDraftRecord) {
     if (previous.contractHash !== contractHash(contract)) throw new TaskDraftError('idempotency_key_conflict', 409);
-    await requireTaskDraftAccount(principal, previous.account);
-    return receipt(previous, true);
+    return withTaskDraftAccountAdmission(principal, previous.account, () => receipt(previous, true));
   }
   // An atomic immutable record can be recovered even if its creator crashed
   // after publication while holding the lock. A lock without a record stays held.
@@ -91,7 +112,9 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
       contract, contractHash: contractHash(contract),
       policy: { automaticDispatch: false, workMode: 'read-only', packetCount: 1, maxAttempts: 1, fallback: false, executionCarrier: null },
     };
-    await withTaskDraftAccountAdmission(principal, account, () => writeTaskDraft(key, draft));
-    return receipt(draft, false);
+    return withTaskDraftAccountAdmission(principal, account, () => {
+      writeTaskDraft(key, draft);
+      return receipt(draft, false);
+    });
   });
 }

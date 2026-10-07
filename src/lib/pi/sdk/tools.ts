@@ -2,6 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
 import { commitPiWrite } from './approved-write';
+import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
 
 export const PI_SDK_TOOLS = [
   { name: 'read_file', description: 'Read a UTF-8 file in the selected workspace.', parameters: {
@@ -11,8 +12,15 @@ export const PI_SDK_TOOLS = [
     type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } },
     required: ['path', 'content'], additionalProperties: false,
   } },
+  { name: 'run_command', description: 'Run a shell command at the workspace root after approval. It has a time limit, an output limit and no credentials in its environment.', parameters: {
+    type: 'object', properties: { command: { type: 'string' } }, required: ['command'], additionalProperties: false,
+  } },
 ] as const;
-export interface PiToolCall { name: string; args: Record<string, unknown>; before?: string }
+export interface PiToolCall {
+  name: string; args: Record<string, unknown>; before?: string;
+  /** Set by the host from the approval policy for commands. */
+  risk?: 'low' | 'medium' | 'high'; policyRuleId?: string;
+}
 export type PiApproval = (call: PiToolCall, signal: AbortSignal) => Promise<boolean>;
 const MAX_BYTES = 50_000;
 
@@ -60,9 +68,33 @@ async function snapshot(root: string, opened: OpenWorkspaceFileResult) {
   return buffer.subarray(0, offset);
 }
 
-export async function executePiTool(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal) {
+async function executePiCommand(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
+  options: PiCommandOptions) {
+  const args = structuredClone(call.args);
+  const command = args.command;
+  if (typeof command !== 'string' || !command.trim() || command.includes('\0')
+    || Buffer.byteLength(command) > PI_COMMAND_MAX_BYTES || Object.keys(args).some(key => key !== 'command')) {
+    throw new Error('Invalid command arguments');
+  }
+  // The same policy rules as every other runtime's shell tool: blocked commands
+  // never start, and an operator rule can lift approval for a workspace.
+  const { evaluatePolicy } = await import('@/lib/approvals/policies');
+  const policy = evaluatePolicy({ toolName: 'run_command', command, workspacePath: root, runtime: 'pi' });
+  if (policy.blocked) throw new Error('Command is blocked by policy');
+  if (policy.requiresApproval && !await approve({ name: call.name, args: structuredClone(args),
+    risk: policy.risk, policyRuleId: policy.ruleId }, signal)) {
+    throw new Error('Command was not approved');
+  }
+  // The launcher checks the physical working directory at spawn time.
+  return { content: [{ type: 'text' as const,
+    text: await withPiExclusive(() => runPiCommand(root, command, signal, options), signal) }] };
+}
+
+export async function executePiTool(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
+  options: PiCommandOptions = {}) {
   signal.throwIfAborted();
   if (!PI_SDK_TOOLS.some(tool => tool.name === call.name)) throw new Error('Tool is not available');
+  if (call.name === 'run_command') return executePiCommand(root, call, approve, signal, options);
   const args = structuredClone(call.args);
   const path = args.path;
   if (typeof path !== 'string' || !path
@@ -84,23 +116,29 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
     if (typeof args.content !== 'string' || Buffer.byteLength(args.content) > MAX_BYTES) {
       throw new Error('Invalid file content or prototype size limit exceeded');
     }
+    const content = args.content;
     if (!await approve({ name: call.name, args: structuredClone(args), before: before?.toString('utf8') }, signal)) {
       throw new Error('File write was not approved');
     }
-    signal.throwIfAborted();
-    const currentParent = await checkPath(root, path);
-    if (currentParent.path !== parent.path || currentParent.dev !== parent.dev || currentParent.ino !== parent.ino
-      || currentParent.root.dev !== parent.root.dev || currentParent.root.ino !== parent.root.ino) {
-      throw new Error('Workspace parent changed during approval');
-    }
-    if (opened) {
-      const target = await lstat(opened.lexicalPath);
-      const current = await opened.handle.stat();
-      if (target.dev !== opened.stat.dev || target.ino !== opened.stat.ino || current.nlink !== 1
-        || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
-    }
-    signal.throwIfAborted();
-    await commitPiWrite(root, path, parent, opened, before, args.content, signal);
-    return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
+    // Checks and commit run under the host-wide lock, so no command from any
+    // session is running between the final checks and the commit.
+    return await withPiExclusive(async () => {
+      signal.throwIfAborted();
+      if (piCommandCleanupUnconfirmed()) throw new Error('Earlier command processes could not be confirmed stopped. Restart o8 before writing.');
+      const currentParent = await checkPath(root, path);
+      if (currentParent.path !== parent.path || currentParent.dev !== parent.dev || currentParent.ino !== parent.ino
+        || currentParent.root.dev !== parent.root.dev || currentParent.root.ino !== parent.root.ino) {
+        throw new Error('Workspace parent changed during approval');
+      }
+      if (opened) {
+        const target = await lstat(opened.lexicalPath);
+        const current = await opened.handle.stat();
+        if (target.dev !== opened.stat.dev || target.ino !== opened.stat.ino || current.nlink !== 1
+          || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
+      }
+      signal.throwIfAborted();
+      await commitPiWrite(root, path, parent, opened, before, content, signal);
+      return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
+    }, signal);
   } finally { await opened?.handle.close(); }
 }

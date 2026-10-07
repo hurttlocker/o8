@@ -70,6 +70,7 @@ const SHELL_TOOL_NAMES = new Set([
   'Bash',                  // Claude Code
   'shell',                 // Codex
   'execute_command',       // Generic
+  'run_command',           // o8 Pi worker
 ]);
 
 function isShellTool(toolName: string): boolean {

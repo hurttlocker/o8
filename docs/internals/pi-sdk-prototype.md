@@ -12,10 +12,11 @@ already have authority over the canonical workspace, a separate private state
 directory, the selected managed model, and any injected host adapters. This API
 must not be wired directly to untrusted request parameters.
 
-The worker receives only model metadata, two tool definitions, and owned session
-paths. It does not inherit provider credentials, `NODE_OPTIONS`, proxy settings,
+The worker receives only model metadata, three tool definitions (`read_file`,
+`write_file`, `run_command`), and owned session paths. It does not inherit provider credentials, `NODE_OPTIONS`, proxy settings,
 user extensions, project instructions, or user Pi settings. Stock tools and
-resource discovery are disabled. Read and write requests return to the host.
+resource discovery are disabled. Read, write and command requests return to the
+host.
 
 The host reuses descriptor-based workspace file IO and the existing approval
 inbox. Writes show the exact proposed content and the existing content when
@@ -32,6 +33,57 @@ restart. Host results require `agent_settled`; an accepted command or an
 their stop reason and cannot reuse text from a previous turn. Stop cancels host
 model/tool work before asking the worker to abort; close uses the shared
 cooperative-to-forced child shutdown ladder.
+
+## Command tool
+
+`run_command` (#3257) goes through `evaluatePolicy`, the same rules as every other
+runtime's shell tool. A blocked command never starts. Every other command needs
+an exact one-shot approval in the inbox unless an operator policy rule (for
+example a workspace-scoped `mutation-shell` override in `policies.json`) lifts
+it. A denied or expired approval never starts the command.
+
+The host runs `/bin/sh -c` at the workspace root in a new process group. Its
+environment is an allowlist (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, locale
+and `TMPDIR`, plus non-interactive pager and Git settings), so provider keys, host
+tokens, o8 internals and the SSH agent socket are not inherited. The launcher
+checks that its physical working directory is still the workspace before the
+command starts, so a root replaced by a symlink after the host's checks is
+refused. Stdout and stderr share one 50 KB buffer; any output past it stops the
+command. The default limit is 120 seconds, set by the host only.
+
+The host reads the process table every 250 ms while a command runs and tracks
+the process group and every descendant by pid and start time, so a child that
+starts its own group stays tracked after its parent exits. Reads may overlap; a
+result older than the last one applied is dropped. Once a read shows the group
+empty, its number is no longer used to adopt processes, because it may have been
+reused. The timeout, the
+output cap, Stop and a normal exit each end the process group and every tracked
+descendant: TERM, then KILL on a fixed schedule. This is not yet a guarantee for
+every process a command starts; see the known limits and #3350. If the process table cannot be read, the group still
+gets TERM and KILL on that schedule, the tool call fails, and later commands
+and writes are refused until o8 restarts.
+
+Pi runs tool calls from one message in parallel by default. The host runs one
+tool call at a time per session, and one command or write commit at a time
+across every Pi session in the host process, so no command process is alive
+while an approved write commits. Stop ends a call that is still waiting for its
+turn without running it.
+
+Known limits: approval is the boundary, not a sandbox. An approved command can
+read anything the user can, including files under `HOME`. Tracking comes from
+process-table snapshots, so a descendant that moves to a new process group and
+outlives its parent can be missed: when it leaves and is reparented between two
+reads, when a read that saw it is dropped as older than teardown's read, or when
+a scan taken around a fork shows the group empty and retires group adoption. A
+missed process keeps running after the tool call. #3350 replaces this with an
+OS-level supervisor before Pi reaches users. A pid can be reused between a read and a signal. The lock
+covers one host process, not other processes writing the same workspace.
+`tests/pi-sdk-command-real-path.test.ts` covers inbox approval and rejection,
+denial, policy block and operator allow, the working directory, a swapped root,
+the environment, timeout, the output cap (including output that fills it
+exactly), Stop, a TERM-ignoring child in its own group, a late process-table read, a
+reused group number, an unreadable process table, ordering against approved
+writes in the same and another session, and Stop while waiting for the lock.
 
 ## Managed inference boundary
 

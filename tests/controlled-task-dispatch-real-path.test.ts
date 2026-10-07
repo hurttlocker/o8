@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
-import { existsSync, fstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, fstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -48,10 +48,12 @@ let repo: string;
 let projectId: string;
 let repoId: string;
 const oldOwnedRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+const oldClaudeRoot = process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
 const oldFixtureBinary = process.env.O8_TASK_DISPATCH_FIXTURE_BIN;
 let fixtureRoot: string;
 let output: string;
 let persistent = true;
+let fixtureRuntime: 'codex' | 'claude-code' = 'codex';
 let store: ReturnType<typeof createOwnedSessionStore>;
 const accountId = 'user_fixture_task_draft';
 
@@ -94,7 +96,7 @@ function contract(snapshotId: string) {
   return {
     machineId: 'draft-machine', repoId, projectId, snapshotId, idempotencyKey: 'exact-draft',
     objective: 'Read the fixture and report its contents.', allowedFiles: ['README.md'],
-    runtime: 'codex', model: 'gpt-6.1-sol', effort: 'high', workMode: 'read-only',
+    runtime: fixtureRuntime, model: fixtureRuntime === 'codex' ? 'gpt-6.1-sol' : 'claude-sonnet-4-6', effort: 'high', workMode: 'read-only',
     evidence: ['Report the exact fixture contents and any residual uncertainty.'],
     sealedTaskContract: {
       version: 1, requirements: [{ id: 'R1', source: 'Explicit task request',
@@ -112,6 +114,7 @@ beforeEach(async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   sync.mockImplementation(actual.fsyncSync);
   persistent = true;
+  fixtureRuntime = 'codex';
   process.env.O8_LICENSE_PUBKEY = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   rmSync(taskDraftRoot(), { recursive: true, force: true });
   await account();
@@ -127,9 +130,15 @@ beforeEach(async () => {
   dirs.push(fixtureRoot);
   output = join(fixtureRoot, 'runs.jsonl');
   process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(fixtureRoot, 'sessions');
+  process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = join(fixtureRoot, 'sessions');
   process.env.O8_TASK_DISPATCH_FIXTURE_BIN = process.execPath;
   store = createOwnedSessionStore(adapter());
   registerRuntime({ ...getRuntime('codex')!, launch: async (opts) => {
+    const result = await store.launch({ ...opts, runtimeConfig: { workMode: opts.workMode! } });
+    return { ok: result.ok, sessionKey: result.surfaceId, note: result.note };
+  } });
+  registerRuntime({ ...getRuntime('claude-code')!, launch: async (opts) => {
+    store = createOwnedSessionStore(adapter());
     const result = await store.launch({ ...opts, runtimeConfig: { workMode: opts.workMode! } });
     return { ok: result.ok, sessionKey: result.surfaceId, note: result.note };
   } });
@@ -156,6 +165,8 @@ afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
   process.env.CORTEX_IDE_OWNED_CODEX_ROOT = oldOwnedRoot;
   if (oldOwnedRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+  if (oldClaudeRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
+  else process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = oldClaudeRoot;
   if (oldFixtureBinary === undefined) delete process.env.O8_TASK_DISPATCH_FIXTURE_BIN;
   else process.env.O8_TASK_DISPATCH_FIXTURE_BIN = oldFixtureBinary;
 });
@@ -169,11 +180,23 @@ function runs(): Array<{ pid: number; cwd: string; model: string; effort: string
   catch { return []; }
 }
 function adapter(): OwnedRuntimeAdapter {
-  return { runtimeId: 'codex', surfaceIdPrefix: 'codex-owned:', rootEnvVar: 'CORTEX_IDE_OWNED_CODEX_ROOT',
+  const report = 'Fixture contents verified. sk-abcdefghijklmnopqrstuvwxyz123456 /private/fixture/report.txt https://example.invalid/report?token=private';
+  const events = fixtureRuntime === 'codex' ? [
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'analysis', content: [{ type: 'output_text', text: 'PRIVATE_THINKING' }] } },
+    { type: 'item.completed', item: { type: 'command_execution', command: 'PRIVATE_TOOL', aggregated_output: 'PRIVATE_TOOL_OUTPUT' } },
+    { type: 'item.completed', item: { type: 'agent_message', text: report } },
+    { type: 'turn.completed' },
+  ] : [
+    { type: 'assistant', message: { id: 'fixture-answer', role: 'assistant', content: [
+      { type: 'thinking', thinking: 'PRIVATE_THINKING' }, { type: 'text', text: report }] } },
+    { type: 'result', subtype: 'success', is_error: false, result: report },
+  ];
+  return { runtimeId: fixtureRuntime, surfaceIdPrefix: `${fixtureRuntime}-owned:`,
+    rootEnvVar: fixtureRuntime === 'codex' ? 'CORTEX_IDE_OWNED_CODEX_ROOT' : 'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
     rootDefault: join(fixtureRoot, 'sessions'), binaryName: 'node', binaryEnvOverride: 'O8_TASK_DISPATCH_FIXTURE_BIN',
     humanLabel: 'Fixture', squadShortName: 'Fixture', workerMcpInjection: 'config-override',
     launchArgs: ({ model, effort }) => ['-e',
-      `require('node:fs').appendFileSync(${JSON.stringify(output)}, JSON.stringify({ pid:process.pid,cwd:process.cwd(),model:${JSON.stringify(model)},effort:${JSON.stringify(effort)} })+${JSON.stringify('\n')}); ${persistent ? 'setInterval(()=>{},1000)' : 'process.exit(0)'}`],
+      `require('node:fs').appendFileSync(${JSON.stringify(output)}, JSON.stringify({ pid:process.pid,cwd:process.cwd(),model:${JSON.stringify(model)},effort:${JSON.stringify(effort)} })+${JSON.stringify('\n')}); ${persistent ? 'setInterval(()=>{},1000)' : `process.stdout.write(${JSON.stringify(events.map((event) => JSON.stringify(event)).join('\n') + '\n')}); process.exit(0)`}`],
     resumeArgs: () => [], parseRunLog: () => ({ entries: [], outcome: persistent ? 'running' : 'finished', completedTurn: !persistent }) };
 }
 async function prepare() {
@@ -203,6 +226,131 @@ function cold(draft: Awaited<ReturnType<typeof prepare>>) {
 }
 
 describe('controlled tasks through the operator route, durable intent and owned child', () => {
+  const taskResult = (taskId: string, bearer = token(accountId, ['o8:read'])) => call('o8_task_result', {
+    machineId: 'draft-machine', taskId,
+  }, bearer);
+
+  it.each(['codex', 'claude-code'] as const)('returns only the bound %s final report through the read-only hosted route', async (runtime) => {
+    fixtureRuntime = runtime;
+    persistent = false;
+    const draft = await prepare();
+    expect((await taskResult(draft.taskId)).result).toMatchObject({ state: 'held', completed: false,
+      completion: { available: false, reason: 'not_launched' } });
+    await decision(draft);
+    await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+    const before = readFileSync(executionFile(draft), 'utf8');
+    const result = await taskResult(draft.taskId);
+    expect(result.status).toBe(200);
+    expect(result.result).toMatchObject({ ok: true, taskId: draft.taskId, state: 'completed', completed: true,
+      runtime, model: draft.contract.model, effort: 'high', reviewRequired: true, retryAllowed: false,
+      completion: { available: true, source: 'worker_report' } });
+    expect(result.result.completion.summary).toContain('Fixture contents verified.');
+    const exposed = JSON.stringify(result.result);
+    for (const privateText of ['PRIVATE_THINKING', 'PRIVATE_TOOL', 'abcdefghijklmnopqrstuvwxyz123456',
+      '/private/fixture', '?token=', draft.contract.objective, readTaskExecution(draft)!.workspacePath]) {
+      expect(exposed).not.toContain(privateText);
+    }
+    expect(readFileSync(executionFile(draft), 'utf8')).toBe(before);
+    expect(runs()).toHaveLength(1);
+    const secondClient = mintPluginToken({ machineId: 'draft-machine', clientId: 'second-official-client',
+      accountId, scopes: ['o8:read'] });
+    expect((await taskResult(draft.taskId, secondClient)).result.completion.available).toBe(true);
+    expect((await store.archiveSession(savedSession().surfaceId)).archived).toBe(true);
+    expect((await taskResult(draft.taskId)).result).toMatchObject({ state: 'completed', completed: true,
+      completion: { available: true } });
+    expect((await taskResult(draft.taskId, token())).status).toBe(403);
+    expect((await taskResult(draft.taskId, token('user_foreign', ['o8:read']))).status).toBe(403);
+    expect((await taskResult(draft.taskId, mintPluginToken({ machineId: 'other-machine', clientId: 'draft-client',
+      accountId, scopes: ['o8:read'] }))).status).toBe(403);
+    expect((await taskResult(draft.taskId, mintPluginToken({ machineId: 'draft-machine', clientId: 'draft-client',
+      scopes: ['o8:read'] }))).status).toBe(403);
+    expect((await taskResult(randomUUID())).status).toBe(404);
+    await account(); // Same user, different sign-in generation cannot expose an old draft.
+    expect((await taskResult(draft.taskId)).status).toBe(404);
+  }, 20_000);
+
+  it('reads running and stopped receipts without controlling the worker or publishing a false report', async () => {
+    const draft = await prepare();
+    await decision(draft);
+    await vi.waitFor(() => expect(runs()).toHaveLength(1));
+    expect((await taskResult(draft.taskId)).result).toMatchObject({ state: 'running', completed: false,
+      completion: { available: false } });
+    expect(() => process.kill(runs()[0]!.pid, 0)).not.toThrow();
+    await decision(draft, 'stop');
+    expect((await taskResult(draft.taskId)).result).toMatchObject({ state: 'stopped', completed: false,
+      completion: { available: false } });
+    expect(runs()).toHaveLength(1);
+  }, 20_000);
+
+  it.each(['binding', 'path', 'symlink', 'missing-log', 'missing-receipt', 'multiple-runs', 'missing-terminal', 'oversized'] as const)(
+    'returns uncertainty or failure for %s evidence through the actual hosted route', async (kind) => {
+      persistent = false;
+      const draft = await prepare();
+      await decision(draft);
+      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+      const session = savedSession();
+      const run = session.recentRuns[0]!;
+      if (kind === 'binding') session.controlledTask!.attemptId = randomUUID();
+      if (kind === 'path') run.stdoutPath = join(repo, 'README.md');
+      if (kind === 'multiple-runs') session.runIdentityLedger!.totalRuns = 2;
+      if (kind === 'symlink') { rmSync(run.stdoutPath); symlinkSync(join(repo, 'README.md'), run.stdoutPath); }
+      if (kind === 'missing-log') rmSync(run.stdoutPath);
+      if (kind === 'missing-receipt') rmSync(executionFile(draft));
+      if (kind === 'missing-terminal') writeFileSync(run.stdoutPath, JSON.stringify({ type: 'item.completed',
+        item: { type: 'agent_message', text: 'Not a completed result.' } }));
+      if (kind === 'oversized') writeFileSync(run.stdoutPath, 'x'.repeat(4_194_305));
+      writeFileSync(join(session.sessionDir, 'session.json'), JSON.stringify(session));
+      const result = await taskResult(draft.taskId);
+      expect(result.status).toBe(200);
+      expect(result.result).toMatchObject({ completed: false, completion: { available: false } });
+      expect(result.result.state).toBe(kind === 'missing-terminal' ? 'blocked' : 'uncertain');
+      expect(JSON.stringify(result.result)).not.toContain('Fixture contents verified.');
+      expect(runs()).toHaveLength(1);
+    }, 20_000);
+
+  it.each(['running', 'completed'] as const)('reports persisted %s execution on an exact hosted preparation retry without another child', async (state) => {
+    persistent = state === 'running';
+    const args = contract((await options()).snapshotId);
+    const prepared = await call('o8_prepare_task', args);
+    expect(prepared.result).toMatchObject({ state: 'held', dispatched: false, completed: false });
+    const draft = listTaskDrafts(accountId)[0]!;
+    await decision(draft);
+    await vi.waitFor(() => expect(runs()).toHaveLength(1));
+    if (state === 'completed') {
+      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+    }
+    const execution = readTaskExecution(draft)!;
+    const replay = await call('o8_prepare_task', args);
+    expect(replay.result).toMatchObject({ ok: true, accepted: true, taskId: draft.taskId,
+      replayed: true, state, dispatched: true, completed: state === 'completed',
+      executionEnabled: false, executionEvidence: 'persisted', attemptId: execution.attemptId });
+    expect(replay.result.message).not.toContain('No worker has started');
+    expect(JSON.stringify(replay.result)).not.toContain(execution.workspacePath);
+    expect(runs()).toHaveLength(1);
+    expect(listTaskDrafts(accountId)).toHaveLength(1);
+    expect(readTaskExecution(draft)!.attemptId).toBe(execution.attemptId);
+    const conflict = await call('o8_prepare_task', { ...args, objective: 'Different task.' });
+    expect(conflict.result.code).toBe('idempotency_key_conflict');
+    expect(conflict.result.message).not.toContain('No worker started');
+    expect(runs()).toHaveLength(1);
+    await account('user_other_account');
+    expect((await call('o8_prepare_task', args)).status).toBe(403);
+  });
+
+  it('reports uncertainty after a reserved execution loses its receipt instead of claiming no worker started', async () => {
+    const args = contract((await options()).snapshotId);
+    await call('o8_prepare_task', args);
+    const draft = listTaskDrafts(accountId)[0]!;
+    await reserveTaskExecution(draft);
+    rmSync(executionFile(draft));
+    const replay = await call('o8_prepare_task', args);
+    expect(replay.result).toMatchObject({ ok: true, accepted: true, taskId: draft.taskId,
+      replayed: true, state: 'uncertain', dispatched: null, completed: false,
+      executionEnabled: false, executionEvidence: 'unavailable', errorCode: 'execution_uncertain' });
+    expect(replay.result.message).not.toContain('No worker has started');
+    expect(runs()).toHaveLength(0);
+  });
+
   it('lists exact operator contract bindings and safe permanent receipts without workspace paths', async () => {
     const draft = await prepare();
     const request = () => new NextRequest('http://localhost/api/plugins/task-drafts', {
@@ -321,6 +469,10 @@ describe('controlled tasks through the operator route, durable intent and owned 
       expect(before.state).toBe('blocked');
       if (kind !== 'sign-out' && kind !== 'account-switch') {
         expect((await decision(draft)).body.execution).toMatchObject({ attemptId: before.attemptId, retryAllowed: false, state: 'blocked' });
+        expect((await call('o8_prepare_task', draft.contract)).result).toMatchObject({
+          taskId: draft.taskId, state: 'blocked', dispatched: false, completed: false, replayed: true,
+        });
+        expect(runs()).toHaveLength(0);
       }
     }, 20_000);
 
