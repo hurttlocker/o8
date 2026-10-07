@@ -109,14 +109,15 @@ describe('Hermes worker production runtime seam', () => {
     const firstLaunch = JSON.parse(readFileSync(launchLog, 'utf8').trim().split('\n')[0]) as {
       cwd: string;
       home: string;
+      hermesHome: string;
       argv: string[];
     };
     expect(firstLaunch.cwd).toBe(process.cwd());
     expect(firstLaunch.argv).toEqual(['acp', '--accept-hooks']);
-    expect(firstLaunch.home).not.toBe(userHome);
-    expect(firstLaunch.home.startsWith(sessionsRoot)).toBe(true);
-    expect(existsSync(path.join(firstLaunch.home, '.hermes', 'config.yaml'))).toBe(true);
-    expect(existsSync(path.join(firstLaunch.home, '.hermes', '.env'))).toBe(true);
+    expect(firstLaunch.home).toBe(userHome);
+    expect(firstLaunch.hermesHome.startsWith(sessionsRoot)).toBe(true);
+    expect(existsSync(path.join(firstLaunch.hermesHome, 'config.yaml'))).toBe(true);
+    expect(existsSync(path.join(firstLaunch.hermesHome, '.env'))).toBe(true);
     expect(readFileSync(modelLog, 'utf8').trim().split('\n')).toEqual(['fixture/model']);
 
     await expect(hermesRuntime.interrupt(sessionKey)).resolves.toMatchObject({ ok: true });

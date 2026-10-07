@@ -16,6 +16,7 @@ if (process.env.O8_HERMES_LAUNCH_LOG) {
     pid: process.pid,
     cwd: process.cwd(),
     home: process.env.HOME ?? null,
+    hermesHome: process.env.HERMES_HOME ?? null,
     argv: process.argv.slice(2),
   })}\n`);
 }

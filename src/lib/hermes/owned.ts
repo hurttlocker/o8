@@ -178,7 +178,7 @@ const hermesStore = createOwnedAcpSessionStore({
       command,
       args: ['acp', '--accept-hooks'],
       commandIdentity: path.basename(command),
-      env: { HOME: worker.home },
+      env: { HERMES_HOME: worker.hermesHome },
     };
   },
   validateInitialize: validateHermesInitialize,

@@ -15,30 +15,28 @@ function operatorHermesHome(): string {
  * memory/session state. We seed only portable config/credential files; tool
  * disable state from the governed orchestrator profile is never copied.
  */
-export function prepareHermesWorkerHome(sessionDir: string): { home: string } {
-  const home = path.join(sessionDir, 'home');
-  const target = path.join(home, '.hermes');
+export function prepareHermesWorkerHome(sessionDir: string): { hermesHome: string } {
+  const hermesHome = path.join(sessionDir, 'hermes-home');
 
   // Seed once. After the first launch this profile is the durable session
   // authority; an ACP reconnect must not overwrite worker state from ~/.hermes
   // or fail merely because the operator later moved their default profile.
-  if (existsSync(path.join(target, 'config.yaml'))) return { home };
+  if (existsSync(path.join(hermesHome, 'config.yaml'))) return { hermesHome };
 
   const source = operatorHermesHome();
   if (!existsSync(path.join(source, 'config.yaml'))) {
     throw new Error('Hermes worker refused: ~/.hermes/config.yaml is missing. Run `hermes setup` first.');
   }
 
-  mkdirSync(target, { recursive: true, mode: 0o700 });
-  try { chmodSync(home, 0o700); } catch { /* best-effort on Windows */ }
-  try { chmodSync(target, 0o700); } catch { /* best-effort on Windows */ }
+  mkdirSync(hermesHome, { recursive: true, mode: 0o700 });
+  try { chmodSync(hermesHome, 0o700); } catch { /* best-effort on Windows */ }
 
   for (const file of HERMES_WORKER_PROFILE_FILES) {
     const from = path.join(source, file);
     if (!existsSync(from)) continue;
-    const to = path.join(target, file);
+    const to = path.join(hermesHome, file);
     cpSync(from, to);
     try { chmodSync(to, 0o600); } catch { /* best-effort on Windows */ }
   }
-  return { home };
+  return { hermesHome };
 }
