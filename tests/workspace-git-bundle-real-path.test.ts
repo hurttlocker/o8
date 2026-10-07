@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-git-bundle-real-path-'));
 const dataDir = path.join(root, 'data');
@@ -23,7 +24,13 @@ const fakeCodex = path.join(root, 'fake-codex');
 writeFileSync(fakeCodex, '#!/bin/sh\nif [ "$1" = "--version" ]; then printf "codex-cli 0.130.0\\n"; exit 0; fi\nexit 17\n', { mode: 0o700 });
 process.env.O8_CODEX_BIN = fakeCodex;
 
-const { GET } = await import('@/app/api/orchestrator/workspace/preservation/route');
+const { GET, POST: restoreArtifacts } = await import('@/app/api/orchestrator/workspace/preservation/route');
+const { POST: closePacket } = await import('@/app/api/orchestrator/discard-packet/route');
+const { writeOrchestratorControlPlaneState, readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { recordMission } = await import('@/lib/db/missions-store');
+const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+const { removeMergedWorktree } = await import('@/lib/orchestrator/worktree-cleanup');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { addRepo } = await import('@/lib/repos/registry');
@@ -315,6 +322,93 @@ describe('portable source preservation through the managed retirement entry', ()
     } finally {
       spy.mockRestore();
     }
+    finished = true;
+  }, 60_000);
+
+  it('banks dirty source through authenticated Close and restores nested ignored bytes', async () => {
+    const packetId = 'close-dirty-source';
+    const { created, lane } = await workspace(packetId);
+    // Materialize idle targets before reopening the database to verify durable Close state.
+    const successor = await workspace('close-dirty-successor');
+    const merged = await workspace('merged-dirty-refused');
+    writeFileSync(path.join(created.path, 'unpushed.txt'), 'unpublished handoff\n');
+    git(created.path, 'add', 'unpushed.txt');
+    git(created.path, 'commit', '-qm', 'unpublished handoff');
+    const unpublished = git(created.path, 'rev-parse', 'HEAD');
+    writeFileSync(path.join(created.path, 'tracked.txt'), 'later dirty decision\n');
+    writeFileSync(path.join(created.path, 'untracked.txt'), 'remaining recovery actions\n');
+    const checkpointPath = '.o8/recovery/nested/checkpoint.bin';
+    const checkpoint = Buffer.from([0, 255, 42, 128, 0, 79, 56, 66, 50, 50, 57, 50, 10]);
+    mkdirSync(path.dirname(path.join(created.path, checkpointPath)), { recursive: true });
+    writeFileSync(path.join(created.path, checkpointPath), checkpoint);
+    setLaneStatus(lane.id, 'paused', 'system', 'operator_stopped');
+    const mission = writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(), missionId: 'mission-close-dirty-source',
+      repoPath: repo.localPath, runtime: 'codex', updatedAt: new Date().toISOString(),
+      packets: [{ id: packetId, referenceLabel: '#3339', title: 'Preserve stopped dirty source',
+        summary: 'Verify unmerged Close reaches source and ignored-content preservation.',
+        workspaceTargetPath: repo.localPath, branchTarget: created.branch, runtime: 'codex',
+        dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+        status: 'blocked', operatorStopped: true, review: null, blockedReason: 'Stopped by operator.',
+        lane: { tileId: lane.id, tabId: lane.id, repoPath: repo.localPath,
+          worktreePath: created.path, runtime: 'codex', laneId: lane.id },
+      } as OrchestratorPacket],
+    });
+    recordMission({ id: mission.missionId!, repoPath: repo.localPath, runtime: 'codex',
+      prompt: '', summary: '', constraints: '', totalWaves: 1, missionState: mission,
+      packetMeta: mission.packets.map(({ id, title, referenceLabel }) => ({ id, title, referenceLabel })),
+    });
+    const response = await closePacket(new NextRequest('http://localhost/api/orchestrator/discard-packet', {
+      method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+      body: JSON.stringify({ packetId, disposition: 'superseded', clientMutationId: 'close-dirty-source-once' }),
+    }));
+    const closed = await response.json();
+    expect(response.status, JSON.stringify(closed)).toBe(200);
+    expect(closed.result).toMatchObject({ closed: true, worktreeRemoved: true });
+    expect(existsSync(created.path)).toBe(false);
+    closeDb();
+    for (const state of [readOrchestratorControlPlaneState(), readMissionRegistryEntry(mission.missionId!, { includeArchived: true })!.mission]) {
+      expect(state.packets.find((packet) => packet.id === packetId)).toMatchObject({
+        status: 'archived', operatorStopped: true, lane: null,
+      });
+    }
+    const inspected = await GET(request(packetId));
+    expect(inspected.status).toBe(200);
+    const summary = (await inspected.json()).result;
+    const snapshot = getWorkspaceSnapshot(repo.id, packetId)!;
+    expect(snapshot.state).toBe('retired');
+    const downloaded = await GET(request(packetId, 'bundle'));
+    expect(downloaded.status).toBe(200);
+    const bundle = Buffer.from(await downloaded.arrayBuffer());
+    expect(createHash('sha256').update(bundle).digest('hex')).toBe(summary.gitBundle.sha256);
+    const bundlePath = path.join(root, 'closed-dirty.bundle');
+    writeFileSync(bundlePath, bundle, { mode: 0o600 });
+    const recovery = path.join(root, 'closed-dirty-empty-recovery');
+    mkdirSync(recovery);
+    git(recovery, 'init', '-q', '--template=');
+    expect(git(recovery, 'remote')).toBe('');
+    expect(existsSync(path.join(recovery, '.git/objects/info/alternates'))).toBe(false);
+    git(recovery, 'bundle', 'verify', bundlePath);
+    git(recovery, 'fetch', '--no-tags', bundlePath, snapshot.recoveryRef + ':refs/heads/recovered');
+    git(recovery, 'checkout', '-q', 'recovered');
+    git(recovery, 'fsck', '--full', '--strict');
+    expect(git(recovery, 'rev-list', 'HEAD').split('\n')).toContain(unpublished);
+    expect(readFileSync(path.join(recovery, 'tracked.txt'), 'utf8')).toBe('later dirty decision\n');
+    expect(readFileSync(path.join(recovery, 'untracked.txt'), 'utf8')).toBe('remaining recovery actions\n');
+    expect(readFileSync(path.join(recovery, 'unpushed.txt'), 'utf8')).toBe('unpublished handoff\n');
+    const restored = await restoreArtifacts(new NextRequest('http://localhost/api/orchestrator/workspace/preservation', {
+      method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+      body: JSON.stringify({ sourcePacketId: packetId, targetPacketId: 'close-dirty-successor',
+        paths: [checkpointPath], clientMutationId: 'close-dirty-artifact-restore' }),
+    }));
+    const restoreReceipt = await restored.json();
+    expect(restored.status, JSON.stringify(restoreReceipt)).toBe(200);
+    expect(restoreReceipt.result).toMatchObject({ restoredFiles: 1, restoredBytes: checkpoint.length });
+    expect(readFileSync(path.join(successor.created.path, checkpointPath))).toEqual(checkpoint);
+    writeFileSync(path.join(merged.created.path, 'tracked.txt'), 'post-merge source stays held\n');
+    expect(await removeMergedWorktree(merged.lane)).toMatchObject({ removed: false, reason: 'dirty' });
+    expect(readFileSync(path.join(merged.created.path, 'tracked.txt'), 'utf8')).toBe('post-merge source stays held\n');
+    expect(getWorkspaceSnapshot(repo.id, 'merged-dirty-refused')).toBeNull();
     finished = true;
   }, 60_000);
 
