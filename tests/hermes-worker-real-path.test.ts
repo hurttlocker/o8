@@ -70,7 +70,7 @@ afterAll(() => {
 });
 
 describe('Hermes worker production runtime seam', () => {
-  it('isolates HOME, runs in the packet cwd, resumes on ACP, and normalizes output', async () => {
+  it('isolates Hermes state, preserves HOME, runs in the packet cwd, resumes on ACP, and normalizes output', async () => {
     const { hermesRuntime } = await import('@/lib/runtimes/hermes');
 
     const launched = await hermesRuntime.launch({

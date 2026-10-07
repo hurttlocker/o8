@@ -549,7 +549,7 @@ async function detectHermes(): Promise<RuntimeAuthStatus> {
     });
   }
 
-  const hermesHome = path.join(os.homedir(), '.hermes');
+  const hermesHome = process.env.HERMES_HOME?.trim() || path.join(process.env.HOME?.trim() || os.homedir(), '.hermes');
   const configured = await fileExists(path.join(hermesHome, 'config.yaml'));
   if (!configured) {
     return nowStatus('hermes', 'hermes', {
