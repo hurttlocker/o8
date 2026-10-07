@@ -1,3 +1,4 @@
+import { providerFromConfig } from './controlled-provider';
 /**
  * createOwnedSessionStore — the generic primitive.
  *
@@ -184,7 +185,7 @@ export function createOwnedSessionStore(
           configHomeRef: defaultConfigHome,
         },
       });
-    } else if (adapter.isolatedConfigHomeEnv) {
+    } else if (adapter.isolatedConfigHomeEnv && !providerFromConfig(request.runtimeConfig)) {
       selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
     }
 

@@ -31,8 +31,10 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
  * `o8` is the FREE conversational backend (o8.ts) — it streams the Vercel AI
  * Gateway free model so the operator can exercise the full orchestrator UI with
  * no subscription draw; it has no tools and never dispatches (v1).
+ * `pi` is the bundled Pi SDK session on the managed model route (pi.ts), with
+ * the same built-in o8 servers as the Claude orchestrator.
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode' | 'pi';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -43,7 +45,7 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
   return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
     || value === 'acp' || value === 'collide' || value === 'fable' || value === 'o8'
-    || value === 'opencode';
+    || value === 'opencode' || value === 'pi';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';

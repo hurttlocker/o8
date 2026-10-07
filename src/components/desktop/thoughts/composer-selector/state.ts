@@ -42,6 +42,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     fable: 'anthropic',
     o8: 'o8',
     opencode: 'terminal',
+    pi: 'terminal',
   },
   workerRuntimes: {
     codex: 'openai',

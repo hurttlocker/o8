@@ -16,7 +16,10 @@ export type DispatchDefaultOrchestratorBackend =
   // opencode DOES dispatch (its ACP session loads o8's operator MCP server), so
   // unlike 'o8' it is only listed here because the worker default is resolved
   // independently — orchestrating on opencode does not force opencode workers.
-  | 'opencode';
+  | 'opencode'
+  // Bundled Pi dispatches through the same operator server; the worker default
+  // is still resolved independently.
+  | 'pi';
 
 export interface ResolveDefaultDispatchRuntimeInput {
   explicitRuntime?: OrchestratorRuntime | null;

@@ -21,6 +21,7 @@ import { acpBackend, hermesBackend, opencodeBackend } from './acp';
 import { collideBackend } from './moa';
 import { fableBackend } from './fable';
 import { o8Backend } from './o8';
+import { piBackend } from './pi';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { applyOrchestrationMode } from './orchestration-mode';
@@ -53,6 +54,7 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   collide: withOrchestrationMode(collideBackend),
   fable: withOrchestrationMode(fableBackend),
   o8: withOrchestrationMode(o8Backend),
+  pi: withOrchestrationMode(piBackend),
 };
 
 /** The default backend — also the fallback for any unregistered id. */

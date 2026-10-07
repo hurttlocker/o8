@@ -57,7 +57,7 @@ export type ComposerModelOption = {
 };
 
 export type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'pi';
   label: string;
   options: ComposerModelOption[];
   /**
@@ -126,6 +126,16 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     label: 'o8',
     options: [
       { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
+    ],
+  },
+  // Bundled Pi (#3258): the built-in orchestrator with the full o8 command set
+  // on the o8 model allowance. Needs no installed CLI. Preview, so it sits
+  // behind Customize leads and is never the default.
+  {
+    key: 'pi',
+    label: 'Pi',
+    options: [
+      { value: 'pi-builtin', label: 'Pi', triggerLabel: 'Pi', backend: 'pi', sub: 'built-in · o8 allowance' },
     ],
   },
 ];
@@ -369,11 +379,11 @@ export function ModelThinkingChip({
   const visibleLead = (key: ComposerModelGroup['key']) => {
     const current = key === activeBackend || (key === 'claude' && activeBackend === 'fable');
     if (current) return true;
-    if (key === 'o8') return advancedLeads;
+    if (key === 'o8' || key === 'pi') return advancedLeads;
     const tool = runtimeForLead(key);
     return installed.some((item) => item.id === tool) && (key !== 'opencode' || advancedLeads);
   };
-  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8'
+  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8' || key === 'pi'
     || tools.inventory?.some((item) => item.id === runtimeForLead(key) && item.available) === true;
   const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
   const ultraEnabled = useUltraEffortPreference();
@@ -412,8 +422,9 @@ export function ModelThinkingChip({
   const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? searchableHouseLabel ?? modelLabel;
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
-  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode'>(
+  const [openHouse, setOpenHouse] = useState<ComposerModelGroup['key']>(
     activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
+      || activeBackend === 'pi'
       ? activeBackend
       : 'claude',
   );
@@ -631,7 +642,7 @@ export function ModelThinkingChip({
                         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
                       >
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                          <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '0', lineHeight: 1.2 }}>{group.label}{group.key === 'opencode' ? ' · experimental' : ''}</span>
+                          <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '0', lineHeight: 1.2 }}>{group.label}{group.key === 'opencode' ? ' · experimental' : group.key === 'pi' ? ' · preview' : ''}</span>
                           {!houseOpen && houseHasActive ? <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--t-accent)', flexShrink: 0 }} /> : null}
                         </span>
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.6, transform: houseOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
