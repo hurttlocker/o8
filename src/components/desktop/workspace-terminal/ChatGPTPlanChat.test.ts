@@ -9,6 +9,7 @@ import { buildNewChatGPTPlanTab, buildPersistedState } from './terminal-tab-hand
 import { useTextChatTabs } from './use-text-chat-tabs';
 import { registerPlanAccountToken } from '@/lib/chatgpt-plan/client';
 import type { TerminalTab } from './types';
+import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 
 const fixture = vi.hoisted(() => ({ owner: 'fixture-owner-a', signedIn: true }));
 vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => ({ isLoaded: true, signedIn: fixture.signedIn, user: { id: fixture.owner }, signIn: vi.fn() }) }));
@@ -51,7 +52,7 @@ async function send() {
   await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 }
 
-it('opens the real plan pane from the normal workspace menu and sends one authenticated text-only request', async () => {
+async function openFromWorkspace() {
   let spawned: CustomEvent | null = null;
   const persist = vi.fn();
   function Harness() {
@@ -73,6 +74,11 @@ it('opens the real plan pane from the normal workspace menu and sends one authen
   expect(launch).toBeDefined();
   await act(async () => launch!.click());
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  return persist;
+}
+
+it('opens the real plan pane from the normal workspace menu and sends one authenticated text-only request', async () => {
+  const persist = await openFromWorkspace();
   expect(container.querySelector('[aria-label="ChatGPT plan model"]')).not.toBeNull();
   expect(persist).toHaveBeenCalledWith(expect.objectContaining({ tabs: [expect.objectContaining({ kind: 'chatgpt-plan', label: 'ChatGPT plan' })] }));
   await send();
@@ -99,7 +105,7 @@ it('invalidates a connected account conversation immediately on disconnect and r
   deferStream = true; await mount(); await send(); connected = false;
   await act(async () => window.dispatchEvent(new Event('o8:chatgpt-plan-changed')));
   expect(container.textContent).not.toContain('O8_PLAN_OK_40');
-  expect(container.querySelector('textarea')?.disabled).toBe(true);
+  expect(container.querySelector('textarea')).toBeNull();
   expect(requestBodies).toHaveLength(1);
 });
 
@@ -153,4 +159,36 @@ it('keeps an open plan conversation when four other tabs exhaust the heavy pane 
   expect(container.querySelector('[aria-label="ChatGPT plan chat"]')).toBe(pane);
   expect(pane?.textContent).toContain('O8_PLAN_OK_40');
   expect(requestBodies).toHaveLength(1);
+});
+
+
+it('takes a disconnected user from the normal pane entry to connection settings without a billed request', async () => {
+  connected = false;
+  const settings = vi.fn();
+  window.addEventListener(OPEN_SETTINGS_TAB_EVENT, settings);
+  try {
+    await openFromWorkspace();
+    const connect = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Connect ChatGPT');
+    expect(connect).toBeDefined();
+    await act(async () => connect!.click());
+    expect(settings).toHaveBeenCalledOnce();
+    expect((settings.mock.calls[0][0] as CustomEvent).detail).toEqual({ tab: 'models' });
+    expect(requestBodies).toHaveLength(0);
+  } finally {
+    window.removeEventListener(OPEN_SETTINGS_TAB_EVENT, settings);
+  }
+});
+
+
+it('prefills a suggested prompt without sending or changing the selected model', async () => {
+  await openFromWorkspace();
+  const model = container.querySelector<HTMLSelectElement>('[aria-label="ChatGPT plan model"]')!;
+  const before = model.value;
+  const prompt = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Make a plan');
+  await act(async () => prompt!.click());
+  const input = container.querySelector('textarea')!;
+  expect(input.value).toContain('turn this idea into a clear plan');
+  expect(document.activeElement).toBe(input);
+  expect(model.value).toBe(before);
+  expect(requestBodies).toHaveLength(0);
 });

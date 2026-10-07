@@ -6,6 +6,8 @@ import { planConnectionRequest } from '@/lib/chatgpt-plan/client';
 import type { PlanStatus } from '@/lib/chatgpt-plan/types';
 import type { LLMMessage, ModelOption } from '@/components/desktop/llm-chat/shared';
 import { streamAssistantResponse } from '@/components/desktop/llm-chat/streaming';
+import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
+import { ChatGPTPlanChatView } from './ChatGPTPlanChatView';
 
 interface ChatView {
   generation: number;
@@ -20,7 +22,6 @@ interface ChatView {
 function emptyView(generation: number): ChatView {
   return { generation, status: null, modelId: '', input: '', messages: [], stream: '', busy: false, notice: null };
 }
-const controlStyle = { border: '1px solid var(--t-panel-border)', borderRadius: 8, color: 'var(--t-text)', background: 'var(--t-bg-card)', paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, font: 'inherit' };
 const noop = () => {};
 
 /** Explicit text-only plan requests; no repository, tools, fallback, or extra turns. */
@@ -101,18 +102,21 @@ export function ChatGPTPlanChat({ tabId }: { tabId: string }) {
     }
   };
 
-  return <section aria-label="ChatGPT plan chat" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, paddingTop: 20, paddingBottom: 16, paddingLeft: 20, paddingRight: 20, gap: 12, color: 'var(--t-text)', fontSize: 13 }}>
-    <div><strong>ChatGPT plan chat</strong><p style={{ marginTop: 6, marginBottom: 0, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>Uses your ChatGPT limits. Text only. This conversation clears when the pane closes or the connected account changes.</p></div>
-    {!owner ? <button type="button" style={controlStyle} onClick={auth.signIn}>Sign in to o8</button> : !view.status?.planEnabled ? <p role="status">Connect ChatGPT in Settings → Models &amp; providers.</p> : null}
-    {view.status?.planEnabled ? <label>Model <select aria-label="ChatGPT plan model" style={controlStyle} disabled={view.busy} value={view.modelId} onChange={(event) => write(epoch, (previous) => ({ ...previous, modelId: event.target.value }))}>{view.status.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label> : null}
-    <div role="log" aria-label="ChatGPT conversation" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-      {view.messages.map((message) => <div key={message.id} style={{ marginBottom: 16, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}><strong>{message.role === 'user' ? 'You' : 'ChatGPT'}</strong><div>{message.content}</div></div>)}
-      {view.stream ? <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}><strong>ChatGPT{view.busy ? '' : ' · partial response'}</strong><div>{view.stream}</div></div> : null}
-    </div>
-    {view.notice ? <p role="status" style={{ marginTop: 0, marginBottom: 0, color: 'var(--t-text-secondary)' }}>{view.notice}</p> : null}
-    <form onSubmit={(event) => { event.preventDefault(); void send(epoch); }} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-      <textarea aria-label="Message ChatGPT" rows={3} placeholder="Ask ChatGPT…" disabled={!view.status?.planEnabled || view.busy} value={view.input} onChange={(event) => write(epoch, (previous) => ({ ...previous, input: event.target.value }))} style={{ ...controlStyle, flex: 1, minWidth: 0, resize: 'vertical' }} />
-      {view.busy ? <button type="button" style={controlStyle} onClick={() => { if (current(epoch) && request.current?.generation === epoch) request.current.controller.abort(); }}>Stop</button> : <button type="submit" disabled={!view.status?.planEnabled || !view.input.trim()} style={controlStyle}>Send</button>}
-    </form>
-  </section>;
+  return <ChatGPTPlanChatView
+    signedIn={Boolean(owner)}
+    loading={!auth.isLoaded || Boolean(owner && !view.status && !view.notice)}
+    status={view.status}
+    modelId={view.modelId}
+    input={view.input}
+    messages={view.messages}
+    stream={view.stream}
+    busy={view.busy}
+    notice={view.notice}
+    onSignIn={auth.signIn}
+    onOpenConnection={() => window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'models' } }))}
+    onModelChange={(modelId) => write(epoch, (previous) => ({ ...previous, modelId }))}
+    onInputChange={(input) => write(epoch, (previous) => ({ ...previous, input }))}
+    onSend={() => { void send(epoch); }}
+    onStop={() => { if (current(epoch) && request.current?.generation === epoch) request.current.controller.abort(); }}
+  />;
 }
