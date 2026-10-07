@@ -16,13 +16,19 @@ function operatorHermesHome(): string {
  * disable state from the governed orchestrator profile is never copied.
  */
 export function prepareHermesWorkerHome(sessionDir: string): { home: string } {
+  const home = path.join(sessionDir, 'home');
+  const target = path.join(home, '.hermes');
+
+  // Seed once. After the first launch this profile is the durable session
+  // authority; an ACP reconnect must not overwrite worker state from ~/.hermes
+  // or fail merely because the operator later moved their default profile.
+  if (existsSync(path.join(target, 'config.yaml'))) return { home };
+
   const source = operatorHermesHome();
   if (!existsSync(path.join(source, 'config.yaml'))) {
     throw new Error('Hermes worker refused: ~/.hermes/config.yaml is missing. Run `hermes setup` first.');
   }
 
-  const home = path.join(sessionDir, 'home');
-  const target = path.join(home, '.hermes');
   mkdirSync(target, { recursive: true, mode: 0o700 });
   try { chmodSync(home, 0o700); } catch { /* best-effort on Windows */ }
   try { chmodSync(target, 0o700); } catch { /* best-effort on Windows */ }
