@@ -32,10 +32,8 @@ import {
   providerIdForModel,
   readOpencodeConfig,
 } from './opencode-readiness';
-import {
-  deepSeekHarnessInstallGuidance,
-  resolveDeepSeekHarnessLaunch,
-} from '@/lib/deepseek-harness/runtime-resolution';
+import { deepSeekHarnessInstallGuidance, resolveDeepSeekHarnessLaunch } from '@/lib/deepseek-harness/runtime-resolution';
+import { piBuiltinReadiness } from './pi-builtin-readiness';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
@@ -608,6 +606,7 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt
     case 'pi': return detectPi();
     case 'prime-agent': return detectPrimeAgent();
     case 'deepseek-harness': return detectDeepSeekHarness();
+    case 'pi-builtin': return piBuiltinReadiness().then(status => nowStatus('pi-builtin', 'pi-builtin', status));
     default: return detectDeclarativeRuntime(runtime);
   }
 }

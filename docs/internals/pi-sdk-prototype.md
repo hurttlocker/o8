@@ -2,9 +2,9 @@
 
 This began as an opt-in server-side prototype under issue #3230. Since #3258 it
 backs the `pi` orchestrator backend (see "Orchestrator" below), offered in the
-composer under Customize leads as a preview. It is not the default, not a worker
-runtime yet, and not part of native first-run acceptance. Existing external Pi
-RPC behavior is unchanged.
+composer under Customize leads as a preview, and the `pi-builtin` packet worker
+runtime (see "Worker" below). Neither is the default, and neither is part of
+native first-run acceptance. The external Pi CLI runtime (`pi`) is unchanged.
 
 ## Entry point and ownership
 
@@ -162,6 +162,55 @@ scripted model: command help, a real operator command, an unknown command, an
 approved write, resume in a new backend, the used-up allowance message, Stop
 followed by a new message, a read-only plan turn, an overlapping message, shutdown
 while Pi is starting, idle close, and a transport error that must not reach Pi.
+
+## Worker
+
+`src/lib/runtimes/pi-builtin.ts` registers bundled Pi as the `pi-builtin` worker
+runtime, labeled "Pi (built-in)" in the runtime catalog, so it appears in the
+dispatch runtime options. It is a separate runtime from the external `pi` CLI and
+is not the default dispatch runtime. Its owned-session store is
+`src/lib/pi-builtin/owned.ts`, with session keys `pi-builtin-owned:<id>`.
+
+A packet dispatched to it gets a managed worktree like any other worker. Each
+turn starts one Pi process with that worktree as its workspace, on the managed
+model route, and closes the process when the turn settles. A follow-up turn
+starts a new process on the newest session file, so the conversation continues.
+Session metadata, run logs and Pi's state live in
+`<data dir>/owned-pi-builtin/<id>/`, outside the workspace. The worker process
+gets no credential. The requested model does not change the route: the session
+records the one managed model.
+
+Lane rules govern a packet worker (`src/lib/pi/sdk/lane-approval.ts`). Inside
+its lane worktree, `write_file` and `run_command` get no per-call inbox approval,
+as for every other worker. The command policy still runs first, so a blocked
+command never starts. A call is allowed only while the lane is open and still
+bound to the session's workspace, and a write path must resolve inside it.
+Review and merge stay the gate. A launch without a lane keeps per-call inbox
+approval. A read-only packet gets `read_file` only. The orchestrator backend
+keeps inbox approval for its own writes and commands.
+
+When a turn settles, the store records a `runtime_process_exit` lane event whose
+classification follows the turn outcome, and a clean finish posts the
+supervisor completion signal, as other owned workers do. The adapter advertises
+discovery, transcript, launch, resume, interrupt and review diffs. It does not
+advertise cost telemetry, because usage counts against the plan or the free
+allowance, or streaming, because the transcript is written per finished message
+and per tool call. Stop aborts the running turn and closes its process; the next
+message resumes the session. A turn cannot be steered while it runs. Per-turn
+limits are 40 model calls, 80 tool calls and 30 minutes.
+
+Readiness needs a supported platform, Node 22.19 or newer, the worker script and
+the approved-write helper. No install or sign-in is needed; entitlement is
+checked on each model call.
+
+`tests/pi-builtin-worker-real-path.test.ts` drives the real delegate route with
+a scripted model behind the managed transport: lane, managed worktree, Pi
+writing and committing in the worktree with no inbox approval, a policy-blocked
+command that never runs, the transcript, discovery, the completion receipt and
+supervisor push, review, merge preview and merge. It also covers Stop, resume on
+the same session file, inbox approval for a launch without a lane, lane rules
+ending with the lane, and an impossible workspace refused before any process
+starts.
 
 ## Managed inference boundary
 

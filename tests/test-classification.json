@@ -3116,6 +3116,15 @@
       ]
     },
     {
+      "path": "tests/pi-builtin-worker-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-orchestrator-real-path.test.ts",
       "reasons": [
         "network-listener",

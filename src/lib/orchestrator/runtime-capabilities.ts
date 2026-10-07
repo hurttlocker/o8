@@ -484,6 +484,25 @@ export const ORCHESTRATOR_RUNTIMES = {
     tier: 'standard',
     description: 'earendil-works/pi coding agent via RPC-mode JSONL with native steer.',
   },
+  // The Pi SDK bundled with o8 (#3258), separate from the external `pi` CLI
+  // above. It runs on o8's own Node and the managed model route.
+  'pi-builtin': {
+    label: 'Pi (built-in)',
+    shortLabel: 'Pi built-in',
+    dispatchable: true,
+    requiresModel: false,
+    defaultModel: 'google/gemini-2.5-flash-lite',
+    accentColor: '#16a34a',
+    // No CLI on PATH: Pi runs as o8's own Node worker script. A name no other
+    // process uses keeps process detection from claiming every `node` process.
+    binaryName: 'o8-pi-worker',
+    workerProvider: 'pi-builtin',
+    authHouse: 'pi-builtin',
+    modelIdPattern: /^google\/gemini-2\.5-flash-lite$/,
+    reasoningEffort: false,
+    tier: 'standard',
+    description: 'Pi SDK bundled with o8 on the managed model route (your plan or the free daily allowance). Writes and commands stay in the packet worktree.',
+  },
   cursor: {
     label: 'Cursor',
     shortLabel: 'Cursor',

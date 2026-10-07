@@ -15,7 +15,6 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
@@ -26,6 +25,7 @@ import { createO8CommandTools, listO8Commands, o8CommandPrompt } from '@/lib/pi/
 import { openO8Servers, type O8ServerSet } from '@/lib/pi/orchestrator/o8-servers';
 import { O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
+import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
 /** Per-turn limits. A turn that dispatches and waits on a mission needs more than the prototype's defaults. */
@@ -102,18 +102,6 @@ export function piEventToOrchestratorEvents(event: Record<string, unknown>): Orc
   return [];
 }
 
-async function newestSessionFile(dir: string): Promise<string | undefined> {
-  let newest: { path: string; mtime: number } | undefined;
-  const entries = await readdir(dir, { recursive: true, withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-    const path = join(entry.parentPath, entry.name);
-    const mtime = (await stat(path).catch(() => null))?.mtimeMs ?? 0;
-    if (!newest || mtime > newest.mtime) newest = { path, mtime };
-  }
-  return newest?.path;
-}
-
 export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): OrchestratorBackend & {
   closeAll(): Promise<void>;
 } {
@@ -151,7 +139,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         workspace: repoPath,
         stateDir,
         model: O8_MANAGED_FLASH_LITE_MODEL,
-        sessionFile: await newestSessionFile(join(stateDir, 'sessions')),
+        sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
         transport: deps.transport,
         approve: deps.approve,
         hostTools: commands.length ? createO8CommandTools(commands) : [],

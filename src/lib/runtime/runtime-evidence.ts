@@ -171,6 +171,7 @@ const BUILT_IN_ARCHIVE_RUNTIMES = new Set<OrchestratorRuntime>([
   'cursor',
   'grok',
   'pi',
+  'pi-builtin',
   'prime-agent',
   'deepseek-harness',
 ]);
@@ -303,6 +304,11 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
   aider: unknownEvidence('aider', ['text'], 'configured-provider'),
   '3code': unknownEvidence('3code', ['text'], 'configured-provider'),
   pi: unknownEvidence('pi', ['stdio-json-rpc'], 'configured-provider'),
+  // One managed model on o8's relay, under the plan or the free allowance.
+  'pi-builtin': {
+    ...unknownEvidence('pi-builtin', ['stdio-json-rpc'], 'fixed'),
+    advertisedModelIds: ['google/gemini-2.5-flash-lite'],
+  },
   cursor: unknownEvidence('cursor', ['stream-json'], 'provider-native'),
   grok: {
     carriers: [{

@@ -62,6 +62,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     aider: 'terminal',
     '3code': 'terminal',
     pi: 'terminal',
+    'pi-builtin': 'terminal',
     cursor: 'terminal',
     grok: 'x',
     'prime-agent': 'terminal',

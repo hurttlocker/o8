@@ -3,9 +3,12 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtimes/shared/stdio-json-rpc';
 import { createPiApproval } from './approval';
+import { requirePiNode, requirePiPlatform } from './platform';
 import { piSdkScriptPath } from './scripts';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval } from './tools';
 import { createManagedPiTransport, PI_ALLOWANCE_EXHAUSTED_MESSAGE, type PiModelTransport } from './transport';
+
+export { requirePiNode, requirePiPlatform } from './platform';
 
 /** A tool the host runs itself. Trusted host adapters only, never built from model or request input. */
 export interface PiHostTool {
@@ -45,20 +48,6 @@ const PI_FAILURE_TEXT = /^(?:Stopped|Managed inference (?:unavailable|failed|rej
 function o8FailureText(message: unknown): string {
   return typeof message === 'string' && (message === PI_ALLOWANCE_EXHAUSTED_MESSAGE || PI_FAILURE_TEXT.test(message))
     ? message : 'Pi run failed';
-}
-
-export function requirePiNode(version = process.versions.node) {
-  const [major, minor] = version.split('.').map(Number);
-  if (!Number.isFinite(major) || major < 22 || (major === 22 && minor < 19)) {
-    throw new Error('The Pi prototype needs Node 22.19 or newer. Install a supported runtime before starting; o8 will not install it automatically.');
-  }
-}
-
-/** Approved writes rely on POSIX directory descriptors; Windows is refused until #3243 covers it. */
-export function requirePiPlatform(platform: NodeJS.Platform = process.platform) {
-  if (platform === 'win32') {
-    throw new Error('The Pi prototype does not support Windows yet. Use macOS or Linux.');
-  }
 }
 
 /** Opt-in host API, not registered as a default runtime or exposed as an HTTP route. */
