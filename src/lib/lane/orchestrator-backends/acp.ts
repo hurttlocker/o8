@@ -30,6 +30,7 @@ import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import { resolveOpencodeOrchestratorModelSync } from '@/lib/operator/defaults';
 import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { resolveHermesBinary } from '@/lib/hermes/runtime-resolution';
 import { governHermesProfile } from './hermes-profile';
 import type {
   OrchestratorBackend,
@@ -345,24 +346,6 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
 }
 
 // ── Concrete backends ──────────────────────────────────────────────────────────
-
-/** Resolve the `hermes` binary (PATH); null when not installed. */
-function resolveHermesBinary(): string | null {
-  for (const candidate of [
-    process.env.O8_HERMES_BIN,
-    `${process.env.HOME ?? ''}/.local/bin/hermes`,
-    '/opt/homebrew/bin/hermes',
-    '/usr/local/bin/hermes',
-    `${process.env.HOME ?? ''}/.npm-global/bin/hermes`,
-  ]) {
-    if (candidate && existsSync(candidate)) return candidate;
-  }
-  // The list above is POSIX-shaped in both halves — HOME is normally unset on
-  // Windows, and none of those paths exist there. scanForBinary knows the
-  // Windows install dirs and the extensions (`.cmd`) an npm-installed CLI
-  // actually carries, so it is the only branch that can hit off macOS/Linux.
-  return scanForBinary('hermes');
-}
 
 /**
  * Hermes via `hermes acp`, run against the GOVERNED profile (3d): an isolated

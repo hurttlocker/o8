@@ -36,6 +36,7 @@ import {
   deepSeekHarnessInstallGuidance,
   resolveDeepSeekHarnessLaunch,
 } from '@/lib/deepseek-harness/runtime-resolution';
+import { resolveHermesBinary } from '@/lib/hermes/runtime-resolution';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
@@ -537,6 +538,54 @@ async function detectPrimeAgent(): Promise<RuntimeAuthStatus> {
   });
 }
 
+async function detectHermes(): Promise<RuntimeAuthStatus> {
+  const binaryPath = resolveHermesBinary() ?? undefined;
+  if (!binaryPath) {
+    return nowStatus('hermes', 'hermes', {
+      installed: false,
+      authenticated: false,
+      detail: 'Hermes CLI is not installed.',
+      fix: 'Install Hermes Agent, then run `hermes setup`.',
+    });
+  }
+
+  const hermesHome = path.join(os.homedir(), '.hermes');
+  const configured = await fileExists(path.join(hermesHome, 'config.yaml'));
+  if (!configured) {
+    return nowStatus('hermes', 'hermes', {
+      installed: true,
+      authenticated: false,
+      ready: false,
+      unavailableReason: 'needs_auth',
+      detail: 'Hermes CLI is installed but no configured ~/.hermes/config.yaml profile was found.',
+      fix: 'Run `hermes setup` before dispatching Hermes workers.',
+      binaryPath,
+    });
+  }
+
+  const authenticated = Boolean(
+    process.env.OPENROUTER_API_KEY?.trim()
+    || process.env.NOUS_API_KEY?.trim()
+    || process.env.OPENAI_API_KEY?.trim()
+    || process.env.ANTHROPIC_API_KEY?.trim()
+    || process.env.DEEPSEEK_API_KEY?.trim()
+    || process.env.GEMINI_API_KEY?.trim(),
+  ) || await fileExists(path.join(hermesHome, '.env'))
+    || await fileExists(path.join(hermesHome, 'auth.json'));
+
+  return nowStatus('hermes', 'hermes', {
+    installed: true,
+    authenticated,
+    ready: true,
+    unavailableReason: null,
+    detail: authenticated
+      ? 'Hermes is configured and has local provider credential evidence.'
+      : 'Hermes is configured; provider auth may be runtime-owned or keyless/local and is validated by Hermes at turn start.',
+    fix: 'No action needed.',
+    binaryPath,
+  });
+}
+
 async function detectDeepSeekHarness(): Promise<RuntimeAuthStatus> {
   const launch = await resolveDeepSeekHarnessLaunch().catch(() => null);
   if (!launch) {
@@ -607,6 +656,7 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt
     case 'grok': return detectGrok();
     case 'pi': return detectPi();
     case 'prime-agent': return detectPrimeAgent();
+    case 'hermes': return detectHermes();
     case 'deepseek-harness': return detectDeepSeekHarness();
     default: return detectDeclarativeRuntime(runtime);
   }

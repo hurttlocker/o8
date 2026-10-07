@@ -58,6 +58,7 @@ import { grokRuntime } from './grok';
 import { piRuntime } from './pi';
 import { primeAgentRuntime } from './prime-agent';
 import { deepSeekHarnessRuntime } from './deepseek-harness';
+import { hermesRuntime } from './hermes';
 import { declarativeWorkerRuntimes, invalidateDeclarativeWorkerFleets } from './declarative-workers';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
@@ -68,6 +69,7 @@ import { invalidateOwnedGrokFleetCache } from '@/lib/grok/owned';
 import { invalidateOwnedPiFleetCache } from '@/lib/pi/owned';
 import { invalidateOwnedPrimeAgentFleetCache } from '@/lib/prime-agent/owned';
 import { invalidateOwnedDeepSeekHarnessFleetCache } from '@/lib/deepseek-harness/owned';
+import { invalidateOwnedHermesFleetCache } from '@/lib/hermes/owned';
 import './opencode-cost-parser';
 import './cursor-cost-parser';
 import './grok-cost-parser';
@@ -90,6 +92,7 @@ export function invalidateAllOwnedFleets(): void {
   invalidateOwnedPiFleetCache();
   invalidateOwnedPrimeAgentFleetCache();
   invalidateOwnedDeepSeekHarnessFleetCache();
+  invalidateOwnedHermesFleetCache();
   invalidateDeclarativeWorkerFleets();
 }
 
@@ -122,6 +125,7 @@ registerRuntime(primeAgentRuntime);
 // Provider/model routing remains a Harness concern rather than a new o8
 // provider branch; o8 owns only the normalized worker lifecycle around it.
 registerRuntime(deepSeekHarnessRuntime);
+registerRuntime(hermesRuntime);
 for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 // #514 — Cloud runtime adapter (self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires
