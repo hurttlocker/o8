@@ -15,7 +15,7 @@ function SignInTerminal({ command, onClose }: { command: string; onClose: () => 
   const [started, setStarted] = useState(false);
   const startedRef = useRef(false);
   const [error, setError] = useState('');
-  const [epoch, setEpoch] = useState(0);
+  const [connection, setConnection] = useState({ connected: false, epoch: 0 });
   const ws = useSharedDesktopWs(undefined, {
     onTerminalCreated: (name, requestId) => {
       if (requestId !== ownerKey) return;
@@ -30,9 +30,13 @@ function SignInTerminal({ command, onClose }: { command: string; onClose: () => 
     onTerminalExited: (name) => { if (name === sessionRef.current) { panelRef.current?.setExited(); setAttached(false); setError('The terminal closed. Check sign-in above, or close this terminal and open a new one.'); } },
   });
   const { isConnected, sendTerminalCreate, sendAgentKill } = ws;
+  if (connection.connected !== isConnected) {
+    // A new transport must receive an attachment acknowledgement before Run is enabled.
+    setConnection({ connected: isConnected, epoch: connection.epoch + (isConnected ? 1 : 0) });
+    setAttached(false);
+  }
   useEffect(() => {
-    if (!isConnected) { requested.current = false; setAttached(false); return; }
-    setEpoch((value) => value + 1);
+    if (!isConnected) { requested.current = false; return; }
     if (sessionRef.current || requested.current) return;
     requested.current = true;
     sendTerminalCreate(90, 12, ownerKey, undefined, ownerKey, true);
@@ -50,7 +54,7 @@ function SignInTerminal({ command, onClose }: { command: string; onClose: () => 
   return <div data-onboarding-sound="silent" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
     <p role="status" style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>{error || (!isConnected ? 'Connecting to the sign-in terminal… You can also copy the command above.' : !attached ? 'Opening a fresh terminal…' : started ? 'Follow the tool’s instructions here. Readiness is checked separately.' : 'Terminal ready. Run the displayed command when you’re ready to sign in.')}</p>
     {session ? <div role="region" aria-label="Sign-in terminal" style={{ height: 220, minWidth: 0, overflow: 'hidden', border: '1px solid var(--t-divider)', borderRadius: 10 }}>
-      <XtermPanel ref={panelRef} tmuxSession={session} visible screenReaderMode inputLocked={!started || !isConnected} connectionEpoch={epoch}
+      <XtermPanel ref={panelRef} tmuxSession={session} visible screenReaderMode inputLocked={!started || !isConnected} connectionEpoch={connection.epoch}
         sendTerminalAttach={ws.sendTerminalAttach} sendTerminalInput={ws.sendTerminalInput} sendTerminalResize={ws.sendTerminalResize}
         sendTerminalVisibility={ws.sendTerminalVisibility} sendTerminalDetach={ws.sendTerminalDetach} />
     </div> : null}

@@ -16,8 +16,9 @@ vi.mock('../hooks/DesktopWebSocketContext', () => ({
 vi.mock('../workspace-terminal/XtermPanel', async () => {
   const React = await import('react');
   return { XtermPanel: React.forwardRef(function Terminal(props: { tmuxSession: string; inputLocked: boolean; sendTerminalAttach: (name: string, cols: number, rows: number) => void }, ref) {
+    const { tmuxSession, sendTerminalAttach } = props;
     React.useImperativeHandle(ref, () => ({ writeData: transport.write, focus: transport.focus, setExited: vi.fn() }));
-    React.useEffect(() => { props.sendTerminalAttach(props.tmuxSession, 90, 12); }, [props.sendTerminalAttach, props.tmuxSession]);
+    React.useEffect(() => { sendTerminalAttach(tmuxSession, 90, 12); }, [sendTerminalAttach, tmuxSession]);
     return createElement('div', { 'data-input-locked': props.inputLocked }, 'Interactive terminal');
   }) };
 });
@@ -80,4 +81,18 @@ it('keeps the copy fallback available when terminal creation fails', async () =>
   expect(document.body.textContent).toContain('Copy the command above');
   expect(button('Run sign-in command').disabled).toBe(true);
   expect(transport.commands.sendTerminalInput).not.toHaveBeenCalled();
+});
+it('waits for a fresh attachment after reconnect before an unstarted command can run', async () => {
+  const { props } = await render(); await attach();
+  expect(button('Run sign-in command').disabled).toBe(false);
+  transport.commands.isConnected = false;
+  await act(async () => root.render(createElement(OnboardingSignInTerminal, props)));
+  transport.commands.isConnected = true;
+  await act(async () => root.render(createElement(OnboardingSignInTerminal, props)));
+  expect(button('Run sign-in command').disabled).toBe(true);
+  await act(async () => button('Run sign-in command').click());
+  expect(transport.commands.sendTerminalInput).not.toHaveBeenCalled();
+  await act(async () => transport.callbacks.onTerminalAttached?.('cortex-dash-owned'));
+  await act(async () => button('Run sign-in command').click());
+  expect(transport.commands.sendTerminalInput).toHaveBeenCalledExactlyOnceWith('cortex-dash-owned', 'codex login\r');
 });
