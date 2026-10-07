@@ -134,9 +134,9 @@ it.each([true, false])('keeps the owned settings picker above setup and selectab
   if (!native) delete shell.__TAURI_INTERNALS__;
   const choose = vi.fn();
   await act(async () => root.render(createElement(ThemeProvider, null,
-    createElement(OnboardingSurface, { children: createElement(PickerMenu, {
+    createElement(OnboardingSurface, null, createElement(PickerMenu, {
       value: 'first', options: [{ value: 'first', label: 'First tool' }, { value: 'second', label: 'Second tool' }], onChange: choose,
-    }) }),
+    })),
   )));
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!.click());
   const picker = document.querySelector<HTMLElement>('[data-o8-settings-portal]')!;
