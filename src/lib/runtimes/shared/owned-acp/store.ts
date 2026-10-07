@@ -295,6 +295,7 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
         : await client.newSession(session.repoPath);
       activeProcess.sessionId = established.sessionId;
       await adapter.configureSession?.({
+        client,
         sessionId: established.sessionId,
         model: session.model,
         resumed,

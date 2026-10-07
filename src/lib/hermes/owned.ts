@@ -183,6 +183,10 @@ const hermesStore = createOwnedAcpSessionStore({
   },
   validateInitialize: validateHermesInitialize,
   supportsResume: hermesSupportsResume,
+  async configureSession({ client, sessionId, model }) {
+    const selected = model?.trim();
+    if (selected) await client.setModel(sessionId, selected);
+  },
   handleRequest: handleHermesRequest,
   notificationSummary: hermesSummary,
   parseRunLog: parseHermesRunLog,

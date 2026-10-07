@@ -97,6 +97,14 @@ input.on('line', (line) => {
     return;
   }
 
+  if (frame.method === 'session/set_model') {
+    if (process.env.O8_HERMES_MODEL_LOG) {
+      appendFileSync(process.env.O8_HERMES_MODEL_LOG, `${frame.params.modelId}\n`);
+    }
+    send({ jsonrpc: '2.0', id: frame.id, result: {} });
+    return;
+  }
+
   if (frame.method === 'session/prompt') {
     turn += 1;
     if (process.env.O8_HERMES_PID_LOG) {

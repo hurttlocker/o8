@@ -17,6 +17,7 @@ const sessionsRoot = path.join(root, 'sessions');
 const pidLog = path.join(root, 'pids.log');
 const permissionLog = path.join(root, 'permissions.log');
 const launchLog = path.join(root, 'launches.log');
+const modelLog = path.join(root, 'models.log');
 const fixture = path.join(process.cwd(), 'tests', 'fixtures', 'hermes-acp-runtime.mjs');
 const wrapper = path.join(root, 'hermes');
 const previousHome = process.env.HOME;
@@ -52,6 +53,7 @@ beforeAll(() => {
   process.env.O8_HERMES_PID_LOG = pidLog;
   process.env.O8_HERMES_PERMISSION_LOG = permissionLog;
   process.env.O8_HERMES_LAUNCH_LOG = launchLog;
+  process.env.O8_HERMES_MODEL_LOG = modelLog;
 });
 
 afterAll(() => {
@@ -63,6 +65,7 @@ afterAll(() => {
   delete process.env.O8_HERMES_PID_LOG;
   delete process.env.O8_HERMES_PERMISSION_LOG;
   delete process.env.O8_HERMES_LAUNCH_LOG;
+  delete process.env.O8_HERMES_MODEL_LOG;
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -76,6 +79,7 @@ describe('Hermes worker production runtime seam', () => {
       clientMutationId: 'hermes-real-path-1',
       packetId: 'packet-fixture',
       laneId: 'lane-fixture',
+      model: 'fixture/model',
     });
     expect(launched).toMatchObject({ ok: true });
     expect(launched.sessionKey).toMatch(/^hermes-owned:/);
@@ -113,6 +117,7 @@ describe('Hermes worker production runtime seam', () => {
     expect(firstLaunch.home.startsWith(sessionsRoot)).toBe(true);
     expect(existsSync(path.join(firstLaunch.home, '.hermes', 'config.yaml'))).toBe(true);
     expect(existsSync(path.join(firstLaunch.home, '.hermes', '.env'))).toBe(true);
+    expect(readFileSync(modelLog, 'utf8').trim().split('\n')).toEqual(['fixture/model']);
 
     await expect(hermesRuntime.interrupt(sessionKey)).resolves.toMatchObject({ ok: true });
     await expect(hermesRuntime.resume(sessionKey, 'third turn')).resolves.toMatchObject({ ok: true });
@@ -122,6 +127,10 @@ describe('Hermes worker production runtime seam', () => {
     expect(pids).toHaveLength(3);
     expect(pids[0]).toBe(pids[1]);
     expect(pids[2]).not.toBe(pids[0]);
+    expect(readFileSync(modelLog, 'utf8').trim().split('\n')).toEqual([
+      'fixture/model',
+      'fixture/model',
+    ]);
 
     await expect(hermesRuntime.discoverSessions()).resolves.toEqual([
       expect.objectContaining({ sessionKey, runtimeId: 'hermes', ownership: 'owned' }),
