@@ -183,6 +183,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/onboarding/OnboardingSignInTerminal.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
       "reasons": [
         "native-build"
@@ -2855,6 +2861,21 @@
     {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/onboarding-sign-in-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/onboarding-sign-in-terminal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },

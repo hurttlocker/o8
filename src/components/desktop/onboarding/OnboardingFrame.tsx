@@ -4,7 +4,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { OnboardingProgress } from './onboarding-progress';
 import { useOnboardingMotion } from './OnboardingExperience';
 
-const frameInset: CSSProperties = { paddingTop: 'clamp(20px, 4vw, 32px)', paddingBottom: 'clamp(20px, 4vw, 32px)',
+const frameInset: CSSProperties = { paddingTop: 'clamp(20px, 3vh, 32px)', paddingBottom: 'clamp(20px, 3vh, 32px)',
   paddingLeft: 'clamp(20px, 4vw, 32px)', paddingRight: 'clamp(20px, 4vw, 32px)' };
 
 export function OnboardingFrame({ progress, agentReady, children }: {
@@ -22,8 +22,8 @@ export function OnboardingFrame({ progress, agentReady, children }: {
     { label: 'Workspace', detail: current === 2 ? workspaceDetail : 'Next', done: false },
   ];
   return <div style={{ width: '100%', maxWidth: 800, border: '1px solid var(--t-divider)', borderRadius: 16, background: 'var(--t-onboarding-bg)' }}>
-    <header style={{ ...frameInset, paddingBottom: 24, borderBottom: '1px solid var(--t-divider)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
+    <header style={{ ...frameInset, paddingBottom: 20, borderBottom: '1px solid var(--t-divider)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
         <span aria-label="o8" style={{ fontSize: 28, fontWeight: 400, letterSpacing: '-2px', lineHeight: 1 }}>o8<span aria-hidden style={{ color: 'var(--t-brand-orange)' }}>.</span></span>
         <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)' }}>Local workspace</span>
       </div>

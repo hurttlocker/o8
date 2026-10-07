@@ -248,7 +248,7 @@ it('routes a project to tool setup when no runtime is usable', async () => {
   const { complete } = await render(request);
   await click('Open Sample project');
   expect(document.body.textContent).toContain('Connect a coding tool');
-  expect(button('Use this setup').disabled).toBe(true);
+  expect(button('Continue to Sample project').disabled).toBe(true);
   expect(complete).not.toHaveBeenCalled();
 });
 
@@ -391,4 +391,15 @@ it('recovers a persisted handoff after remount and clears a cancelled agent rece
   expect(next.complete).toHaveBeenCalledOnce();
   expect(fixture.state.status).toBe('cancelled');
   expect(document.body.textContent).not.toContain('could not be confirmed');
+});
+
+
+it('returns keyboard focus to the setup action that opened a page', async () => {
+  await render();
+  await click('Change');
+  await click('← Projects');
+  expect(document.activeElement).toBe(button('Change'));
+  await click('Clone from GitHub');
+  await click('Choose later');
+  expect(document.activeElement).toBe(button('Clone from GitHub'));
 });

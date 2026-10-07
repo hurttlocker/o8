@@ -23,7 +23,7 @@ import type { OnboardingRequest } from './request';
 import { OnboardingToolsPanel } from './OnboardingToolsPanel';
 import { AgentReadiness } from './AgentReadiness';
 import { useToolScanStatus } from './useToolScanStatus';
-import { onboardingButtonStyle, onboardingQuietButtonStyle } from './onboarding-style';
+import { onboardingActionRowStyle, onboardingButtonStyle, onboardingQuietButtonStyle } from './onboarding-style';
 import { Plus, RefreshCw, SlidersHorizontal } from '../lucide-shims';
 import { RuntimeIdentity } from './RuntimeIdentity';
 import { formatModelLabel } from '@/lib/format';
@@ -133,26 +133,32 @@ function RuntimeInventoryRow({
 }
 
 export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
-  request = fetch, onContinue, onSkip, renderButton, onBusyChange,
+  request = fetch, onContinue, onSkip, renderButton, onBusyChange, projectName, allowSetupTerminal = true,
 }: {
   request?: OnboardingRequest;
   onContinue: () => void | Promise<void>;
   onBusyChange?: (busy: boolean) => void;
   onSkip: () => void;
-  renderButton: (props: { label: string; onClick: () => void; disabled?: boolean }) => ReactNode;
+  projectName?: string;
+  allowSetupTerminal?: boolean;
+  renderButton: (props: { label: string; onClick: () => void; disabled?: boolean; descriptionId?: string }) => ReactNode;
 }) {
   const [selection, setSelection] = useState<OnboardingRuntimeSelection | null>(null);
   const [initialBuiltIn, setInitialBuiltIn] = useState<SetupRuntime | null>(null);
   const [orchestratorRuntime, setOrchestratorRuntime] = useState<OnboardingOrchestratorRuntime>('codex');
   const [workerRuntimes, setWorkerRuntimes] = useState<DispatchRuntime[]>([]);
   const [panel, setPanel] = useState<'choose' | 'customize' | 'tools' | null>(null);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const customize = panel === 'customize';
   const headingRef = useRef<HTMLHeadingElement>(null);
   const toolsButtonRef = useRef<HTMLButtonElement>(null);
   const customizeButtonRef = useRef<HTMLButtonElement>(null);
   const previousPanel = useRef(panel);
   useEffect(() => {
-    if (panel === 'tools' || panel === 'customize') headingRef.current?.focus();
+    if (panel === 'tools' || panel === 'customize') {
+      const recovery = headingRef.current?.closest('[data-onboarding-agent-setup]')?.querySelector<HTMLElement>('#onboarding-sign-in-title');
+      (recovery ?? headingRef.current)?.focus();
+    }
     else if (previousPanel.current === 'tools') toolsButtonRef.current?.focus();
     else if (previousPanel.current === 'customize') customizeButtonRef.current?.focus();
     previousPanel.current = panel;
@@ -162,12 +168,14 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
   const [saving, setSaving] = useState(false);
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [onBusyChange, saving]);
   const [error, setError] = useState<string | null>(null);
+  const [scanFailed, setScanFailed] = useState(false);
   const choiceMade = useRef(false);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
+    setScanFailed(false);
     void loadOnboardingBuiltInAgent(request).then((next) => { if (active) setInitialBuiltIn(next); }).catch(() => {});
     void loadOnboardingRuntimeSelection(request, revision > 0).then((next) => {
       if (!active) return;
@@ -179,7 +187,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
         setWorkerRuntimes(next.workerRuntimes);
       }
     }).catch((cause: unknown) => {
-      if (active) { setSelection(null); setError(cause instanceof Error ? cause.message : 'Runtime inventory is unavailable.'); }
+      if (active) { setScanFailed(true); setError(cause instanceof Error ? cause.message : 'Runtime inventory is unavailable.'); }
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [request, revision]);
@@ -198,7 +206,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     ? selection?.recommendation.workerModel ?? '' : workerRuntimes[0] === builtIn?.id ? '' : workerRuntimes[0] === 'opencode' ? selection?.recommendation.opencodeModel ?? workerModelPreset('opencode') : workerModelPreset(workerRuntimes[0]);
   const leadReady = leadRuntime ? canSelectOnboardingRuntime(inventory, leadRuntime)
     : backend === 'o8' || Boolean(sameLead && selection?.recommendation.preserved);
-  const readyToSave = Boolean(selection && leadReady && workerRuntimes.length > 0
+  const readyToSave = Boolean(selection && !scanFailed && leadReady && workerRuntimes.length > 0
     && workerRuntimes.every((id) => canSelectOnboardingRuntime(inventory, id)));
   const leadOptions = (['codex', 'claude-code', ...(customize ? ['fable', 'opencode', 'o8'] : [])] as OnboardingOrchestratorRuntime[])
     .filter((id) => id === 'o8' || inventory.some((item) => item.id === runtimeForLead(orchestratorBackendForRuntime(id)) && item.available));
@@ -236,12 +244,13 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
   };
   const motionRef = useOnboardingMotion(panel ?? 'choose');
   return (
-    <div ref={motionRef} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
-      <div>
+    <div ref={motionRef} data-onboarding-agent-setup="" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
+      {!recoveryOpen ? <div>
         <h1 ref={headingRef} tabIndex={-1} style={{ margin: 0, fontSize: 28, fontWeight: 300, color: 'var(--t-text)', outline: 'none' }}>{showTools ? needsConnection ? 'Connect a coding tool' : 'Add coding tools' : customize ? 'Customize your setup' : 'Choose your agent'}</h1>
         <p style={{ marginTop: 12, marginBottom: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{showTools ? 'Install or sign in to a tool, then refresh to check it. Your selected setup stays yours.' : customize ? 'Choose the lead and workers for this project. Save when your setup is ready.' : 'Start with an agent. You can add coding tools and adjust your setup later.'}</p>
-      </div>
-      {showTools ? <OnboardingToolsPanel inventory={inventory.filter((item) => !item.builtIn && (!needsConnection || item.id === 'codex' || item.id === 'claude-code'))} loading={loading} disabled={saving} /> : <>
+      </div> : null}
+      {showTools ? <OnboardingToolsPanel inventory={inventory.filter((item) => !item.builtIn && (!needsConnection || item.id === 'codex' || item.id === 'claude-code'))} loading={loading} disabled={saving}
+        scanError={scanFailed ? error : null} allowTerminal={allowSetupTerminal} onRefresh={() => setRevision((current) => current + 1)} onRecoveryStart={() => { setPanel('tools'); setRecoveryOpen(true); }} onRecoveryEnd={() => setRecoveryOpen(false)} /> : <>
         {!customize ? <>
           <AgentReadiness inventory={readyChoices} selectedRuntime={leadRuntime} disabled={loading || saving || locked} onSelect={(item) => changeLead(item.builtIn ? item.builtIn.backend === 'claude' ? 'claude-code' : item.builtIn.backend : item.id as OnboardingOrchestratorRuntime)} />
           {loading ? <div role="status" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>{scanStatus}</div> : <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
@@ -284,15 +293,20 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
       {!loading && !readyToSave && workerRuntimes.length > 0 ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Some selected tools need attention. Add coding tools or customize your setup.</div> : null}
       {error ? <OnboardingFeedback tone="error" title={error}>Your selections are still here. Try saving again when you’re ready.</OnboardingFeedback> : null}
       {!showTools ? <div style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-faint)' }}>{leadRuntime !== builtIn?.id ? 'Recommendations use session file activity from the past seven days. Conversation contents stay unread. ' : ''}Messaging and other optional features can be connected later.</div> : null}
-      <div style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 12, paddingTop: 12, paddingBottom: 12, background: 'var(--t-onboarding-bg)', borderTop: '1px solid var(--t-divider)' }}>
+      <div style={onboardingActionRowStyle}>
+      <p id="onboarding-next-action" style={{ margin: 0, width: '100%', fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+        {loading ? 'Checking tools before you continue.' : scanFailed ? 'Check your tools again to continue.' : readyToSave
+          ? projectName ? selection?.consentAnswered ? `Next: open ${projectName} with ${leadLabel}.` : 'Next: choose your privacy preferences, then open your workspace.'
+            : 'Next: save this setup and return to your projects.'
+          : 'Finish connecting your selected tools, then check them here.'}
+      </p>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-          {showTools ? <button type="button" disabled={saving} onClick={() => setPanel('choose')} style={{ ...onboardingQuietButtonStyle, fontSize: 12 }}>Back to agent choices</button> : null}
+          {showTools ? <button data-onboarding-back-to-choices type="button" disabled={saving} onClick={() => { setPanel('choose'); setRecoveryOpen(false); }} style={{ ...onboardingQuietButtonStyle, fontSize: 12 }}>Back to agent choices</button> : null}
           <button type="button" disabled={saving} onClick={onSkip} style={{ ...onboardingQuietButtonStyle, color: 'var(--t-text-faint)', fontSize: 12 }}>Set up later</button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
-          {showTools ? <button type="button" disabled={loading || saving} onClick={() => setRevision((current) => current + 1)} style={{ ...onboardingButtonStyle, display: 'inline-flex', alignItems: 'center', gap: 8 }}><RefreshCw size={14} aria-hidden="true" />{loading ? 'Checking tools…' : 'Refresh tools'}</button> : null}
-          {renderButton({ label: saving ? 'Saving setup…' : 'Use this setup', onClick: handleContinue, disabled: loading || saving || !readyToSave })}
+          {showTools && !recoveryOpen ? <button type="button" disabled={loading || saving} onClick={() => setRevision((current) => current + 1)} style={{ ...onboardingButtonStyle, display: 'inline-flex', alignItems: 'center', gap: 8 }}><RefreshCw size={14} aria-hidden="true" />{loading ? 'Checking tools…' : 'Refresh tools'}</button> : null}
+          {renderButton({ label: saving ? 'Saving setup…' : projectName ? `Continue to ${projectName}` : 'Use this setup', onClick: handleContinue, disabled: loading || saving || !readyToSave, descriptionId: 'onboarding-next-action' })}
         </div>
       </div>
     </div>

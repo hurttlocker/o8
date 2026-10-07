@@ -972,6 +972,8 @@ interface TerminalAttachment {
   snapshotSource: 'tmux' | 'scrollback';
   /** The first attach came from a viewer; its tmux client ignores window size. */
   observerOwned?: boolean;
+  /** Direct setup shells are temporary and must not survive their last view. */
+  transient?: boolean;
   cols: number;
   rows: number;
   batchBuffer: string;
@@ -1018,7 +1020,7 @@ const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
 const TERMINAL_TMUX_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
-const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean }>();
+const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean; clientId?: string }>();
 
 // ── Orchestrator channel state ──
 
@@ -6972,6 +6974,7 @@ function materializePendingDashSession(
     id: randomUUID(),
     sessionName,
     kind: 'dash-shell',
+    transient: pending.directPty,
     ptyProcess,
     clientIds: new Set([client.id]),
     clientViews: new Map(),
@@ -7044,7 +7047,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   }
 
   const sessionName = ownerSessionName ?? `cortex-dash-${randomUUID().slice(0, 8)}`;
-  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty });
+  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty, clientId: directPty ? client.id : undefined });
   console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });
 }
@@ -7307,7 +7310,7 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   if (!attachment) {
     if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
       const pending = pendingDashSessions.get(sessionName);
-      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true });
+      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true, clientId: pending?.clientId });
     }
     return;
   }
@@ -7382,7 +7385,7 @@ function handleTerminalDetach(client: ClientState, msg: Record<string, unknown>)
   sendTerminal(client, 'detached', { sessionName });
 }
 
-function removeClientFromTerminal(clientId: string, sessionName: string) {
+function removeClientFromTerminal(clientId: string, sessionName: string, disconnected = false) {
   const attachment = terminalAttachments.get(sessionName);
   if (!attachment) return;
 
@@ -7408,6 +7411,17 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
 
   // If no more clients, destroy the PTY handle and clean up the tmux session
   if (attachment.clientIds.size === 0) {
+    if (attachment.transient) {
+      if (attachment.orphanTimer) clearTimeout(attachment.orphanTimer);
+      // A live view may briefly detach while xterm reinitializes. A disconnected
+      // setup transport has no owner left, so terminate it immediately.
+      if (disconnected) terminateTerminalSession(sessionName);
+      else attachment.orphanTimer = setTimeout(() => {
+        const latest = terminalAttachments.get(sessionName);
+        if (latest?.clientIds.size === 0) terminateTerminalSession(sessionName);
+      }, 1_000);
+      return;
+    }
     if (attachment.kind === 'dash-shell') {
       // #6 persistent terminals — when persistence is on, a dash PTY is a
       // `tmux attach` client over a detached session, so detaching costs us
@@ -8893,7 +8907,10 @@ wss.on('connection', (ws, req) => {
     client.backpressureQueue.length = 0;
     // Detach from all terminal sessions
     for (const sessionName of client.terminalSessions) {
-      removeClientFromTerminal(client.id, sessionName);
+      removeClientFromTerminal(client.id, sessionName, true);
+    }
+    for (const [sessionName, pending] of pendingDashSessions) {
+      if (pending.directPty && pending.clientId === client.id) pendingDashSessions.delete(sessionName);
     }
     // Clean up orchestrator subscriptions (one per backend the client used).
     for (const key of orchestratorSubscriptions.keys()) {

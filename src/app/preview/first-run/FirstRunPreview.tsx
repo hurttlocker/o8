@@ -13,7 +13,7 @@ import type { PermissionSnapshot } from '@/components/desktop/onboarding/permiss
 
 export type ConsentPreviewState = 'unanswered' | 'one-choice' | 'saving' | 'error';
 type PreviewSurface = 'consent' | 'onboarding';
-type PreviewTools = 'both' | 'codex' | 'claude-code' | 'none' | 'built-in-free' | 'built-in-paid' | 'built-in-with-tools' | 'built-in-windows';
+type PreviewTools = 'both' | 'codex' | 'claude-code' | 'none' | 'sign-in' | 'built-in-free' | 'built-in-paid' | 'built-in-with-tools' | 'built-in-windows';
 
 const ONBOARDING_STEPS: Array<{ value: OnboardingStep; label: string }> = [
   { value: 'open', label: 'Projects' },
@@ -81,6 +81,12 @@ export function createOnboardingPreviewRequest(storage: ProgressStorage | null =
     ];
     for (const item of inventory) {
       if (item.available && tools !== 'both' && tools !== 'built-in-with-tools' && tools !== item.id) { item.available = false; item.unavailableReason = 'not_installed'; item.detail = 'Not installed'; item.fix = `Install ${item.label}, then refresh tools.`; }
+    }
+    if (tools === 'sign-in') {
+      const codex = inventory[0]!;
+      Object.assign(codex, storage?.getItem('signed-in-runtime') === 'codex'
+        ? { available: true, installed: true, unavailableReason: null, detail: 'Ready', fix: '' }
+        : { available: false, installed: true, unavailableReason: 'needs_auth', detail: 'Installed, sign-in needed', fix: 'Run `codex login`.' });
     }
     if (builtInAgent) inventory.unshift(builtInAgent);
     return jsonResponse({ values, sources: Object.fromEntries(Object.keys(values).map((key) => [key, 'file'])), dispatchableRuntimes: inventory, setupRecommendation: recommendRuntimeSetup({ inventory, values, sources: Object.fromEntries(Object.keys(values).map((key) => [key, 'file'])), activity: { codex: 12, claude: 4, complete: true } }) });
@@ -179,7 +185,7 @@ export function FirstRunPreview() {
   const [onboardingRequest, setOnboardingRequest] = useState(() => createOnboardingPreviewRequest(storage));
 
   const restart = (nextTools = tools) => {
-    storage.removeItem('settings'); storage.removeItem(PROGRESS_KEY);
+    storage.removeItem('settings'); storage.removeItem(PROGRESS_KEY); storage.removeItem('signed-in-runtime');
     setOnboardingRequest(() => createOnboardingPreviewRequest(storage, nextTools));
     setFinished(false); setOnboardingStep('open'); setRun((value) => value + 1);
   };
@@ -197,6 +203,7 @@ export function FirstRunPreview() {
           pickFolder={pickPreviewFolder}
           openExternal={ignorePreviewAction}
           permissionClient={permissionClient}
+          allowSetupTerminal={false}
           restartPermissions={restartPreviewPermissions}
           onComplete={(task) => { setFinishedTask(task ?? null); setFinished(true); return true; }}
         />
@@ -261,12 +268,13 @@ export function FirstRunPreview() {
           </select>
         )}
         <select aria-label="Available tools" value={tools} onChange={(event) => { const next = event.target.value as PreviewTools; setTools(next); restart(next); }} style={controlStyle}>
-          <option value="both">Codex + Claude</option><option value="codex">Codex only</option><option value="claude-code">Claude only</option><option value="none">No tools</option>
+          <option value="both">Codex + Claude</option><option value="codex">Codex only</option><option value="claude-code">Claude only</option><option value="none">No tools</option><option value="sign-in">Installed · sign-in needed</option>
           <option value="built-in-free">Built-in · free</option><option value="built-in-paid">Built-in · paid</option><option value="built-in-with-tools">Built-in + tools</option><option value="built-in-windows">Built-in · Windows</option>
         </select>
         <select aria-label="Voice permissions" value={permissions} onChange={(event) => setPermissions(event.target.value as PreviewPermissions)} style={controlStyle}>
           <option value="browser">Browser · unavailable</option><option value="new">macOS · new</option><option value="ready">macOS · ready</option><option value="mixed">macOS · mixed</option>
         </select>
+        {tools === 'sign-in' ? <button type="button" onClick={() => storage.setItem('signed-in-runtime', 'codex')} style={{ ...controlStyle, paddingRight: 10 }}>Mark preview sign-in ready</button> : null}
         <select aria-label="Preview theme" value={palette} onChange={(event) => setPalette(event.target.value as 'light' | 'dark')} style={controlStyle}><option value="light">Light</option><option value="dark">Dark</option></select>
         <button type="button" aria-label="Reset onboarding preview" onClick={() => restart()} style={{ ...controlStyle, paddingRight: 10 }}>Reset</button>
         <span style={{ fontSize: 10, color: 'var(--t-text-faint)', whiteSpace: 'nowrap' }}>isolated state</span>

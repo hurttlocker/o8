@@ -9,6 +9,8 @@ export interface XtermPanelProps {
   /** Observe an existing run without writing keystrokes into its PTY. */
   readOnly?: boolean;
   inputLocked?: boolean;
+  /** Enable readable terminal output for setup and other assistive surfaces. */
+  screenReaderMode?: boolean;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number, readOnly?: boolean) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;

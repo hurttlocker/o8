@@ -12,6 +12,7 @@ const xtermMock = vi.hoisted(() => ({
   resets: 0,
   onData: null as ((data: string) => void) | null,
   completeWritesImmediately: true,
+  constructorOptions: [] as Array<{ screenReaderMode?: boolean }>,
 }));
 
 class MockDisposable {
@@ -23,6 +24,7 @@ class MockAddon {
 }
 
 class MockTerminal {
+  constructor(options: { screenReaderMode?: boolean }) { xtermMock.constructorOptions.push(options); }
   cols = 120;
   rows = 30;
   options: { theme?: Record<string, string>; disableStdin?: boolean } = {};
@@ -101,6 +103,7 @@ describe('XtermPanel terminal workload instrumentation', () => {
     xtermMock.resets = 0;
     xtermMock.onData = null;
     xtermMock.completeWritesImmediately = true;
+    xtermMock.constructorOptions.length = 0;
     delete window.__o8TerminalDiagnostics;
     delete window.__o8TerminalBenchEnabled;
     delete window.__o8TerminalWriteStats;
@@ -142,6 +145,14 @@ describe('XtermPanel terminal workload instrumentation', () => {
 
     expect(xtermMock.writes).toHaveLength(0);
     expect(window.__o8TerminalWriteStats).toBeUndefined();
+  });
+
+  it('enables accessible terminal output only for an opted-in surface', async () => {
+    const props = panelProps(true);
+    await act(async () => root.render(createElement(XtermPanel, props)));
+    expect(xtermMock.constructorOptions.at(-1)?.screenReaderMode).toBe(false);
+    await act(async () => root.render(createElement(XtermPanel, { ...props, screenReaderMode: true })));
+    expect(xtermMock.constructorOptions.at(-1)?.screenReaderMode).toBe(true);
   });
 
   it('does not install render or write-completion instrumentation when the bench flag is unset', async () => {
