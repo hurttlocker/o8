@@ -79,6 +79,14 @@ These rules apply across setup, Settings, connection flows, project views, and t
 - Independent discovery must render independently. A slow tool scan must not hide available projects or prevent a manual folder choice. Name a long wait and keep an available next action reachable.
 - Keep error and recovery feedback in the section that failed. Retain context and choices. Optional permissions and privacy choices remain explicit.
 
+### Actions and optional setup
+
+- Use anchors for navigation and buttons for local actions. A local action that opens configuration must have a visible control boundary, a verb label, and `aria-expanded` / `aria-controls`; do not rely on accent text to advertise interactivity. Reuse the surface’s existing secondary button primitive.
+- Put related optional actions in one group. Open one setup subtask at a time inside the stable frame; give it a name and an explicit return action. Closing or switching panels must preserve selected values and return keyboard focus to the initiating control. Opening a panel performs no installation, authentication, or settings write.
+- A tool setup panel groups identity, observed readiness, remediation, and its action. Show the exact install command before copying; name the provider in accessible action labels. A failed copy or refresh keeps instructions and selections available. Refresh remains contextual to discovery, separate from saving setup.
+- Provider marks identify choices in setup and connection flows. Reuse existing assets in a fixed identity slot, with optical sizing for the mark, a readable tool name, and a separate status. Hide redundant brand graphics from assistive technology. Dense workspace history keeps its existing text-first rule.
+- Use the existing page and grouped-surface tokens for hierarchy. A new border, background, or column must organize a real choice or supporting information; adding a panel does not require adding a new palette, font, or Settings control variant.
+
 ### Window fit
 
 - Verify the live surface at a compact 900 × 700 window and a wide 1680 × 1050 window, in light and dark themes. Content may scroll vertically, but must not clip horizontally or require a whole-screen horizontal scroll.
@@ -93,6 +101,6 @@ These rules apply across setup, Settings, connection flows, project views, and t
    - [ ] No spinner under 100ms; named stages past 3s (§1).
    - [ ] Sibling elements share one geometry source; no accidental snowflake (§2).
    - [ ] Exactly one primary action; destructive is danger + confirm strip (§3).
-   - [ ] Screen structure, grouping, disclosure, and compact/wide window fit satisfy §4.
+   - [ ] Screen structure, action semantics, panel return/focus, grouping, and compact/wide window fit satisfy §4.
 
 **Chunk-size note** (for the Brain): keep each H2/H3 here chunk-sized — the composer reads ~1,500 chars per row. The tables above are intentionally short so each rule is independently retrievable.

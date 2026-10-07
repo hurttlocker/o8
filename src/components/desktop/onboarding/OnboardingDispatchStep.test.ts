@@ -39,7 +39,7 @@ describe('one recommended runtime setup', () => {
     expect(document.body.textContent).not.toContain('GPT-');
     expect(document.querySelector('[aria-label="Agent readiness"]')?.textContent).toContain('Ready');
     expect(button('Use this setup').disabled).toBe(false);
-    await act(async () => button('Customize').click());
+    await act(async () => button('Customize setup').click());
     const picker = document.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!;
     await act(async () => picker.click());
     expect(document.body.querySelector('[role="listbox"]')?.textContent).toContain('Codex');
@@ -53,14 +53,16 @@ describe('one recommended runtime setup', () => {
     expect(onContinue).toHaveBeenCalledOnce();
   });
 
-  it('keeps missing tools in Add tools and installed tools needing attention in customization', async () => {
+  it('keeps missing tools in tool setup and installed tools needing attention in customization', async () => {
     await render();
-    await act(async () => button('Customize').click());
+    await act(async () => button('Customize setup').click());
     const workerButtons = [...document.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')];
     expect(workerButtons.some((item) => item.textContent?.includes('Gemini'))).toBe(true);
     expect(workerButtons.find((item) => item.textContent?.includes('Gemini'))?.disabled).toBe(true);
     expect(workerButtons.some((item) => item.textContent?.includes('OpenCode'))).toBe(false);
-    expect(document.querySelector('details')?.textContent).toContain('Install OpenCode');
+    await act(async () => button('Add coding tools').click());
+    expect(document.querySelector('[aria-label="Tool setup"]')?.textContent).toContain('Install OpenCode');
+    expect(document.querySelector('[aria-label="Setup customization"]')).toBeNull();
   });
 
   it('can finish setup after a tool is installed and refreshed', async () => {
@@ -86,12 +88,12 @@ describe('one recommended runtime setup', () => {
 
 it('offers Fable through a ready Claude tool and saves the selected lead', async () => {
   const { request } = await render();
-  await act(async () => button('Customize').click());
+  await act(async () => button('Customize setup').click());
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!.click());
   const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent?.includes('Fable'));
   expect(option).toBeTruthy();
   await act(async () => option!.click());
-  await act(async () => button('Keep it simple').click());
+  await act(async () => button('Done customizing').click());
   expect(document.body.textContent).toContain('Fable');
   await act(async () => button('Use this setup').click());
   const write = request.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -105,4 +107,45 @@ it('keeps a failed setup save visible and retryable', async () => {
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not save settings');
   expect(button('Use this setup').disabled).toBe(false);
   expect(onContinue).not.toHaveBeenCalled();
+});
+
+
+it('returns from tool setup to the chosen lead and restores keyboard focus', async () => {
+  const { request } = await render();
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Codex: Ready"]')!.click());
+  const addTools = button('Add coding tools');
+  await act(async () => addTools.click());
+  expect(document.querySelector('[aria-label="Tool setup"]')).not.toBeNull();
+  expect(document.activeElement?.textContent).toBe('Add coding tools');
+  expect(request.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  await act(async () => button('Refresh tools').click());
+  await act(async () => button('Back to agent choices').click());
+  expect(document.activeElement).toBe(button('Add coding tools'));
+  expect(document.querySelector('[aria-label="Codex: Ready"]')?.getAttribute('aria-pressed')).toBe('true');
+  await act(async () => button('Use this setup').click());
+  const write = request.mock.calls.find(([, init]) => init?.method === 'POST');
+  expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({ orchestratorBackend: 'codex', workerRuntimes: ['codex'] });
+});
+
+it('keeps an inspected install command visible through clipboard failure and retry', async () => {
+  const originalClipboard = navigator.clipboard;
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('Unavailable')).mockResolvedValueOnce(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    await render();
+    await act(async () => button('Add coding tools').click());
+    expect(document.querySelector('[aria-label="Tool setup"]')?.textContent).toContain('npm i -g @opencode-ai/cli@next');
+    const copy = document.querySelector<HTMLButtonElement>('[aria-label="Copy OpenCode install command"]')!;
+    expect(copy).not.toBeNull();
+    await act(async () => copy.click());
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Clipboard unavailable');
+    expect(copy.textContent).toBe('Copy command');
+    await act(async () => copy.click());
+    expect(writeText).toHaveBeenLastCalledWith('npm i -g @opencode-ai/cli@next');
+    expect(copy.textContent).toBe('Copied');
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Tool setup"]')?.textContent).toContain('npm i -g @opencode-ai/cli@next');
+  } finally {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
+  }
 });

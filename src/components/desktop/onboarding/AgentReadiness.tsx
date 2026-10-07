@@ -2,8 +2,9 @@
 
 import type { SetupRuntime } from '@/lib/setup/runtime-recommendation';
 import { onboardingQuietButtonStyle } from './onboarding-style';
+import { RuntimeIdentity } from './RuntimeIdentity';
 
-function readinessLabel(runtime: SetupRuntime): string {
+export function runtimeReadinessLabel(runtime: SetupRuntime): string {
   if (runtime.available) return 'Ready';
   if (runtime.unavailableReason === 'not_installed') return 'Not installed';
   if (runtime.unavailableReason === 'needs_auth') return 'Sign-in needed';
@@ -21,10 +22,11 @@ export function AgentReadiness({ inventory, selectedRuntime, disabled, onSelect 
   return <div aria-label="Agent readiness" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
     {inventory.map((runtime) => {
       const selected = selectedRuntime === runtime.id;
-      const status = readinessLabel(runtime);
+      const status = runtimeReadinessLabel(runtime);
       const detail = runtime.available ? /^(ready|ready to code)\.?$/i.test(runtime.detail) ? 'Available on this computer' : runtime.detail
         : runtime.fix || runtime.detail;
       const content = <>
+        <RuntimeIdentity runtime={runtime.id} />
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{runtime.label}</span>
           <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)', overflowWrap: 'anywhere' }}>{detail}</span>
