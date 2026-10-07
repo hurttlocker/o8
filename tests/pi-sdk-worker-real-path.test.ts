@@ -272,4 +272,23 @@ describe('managed Pi SDK real worker', () => {
     expect(await readFile(session.sessionFile, 'utf8')).not.toContain('synthetic-secret-provider-body');
   }, 15000);
 
+  it('redacts SSE failure text from partial messages queued before the error', async () => {
+    const paths = await fixture(); const observed: unknown[] = []; const forwarded: string[] = [];
+    const managed = createManagedPiTransport({ model,
+      resolveRoute: async () => ({ via: 'proxy', url: 'https://managed.example/v1/inference', headers: {} }),
+      fetch: async () => new Response(['Partial', ' answer', ' before'].map(text => `data: {"choices":[{"delta":{"content":"${text}"},"finish_reason":null}]}\n\n`).join('')
+        + 'data: {"error":{"message":"synthetic-secret-provider-body"}}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } }) });
+    // Serialize each event where the session forwards it to the worker: after the
+    // round-trip for the previous event, so Pi has already parsed the error.
+    const transport: typeof managed = async function* (context, signal) {
+      for await (const event of managed(context, signal)) { forwarded.push(JSON.stringify(event)); yield event; }
+    };
+    const session = await client({ ...paths, model, transport, onEvent: event => observed.push(event) });
+    expect((await session.prompt('Try a late SSE error')).stopReason).toBe('error');
+    expect(forwarded.some(event => event.includes('text_delta'))).toBe(true);
+    expect(forwarded.join('\n')).not.toContain('synthetic-secret-provider-body');
+    expect(JSON.stringify(observed)).not.toContain('synthetic-secret-provider-body');
+    expect(await readFile(session.sessionFile, 'utf8')).not.toContain('synthetic-secret-provider-body');
+  }, 15000);
+
 });
