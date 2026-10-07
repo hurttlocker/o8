@@ -28,15 +28,25 @@ The connection can list connected computers, page through tasks needing
 attention, read a compact result, and send an explicitly requested follow-up.
 The preparation feature also lists registered project choices and stores one
 explicitly requested read-only task draft with sealed requirements and exact
-runtime/model/effort pins. A new draft remains held until the operator reviews
-and launches it in o8. `o8_task_result` reads its status and the bound completed
+runtime/model/effort pins. Preparation leaves a new draft held; execution needs
+separate desktop review and Launch or the bounded hosted permission below.
+`o8_task_result` reads its status and the bound completed
 worker report with `o8:read`; it cannot dispatch, retry or recover a worker.
 Preparation retries report persisted execution state without starting work.
+When separately activated, `o8_launch_task` and `o8_stop_task` require their own
+`o8:launch-task` user consent and exact prepared task ID and contract hash.
+They support only the fixed read-only OpenRouter worker offered by the current
+desktop catalog. Existing grants gain no execution authority automatically.
+Launch permanently binds one attempt; repeated or uncertain calls inspect it
+instead of creating a replacement. Stop requires current scoped account access;
+disconnecting does not undo already admitted work. The provider route uses its
+configured API credit and visible stopping limits, with no native fallback.
 No hosted tool approves, merges, releases or calls the unrestricted operator
 MCP registry. New work directly from local Codex uses the local handoff skill.
 
 Account linking uses the existing account provider's OAuth service with PKCE,
-consent, custom `o8:read`, `o8:follow-up` and `o8:prepare-task` scopes, a registered client, and an
+consent, custom `o8:read`, `o8:follow-up`, `o8:prepare-task` and separately
+activated `o8:launch-task` scopes, a registered client, and an
 exact resource audience. Every hosted tool call verifies the access token,
 expiry, revocation, permitted client, resource audience, and required scope.
 Connection access does not add a paid-plan gate. Features invoked by an
