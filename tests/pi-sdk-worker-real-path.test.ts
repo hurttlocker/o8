@@ -66,7 +66,7 @@ describe('managed Pi SDK real worker', () => {
         yield* events(++calls === 1 ? message([{ type: 'toolCall', id: 'write-1', name: 'write_file', arguments: { path: 'note.txt', content: 'hello π' } }], 'toolUse')
           : message([{ type: 'text', text: 'Saved π' }]));
       } });
-    expect(first.tools).toEqual(['read_file', 'write_file']);
+    expect(first.tools).toEqual(['read_file', 'write_file', 'run_command']);
     expect(await first.prompt('Write a note')).toMatchObject({ text: 'Saved π', stopReason: 'stop' });
     expect(await readFile(join(paths.workspace, 'note.txt'), 'utf8')).toBe('hello π');
     expect(approved).toBe(1); expect(seen.at(-1)).toBe('agent_settled');

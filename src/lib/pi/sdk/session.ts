@@ -19,6 +19,8 @@ export interface PiSdkSessionOptions {
   maxModelCalls?: number;
   maxToolCalls?: number;
   runTimeoutMs?: number;
+  /** Per-command limit for `run_command`. Host-set only. */
+  commandTimeoutMs?: number;
 }
 /** `errorMessage` is o8's own failure text; anything else becomes a generic failure. */
 export interface PiRunResult { text?: string; stopReason?: string; errorMessage?: string; messageCount: number }
@@ -74,6 +76,9 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   let modelCalls = 0;
   let toolCalls = 0;
   let settled = false;
+  // Pi runs tool calls from one message in parallel. One at a time means no
+  // command process is alive while an approved write commits.
+  let toolTail: Promise<unknown> = Promise.resolve();
   peer.on('notification', ({ method, params }) => {
     if (method !== 'event' || !params.event) return;
     if (params.event.type === 'agent_settled') settled = true;
@@ -91,7 +96,10 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       if (typeof name !== 'string' || !args || typeof args !== 'object' || Array.isArray(args)) {
         throw new Error('Invalid tool request');
       }
-      return executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal);
+      const turn = toolTail.then(() => executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal,
+        { timeoutMs: options.commandTimeoutMs }));
+      toolTail = turn.catch(() => {});
+      return turn;
     }
     if (request.method === 'model') {
       if (++modelCalls > (options.maxModelCalls ?? 8)) throw new Error('Model-call budget exhausted');

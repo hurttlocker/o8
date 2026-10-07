@@ -12,10 +12,11 @@ already have authority over the canonical workspace, a separate private state
 directory, the selected managed model, and any injected host adapters. This API
 must not be wired directly to untrusted request parameters.
 
-The worker receives only model metadata, two tool definitions, and owned session
-paths. It does not inherit provider credentials, `NODE_OPTIONS`, proxy settings,
+The worker receives only model metadata, three tool definitions (`read_file`,
+`write_file`, `run_command`), and owned session paths. It does not inherit provider credentials, `NODE_OPTIONS`, proxy settings,
 user extensions, project instructions, or user Pi settings. Stock tools and
-resource discovery are disabled. Read and write requests return to the host.
+resource discovery are disabled. Read, write and command requests return to the
+host.
 
 The host reuses descriptor-based workspace file IO and the existing approval
 inbox. Writes show the exact proposed content and the existing content when
@@ -32,6 +33,35 @@ restart. Host results require `agent_settled`; an accepted command or an
 their stop reason and cannot reuse text from a previous turn. Stop cancels host
 model/tool work before asking the worker to abort; close uses the shared
 cooperative-to-forced child shutdown ladder.
+
+## Command tool
+
+`run_command` (#3257) goes through `evaluatePolicy`, the same rules as every other
+runtime's shell tool. A blocked command never starts. Every other command needs
+an exact one-shot approval in the inbox unless an operator policy rule (for
+example a workspace-scoped `mutation-shell` override in `policies.json`) lifts
+it. A denied or expired approval never starts the command.
+
+The host runs `/bin/sh -c` at the workspace root in a new process group. Its
+environment is an allowlist (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, locale
+and `TMPDIR`, plus non-interactive pager and Git settings), so provider keys, host
+tokens, o8 internals and the SSH agent socket are not inherited. Stdout and stderr
+share one 50 KB buffer. The default limit is 120 seconds, set by the host only.
+The timeout, the output cap, Stop and a normal exit each end the whole tree: the
+process group and every live descendant, including children that started their
+own group, get TERM, then KILL after a grace period. No background process
+outlives the tool call.
+
+Pi runs tool calls from one message in parallel by default. The host runs one
+tool call at a time per session, so no command process is alive while an
+approved write commits.
+
+Known limits: approval is the boundary, not a sandbox. An approved command can
+read anything the user can, including files under `HOME`. A process that detaches
+into a new session and is reparented before the tree is ended escapes cleanup.
+`tests/pi-sdk-command-real-path.test.ts` covers approval, denial, policy block and
+operator allow, the working directory and environment, timeout, output cap,
+Stop, and ordering against an approved write.
 
 ## Managed inference boundary
 
