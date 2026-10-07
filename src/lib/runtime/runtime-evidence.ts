@@ -173,7 +173,6 @@ const BUILT_IN_ARCHIVE_RUNTIMES = new Set<OrchestratorRuntime>([
   'pi',
   'prime-agent',
   'deepseek-harness',
-  'hermes',
 ]);
 
 export const RUNTIME_EVIDENCE_DEFINITIONS = {
