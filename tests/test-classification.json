@@ -3100,6 +3100,7 @@
     {
       "path": "tests/pi-sdk-command-real-path.test.ts",
       "reasons": [
+        "child-process",
         "process-signal",
         "real-path"
       ]
