@@ -87,7 +87,7 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
   }
   // The launcher checks the physical working directory at spawn time.
   return { content: [{ type: 'text' as const,
-    text: await withPiExclusive(() => runPiCommand(root, command, signal, options)) }] };
+    text: await withPiExclusive(() => runPiCommand(root, command, signal, options), signal) }] };
 }
 
 export async function executePiTool(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
@@ -139,6 +139,6 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
       signal.throwIfAborted();
       await commitPiWrite(root, path, parent, opened, before, content, signal);
       return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
-    });
+    }, signal);
   } finally { await opened?.handle.close(); }
 }

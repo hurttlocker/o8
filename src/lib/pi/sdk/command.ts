@@ -21,12 +21,25 @@ export function piCommandEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Pr
 let exclusiveTail: Promise<unknown> = Promise.resolve();
 /**
  * One command or approved-write commit at a time across every Pi session in this
- * host, so no command process is alive while any approved write commits.
+ * host, so no command process is alive while any approved write commits. A call
+ * still waiting for its turn ends on abort without running; later calls keep
+ * waiting for the work ahead of it.
  */
-export function withPiExclusive<T>(work: () => Promise<T>): Promise<T> {
-  const turn = exclusiveTail.then(work);
-  exclusiveTail = turn.catch(() => {});
-  return turn;
+export function withPiExclusive<T>(work: () => Promise<T>, abort?: AbortSignal): Promise<T> {
+  const ahead = exclusiveTail;
+  let release!: () => void;
+  const finished = new Promise<void>(resolve => { release = resolve; });
+  exclusiveTail = ahead.then(() => finished);
+  const stopped = new Promise<never>((_resolve, reject) => {
+    if (!abort) return;
+    const onAbort = () => reject(abort.reason ?? new Error('Stopped'));
+    if (abort.aborted) onAbort(); else abort.addEventListener('abort', onAbort, { once: true });
+    void ahead.then(() => abort.removeEventListener('abort', onAbort));
+  });
+  stopped.catch(() => {});
+  return Promise.race([ahead, stopped])
+    .then(() => { abort?.throwIfAborted(); return work(); })
+    .finally(release);
 }
 
 let cleanupUnconfirmed = false;
@@ -59,31 +72,57 @@ function listProcesses(): Promise<ProcessRow[] | null> {
  */
 class CommandTree {
   private readonly tracked = new Map<number, ProcessRow>();
+  private started = 0;
+  private applied = 0;
+  private inFlight = 0;
+  /** Set once a readable table shows no member of the group; its number may then be reused. */
+  private groupGone = false;
   constructor(private readonly leader: number) {}
 
+  /**
+   * Reads may overlap, so each is numbered and a result older than the last
+   * one applied is dropped: a late snapshot never undoes what a newer one found.
+   */
   async refresh(): Promise<boolean> {
-    const rows = await listProcesses();
-    if (!rows) return false;
+    const sequence = ++this.started;
+    this.inFlight++;
+    try {
+      const rows = await listProcesses();
+      if (sequence < this.applied) return true;
+      if (!rows) return false;
+      this.applied = sequence;
+      this.apply(rows);
+      return true;
+    } finally { this.inFlight--; }
+  }
+
+  /** For the periodic watch: a stalled read does not stop new ones, but reads do not pile up. */
+  refreshIfIdle() { if (this.inFlight < 3) void this.refresh(); }
+
+  private apply(rows: ProcessRow[]) {
     const live = new Map(rows.map(row => [row.pid, row]));
     for (const [pid, row] of this.tracked) {
       if (live.get(pid)?.started !== row.started) this.tracked.delete(pid);
     }
-    for (const row of rows) if (row.pgid === this.leader && row.pid !== process.pid) this.tracked.set(row.pid, row);
+    if (!this.groupGone) {
+      const members = rows.filter(row => row.pgid === this.leader && row.pid !== process.pid);
+      if (!members.length) this.groupGone = true;
+      for (const row of members) this.tracked.set(row.pid, row);
+    }
     for (let grew = true; grew;) {
       grew = false;
       for (const row of rows) {
         if (!this.tracked.has(row.pid) && this.tracked.has(row.ppid)) { this.tracked.set(row.pid, row); grew = true; }
       }
     }
-    return true;
   }
 
   get empty() { return this.tracked.size === 0; }
 
   signal(name: NodeJS.Signals, groupUnverified: boolean) {
     // The group id is only signalled while a tracked member still holds it, or
-    // when the table could not be read and the group may still be alive.
-    if (groupUnverified || [...this.tracked.values()].some(row => row.pgid === this.leader)) {
+    // when the table could not be read and the group was never seen empty.
+    if (!this.groupGone && (groupUnverified || [...this.tracked.values()].some(row => row.pgid === this.leader))) {
       try { process.kill(-this.leader, name); } catch { /* The group is empty. */ }
     }
     for (const pid of this.tracked.keys()) { try { process.kill(pid, name); } catch { /* Already gone. */ } }
@@ -161,7 +200,7 @@ export async function runPiCommand(root: string, command: string, abort: AbortSi
   const timer = setTimeout(() => stop('timeout'), timeoutMs);
   // Track the tree while it runs, so a child that starts its own group is still
   // known after its parent exits and it is reparented.
-  const watch = setInterval(() => { if (!teardown) void tree?.refresh(); }, TRACK_INTERVAL_MS);
+  const watch = setInterval(() => { if (!teardown) tree?.refreshIfIdle(); }, TRACK_INTERVAL_MS);
   void tree?.refresh();
   const onAbort = () => stop('stop');
   abort.addEventListener('abort', onAbort, { once: true });

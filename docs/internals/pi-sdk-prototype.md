@@ -53,7 +53,10 @@ command. The default limit is 120 seconds, set by the host only.
 
 The host reads the process table every 250 ms while a command runs and tracks
 the process group and every descendant by pid and start time, so a child that
-starts its own group stays tracked after its parent exits. The timeout, the
+starts its own group stays tracked after its parent exits. Reads may overlap; a
+result older than the last one applied is dropped. Once a read shows the group
+empty, its number is no longer used to adopt processes, because it may have been
+reused. The timeout, the
 output cap, Stop and a normal exit each end the whole tracked tree: TERM, then
 KILL on a fixed schedule. If the process table cannot be read, the group still
 gets TERM and KILL on that schedule, the tool call fails, and later commands
@@ -62,7 +65,8 @@ and writes are refused until o8 restarts.
 Pi runs tool calls from one message in parallel by default. The host runs one
 tool call at a time per session, and one command or write commit at a time
 across every Pi session in the host process, so no command process is alive
-while an approved write commits.
+while an approved write commits. Stop ends a call that is still waiting for its
+turn without running it.
 
 Known limits: approval is the boundary, not a sandbox. An approved command can
 read anything the user can, including files under `HOME`. A process that leaves
@@ -72,8 +76,9 @@ covers one host process, not other processes writing the same workspace.
 `tests/pi-sdk-command-real-path.test.ts` covers inbox approval and rejection,
 denial, policy block and operator allow, the working directory, a swapped root,
 the environment, timeout, the output cap (including output that fills it
-exactly), Stop, a TERM-ignoring child in its own group, an unreadable process
-table, and ordering against approved writes in the same and another session.
+exactly), Stop, a TERM-ignoring child in its own group, a late process-table read, a
+reused group number, an unreadable process table, ordering against approved
+writes in the same and another session, and Stop while waiting for the lock.
 
 ## Managed inference boundary
 

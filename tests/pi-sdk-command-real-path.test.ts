@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,16 +13,24 @@ import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
 // Test-only seam: make the host's process-table read fail.
-const ps = vi.hoisted(() => ({ fail: false }));
+// Test-only seam over the host's process-table reads: fail them, deliver one late,
+// or rewrite their output.
+const ps = vi.hoisted(() => ({ fail: false, delayNext: 0, transform: undefined as undefined | ((stdout: string) => string) }));
 vi.mock('node:child_process', async importOriginal => {
   const cp = await importOriginal<typeof import('node:child_process')>();
   return { ...cp, execFile: ((file: string, ...rest: unknown[]) => {
-    if (ps.fail && file === 'ps') {
-      const callback = rest.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+    if (file !== 'ps') return (cp.execFile as (...args: unknown[]) => unknown)(file, ...rest);
+    const callback = rest.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
+    if (ps.fail) {
       setImmediate(() => callback(new Error('synthetic process table failure'), '', ''));
       return undefined;
     }
-    return (cp.execFile as (...args: unknown[]) => unknown)(file, ...rest);
+    const delay = ps.delayNext; ps.delayNext = 0;
+    return (cp.execFile as (...args: unknown[]) => unknown)(file, ...rest.slice(0, -1),
+      (error: Error | null, stdout: string, stderr: string) => {
+        const deliver = () => callback(error, ps.transform ? ps.transform(stdout) : stdout, stderr);
+        if (delay) setTimeout(deliver, delay); else deliver();
+      });
   }) as typeof cp.execFile };
 });
 
@@ -33,7 +42,7 @@ beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 const roots: string[] = [];
 const clients: Awaited<ReturnType<typeof createPiSdkSession>>[] = [];
 afterEach(async () => {
-  vi.unstubAllEnvs();
+  vi.unstubAllEnvs(); ps.delayNext = 0; ps.transform = undefined;
   await Promise.all(clients.splice(0).map(client => client.close()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   await rm(join(getDataDir(), 'policies.json'), { force: true });
@@ -238,6 +247,60 @@ describe('Pi governed command tool through the real worker', () => {
     expect(results[0]).toContain('The workspace changed before the command started.');
     expect(await readdir(outside)).toEqual([]);
   }, 20000);
+
+  it('keeps a reparented child tracked when an older process-table read finishes late', async () => {
+    const paths = await fixture();
+    const session = await client({ ...paths, model, approve: async () => true,
+      transport: scripted([command('late', 'perl -e \'$SIG{TERM}="IGNORE"; setpgrp(0,0); sleep 30\' & echo $! > hard.pid; sleep 0.6')]) });
+    // The read taken at spawn, before the child exists, is delivered after the
+    // child was found and its parent exited.
+    ps.delayNext = 1_500;
+    await session.prompt('Run with a late read');
+    await allEnded(paths.workspace, ['hard.pid']);
+  }, 30000);
+
+  it('stops adopting by group number once the group was seen empty', async () => {
+    const paths = await fixture();
+    const victim = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' }); victim.unref();
+    try {
+      // After the command's group is empty, report an unrelated process as a
+      // member of a reused group with the same number.
+      let sawEmpty = false;
+      ps.transform = stdout => {
+        let leader: number;
+        try { leader = Number(readFileSync(join(paths.workspace, 'leader.pid'), 'utf8')); } catch { return stdout; }
+        const members = stdout.split('\n').filter(line => line.trim().split(/\s+/)[2] === String(leader));
+        if (members.length) return stdout;
+        if (!sawEmpty) { sawEmpty = true; return stdout; }
+        const started = execFileSync('ps', ['-o', 'lstart=', '-p', String(victim.pid)], { encoding: 'utf8' }).trim();
+        return `${stdout}${victim.pid} 1 ${leader} S ${started}\n`;
+      };
+      const session = await client({ ...paths, model, approve: async () => true,
+        transport: scripted([command('reuse', 'echo $$ > leader.pid; sleep 0.3')]) });
+      await session.prompt('Run then exit');
+      expect(sawEmpty).toBe(true);
+      expect(alive(victim.pid!)).toBe(true);
+    } finally { try { process.kill(victim.pid!, 'SIGKILL'); } catch { /* gone */ } }
+  }, 30000);
+
+  it('lets Stop end a write that is waiting behind another session\'s command', async () => {
+    const paths = await fixture();
+    const runner = await client({ ...paths, model, approve: async () => true,
+      transport: scripted([command('long', 'touch started; sleep 30')]) });
+    let approved!: () => void; const writeApproved = new Promise<void>(resolve => { approved = resolve; });
+    const writer = await client({ ...paths, stateDir: join(paths.root, 'state-writer'), model,
+      approve: async () => { approved(); return true; },
+      transport: scripted([{ type: 'toolCall', id: 'write', name: 'write_file', arguments: { path: 'note.txt', content: 'queued' } }]) });
+    const running = runner.prompt('Run a long command');
+    await vi.waitFor(() => readFile(join(paths.workspace, 'started')), { timeout: 10_000, interval: 20 });
+    const writing = writer.prompt('Write behind it');
+    await writeApproved;
+    const stopped = Date.now();
+    await writer.abort(); await writing;
+    expect(Date.now() - stopped).toBeLessThan(3_000);
+    expect(await readdir(paths.workspace)).toEqual(['started']);
+    await runner.abort(); await running;
+  }, 30000);
 
   // Last: an unconfirmed cleanup refuses commands and writes for the rest of the host process.
   it('ends the group and refuses later commands and writes when the process table cannot be read', async () => {
