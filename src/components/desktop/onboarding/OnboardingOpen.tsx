@@ -26,8 +26,7 @@ export function OnboardingOpen({ projects, loading, busy, status, tools, error, 
   onOpenFolder: () => void; onOpenProject: (project: OnboardingProject) => void;
   onClone: () => void; onExplore: () => void; onPermissions: () => void;
 }) {
-  return <section aria-labelledby="onboarding-project-title" style={{ width: '100%', maxWidth: 520, display: 'flex', flexDirection: 'column' }}>
-    <span aria-label="o8" style={{ fontSize: 28, fontWeight: 400, letterSpacing: '-2px', lineHeight: 1, marginBottom: 36 }}>o8<span aria-hidden style={{ color: 'var(--t-brand-orange)' }}>.</span></span>
+  return <section aria-labelledby="onboarding-project-title" style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
     <h1 id="onboarding-project-title" style={{ margin: 0, fontSize: 'clamp(30px, 4vw, 40px)', fontWeight: 300, letterSpacing: '-1.2px', lineHeight: 1.15 }}>Open a project.</h1>
     <p style={{ marginTop: 14, marginBottom: 28, fontSize: 14, fontWeight: 300, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>Use your coding tools in one workspace.</p>
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -44,7 +43,9 @@ export function OnboardingOpen({ projects, loading, busy, status, tools, error, 
       <div style={{ maxHeight: 200, overflowY: 'auto' }}>{projects.map((project) => <ProjectRow key={project.id} project={project} disabled={busy} onOpen={() => onOpenProject(project)} />)}</div>
     </section> : null}
     <div style={{ borderTop: '1px solid var(--t-divider)', marginTop: 28, paddingTop: 12 }}>{tools}</div>
-    <button type="button" disabled={busy} onClick={onPermissions} style={{ ...onboardingQuietButtonStyle, alignSelf: 'flex-start', marginTop: 8, paddingLeft: 0, fontSize: 12 }}>Check voice &amp; permissions</button>
-    <button type="button" disabled={busy} onClick={onExplore} style={{ ...onboardingQuietButtonStyle, alignSelf: 'flex-start', marginTop: 12, paddingLeft: 0, color: 'var(--t-text-muted)', fontSize: 12 }}>Start without a project</button>
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginTop: 16 }}>
+      <button type="button" disabled={busy} onClick={onPermissions} style={{ ...onboardingQuietButtonStyle, paddingLeft: 0, fontSize: 12 }}>Check voice &amp; permissions</button>
+      <button type="button" disabled={busy} onClick={onExplore} style={{ ...onboardingQuietButtonStyle, paddingLeft: 0, color: 'var(--t-text-muted)', fontSize: 12 }}>Start without a project</button>
+    </div>
   </section>;
 }

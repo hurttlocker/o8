@@ -54,14 +54,45 @@ A view has **one primary action**. Everything else is secondary, ghost, or dange
 
 ---
 
-## 4 — How this is enforced (the gate)
+## 4 — Screen structure and layout
+
+These rules apply across setup, Settings, connection flows, project views, and the workspace. Typography, button treatment, and dense navigation rows still follow [`hurttlocker.md`](./hurttlocker.md). A dense sidebar is not a template for a full-window task.
+
+| Surface | Layout contract |
+|---|---|
+| Setup, connection, or focused task | One stable content frame, up to 800 px wide with 20–32 px responsive insets. Header, context, choices, and action share its edges. Keep the frame width stable when advancing or showing an error. |
+| Settings or detail page | Group related controls under one heading and short description. Use a readable main column; add a second column only for independent supporting information. |
+| Workspace | Give the work surface the available space. Navigation, current project, agent status, and next action remain easy to locate as panels open or resize. |
+| Dense navigation | Keep the existing compact row geometry. Show enough identity and status to choose an item without expanding it. |
+
+### Reading order and grouping
+
+- Every screen answers, in order: where am I, what is the current state, what do I need to choose, and what happens next. Keep the title and explanation together, choices together, and action beside the choice it acts on.
+- Use 8 px within a row, 16 px between related controls, and 24–32 px between sections. Derive sibling spacing from the same component or style object. Avoid applying the dense sidebar's spacing to page content.
+- A border or card groups a real decision or state. Avoid cards inside cards for unrelated decoration. A simple list can live directly in the frame.
+- Put readiness beside the tool or connection it describes. Distinguish checking, ready, unavailable, and failed; a discovered installation does not prove a successful operation.
+
+### Progressive disclosure and recovery
+
+- Start a common task with the smallest sufficient set of choices. Put model routing, worker configuration, and other expert controls behind a labeled expansion such as Customize. Preserve saved choices when that section is closed.
+- Show persistent progress for a multi-step task. Compute it from observed state; do not mark an unchecked connection or unopened workspace complete. Keep selected project identity visible through retries and later steps.
+- Independent discovery must render independently. A slow tool scan must not hide available projects or prevent a manual folder choice. Name a long wait and keep an available next action reachable.
+- Keep error and recovery feedback in the section that failed. Retain context and choices. Optional permissions and privacy choices remain explicit.
+
+### Window fit
+
+- Verify the live surface at a compact 900 × 700 window and a wide 1680 × 1050 window, in light and dark themes. Content may scroll vertically, but must not clip horizontally or require a whole-screen horizontal scroll.
+- A long list or advanced section gets its own bounded region when needed. Keep the task title and primary action reachable without hunting through unrelated content. A short viewport must have a clear vertical scrolling path.
+
+## 5 — How this is enforced (the gate)
 
 1. **Spec-ingested** — this file is in `ROOT_SPEC_FILES` (`src/lib/cortex/spec-ingest.ts`), so the Engineering Brain retrieves it and any orchestrator/worker asking "how should this behave" gets these rules.
-2. **Reviewer-checked** — the `reviewer` agent (`.claude/agents/reviewer.md`) checks UI diffs against §1–§3 and reports violations with `file:line`, same as CLAUDE.md rules.
+2. **Reviewer-checked** — the `reviewer` agent (`.claude/agents/reviewer.md`) checks UI diffs against §1–§4 and reports violations with `file:line`, same as CLAUDE.md rules.
 3. **Author checklist** — before shipping a UI change, confirm:
    - [ ] Every mutating control has a press→busy→result state (§1).
    - [ ] No spinner under 100ms; named stages past 3s (§1).
    - [ ] Sibling elements share one geometry source; no accidental snowflake (§2).
    - [ ] Exactly one primary action; destructive is danger + confirm strip (§3).
+   - [ ] Screen structure, grouping, disclosure, and compact/wide window fit satisfy §4.
 
 **Chunk-size note** (for the Brain): keep each H2/H3 here chunk-sized — the composer reads ~1,500 chars per row. The tables above are intentionally short so each rule is independently retrievable.

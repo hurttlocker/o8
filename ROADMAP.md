@@ -22,6 +22,8 @@ The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.m
 
 First-run acceptance is the immediate engineering priority. Published stable is 0.1.781. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 
+Shared screen layout rules, explicit agent readiness, and independent project discovery are under review in [#3338](https://github.com/hurttlocker/o8/issues/3338). Managed development environment cleanup is tracked in [#3337](https://github.com/hurttlocker/o8/issues/3337). These are source and development checks; installed first-run acceptance remains open.
+
 Update-service source work has closed. Closure does not establish deployed endpoint behavior, delivery in the installed updater, or trustworthy active-install counts. New-install usage analytics, existing opt-out preservation and matching privacy documentation remain a separate delivery gate. [#2882](https://github.com/hurttlocker/o8/issues/2882)
 
 After first-run acceptance, verify paid-tier behavior through the installed app, then complete the existing Symon reliability review. Its scope includes sessions, models, tool results, interruptions, reconnect and approvals. Current Symon follow-ups retain their own prerequisite and acceptance evidence. [#2534](https://github.com/hurttlocker/o8/issues/2534)

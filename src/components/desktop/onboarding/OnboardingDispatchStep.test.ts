@@ -6,6 +6,8 @@ import { OnboardingDispatchStep } from './OnboardingDispatchStep';
 import { recommendRuntimeSetup, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
 import { MODEL_IDS } from '@/lib/models';
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 let root: Root | null = null;
 afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ''; });
 const inventory: SetupRuntime[] = [
@@ -32,8 +34,12 @@ describe('one recommended runtime setup', () => {
   it('shows one setup, keeps both primary choices, and saves the lead and economical worker model', async () => {
     const { request, onContinue } = await render();
     expect(document.body.textContent).toContain('Claude Code has more local sessions');
-    expect(document.body.textContent).toContain('Your setup');
+    expect(document.body.textContent).toContain('Choose your agent');
+    expect(document.body.textContent).not.toContain('Workers:');
+    expect(document.body.textContent).not.toContain('GPT-');
+    expect(document.querySelector('[aria-label="Agent readiness"]')?.textContent).toContain('Ready');
     expect(button('Use this setup').disabled).toBe(false);
+    await act(async () => button('Customize').click());
     const picker = document.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')!;
     await act(async () => picker.click());
     expect(document.body.querySelector('[role="listbox"]')?.textContent).toContain('Codex');
@@ -66,7 +72,8 @@ describe('one recommended runtime setup', () => {
     })));
     await act(async () => button('Refresh tools').click());
     expect(button('Use this setup').disabled).toBe(false);
-    expect(document.body.textContent).toContain('Workers: Claude Code');
+    expect(document.querySelector('[aria-label="Agent readiness"]')?.textContent).toContain('Claude Code');
+    expect(document.body.textContent).not.toContain('Workers:');
   });
 
   it('offers a skippable setup when nothing is ready', async () => {
@@ -85,7 +92,7 @@ it('offers Fable through a ready Claude tool and saves the selected lead', async
   expect(option).toBeTruthy();
   await act(async () => option!.click());
   await act(async () => button('Keep it simple').click());
-  expect(document.querySelector('[aria-haspopup="listbox"]')?.textContent).toContain('Fable');
+  expect(document.body.textContent).toContain('Fable');
   await act(async () => button('Use this setup').click());
   const write = request.mock.calls.find(([, init]) => init?.method === 'POST');
   expect(JSON.parse(String(write?.[1]?.body))).toMatchObject({ orchestratorBackend: 'fable', defaultDispatchModel: 'claude-sonnet-5' });

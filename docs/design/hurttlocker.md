@@ -128,6 +128,12 @@ Expected deltas (bbox, producing ink alignment): `dFilter 3, dNewSession 3, dPro
 
 ## Layout primitives
 
+These primitives govern dense navigation and list chrome. Full-window setup,
+Settings, connection flows, and workspace composition use the screen structure
+rules in [`STYLEGUIDE.md` §4](./STYLEGUIDE.md#4--screen-structure-and-layout).
+Keep the locked fonts, buttons, and sidebar geometry while adapting content
+width, grouping, and disclosure to the task.
+
 | Token | Value | Where |
 |---|---|---|
 | Row vertical padding | 5 px top + 5 px bottom | All chat / agent / packet rows |

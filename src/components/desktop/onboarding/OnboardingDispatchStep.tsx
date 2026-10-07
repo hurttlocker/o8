@@ -19,6 +19,9 @@ import {
 } from './onboarding-runtime-selection';
 import type { OnboardingRequest } from './request';
 import { RuntimeToolsPanel } from './RuntimeToolsPanel';
+import { AgentReadiness } from './AgentReadiness';
+import { useToolScanStatus } from './useToolScanStatus';
+import { onboardingQuietButtonStyle } from './onboarding-style';
 import { formatModelLabel } from '@/lib/format';
 import { leadModelPreset, runtimeForLead, visibleRuntimeInventory, workerModelPreset } from '@/lib/setup/runtime-recommendation';
 import { orchestratorBackendForRuntime, type OnboardingRuntimeSelection } from './onboarding-runtime-selection';
@@ -135,6 +138,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
   const [workerRuntimes, setWorkerRuntimes] = useState<DispatchRuntime[]>([]);
   const [customize, setCustomize] = useState(false);
   const [loading, setLoading] = useState(true);
+  const scanStatus = useToolScanStatus(loading);
   const [saving, setSaving] = useState(false);
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [onBusyChange, saving]);
   const [error, setError] = useState<string | null>(null);
@@ -200,12 +204,22 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     }
   };
   return (
-    <div style={{ maxWidth: 560, width: '100%', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
-      <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-        {loading ? 'Checking installed tools and recent local activity…' : sameLead ? selection?.recommendation.reason : 'Choose the lead and workers for your setup.'}
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
+      <div>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 300, color: 'var(--t-text)' }}>{needsConnection ? 'Connect a coding tool' : 'Choose your agent'}</h1>
+        <p style={{ marginTop: 12, marginBottom: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>Start with one coding tool. You can add more and adjust your setup later.</p>
       </div>
-      {needsConnection ? <div><h1 style={{ margin: 0, fontSize: 28, fontWeight: 300 }}>Connect a coding tool</h1><p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>Choose one to get started. You can add others whenever you need them.</p><button type="button" onClick={() => setCustomize(true)} style={{ minHeight: 44, border: 0, background: 'transparent', color: 'var(--t-accent)', font: 'inherit', cursor: 'pointer' }}>Other configurations</button></div> : <div style={{ border: '1px solid var(--t-glass-border-strong)', borderRadius: 12, padding: 16, background: 'var(--t-bg-card)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 300, color: 'var(--t-text)' }}>Your setup</h1>
+      {loading ? <div role="status" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>{scanStatus}</div> : <>
+        <AgentReadiness inventory={inventory.filter((item) => item.id === 'codex' || item.id === 'claude-code' || item.id === leadRuntime)} selectedRuntime={leadRuntime} disabled={saving || locked} onSelect={(item) => changeLead(item.id as OnboardingOrchestratorRuntime)} />
+        <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+          Selected agent: {ORCHESTRATOR_LABELS[orchestratorRuntime] ?? orchestratorRuntime}.
+          {sameLead ? <div style={{ marginTop: 4 }}>{selection?.recommendation.reason}</div> : null}
+        </div>
+      </>}
+      <button type="button" aria-expanded={customize} onClick={() => setCustomize((current) => !current)} style={{ ...onboardingQuietButtonStyle, alignSelf: 'flex-start', paddingLeft: 0, color: 'var(--t-accent)', fontSize: 12 }}>
+        {customize ? 'Keep it simple' : 'Customize'}
+      </button>
+      {customize ? <div style={{ border: '1px solid var(--t-glass-border-strong)', borderRadius: 12, padding: 16, background: 'var(--t-bg-card)', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)' }}>
             Lead
@@ -219,10 +233,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
           Workers: {workerRuntimes.map((id) => inventory.find((item) => item.id === id)?.label ?? id).join(', ') || 'Connect a tool'}
           <div style={{ marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)' }}>{workerModel ? formatModelLabel(workerModel) : 'Uses each tool’s configured model'}</div>
         </div>
-        <button type="button" aria-expanded={customize} onClick={() => setCustomize((current) => !current)} style={{ alignSelf: 'flex-start', border: 0, background: 'transparent', color: 'var(--t-accent)', fontFamily: FONT, fontSize: 12, fontWeight: 300, minHeight: 44, padding: 0, cursor: 'pointer' }}>
-          {customize ? 'Keep it simple' : 'Customize'}
-        </button>
-      </div>}
+      </div> : null}
       {customize ? <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Choose the tools allowed to receive work. The first selected tool is the default worker. OpenCode starts with its detected configuration or a supported preset; choose another model in the composer.</div>
         {shownWorkers.map((item) => <RuntimeInventoryRow key={item.id} runtime={item} selected={workerRuntimes.includes(item.id)} isDefault={workerRuntimes[0] === item.id} disabled={saving || workersLocked || loading} onToggle={() => {
@@ -235,7 +246,8 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
       {error ? <OnboardingFeedback tone="error" title={error}>Your selections are still here. Try saving again when you’re ready.</OnboardingFeedback> : null}
       <RuntimeToolsPanel key={needsConnection ? 'connect' : 'additional'} initiallyExpanded={needsConnection} inventory={needsConnection ? inventory.filter((item) => item.id === 'codex' || item.id === 'claude-code') : inventory} loading={loading} error={null} onRefresh={() => setRevision((current) => current + 1)} />
       {!needsConnection ? <div style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-faint)' }}>Recommendations use session file activity from the past seven days. Conversation contents stay unread. Messaging and other optional features can be connected later.</div> : null}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, paddingTop: 12, paddingBottom: 12, background: 'var(--t-onboarding-bg)', borderTop: '1px solid var(--t-divider)' }}>
         <button type="button" disabled={saving} onClick={onSkip} style={{ border: 0, background: 'transparent', color: 'var(--t-text-faint)', fontFamily: FONT, fontSize: 12, fontWeight: 300, minHeight: 44, cursor: 'pointer', padding: 8 }}>Set up later</button>
         {renderButton({ label: saving ? 'Saving setup…' : 'Use this setup', onClick: handleContinue, disabled: loading || saving || !readyToSave })}
       </div>

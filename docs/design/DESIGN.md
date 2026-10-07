@@ -207,7 +207,7 @@ NavRail was retired in epic #1089 — do not reference or reintroduce it.
 
 ### Asymmetry
 
-The desktop layout is not centered. Content lives against a firm left edge (the AgentPanel card). Panels on the right (Changes) float over vibrancy. No surface is horizontally centered.
+The active workspace uses a firm left edge (the AgentPanel card). Panels on the right (Changes) float over vibrancy. Focused setup and connection flows use a centered, stable content frame; their width and reading order follow [`STYLEGUIDE.md` §4](./STYLEGUIDE.md#4--screen-structure-and-layout). Keep dense navigation geometry separate from full-window task layout.
 
 ---
 
