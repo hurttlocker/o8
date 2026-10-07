@@ -13,6 +13,7 @@ import { restartOnboardingAtPermissions } from './onboarding/permissions-check';
 import { OnboardingOpen } from './onboarding/OnboardingOpen';
 import { OnboardingFeedback } from './onboarding/OnboardingFeedback';
 import { OnboardingFrame } from './onboarding/OnboardingFrame';
+import { OnboardingSurface } from './onboarding/OnboardingSurface';
 import { AgentReadiness } from './onboarding/AgentReadiness';
 import { useToolScanStatus } from './onboarding/useToolScanStatus';
 import { runtimeForLead, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
@@ -236,7 +237,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   </div>;
   const renderButton = ({ label, onClick, disabled, descriptionId }: { label: string; onClick: () => void; disabled?: boolean; descriptionId?: string }) => <button type="button" aria-describedby={descriptionId} onClick={onClick} disabled={disabled} style={{ ...onboardingButtonStyle, background: 'var(--t-text)', color: 'var(--t-onboarding-bg)', opacity: disabled ? 0.5 : 1 }}>{label}</button>;
   const home = progress.step === 'open';
-  return <div ref={overlayRef} data-o8-onboarding="" data-onboarding-sound={progress.step === 'permissions' && childBusy ? 'silent' : undefined} role="dialog" aria-modal="true" aria-label="Set up o8" onKeyDown={(event) => {
+  return <OnboardingSurface rootRef={overlayRef} sound={progress.step === 'permissions' && childBusy ? 'silent' : undefined} onKeyDown={(event) => {
     // Portaled dialogs own their keyboard navigation while they are open.
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
     const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'))
@@ -251,7 +252,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
       event.preventDefault();
       first?.focus();
     }
-  }} style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-onboarding-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
+  }}>
     <div data-tauri-drag-region="" style={{ height: 52, flexShrink: 0 }} />
     <div ref={contentRef} role="region" aria-label="Setup content" tabIndex={0} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 'clamp(12px, 2vh, 24px)', paddingBottom: 0, paddingLeft: 32, paddingRight: 32 }}>
       <div style={{ minHeight: '100%', boxSizing: 'border-box', paddingBottom: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center' }}>
@@ -284,7 +285,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
       </div>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><OnboardingSoundToggle quiet={progress.step === 'permissions' && childBusy} /><button type="button" onClick={() => openExternal('https://o8.run/privacy')} style={{ ...onboardingQuietButtonStyle, fontSize: 11 }}>Privacy</button></div>
     </footer>
-  </div>;
+  </OnboardingSurface>;
 });
 
 const subscribeHydration = () => () => {};
@@ -293,5 +294,5 @@ const serverSnapshot = () => false;
 /** Read local progress only after hydration so server markup never disagrees. */
 export function Onboarding(props: ComponentProps<typeof OnboardingFlow>) {
   const hydrated = useSyncExternalStore(subscribeHydration, clientSnapshot, serverSnapshot);
-  return hydrated ? <OnboardingExperience storage={props.storage}><OnboardingFlow {...props} /></OnboardingExperience> : <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'grid', placeItems: 'center', background: 'var(--t-onboarding-bg)', color: 'var(--t-text-secondary)' }}>Loading setup…</div>;
+  return hydrated ? <OnboardingExperience storage={props.storage}><OnboardingFlow {...props} /></OnboardingExperience> : <OnboardingSurface loading>Loading setup…</OnboardingSurface>;
 }

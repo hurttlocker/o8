@@ -21,7 +21,7 @@ export function OnboardingFrame({ progress, agentReady, children }: {
     { label: 'Agent', detail: agentReady ? 'Ready' : current === 1 ? 'Choose a tool' : 'Check readiness', done: agentReady },
     { label: 'Workspace', detail: current === 2 ? workspaceDetail : 'Next', done: false },
   ];
-  return <div style={{ width: '100%', maxWidth: 800, border: '1px solid var(--t-divider)', borderRadius: 16, background: 'var(--t-onboarding-bg)' }}>
+  return <div style={{ width: '100%', maxWidth: 800, border: '1px solid var(--t-divider)', borderRadius: 16, background: 'var(--t-onboarding-surface-bg, var(--t-onboarding-bg))' }}>
     <header style={{ ...frameInset, paddingBottom: 20, borderBottom: '1px solid var(--t-divider)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
         <span aria-label="o8" style={{ fontSize: 28, fontWeight: 400, letterSpacing: '-2px', lineHeight: 1 }}>o8<span aria-hidden style={{ color: 'var(--t-brand-orange)' }}>.</span></span>

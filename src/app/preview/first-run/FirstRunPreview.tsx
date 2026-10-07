@@ -5,6 +5,8 @@ import { Onboarding, type OnboardingStep } from '@/components/desktop/Onboarding
 import { TelemetryConsentCard } from '@/components/desktop/TelemetryConsentCard';
 import type { OnboardingRequest } from '@/components/desktop/onboarding/request';
 import { getPalette, resolveTheme } from '@/lib/theme/registry';
+import { useTheme } from '@/lib/theme/context';
+import { isTauri } from '@/lib/tauri/bridge';
 import { PROGRESS_KEY, browserProgressStorage, type OnboardingTask, type ProgressStorage } from '@/components/desktop/onboarding/onboarding-progress';
 import { recommendRuntimeSetup, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
 import { previewBuiltInAgent } from './built-in-agent-fixture';
@@ -165,6 +167,8 @@ const controlStyle: React.CSSProperties = {
 };
 
 export function FirstRunPreview() {
+  const appearance = useTheme();
+  const nativeGlass = isTauri() && appearance.surface === 'glass';
   const [controlsOpen, setControlsOpen] = useState(true);
   const [surface, setSurface] = useState<PreviewSurface>('onboarding');
   const [consentState, setConsentState] = useState<ConsentPreviewState>('unanswered');
@@ -191,7 +195,7 @@ export function FirstRunPreview() {
   };
 
   return (
-    <main style={{ ...resolveTheme(getPalette(palette), 'solid').cssVars, position: 'fixed', inset: 0, overflow: 'hidden', background: 'var(--t-bg)', color: 'var(--t-text)' } as React.CSSProperties}>
+    <main style={{ ...(!nativeGlass ? resolveTheme(getPalette(palette), 'solid').cssVars : {}), position: 'fixed', inset: 0, overflow: 'hidden', background: nativeGlass ? 'var(--t-bg-gradient)' : 'var(--t-bg)', color: 'var(--t-text)' } as React.CSSProperties}>
       {finished ? <section style={{ maxWidth: 520, marginTop: 160, marginLeft: 'auto', marginRight: 'auto', paddingTop: 24, paddingBottom: 24, paddingLeft: 32, paddingRight: 32, fontFamily: 'var(--font-sans-system)' }}><h1 style={{ fontSize: 30, fontWeight: 300 }}>Workspace opened.</h1><p style={{ lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{finishedTask?.project.name ?? 'An empty workspace'} is ready. In the app, you land directly in the workspace with your composer ready.</p><p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>This preview ends at the handoff. No task was submitted.</p><button type="button" onClick={() => restart()} style={controlStyle}>Restart preview</button></section> : surface === 'consent' ? (
         <ConsentScenario key={consentState} state={consentState} />
       ) : (
@@ -209,7 +213,7 @@ export function FirstRunPreview() {
         />
       )}
 
-      <aside style={{
+      <aside data-onboarding-preview-controls="" style={{
         position: 'fixed',
         top: 10,
         left: controlsOpen ? '50%' : undefined,
@@ -275,7 +279,7 @@ export function FirstRunPreview() {
           <option value="browser">Browser · unavailable</option><option value="new">macOS · new</option><option value="ready">macOS · ready</option><option value="mixed">macOS · mixed</option>
         </select>
         {tools === 'sign-in' ? <button type="button" onClick={() => storage.setItem('signed-in-runtime', 'codex')} style={{ ...controlStyle, paddingRight: 10 }}>Mark preview sign-in ready</button> : null}
-        <select aria-label="Preview theme" value={palette} onChange={(event) => setPalette(event.target.value as 'light' | 'dark')} style={controlStyle}><option value="light">Light</option><option value="dark">Dark</option></select>
+        <select aria-label="Preview theme" disabled={nativeGlass} title={nativeGlass ? 'Native glass uses the app appearance.' : undefined} value={palette} onChange={(event) => setPalette(event.target.value as 'light' | 'dark')} style={controlStyle}><option value="light">Light</option><option value="dark">Dark</option></select>
         <button type="button" aria-label="Reset onboarding preview" onClick={() => restart()} style={{ ...controlStyle, paddingRight: 10 }}>Reset</button>
         <span style={{ fontSize: 10, color: 'var(--t-text-faint)', whiteSpace: 'nowrap' }}>isolated state</span>
         </> : null}

@@ -89,6 +89,7 @@ These rules apply across setup, Settings, connection flows, project views, and t
 - Provider marks identify choices in setup and connection flows. Reuse existing assets in a fixed identity slot, with optical sizing for the mark, a readable tool name, and a separate status. Hide redundant brand graphics from assistive technology. Dense workspace history keeps its existing text-first rule.
 - A bundled agent uses the same identity slot and readiness row as installed tools. When no licensed mark is available, use its text symbol in the existing typography and theme tokens. Show plan and platform details beside the choice; installation scans belong only to external tools. Availability follows the runtime registry, never a display-only promise.
 - Use the existing page and grouped-surface tokens for hierarchy. A new border, background, or column must organize a real choice or supporting information; adding a panel does not require adding a new palette, font, or Settings control variant.
+- Full-window native setup follows the selected glass material. Hide and make background workspace content inert while it is visible, then restore its prior state on close. Keep primary-action ink separate from the transparent surface and use the shared frost for scrolling action docks. Browser and solid surfaces keep the opaque fallback; operator appearance preferences are preserved.
 
 ### Window fit
 
