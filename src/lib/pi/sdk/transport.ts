@@ -40,6 +40,17 @@ async function isDailyCapResponse(response: Response, signal: AbortSignal): Prom
   }
 }
 
+/**
+ * Pi passes one mutable message as `partial` on every event and writes raw
+ * provider error text into it on failure. Events queued before that failure are
+ * forwarded later, so each one gets a copy without the diagnostic field.
+ */
+function withoutProviderDiagnostics(event: AssistantMessageEvent): AssistantMessageEvent {
+  if (!('partial' in event)) return event;
+  const { errorMessage: _providerText, ...partial } = event.partial;
+  return { ...event, partial };
+}
+
 /** Credentials never cross into the SDK worker. Re-resolve entitlement each call. */
 export function createManagedPiTransport(options: ManagedPiTransportOptions): PiModelTransport {
   return async function* (context, signal) {
@@ -83,7 +94,7 @@ export function createManagedPiTransport(options: ManagedPiTransportOptions): Pi
       maxRetries: 0, maxTokens: options.maxOutputTokens ?? 4096, transport: 'sse',
     });
     for await (const event of stream) {
-      if (event.type !== 'error') { yield event; continue; }
+      if (event.type !== 'error') { yield withoutProviderDiagnostics(event); continue; }
       // Providers can encode failures inside a successful SSE response. Pi yields
       // these as events, so catch-only redaction would leak their raw bodies.
       yield { type: 'error', reason: event.reason, error: {

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -13,7 +13,8 @@ import { POST } from '@/app/api/plugins/mcp/route';
 import { resolveRequestPrincipal, resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { MachineRelayConnector } from '@/lib/connect/machine-attach';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { bumpSignInEpoch, writeActiveIdentity } from '@/lib/github-broker/managed';
+import { bumpSignInEpoch, readSignInEpoch, writeActiveIdentity } from '@/lib/github-broker/managed';
+import { allowAccountRefresh, publishReadyAccountState, withAccountStateLease } from '@/lib/auth/account-state';
 import { readPluginAudit } from '@/lib/mcp/plugin-audit';
 import { panelGateMiddleware } from '@/middleware';
 
@@ -79,9 +80,9 @@ describe('machine connector plugin stream through the gated HTTP entry point', (
       operatorToken: () => 'fixture-operator-secret',
       ticketProvider: async () => ({ ticket: 'fixture-machine-ticket', expiresAt: new Date(Date.now() + 600_000).toISOString() }),
     });
-    const send = (rid: string, path: string, sid = 'plugin-stream', name = 'o8_attention') => peer!.send(JSON.stringify({ t: 'mux', sid, seq: 0,
+    const send = (rid: string, path: string, sid = 'plugin-stream', name = 'o8_attention', extra = {}) => peer!.send(JSON.stringify({ t: 'mux', sid, seq: 0,
       payload: Buffer.from(JSON.stringify({ t: 'http-req', rid, path, method: 'POST', headers: { 'content-type': 'application/json' },
-        bodyB64: Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { machineId: 'machine-relay' } } })).toString('base64'),
+        bodyB64: Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { machineId: 'machine-relay', ...extra } } })).toString('base64'),
         authorization: 'Bearer fixture-operator-secret',
       })).toString('base64'),
     }));
@@ -109,13 +110,18 @@ describe('machine connector plugin stream through the gated HTTP entry point', (
       const payload = Buffer.from(JSON.stringify({ sub: accountId, plan: 'free', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
       const unsigned = `${header}.${payload}`;
       const licenseKey = `${unsigned}.${sign(null, Buffer.from(unsigned), keys.privateKey).toString('base64url')}`;
-      writeActiveIdentity(accountId);
-      bumpSignInEpoch();
-      writeFileSync(join(getDataDir(), 'entitlement.json'), JSON.stringify({ plan: 'free', licenseKey }));
-      const expiry = Date.now() + 2000;
-      const open = (sid: string, subject?: string) => peer!.send(JSON.stringify({
+      await withAccountStateLease(() => {
+        writeActiveIdentity(accountId);
+        bumpSignInEpoch();
+        writeFileSync(join(getDataDir(), 'entitlement.json'), JSON.stringify({ plan: 'free', licenseKey }));
+        rmSync(join(getDataDir(), 'auth-signed-out-at'), { force: true });
+        allowAccountRefresh();
+        publishReadyAccountState(accountId, readSignInEpoch()!, licenseKey);
+      });
+      const expiry = Date.now() + 4000;
+      const open = (sid: string, subject?: string, scopes = ['o8:prepare-task']) => peer!.send(JSON.stringify({
         t: 'mux-open', sid, surface: 'plugin', grant: {
-          accountId: subject, clientId: 'client-relay', scopes: ['o8:prepare-task'], expiresAt: expiry,
+          accountId: subject, clientId: 'client-relay', scopes, expiresAt: expiry,
         },
       }));
       send('old-grant-draft', '/api/plugins/mcp', 'plugin-stream', 'o8_task_options');
@@ -126,6 +132,19 @@ describe('machine connector plugin stream through the gated HTTP entry point', (
       await waitFor(() => receipts.has('draft-options'));
       expect(receipts.get('draft-options')?.status).toBe(200);
       expect(contexts.at(-1)).toMatchObject({ role: 'plugin', accountId, scopes: ['o8:prepare-task'], expiresAt: expiry });
+      const taskId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      open('result-read', accountId, ['o8:read']);
+      send('bound-result', '/api/plugins/mcp', 'result-read', 'o8_task_result', { taskId });
+      await waitFor(() => receipts.has('bound-result'));
+      expect(receipts.get('bound-result')?.status).toBe(404); // Authenticated, but no such own task.
+      expect(contexts.at(-1)).toMatchObject({ role: 'plugin', accountId, scopes: ['o8:read'], expiresAt: expiry });
+      send('result-no-account', '/api/plugins/mcp', 'plugin-stream', 'o8_task_result', { taskId });
+      await waitFor(() => receipts.has('result-no-account'));
+      expect(receipts.get('result-no-account')?.status).toBe(403);
+      open('result-foreign', 'user_foreign_relay_fixture', ['o8:read']);
+      send('result-other-account', '/api/plugins/mcp', 'result-foreign', 'o8_task_result', { taskId });
+      await waitFor(() => receipts.has('result-other-account'));
+      expect(receipts.get('result-other-account')?.status).toBe(403);
       open('draft-foreign', 'user_foreign_relay_fixture');
       send('foreign-options', '/api/plugins/mcp', 'draft-foreign', 'o8_task_options');
       await waitFor(() => receipts.has('foreign-options'));

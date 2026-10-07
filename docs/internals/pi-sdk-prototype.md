@@ -1,8 +1,10 @@
 # Managed Pi SDK prototype
 
-This is an opt-in server-side prototype under issue #3230. It is not registered
-in the runtime catalog, exposed as a public route, selected by default, or part
-of native first-run acceptance. Existing external Pi RPC behavior is unchanged.
+This began as an opt-in server-side prototype under issue #3230. Since #3258 it
+backs the `pi` orchestrator backend (see "Orchestrator" below), offered in the
+composer under Customize leads as a preview. It is not the default, not a worker
+runtime yet, and not part of native first-run acceptance. Existing external Pi
+RPC behavior is unchanged.
 
 ## Entry point and ownership
 
@@ -12,10 +14,11 @@ already have authority over the canonical workspace, a separate private state
 directory, the selected managed model, and any injected host adapters. This API
 must not be wired directly to untrusted request parameters.
 
-The worker receives only model metadata, two tool definitions, and owned session
-paths. It does not inherit provider credentials, `NODE_OPTIONS`, proxy settings,
+The worker receives only model metadata, three tool definitions (`read_file`,
+`write_file`, `run_command`), and owned session paths. It does not inherit provider credentials, `NODE_OPTIONS`, proxy settings,
 user extensions, project instructions, or user Pi settings. Stock tools and
-resource discovery are disabled. Read and write requests return to the host.
+resource discovery are disabled. Read, write and command requests return to the
+host.
 
 The host reuses descriptor-based workspace file IO and the existing approval
 inbox. Writes show the exact proposed content and the existing content when
@@ -32,6 +35,133 @@ restart. Host results require `agent_settled`; an accepted command or an
 their stop reason and cannot reuse text from a previous turn. Stop cancels host
 model/tool work before asking the worker to abort; close uses the shared
 cooperative-to-forced child shutdown ladder.
+
+## Command tool
+
+`run_command` (#3257) goes through `evaluatePolicy`, the same rules as every other
+runtime's shell tool. A blocked command never starts. Every other command needs
+an exact one-shot approval in the inbox unless an operator policy rule (for
+example a workspace-scoped `mutation-shell` override in `policies.json`) lifts
+it. A denied or expired approval never starts the command.
+
+The host runs `/bin/sh -c` at the workspace root in a new process group. Its
+environment is an allowlist (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, locale
+and `TMPDIR`, plus non-interactive pager and Git settings), so provider keys, host
+tokens, o8 internals and the SSH agent socket are not inherited. The launcher
+checks that its physical working directory is still the workspace before the
+command starts, so a root replaced by a symlink after the host's checks is
+refused. Stdout and stderr share one 50 KB buffer; any output past it stops the
+command. The default limit is 120 seconds, set by the host only.
+
+Ending a command depends on the platform:
+
+- Linux: the command runs under the native supervisor (`o8-pi-write supervise`,
+  #3350). It marks itself a child subreaper, so a descendant whose parent exits
+  is reparented to the supervisor, whatever process group or session it moved
+  to. On the command's exit, on SIGTERM from the host (timeout, output cap or
+  Stop), or when the host dies (parent-death signal), it sends TERM to every
+  descendant found from `/proc`, waits 1.5 seconds, then sends KILL until
+  `waitpid` reports no child. Signals go through pidfds checked against each
+  process's start time, so a reused pid never receives one; the supervisor
+  refuses to start a command when pidfds are unavailable (Linux before 5.3, or a
+  seccomp policy that denies them). It writes a receipt on a separate descriptor that
+  the command never sees. A missing or unconfirmed receipt fails the call and
+  refuses later commands and writes until o8 restarts.
+- macOS has no subreaper. The host reads the process table every 250 ms while a
+  command runs and tracks the process group and every descendant by pid and
+  start time. Reads may overlap; a result older than the last one applied is
+  dropped. Once a read shows the group empty, its number is no longer used to
+  adopt processes, because it may have been reused. The timeout, the output
+  cap, Stop and a normal exit each send TERM, then KILL on a fixed schedule. If
+  the table cannot be read, the group still gets TERM and KILL, the call fails,
+  and later commands and writes are refused until o8 restarts.
+
+Pi runs tool calls from one message in parallel by default. The host runs one
+tool call at a time per session, and one command or write commit at a time
+across every Pi session in the host process, so no command process is alive
+while an approved write commits. Stop ends a call that is still waiting for its
+turn without running it.
+
+Known limits: approval is the boundary, not a sandbox. An approved command can
+read anything the user can, including files under `HOME`. On macOS, tracking
+comes from process-table snapshots, so a descendant that moves to a new process
+group and outlives its parent can be missed: when it leaves and is reparented
+between two reads, when a read that saw it is dropped as older than teardown's
+read, or when a scan taken around a fork shows the group empty. A missed process
+keeps running after the tool call. On Linux, a process stuck in uninterruptible
+sleep past the 5-second KILL deadline leaves the receipt unconfirmed, which
+refuses later commands and writes. Work handed over IPC to a service outside
+the tree (systemd, an already running daemon) is not ended. After exit, the host
+waits at most 1 second for buffered output, so output still in flight after that
+is dropped. The lock covers one host process, not other
+processes writing the same workspace.
+
+`tests/pi-sdk-command-real-path.test.ts` covers inbox approval and rejection,
+denial, policy block and operator allow, the working directory, a swapped root,
+the environment, timeout, the output cap (including output that fills it
+exactly), Stop, a TERM-ignoring child in its own group, a late process-table read, a
+reused group number, an unreadable process table, ordering against approved
+writes in the same and another session, and Stop while waiting for the lock.
+The process-table cases run on macOS only. On Linux, the supervisor cases cover
+an orphaned TERM-ignoring child in its own session at exit, timeout and Stop,
+the host's death, a host that is gone before launch, and a supervisor that ends
+without a receipt.
+
+## Orchestrator
+
+`src/lib/lane/orchestrator-backends/pi.ts` registers bundled Pi as the `pi`
+orchestrator backend (#3258). It runs one turn at a time per repo and thread; a
+message that arrives while a turn is running or starting is refused. Each thread
+has one Pi process, and its session file lives under `<data dir>/pi/orchestrator/`,
+so a new process after a restart, a failure or a 15-minute idle close resumes the
+same conversation. Stop aborts the run and the next message is accepted. A failed
+run closes the process and the next message starts a new one on the same session
+file. A turn that needs a different tool surface gets a new process.
+
+Pi gets the built-in o8 servers that the Claude orchestrator surface gets for
+the same repo and tool profile, from the same tool-spine entries:
+
+- the operator server, reached the way the operator stdio proxy forwards every
+  message: a JSON-RPC POST to `/api/mcp` with the ws token;
+- cortex, launched as a stdio MCP server from its tool-spine entry. A proposer
+  turn gets it read-only and no operator server, as Claude does.
+
+A plan-mode turn is read-only: it gets the proposer projection, and of Pi's own
+tools only `read_file`.
+
+User-configured external MCP servers are not attached to Pi.
+
+The servers list 152 commands when this was written (125 from the operator server
+and 27 from cortex). The operator server's schemas alone are about
+110 KB, which would ride on every model call. Pi instead gets three host tools:
+`o8_commands` lists commands with a one-line summary, `o8_command_help` returns
+one command's description and argument schema, and `o8_run` runs a command with
+its arguments as a JSON object string (a string, because some providers reject
+an object parameter that declares no properties). The system prompt is the
+shared `orchestrator.md` prompt plus the list of command names. Claude sees each
+server's tools under that server's name, so a name listed by two servers stays
+two commands: the operator's `cortex_ask` and cortex's `cortex.cortex_ask`.
+A command result is capped at 40 KB. Calls reach the servers unchanged, so their
+own checks apply as for every other orchestrator. Transport errors, which can
+carry server stderr, go to the host log; Pi and the stream get a fixed message.
+A server's own error result reaches Pi exactly as it reaches Claude, including
+any API error text the server put in it (#3373).
+A start failure is shown only when o8 itself explains it (unsupported Node or
+platform).
+
+Pi's own `write_file` and `run_command` in the repo keep per-call approval in the
+inbox. Per-turn limits are 40 model calls, 80 tool calls and 30 minutes.
+
+`tests/pi-orchestrator-real-path.test.ts` serves the real `/api/mcp` route over a
+local HTTP server behind the real middleware gate, which refuses a request
+without the ws token. It spawns every built-in server in the Claude
+orchestrator's emitted MCP config and checks that Pi's production path reaches
+the same commands on the same servers with the same schemas, and that a proposer
+turn drops the operator server. It then drives turns through the backend with a
+scripted model: command help, a real operator command, an unknown command, an
+approved write, resume in a new backend, the used-up allowance message, Stop
+followed by a new message, a read-only plan turn, an overlapping message, shutdown
+while Pi is starting, idle close, and a transport error that must not reach Pi.
 
 ## Managed inference boundary
 

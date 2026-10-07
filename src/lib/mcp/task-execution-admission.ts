@@ -1,3 +1,4 @@
+import { controlledProviderConfig } from '@/lib/runtimes/shared/owned-session/controlled-provider';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readActiveIdentity } from '@/lib/github-broker/managed';
@@ -14,6 +15,9 @@ import { readTaskExecution, taskBinding, withTaskExecutionLock, writeTaskExecuti
 import { verifyTaskExecutionWorkspace } from './task-execution-workspace';
 
 export const operatorAccount = () => ({ accountId: readActiveIdentity() ?? undefined, expiresAt: Infinity });
+function launchAccount(record: TaskExecutionRecord) {
+  return { accountId: record.account.accountId, expiresAt: record.pluginLaunchGrant?.expiresAt ?? Infinity };
+}
 function draftFor(binding: ControlledTaskBinding) {
   const draft = findTaskDraft(binding.taskId, readActiveIdentity() ?? '');
   if (draft.contractHash !== binding.contractHash) throw new TaskDraftError('contract_conflict', 409);
@@ -26,15 +30,18 @@ function executionFor(binding: ControlledTaskBinding): TaskExecutionRecord {
 }
 function requirePins(record: TaskExecutionRecord, request: Pick<OwnedLaunchRequest, 'cwd' | 'executionPolicy' | 'model' | 'effort' | 'clientMutationId' | 'runtimeConfig'>, runtime: string) {
   if (record.runtime !== runtime || record.workspacePath !== request.cwd || request.executionPolicy !== 'single-attempt'
-    || record.model !== request.model || record.effort !== request.effort || request.clientMutationId !== record.attemptId
-    || request.runtimeConfig?.workMode !== 'read-only') throw new TaskDraftError('execution_binding_changed', 409);
+    || record.model !== request.model || (record.effort === 'provider-default' ? undefined : record.effort) !== request.effort || request.clientMutationId !== record.attemptId
+    || request.runtimeConfig?.workMode !== 'read-only'
+    || (record.provider && canonical(request.runtimeConfig) !== canonical({ workMode: 'read-only', ...controlledProviderConfig(record.provider) }))
+    || (!record.provider && request.runtimeConfig?.controlledProvider !== undefined)) throw new TaskDraftError('execution_binding_changed', 409);
 }
 
 /** Claim the one session before its directory or native identity configuration is created. */
 export async function bindControlledTaskSession(request: OwnedLaunchRequest, runtime: string, surfaceId: string): Promise<void> {
   if (!request.controlledTask) return;
   const draft = draftFor(request.controlledTask);
-  await withTaskDraftAccountAdmission(operatorAccount(), draft.account, () => withTaskExecutionLock(draft.taskId, async () => {
+  const admission = launchAccount(executionFor(request.controlledTask));
+  await withTaskDraftAccountAdmission(admission, draft.account, () => withTaskExecutionLock(draft.taskId, async () => {
     const record = executionFor(request.controlledTask!);
     requirePins(record, request, runtime);
     if (record.state !== 'accepted' || record.surfaceId) throw new TaskDraftError('execution_already_reserved', 409);
@@ -48,13 +55,14 @@ export async function withControlledTaskSpawn<T extends OwnedRunRecord>(session:
   runId: string, action: () => Promise<T>): Promise<T> {
   if (!session.controlledTask) return action();
   const draft = draftFor(session.controlledTask);
-  return withTaskDraftAccountAdmission(operatorAccount(), draft.account, () => withTaskExecutionLock(draft.taskId, async () => {
+  const admission = launchAccount(executionFor(session.controlledTask));
+  return withTaskDraftAccountAdmission(admission, draft.account, () => withTaskExecutionLock(draft.taskId, async () => {
     const record = executionFor(session.controlledTask!);
     requirePins(record, { ...session, clientMutationId: session.launchMutationId, executionPolicy: 'single-attempt' }, runtime);
     if (record.state !== 'accepted' || record.surfaceId !== session.surfaceId || record.runId || !record.laneId
       || record.laneId !== session.laneId
       || session.executionPolicy?.runtime !== runtime || session.executionPolicy.model !== record.model
-      || session.executionPolicy.effort !== record.effort) throw new TaskDraftError('execution_already_reserved', 409);
+      || session.executionPolicy.effort !== (record.effort === 'provider-default' ? undefined : record.effort)) throw new TaskDraftError('execution_already_reserved', 409);
     await verifyTaskExecutionWorkspace(draft, record);
     const reserved = { ...record, state: 'spawn_reserved' as const, runId };
     writeTaskExecution(reserved);
@@ -73,6 +81,15 @@ export async function withControlledTaskSpawn<T extends OwnedRunRecord>(session:
   }));
 }
 
+/** Called synchronously immediately before actual process creation, inside the account lease. */
+export function assertControlledLaunchGrantCurrent(session: OwnedSessionRecord): void {
+  if (!session.controlledTask) return;
+  const record = executionFor(session.controlledTask);
+  if (record.pluginLaunchGrant && record.pluginLaunchGrant.expiresAt <= Date.now()) {
+    throw new TaskDraftError('account_changed_or_unavailable', 403);
+  }
+}
+
 export function readExecutionSession(record: TaskExecutionRecord): OwnedSessionRecord | null {
   if (!record.surfaceId) return null;
   const root = ownedRoots().find((entry) => record.surfaceId!.startsWith(entry.marker));
@@ -84,11 +101,12 @@ export function readExecutionSession(record: TaskExecutionRecord): OwnedSessionR
     const session = JSON.parse(readFileSync(files[0]!, 'utf8')) as OwnedSessionRecord;
     if (session.surfaceId !== record.surfaceId || session.repoPath !== record.workspacePath
       || canonical(session.controlledTask) !== canonical(taskBinding(record))
-      || session.launchMutationId !== record.attemptId || session.model !== record.model || session.effort !== record.effort
+      || session.launchMutationId !== record.attemptId || session.model !== record.model || session.effort !== (record.effort === 'provider-default' ? undefined : record.effort)
       || session.executionPolicy?.mode !== 'single-attempt' || session.executionPolicy.runtime !== record.runtime
-      || session.executionPolicy.model !== record.model || session.executionPolicy.effort !== record.effort
+      || session.executionPolicy.model !== record.model || session.executionPolicy.effort !== (record.effort === 'provider-default' ? undefined : record.effort)
       || session.runIdentityLedger?.totalRuns !== 1 || !session.runIdentityLedger.complete
       || session.recentRuns.length !== 1 || session.recentRuns[0]?.id !== record.runId) throw new Error('Invalid session');
+    requirePins(record, { ...session, clientMutationId: session.launchMutationId, executionPolicy: 'single-attempt' }, record.runtime);
     return session;
   } catch { throw new TaskDraftError('execution_uncertain', 409); }
 }

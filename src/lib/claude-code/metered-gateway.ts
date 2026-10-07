@@ -14,6 +14,7 @@ interface Registration {
   upstreamBaseUrl: string;
   cap: PacketSpendCap;
   telemetry: PacketSpendTelemetry;
+  admission: Promise<void>;
 }
 
 const registrations = new Map<string, Registration>();
@@ -80,7 +81,8 @@ async function requestBody(request: IncomingMessage): Promise<Buffer | undefined
 async function enforceCap(registration: Registration): Promise<boolean> {
   const telemetry = registration.telemetry;
   const breach = packetSpendCapBreach(registration.cap, telemetry);
-  if (!breach || telemetry.capHit) return false;
+  if (telemetry.capHit) return true;
+  if (!breach) return false;
   telemetry.capHit = true;
   await persistTelemetry(registration);
   const { packetId, laneId } = registration.session;
@@ -150,6 +152,20 @@ async function relay(request: IncomingMessage, response: ServerResponse): Promis
     response.writeHead(404).end('Unknown metered gateway session.');
     return;
   }
+  const previous = registration.admission;
+  let release!: () => void;
+  registration.admission = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    if (registration.telemetry.capHit) {
+      response.writeHead(429, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: 'Packet spend cap reached.' } }));
+      return;
+    }
+    await forward(registration, request, response, incomingUrl, suffix);
+  } finally { release(); }
+}
+
+async function forward(registration: Registration, request: IncomingMessage, response: ServerResponse, incomingUrl: URL, suffix: string[]): Promise<void> {
   const upstream = new URL(suffix.join('/'), `${registration.upstreamBaseUrl.replace(/\/$/, '')}/`);
   upstream.search = incomingUrl.search;
   const headers = new Headers();
@@ -168,11 +184,11 @@ async function relay(request: IncomingMessage, response: ServerResponse): Promis
   }
   registration.telemetry.inputTokens += usage.inputTokens;
   registration.telemetry.outputTokens += usage.outputTokens;
-  await persistTelemetry(registration);
   if (await enforceCap(registration)) {
     response.writeHead(429, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: 'Packet spend cap reached.' } }));
     return;
   }
+  await persistTelemetry(registration);
   const responseHeaders: Record<string, string> = {};
   upstreamResponse.headers.forEach((value, name) => { responseHeaders[name] = value; });
   delete responseHeaders['content-encoding'];
@@ -209,6 +225,7 @@ export async function prepareMeteredGatewaySession(session: OwnedSessionRecord, 
     session,
     upstreamBaseUrl,
     cap,
+    admission: Promise.resolve(),
     telemetry: { costUsd: null, inputTokens: 0, outputTokens: 0, costSource: 'unknown', capHit: false, updatedAt: new Date().toISOString() },
   });
   return `http://127.0.0.1:${port}/${key}`;

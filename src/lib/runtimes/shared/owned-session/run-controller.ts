@@ -1,6 +1,8 @@
+import { controlledProviderSandbox } from './controlled-provider-sandbox';
+import { revokeControlledGateway } from '@/lib/claude-code/controlled-gateway';
 import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
-import { withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
+import { assertControlledLaunchGrantCurrent, withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
 import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
 import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn } from './execution-policy';
@@ -212,6 +214,7 @@ export function createOwnedRunController({
     stderrPath: string,
     outcome: OwnedChildExitOutcome,
   ) {
+    revokeControlledGateway(surfaceId);
     const stderrTail = await readAbnormalStderrTail(stderrPath, outcome);
     const childExit = stderrTail ? { ...outcome, stderrTail } : outcome;
 
@@ -527,7 +530,9 @@ export function createOwnedRunController({
     const sandboxEnvExtra: Record<string, string> = {};
     if (sandboxEnabled) {
       try {
+        const controlledSandbox = controlledProviderSandbox(session, spawnBinary);
         const prepared = await prepareWorkerSandbox({
+          ...controlledSandbox,
           runId,
           profileDir: path.join(session.sessionDir, RUNS_DIR),
           cwd: session.repoPath,
@@ -536,7 +541,7 @@ export function createOwnedRunController({
           args: spawnArgs,
           extraReadPaths: executionCarrierSandboxReadPaths(workerMcp.sandboxReadPaths, carrierLaunch),
           readBackingProjectConfig: runtimeId === 'codex',
-          finalAllowReadPaths: workerMcp.configPath ? [workerMcp.configPath] : undefined,
+          finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : [])],
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
@@ -692,6 +697,7 @@ export function createOwnedRunController({
                     ['-n', '10', spawnBinary, ...spawnArgs],
                     materializationIdentity,
                   );
+              assertControlledLaunchGrantCurrent(session);
               const child = process.platform === 'win32'
                 ? spawn(directLaunch.command, directLaunch.args, {
                     windowsHide: true,

@@ -44,6 +44,9 @@ export const ORCHESTRATOR_BACKEND_BILLING: Record<OrchestratorBackendId, Orchest
   // money. Claiming `subscription` here would disable those policies on a rail
   // that can be genuinely per-token billed.
   opencode: 'metered',
+  // Bundled Pi draws per token on the o8 model allowance (paid plan or the
+  // free daily allowance), so the decisions-only window policies apply.
+  pi: 'metered',
 };
 
 export function orchestratorBackendBillingClass(id: OrchestratorBackendId): OrchestratorBillingClass {
