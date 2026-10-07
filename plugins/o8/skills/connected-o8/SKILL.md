@@ -1,11 +1,11 @@
 ---
 name: connected-o8
-description: Check tasks, prepare explicitly requested drafts, and read worker results through your connected o8 computer from ChatGPT or Codex.
+description: Check tasks, prepare explicitly requested drafts, run separately consented bounded workers, and read results through your connected o8 computer from ChatGPT or Codex.
 ---
 
 # Use connected o8
 
-Use this workflow when the user asks to check, prepare or follow up work in their connected
+Use this workflow when the user asks to check, prepare, run, stop or follow up work in their connected
 o8 app. The hosted tools require account linking. Let the host's OAuth flow obtain
 the permission; never ask the user to paste credentials into chat.
 
@@ -52,12 +52,6 @@ execution or subscription eligibility. Ask for missing exact file scope. Transla
 the ordinary-language request into one sealed task with `o8_prepare_task`; the
 user does not need to provide JSON. Keep files and requirements within that
 request.
-
-For an explicitly selected OpenRouter catalog row, copy its provider policy
-exactly and use `provider-default` effort. Do not describe that as High reasoning
-or substitute a native provider. It uses the configured OpenRouter API credit;
-the CLI name does not identify the payer. If the route or key is unavailable,
-stop and report the refusal. Leave saved worker defaults unchanged.
 
 For an explicitly selected OpenRouter catalog row, copy its provider policy
 exactly and use `provider-default` effort. Do not describe that as High reasoning
