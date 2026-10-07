@@ -12,13 +12,14 @@ import { OnboardingFeedback } from './onboarding/OnboardingFeedback';
 import { OnboardingFrame } from './onboarding/OnboardingFrame';
 import { AgentReadiness } from './onboarding/AgentReadiness';
 import { useToolScanStatus } from './onboarding/useToolScanStatus';
-import { runtimeForLead } from '@/lib/setup/runtime-recommendation';
+import { runtimeForLead, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
+import { builtInAgentFromInventory } from '@/lib/setup/built-in-agent';
 import { useAgentSetupRequest } from './onboarding/useAgentSetupRequest';
 import type { AgentSetupRequest, SetupRequestStatus } from '@/lib/setup/agent-request';
 import { useOnboardingGithub } from './onboarding/useOnboardingGithub';
 import { PROGRESS_KEY, browserProgressStorage, emptyProgress, readProgress, writeProgress, type OnboardingProgress, type OnboardingStep, type OnboardingTask, type OnboardingProject, type ProgressStorage } from './onboarding/onboarding-progress';
 import { onboardingButtonStyle, onboardingQuietButtonStyle } from './onboarding/onboarding-style';
-import { loadOnboardingRuntimeSelection, onboardingSetupIsReady, persistOnboardingRuntimeSelection, type OnboardingRuntimeSelection } from './onboarding/onboarding-runtime-selection';
+import { loadOnboardingBuiltInAgent, loadOnboardingRuntimeSelection, onboardingSetupIsReady, persistOnboardingRuntimeSelection, type OnboardingRuntimeSelection } from './onboarding/onboarding-runtime-selection';
 import { chooseOnboardingProject, loadOnboardingProjects } from './onboarding/onboarding-projects';
 import type { OnboardingRequest } from './onboarding/request';
 export type { OnboardingStep } from './onboarding/onboarding-progress';
@@ -33,6 +34,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   const progressRef = useRef(progress);
   const [projects, setProjects] = useState<OnboardingProject[]>([]);
   const [setup, setSetup] = useState<OnboardingRuntimeSelection | null>(null);
+  const [initialBuiltIn, setInitialBuiltIn] = useState<SetupRuntime | null>(null);
   const [loading, setLoading] = useState(true);
   const [toolsLoading, setToolsLoading] = useState(true);
   const toolScanStatus = useToolScanStatus(toolsLoading);
@@ -66,6 +68,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
     setLoading(true);
     setToolsLoading(true);
     setDiscoveryError(null);
+    void loadOnboardingBuiltInAgent(request).then((next) => { if (active) setInitialBuiltIn(next); }).catch(() => {});
     // Project choice stays usable while slower installation/sign-in discovery runs.
     void loadOnboardingProjects(request).then((next) => { if (active) setProjects(next); })
       .catch(() => { if (active) setDiscoveryError('Could not load your projects. You can still open a folder.'); })
@@ -203,8 +206,11 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   });
 
   const ready = !toolsLoading && setup && onboardingSetupIsReady(setup);
-  const leadLabel = setup?.inventory.find((item) => item.id === setup.orchestratorRuntime)?.label ?? setup?.orchestratorRuntime;
-  const leadInventory = setup?.inventory.filter((item) => item.id === runtimeForLead(setup.recommendation.backend)) ?? [];
+  const leadRuntime = runtimeForLead(setup?.recommendation.backend ?? null, setup?.inventory);
+  const leadLabel = setup?.inventory.find((item) => item.id === leadRuntime)?.label ?? setup?.orchestratorRuntime;
+  const builtIn = setup ? builtInAgentFromInventory(setup.inventory) : initialBuiltIn;
+  const leadInventory = setup?.inventory.filter((item) => item.id === leadRuntime && !item.builtIn) ?? [];
+  const homeInventory = [...(builtIn ? [builtIn] : []), ...(!toolsLoading ? leadInventory : [])];
   const tools = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
       <span role="status" style={{ fontSize: 12, fontWeight: 300, color: 'var(--t-text-secondary)' }}>
@@ -212,7 +218,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
       </span>
       <button type="button" disabled={busy} onClick={() => { continueAfterTools.current = false; navigate('dispatch'); }} style={{ ...onboardingQuietButtonStyle, fontSize: 12 }}>{ready ? 'Change' : 'Set up tools'}</button>
     </div>
-    {!toolsLoading && leadInventory.length > 0 ? <AgentReadiness inventory={leadInventory} /> : null}
+    {homeInventory.length > 0 ? <AgentReadiness inventory={homeInventory} /> : null}
   </div>;
   const renderButton = ({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) => <button type="button" onClick={onClick} disabled={disabled} style={{ ...onboardingButtonStyle, background: 'var(--t-text)', color: 'var(--t-onboarding-bg)', opacity: disabled ? 0.5 : 1 }}>{label}</button>;
   const home = progress.step === 'open';

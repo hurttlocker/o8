@@ -53,7 +53,7 @@ import {
 } from '@/lib/runtimes/shared/auth-detect';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
 import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
-import { readRuntimeSetupRecommendation } from '@/lib/setup/runtime-setup-server';
+import { readBuiltInAgentRuntime, readOnboardingRuntimeSetup } from '@/lib/setup/built-in-agent-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -716,9 +716,10 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
 export async function GET(request: Request) {
   try {
-    if (new URL(request.url).searchParams.get('refresh') === 'runtime') invalidateRuntimeAuthCache();
-    const valuesOnly = new URL(request.url).searchParams.get('include') === 'values';
-    if (valuesOnly) {
+    const query = new URL(request.url).searchParams;
+    if (query.get('include') === 'setup-built-in') return response({ builtInAgent: await readBuiltInAgentRuntime() });
+    if (query.get('refresh') === 'runtime') invalidateRuntimeAuthCache();
+    if (query.get('include') === 'values') {
       const [data, settingsToml] = await Promise.all([
         getOperatorDefaults(),
         getOperatorDefaultsTomlState(),
@@ -731,9 +732,8 @@ export async function GET(request: Request) {
       getRuntimeAuthSnapshot(),
     ]);
     const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
-    if (new URL(request.url).searchParams.get('include') === 'setup') {
-      const setupRecommendation = await readRuntimeSetupRecommendation(data, dispatchableRuntimes);
-      return response({ ...operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes), setupRecommendation });
+    if (query.get('include') === 'setup') {
+      return response({ ...operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes), ...await readOnboardingRuntimeSetup(data, dispatchableRuntimes) });
     }
     return response(operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {

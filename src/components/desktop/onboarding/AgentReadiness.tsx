@@ -6,6 +6,7 @@ import { RuntimeIdentity } from './RuntimeIdentity';
 
 export function runtimeReadinessLabel(runtime: SetupRuntime): string {
   if (runtime.available) return 'Ready';
+  if (runtime.builtIn) return 'Unavailable';
   if (runtime.unavailableReason === 'not_installed') return 'Not installed';
   if (runtime.unavailableReason === 'needs_auth') return 'Sign-in needed';
   if (runtime.unavailableReason === 'needs_restart') return 'Restart needed';
@@ -26,10 +27,11 @@ export function AgentReadiness({ inventory, selectedRuntime, disabled, onSelect 
       const detail = runtime.available ? /^(ready|ready to code)\.?$/i.test(runtime.detail) ? 'Available on this computer' : runtime.detail
         : runtime.fix || runtime.detail;
       const content = <>
-        <RuntimeIdentity runtime={runtime.id} />
+        <RuntimeIdentity runtime={runtime.id} builtIn={Boolean(runtime.builtIn)} />
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{runtime.label}</span>
           <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)', overflowWrap: 'anywhere' }}>{detail}</span>
+          {runtime.builtIn ? <span style={{ fontSize: 11, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>{runtime.builtIn.planDetail}</span> : null}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, fontSize: 11, fontWeight: 300, color: runtime.available ? 'var(--t-success)' : 'var(--t-text-muted)' }}>
           <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />{status}

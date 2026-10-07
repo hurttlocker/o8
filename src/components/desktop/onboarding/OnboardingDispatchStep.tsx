@@ -12,6 +12,7 @@ import {
 import {
   canSelectOnboardingRuntime,
   loadOnboardingRuntimeSelection,
+  loadOnboardingBuiltInAgent,
   persistOnboardingRuntimeSelection,
   toggleOnboardingWorkerRuntime,
   type DispatchableRuntimeInventoryItem,
@@ -27,6 +28,8 @@ import { RuntimeIdentity } from './RuntimeIdentity';
 import { formatModelLabel } from '@/lib/format';
 import { leadModelPreset, runtimeForLead, visibleRuntimeInventory, workerModelPreset } from '@/lib/setup/runtime-recommendation';
 import { orchestratorBackendForRuntime, type OnboardingRuntimeSelection } from './onboarding-runtime-selection';
+import { builtInAgentFromInventory, setupRuntimeLabel } from '@/lib/setup/built-in-agent';
+import type { SetupRuntime } from '@/lib/setup/runtime-recommendation';
 
 const FONT = 'var(--font-sans-system)';
 
@@ -91,7 +94,7 @@ function RuntimeInventoryRow({
         transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
-      <RuntimeIdentity runtime={runtime.id} />
+      <RuntimeIdentity runtime={runtime.id} builtIn={Boolean(runtime.builtIn)} />
       <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
@@ -105,6 +108,7 @@ function RuntimeInventoryRow({
         </span>
         <span style={{ fontSize: 10.5, fontWeight: 300, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>
           {selectable ? runtime.detail : runtime.fix || runtime.detail}
+          {runtime.builtIn ? <span style={{ display: 'block', marginTop: 4 }}>{runtime.builtIn.planDetail}</span> : null}
         </span>
       </span>
       <span style={{
@@ -137,6 +141,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
   renderButton: (props: { label: string; onClick: () => void; disabled?: boolean }) => ReactNode;
 }) {
   const [selection, setSelection] = useState<OnboardingRuntimeSelection | null>(null);
+  const [initialBuiltIn, setInitialBuiltIn] = useState<SetupRuntime | null>(null);
   const [orchestratorRuntime, setOrchestratorRuntime] = useState<OnboardingOrchestratorRuntime>('codex');
   const [workerRuntimes, setWorkerRuntimes] = useState<DispatchRuntime[]>([]);
   const [panel, setPanel] = useState<'choose' | 'customize' | 'tools' | null>(null);
@@ -162,6 +167,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     let active = true;
     setLoading(true);
     setError(null);
+    void loadOnboardingBuiltInAgent(request).then((next) => { if (active) setInitialBuiltIn(next); }).catch(() => {});
     void loadOnboardingRuntimeSelection(request, revision > 0).then((next) => {
       if (!active) return;
       setSelection((previous) => choiceMade.current && previous
@@ -179,24 +185,33 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
 
   const inventory = selection?.inventory ?? [];
   const backend = orchestratorBackendForRuntime(orchestratorRuntime);
-  const leadRuntime = runtimeForLead(backend);
+  const leadRuntime = runtimeForLead(backend, inventory);
+  const builtIn = builtInAgentFromInventory(inventory);
+  const builtInChoice = builtIn?.builtIn?.backend === 'claude' ? 'claude-code' : builtIn?.builtIn?.backend;
+  const leadLabel = setupRuntimeLabel(backend, inventory) ?? ORCHESTRATOR_LABELS[orchestratorRuntime] ?? orchestratorRuntime;
   const locked = selection?.sources.orchestratorBackend === 'env' || selection?.sources.orchestratorBackend === 'profile';
   const workersLocked = selection?.sources.defaultDispatchRuntime === 'env' || selection?.sources.defaultDispatchRuntime === 'profile';
   const sameLead = selection?.orchestratorRuntime === orchestratorRuntime;
   const leadModel = sameLead ? selection?.recommendation.leadModel ?? '' : leadModelPreset(backend);
   const workerModel = workerRuntimes[0] === selection?.workerRuntimes[0]
-    ? selection?.recommendation.workerModel ?? '' : workerRuntimes[0] === 'opencode' ? selection?.recommendation.opencodeModel ?? workerModelPreset('opencode') : workerModelPreset(workerRuntimes[0]);
+    ? selection?.recommendation.workerModel ?? '' : workerRuntimes[0] === builtIn?.id ? '' : workerRuntimes[0] === 'opencode' ? selection?.recommendation.opencodeModel ?? workerModelPreset('opencode') : workerModelPreset(workerRuntimes[0]);
   const leadReady = leadRuntime ? canSelectOnboardingRuntime(inventory, leadRuntime)
     : backend === 'o8' || Boolean(sameLead && selection?.recommendation.preserved);
   const readyToSave = Boolean(selection && leadReady && workerRuntimes.length > 0
     && workerRuntimes.every((id) => canSelectOnboardingRuntime(inventory, id)));
   const leadOptions = (['codex', 'claude-code', ...(customize ? ['fable', 'opencode', 'o8'] : [])] as OnboardingOrchestratorRuntime[])
     .filter((id) => id === 'o8' || inventory.some((item) => item.id === runtimeForLead(orchestratorBackendForRuntime(id)) && item.available));
+  if (builtIn?.available && builtInChoice && !leadOptions.includes(builtInChoice)) leadOptions.unshift(builtInChoice);
   if ((selection?.recommendation.preserved || choiceMade.current) && !leadOptions.includes(orchestratorRuntime)) leadOptions.push(orchestratorRuntime);
-  const options = leadOptions.map((value) => ({ value, label: ORCHESTRATOR_LABELS[value] ?? value }));
-  const needsConnection = Boolean(selection && options.length === 0);
+  const options = leadOptions.map((value) => ({ value, label: setupRuntimeLabel(orchestratorBackendForRuntime(value), inventory) ?? ORCHESTRATOR_LABELS[value] ?? value }));
+  const needsConnection = Boolean(selection && options.length === 0 && !builtIn);
   const showTools = panel === 'tools' || (needsConnection && panel === null);
   const shownWorkers = visibleRuntimeInventory(inventory, workerRuntimes);
+  const commonInventory = builtIn?.available ? visibleRuntimeInventory(inventory, leadRuntime ? [leadRuntime] : []) : inventory;
+  const commonChoices = commonInventory.filter((item) => item.id === 'codex' || item.id === 'claude-code' || item.id === leadRuntime);
+  // TODO(#3273): an existing Pi setup is a separate choice from the bundled agent.
+  const readyChoices = builtIn ? [builtIn, ...commonChoices.filter((item) => item.id !== builtIn.id)]
+    : !selection && initialBuiltIn ? [initialBuiltIn] : commonChoices;
 
   const handleContinue = useCallback(async () => {
     if (!readyToSave || saving) return;
@@ -214,7 +229,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     choiceMade.current = true;
     setOrchestratorRuntime(next);
     if (!selection?.recommendation.preserved && !workersLocked && !customize && (!selection?.sources.defaultDispatchRuntime || selection.sources.defaultDispatchRuntime === 'default') && (!selection?.sources.workerRuntimes || selection.sources.workerRuntimes === 'default')) {
-      const nextRuntime = runtimeForLead(orchestratorBackendForRuntime(next));
+      const nextRuntime = runtimeForLead(orchestratorBackendForRuntime(next), inventory);
       if (nextRuntime && canSelectOnboardingRuntime(inventory, nextRuntime)) setWorkerRuntimes([nextRuntime]);
     }
   };
@@ -222,15 +237,15 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
       <div>
         <h1 ref={headingRef} tabIndex={-1} style={{ margin: 0, fontSize: 28, fontWeight: 300, color: 'var(--t-text)', outline: 'none' }}>{showTools ? needsConnection ? 'Connect a coding tool' : 'Add coding tools' : customize ? 'Customize your setup' : 'Choose your agent'}</h1>
-        <p style={{ marginTop: 12, marginBottom: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{showTools ? 'Install or sign in to a tool, then refresh to check it. Your selected setup stays yours.' : customize ? 'Choose the lead and workers for this project. Save when your setup is ready.' : 'Start with one coding tool. You can add more and adjust your setup later.'}</p>
+        <p style={{ marginTop: 12, marginBottom: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{showTools ? 'Install or sign in to a tool, then refresh to check it. Your selected setup stays yours.' : customize ? 'Choose the lead and workers for this project. Save when your setup is ready.' : 'Start with an agent. You can add coding tools and adjust your setup later.'}</p>
       </div>
-      {showTools ? <OnboardingToolsPanel inventory={needsConnection ? inventory.filter((item) => item.id === 'codex' || item.id === 'claude-code') : inventory} loading={loading} disabled={saving} /> : <>
-        {!customize ? loading ? <div role="status" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>{scanStatus}</div> : <>
-          <AgentReadiness inventory={inventory.filter((item) => item.id === 'codex' || item.id === 'claude-code' || item.id === leadRuntime)} selectedRuntime={leadRuntime} disabled={saving || locked} onSelect={(item) => changeLead(item.id as OnboardingOrchestratorRuntime)} />
-          <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-            Selected agent: {ORCHESTRATOR_LABELS[orchestratorRuntime] ?? orchestratorRuntime}.
+      {showTools ? <OnboardingToolsPanel inventory={inventory.filter((item) => !item.builtIn && (!needsConnection || item.id === 'codex' || item.id === 'claude-code'))} loading={loading} disabled={saving} /> : <>
+        {!customize ? <>
+          <AgentReadiness inventory={readyChoices} selectedRuntime={leadRuntime} disabled={loading || saving || locked} onSelect={(item) => changeLead(item.builtIn ? item.builtIn.backend === 'claude' ? 'claude-code' : item.builtIn.backend : item.id as OnboardingOrchestratorRuntime)} />
+          {loading ? <div role="status" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>{scanStatus}</div> : <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+            Selected agent: {leadLabel}.
             {sameLead ? <div style={{ marginTop: 4 }}>{selection?.recommendation.reason}</div> : null}
-          </div>
+          </div>}
         </> : null}
         <div aria-label="Optional setup actions" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button ref={customizeButtonRef} type="button" disabled={loading || saving} aria-expanded={customize} aria-controls="onboarding-customization" onClick={() => setPanel(customize ? 'choose' : 'customize')} style={{ ...onboardingButtonStyle, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -244,7 +259,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)' }}>
               Lead
-              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)' }}>{leadModel ? formatModelLabel(leadModel) : 'Uses the configured model'}</div>
+              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)' }}>{leadRuntime === builtIn?.id ? builtIn?.builtIn?.planDetail : leadModel ? formatModelLabel(leadModel) : 'Uses the configured model'}</div>
             </div>
             <PickerMenu<OnboardingOrchestratorRuntime> value={orchestratorRuntime} options={options} onChange={changeLead} disabled={loading || saving || locked || !options.length} minWidth={180} />
           </div>
@@ -252,7 +267,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
           {locked ? <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Your environment or subscription profile controls the lead. Change that in Settings to use another tool.</div> : null}
           <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)' }}>
             Workers: {workerRuntimes.map((id) => inventory.find((item) => item.id === id)?.label ?? id).join(', ') || 'Connect a tool'}
-            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)' }}>{workerModel ? formatModelLabel(workerModel) : 'Uses each tool’s configured model'}</div>
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)' }}>{workerRuntimes[0] === builtIn?.id ? builtIn?.builtIn?.planDetail : workerModel ? formatModelLabel(workerModel) : 'Uses each tool’s configured model'}</div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Choose the tools allowed to receive work. The first selected tool is the default worker. OpenCode starts with its detected configuration or a supported preset; choose another model in the composer.</div>
@@ -266,7 +281,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
       {!loading && !leadReady && !needsConnection ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Connect a primary lead, or customize to choose a supported alternative.</div> : null}
       {!loading && !readyToSave && workerRuntimes.length > 0 ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Some selected tools need attention. Add coding tools or customize your setup.</div> : null}
       {error ? <OnboardingFeedback tone="error" title={error}>Your selections are still here. Try saving again when you’re ready.</OnboardingFeedback> : null}
-      {!showTools ? <div style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-faint)' }}>Recommendations use session file activity from the past seven days. Conversation contents stay unread. Messaging and other optional features can be connected later.</div> : null}
+      {!showTools ? <div style={{ fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-faint)' }}>{leadRuntime !== builtIn?.id ? 'Recommendations use session file activity from the past seven days. Conversation contents stay unread. ' : ''}Messaging and other optional features can be connected later.</div> : null}
       <div style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 12, paddingTop: 12, paddingBottom: 12, background: 'var(--t-onboarding-bg)', borderTop: '1px solid var(--t-divider)' }}>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>

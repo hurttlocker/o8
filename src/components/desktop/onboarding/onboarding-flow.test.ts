@@ -36,13 +36,26 @@ it('shows projects while agent discovery is still pending and never reports them
   const fixture = createOnboardingPreviewRequest();
   let finishScan!: (response: Response) => void;
   const scan = new Promise<Response>((resolve) => { finishScan = resolve; });
-  const request: OnboardingRequest = (url, init) => String(url).includes('include=setup') ? scan : fixture(url, init);
+  const request: OnboardingRequest = (url, init) => new URL(String(url), 'http://127.0.0.1').searchParams.get('include') === 'setup' ? scan : fixture(url, init);
   const { container } = await render(request);
   expect(button('Open Sample project')).toBeDefined();
   expect(container.textContent).toContain('Checking your coding tools');
   expect(container.textContent).not.toContain('Codex is ready');
   await act(async () => finishScan(await fixture('/api/panel/operator-defaults?include=setup')));
   expect(container.textContent).toContain('Codex is ready');
+});
+
+it('shows the built-in agent on the project screen before external tool discovery finishes', async () => {
+  const fixture = createOnboardingPreviewRequest(null, 'built-in-free');
+  let finishScan!: (response: Response) => void;
+  const scan = new Promise<Response>((resolve) => { finishScan = resolve; });
+  const request: OnboardingRequest = (url, init) => new URL(String(url), 'http://127.0.0.1').searchParams.get('include') === 'setup' ? scan : fixture(url, init);
+  const { container } = await render(request);
+  expect(button('Open Sample project')).toBeDefined();
+  expect(container.querySelector('[aria-label="Agent readiness"]')?.textContent).toContain('Built-in agent (Pi)');
+  expect(container.querySelector('[aria-label="Agent readiness"]')?.textContent).toContain('Ready');
+  await act(async () => finishScan(await fixture('/api/panel/operator-defaults?include=setup')));
+  expect(container.textContent).toContain('Built-in agent (Pi) is ready');
 });
 
 it('wraps keyboard focus inside setup instead of entering the obscured workspace', async () => {

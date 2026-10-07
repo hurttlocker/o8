@@ -7,10 +7,11 @@ import type { OnboardingRequest } from '@/components/desktop/onboarding/request'
 import { getPalette, resolveTheme } from '@/lib/theme/registry';
 import { PROGRESS_KEY, browserProgressStorage, type OnboardingTask, type ProgressStorage } from '@/components/desktop/onboarding/onboarding-progress';
 import { recommendRuntimeSetup, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
+import { previewBuiltInAgent } from './built-in-agent-fixture';
 
 export type ConsentPreviewState = 'unanswered' | 'one-choice' | 'saving' | 'error';
 type PreviewSurface = 'consent' | 'onboarding';
-type PreviewTools = 'both' | 'codex' | 'claude-code' | 'none';
+type PreviewTools = 'both' | 'codex' | 'claude-code' | 'none' | 'built-in-free' | 'built-in-paid' | 'built-in-with-tools' | 'built-in-windows';
 
 const ONBOARDING_STEPS: Array<{ value: OnboardingStep; label: string }> = [
   { value: 'open', label: 'Projects' },
@@ -54,6 +55,8 @@ export function createOnboardingPreviewRequest(storage: ProgressStorage | null =
     });
   }
   if (url.startsWith('/api/panel/operator-defaults')) {
+    const builtInAgent = tools.startsWith('built-in-') ? previewBuiltInAgent(tools === 'built-in-paid' ? 'pro' : 'free', tools === 'built-in-windows' ? 'win32' : 'darwin') : null;
+    if (url.includes('include=setup-built-in')) return jsonResponse({ builtInAgent });
     if (init?.method === 'POST') {
       values = { ...values, ...JSON.parse(String(init.body ?? '{}')) };
       storage?.setItem('settings', JSON.stringify(values));
@@ -64,8 +67,9 @@ export function createOnboardingPreviewRequest(storage: ProgressStorage | null =
       { id: 'opencode', label: 'OpenCode', available: false, unavailableReason: 'not_installed', detail: 'Not installed', fix: 'Install OpenCode, then refresh tools.' },
     ];
     for (const item of inventory) {
-      if (item.available && tools !== 'both' && tools !== item.id) { item.available = false; item.unavailableReason = 'not_installed'; item.detail = 'Not installed'; item.fix = `Install ${item.label}, then refresh tools.`; }
+      if (item.available && tools !== 'both' && tools !== 'built-in-with-tools' && tools !== item.id) { item.available = false; item.unavailableReason = 'not_installed'; item.detail = 'Not installed'; item.fix = `Install ${item.label}, then refresh tools.`; }
     }
+    if (builtInAgent) inventory.unshift(builtInAgent);
     return jsonResponse({ values, sources: Object.fromEntries(Object.keys(values).map((key) => [key, 'file'])), dispatchableRuntimes: inventory, setupRecommendation: recommendRuntimeSetup({ inventory, values, sources: Object.fromEntries(Object.keys(values).map((key) => [key, 'file'])), activity: { codex: 12, claude: 4, complete: true } }) });
   }
   if (url.startsWith('/api/connectors/')) return jsonResponse({ profile: null });
@@ -241,6 +245,7 @@ export function FirstRunPreview() {
         )}
         <select aria-label="Available tools" value={tools} onChange={(event) => { const next = event.target.value as PreviewTools; setTools(next); restart(next); }} style={controlStyle}>
           <option value="both">Codex + Claude</option><option value="codex">Codex only</option><option value="claude-code">Claude only</option><option value="none">No tools</option>
+          <option value="built-in-free">Built-in · free</option><option value="built-in-paid">Built-in · paid</option><option value="built-in-with-tools">Built-in + tools</option><option value="built-in-windows">Built-in · Windows</option>
         </select>
         <select aria-label="Preview theme" value={palette} onChange={(event) => setPalette(event.target.value as 'light' | 'dark')} style={controlStyle}><option value="light">Light</option><option value="dark">Dark</option></select>
         <button type="button" aria-label="Reset onboarding preview" onClick={() => restart()} style={{ ...controlStyle, paddingRight: 10 }}>Reset</button>

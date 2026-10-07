@@ -3,8 +3,10 @@
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '../repo-registry/shared';
 
 /** Provider identity belongs in setup choices; dense history remains text-first. */
-export function RuntimeIdentity({ runtime }: { runtime: string }) {
-  const icon = runtime === 'codex' ? <CodexIcon size={32} />
+export function RuntimeIdentity({ runtime, builtIn = false }: { runtime: string; builtIn?: boolean }) {
+  // One shared asset slot. A licensed bundled-agent mark can replace this text.
+  const icon = builtIn ? <span style={{ fontFamily: 'var(--font-sans-system)', fontSize: 24, fontWeight: 300, color: 'var(--t-text)' }}>π</span>
+    : runtime === 'codex' ? <CodexIcon size={32} />
     : runtime === 'claude-code' ? <ClaudeIcon size={24} />
     : runtime === 'gemini' || runtime === 'antigravity' ? <GeminiIcon size={24} />
     : runtime === 'opencode' ? <OpenCodeIcon size={24} />
