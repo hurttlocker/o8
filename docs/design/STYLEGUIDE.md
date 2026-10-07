@@ -93,6 +93,16 @@ These rules apply across setup, Settings, connection flows, project views, and t
 - Verify the live surface at a compact 900 × 700 window and a wide 1680 × 1050 window, in light and dark themes. Content may scroll vertically, but must not clip horizontally or require a whole-screen horizontal scroll.
 - A long list or advanced section gets its own bounded region when needed. Keep the task title and primary action reachable without hunting through unrelated content. A short viewport must have a clear vertical scrolling path.
 
+### Optional setup and sensory feedback
+
+- Voice, device installation, and other optional setup belong in named destinations with a clear return action. Keep the selected project and required setup progress intact. Platform-limited access remains visible with a short reason; unknown permission state never counts as granted.
+- Group permissions by the feature they enable. Start voice setup with microphone access and a local input check. Put broader desktop access behind a named disclosure. A successful input check does not establish transcription, provider health, or a successful voice conversation.
+- Reuse the voice identity from the live app: its shared orb, waveform geometry, and polishing silhouette. The owned voice palette remains a brand exception; surrounding chrome uses theme tokens. Feature previews stay static and labeled. Only measured microphone input drives the test waveform; never imply recording, transcription, or polishing from a decorative animation.
+- An install QR encodes the same public URL as its readable link. Keep installation separate from pairing and credential enrollment. Show the destination, copy failure recovery, and an optional way back.
+- Animate a meaningful step or disclosure change for pointer interaction only. Use opacity and at most 4 px translation, 180 ms, and `cubic-bezier(0.22, 1, 0.36, 1)`. Keep the frame stable and controls interactive. Cancel interrupted transitions; keyboard actions and reduced-motion preference take effect immediately. Do not animate scans, polling, or scrolling.
+- Optional UI sounds start silent and use an explicit, persistent toggle. Use short, low-volume original cues for presses and navigation, and reserve completion cues for confirmed outcomes. Do not play on page load or polling. Keep microphone tests silent so feedback cannot be mistaken for input. Sound and reduced motion are independent preferences.
+- Preserve the existing fonts and Settings buttons. Sensory feedback does not add tap scaling, hover movement, decorative loading, or a new button system.
+
 ## 5 — How this is enforced (the gate)
 
 1. **Spec-ingested** — this file is in `ROOT_SPEC_FILES` (`src/lib/cortex/spec-ingest.ts`), so the Engineering Brain retrieves it and any orchestrator/worker asking "how should this behave" gets these rules.

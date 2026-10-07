@@ -8,3 +8,12 @@ export const onboardingQuietButtonStyle: CSSProperties = {
   ...onboardingButtonStyle, minHeight: 44, border: 0, background: 'transparent',
   paddingLeft: 12, paddingRight: 12, fontWeight: 300, color: 'var(--t-text-secondary)',
 };
+export const onboardingActionRowStyle: CSSProperties = {
+  position: 'sticky', bottom: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  flexWrap: 'wrap', gap: 12, paddingTop: 12, paddingBottom: 12,
+  background: 'var(--t-onboarding-bg)', borderTop: '1px solid var(--t-divider)',
+};
+export const onboardingCardStyle: CSSProperties = {
+  border: '1px solid var(--t-divider)', borderRadius: 12, padding: 16,
+  background: 'var(--t-input-bg)', minWidth: 0,
+};

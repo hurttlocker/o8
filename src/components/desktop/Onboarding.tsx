@@ -5,7 +5,10 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 import { TelemetryConsentCard } from './TelemetryConsentCard';
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
 import { OnboardingReposStep } from './onboarding/OnboardingReposStep';
-import { OnboardingPermissionsStep } from './onboarding/OnboardingPermissionsStep';
+import { OnboardingPermissionsStep, type OnboardingPermissionClient } from './onboarding/OnboardingPermissionsStep';
+import { OnboardingMobileStep } from './onboarding/OnboardingMobileStep';
+import { OnboardingExperience, OnboardingSoundToggle } from './onboarding/OnboardingExperience';
+import { playOnboardingCue } from './onboarding/onboarding-sound';
 import { restartOnboardingAtPermissions } from './onboarding/permissions-check';
 import { OnboardingOpen } from './onboarding/OnboardingOpen';
 import { OnboardingFeedback } from './onboarding/OnboardingFeedback';
@@ -24,10 +27,11 @@ import { chooseOnboardingProject, loadOnboardingProjects } from './onboarding/on
 import type { OnboardingRequest } from './onboarding/request';
 export type { OnboardingStep } from './onboarding/onboarding-progress';
 
-const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionError, initialStep, request = fetch, pickFolder, openExternal = openExternalUrl, storage }: {
+const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionError, initialStep, request = fetch, pickFolder, openExternal = openExternalUrl, storage, permissionClient, restartPermissions }: {
   onComplete: (task?: OnboardingTask) => Promise<boolean | void> | boolean | void;
   completionError?: string | null; initialStep?: OnboardingStep; request?: OnboardingRequest;
   pickFolder?: () => Promise<string | null>; openExternal?: (url: string) => void; storage?: ProgressStorage | null;
+  permissionClient?: OnboardingPermissionClient; restartPermissions?: () => Promise<void>;
 }) {
   const [progressStorage] = useState(() => storage === undefined ? browserProgressStorage() : storage);
   const [progress, setProgress] = useState(() => initialStep ? emptyProgress(initialStep) : readProgress(progressStorage));
@@ -189,6 +193,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
       if (completed === false) throw new Error('Could not open the workspace. Try again.');
       await acknowledgeAgent(project, 'opened');
       try { progressStorage?.removeItem(PROGRESS_KEY); } catch { /* Completion is already saved on the server. */ }
+      playOnboardingCue('complete', progressStorage);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Could not open the workspace. Try again.';
       setError(message);
@@ -222,7 +227,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
   </div>;
   const renderButton = ({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) => <button type="button" onClick={onClick} disabled={disabled} style={{ ...onboardingButtonStyle, background: 'var(--t-text)', color: 'var(--t-onboarding-bg)', opacity: disabled ? 0.5 : 1 }}>{label}</button>;
   const home = progress.step === 'open';
-  return <div ref={overlayRef} data-o8-onboarding="" role="dialog" aria-modal="true" aria-label="Set up o8" onKeyDown={(event) => {
+  return <div ref={overlayRef} data-o8-onboarding="" data-onboarding-sound={progress.step === 'permissions' && childBusy ? 'silent' : undefined} role="dialog" aria-modal="true" aria-label="Set up o8" onKeyDown={(event) => {
     // Portaled dialogs own their keyboard navigation while they are open.
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
     const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'))
@@ -239,22 +244,23 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
     }
   }} style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-onboarding-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)' }}>
     <div data-tauri-drag-region="" style={{ height: 52, flexShrink: 0 }} />
-    <div ref={contentRef} role="region" aria-label="Setup content" tabIndex={0} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 24, paddingBottom: 24, paddingLeft: 32, paddingRight: 32 }}>
-      <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center' }}>
+    <div ref={contentRef} role="region" aria-label="Setup content" tabIndex={0} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 24, paddingBottom: 0, paddingLeft: 32, paddingRight: 32 }}>
+      <div style={{ minHeight: '100%', boxSizing: 'border-box', paddingBottom: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center' }}>
         <OnboardingFrame progress={progress} agentReady={Boolean(ready)}>
-        {!home ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        {!home && !['permissions', 'mobile'].includes(progress.step) ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <button type="button" disabled={busy} onClick={() => { continueAfterTools.current = false; navigate('open'); }} style={{ ...onboardingQuietButtonStyle, paddingLeft: 0 }}>← Projects</button>
           {progress.project ? <span style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)', overflowWrap: 'anywhere' }}>Setting up <span style={{ color: 'var(--t-text)' }}>{progress.project.name}</span></span> : null}
         </div> : null}
         {home && setupSaved ? <OnboardingFeedback title="Setup saved">Your agent choices are saved. Open a project when you’re ready.</OnboardingFeedback> : null}
-        {home ? <OnboardingOpen projects={projects} loading={loading} busy={busy} status={status} tools={tools} error={error ?? discoveryError ?? completionError ?? null} onRetry={() => setRevision((value) => value + 1)} onOpenFolder={() => void enter(null, true)} onOpenProject={(project) => void enter(project)} onClone={() => navigate('repos')} onPermissions={() => navigate('permissions')} onExplore={() => void enter(null)} /> : null}
+        {home ? <OnboardingOpen projects={projects} loading={loading} busy={busy} status={status} tools={tools} error={error ?? discoveryError ?? completionError ?? null} onRetry={() => setRevision((value) => value + 1)} onOpenFolder={() => void enter(null, true)} onOpenProject={(project) => void enter(project)} onClone={() => navigate('repos')} onPermissions={() => navigate('permissions')} onMobile={() => navigate('mobile')} onExplore={() => void enter(null)} /> : null}
         {progress.step === 'repos' ? <><h1 style={{ fontSize: 28, fontWeight: 300, margin: 0 }}>Choose a project</h1><OnboardingReposStep initialShowGithub onBusyChange={setChildBusy} request={request} pickFolder={pickFolder} selectedProject={progress.project} deviceFlowEnabled={githubDeviceFlowEnabled} githubFlow={githubFlow} onConnectGithub={(onSuccess) => void startGithubFlow(onSuccess)} onSkip={() => navigate('open')} onContinue={(project) => enter(project)} renderContinueButton={renderButton} /></> : null}
         {progress.step === 'dispatch' ? <OnboardingDispatchStep onBusyChange={setChildBusy} request={request} onContinue={() => {
           setRevision((value) => value + 1);
           if (continueAfterTools.current) { continueAfterTools.current = false; return enter(progressRef.current.project); }
           else { navigate('open'); setSetupSaved(true); }
         }} onSkip={() => navigate('open')} renderButton={renderButton} /> : null}
-        {progress.step === 'permissions' ? <OnboardingPermissionsStep storage={progressStorage} onBusyChange={setChildBusy} onRestart={() => restartOnboardingAtPermissions(progressStorage, progressRef.current)} onContinue={() => navigate('open')} /> : null}
+        {progress.step === 'permissions' ? <OnboardingPermissionsStep storage={progressStorage} client={permissionClient} onBusyChange={setChildBusy} onRestart={restartPermissions ?? (() => restartOnboardingAtPermissions(progressStorage, progressRef.current))} onContinue={() => navigate('open')} /> : null}
+        {progress.step === 'mobile' ? <OnboardingMobileStep openExternal={openExternal} onContinue={() => navigate('open')} /> : null}
         {progress.step === 'privacy' ? <TelemetryConsentCard onBusyChange={setChildBusy} embedded request={consentRequest} onContinue={() => enter(progressRef.current.project)} /> : null}
         {!home && actionBusy ? <div role="status" style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>{status}</div> : null}
         {!home && (error || completionError) ? <div style={{ width: '100%', maxWidth: 640 }}><OnboardingFeedback tone="error" title={error ?? completionError ?? ''}>{storageError ? 'Keep this window open while you retry.' : 'Your saved choices are kept. You can retry or return to projects.'}</OnboardingFeedback></div> : null}
@@ -267,7 +273,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
         <button type="button" aria-expanded={supportOpen} onClick={() => setSupportOpen((value) => !value)} style={{ ...onboardingQuietButtonStyle, fontSize: 11 }}>Help</button>
         {supportOpen ? <><button type="button" onClick={() => window.dispatchEvent(new Event('o8:open-report'))} style={onboardingQuietButtonStyle}>Report an issue</button><button type="button" onClick={() => openExternal('https://o8.run/docs')} style={onboardingQuietButtonStyle}>Docs &amp; FAQ</button></> : null}
       </div>
-      <button type="button" onClick={() => openExternal('https://o8.run/privacy')} style={{ ...onboardingQuietButtonStyle, fontSize: 11 }}>Privacy</button>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><OnboardingSoundToggle quiet={progress.step === 'permissions' && childBusy} /><button type="button" onClick={() => openExternal('https://o8.run/privacy')} style={{ ...onboardingQuietButtonStyle, fontSize: 11 }}>Privacy</button></div>
     </footer>
   </div>;
 });
@@ -278,5 +284,5 @@ const serverSnapshot = () => false;
 /** Read local progress only after hydration so server markup never disagrees. */
 export function Onboarding(props: ComponentProps<typeof OnboardingFlow>) {
   const hydrated = useSyncExternalStore(subscribeHydration, clientSnapshot, serverSnapshot);
-  return hydrated ? <OnboardingFlow {...props} /> : <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'grid', placeItems: 'center', background: 'var(--t-onboarding-bg)', color: 'var(--t-text-secondary)' }}>Loading setup…</div>;
+  return hydrated ? <OnboardingExperience storage={props.storage}><OnboardingFlow {...props} /></OnboardingExperience> : <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'grid', placeItems: 'center', background: 'var(--t-onboarding-bg)', color: 'var(--t-text-secondary)' }}>Loading setup…</div>;
 }

@@ -26,6 +26,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from '../lucide-shims';
 import type { DictationSnapshot, DictationState } from './types';
+import { SYMON_GRADIENT_STOPS, SYMON_POLISH_PATH, SYMON_WAVEFORM } from './SymonVisuals';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_STACK = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
@@ -35,29 +36,10 @@ const getServerMountedSnapshot = () => false;
 
 // ── Symon brand gradient (cyan → periwinkle → pink → gold) ──
 // Verbatim from SymonPillWaveform.svelte / SquiggleLoader.svelte.
-const GRADIENT_STOPS: Array<[number, string]> = [
-  [0.00, 'rgba(136, 209, 241, 0.92)'],
-  [0.42, 'rgba(177, 180, 229, 0.95)'],
-  [0.72, 'rgba(245, 184, 196, 0.92)'],
-  [1.00, 'rgba(244, 201, 119, 0.92)'],
-];
+const GRADIENT_STOPS = SYMON_GRADIENT_STOPS;
 
 // ── EQ canvas geometry — Symon's SymonPillWaveform.svelte values ──
-const BAR_COUNT = 30;
-const BAR_WIDTH = 2;
-const BAR_GAP = 2.5;
-const INNER_W = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP; // 132.5
-const INNER_H = 24;
-
-const WEIGHTS = (() => {
-  const out = new Array<number>(BAR_COUNT);
-  const center = (BAR_COUNT - 1) / 2;
-  for (let i = 0; i < BAR_COUNT; i++) {
-    const dist = Math.abs(i - center) / center;
-    out[i] = Math.exp(-1.8 * dist * dist);
-  }
-  return out;
-})();
+const { barCount: BAR_COUNT, barWidth: BAR_WIDTH, barGap: BAR_GAP, width: INNER_W, height: INNER_H, weights: WEIGHTS } = SYMON_WAVEFORM;
 
 // EQ ink emphasis — the speaking/listening "hot" state vs the resting "cool"
 // one, applied as canvas alpha inside the draw loop.
@@ -255,8 +237,7 @@ function SymonWaveCanvas({
  * SquiggleLoader — adapted from the owned SquiggleLoader.svelte. Dash-animated
  * wave path stroked with the Symon brand gradient. Used for transcribing/polishing.
  */
-const SQUIGGLE_PATH =
-  'M8 28C32 22 48 14 72 14C96 14 108 34 132 34C156 34 170 12 198 12C230 12 238 38 272 38C304 38 316 18 344 18C372 18 388 28 408 28';
+const SQUIGGLE_PATH = SYMON_POLISH_PATH;
 
 function SquiggleLoader({ label }: { label: string }) {
   return (

@@ -8,6 +8,8 @@ import { getPalette, resolveTheme } from '@/lib/theme/registry';
 import { PROGRESS_KEY, browserProgressStorage, type OnboardingTask, type ProgressStorage } from '@/components/desktop/onboarding/onboarding-progress';
 import { recommendRuntimeSetup, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
 import { previewBuiltInAgent } from './built-in-agent-fixture';
+import type { OnboardingPermissionClient } from '@/components/desktop/onboarding/OnboardingPermissionsStep';
+import type { PermissionSnapshot } from '@/components/desktop/onboarding/permissions-check';
 
 export type ConsentPreviewState = 'unanswered' | 'one-choice' | 'saving' | 'error';
 type PreviewSurface = 'consent' | 'onboarding';
@@ -19,6 +21,7 @@ const ONBOARDING_STEPS: Array<{ value: OnboardingStep; label: string }> = [
   { value: 'dispatch', label: 'Tools' },
   { value: 'privacy', label: 'Privacy' },
   { value: 'permissions', label: 'Voice & permissions' },
+  { value: 'mobile', label: 'iPhone app' },
 ];
 
 const CONSENT_STATES: Array<{ value: ConsentPreviewState; label: string }> = [
@@ -30,6 +33,16 @@ const CONSENT_STATES: Array<{ value: ConsentPreviewState; label: string }> = [
 
 const ignorePreviewAction = () => {};
 const pickPreviewFolder = async () => '/preview/sample-project';
+type PreviewPermissions = 'browser' | 'new' | 'ready' | 'mixed';
+function previewPermissionClient(scenario: PreviewPermissions): OnboardingPermissionClient | undefined {
+  if (scenario === 'browser') return undefined;
+  const statuses: PermissionSnapshot = scenario === 'ready'
+    ? { microphone: 'granted', accessibility: 'granted', 'input-monitoring': 'granted', 'screen-recording': 'granted' }
+    : scenario === 'mixed' ? { microphone: 'granted', accessibility: 'denied', 'input-monitoring': 'unknown', 'screen-recording': 'granted' }
+      : { microphone: 'not-asked', accessibility: 'denied', 'input-monitoring': 'denied', 'screen-recording': 'denied' };
+  return { supported: () => true, read: async () => ({ ...statuses }), request: async (id) => { statuses[id] = 'granted'; } };
+}
+const restartPreviewPermissions = async () => { throw new Error('Preview: native restart is unavailable. Your preview stays here.'); };
 export const PREVIEW_PROJECT = { id: 'preview-project', name: 'Sample project', localPath: '/preview/sample-project', defaultBranch: 'main' };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -150,6 +163,8 @@ export function FirstRunPreview() {
   const [surface, setSurface] = useState<PreviewSurface>('onboarding');
   const [consentState, setConsentState] = useState<ConsentPreviewState>('unanswered');
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | undefined>(undefined);
+  const [permissions, setPermissions] = useState<PreviewPermissions>('browser');
+  const permissionClient = useMemo(() => previewPermissionClient(permissions), [permissions]);
 
   const [palette, setPalette] = useState<'light' | 'dark'>('light');
   const [tools, setTools] = useState<PreviewTools>('both');
@@ -175,12 +190,14 @@ export function FirstRunPreview() {
         <ConsentScenario key={consentState} state={consentState} />
       ) : (
         <Onboarding
-          key={`${run}:${onboardingStep}`}
+          key={`${run}:${onboardingStep}:${permissions}`}
           initialStep={onboardingStep}
           request={onboardingRequest}
           storage={storage}
           pickFolder={pickPreviewFolder}
           openExternal={ignorePreviewAction}
+          permissionClient={permissionClient}
+          restartPermissions={restartPreviewPermissions}
           onComplete={(task) => { setFinishedTask(task ?? null); setFinished(true); return true; }}
         />
       )}
@@ -246,6 +263,9 @@ export function FirstRunPreview() {
         <select aria-label="Available tools" value={tools} onChange={(event) => { const next = event.target.value as PreviewTools; setTools(next); restart(next); }} style={controlStyle}>
           <option value="both">Codex + Claude</option><option value="codex">Codex only</option><option value="claude-code">Claude only</option><option value="none">No tools</option>
           <option value="built-in-free">Built-in · free</option><option value="built-in-paid">Built-in · paid</option><option value="built-in-with-tools">Built-in + tools</option><option value="built-in-windows">Built-in · Windows</option>
+        </select>
+        <select aria-label="Voice permissions" value={permissions} onChange={(event) => setPermissions(event.target.value as PreviewPermissions)} style={controlStyle}>
+          <option value="browser">Browser · unavailable</option><option value="new">macOS · new</option><option value="ready">macOS · ready</option><option value="mixed">macOS · mixed</option>
         </select>
         <select aria-label="Preview theme" value={palette} onChange={(event) => setPalette(event.target.value as 'light' | 'dark')} style={controlStyle}><option value="light">Light</option><option value="dark">Dark</option></select>
         <button type="button" aria-label="Reset onboarding preview" onClick={() => restart()} style={{ ...controlStyle, paddingRight: 10 }}>Reset</button>

@@ -95,7 +95,7 @@ it('recovers focus taken by the workspace after startup while allowing another d
 
 it('uses an opaque overlay and visible button ink even when workspace glass is transparent', async () => {
   const { container } = await render();
-  expect((container.firstElementChild as HTMLElement).style.background).toBe('var(--t-onboarding-bg)');
+  expect(container.querySelector<HTMLElement>('[data-o8-onboarding]')?.style.background).toBe('var(--t-onboarding-bg)');
   expect(button('Open a folder').style.color).toBe('var(--t-onboarding-bg)');
   const { PALETTES } = await import('@/lib/theme/registry');
   for (const palette of PALETTES) {

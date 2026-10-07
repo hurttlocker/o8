@@ -365,6 +365,12 @@ Framer Motion with restrained curves.
 - Duration-based: 150ms for hover states, 200ms for panel slides, 300ms for tab switches
 - No bounce. No scale-on-hover > 1.02. No parallax.
 
+First-run step and disclosure changes use the pointer-only 180 ms contract in
+[`STYLEGUIDE.md` §4](./STYLEGUIDE.md#optional-setup-and-sensory-feedback). A
+predetermined opacity/transform transition may use the Web Animations API without
+adding a motion dependency. Keyboard navigation and reduced-motion mode stay
+instant. Optional sound cues follow the same section's explicit opt-in contract.
+
 ### Specifically banned
 
 - Loading spinners on fast operations (< 500ms)

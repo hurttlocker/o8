@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import type { OnboardingProject } from './onboarding-progress';
-import { onboardingButtonStyle, onboardingQuietButtonStyle } from './onboarding-style';
+import { onboardingButtonStyle, onboardingCardStyle, onboardingQuietButtonStyle } from './onboarding-style';
 import { OnboardingFeedback } from './OnboardingFeedback';
 
 function ProjectRow({ project, disabled, onOpen }: { project: OnboardingProject; disabled: boolean; onOpen: () => void }) {
@@ -20,11 +20,11 @@ function ProjectRow({ project, disabled, onOpen }: { project: OnboardingProject;
   </button>;
 }
 
-export function OnboardingOpen({ projects, loading, busy, status, tools, error, onRetry, onOpenFolder, onOpenProject, onClone, onExplore, onPermissions }: {
+export function OnboardingOpen({ projects, loading, busy, status, tools, error, onRetry, onOpenFolder, onOpenProject, onClone, onExplore, onPermissions, onMobile }: {
   projects: OnboardingProject[]; loading: boolean; busy: boolean; status: string;
   tools: ReactNode; error: string | null; onRetry: () => void;
   onOpenFolder: () => void; onOpenProject: (project: OnboardingProject) => void;
-  onClone: () => void; onExplore: () => void; onPermissions: () => void;
+  onClone: () => void; onExplore: () => void; onPermissions: () => void; onMobile: () => void;
 }) {
   return <section aria-labelledby="onboarding-project-title" style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
     <h1 id="onboarding-project-title" style={{ margin: 0, fontSize: 'clamp(30px, 4vw, 40px)', fontWeight: 300, letterSpacing: '-1.2px', lineHeight: 1.15 }}>Open a project.</h1>
@@ -43,9 +43,17 @@ export function OnboardingOpen({ projects, loading, busy, status, tools, error, 
       <div style={{ maxHeight: 200, overflowY: 'auto' }}>{projects.map((project) => <ProjectRow key={project.id} project={project} disabled={busy} onOpen={() => onOpenProject(project)} />)}</div>
     </section> : null}
     <div style={{ borderTop: '1px solid var(--t-divider)', marginTop: 28, paddingTop: 12 }}>{tools}</div>
-    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginTop: 16 }}>
-      <button type="button" disabled={busy} onClick={onPermissions} style={{ ...onboardingQuietButtonStyle, paddingLeft: 0, fontSize: 12 }}>Check voice &amp; permissions</button>
-      <button type="button" disabled={busy} onClick={onExplore} style={{ ...onboardingQuietButtonStyle, paddingLeft: 0, color: 'var(--t-text-muted)', fontSize: 12 }}>Start without a project</button>
+    <div style={{ marginTop: 24, fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)', letterSpacing: '0.04em' }}>OPTIONAL SETUP</div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 8, marginTop: 8 }}>
+      {[
+        { label: 'Check voice & permissions', detail: 'Meet Symon and choose its access.', action: onPermissions, path: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm-6 8v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6' },
+        { label: 'Try the iPhone app', detail: 'Get the companion through TestFlight.', action: onMobile, path: 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm2 3h4m-3 14h2' },
+      ].map((option) => <button key={option.label} type="button" aria-label={option.label} data-onboarding-cue="advance" disabled={busy} onClick={option.action} style={{ ...onboardingButtonStyle, ...onboardingCardStyle, display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'transparent', opacity: busy ? 0.5 : 1 }}>
+        <svg aria-hidden width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--t-text-secondary)' }}><path d={option.path} /></svg>
+        <span style={{ minWidth: 0, flex: 1 }}><span style={{ display: 'block', fontSize: 13, fontWeight: 300 }}>{option.label}</span><span style={{ display: 'block', marginTop: 4, fontSize: 11, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>{option.detail}</span></span>
+        <span aria-hidden style={{ color: 'var(--t-text-muted)' }}>›</span>
+      </button>)}
     </div>
+    <button type="button" disabled={busy} onClick={onExplore} style={{ ...onboardingQuietButtonStyle, alignSelf: 'flex-start', marginTop: 12, paddingLeft: 0, color: 'var(--t-text-muted)', fontSize: 12 }}>Start without a project</button>
   </section>;
 }

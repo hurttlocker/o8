@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import type { OnboardingProgress } from './onboarding-progress';
+import { useOnboardingMotion } from './OnboardingExperience';
 
 const frameInset: CSSProperties = { paddingTop: 'clamp(20px, 4vw, 32px)', paddingBottom: 'clamp(20px, 4vw, 32px)',
   paddingLeft: 'clamp(20px, 4vw, 32px)', paddingRight: 'clamp(20px, 4vw, 32px)' };
@@ -11,12 +12,14 @@ export function OnboardingFrame({ progress, agentReady, children }: {
   agentReady: boolean;
   children: ReactNode;
 }) {
-  const current = progress.step === 'dispatch' ? 1 : progress.step === 'privacy' ? 2 : 0;
+  const motionRef = useOnboardingMotion(progress.step);
+  const current = progress.step === 'dispatch' ? 1 : ['privacy', 'permissions', 'mobile'].includes(progress.step) ? 2 : 0;
+  const workspaceDetail = progress.step === 'permissions' ? 'Optional voice setup' : progress.step === 'mobile' ? 'Optional iPhone app' : 'Privacy choices';
   const projectChosen = Boolean(progress.project);
   const steps = [
     { label: 'Project', detail: projectChosen ? progress.project!.name : current === 2 ? 'Optional' : 'Choose a folder', done: projectChosen },
     { label: 'Agent', detail: agentReady ? 'Ready' : current === 1 ? 'Choose a tool' : 'Check readiness', done: agentReady },
-    { label: 'Workspace', detail: current === 2 ? 'Privacy choices' : 'Next', done: false },
+    { label: 'Workspace', detail: current === 2 ? workspaceDetail : 'Next', done: false },
   ];
   return <div style={{ width: '100%', maxWidth: 800, border: '1px solid var(--t-divider)', borderRadius: 16, background: 'var(--t-onboarding-bg)' }}>
     <header style={{ ...frameInset, paddingBottom: 24, borderBottom: '1px solid var(--t-divider)' }}>
@@ -33,7 +36,7 @@ export function OnboardingFrame({ progress, agentReady, children }: {
         </ol>
       </nav>
     </header>
-    <div style={{ ...frameInset, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div ref={motionRef} style={{ ...frameInset, display: 'flex', flexDirection: 'column', gap: 20 }}>
       {children}
     </div>
   </div>;

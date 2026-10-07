@@ -40,3 +40,28 @@ it('does not erase a new return marker when an older permission read finishes la
   await act(async () => resolveRead({ microphone: 'granted', accessibility: 'granted', 'input-monitoring': 'granted', 'screen-recording': 'granted' }));
   expect(localStorage.getItem(PERMISSIONS_RESUME_KEY)).toBe('resume:new');
 });
+
+it('requires verified microphone access and leaves broader access optional', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); vi.useFakeTimers();
+  mocks.read.mockResolvedValue({ microphone: 'unknown', accessibility: 'denied', 'input-monitoring': 'denied', 'screen-recording': 'denied' });
+  const host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+  await act(async () => root.render(createElement(OnboardingPermissionsStep, { storage: localStorage, onRestart: vi.fn(), onContinue: vi.fn(), onBusyChange: vi.fn() })));
+  const test = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Test microphone')!;
+  expect(test.disabled).toBe(true);
+  expect(document.querySelector('[aria-label="Microphone ready"]')).toBeNull();
+  const disclosure = document.querySelector<HTMLButtonElement>('[aria-controls="onboarding-desktop-permissions"]')!;
+  expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => disclosure.click());
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+  expect(mocks.request).not.toHaveBeenCalled();
+  const settings = document.querySelector<HTMLButtonElement>('[aria-label="Enable Accessibility"]')!;
+  await act(async () => settings.click());
+  expect(mocks.request).toHaveBeenCalledWith('accessibility', 'denied');
+  mocks.read.mockResolvedValue({ microphone: 'granted', accessibility: 'denied', 'input-monitoring': 'denied', 'screen-recording': 'denied' });
+  await act(async () => vi.advanceTimersByTime(1500));
+  expect(test.disabled).toBe(false);
+  expect(document.querySelector('[aria-label="Microphone ready"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Microphone input"]')?.getAttribute('aria-valuenow')).toBe('0');
+  expect(document.querySelector('[aria-label="Microphone input"] svg')).not.toBeNull();
+  expect(document.body.textContent).not.toContain('We can hear you.');
+});

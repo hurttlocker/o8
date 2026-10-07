@@ -1,6 +1,7 @@
 'use client';
 
 import { OnboardingFeedback } from './OnboardingFeedback';
+import { useOnboardingMotion } from './OnboardingExperience';
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -233,8 +234,9 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
       if (nextRuntime && canSelectOnboardingRuntime(inventory, nextRuntime)) setWorkerRuntimes([nextRuntime]);
     }
   };
+  const motionRef = useOnboardingMotion(panel ?? 'choose');
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
+    <div ref={motionRef} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
       <div>
         <h1 ref={headingRef} tabIndex={-1} style={{ margin: 0, fontSize: 28, fontWeight: 300, color: 'var(--t-text)', outline: 'none' }}>{showTools ? needsConnection ? 'Connect a coding tool' : 'Add coding tools' : customize ? 'Customize your setup' : 'Choose your agent'}</h1>
         <p style={{ marginTop: 12, marginBottom: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{showTools ? 'Install or sign in to a tool, then refresh to check it. Your selected setup stays yours.' : customize ? 'Choose the lead and workers for this project. Save when your setup is ready.' : 'Start with an agent. You can add coding tools and adjust your setup later.'}</p>
