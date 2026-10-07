@@ -12,11 +12,11 @@
 import { apiFetch } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
-  printHumanHeading,
-  printHumanKv,
   printJson,
   type OutputMode,
 } from '../../output.js';
+import { renderHumanSemanticSurface } from '../../presentation/text.js';
+import { buildPacketInfoSurface } from './info-surface.js';
 import { warnRuntimeDriftIfNeeded } from './runtime-drift.js';
 import { detectWorktree } from './worktree-resolve.js';
 import { parsePacketArguments, resolvePacketTarget } from './target.js';
@@ -121,25 +121,19 @@ export async function runPacketInfo(mode: OutputMode, rest: string[]): Promise<n
   }, mode);
 
   if (mode.human) {
-    printHumanHeading('packet');
-    printHumanKv([
-      ['lane', slugMatch.id],
-      ['packet', slugMatch.packetId ?? '(none)'],
-      ['status', slugMatch.status],
-      ['runtime', slugMatch.runtime],
-      ['actual runtime', actualRuntime ?? '(pending)'],
-      ['branch', slugMatch.branch],
-      ['base', slugMatch.baseBranch],
-      ['repo', slugMatch.repoPath],
-      ['worktree', slugMatch.worktreePath ?? '(none)'],
-      ['label', slugMatch.label],
-    ]);
-    if (events.length > 0) {
-      printHumanHeading(`recent events (${events.length})`);
-      for (const e of events) {
-        process.stdout.write(`  ${e.timestamp}  ${e.actor.padEnd(13)} ${e.verb}\n`);
-      }
-    }
+    renderHumanSemanticSurface(buildPacketInfoSurface({
+      laneId: slugMatch.id,
+      packetId: slugMatch.packetId,
+      status: slugMatch.status,
+      runtime: slugMatch.runtime,
+      actualRuntime,
+      branch: slugMatch.branch,
+      baseBranch: slugMatch.baseBranch,
+      repoPath: slugMatch.repoPath,
+      worktreePath: slugMatch.worktreePath,
+      label: slugMatch.label,
+      events,
+    }));
   } else {
     printJson(payload);
   }
