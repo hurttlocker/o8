@@ -173,6 +173,7 @@ const BUILT_IN_ARCHIVE_RUNTIMES = new Set<OrchestratorRuntime>([
   'pi',
   'prime-agent',
   'deepseek-harness',
+  'hermes',
 ]);
 
 export const RUNTIME_EVIDENCE_DEFINITIONS = {
@@ -337,6 +338,21 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
     ],
   },
   'prime-agent': unknownEvidence('prime-agent', ['jsonl'], 'configured-provider'),
+  hermes: {
+    ...unknownEvidence('hermes', ['acp'], 'configured-provider'),
+    sources: [
+      internalSource('hermes'),
+      {
+        id: 'hermes-agent-upstream',
+        label: 'Hermes Agent upstream runtime',
+        url: 'https://github.com/NousResearch/hermes-agent',
+        observedAt: '2026-10-07',
+        maxAgeDays: 30,
+        confidence: 'verified',
+        scope: 'runtime-upstream',
+      },
+    ],
+  },
   'deepseek-harness': {
     carriers: [{
       os: 'darwin',

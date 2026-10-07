@@ -66,6 +66,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     grok: 'x',
     'prime-agent': 'terminal',
     'deepseek-harness': 'deepseek',
+    hermes: 'terminal',
   },
 } as const satisfies {
   leadModelFamilies: readonly { pattern: RegExp; mark: ComposerProviderMark }[];
