@@ -77,6 +77,7 @@ export interface RuntimeActionResult {
 export interface RuntimeLaunchRequest {
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';
+  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
   automaticRecoverySurfaceId?: string;
   automaticRecoveryRunId?: string;
   runtime: RuntimeId;
@@ -436,6 +437,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
     workMode: workModeResolution.workMode,
     executionPolicy: payload.executionPolicy,
     controlledTask: payload.controlledTask,
+    controlledProvider: payload.controlledProvider,
   });
 
   return settleRuntimeLaunchGovernance({

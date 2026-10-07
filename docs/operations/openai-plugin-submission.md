@@ -26,12 +26,17 @@ confirm the public URL before uploading.
 
 The connection can list connected computers, page through tasks needing
 attention, read a compact result, and send an explicitly requested follow-up.
-It cannot create a new remote task, approve, merge, release, or call the
-unrestricted operator MCP registry. New work from local Codex uses the local
-handoff skill and the user's explicit runtime, model, and effort.
+The preparation feature also lists registered project choices and stores one
+explicitly requested read-only task draft with sealed requirements and exact
+runtime/model/effort pins. A new draft remains held until the operator reviews
+and launches it in o8. `o8_task_result` reads its status and the bound completed
+worker report with `o8:read`; it cannot dispatch, retry or recover a worker.
+Preparation retries report persisted execution state without starting work.
+No hosted tool approves, merges, releases or calls the unrestricted operator
+MCP registry. New work directly from local Codex uses the local handoff skill.
 
 Account linking uses the existing account provider's OAuth service with PKCE,
-consent, custom `o8:read` and `o8:follow-up` scopes, a registered client, and an
+consent, custom `o8:read`, `o8:follow-up` and `o8:prepare-task` scopes, a registered client, and an
 exact resource audience. Every hosted tool call verifies the access token,
 expiry, revocation, permitted client, resource audience, and required scope.
 Connection access does not add a paid-plan gate. Features invoked by an
@@ -61,6 +66,15 @@ or result bodies. Operators can read the latest records through the gated
 `GET /api/plugins/audit` route. Computer discovery is transient relay metadata;
 it does not create a desktop task execution audit. Disconnected computers
 receive no queued calls.
+
+Controlled task results require the relay's verified account subject and the
+desktop's matching current sign-in generation. The draft machine and original
+client binding, sealed contract, execution attempt, single owned run and pins
+must match. Reads do not refresh or reconcile runtime state. A final report
+requires the bound provider terminal result, a clean child exit, and absence
+of the owned process group and marker; missing, oversized, symlinked or
+mismatched evidence returns unavailable. Only bounded sanitized assistant
+report text is returned, excluding prompts, reasoning and tool output.
 
 The hosted plugin path processes calls and results in plaintext under TLS.
 It does not log, persist, or queue payloads. Publish the accurate privacy
@@ -94,6 +108,7 @@ existing separate path.
 7. Test five positive and three negative reviewer cases, including offline,
    revoked and missing permission. Prepare a dedicated sample account and a
    demonstration video that contains no private workspace data.
+   See the [reviewer walkthrough](./openai-plugin-reviewer-walkthrough.md).
 
 For local lead commands, `node scripts/verify-lead-handoff.mjs` probes CLI,
 route, persistence, retries, wait and stop. The separate `o8 mcp install --codex`

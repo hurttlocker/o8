@@ -292,6 +292,8 @@ export function orchestratorBackendDisplayLabel(input: {
       return 'ACP';
     case 'o8':
       return 'o8';
+    case 'pi':
+      return 'Pi';
     default:
       return null;
   }

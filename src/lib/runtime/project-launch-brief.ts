@@ -31,7 +31,9 @@ export async function buildLaunchPromptWithProjectBrief(
   } catch (error) {
     console.warn('[runtime-actions] Project context unavailable for launch:', error instanceof Error ? error.message : error);
   }
-  if (PROJECT_BRIEF_HEADING_PATTERN.test(prompt) || !projectContext) return { prompt, projectContext };
+  // Controlled tasks already carry admitted instructions and a sealed file scope.
+  // Keep project metadata for the lane, without directing the worker to the source repo.
+  if (payload.controlledTask || PROJECT_BRIEF_HEADING_PATTERN.test(prompt) || !projectContext) return { prompt, projectContext };
   const projectBrief = buildProjectTaskBrief(projectContext, {
     repoPath: contextRepoPath,
     taskTitle: payload.taskName?.trim() || summarizeTaskName(prompt),
