@@ -162,8 +162,9 @@ const LAUNCHER = '[ "$(pwd -P)" = "$1" ] || { echo "The workspace changed before
 
 /**
  * Runs one approved command at the workspace root. Stdout and stderr share one
- * capped buffer. Timeout, the output cap and Stop each end the whole tree, and
- * so does a normal exit, so no tracked process outlives the tool call.
+ * capped buffer. Timeout, the output cap, Stop and a normal exit each end the
+ * group and every tracked descendant. Snapshot tracking can miss a descendant
+ * that leaves the group and outlives its parent; #3350 adds an OS-level supervisor.
  */
 export async function runPiCommand(root: string, command: string, abort: AbortSignal, options: PiCommandOptions = {}) {
   abort.throwIfAborted();

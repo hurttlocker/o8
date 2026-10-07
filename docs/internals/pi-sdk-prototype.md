@@ -57,8 +57,9 @@ starts its own group stays tracked after its parent exits. Reads may overlap; a
 result older than the last one applied is dropped. Once a read shows the group
 empty, its number is no longer used to adopt processes, because it may have been
 reused. The timeout, the
-output cap, Stop and a normal exit each end the whole tracked tree: TERM, then
-KILL on a fixed schedule. If the process table cannot be read, the group still
+output cap, Stop and a normal exit each end the process group and every tracked
+descendant: TERM, then KILL on a fixed schedule. This is not yet a guarantee for
+every process a command starts; see the known limits and #3350. If the process table cannot be read, the group still
 gets TERM and KILL on that schedule, the tool call fails, and later commands
 and writes are refused until o8 restarts.
 
@@ -69,9 +70,13 @@ while an approved write commits. Stop ends a call that is still waiting for its
 turn without running it.
 
 Known limits: approval is the boundary, not a sandbox. An approved command can
-read anything the user can, including files under `HOME`. A process that leaves
-the tree and is reparented between two process-table reads (under 250 ms)
-escapes tracking. A pid can be reused between a read and a signal. The lock
+read anything the user can, including files under `HOME`. Tracking comes from
+process-table snapshots, so a descendant that moves to a new process group and
+outlives its parent can be missed: when it leaves and is reparented between two
+reads, when a read that saw it is dropped as older than teardown's read, or when
+a scan taken around a fork shows the group empty and retires group adoption. A
+missed process keeps running after the tool call. #3350 replaces this with an
+OS-level supervisor before Pi reaches users. A pid can be reused between a read and a signal. The lock
 covers one host process, not other processes writing the same workspace.
 `tests/pi-sdk-command-real-path.test.ts` covers inbox approval and rejection,
 denial, policy block and operator allow, the working directory, a swapped root,
