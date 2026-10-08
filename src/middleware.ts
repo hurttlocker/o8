@@ -113,6 +113,7 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
 ];
 
 const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
   // this list: devices*, push-url, symon/tool, and ws-token all require the
   // operator credential. New mobile routes fail closed until named here.

@@ -92,6 +92,8 @@ Hermes worker dispatch is implemented through the shared owned ACP path in [#339
 
 Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control plane. Each caller gets its own authority; none of them gets the operator's by default.
 
+Mobile voice intent resolution is implemented in [#3146](https://github.com/hurttlocker/o8/pull/3146). Entry-point tests cover paired-device access, confirmed choices scoped to a submitted chat and repository, and offline replay. Paired-phone and provider acceptance remain open.
+
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
 | Terminals as a workspace surface | A tmux or vim session survives an update and a pane switch byte for byte, and agent terminal actions go through a governed adapter. | open | CLI discovery is tracked in #2727, verified Codex turn events in #2729, repo-less reload in #2732, and cross-profile tmux ownership in #2733. Other CLI states, governed actions, and native multi-terminal add/close proof remain open. | [#1723](https://github.com/hurttlocker/o8/issues/1723) |
