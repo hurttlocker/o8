@@ -32,11 +32,9 @@ import {
   providerIdForModel,
   readOpencodeConfig,
 } from './opencode-readiness';
-import {
-  deepSeekHarnessInstallGuidance,
-  resolveDeepSeekHarnessLaunch,
-} from '@/lib/deepseek-harness/runtime-resolution';
+import { deepSeekHarnessInstallGuidance, resolveDeepSeekHarnessLaunch } from '@/lib/deepseek-harness/runtime-resolution';
 import { resolveHermesBinary } from '@/lib/hermes/runtime-resolution';
+import { piBuiltinReadiness } from './pi-builtin-readiness';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
@@ -658,6 +656,7 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt
     case 'prime-agent': return detectPrimeAgent();
     case 'hermes': return detectHermes();
     case 'deepseek-harness': return detectDeepSeekHarness();
+    case 'pi-builtin': return piBuiltinReadiness().then(status => nowStatus('pi-builtin', 'pi-builtin', status));
     default: return detectDeclarativeRuntime(runtime);
   }
 }

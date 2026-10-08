@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// The o8 model is advertised only file-editing tools, but advertisement is a soft
-// guarantee — a model (especially a weak free-tier one, or one nudged by injected
-// file content) can still EMIT an undeclared call. These tests prove the allowlist
-// is ENFORCED at execution on BOTH rails: a github / shell / run_terminal_command
-// call is rejected before it can run `gh pr merge`. (Adversarial review 2026-07-14.)
+// A caller's tool allowlist is advertisement AND enforcement on the Gemini rail: a
+// model can still EMIT an undeclared call, and it must be rejected before it can
+// run `gh pr merge`. (Adversarial review 2026-07-14.) The operator rail itself is
+// text only since #3408; its OpenRouter path below never attaches or runs tools.
 
 // ── Gemini rail: executeNativeTool ──────────────────────────────────────────
 import { executeNativeTool } from './google-native-execution';
@@ -44,19 +43,8 @@ describe('executeNativeTool enforces the allowlist at execution', () => {
   });
 });
 
-// ── OpenRouter rail: streamOpenRouterFallback tool loop ─────────────────────
-const mockExecuteTool = vi.fn();
+// ── OpenRouter rail: text only since #3408 ──────────────────────────────────
 const mockFetch = vi.fn();
-
-vi.mock('@/lib/llm/tools', () => ({
-  executeTool: (...args: unknown[]) => mockExecuteTool(...args),
-  TOOLS: [
-    { name: 'read_file', description: 'read', parameters: { type: 'object', properties: {} } },
-    { name: 'write_file', description: 'write', parameters: { type: 'object', properties: {} } },
-    { name: 'edit_file', description: 'edit', parameters: { type: 'object', properties: {} } },
-    { name: 'run_terminal_command', description: 'shell', parameters: { type: 'object', properties: {} } },
-  ],
-}));
 
 import { streamOpenRouterFallback } from './operator-fallback';
 
@@ -88,7 +76,6 @@ async function drain(res: Response): Promise<string> {
 }
 
 beforeEach(() => {
-  mockExecuteTool.mockReset();
   mockFetch.mockReset();
   vi.stubGlobal('fetch', mockFetch);
 });
@@ -97,72 +84,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('OpenRouter operator rail enforces the allowlist at execution', () => {
-  it('rejects a disallowed tool (run_terminal_command) WITHOUT calling executeTool', async () => {
-    mockExecuteTool.mockResolvedValue({ content: 'SHOULD NEVER RUN' });
-    mockFetch
-      .mockResolvedValueOnce(orSse([
-        orChunk({ tool_calls: [{ index: 0, id: 'c1', function: { name: 'run_terminal_command', arguments: '{"command":"gh pr merge 1 --admin"}' } }] }),
-        'data: [DONE]\n\n',
-      ]))
-      .mockResolvedValueOnce(orSse([
-        orChunk({ content: 'I can only edit files.' }),
-        'data: [DONE]\n\n',
-      ]));
-
-    const res = await streamOpenRouterFallback({
-      apiKey: 'k',
-      model: 'nemotron',
-      auth: null,
-      messages: [{ role: 'user', content: 'merge the PR' }],
-      enableTools: true,
-      scopedRepoRoot: '/tmp/o8-enforce-repo',
-    });
-    const text = await drain(res);
-
-    expect(mockExecuteTool).not.toHaveBeenCalled();
-    expect(text).toMatch(/not available in this mode/i);
-  });
-
-  it('runs an allowlisted tool (write_file) through executeTool, scoped to the repo', async () => {
-    mockExecuteTool.mockResolvedValue({ content: 'Created page.html (100 bytes)' });
-    mockFetch
-      .mockResolvedValueOnce(orSse([
-        orChunk({ tool_calls: [{ index: 0, id: 'c2', function: { name: 'write_file', arguments: '{"path":"page.html","content":"<h1>hi</h1>"}' } }] }),
-        'data: [DONE]\n\n',
-      ]))
-      .mockResolvedValueOnce(orSse([
-        orChunk({ content: 'Done.' }),
-        'data: [DONE]\n\n',
-      ]));
+describe('OpenRouter operator rail is text only', () => {
+  it('never attaches tools, and a tool call the model emits anyway is not run', async () => {
+    mockFetch.mockResolvedValueOnce(orSse([
+      orChunk({ tool_calls: [{ index: 0, id: 'c1', function: { name: 'write_file', arguments: '{"path":"page.html","content":"x"}' } }] }),
+      orChunk({ content: 'hello' }),
+      'data: [DONE]\n\n',
+    ]));
 
     const res = await streamOpenRouterFallback({
       apiKey: 'k',
       model: 'nemotron',
       auth: null,
       messages: [{ role: 'user', content: 'make page.html' }],
-      enableTools: true,
-      scopedRepoRoot: '/tmp/o8-enforce-repo',
     });
     const text = await drain(res);
 
-    expect(mockExecuteTool).toHaveBeenCalledWith('write_file', { path: 'page.html', content: '<h1>hi</h1>' }, '/tmp/o8-enforce-repo');
-    expect(text).toMatch(/Created page\.html/);
-  });
-
-  it('the non-tool chat path never attaches tools (enableTools off)', async () => {
-    mockFetch.mockResolvedValueOnce(orSse([orChunk({ content: 'hello' }), 'data: [DONE]\n\n']));
-
-    const res = await streamOpenRouterFallback({
-      apiKey: 'k',
-      model: 'nemotron',
-      auth: null,
-      messages: [{ role: 'user', content: 'hi' }],
-    });
-    await drain(res);
-
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     const sentBody = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
     expect(sentBody.tools).toBeUndefined();
     expect(sentBody.tool_choice).toBeUndefined();
+    expect(text).toContain('hello');
+    expect(text).not.toMatch(/tool_use|tool_result/);
   });
 });

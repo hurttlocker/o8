@@ -33,6 +33,25 @@ const LOCAL_LIVENESS_TTL_MS = 30_000;
 const LOCAL_LIVENESS_TIMEOUT_MS = 1_500;
 
 /** Base URL of the hosted o8 API. Overridable. */
+/**
+ * The managed text model for the Brain, dictation polish, and the o8 model.
+ * On the managed route the hosted endpoint serves it on paid plans and on the
+ * free plan up to its daily allowance, then answers with its $0 model.
+ */
+export const O8_MANAGED_TEXT_MODEL = 'openai/gpt-6-luna';
+
+/** The $0 model callers fall back to when the managed text model fails. */
+export const O8_MANAGED_ZERO_COST_MODEL = 'nvidia/nemotron-3.5-lightning:free';
+
+/**
+ * Luna's Chat Completions accepts tools only with reasoning effort none, and
+ * these short text tasks gain nothing from reasoning, so its requests set none.
+ * Other models, including local runtimes, get no reasoning field.
+ */
+export function managedTextModelOptions(model: string): { reasoning_effort?: 'none' } {
+  return model === O8_MANAGED_TEXT_MODEL ? { reasoning_effort: 'none' } : {};
+}
+
 export function proxyBaseUrl(): string {
   const raw = process.env.O8_PROXY_URL?.trim();
   return (raw || DEFAULT_O8_API_BASE_URL).replace(/\/+$/, '');

@@ -44,7 +44,7 @@ it('keeps a detected CLI selected and allows the built-in choice without forcing
   const { request } = await mount([previewBuiltInAgent('pro'), cli]);
   const builtIn = document.querySelector<HTMLButtonElement>('[aria-label="Built-in agent (Pi): Ready"]')!;
   expect(builtIn.getAttribute('aria-pressed')).toBe('false');
-  expect(document.body.textContent).toContain('Uses the included managed model.');
+  expect(document.body.textContent).toContain('Uses the included managed model on your weekly o8 model allowance. Resets Monday at 00:00 UTC.');
   await act(async () => builtIn.click());
   expect(builtIn.getAttribute('aria-pressed')).toBe('true');
   await act(async () => button('Use this setup').click());

@@ -3,6 +3,7 @@ import { executionRunIsClear } from '@/lib/mcp/task-execution-admission';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { saveRestrictedOwnedSession } from './restricted-session-persistence';
+import { readOwnedSessionMetadata } from './metadata-read';
 
 import {
   archiveOwnedSessionDir,
@@ -14,7 +15,6 @@ import {
   metadataPath,
   nowIso,
   pathExists,
-  readJsonFile,
   writeJsonFile,
 } from './helpers';
 import type {
@@ -53,7 +53,7 @@ export function createOwnedSessionIo({
   }
 
   async function loadSession(sessionDir: string) {
-    return readJsonFile<OwnedSessionRecord>(metadataPath(sessionDir));
+    return readOwnedSessionMetadata<OwnedSessionRecord>(metadataPath(sessionDir));
   }
 
   async function saveSession(session: OwnedSessionRecord) {

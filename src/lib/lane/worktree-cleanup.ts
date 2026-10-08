@@ -1,7 +1,6 @@
-import { execFile } from 'node:child_process';
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { preserveAndRecordLaneRecovery } from './merge-recovery';
@@ -9,8 +8,6 @@ import { checkPruneGate } from './prune-gate';
 import type { Lane } from './types';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 import { worktreeIsConfirmedAbsent } from './lane-storage-release';
-
-const execFileAsync = promisify(execFile);
 
 type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>
   & Partial<Pick<Lane, 'baseBranch' | 'packetId'>>
@@ -37,15 +34,17 @@ function settleRemovedWorktreeReservation(lane: CleanupLane, removed: boolean): 
  * repository" on every preserve attempt, or walks up and answers for the
  * parent checkout instead.
  */
-export async function worktreeIsNotGitRepository(worktreePath: string): Promise<boolean> {
+export async function worktreeIsNotGitRepository(worktreePath: string, repoPath: string): Promise<boolean> {
   if (!existsSync(join(worktreePath, '.git'))) return true;
   try {
-    await execFileAsync('git', ['-C', worktreePath, 'rev-parse', '--git-dir'], {
-      windowsHide: true,
+    await laneGit(worktreePath, repoPath, ['rev-parse', '--git-dir'], {
       timeout: 5_000,
     });
     return false;
   } catch (error) {
+    // Invalid metadata is unrecoverable by Git. Retain the directory and let
+    // the terminal sweep stop retrying it until an operator repairs it.
+    if (error instanceof LaneGitMetadataError) return true;
     const stderr = (error as { stderr?: unknown }).stderr;
     return /not a git repository/i.test(typeof stderr === 'string' ? stderr : formatError(error));
   }
@@ -121,7 +120,7 @@ export async function cleanupLaneWorktree(
   // work internally; this covers the commit history. Fail closed if the ref
   // cannot be confirmed.
   if (terminal || force) {
-    if (await worktreeIsNotGitRepository(worktreePath)) {
+    if (await worktreeIsNotGitRepository(worktreePath, lane.repoPath)) {
       console.warn(`[lane-worktree] Retaining non-git directory ${worktreePath}: preservation authority is unavailable.`);
       return false;
     }

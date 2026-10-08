@@ -16,7 +16,7 @@ import {
   isDispatchableRuntime,
   ORCHESTRATOR_RUNTIMES,
 } from '@/lib/orchestrator/runtime-capabilities';
-import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { getAllEvents, getLane, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import { debouncedSessionStatus } from '@/lib/terminal-status/debounce';
 import { relativeAge, timestampMillis } from '@/lib/util/relative-age';
@@ -710,7 +710,9 @@ export async function getRuntimeInventorySnapshot(
           await Promise.allSettled(
             pendingReviewCommits.map(async ({ laneId, worktreePath }) => {
               try {
-                const committed = await autoCommitCompletionWorktree(worktreePath);
+                const lane = getLane(laneId);
+                if (!lane) return;
+                const committed = await autoCommitCompletionWorktree(worktreePath, lane.repoPath);
                 if (committed) {
                   console.log(`[lane-review] Auto-committed dirty worktree for lane ${laneId} at ${worktreePath}`);
                 }

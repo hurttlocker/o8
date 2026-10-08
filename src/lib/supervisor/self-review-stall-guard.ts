@@ -1,12 +1,9 @@
-import { execFile } from 'node:child_process';
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { ownedTranscriptMtimeMs } from '@/lib/lane/reaper-liveness';
 import type { Lane } from '@/lib/lane/types';
-
-const execFileAsync = promisify(execFile);
 
 const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
 const AUTO_COMMIT_AFTER_VERIFIED_IDLE_MS = 2 * 60_000;
@@ -120,7 +117,7 @@ export async function probeSelfReviewStall(
     return { kind: 'none' };
   }
 
-  const snapshot = await readWorktreeSnapshot(lane.worktreePath ?? lane.repoPath, lane.baseBranch);
+  const snapshot = await readWorktreeSnapshot(lane.worktreePath ?? lane.repoPath, lane.repoPath, lane.baseBranch);
   const hasCommitWorthyWork = snapshot.dirty || snapshot.hasDiffAgainstBase;
   if (!hasCommitWorthyWork) {
     resetSelfReviewStallGuard(input.surfaceId);
@@ -277,11 +274,11 @@ export async function preserveSelfReviewStallWork(
 
   let committed = false;
   try {
-    committed = await completion.autoCommitCompletionWorktree(cwd, lane.label);
+    committed = await completion.autoCommitCompletionWorktree(cwd, lane.repoPath, lane.label);
   } catch (error) {
     return {
       committed: false,
-      hasReviewableDiff: await completion.hasReviewableCompletionDiff(cwd, lane.baseBranch),
+      hasReviewableDiff: await completion.hasReviewableCompletionDiff(cwd, lane.baseBranch, lane.repoPath),
       captureRef: capture.ref,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -289,7 +286,7 @@ export async function preserveSelfReviewStallWork(
 
   return {
     committed,
-    hasReviewableDiff: await completion.hasReviewableCompletionDiff(cwd, lane.baseBranch),
+    hasReviewableDiff: await completion.hasReviewableCompletionDiff(cwd, lane.baseBranch, lane.repoPath),
     captureRef: capture.ref,
   };
 }
@@ -329,11 +326,11 @@ function commandSucceeded(text: string, commandNeedles: string[]): boolean {
   return false;
 }
 
-async function readWorktreeSnapshot(cwd: string, baseBranch?: string | null): Promise<WorktreeSnapshot> {
+async function readWorktreeSnapshot(cwd: string, repoPath: string, baseBranch?: string | null): Promise<WorktreeSnapshot> {
   const [head, porcelain, hasDiffAgainstBase] = await Promise.all([
-    readGitStdout(cwd, ['rev-parse', 'HEAD']).catch(() => null),
-    readGitStdout(cwd, ['status', '--porcelain=v1']).catch(() => ''),
-    hasDiff(cwd, baseBranch?.trim() || 'main'),
+    readGitStdout(cwd, repoPath, ['rev-parse', 'HEAD']).catch((error) => { if (error instanceof LaneGitMetadataError) throw error; return null; }),
+    readGitStdout(cwd, repoPath, ['status', '--porcelain=v1']).catch((error) => { if (error instanceof LaneGitMetadataError) throw error; return ''; }),
+    hasDiff(cwd, repoPath, baseBranch?.trim() || 'main'),
   ]);
   const changedPaths = parsePorcelainPaths(porcelain);
   const fileStats = await Promise.all(
@@ -361,38 +358,28 @@ async function readWorktreeSnapshot(cwd: string, baseBranch?: string | null): Pr
   };
 }
 
-async function hasDiff(cwd: string, baseRef: string): Promise<boolean> {
+async function hasDiff(cwd: string, repoPath: string, baseRef: string): Promise<boolean> {
   try {
-    await execFileAsync('git', ['diff', '--quiet', `${baseRef}...HEAD`], {
-      windowsHide: true,
-      cwd,
-      maxBuffer: COMMAND_MAX_BUFFER,
-    });
+    await laneGit(cwd, repoPath, ['diff', '--quiet', `${baseRef}...HEAD`], { maxBuffer: COMMAND_MAX_BUFFER });
     return false;
   } catch (error) {
-    const status = (error as { status?: number | null }).status;
+    if (error instanceof LaneGitMetadataError) throw error;
+    const status = (error as { status?: number | null; code?: number }).status ?? (error as { code?: number }).code;
     if (status === 1) return true;
   }
 
   try {
-    await execFileAsync('git', ['diff', '--quiet', 'HEAD~1..HEAD'], {
-      windowsHide: true,
-      cwd,
-      maxBuffer: COMMAND_MAX_BUFFER,
-    });
+    await laneGit(cwd, repoPath, ['diff', '--quiet', 'HEAD~1..HEAD'], { maxBuffer: COMMAND_MAX_BUFFER });
     return false;
   } catch (error) {
-    const status = (error as { status?: number | null }).status;
+    if (error instanceof LaneGitMetadataError) throw error;
+    const status = (error as { status?: number | null; code?: number }).status ?? (error as { code?: number }).code;
     return status === 1;
   }
 }
 
-async function readGitStdout(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    windowsHide: true,
-    cwd,
-    maxBuffer: COMMAND_MAX_BUFFER,
-  });
+async function readGitStdout(cwd: string, repoPath: string, args: string[]): Promise<string> {
+  const { stdout } = await laneGit(cwd, repoPath, args, { maxBuffer: COMMAND_MAX_BUFFER });
   return stdout;
 }
 

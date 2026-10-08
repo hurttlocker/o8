@@ -259,7 +259,7 @@ describe('portable source preservation through the managed retirement entry', ()
       "const fs = require('node:fs');",
       'const args = process.argv.slice(2);',
       'const result = spawnSync(' + JSON.stringify(realGit) + ", args, { stdio: 'inherit' });",
-      "if (result.status === 0 && args[4] === 'bundle' && args[5] === 'create') {",
+      "if (result.status === 0 && args.some((arg, index) => arg === 'bundle' && args[index + 1] === 'create')) {",
       '  fs.renameSync(' + JSON.stringify(created.path) + ', ' + JSON.stringify(retainedPath) + ');',
       '  fs.mkdirSync(' + JSON.stringify(created.path) + ');',
       '  fs.writeFileSync(' + JSON.stringify(path.join(created.path, 'replacement.txt')) + ", 'unowned replacement');",

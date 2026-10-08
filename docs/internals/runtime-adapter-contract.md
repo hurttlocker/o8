@@ -172,7 +172,7 @@ remain in force; headless tools requiring approval may be denied. A result with
 denied actions is reported as failed even when the CLI exits successfully. Token
 telemetry does not establish a monetary charge or remaining account quota.
 
-- Specialized: `codex`, `claude-code`, `gemini`, `opencode`, `pi`, `cursor`, `grok`, `prime-agent`, `deepseek-harness`, and `hermes`.
+- Specialized: `codex`, `claude-code`, `gemini`, `opencode`, `pi`, `pi-builtin`, `cursor`, `grok`, `prime-agent`, `deepseek-harness`, and `hermes`. `pi-builtin` is the Pi SDK bundled with o8 on the managed model route; see [the Pi SDK notes](./pi-sdk-prototype.md#worker).
 - Declarative: `openhands`, `goose`, `qwen`, `qoder`, `kimi`, `aider`, `3code`, `copilot-cli`, `crush`, and `antigravity`.
 
 ## Contract locations

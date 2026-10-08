@@ -150,6 +150,7 @@ function hasApprovedVerdict(packet: OrchestratorPacket, lane: Lane | null): bool
 async function normalizeSubmittedReviewHead(
   input: string | undefined,
   cwd: string | undefined,
+  repoPath: string | undefined,
 ): Promise<
   | { ok: true; reviewedHeadSha: string | undefined }
   | { ok: false; code: 'invalid_reviewed_head_sha' | 'unresolvable_reviewed_head_sha'; error: string }
@@ -163,7 +164,7 @@ async function normalizeSubmittedReviewHead(
       error: 'reviewedHeadSha must be a 7- to 40-character hexadecimal commit SHA.',
     };
   }
-  if (!cwd) {
+  if (!cwd || !repoPath) {
     return {
       ok: false,
       code: 'unresolvable_reviewed_head_sha',
@@ -171,7 +172,7 @@ async function normalizeSubmittedReviewHead(
     };
   }
 
-  const resolved = await resolveHeadSha(cwd, normalized);
+  const resolved = await resolveHeadSha(cwd, normalized, repoPath);
   if (!resolved) {
     return {
       ok: false,
@@ -291,7 +292,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     || verdictLane?.repoPath?.trim()
     || packet.workspaceTargetPath?.trim()
     || undefined;
-  const submittedHead = await normalizeSubmittedReviewHead(input.reviewedHeadSha, reviewCwd);
+  const submittedHead = await normalizeSubmittedReviewHead(input.reviewedHeadSha, reviewCwd, verdictLane?.repoPath ?? packet.workspaceTargetPath ?? undefined);
   if (!submittedHead.ok) {
     return {
       recorded: false,
@@ -314,7 +315,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     let currentHeadSha: string | undefined;
     if (cwd) {
       try {
-        currentHeadSha = normalizeHeadSha(await readHeadSha(cwd));
+        currentHeadSha = normalizeHeadSha(await readHeadSha(cwd, verdictLane?.repoPath ?? packet.workspaceTargetPath!));
       } catch (error) {
         console.warn(`[review] Failed to re-prove auto-review HEAD for packet ${input.packetId}:`, error);
       }
@@ -348,7 +349,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     const cwd = reviewCwd;
     if (cwd) {
       try {
-        reviewedHeadSha = normalizeHeadSha(await readHeadSha(cwd));
+        reviewedHeadSha = normalizeHeadSha(await readHeadSha(cwd, verdictLane?.repoPath ?? packet.workspaceTargetPath!));
         reviewedHeadAutoCaptured = reviewedHeadSha !== undefined;
       } catch (error) {
         console.warn(`[review] Failed to capture reviewed HEAD for packet ${input.packetId}:`, error);
@@ -366,7 +367,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       || missingContractWaiverReason.length > 500) {
       throw new Error('A missing-contract waiver requires a missing runtime-default contract, an approved review, a full reviewed HEAD, and a bounded reason.');
     }
-    const currentHeadSha = normalizeHeadSha(await readHeadSha(reviewCwd));
+    const currentHeadSha = normalizeHeadSha(await readHeadSha(reviewCwd, verdictLane?.repoPath ?? packet.workspaceTargetPath!));
     if (!currentHeadSha || !headShaMatches(currentHeadSha, reviewedHeadSha)) {
       throw new Error('The missing-contract waiver does not match the packet current HEAD. Review the current commit before waiving.');
     }

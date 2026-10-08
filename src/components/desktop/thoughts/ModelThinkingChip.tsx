@@ -41,9 +41,10 @@ const MODEL_THINKING_MENU_WIDTH = 200;
 // open; the fixed houses keep their locked 200px geometry.
 const SEARCHABLE_HOUSE_MENU_WIDTH = 300;
 
-// Synthetic model id for the free o8 backend — there is no underlying model name
+// Synthetic model id for the o8 backend — there is no underlying model name
 // exposed in the UI (monetization doctrine: we own the brand, hide the model).
-// This value is what `onModelChange` stores and what `activeModelOption` matches.
+// This value is what `onModelChange` stores and what `activeModelOption` matches,
+// so it keeps its original value for saved selections.
 const O8_FREE_MODEL_ID = 'o8-free';
 
 export type ComposerModelOption = {
@@ -57,7 +58,7 @@ export type ComposerModelOption = {
 };
 
 export type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'pi';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode';
   label: string;
   options: ComposerModelOption[];
   /**
@@ -117,25 +118,15 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   // and either can return when its setup story is one-click. Settings →
   // Operator Defaults still offers Hermes when a HEALTHY binary is present
   // (isHermesAvailable now exec-probes instead of existsSync).
-  // The free house (operator ruling 2026-07-12): one conversational model that
-  // streams with no subscription draw, so the operator can drive the full
-  // orchestrator UI without burning Claude/Codex usage. Named only 'o8' — the
-  // underlying model is never surfaced.
+  // o8's own house (#3408): its built-in agent, bundled Pi with the full o8
+  // command set, on the managed model and the o8 model allowance. Needs no
+  // installed CLI or key, so it draws on no Claude/Codex subscription. It is
+  // the one Pi entry: a separate Pi row would name the same agent twice.
   {
     key: 'o8',
     label: 'o8',
     options: [
-      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
-    ],
-  },
-  // Bundled Pi (#3258): the built-in orchestrator with the full o8 command set
-  // on the o8 model allowance. Needs no installed CLI. Preview, so it sits
-  // behind Customize leads and is never the default.
-  {
-    key: 'pi',
-    label: 'Pi',
-    options: [
-      { value: 'pi-builtin', label: 'Pi', triggerLabel: 'Pi', backend: 'pi', sub: 'built-in · o8 allowance' },
+      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'built-in agent · managed model' },
     ],
   },
 ];
@@ -379,11 +370,11 @@ export function ModelThinkingChip({
   const visibleLead = (key: ComposerModelGroup['key']) => {
     const current = key === activeBackend || (key === 'claude' && activeBackend === 'fable');
     if (current) return true;
-    if (key === 'o8' || key === 'pi') return advancedLeads;
+    if (key === 'o8') return advancedLeads;
     const tool = runtimeForLead(key);
     return installed.some((item) => item.id === tool) && (key !== 'opencode' || advancedLeads);
   };
-  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8' || key === 'pi'
+  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8'
     || tools.inventory?.some((item) => item.id === runtimeForLead(key) && item.available) === true;
   const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
   const ultraEnabled = useUltraEffortPreference();
@@ -424,9 +415,8 @@ export function ModelThinkingChip({
   // backend's house so the current model is visible on open.
   const [openHouse, setOpenHouse] = useState<ComposerModelGroup['key']>(
     activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
-      || activeBackend === 'pi'
       ? activeBackend
-      : 'claude',
+      : activeBackend === 'pi' ? 'o8' : 'claude',
   );
   // The ACP house needs a wider menu than the fixed drawers (see the width
   // constants) — derived from the open house, not the active backend, so the
@@ -642,7 +632,7 @@ export function ModelThinkingChip({
                         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
                       >
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                          <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '0', lineHeight: 1.2 }}>{group.label}{group.key === 'opencode' ? ' · experimental' : group.key === 'pi' ? ' · preview' : ''}</span>
+                          <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '0', lineHeight: 1.2 }}>{group.label}{group.key === 'opencode' ? ' · experimental' : ''}</span>
                           {!houseOpen && houseHasActive ? <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--t-accent)', flexShrink: 0 }} /> : null}
                         </span>
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.6, transform: houseOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)' }}>

@@ -464,7 +464,7 @@ describe('ComposerSelectorFooter', () => {
     expect(o8Stops[0]?.textContent).toBe('Low');
     act(() => o8Stops[0]!.click());
     expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('Low');
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"] > span > span:not([aria-hidden])')?.textContent).toBe('free');
+    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"] > span > span:not([aria-hidden])')?.textContent).toBe('managed model');
     expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')?.textContent).not.toContain('of 2');
   });
 

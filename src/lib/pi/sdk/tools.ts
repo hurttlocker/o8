@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
 import { commitPiWrite } from './approved-write';
 import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
+import { PiConfinementUnavailable } from './confine';
 
 export const PI_SDK_TOOLS = [
   { name: 'read_file', description: 'Read a UTF-8 file in the selected workspace.', parameters: {
@@ -22,6 +23,19 @@ export interface PiToolCall {
   risk?: 'low' | 'medium' | 'high'; policyRuleId?: string;
 }
 export type PiApproval = (call: PiToolCall, signal: AbortSignal) => Promise<boolean>;
+/** A host check run inside the host-wide lock immediately before a write commits or a command starts. */
+export type PiAuthority = (call: PiToolCall) => Promise<boolean>;
+export interface PiToolOptions extends PiCommandOptions {
+  /** When set, a false result refuses the call, whatever approval or policy said. Host-set only. */
+  authorize?: PiAuthority;
+  /**
+   * Lane rules (#3385): every command runs confined, with no network and writes
+   * only in the workspace and a private temp dir. Where confinement is
+   * unavailable the command needs `inbox` approval and then runs unconfined, as
+   * approved. Host-set only.
+   */
+  confine?: { inbox: PiApproval };
+}
 const MAX_BYTES = 50_000;
 
 function protectedPath(path: string) {
@@ -68,8 +82,14 @@ async function snapshot(root: string, opened: OpenWorkspaceFileResult) {
   return buffer.subarray(0, offset);
 }
 
+async function requireAuthority(call: PiToolCall, authorize: PiAuthority | undefined) {
+  if (authorize && !await authorize({ name: call.name, args: structuredClone(call.args) })) {
+    throw new Error('The workspace no longer allows this call');
+  }
+}
+
 async function executePiCommand(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
-  options: PiCommandOptions) {
+  { authorize, confine, ...options }: PiToolOptions) {
   const args = structuredClone(call.args);
   const command = args.command;
   if (typeof command !== 'string' || !command.trim() || command.includes('\0')
@@ -86,12 +106,25 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
     throw new Error('Command was not approved');
   }
   // The launcher checks the physical working directory at spawn time.
-  return { content: [{ type: 'text' as const,
-    text: await withPiExclusive(() => runPiCommand(root, command, signal, options), signal) }] };
+  const run = (confined: boolean) => withPiExclusive(async () => {
+    await requireAuthority(call, authorize);
+    return runPiCommand(root, command, signal, { ...options, confined });
+  }, signal);
+  let text: string;
+  try {
+    text = await run(Boolean(confine));
+  } catch (error) {
+    if (!confine || !(error instanceof PiConfinementUnavailable)) throw error;
+    // Nothing started. Lane rules cover only a confined command, so the operator approves this one.
+    if (!await confine.inbox({ name: call.name, args: structuredClone(args), risk: policy.risk,
+      policyRuleId: policy.ruleId }, signal)) throw new Error('Command was not approved');
+    text = await run(false);
+  }
+  return { content: [{ type: 'text' as const, text }] };
 }
 
 export async function executePiTool(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
-  options: PiCommandOptions = {}) {
+  options: PiToolOptions = {}) {
   signal.throwIfAborted();
   if (!PI_SDK_TOOLS.some(tool => tool.name === call.name)) throw new Error('Tool is not available');
   if (call.name === 'run_command') return executePiCommand(root, call, approve, signal, options);
@@ -136,6 +169,7 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
         if (target.dev !== opened.stat.dev || target.ino !== opened.stat.ino || current.nlink !== 1
           || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
       }
+      await requireAuthority(call, options.authorize);
       signal.throwIfAborted();
       await commitPiWrite(root, path, parent, opened, before, content, signal);
       return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };

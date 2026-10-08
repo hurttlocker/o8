@@ -183,6 +183,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/onboarding/OnboardingSignInTerminal.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
       "reasons": [
         "native-build"
@@ -361,12 +367,6 @@
       "reasons": [
         "child-process",
         "git-cli"
-      ]
-    },
-    {
-      "path": "src/lib/lane/merge-gate-script.test.ts",
-      "reasons": [
-        "child-process"
       ]
     },
     {
@@ -736,6 +736,7 @@
     {
       "path": "src/lib/runtimes/shared/owned-session-index.test.ts",
       "reasons": [
+        "child-process",
         "terminal-tool"
       ]
     },
@@ -2367,6 +2368,30 @@
       ]
     },
     {
+      "path": "tests/lane-git-guard.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/lane-git-remaining-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/lane-host-git-hardening-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/lane-lifecycle-1810-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2682,6 +2707,14 @@
       ]
     },
     {
+      "path": "tests/merge-gate-host-code-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/merge-gate-typecheck-environment-failure-real-path.test.ts",
       "reasons": [
         "executable-fixture",
@@ -2856,6 +2889,15 @@
       ]
     },
     {
+      "path": "tests/o8-model-pi-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8-serve-governed-loop-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2878,6 +2920,21 @@
     {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/onboarding-sign-in-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/onboarding-sign-in-terminal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },
@@ -3012,6 +3069,7 @@
       "reasons": [
         "apfs-tool",
         "child-process",
+        "git-cli",
         "native-build",
         "real-path"
       ]
@@ -3096,6 +3154,16 @@
       "path": "tests/persistent-terminals.test.ts",
       "reasons": [
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/pi-builtin-worker-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
       ]
     },
     {
@@ -3586,6 +3654,15 @@
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/retained-completion-handoff-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },

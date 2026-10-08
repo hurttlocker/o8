@@ -501,7 +501,7 @@ export function TelemetryConsentCard({
           marginTop: 20,
           paddingTop: 20,
           paddingBottom: embedded ? 12 : undefined,
-          background: embedded ? 'var(--t-onboarding-bg)' : undefined,
+          background: embedded ? 'var(--t-onboarding-dock-bg, var(--t-onboarding-bg))' : undefined,
           borderTop: '1px solid var(--t-divider-subtle)',
         }}>
           <div style={{ minHeight: 20, fontSize: 11.5, fontWeight: 300, lineHeight: 1.45, color: error ? 'var(--t-danger)' : 'var(--t-text-muted)' }} role={error ? 'alert' : undefined}>

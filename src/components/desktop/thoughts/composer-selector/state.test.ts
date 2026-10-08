@@ -143,7 +143,7 @@ describe('composer selector state', () => {
     expect(resolved.effort).toBe('low');
     expect(resolved.effortOptions).toEqual(['low']);
     expect(resolved.lockedEffortOptions).toEqual([]);
-    expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
+    expect(composerEffortConsequence('o8', 'low')).toBe('Low · managed model');
     expect(resolved.effortClampedFrom).toBe('high');
   });
 

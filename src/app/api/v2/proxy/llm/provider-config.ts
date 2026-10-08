@@ -1,3 +1,4 @@
+import { O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL } from '@/lib/cortex/qa/llm/inference-route';
 import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
 import { toolsForAnthropic, toolsForOpenAI } from '@/lib/llm/tools';
 import { chatGPTPlanProvider } from '@/lib/chatgpt-plan/responses-provider';
@@ -18,15 +19,11 @@ export const OPERATOR_GEMINI_MODEL = 'gemini-3-flash-preview';
  *  be re-pointed or retired by Google) before touching the free chain. */
 export const OPERATOR_GEMINI_ROLLBACK_MODEL = 'gemini-2.5-flash';
 
-/** o8 Operator FREE chain — $0 OpenRouter models, ordered. Bake-off
- *  2026-07-12 (scratchpad bakeoff_results.json): nemotron passed tool-calling
- *  and scored 5/5 on the o8 explainer with zero invented features;
- *  gpt-oss-120b:free stays as the always-answers safety net (it fabricated
- *  product mechanics and threw a 42s outlier, so it lost the primary slot). */
-export const OPERATOR_FREE_OPENROUTER_MODELS = [
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'openai/gpt-oss-120b:free',
-] as const;
+/** o8 Operator chain on the OpenAI-compatible route (managed endpoint or a
+ *  direct OpenRouter key), ordered: the managed text model, then the $0 model
+ *  so o8 always has a model. On the managed endpoint the free plan's model is
+ *  chosen by the endpoint. */
+export const OPERATOR_OPENROUTER_MODELS = [O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL] as const;
 
 export interface Message {
   role: string;

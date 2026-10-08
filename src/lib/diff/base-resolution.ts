@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { LaneGitMetadataError } from '@/lib/lane/lane-git';
+
 import { isSafeGitRef } from '@/lib/git/refs';
 
 const execFileAsync = promisify(execFile);
@@ -8,6 +10,8 @@ const COMMAND_MAX_BUFFER = 1024 * 1024;
 const DEFAULT_FETCH_TIMEOUT_MS = 4_000;
 const FETCH_MEMO_TTL_MS = 60_000;
 const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+export type DiffBaseGitRunner = (args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
 interface FetchOutcome {
   comparisonRef: string;
@@ -41,11 +45,13 @@ async function gitStdout(cwd: string, args: string[], timeout = DEFAULT_FETCH_TI
   return stdout.trim();
 }
 
-async function refExists(cwd: string, ref: string): Promise<boolean> {
+async function refExists(cwd: string, ref: string, runGit?: DiffBaseGitRunner): Promise<boolean> {
   try {
-    await gitStdout(cwd, ['rev-parse', '--verify', '--quiet', ref], 5_000);
+    if (runGit) await runGit(['rev-parse', '--verify', '--quiet', ref]);
+    else await gitStdout(cwd, ['rev-parse', '--verify', '--quiet', ref], 5_000);
     return true;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return false;
   }
 }
@@ -61,8 +67,12 @@ async function resolveFetchOutcome(
   base: string,
   originRef: string,
   fetchTimeoutMs: number,
+  runGit?: DiffBaseGitRunner,
 ): Promise<FetchOutcome> {
-  const memoKey = `${cwd}\0${base}`;
+  const execute = runGit
+    ? async (args: string[]) => (await runGit(args)).stdout.trim()
+    : (args: string[]) => gitStdout(cwd, args, fetchTimeoutMs);
+  const memoKey = `${cwd}\0${base}\0${runGit ? 'host-lane' : 'default'}`;
   const cached = fetchMemo.get(memoKey);
   if (cached && Date.now() - cached.attemptedAt < FETCH_MEMO_TTL_MS) {
     return {
@@ -75,8 +85,8 @@ async function resolveFetchOutcome(
 
   let outcome: FetchOutcome;
   try {
-    await gitStdout(cwd, ['fetch', 'origin', base, '--quiet'], fetchTimeoutMs);
-    if (await refExists(cwd, originRef)) {
+    await execute(['fetch', 'origin', base, '--quiet']);
+    if (await refExists(cwd, originRef, runGit)) {
       outcome = {
         comparisonRef: originRef,
         fetchedRemoteBase: true,
@@ -92,6 +102,7 @@ async function resolveFetchOutcome(
       };
     }
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     outcome = {
       comparisonRef: base,
       fetchedRemoteBase: false,
@@ -109,6 +120,7 @@ export async function resolvePacketDiffBase(
   baseBranch: string,
   headSha: string,
   fetchTimeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
+  runGit?: DiffBaseGitRunner,
 ): Promise<PacketDiffBaseResolution> {
   const base = baseBranch.trim() || 'main';
   if (!isSafeGitRef(base)) {
@@ -116,14 +128,17 @@ export async function resolvePacketDiffBase(
   }
 
   const originRef = `origin/${base}`;
-  const fetchOutcome = await resolveFetchOutcome(cwd, base, originRef, fetchTimeoutMs);
+  const fetchOutcome = await resolveFetchOutcome(cwd, base, originRef, fetchTimeoutMs, runGit);
   let usedFallback = fetchOutcome.usedFallback;
   let warning = fetchOutcome.warning;
 
   let mergeBase: string | null = null;
   try {
-    mergeBase = await gitStdout(cwd, ['merge-base', fetchOutcome.comparisonRef, headSha]);
+    mergeBase = runGit
+      ? (await runGit(['merge-base', fetchOutcome.comparisonRef, headSha])).stdout.trim()
+      : await gitStdout(cwd, ['merge-base', fetchOutcome.comparisonRef, headSha]);
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     usedFallback = true;
     warning = warning
       ? `${warning} merge-base failed for ${fetchOutcome.comparisonRef}: ${gitErrorMessage(error)}.`
@@ -147,6 +162,7 @@ export async function resolvePacketAttributionBase(
   baseBranch: string,
   headSha: string,
   creationBaseCommit?: string | null,
+  runGit?: DiffBaseGitRunner,
 ): Promise<PacketDiffBaseResolution> {
   const base = baseBranch.trim() || 'main';
   if (!isSafeGitRef(base)) {
@@ -159,15 +175,14 @@ export async function resolvePacketAttributionBase(
       throw new Error('Saved packet creation base is not a full Git object ID.');
     }
     try {
-      const resolved = (await gitStdout(
-        cwd,
-        ['rev-parse', '--verify', `${creationBase}^{commit}`],
-        5_000,
-      )).toLowerCase();
+      const execute = runGit
+        ? async (args: string[]) => (await runGit(args)).stdout.trim()
+        : (args: string[]) => gitStdout(cwd, args, 5_000);
+      const resolved = (await execute(['rev-parse', '--verify', `${creationBase}^{commit}`])).toLowerCase();
       if (resolved !== creationBase) {
         throw new Error('the saved object did not resolve to itself');
       }
-      await gitStdout(cwd, ['merge-base', '--is-ancestor', creationBase, headSha], 5_000);
+      await execute(['merge-base', '--is-ancestor', creationBase, headSha]);
       return {
         baseBranch: base,
         requestedRef: creationBase,
@@ -178,6 +193,7 @@ export async function resolvePacketAttributionBase(
         warning: null,
       };
     } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
       throw new Error(`Saved packet creation base ${creationBase} is unavailable: ${gitErrorMessage(error)}`);
     }
   }
@@ -185,5 +201,5 @@ export async function resolvePacketAttributionBase(
   // Legacy lanes predate creation receipts. Preserve their remote-first
   // behavior because they may have been created from either local or remote
   // base state, and guessing local can attribute upstream commits to a packet.
-  return resolvePacketDiffBase(cwd, base, headSha);
+  return resolvePacketDiffBase(cwd, base, headSha, undefined, runGit);
 }

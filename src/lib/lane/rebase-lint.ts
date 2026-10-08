@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { laneGit } from '@/lib/lane/lane-git';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 
 const execFileAsync = promisify(execFile);
@@ -142,13 +143,13 @@ function lintAvailability(cwd: string): { skip: false; eslintScript: string } | 
   }
 }
 
-async function gitOutput(cwd: string, args: string[], deadline: number): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    windowsHide: true,
-    cwd,
+async function gitOutput(cwd: string, args: string[], deadline: number, gitRepoPath?: string): Promise<string> {
+  const execute = gitRepoPath
+    ? (args: string[], options: { timeout: number; maxBuffer: number }) => laneGit(cwd, gitRepoPath, args, options)
+    : (args: string[], options: { timeout: number; maxBuffer: number }) => execFileAsync('git', args, { cwd, windowsHide: true, encoding: 'utf8', ...options });
+  const { stdout } = await execute(args, {
     timeout: remainingTimeout(deadline),
     maxBuffer: LINT_MAX_BUFFER_BYTES,
-    encoding: 'utf8',
   });
   return stdout;
 }
@@ -179,13 +180,15 @@ async function changedLintFiles(
   cwd: string,
   baseRef: string,
   deadline: number,
+  gitRepoPath?: string,
 ): Promise<{ mergeBase: string; files: ChangedLintFile[] }> {
-  const mergeBase = (await gitOutput(cwd, ['merge-base', baseRef, 'HEAD'], deadline)).trim();
+  const mergeBase = (await gitOutput(cwd, ['merge-base', baseRef, 'HEAD'], deadline, gitRepoPath)).trim();
   if (!mergeBase) throw new Error(`Unable to resolve the lint merge base from ${baseRef}.`);
   const output = await gitOutput(
     cwd,
     ['diff', '--name-status', '-z', '--find-renames', `${mergeBase}..HEAD`],
     deadline,
+    gitRepoPath,
   );
   return { mergeBase, files: parseChangedFiles(output, cwd) };
 }
@@ -336,6 +339,7 @@ function warningsAbsentFromBase(
  */
 export async function runLaneRebaseLint(input: {
   cwd: string;
+  gitRepoPath?: string;
   baseRef: string;
   actualBranch: string;
   logPrefix: string;
@@ -350,7 +354,7 @@ export async function runLaneRebaseLint(input: {
   }
 
   try {
-    const { mergeBase, files } = await changedLintFiles(input.cwd, input.baseRef, deadline);
+    const { mergeBase, files } = await changedLintFiles(input.cwd, input.baseRef, deadline, input.gitRepoPath);
     if (files.length === 0) {
       return { ok: true, detail: 'No changed lintable files.' };
     }

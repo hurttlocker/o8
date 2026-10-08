@@ -15,7 +15,6 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
@@ -24,8 +23,9 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { createO8CommandTools, listO8Commands, o8CommandPrompt } from '@/lib/pi/orchestrator/o8-commands';
 import { openO8Servers, type O8ServerSet } from '@/lib/pi/orchestrator/o8-servers';
-import { O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
+import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
+import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
 /** Per-turn limits. A turn that dispatches and waits on a mission needs more than the prototype's defaults. */
@@ -102,20 +102,9 @@ export function piEventToOrchestratorEvents(event: Record<string, unknown>): Orc
   return [];
 }
 
-async function newestSessionFile(dir: string): Promise<string | undefined> {
-  let newest: { path: string; mtime: number } | undefined;
-  const entries = await readdir(dir, { recursive: true, withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-    const path = join(entry.parentPath, entry.name);
-    const mtime = (await stat(path).catch(() => null))?.mtimeMs ?? 0;
-    if (!newest || mtime > newest.mtime) newest = { path, mtime };
-  }
-  return newest?.path;
-}
-
 export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): OrchestratorBackend & {
   closeAll(): Promise<void>;
+  hasSession(repoPath: string, threadId?: string | null): Promise<boolean>;
 } {
   const resident = new Map<string, ResidentPi>();
   /** Threads with a turn in flight, startup included. Reserved before any await. */
@@ -126,6 +115,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
   const stateRoot = deps.stateRoot ?? (() => join(getDataDir(), 'pi', 'orchestrator'));
 
   const nameFor = (repoPath: string, threadId?: string | null) => sessionNameForRepo('pi-orchestrator', repoPath, threadId);
+  const stateDirFor = (name: string) => join(stateRoot(), createHash('sha256').update(name).digest('hex').slice(0, 32));
 
   /** Closes one resident; the map entry goes only if it still names this resident. */
   async function close(pi: ResidentPi) {
@@ -135,7 +125,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
   }
 
   async function start(name: string, repoPath: string, options: OrchestratorTurnOptions, surface: PiSurface): Promise<ResidentPi> {
-    const stateDir = join(stateRoot(), createHash('sha256').update(name).digest('hex').slice(0, 32));
+    const stateDir = stateDirFor(name);
     const signal = options.signal ?? new AbortController().signal;
     const servers = await (deps.openServers ?? openO8Servers)(repoPath, { profile: surface.profile, threadId: options.threadId });
     try {
@@ -150,8 +140,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
       pi.session = await createPiSdkSession({
         workspace: repoPath,
         stateDir,
-        model: O8_MANAGED_FLASH_LITE_MODEL,
-        sessionFile: await newestSessionFile(join(stateDir, 'sessions')),
+        model: O8_MANAGED_PI_MODEL,
+        sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
         transport: deps.transport,
         approve: deps.approve,
         hostTools: commands.length ? createO8CommandTools(commands) : [],
@@ -262,6 +252,11 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
       return { sessionName: name, status: status(name) };
     },
     sendTurn,
+    /** True once this repo and thread have a Pi conversation to resume. */
+    async hasSession(repoPath, threadId) {
+      const name = nameFor(repoPath, threadId);
+      return resident.has(name) || Boolean(await newestPiSessionFile(join(stateDirFor(name), 'sessions')));
+    },
     /** Ends every turn and process, including ones still starting. */
     async closeAll() {
       closing = true;

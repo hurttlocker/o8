@@ -6,6 +6,8 @@ export type OnboardingCue = 'tick' | 'advance' | 'complete';
 const MUTE_KEY = 'o8:onboarding-muted';
 
 let ctx: AudioContext | null = null;
+const activeVoices = new Set<{ osc: OscillatorNode; gain: GainNode }>();
+let lastCueAt = -Infinity;
 
 function audioCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -34,6 +36,7 @@ export function setOnboardingMuted(muted: boolean, storage: ProgressStorage | nu
   try {
     if (!storage) return false;
     storage.setItem(MUTE_KEY, muted ? '1' : '0');
+    if (muted) stopOnboardingCues();
     return true;
   } catch {
     return false;
@@ -52,9 +55,25 @@ function voice(ac: AudioContext, freq: number, startAt: number, dur: number, pea
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   osc.connect(gain);
   gain.connect(ac.destination);
-  osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  const entry = { osc, gain };
+  activeVoices.add(entry);
+  osc.onended = () => { activeVoices.delete(entry); osc.disconnect(); gain.disconnect(); };
   osc.start(t0);
   osc.stop(t0 + dur + 0.02);
+}
+
+/** Quietly release a cue when it is replaced or muted. */
+export function stopOnboardingCues(): void {
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  for (const { osc, gain } of activeVoices) {
+    try {
+      if (gain.gain.cancelAndHoldAtTime) gain.gain.cancelAndHoldAtTime(now);
+      else gain.gain.cancelScheduledValues(now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.012);
+      osc.stop(now + 0.02);
+    } catch { /* A note may already have ended. */ }
+  }
 }
 
 /** Play a UI cue. Cheap, fire-and-forget, never throws. */
@@ -62,6 +81,9 @@ export function playOnboardingCue(cue: OnboardingCue, storage: ProgressStorage |
   if (isOnboardingMuted(storage)) return;
   const ac = audioCtx();
   if (!ac) return;
+  if (cue === 'tick' && ac.currentTime - lastCueAt < 0.075) return;
+  stopOnboardingCues();
+  lastCueAt = ac.currentTime;
   try {
     if (cue === 'tick') {
       voice(ac, 640, 0, 0.045, 0.018);

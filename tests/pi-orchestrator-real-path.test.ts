@@ -90,7 +90,7 @@ async function listTools(config: { command: string; args?: string[]; env?: Recor
   } finally { await peer.close({ gracefulMs: 200 }); }
 }
 
-const model = { id: 'google/gemini-2.5-flash-lite', api: 'openai-completions' as const, provider: 'o8-managed' };
+const model = { id: 'openai/gpt-6-luna', api: 'openai-completions' as const, provider: 'o8-managed' };
 function message(content: AssistantMessage['content'], stopReason: AssistantMessage['stopReason'] = 'stop',
   errorMessage?: string): AssistantMessage {
   return { role: 'assistant', content, stopReason, model: model.id, api: model.api, provider: model.provider,
