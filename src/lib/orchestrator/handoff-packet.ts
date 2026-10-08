@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
+import { readLaneCreationBaseCommit } from '@/lib/lane/creation-base';
+import { readHeadSha } from '@/lib/lane/head-sha-lock';
+import { getLaneSpokenDiffFacts, spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
 import { getLane, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -41,6 +44,24 @@ export interface BuildHandoffPacketInput {
   narrativeMode?: 'auto' | 'full' | 'compact';
   /** Internal launch-path exclusion when fallback selection follows persistence. */
   excludeMessageId?: string;
+}
+
+/** Hashes only: source text stays in the workspace, outside the carried evidence. */
+export interface HandoffWorkspaceEvidence {
+  laneId: string;
+  headSha: string;
+  against: string;
+  snapshotTreeHash: string;
+  diffFingerprint: string;
+}
+
+/** Diagnostic observation only; even a fresh snapshot grants no execution authority. */
+export interface HandoffWorkspaceFreshness {
+  status: 'fresh' | 'stale' | 'unavailable';
+  reason: 'snapshot-matched' | 'snapshot-changed' | 'evidence-missing'
+    | 'evidence-invalid' | 'lane-unavailable' | 'workspace-mismatch' | 'evidence-unavailable';
+  expectedFingerprint: string | null;
+  currentFingerprint: string | null;
 }
 
 export interface HandoffPacket {
@@ -91,6 +112,9 @@ export interface HandoffPacket {
     diffStat: string;
     touchedFiles: string[];
     dirty: boolean;
+    /** Exact evidence captured after the legacy descriptive summary above.
+     * Optional for persisted v1 packets; absence never establishes freshness. */
+    evidence?: HandoffWorkspaceEvidence | null;
   } | null;
   governance: {
     packets: Array<{
@@ -292,6 +316,7 @@ function narrativeFromTranscript(entries: MobileTranscriptEntry[]): {
 async function buildWorkspace(
   repoPath: string,
   worktreePath: string,
+  lane: Lane | null,
 ): Promise<HandoffPacket['workspace']> {
   const review = await getRuntimeRepoReview(worktreePath);
   if (!review.branch || !review.head) return null;
@@ -303,24 +328,109 @@ async function buildWorkspace(
     diffStat: review.diffStat,
     touchedFiles: review.changedFiles.map((file) => file.path),
     dirty: review.dirty,
+    evidence: lane && lane.branch === review.branch
+      ? await captureWorkspaceEvidence(lane).then((evidence) => (
+          evidence?.headSha.startsWith(review.head!) ? evidence : null
+        ))
+      : null,
   };
+}
+
+function canonicalPath(value: string): string {
+  try {
+    return realpathSync(value);
+  } catch {
+    return resolve(value);
+  }
 }
 
 function laneBelongsToWorkspace(
   lane: NonNullable<ReturnType<typeof getLane>>,
   repoPath: string,
 ): boolean {
-  const canonical = (value: string) => {
-    try {
-      return realpathSync(value);
-    } catch {
-      return resolve(value);
-    }
-  };
-  const expected = canonical(repoPath);
+  const expected = canonicalPath(repoPath);
   return [lane.repoPath, lane.worktreePath]
     .filter((candidate): candidate is string => Boolean(candidate))
-    .some((candidate) => canonical(candidate) === expected);
+    .some((candidate) => canonicalPath(candidate) === expected);
+}
+
+async function captureWorkspaceEvidence(lane: Lane): Promise<HandoffWorkspaceEvidence | null> {
+  try {
+    // Legacy lanes without a creation receipt can trigger a remote-base fetch.
+    // A handoff inspection must remain local and must not invent a baseline.
+    const pinnedCreationBaseCommit = readLaneCreationBaseCommit(lane.id);
+    if (!pinnedCreationBaseCommit) return null;
+    const facts = await getLaneSpokenDiffFacts(lane, { pinnedCreationBaseCommit });
+    // The existing helper checks diff/tree consistency. Close its final HEAD
+    // window too; a moving snapshot is unavailable, never asserted current.
+    if (await readHeadSha(lane.worktreePath || lane.repoPath) !== facts.headSha) return null;
+    return {
+      laneId: lane.id,
+      headSha: facts.headSha,
+      against: facts.against,
+      snapshotTreeHash: facts.snapshotTreeHash,
+      diffFingerprint: facts.fingerprint,
+    };
+  } catch {
+    // Git errors can contain source paths or output; never carry raw diagnostics.
+    return null;
+  }
+}
+
+/**
+ * Re-observe a persisted handoff against its recorded lane's current workspace.
+ * This is a point-in-time diagnostic, not an ACT guard or a freshness lease.
+ * Callers must still enforce their own authority and action-time checks.
+ */
+export async function inspectHandoffWorkspaceFreshness(
+  packet: unknown,
+): Promise<HandoffWorkspaceFreshness> {
+  const isRecord = (value: unknown): value is Record<string, unknown> => (
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+  );
+  const workspace = isRecord(packet) && isRecord(packet.workspace) ? packet.workspace : null;
+  const evidence = workspace && isRecord(workspace.evidence) ? workspace.evidence : null;
+  const unavailable = (reason: HandoffWorkspaceFreshness['reason']): HandoffWorkspaceFreshness => ({
+    status: 'unavailable',
+    reason,
+    expectedFingerprint: typeof evidence?.diffFingerprint === 'string'
+      && /^[0-9a-f]{64}$/.test(evidence.diffFingerprint) ? evidence.diffFingerprint : null,
+    currentFingerprint: null,
+  });
+  if (!isRecord(packet) || packet.schema !== HANDOFF_PACKET_SCHEMA) return unavailable('evidence-invalid');
+  if (packet.workspace == null) return unavailable('evidence-missing');
+  if (!workspace) return unavailable('evidence-invalid');
+  if (workspace.evidence == null) return unavailable('evidence-missing');
+  if (!evidence) return unavailable('evidence-invalid');
+  const { laneId, headSha, against, snapshotTreeHash, diffFingerprint } = evidence;
+  const objectId = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+  if (typeof laneId !== 'string' || !laneId.trim()
+    || typeof headSha !== 'string' || typeof against !== 'string' || typeof snapshotTreeHash !== 'string'
+    || ![headSha, against, snapshotTreeHash].every((value) => objectId.test(value))
+    || typeof diffFingerprint !== 'string'
+    || diffFingerprint !== spokenReviewSnapshotFingerprint(headSha, against, snapshotTreeHash)
+    || typeof workspace.branch !== 'string' || typeof workspace.repoPath !== 'string'
+    || typeof workspace.worktreePath !== 'string'
+  ) return unavailable('evidence-invalid');
+  try {
+    const lane = getLane(laneId);
+    if (!lane) return unavailable('lane-unavailable');
+    if (lane.branch !== workspace.branch
+      || canonicalPath(lane.repoPath) !== canonicalPath(workspace.repoPath)
+      || canonicalPath(lane.worktreePath || lane.repoPath) !== canonicalPath(workspace.worktreePath)
+    ) return unavailable('workspace-mismatch');
+    const current = await captureWorkspaceEvidence(lane);
+    if (!current) return unavailable('evidence-unavailable');
+    const matches = current.diffFingerprint === diffFingerprint;
+    return {
+      status: matches ? 'fresh' : 'stale',
+      reason: matches ? 'snapshot-matched' : 'snapshot-changed',
+      expectedFingerprint: diffFingerprint,
+      currentFingerprint: current.diffFingerprint,
+    };
+  } catch {
+    return unavailable('evidence-unavailable');
+  }
 }
 
 function resolveHandoffLane(
@@ -510,7 +620,7 @@ export async function buildHandoffPacket(input: BuildHandoffPacketInput): Promis
   const governanceSources = resolveGovernanceSources(threadId, lane);
   const workspaceLane = lane ?? governanceSources.lanes.find((candidate) => candidate.worktreePath) ?? null;
   const worktreePath = workspaceLane?.worktreePath ?? repoPath;
-  const workspace = await buildWorkspace(workspaceLane?.repoPath ?? repoPath, worktreePath);
+  const workspace = await buildWorkspace(workspaceLane?.repoPath ?? repoPath, worktreePath, workspaceLane);
   const governance = buildGovernance(governanceSources.packets, governanceSources.lanes);
   const verifiedClaims = cleanTextList(input.verifiedClaims);
   const unverifiedClaims = cleanTextList(input.unverifiedClaims);

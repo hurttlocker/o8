@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
+import { resolvePacketAttributionBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import { resolveLaneReviewTarget } from '@/lib/lane/review-target';
@@ -235,11 +235,22 @@ export function spokenReviewSnapshotFingerprint(
  * every result to one HEAD and fails closed instead of falling back to an
  * unrelated previous commit.
  */
-export async function getLaneSpokenDiffFacts(lane: Lane): Promise<LaneSpokenDiffFacts> {
+export async function getLaneSpokenDiffFacts(
+  lane: Lane,
+  options?: { pinnedCreationBaseCommit: string },
+): Promise<LaneSpokenDiffFacts> {
+  const pinnedBase = options?.pinnedCreationBaseCommit;
+  if (options !== undefined && (typeof pinnedBase !== 'string' || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(pinnedBase))) {
+    throw new Error('Pinned snapshot base must be a full Git object ID.');
+  }
   const cwd = resolveLaneReviewTarget(lane).cwd;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const headSha = await readHeadSha(cwd);
-    const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha);
+    // A caller holding a creation receipt can prohibit the legacy remote-base
+    // fallback even if that receipt disappears while this observation runs.
+    const diffBase = pinnedBase
+      ? await resolvePacketAttributionBase(cwd, lane.baseBranch, headSha, pinnedBase)
+      : await resolveLaneAttributionBase(lane, cwd, headSha);
     const against = diffBase.mergeBase ?? diffBase.comparisonRef;
     const [stat, diff, nameStatus, dirtyNameOnly, untracked, snapshotTreeHash] = await Promise.all([
       readGitOutputAsync(cwd, ['diff', '--stat', against]),

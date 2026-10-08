@@ -1,7 +1,10 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -9,8 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { NextRequest } from 'next/server';
-import { afterAll, describe, expect, it } from 'vitest';
-import type { HandoffPacket } from '@/lib/orchestrator/handoff-packet';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import type { HandoffIntent, HandoffPacket } from '@/lib/orchestrator/handoff-packet';
 
 const testRoot = mkdtempSync(join(tmpdir(), 'o8-handoff-real-'));
 const dataDir = join(testRoot, 'data');
@@ -51,6 +54,8 @@ const chatHistoryStore = await import('@/lib/llm/chat-history-store');
 const laneRegistry = await import('@/lib/lane/registry');
 const approvals = await import('@/lib/approvals/store');
 const handoff = await import('@/lib/orchestrator/handoff-packet');
+const laneDiffFacts = await import('@/lib/lane/lane-diff-facts');
+const laneCreationBase = await import('@/lib/lane/creation-base');
 const backendCarry = await import('@/lib/orchestrator/backend-switch-carry');
 const controlPlane = await import('@/lib/orchestrator/control-plane');
 const orchestratorStore = await import('@/lib/orchestrator/store');
@@ -58,25 +63,27 @@ const route = await import('@/app/api/orchestrator/handoff/route');
 const historyRoute = await import('@/app/api/orchestrator/history/route');
 
 function createThread(input: {
+  repoPath?: string;
   assistantBackend?: 'o8';
   assistantModel?: string;
   sessionId?: string;
 }) {
+  const threadRepoPath = input.repoPath ?? repoPath;
   const threadId = history.createMobileOrchestratorThread({
-    repoPath,
+    repoPath: threadRepoPath,
     backend: 'o8',
   }).id;
   history.appendMobileOrchestratorUserMessage({
     tabId: threadId,
     message: 'Continue the durable handoff slice.',
-    repoPath,
+    repoPath: threadRepoPath,
     backend: 'o8',
   });
   history.upsertMobileOrchestratorAssistantMessage({
     tabId: threadId,
     messageId: `${threadId}-assistant`,
     content: 'The workspace is measured and the first approach was rejected.',
-    repoPath,
+    repoPath: threadRepoPath,
     backend: input.assistantBackend,
     model: input.assistantModel,
     sessionId: input.sessionId,
@@ -454,6 +461,297 @@ describe('handoff packet real path', () => {
     })).rejects.toMatchObject({
       code: 'invalid_handoff_destination',
       status: 400,
+    });
+  });
+});
+
+// Resource integration: real Git, persisted lanes and authenticated handoff
+// routes. These tests do not invoke a model or a worker runtime.
+describe('handoff workspace freshness real Git integration', () => {
+  function persistPacket(packet: HandoffPacket) {
+    history.appendMobileOrchestratorUserMessage({
+      tabId: packet.threadId,
+      repoPath: packet.workspace!.worktreePath,
+      message: 'Continue from the handoff.',
+      backend: 'codex',
+      handoff: {
+        handoffId: packet.handoffId,
+        from: packet.from.backend ? { backend: packet.from.backend, model: packet.from.model } : null,
+        to: packet.to,
+        lossless: false,
+        carries: packet.carries,
+        packet: packet as unknown as Record<string, unknown>,
+      },
+    });
+    const saved = chatHistoryStore.readPersistedLlmChat(packet.threadId)?.history.messages
+      .find((message) => message.id === packet.handoffId)?.handoff?.packet;
+    expect(saved).toEqual(packet);
+    return saved as unknown as HandoffPacket;
+  }
+
+  async function capturePacket(intent?: HandoffIntent) {
+    const workspacePath = mkdtempSync(join(testRoot, 'freshness-'));
+    createRepo(workspacePath);
+    writeFileSync(join(workspacePath, 'notes.txt'), 'staged bytes\n');
+    git(workspacePath, 'add', 'notes.txt');
+    writeFileSync(join(workspacePath, 'notes.txt'), 'working bytes A\n');
+    writeFileSync(join(workspacePath, 'untracked.txt'), 'untracked bytes A\n');
+    const indexPath = join(workspacePath, '.git', 'index');
+    const indexBefore = readFileSync(indexPath);
+    const lane = laneRegistry.createLane({
+      repoPath: workspacePath,
+      worktreePath: workspacePath,
+      branch: 'main',
+      runtime: 'codex',
+      projectId: null,
+    });
+    const threadId = createThread({
+      repoPath: workspacePath,
+      assistantBackend: 'o8',
+      assistantModel: 'source/model',
+    });
+    const response = await route.POST(new NextRequest('https://operator.example.test/api/orchestrator/handoff', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${operatorToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threadId, laneId: lane.id, intent, to: { backend: 'codex', model: 'target/model' } }),
+    }));
+    expect(response.status).toBe(200);
+    const { packet } = await response.json() as { packet: HandoffPacket };
+    const saved = persistPacket(packet);
+    expect(readFileSync(indexPath)).toEqual(indexBefore);
+    return { packet: saved as unknown as HandoffPacket, workspacePath, lane, threadId, indexPath, indexBefore };
+  }
+
+  it('exports a diagnostic-only evidence companion rehearsal', async () => {
+    const intent: HandoffIntent = {
+      objective: 'Make this respond faster.',
+      constraints: ['Keep the layout and existing behavior.', 'Do not deploy.'],
+      rejected: [],
+    };
+    const { packet, workspacePath, lane, threadId, indexPath, indexBefore } = await capturePacket(intent);
+    const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
+    const original = JSON.stringify(packet);
+    const sourceBefore = readFileSync(join(workspacePath, 'notes.txt'));
+    const headBefore = git(workspacePath, 'rev-parse', 'HEAD');
+    const statusBefore = git(workspacePath, 'status', '--porcelain=v1');
+    const unchanged = await handoff.inspectHandoffWorkspaceFreshness(packet);
+    expect(unchanged).toMatchObject({ status: 'fresh', reason: 'snapshot-matched' });
+    expect(unchanged.currentFingerprint).toBe(packet.workspace!.evidence!.diffFingerprint);
+
+    // Fixture actor B is test code inspecting the persisted packet, not a worker.
+    writeFileSync(join(workspacePath, 'notes.txt'), 'working bytes B\n');
+    const sourceAfter = readFileSync(join(workspacePath, 'notes.txt'));
+    const headAfter = git(workspacePath, 'rev-parse', 'HEAD');
+    const statusAfter = git(workspacePath, 'status', '--porcelain=v1');
+    expect(sourceAfter).not.toEqual(sourceBefore);
+    expect(sourceAfter.length).toBe(sourceBefore.length);
+    expect(headAfter).toBe(headBefore);
+    expect(statusAfter).toBe(statusBefore);
+    const changed = await handoff.inspectHandoffWorkspaceFreshness(packet);
+    expect(changed).toMatchObject({ status: 'stale', reason: 'snapshot-changed' });
+    expect(changed.currentFingerprint).not.toBe(changed.expectedFingerprint);
+
+    const legacy = structuredClone(packet);
+    delete legacy.workspace!.evidence;
+    const missing = await handoff.inspectHandoffWorkspaceFreshness(legacy);
+    expect(missing).toEqual({
+      status: 'unavailable', reason: 'evidence-missing', expectedFingerprint: null, currentFingerprint: null,
+    });
+    const refreshed = persistPacket(await handoff.buildHandoffPacket({
+      threadId, laneId: lane.id, to: packet.to, intent: packet.intent!,
+    }));
+    const reobserved = await handoff.inspectHandoffWorkspaceFreshness(refreshed);
+    const originalAfter = await handoff.inspectHandoffWorkspaceFreshness(packet);
+    expect(reobserved).toMatchObject({ status: 'fresh', reason: 'snapshot-matched' });
+    expect(refreshed.workspace!.evidence!.diffFingerprint).toBe(changed.currentFingerprint);
+    expect(refreshed.handoffId).not.toBe(packet.handoffId);
+    expect(refreshed.intent).toEqual(intent);
+    expect(originalAfter).toEqual(changed);
+    expect(JSON.stringify(packet)).toBe(original);
+    const persistedOriginal = chatHistoryStore.readPersistedLlmChat(threadId)?.history.messages
+      .find((message) => message.id === packet.handoffId)?.handoff?.packet;
+    expect(persistedOriginal).toEqual(packet);
+    expect(readFileSync(indexPath)).toEqual(indexBefore);
+
+    const receipt = {
+      schema: 'o8/handoff-evidence-rehearsal/v1', result: 'passed',
+      actors: { A: 'fixture capture code', B: 'fixture inspection code', actualAgents: false },
+      intent: { kind: 'placeholder narrative only', value: intent, admittedIntentRef: null },
+      boundaries: { workerDispatched: false, actEnforced: false, aodlAdmissionRun: false, finalR1Acceptance: null },
+      original: {
+        handoffId: packet.handoffId, threadId, evidence: packet.workspace!.evidence,
+        serializedPacketSha256: digest(original),
+      },
+      observations: [
+        { sequence: 1, scenario: 'unchanged', result: 'passed', diagnostic: unchanged },
+        { sequence: 2, scenario: 'already-dirty-mutation', result: 'passed', diagnostic: changed,
+          change: { file: 'notes.txt', beforeSha256: digest(sourceBefore), afterSha256: digest(sourceAfter),
+            beforeBytes: sourceBefore.length, afterBytes: sourceAfter.length,
+            headBefore, headAfter, porcelainBefore: statusBefore, porcelainAfter: statusAfter } },
+        { sequence: 3, scenario: 'missing-evidence', result: 'passed', diagnostic: missing,
+          input: 'in-memory legacy copy of the original; workspace.evidence removed' },
+        { sequence: 4, scenario: 're-observation', result: 'passed', diagnostic: reobserved,
+          handoffId: refreshed.handoffId, evidence: refreshed.workspace!.evidence, originalAfter },
+      ],
+      assertions: { persistedOriginalPreserved: 'passed', normalGitIndexPreserved: 'passed',
+        placeholderIntentPreserved: 'passed', originalRemainsStale: 'passed' },
+      notRun: ['admitted authored R1', 'actual worker handoff', 'receiver ACT enforcement',
+        'compaction', 'performance/layout acceptance', 'final verification against R1'],
+    };
+    if (process.env.O8_HANDOFF_REHEARSAL_RECEIPT) {
+      writeFileSync(process.env.O8_HANDOFF_REHEARSAL_RECEIPT, `${JSON.stringify(receipt, null, 2)}\n`, { flag: 'wx' });
+    }
+  });
+
+  it('keeps the exact snapshot fresh across persisted handoff and preserves the real index', async () => {
+    const { packet, workspacePath, lane, indexPath, indexBefore } = await capturePacket();
+    expect(packet.workspace?.evidence).toMatchObject({
+      laneId: lane.id,
+      headSha: git(workspacePath, 'rev-parse', 'HEAD'),
+      against: git(workspacePath, 'rev-parse', 'main'),
+      diffFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      snapshotTreeHash: expect.stringMatching(/^[0-9a-f]{40}$/),
+    });
+    const before = JSON.stringify(packet);
+    const result = await handoff.inspectHandoffWorkspaceFreshness(packet);
+    expect(result).toEqual({
+      status: 'fresh', reason: 'snapshot-matched',
+      expectedFingerprint: packet.workspace?.evidence?.diffFingerprint,
+      currentFingerprint: packet.workspace?.evidence?.diffFingerprint,
+    });
+    expect(JSON.stringify(packet)).toBe(before);
+    expect(readFileSync(indexPath)).toEqual(indexBefore);
+    expect(JSON.stringify(packet.workspace?.evidence)).not.toContain('working bytes');
+  });
+
+  it.each(['notes.txt', 'untracked.txt'])('detects a same-porcelain content mutation in %s', async (file) => {
+    const { packet, workspacePath, lane, threadId, indexPath, indexBefore } = await capturePacket();
+    const head = git(workspacePath, 'rev-parse', 'HEAD');
+    const porcelain = git(workspacePath, 'status', '--porcelain=v1');
+    const previousBytes = readFileSync(join(workspacePath, file), 'utf8');
+    writeFileSync(join(workspacePath, file), previousBytes.replace(' A\n', ' B\n'));
+    expect(readFileSync(join(workspacePath, file)).length).toBe(Buffer.byteLength(previousBytes));
+    expect(git(workspacePath, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(workspacePath, 'status', '--porcelain=v1')).toBe(porcelain);
+    const result = await handoff.inspectHandoffWorkspaceFreshness(packet);
+    expect(result).toMatchObject({ status: 'stale', reason: 'snapshot-changed' });
+    expect(result.currentFingerprint).not.toBe(result.expectedFingerprint);
+    const refreshed = await handoff.buildHandoffPacket({
+      threadId, laneId: lane.id, to: packet.to,
+    });
+    expect(refreshed.workspace?.evidence?.diffFingerprint).toBe(result.currentFingerprint);
+    expect(await handoff.inspectHandoffWorkspaceFreshness(refreshed)).toMatchObject({ status: 'fresh' });
+    expect(packet.workspace?.evidence?.diffFingerprint).toBe(result.expectedFingerprint);
+    expect(readFileSync(indexPath)).toEqual(indexBefore);
+  });
+
+  it('detects HEAD movement even when worktree contents stay identical', async () => {
+    const { packet, workspacePath } = await capturePacket();
+    git(workspacePath, 'commit', '--allow-empty', '--only', '-m', 'test: advance head');
+    expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toMatchObject({
+      status: 'stale', reason: 'snapshot-changed',
+    });
+  });
+
+  it('never calls legacy or missing workspace evidence fresh', async () => {
+    expect(await handoff.inspectHandoffWorkspaceFreshness(null)).toMatchObject({ status: 'unavailable' });
+    expect(await handoff.inspectHandoffWorkspaceFreshness(undefined)).toMatchObject({ status: 'unavailable' });
+    for (const malformed of ['packet', 1, [], { schema: 'unknown' }, { schema: 'o8/handoff.packet/v1', workspace: 1 }]) {
+      expect(await handoff.inspectHandoffWorkspaceFreshness(malformed)).toMatchObject({ status: 'unavailable' });
+    }
+    const { packet } = await capturePacket();
+    delete packet.workspace!.evidence;
+    expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toEqual({
+      status: 'unavailable', reason: 'evidence-missing', expectedFingerprint: null, currentFingerprint: null,
+    });
+    packet.workspace = null;
+    expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toMatchObject({
+      status: 'unavailable', reason: 'evidence-missing',
+    });
+  });
+
+  it('rejects malformed evidence and another workspace without reading it as current', async () => {
+    const { packet } = await capturePacket();
+    const evidence = packet.workspace!.evidence!;
+    packet.workspace!.evidence = { ...evidence, diffFingerprint: 'not-an-exact-fingerprint' };
+    expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toMatchObject({
+      status: 'unavailable', reason: 'evidence-invalid',
+    });
+    packet.workspace!.evidence = evidence;
+    packet.workspace!.worktreePath = otherRepoPath;
+    expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toMatchObject({
+      status: 'unavailable', reason: 'workspace-mismatch',
+    });
+  });
+
+  it('keeps a pinned local base when the creation receipt disappears during observation', async () => {
+    const { packet, lane, threadId } = await capturePacket();
+    const base = packet.workspace!.evidence!.against;
+    const receipt = vi.spyOn(laneCreationBase, 'readLaneCreationBaseCommit')
+      .mockReturnValueOnce(base).mockReturnValue(null);
+    try {
+      const recaptured = await handoff.buildHandoffPacket({ threadId, laneId: lane.id, to: packet.to });
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(recaptured.workspace?.evidence).toEqual(packet.workspace?.evidence);
+      // Once the receipt is absent, later captures cannot silently fetch or
+      // substitute a moving base. The previously captured packet is unchanged.
+      expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toMatchObject({
+        status: 'unavailable', reason: 'evidence-unavailable',
+      });
+    } finally {
+      receipt.mockRestore();
+    }
+  });
+
+  it('rejects invalid or unavailable pinned bases without a legacy fallback', async () => {
+    const { lane } = await capturePacket();
+    await expect(laneDiffFacts.getLaneSpokenDiffFacts(lane, { pinnedCreationBaseCommit: '' }))
+      .rejects.toThrow('Pinned snapshot base must be a full Git object ID.');
+    await expect(laneDiffFacts.getLaneSpokenDiffFacts(lane, { pinnedCreationBaseCommit: 'f'.repeat(40) }))
+      .rejects.toThrow('Saved packet creation base');
+  });
+
+  it('refuses a missing lane rather than treating matching hashes as authority', async () => {
+    const { packet } = await capturePacket();
+    packet.workspace!.evidence!.laneId = 'lane-no-longer-present';
+    expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toMatchObject({
+      status: 'unavailable', reason: 'lane-unavailable',
+    });
+  });
+
+  it('omits evidence if HEAD moves after the shared snapshot reader returns', async () => {
+    const { packet, workspacePath, lane, threadId, indexPath, indexBefore } = await capturePacket();
+    const readFacts = laneDiffFacts.getLaneSpokenDiffFacts;
+    const reader = vi.spyOn(laneDiffFacts, 'getLaneSpokenDiffFacts').mockImplementationOnce(async (...args) => {
+      const facts = await readFacts(...args);
+      const nextHead = git(workspacePath, 'commit-tree', 'HEAD^{tree}', '-p', facts.headSha, '-m', 'test: race snapshot head');
+      git(workspacePath, 'update-ref', 'HEAD', nextHead, facts.headSha);
+      return facts;
+    });
+    try {
+      const raced = await handoff.buildHandoffPacket({ threadId, laneId: lane.id, to: packet.to });
+      expect(raced.workspace?.evidence).toBeNull();
+      expect(await handoff.inspectHandoffWorkspaceFreshness(raced)).toMatchObject({ status: 'unavailable' });
+      expect(readFileSync(indexPath)).toEqual(indexBefore);
+    } finally {
+      reader.mockRestore();
+    }
+  });
+
+  it('returns generic unavailable diagnostics when a recorded worktree disappears', async () => {
+    const { packet, workspacePath } = await capturePacket();
+    renameSync(workspacePath, `${workspacePath}-moved`);
+    const result = await handoff.inspectHandoffWorkspaceFreshness(packet);
+    expect(result).toMatchObject({ status: 'unavailable', reason: 'evidence-unavailable', currentFingerprint: null });
+    expect(JSON.stringify(result)).not.toContain(workspacePath);
+  });
+
+  it('keeps a lane-less handoff backward compatible without inventing exact evidence', async () => {
+    const threadId = createThread({ assistantBackend: 'o8' });
+    const packet = await handoff.buildHandoffPacket({ threadId, to: { backend: 'codex', model: null } });
+    expect(packet.workspace?.evidence).toBeNull();
+    expect(await handoff.inspectHandoffWorkspaceFreshness(packet)).toMatchObject({
+      status: 'unavailable', reason: 'evidence-missing',
     });
   });
 });
