@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { RepoFocusRepo } from '../../types';
 import { canCreateOrchestratorForRepo } from '../../../agent-panel-repo-selection';
 import { ChatGroupPicker } from './ChatGroupPicker';
-import { CHAT_VIEW_LABELS, type ChatGroupMode } from './sidebar-view';
+import type { ChatGroupMode } from './sidebar-view';
 import { CONVERSATIONS_GROUP_KEY } from './helpers';
 import { MissingRepoRailNotice } from './MissingRepoRailNotice';
 import { RepoGroupLabel, SectionLabel } from './shared';
@@ -29,44 +29,29 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   flatHistoryItems, flatHistoryDateGroups, flatHistoryRepoGroups, collapsedRepoGroups,
   repoByGroupKey, toggleRepoGroup, onCreateOrchestratorForRepo, renderHistoryRow,
   hiddenChatCount, showMore }: Props) {
-  const pinned = remainder.filter((item) => item.pinned);
-  const conversations = remainder.filter((item) => !item.pinned);
+  const normal = chatGroupBy === 'chronological';
+  const source = normal ? flatHistoryItems : remainder;
+  const heading = (chatGroupBy === 'flat' || chatGroupBy === 'working') && priority.length > 0 ? 'Priority' : source.some((item) => item.pinned) ? 'Pinned' : 'Recents';
+  const pinned = source.filter((item) => item.pinned);
+  const conversations = source.filter((item) => !item.pinned);
   return (
     <>
-      <SectionLabel label="Chats" compact action={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingRight: 3 }}>
-          <span style={{ fontSize: 9.5, fontWeight: 260 }}>{CHAT_VIEW_LABELS[chatGroupBy]}</span>
-          <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
-        </div>
+      <SectionLabel label={heading} compact action={
+        <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
       } />
       {chatGroupBy === 'flat' || chatGroupBy === 'working' ? (
         <>
-          {priority.length > 0 ? <RepoGroupLabel label="Priority" noIcon /> : null}
-          {priority.length > 0 ? (
-            priority.map((item) => renderHistoryRow(item))
-          ) : (
-            <div
-              style={{
-                paddingTop: 3,
-                paddingRight: 12,
-                paddingBottom: 5,
-                paddingLeft: 12,
-                color: 'var(--t-text-faint)',
-                fontSize: 9.5,
-                lineHeight: 1.25,
-                fontWeight: 260,
-                letterSpacing: '-0.4px',
-              }}
-            >
-              Nothing needs attention
-            </div>
-          )}
-          {pinned.length > 0 ? <><RepoGroupLabel label="Pinned" noIcon />{pinned.map(renderHistoryRow)}</> : null}
-          {conversations.length > 0 ? <RepoGroupLabel label={chatGroupBy === 'working' ? 'Working' : 'Conversations'} noIcon /> : null}
+          {priority.map(renderHistoryRow)}
+          {pinned.length > 0 ? <>{heading !== 'Pinned' ? <RepoGroupLabel label="Pinned" noIcon /> : null}{pinned.map(renderHistoryRow)}</> : null}
+          {conversations.length > 0 && heading !== 'Recents' ? <RepoGroupLabel label={chatGroupBy === 'working' ? 'Working' : 'Recents'} noIcon /> : null}
           {conversations.map(renderHistoryRow)}
         </>
       ) : chatGroupBy === 'chronological' ? (
-        flatHistoryItems.map(renderHistoryRow)
+        <>
+          {flatHistoryItems.filter((item) => item.pinned).map(renderHistoryRow)}
+          {pinned.length > 0 && conversations.length > 0 ? <RepoGroupLabel label="Recents" noIcon /> : null}
+          {flatHistoryItems.filter((item) => !item.pinned).map(renderHistoryRow)}
+        </>
       ) : chatGroupBy === 'date' ? (
         flatHistoryDateGroups.map((group) => (
           <div key={group.key}>

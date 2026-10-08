@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
+import { WorkspaceHistoryControls } from './WorkspaceHistoryControls';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { TrafficLightsOrSpacer } from './TrafficLights';
 import { HeaderIconPill } from './HeaderIconPill';
@@ -81,6 +82,7 @@ export function WorkspaceHeaderStrip({
               screen-pixel spacer on older shells. Same yNudge as the toggle
               pill below so their centers ride one line. */}
           {leadingInset ? <TrafficLightsOrSpacer yNudge={1.3} leadInPx={2} /> : null}
+          <WorkspaceHistoryControls tabs={tabs} activeTabId={headerActiveTabId} workspaceId={tabWorkspaceId ?? workspaceId} />
           {onToggleSidebar ? (
             <SidebarTogglePill
               sidebarVisible={sidebarVisible}

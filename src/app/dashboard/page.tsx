@@ -4740,7 +4740,7 @@ function DashboardInner() {
         const leftHeader = (
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}
-            windowControls={!showCompactNavigationRail}
+            windowControls={!showCompactNavigationRail} onSearch={handlePaletteOpen}
             // Solid: the strip renders inside the floating card and must be
             // the same continuous tone (Claude-desktop float, Q 2026-07-17).
             inCard={!effectiveGlassSurface}
@@ -4945,7 +4945,7 @@ function DashboardInner() {
         {(!workspaceSurfaceHidden || !showSidebarColumn) && <WorkspaceHeaderStrip
           leadingInset={!showCompactNavigationRail}
           sidebarVisible={sidebarVisible}
-          onToggleSidebar={undefined}
+          onToggleSidebar={toggleSidebarFromChrome}
           rightPanelOpen={showRightPanelColumn}
           rightPanelDisabled={viewportBands?.belowRightCollapse ?? false}
           onToggleRightPanel={compactShell || isPullRequestWorkspace ? undefined : handleToggleO8Panel}

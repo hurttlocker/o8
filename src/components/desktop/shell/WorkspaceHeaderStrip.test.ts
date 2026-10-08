@@ -55,6 +55,28 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     container.remove();
   });
 
+  it('follows visited tabs in both directions, skips closed tabs and branches after a new visit', async () => {
+    const selected: string[] = [];
+    const select = (event: Event) => selected.push((event as CustomEvent<{ tabId: string }>).detail.tabId);
+    window.addEventListener('o8:request-select-tab', select);
+    const render = async (id: string, ids = [0, 1, 2]) => {
+      await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({
+        headerActiveTabId: id, headerTabs: ids.map((index) => headerTab(index, `Session ${index}`)),
+      }))));
+    };
+    const button = (name: string) => container.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
+    try {
+      await render('tab-0'); expect(button('Back').disabled).toBe(true);
+      await render('tab-1'); await render('tab-2');
+      await act(async () => button('Back').click()); expect(selected.pop()).toBe('tab-1');
+      await render('tab-1');
+      await act(async () => button('Forward').click()); expect(selected.pop()).toBe('tab-2');
+      await render('tab-2', [0, 2]);
+      await act(async () => button('Back').click()); expect(selected.pop()).toBe('tab-0');
+      await render('tab-0', [0, 2]); await render('tab-1');
+      expect(button('Forward').disabled).toBe(true);
+    } finally { window.removeEventListener('o8:request-select-tab', select); }
+  });
   it('exposes the pill strip as a tablist of tabs with aria-selected', async () => {
     await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps())));
 

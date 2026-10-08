@@ -25,6 +25,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePublishSidebarAttention } from './repo-focus/tabs/chats/sidebar-view-store';
 import { motion } from 'framer-motion';
 import { deriveParkedLaneBuckets, type ReviewApprovalSummary } from '@/components/desktop/merge-beacon/derive';
 import { AGENT_STATUS_ACCENT } from '@/components/desktop/AgentStatusDot';
@@ -608,6 +609,7 @@ function AgentPanelExtraAgentsBase({
   }, [clearableRowKeys]);
 
   const needsYouCount = rankedRows.filter((entry) => entry.rank > 0).length;
+  usePublishSidebarAttention(needsYouCount);
   const highestBand = rankedRows.find((entry) => entry.rank > 0)?.band ?? null;
   // Tone ladder mirrors attentionWashStyle — 'human' is warm like rejected,
   // never slate, so the header count always matches the loudest wash below it.

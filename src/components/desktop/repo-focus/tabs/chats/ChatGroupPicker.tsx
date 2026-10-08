@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { FilterList } from 'iconoir-react';
 import { REPO_FOCUS_FONT } from '../../utils';
 
 import { CHAT_VIEW_LABELS, type ChatGroupMode } from './sidebar-view';
@@ -81,7 +80,7 @@ export function ChatGroupPicker({
         }}
       >
         {/* Iconoir FilterList — matches hurttlocker chrome vocabulary. */}
-        <FilterList width={12} height={12} color="currentColor" strokeWidth={1.8} />
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg>
 
       </button>
       {/* Always-mounted (display toggles) so agents can enumerate the

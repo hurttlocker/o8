@@ -4,6 +4,14 @@
 scrolling and keyboard access, keep focus visible, and reserve no scrollbar
 gutter. See [`STYLEGUIDE.md`](./STYLEGUIDE.md) for the shared interaction rules.
 
+The sidebar header holds the app mark, priority bell and search. The bell toggles
+between a compact normal list and a preview-rich priority list; its dot reflects
+pending attention from actual conversations and workers. Pinned and recent chats
+provide hierarchy without a redundant Chats label or an empty attention message.
+Keep additional grouping choices in the section's secondary menu. The icon rail
+stays visible when the list collapses; workspace back/forward and collapse controls
+remain available in the header. Preserve the status squares and worker motion.
+
 Inline code uses theme text tokens, with a restrained cyan for calls and shell
 snippets. Clickable file references use the accent blue. Avoid hardcoded bright
 code colors that compete with links, failures, or the surrounding prose.

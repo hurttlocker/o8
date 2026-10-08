@@ -31,6 +31,7 @@ interface HeaderIconPillProps {
   title?: string;
   onClick?: () => void;
   pressed?: boolean;
+  disabled?: boolean;
   /**
    * Per-context vertical nudge (px). -2 fits LeftHeaderStrip (32px strip,
    * paddingTop=5 card). WorkspaceHeaderStrip / PanelHeaderStrip use -3 to
@@ -45,19 +46,21 @@ export function HeaderIconPill({
   title,
   onClick,
   pressed,
+  disabled = false,
   yNudge = -2,
 }: HeaderIconPillProps) {
   return (
     <motion.button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
       aria-pressed={pressed}
       title={title ?? label}
       data-no-drag
       initial={false}
       animate="rest"
-      whileHover="hover"
+      whileHover={disabled ? undefined : "hover"}
       variants={{
         rest: {
           background: 'var(--t-pill-rest-bg, transparent)',
@@ -80,7 +83,8 @@ export function HeaderIconPill({
         paddingRight: 7,
         borderWidth: 0,
         borderRadius: 7,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.35 : 1,
         flexShrink: 0,
         marginTop: yNudge,
         WebkitTapHighlightColor: 'transparent',

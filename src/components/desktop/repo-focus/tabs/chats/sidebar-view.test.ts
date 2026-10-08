@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, Fragment } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentPanelExtraAgents, type LaneSummary } from '../../../AgentPanelExtraAgents';
 import { ChatsTab } from '../ChatsTab';
+import { SidebarHeaderActions } from '../../../shell/SidebarHeaderActions';
 import { CHAT_GROUP_BY_KEY, staysInWorkingView } from './sidebar-view';
 import type { ChatHistoryItem } from './types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -13,7 +14,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const repo = { id: 'test', name: 'project', localPath: '/tmp/sidebar-project', remoteUrl: null, defaultBranch: 'main' };
 const history = ['Idle', 'Running', 'Decision', 'Pinned'].map((title, index): ChatHistoryItem => ({
-  tabId: `thoughts-${title}`, title, preview: '', empty: false, messageCount: 1, model: 'codex',
+  tabId: `thoughts-${title}`, title, preview: `Latest update for ${title}`, empty: false, messageCount: 1, model: 'codex',
   savedAt: new Date(Date.now() - index * 60_000).toISOString(),
   modifiedAt: new Date(Date.now() - index * 60_000).toISOString(),
   starred: false, pinned: title === 'Pinned', repoPath: repo.localPath, repoName: repo.name, repoBranch: 'main',
@@ -30,12 +31,13 @@ describe('compact sidebar view through the chat panel', () => {
   let container: HTMLDivElement;
   let root: Root;
   const onOpen = vi.fn();
+  const onSearch = vi.fn();
   const render = async (active = 'thoughts-Idle') => {
-    await act(async () => root.render(createElement(ChatsTab, {
+    await act(async () => root.render(createElement(Fragment, null, createElement(SidebarHeaderActions, { onSearch }), createElement(ChatsTab, {
       repos: [repo], variant: 'mini', groupMode: 'flat', showLiveSessions: false,
       activeSessionKey: active, onOpenHistoryChat: onOpen, packets,
       agentsSection: (workingOnly) => createElement('span', { 'data-workers': String(workingOnly) }, 'Workers'),
-    })));
+    }))));
   };
   const rows = () => Array.from(container.querySelectorAll('[role="button"][title]')).map((row) => row.getAttribute('title')?.split(' · ')[0]);
   const trigger = () => container.querySelector<HTMLButtonElement>('[aria-label="Change chat view"]')!;
@@ -45,11 +47,30 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => item.click());
   };
   beforeEach(() => {
-    window.localStorage.clear(); onOpen.mockClear();
+    window.localStorage.clear(); onOpen.mockClear(); onSearch.mockClear();
     vi.stubGlobal('fetch', vi.fn(async (url) => ({ ok: true, json: async () => String(url).includes('chat-history/list') ? { conversations: history } : { lanes: [] } })));
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   });
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+  it('toggles priority from the header, shows previews and restores the normal view without opening a chat', async () => {
+    await render();
+    const bell = container.querySelector<HTMLButtonElement>('[aria-label="Priority chats"]')!;
+    expect(bell.getAttribute('aria-pressed')).toBe('false');
+    expect(bell.querySelector('[data-attention-dot]')).not.toBeNull();
+    expect(container.textContent).not.toContain('Latest update for');
+    expect(container.textContent).not.toContain('Nothing needs attention');
+    await act(async () => bell.click());
+    expect(bell.getAttribute('aria-pressed')).toBe('true');
+    expect(container.textContent).toContain('Latest update for Decision');
+    expect(container.textContent).toContain('Latest update for Running');
+    expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('flat');
+    expect(onOpen).not.toHaveBeenCalled();
+    await act(async () => bell.click());
+    expect(container.textContent).not.toContain('Latest update for');
+    expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('chronological');
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search chats"]')!.click());
+    expect(onSearch).toHaveBeenCalledOnce();
+  });
   it('persists working view, keeps decisions and selected idle chat, and forwards the worker filter', async () => {
     await render(); await choose('Working only');
     expect(rows()).toEqual(expect.arrayContaining(['Idle', 'Running', 'Decision']));
@@ -71,6 +92,7 @@ describe('compact sidebar view through the chat panel', () => {
     await choose('Group by date'); expect(container.textContent).toContain('Today');
   });
   it('centers the hit area, moves keyboard focus in the menu and returns it on Escape', async () => {
+    window.localStorage.setItem(CHAT_GROUP_BY_KEY, 'flat');
     await render(); expect(trigger().style.justifyContent).toBe('center');
     await act(async () => trigger().click());
     expect(document.activeElement?.textContent).toBe('Priority');

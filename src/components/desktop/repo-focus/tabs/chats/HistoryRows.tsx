@@ -229,6 +229,8 @@ export function HistoryChatRow({
   branchLabel,
   recede = false,
   washBand,
+  preview,
+  scheduled = false,
   onHoverChange,
 }: {
   item: ChatHistoryItem;
@@ -244,6 +246,8 @@ export function HistoryChatRow({
   branchLabel?: string | null;
   recede?: boolean;
   washBand?: AttentionBand | null;
+  preview?: string;
+  scheduled?: boolean;
   /** Fleet-reveal hook: rect on enter, null on leave. Wired only for threads
    *  that own live packets — see ChatsTab. */
   onHoverChange?: (rect: DOMRect | null) => void;
@@ -329,7 +333,7 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: compact && !(repoLabel || branchLabel || statusLabel) ? 33 : 47,
+        minHeight: preview ? 64 : compact && !(repoLabel || branchLabel || statusLabel) ? 33 : 47,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -415,6 +419,7 @@ export function HistoryChatRow({
         >
           {item.title}
         </span>
+        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: 4, fontSize: 11.5, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
         {(repoLabel || branchLabel || statusLabel || backendLabel) ? (
           <span
             style={{
@@ -466,6 +471,7 @@ export function HistoryChatRow({
           position: 'relative',
         }}
       >
+        {scheduled ? <span aria-label="Scheduled task" title="Scheduled task">◷</span> : null}
         {compact && ownedCount > 0 ? (
           <span
             style={{

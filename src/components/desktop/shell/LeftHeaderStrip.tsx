@@ -5,6 +5,8 @@
  * Hosts the macOS traffic-light inset and the sidebar toggle. Part of epic #1089.
  */
 
+import Image from 'next/image';
+import { SidebarHeaderActions } from './SidebarHeaderActions';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { TrafficLightsOrSpacer } from './TrafficLights';
@@ -29,9 +31,10 @@ interface LeftHeaderStripProps {
    */
   inCard?: boolean;
   windowControls?: boolean;
+  onSearch?: () => void;
 }
 
-export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, togglePillYNudge, inCard = false, windowControls = true }: LeftHeaderStripProps) {
+export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, togglePillYNudge, inCard = false, windowControls = true, onSearch }: LeftHeaderStripProps) {
   return (
     <ColumnHeaderStrip
       drag
@@ -46,6 +49,7 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
       // was tried (0.1.605) and REVERTED — resizing the titlebar container
       // outside tao's draw_rect left the webview under-filling the window.
       height={32}
+      right={!windowControls ? <SidebarHeaderActions onSearch={onSearch} /> : undefined}
       left={
         <>
           {/* Traffic lights: DOM-rendered when the shell hides the native
@@ -59,6 +63,20 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
               so the cluster doesn't jump when the sidebar collapses.
               See TrafficLights.tsx. */}
           {windowControls ? <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} leadInPx={6} /> : null}
+          {!windowControls ? (
+            <span
+              data-sidebar-brand="true"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                paddingLeft: 8,
+                pointerEvents: 'none',
+                userSelect: 'none',
+              }}
+            >
+              <Image src="/logos/o8-desktop.png" alt="o8" width={24} height={24} unoptimized style={{ display: 'block', objectFit: 'contain' }} />
+            </span>
+          ) : null}
           {onToggleSidebar ? <SidebarTogglePill
             sidebarVisible={sidebarVisible}
             onClick={onToggleSidebar}
