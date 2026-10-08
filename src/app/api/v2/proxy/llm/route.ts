@@ -20,7 +20,7 @@ import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinki
 import {
   computeCost,
   isSupportedProvider,
-  OPERATOR_FREE_OPENROUTER_MODELS,
+  OPERATOR_OPENROUTER_MODELS,
   OPERATOR_GEMINI_MODEL,
   OPERATOR_GEMINI_ROLLBACK_MODEL,
   PROVIDERS,
@@ -412,9 +412,9 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
 
   // o8 Operator — the branded zero-setup model, plan-gated (Q ruling
-  // 2026-07-12): founders/paid auto-ride Gemini Flash ("High"); the free plan
-  // auto-rides the $0 OpenRouter chain ("Low" — nemotron won the bake-off,
-  // gpt-oss-120b:free is the safety net, so o8 ALWAYS has a model). The tier
+  // 2026-07-12): with a local Gemini key, founders/paid auto-ride Gemini Flash
+  // ("High"); otherwise every plan rides the OpenAI-compatible chain: the managed
+  // text model, then the $0 model, so o8 ALWAYS has a model. The tier
   // arrives as thinkingEffort but is SERVER-ENFORCED: a free client asking for
   // high still gets the free chain (fail-closed). Founders draw no metered
   // usage; the abuse limiter below guards the rail against runaway loops.
@@ -478,7 +478,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     // OpenRouter and the managed proxy retain the two-model fallback chain.
     if (operatorEndpoint || openRouterKey) {
       let lastFailure: Response | null = null;
-      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_FREE_OPENROUTER_MODELS;
+      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_OPENROUTER_MODELS;
       for (const freeModel of operatorModels) {
         const response = await streamOpenRouterFallback({
           apiKey: openRouterKey ?? '',

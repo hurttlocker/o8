@@ -1,3 +1,4 @@
+import { managedTextModelOptions } from '@/lib/cortex/qa/llm/inference-route';
 import type { AuthContext } from '@/lib/auth/middleware';
 import { executeTool, TOOLS } from '@/lib/llm/tools';
 import type { Message } from './provider-config';
@@ -61,10 +62,10 @@ interface StreamOptions {
 }
 
 /**
- * o8 Operator OpenRouter path — streams an OpenAI-compatible response from an
- * OpenRouter model. This is the free plan's PRIMARY rail (nemotron, then
- * gpt-oss-120b — Q ruling + bake-off 2026-07-12) and the paid plan's fallback
- * when Gemini hits quota.
+ * o8 Operator OpenAI-compatible path — streams a response from the managed
+ * endpoint or a direct OpenRouter key. It is the primary rail on the managed
+ * endpoint (the managed text model, then the $0 model) and the paid plan's
+ * fallback when a local Gemini key hits quota.
  *
  * Tools are disabled on this path: tool support here is future work (nemotron
  * passed tool-calling in the bake-off, but this stream doesn't carry a tools
@@ -93,6 +94,7 @@ export async function streamOpenRouterFallback(options: StreamOptions): Promise<
           role: message.role,
           content: message.content,
         })),
+        ...managedTextModelOptions(model),
       }),
       signal: controller.signal,
     });
@@ -255,7 +257,7 @@ async function streamOpenRouterWithTools(
             upstream = await fetch(target.url, {
               method: 'POST',
               headers: target.headers,
-              body: JSON.stringify({ model, stream: true, messages: convo, tools, tool_choice: 'auto' }),
+              body: JSON.stringify({ model, stream: true, messages: convo, tools, tool_choice: 'auto', ...managedTextModelOptions(model) }),
               signal: stepController.signal,
             });
           } finally {

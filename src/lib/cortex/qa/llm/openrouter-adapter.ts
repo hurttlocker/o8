@@ -53,7 +53,7 @@ import {
   recordBrainOpenRouterSpend,
   type OpenRouterUsage,
 } from '@/lib/cortex/qa/llm/brain-spend';
-import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
+import { managedTextModelOptions, O8_MANAGED_TEXT_MODEL, resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -72,13 +72,12 @@ export interface CallOpenRouterOptions {
 }
 
 /**
- * Primary OpenRouter model. grok-4.1-fast (the 2026-04-30 bake-off winner)
- * was DEPRECATED by xAI (404 on every call, verified live 2026-06-11) and
- * its successor grok-4.3 costs 6x ($1.25/$2.50). flash-lite was the bake-off
- * runner-up — 505 ms p50, 6/6 quality, and the cheapest of the field at
- * $0.10/$0.40 per M tokens (verified live 2026-06-11: "OK" in 0.89s).
+ * Primary Brain model: the managed text model. It completed all six tasks of
+ * the orchestrator evaluation and runs with reasoning off for these short calls.
+ * The earlier primary, gemini-2.5-flash-lite, stays first in the in-call
+ * fallback chain for direct OpenRouter keys.
  */
-export const OPENROUTER_PRIMARY_MODEL = 'google/gemini-2.5-flash-lite';
+export const OPENROUTER_PRIMARY_MODEL = O8_MANAGED_TEXT_MODEL;
 
 /**
  * In-call fallback chain. OpenRouter's `models[]` parameter auto-fails over
@@ -86,12 +85,13 @@ export const OPENROUTER_PRIMARY_MODEL = 'google/gemini-2.5-flash-lite';
  * extra round-trip. (Verified live: a deprecated primary fails over to
  * models[0] inside one request.)
  *
- *   1. openai/gpt-5.4-nano — bake-off p95 sum 1088 ms, $0.20/$1.25
- *   2. x-ai/grok-4.3       — grok-4.1-fast's successor; pricier ($1.25/$2.50)
+ *   1. google/gemini-2.5-flash-lite — the previous primary, $0.10/$0.40
+ *   2. openai/gpt-5.4-nano — bake-off p95 sum 1088 ms, $0.20/$1.25
+ *   3. x-ai/grok-4.3       — grok-4.1-fast's successor; pricier ($1.25/$2.50)
  *                            but classifier/composer calls are small enough
  *                            that a last-resort fallback at 6x is still <1¢.
  */
-export const OPENROUTER_FALLBACK_MODELS = ['openai/gpt-5.4-nano', 'x-ai/grok-4.3'];
+export const OPENROUTER_FALLBACK_MODELS = ['google/gemini-2.5-flash-lite', 'openai/gpt-5.4-nano', 'x-ai/grok-4.3'];
 
 // ── Circuit breaker ──────────────────────────────────────────────────────────
 //
@@ -200,6 +200,7 @@ export async function callOpenRouter(
     messages: [{ role: 'user', content: prompt }],
     temperature: 0,
     max_tokens: Math.min(Math.max(opts.maxTokens ?? 512, 1), 4096),
+    ...managedTextModelOptions(primary),
     // Ask OpenRouter to return the call's cost in the response so the spend
     // ledger records exact figures instead of pricing-table estimates.
     ...(route.via === 'local' ? {} : { usage: { include: true } }),

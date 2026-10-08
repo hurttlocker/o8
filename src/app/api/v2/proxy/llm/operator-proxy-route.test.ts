@@ -87,3 +87,25 @@ describe('operator managed-proxy endpoint override', () => {
     expect((init as { headers: Record<string, string> }).headers.Authorization).toBe('Bearer sk-or-directkey');
   });
 });
+
+describe('operator chain on the OpenAI-compatible route', () => {
+  it('leads with the managed text model, reasoning off, then the $0 model without a reasoning field', async () => {
+    const { OPERATOR_OPENROUTER_MODELS } = await import('./provider-config');
+    expect(OPERATOR_OPENROUTER_MODELS).toEqual(['openai/gpt-6-luna', 'nvidia/nemotron-3.5-lightning:free']);
+    const { streamOpenRouterFallback } = await import('./operator-fallback');
+    for (const model of OPERATOR_OPENROUTER_MODELS) {
+      mockFetch.mockResolvedValueOnce(sse([chunk({ content: 'hi' }), 'data: [DONE]\n\n']));
+      await drain(await streamOpenRouterFallback({
+        apiKey: '',
+        endpoint: { url: `${DEFAULT_O8_API_BASE_URL}/v1/inference`, headers: { Authorization: 'Bearer plan.token.jwt' } },
+        messages: [{ role: 'user', content: 'hey' }],
+        model,
+        auth: null,
+      }));
+    }
+    const bodies = mockFetch.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+    expect(bodies[0]).toMatchObject({ model: 'openai/gpt-6-luna', reasoning_effort: 'none' });
+    expect(bodies[1].model).toBe('nvidia/nemotron-3.5-lightning:free');
+    expect(bodies[1]).not.toHaveProperty('reasoning_effort');
+  });
+});
