@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { laneGit } from '@/lib/lane/lane-git';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { autoCommitCompletionWorktree } from '@/lib/supervisor/completion-verification';
@@ -34,9 +35,9 @@ async function git(cwd: string, args: string[]) {
   });
 }
 
-async function headHasUnmergedWork(worktreePath: string, baseBranch: string): Promise<boolean> {
+async function headHasUnmergedWork(worktreePath: string, repoPath: string, baseBranch: string): Promise<boolean> {
   try {
-    await git(worktreePath, ['merge-base', '--is-ancestor', 'HEAD', baseBranch]);
+    await laneGit(worktreePath, repoPath, ['merge-base', '--is-ancestor', 'HEAD', baseBranch], { timeout: 30_000 });
     return false;
   } catch {
     return true;
@@ -52,7 +53,7 @@ async function preserveHeadRef(
     await git(repoPath, ['fetch', worktreePath, `+HEAD:${refName}`]);
     return;
   } catch {
-    await git(worktreePath, ['update-ref', refName, 'HEAD']);
+    await laneGit(worktreePath, repoPath, ['update-ref', refName, 'HEAD'], { timeout: 30_000 });
   }
 }
 
@@ -80,7 +81,7 @@ export async function preserveLaneWorktreeHead(
 
   const autoCommitted = await autoCommitCompletionWorktree(worktreePath, lane.repoPath);
   const baseBranch = lane.baseBranch?.trim() || 'main';
-  const hasUnmergedWork = await headHasUnmergedWork(worktreePath, baseBranch);
+  const hasUnmergedWork = await headHasUnmergedWork(worktreePath, lane.repoPath, baseBranch);
   if (!autoCommitted && !hasUnmergedWork) {
     return {
       preserved: false,
@@ -94,7 +95,7 @@ export async function preserveLaneWorktreeHead(
   const id = branchSafeId(path.basename(worktreePath) || lane.id);
   const branchName = `preserved/${id}`;
   const refName = `refs/heads/${branchName}`;
-  const { stdout } = await git(worktreePath, ['rev-parse', 'HEAD']);
+  const { stdout } = await laneGit(worktreePath, lane.repoPath, ['rev-parse', 'HEAD'], { timeout: 30_000 });
   const headSha = stdout.trim() || undefined;
   const alreadyPreserved = Boolean(
     headSha && await resolveRefSha(lane.repoPath, refName) === headSha,
