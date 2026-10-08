@@ -26,7 +26,7 @@ import {
   toAssistantUiToolCallPart,
   toProxyMessages,
 } from './mobile-assistant-chat-core';
-import { getRippleContextForMessage } from '@/lib/mobile/ripple-client';
+import { consumeRippleContextForMessage } from '@/lib/mobile/ripple-client';
 import { formatRippleSystemContext } from '@/lib/mobile/ripple-contract';
 
 type ContentEvent = {
@@ -321,14 +321,18 @@ function buildAssistantSnapshot(
   return content;
 }
 
-export function createMobileChatModel(selectedModel: ModelOption, repoPath: string | null, effortOverride?: string): ChatModelAdapter {
+export function createMobileChatModel(selectedModel: ModelOption, repoPath: string | null, effortOverride?: string, threadId?: string): ChatModelAdapter {
   return {
-    run: async function* ({ messages, abortSignal }: ChatModelRunOptions) {
+    run: async function* ({ messages, abortSignal, runConfig }: ChatModelRunOptions) {
       try {
         const proxyMessages = toProxyMessages(messages);
-        const lastUserMessage = [...proxyMessages].reverse().find((message) => message.role === 'user');
+        const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user');
         const ripplePatches = lastUserMessage
-          ? getRippleContextForMessage(lastUserMessage.content)
+          ? consumeRippleContextForMessage({
+              draftId: runConfig?.custom?.rippleDraftId, threadId, repoPath,
+              messageId: lastUserMessage.id,
+              utterance: lastUserMessage.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n'),
+            })
           : [];
         const messagesWithRipple = ripplePatches.length > 0
           ? [

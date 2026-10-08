@@ -29,6 +29,12 @@ export type RippleAodlPatch = {
   resolutionId: string;
 };
 
+export type RippleDraftScope = {
+  draftId: string;
+  threadId: string;
+  repoPath: string | null;
+};
+
 export type RippleEpisode = {
   version: 1;
   utterance: string;
@@ -37,7 +43,11 @@ export type RippleEpisode = {
   patch: RippleAodlPatch;
   resolutionMs: number;
   resolvedAt: string;
+  scope?: RippleDraftScope;
+  messageId?: string;
 };
+
+export type RippleConfirmedEpisode = RippleEpisode & { scope: RippleDraftScope };
 
 const AODL_PATH = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/i;
 const ALLOWED_AODL_ROOTS = new Set(['intent', 'constraints', 'references', 'verification']);
@@ -96,6 +106,28 @@ export function parseRippleResolutionResult(value: unknown): RippleResolutionRes
   if (!record(value)) return null;
   const id = cleanString(value.id, 96);
   return id ? { ...draft, id } : null;
+}
+
+/** Restore only the bounded, user-selected intent fields from a queued receipt. */
+export function parseRippleConfirmedEpisode(value: unknown): RippleConfirmedEpisode | null {
+  if (!record(value) || value.version !== 1 || !record(value.scope)) return null;
+  const resolution = parseRippleResolutionResult(value.resolution);
+  const { draftId, threadId, repoPath } = value.scope;
+  if (!resolution || resolution.kind !== 'choice'
+    || typeof value.utterance !== 'string' || !value.utterance.trim() || value.utterance.length > 4000
+    || typeof draftId !== 'string' || !draftId || draftId.length > 96
+    || typeof threadId !== 'string' || !threadId || threadId.length > 256
+    || (repoPath !== null && (typeof repoPath !== 'string' || repoPath.length > 4096))
+    || typeof value.resolvedAt !== 'string' || !Number.isFinite(Date.parse(value.resolvedAt))
+    || typeof value.resolutionMs !== 'number' || !Number.isFinite(value.resolutionMs) || value.resolutionMs < 0) return null;
+  const choice = resolution.options.find((option) => option.value === value.selectedValue);
+  if (!choice) return null;
+  return {
+    version: 1, utterance: value.utterance, resolution, selectedValue: choice.value,
+    patch: { path: resolution.aodlPath, value: choice.value, source: 'ripple', resolutionId: resolution.id },
+    resolutionMs: value.resolutionMs, resolvedAt: value.resolvedAt,
+    scope: { draftId, threadId, repoPath },
+  };
 }
 
 export function formatRippleSystemContext(patches: RippleAodlPatch[]): string {
