@@ -5307,7 +5307,6 @@ function DashboardInner() {
           } : undefined);
         }}
         onCreateTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
-        onSearch={handlePaletteOpen}
         onOpenPRs={() => {
           leaveNavTakeover();
           const repoPath = focusedWorkspaceTab?.repoPath ?? globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;

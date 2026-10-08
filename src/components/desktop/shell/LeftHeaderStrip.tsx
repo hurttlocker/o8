@@ -70,6 +70,7 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
                 display: 'flex',
                 alignItems: 'center',
                 paddingLeft: 8,
+                transform: 'translateX(-11.5px)',
                 pointerEvents: 'none',
                 userSelect: 'none',
               }}

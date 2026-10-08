@@ -15,7 +15,7 @@ afterEach(() => { auth.signedIn = false; vi.clearAllMocks(); vi.unstubAllGlobals
 it('keeps navigation usable with the chat list open or closed and reads fresh usage', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const callbacks = {
-    onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onSearch: vi.fn(),
+    onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(),
     onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(),
     onOpenPRs: vi.fn(), onOpenShortcuts: vi.fn(),
   };
@@ -38,10 +38,11 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
   try {
     await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: true, activeDestination: 'projects', glassSurface: false })));
     expect(fetch).not.toHaveBeenCalled();
+    expect(host.querySelector('[aria-label="Search"]')).toBeNull();
     expect(button('Projects').getAttribute('aria-current')).toBe('page');
     expect(button('Hide chats').getAttribute('aria-expanded')).toBe('true');
     expect(button('Hide chats').getAttribute('aria-controls')).toBe('o8-chat-list');
-    for (const [label, callback] of [['Home', callbacks.onHome], ['New session', callbacks.onNewSession], ['Terminal', callbacks.onCreateTerminal], ['Search', callbacks.onSearch], ['Projects', callbacks.onOpenProjects], ['PRs', callbacks.onOpenPRs], ['Settings', callbacks.onOpenSettings], ['Hide chats', callbacks.onToggleSidebar]] as const) {
+    for (const [label, callback] of [['Home', callbacks.onHome], ['New session', callbacks.onNewSession], ['Terminal', callbacks.onCreateTerminal], ['Projects', callbacks.onOpenProjects], ['PRs', callbacks.onOpenPRs], ['Settings', callbacks.onOpenSettings], ['Hide chats', callbacks.onToggleSidebar]] as const) {
       await act(async () => button(label).click());
       expect(callback).toHaveBeenCalledOnce();
       expect(button(label).style.minWidth).toBe('44px');
@@ -78,7 +79,7 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onSearch: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(), onOpenPRs: vi.fn(), onOpenShortcuts: vi.fn() };
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(), onOpenPRs: vi.fn(), onOpenShortcuts: vi.fn() };
   const settings = vi.fn();
   const help = vi.fn();
   window.addEventListener(OPEN_SETTINGS_TAB_EVENT, settings);

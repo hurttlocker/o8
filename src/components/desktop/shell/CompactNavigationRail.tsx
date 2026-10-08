@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { SmoothCorners } from '@lisse/react';
-import { AutoFlash, ControlSlider, Delivery, HomeSimple, InputSearch } from 'iconoir-react';
+import { AutoFlash, ControlSlider, Delivery, HomeSimple } from 'iconoir-react';
 import { CircleUser, Gauge, GitPullRequest, MessageSquare, Play, Terminal, Settings2 as Settings } from '@/components/desktop/lucide-shims';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
@@ -41,7 +41,7 @@ type RailNavAction = 'handoffs' | 'automations' | 'customize' | 'projects';
 
 export function CompactNavigationRail({
   sidebarVisible, onToggleSidebar, activeDestination, glassSurface,
-  onHome, onNewSession, onCreateTerminal, onSearch, onOpenProjects, onOpenSettings, onOpenShortcuts, onOpenPRs,
+  onHome, onNewSession, onCreateTerminal, onOpenProjects, onOpenSettings, onOpenShortcuts, onOpenPRs,
 }: {
   sidebarVisible: boolean;
   onToggleSidebar: () => void;
@@ -50,7 +50,6 @@ export function CompactNavigationRail({
   onHome: () => void;
   onNewSession: () => void;
   onCreateTerminal: () => void;
-  onSearch: () => void;
   onOpenProjects: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
@@ -179,7 +178,6 @@ export function CompactNavigationRail({
       <button id="o8-chat-list-toggle" type="button" aria-label={sidebarVisible ? 'Hide chats' : 'Show chats'} title={sidebarVisible ? 'Hide chats' : 'Show chats'} aria-expanded={sidebarVisible} aria-controls="o8-chat-list" onClick={onToggleSidebar} style={{ ...railButton, background: sidebarVisible ? 'var(--t-hover)' : 'transparent' }}>
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></svg>
       </button>
-      <button type="button" aria-label="Search" title="Search" onClick={onSearch} style={railButton}><InputSearch width={20} height={20} strokeWidth={1.8} /></button>
       <div style={{ width: 27, height: 1, marginTop: 6, marginBottom: 6, flexShrink: 0, background: 'var(--t-divider-subtle)' }} />
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 0, flexShrink: 1, overflowY: 'auto', scrollbarWidth: 'none' }}>
         {navItems.map((item) => (
