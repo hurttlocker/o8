@@ -2510,7 +2510,6 @@ button.workflow-file-item.workflow-file-item-active {
 [data-right-pr-tabs] button:focus-visible,
 [aria-label="Panel views"] button:focus-visible,
 [aria-label="Open a panel"]:focus-visible,
-[aria-label="Chat list width"]:focus-visible,
 [data-mcp-scope="compact-navigation-rail"] button:focus-visible {
   outline: 2px solid var(--t-accent) !important;
   outline-offset: -3px;

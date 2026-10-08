@@ -33,8 +33,6 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     expect(found).not.toBeNull();
     return found!;
   };
-  const handoffs = vi.fn();
-  window.addEventListener('o8:open-handoffs', handoffs);
   try {
     await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: true, activeDestination: 'projects', glassSurface: false })));
     expect(fetch).not.toHaveBeenCalled();
@@ -49,8 +47,7 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
       expect(button(label).style.minHeight).toBe('44px');
     }
     expect(button('Projects').nextElementSibling).toBe(button('PRs'));
-    await act(async () => button('Handoffs').click());
-    expect(handoffs).toHaveBeenCalledOnce();
+    expect(host.querySelector('[aria-label="Handoffs"]')).toBeNull();
     await act(async () => button('Runtime usage').focus());
     expect(document.getElementById('o8-rail-usage-tooltip')?.textContent).toContain('40% used');
     for (const scroller of host.querySelectorAll<HTMLElement>('[style*="overflow-y: auto"]')) expect(scroller.style.scrollbarWidth).toBe('none');
@@ -67,7 +64,6 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     expect((rail as HTMLElement).style.boxShadow).toBe('none');
     expect(fetch).toHaveBeenCalledWith('/api/runtime/capacity', expect.objectContaining({ cache: 'no-store' }));
   } finally {
-    window.removeEventListener('o8:open-handoffs', handoffs);
     await act(async () => root.unmount());
     host.remove();
   }

@@ -24,14 +24,16 @@ interface Props {
   renderHistoryRow: (item: ChatHistoryItem) => ReactNode;
   hiddenChatCount: number;
   showMore: () => void;
+  leadingContent?: ReactNode;
+  leadingPriority?: boolean;
 }
 export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, remainder,
   flatHistoryItems, flatHistoryDateGroups, flatHistoryRepoGroups, collapsedRepoGroups,
   repoByGroupKey, toggleRepoGroup, onCreateOrchestratorForRepo, renderHistoryRow,
-  hiddenChatCount, showMore }: Props) {
+  hiddenChatCount, showMore, leadingContent, leadingPriority = false }: Props) {
   const normal = chatGroupBy === 'chronological';
   const source = normal ? flatHistoryItems : remainder;
-  const heading = chatGroupBy === 'scheduled' ? 'Scheduled' : (chatGroupBy === 'flat' || chatGroupBy === 'working') && priority.length > 0 ? 'Priority' : source.some((item) => item.pinned) ? 'Pinned' : 'Recents';
+  const heading = chatGroupBy === 'scheduled' ? 'Scheduled' : (chatGroupBy === 'flat' || chatGroupBy === 'working') && (priority.length > 0 || leadingPriority) ? 'Priority' : source.some((item) => item.pinned) ? 'Pinned' : 'Recents';
   const pinned = source.filter((item) => item.pinned);
   const conversations = source.filter((item) => !item.pinned);
   return (
@@ -39,6 +41,7 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
       <SectionLabel label={heading} compact action={
         <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
       } />
+      {leadingContent}
       {chatGroupBy === 'flat' || chatGroupBy === 'working' ? (
         <>
           {priority.map(renderHistoryRow)}

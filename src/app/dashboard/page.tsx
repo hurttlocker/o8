@@ -20,6 +20,7 @@ import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { CompactNavigationRail } from '@/components/desktop/shell/CompactNavigationRail';
 import { ChatListColumn, NAVIGATION_RAIL_WIDTH } from '@/components/desktop/shell/ChatListColumn';
+import { ChatListResizeEdge } from '@/components/desktop/shell/ChatListResizeEdge';
 import { ProjectsPage } from '@/components/desktop/ProjectsPage';
 import { RetainedCustomizeView } from '@/components/desktop/customize/RetainedCustomizeView';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
@@ -4864,52 +4865,8 @@ function DashboardInner() {
       );
       })()}
 
-      {/* ── Left drag handle ── */}
-      {showSidebarColumn && !sidebarOverlay && <div
-        role="separator"
-        tabIndex={0}
-        aria-label="Chat list width"
-        aria-orientation="vertical"
-        aria-valuemin={160}
-        aria-valuemax={500}
-        aria-valuenow={leftWidth}
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            event.preventDefault();
-            setLeftWidth((width) => Math.max(160, Math.min(500, width + (event.key === 'ArrowRight' ? 16 : -16))));
-          }
-        }}
-        onMouseDown={startLeftDrag}
-        onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle-hover, var(--t-text-faint))'; }}
-        onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
-        style={{
-          width: 6,
-          cursor: 'col-resize',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          zIndex: 10,
-        }}
-      >
-        {/* Divider pill is ALWAYS visible (Q ruling 2026-07-12) — a
-            hidden-until-hover handle reads as no affordance at all. Rest
-            paints the drag-handle token at full strength; hover glows by
-            swapping to the stronger drag-handle-hover color, NOT by opacity
-            (the token's low alpha over glass made any opacity dance
-            invisible). The translateX centers the pill in the VISIBLE gap:
-            the workspace card's marginLeft (workspaceInset) extends the gap
-            rightward past this 6px gutter, so a gutter-centered pill read
-            off-center (Q report 2026-07-14). */}
-        <div style={{
-          width: 3,
-          height: 40,
-          borderRadius: 2,
-          backgroundColor: 'var(--t-drag-handle)',
-          transition: 'background-color 150ms',
-          transform: `translateX(${workspaceInset / 2}px)`,
-        }} />
-      </div>}
+      {showSidebarColumn && !sidebarOverlay ? <ChatListResizeEdge width={leftWidth}
+        glass={effectiveGlassSurface} onStartDrag={startLeftDrag} setWidth={setLeftWidth} /> : null}
 
       {/* ── Center + right region ──
           Wrapped in its own column so the DesktopStatusBar renders at ITS

@@ -12,6 +12,8 @@ import {
 } from '../utils';
 import { SessionRow } from './AgentRows';
 import { CompactChatHistory } from './chats/CompactChatHistory';
+import { SidebarDemoStates } from './chats/SidebarDemoStates';
+import { useSidebarFixtures } from './chats/use-sidebar-fixtures';
 import { staysInWorkingView, type ChatGroupMode } from './chats/sidebar-view';
 import { setSidebarView, usePublishSidebarAttention, useSidebarView } from './chats/sidebar-view-store';
 import { HISTORY_ROW_TONES } from './chats/constants';
@@ -79,6 +81,7 @@ export function ChatsTab({
   const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
   const [showAllChats, setShowAllChats] = useState(false);
+  const demoFixtures = useSidebarFixtures(variant === 'mini');
 
   // Group-by mode for the left-rail chat list (mini / flat variant).
   // Keep the existing persisted grouping ids compatible with the view menu.
@@ -297,8 +300,9 @@ export function ChatsTab({
   ), [packets, targetRepos]);
 
   const visibleHistory = useMemo(() => (
-    historyItems.filter((item) => historyIsVisibleForRepos(item, targetRepos))
-  ), [historyItems, targetRepos]);
+    historyItems.filter((item) => !demoFixtures.some((sample) => sample.tabId === item.tabId)
+      && historyIsVisibleForRepos(item, targetRepos))
+  ), [historyItems, targetRepos, demoFixtures]);
   const historyPacketsByTabId = useMemo(() => new Map(
     visibleHistory.map((item) => [item.tabId, pickHistoryPacket(item, visiblePackets)]),
   ), [visibleHistory, visiblePackets]);
@@ -601,6 +605,9 @@ export function ChatsTab({
                 repoByGroupKey={repoByGroupKey} toggleRepoGroup={toggleRepoGroup}
                 onCreateOrchestratorForRepo={onCreateOrchestratorForRepo} renderHistoryRow={renderHistoryRow}
                 hiddenChatCount={hiddenChatCount} showMore={() => setShowAllChats(true)}
+                leadingPriority={demoFixtures.some((sample) => !['running', 'idle'].includes(sample.state))}
+                leadingContent={<SidebarDemoStates key={chatGroupBy} mode={chatGroupBy} fixtures={demoFixtures}
+                  activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />}
               />
               {chatGroupBy === 'scheduled' ? visibleSessions.filter(isOwnedAutomationSession).map((session) => (
                 <CompactSessionRow key={session.sessionKey} session={session} onSelectSession={onSelectSession} />

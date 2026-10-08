@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { CheckCircle2 } from '../../../lucide-shims';
 import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
@@ -12,42 +12,12 @@ import {
   packetRepoLabel,
   packetTimestamp,
 } from './helpers';
-import { AGENT_STATUS_ACCENT, AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { ScheduledTaskMark } from '@/components/desktop/ScheduledTaskMark';
 import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
-import { repoSuffix, type AttentionBand } from './sections';
+import { repoSuffix } from './sections';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
-
-// 'human' rides the warm rejected accent, NOT the slate review tone — rank 3
-// ("agent blocked on you") washed in gray reads as a hover state and vanishes
-// next to finished rows (rig finding 2026-07-31). Slate stays for review:
-// quieter is correct one rank down. Hierarchy: red > orange > slate > green.
-export function attentionAccent(band: AttentionBand): string | null {
-  return band === 'failed'
-    ? AGENT_STATUS_ACCENT.failed
-    : band === 'rejected' || band === 'human'
-      ? AGENT_STATUS_ACCENT.rejected
-      : band === 'review'
-        ? AGENT_STATUS_ACCENT.review
-        : band === 'merged'
-          ? AGENT_STATUS_ACCENT.merged
-          : null;
-}
-
-export function attentionWashStyle(band: AttentionBand): CSSProperties | null {
-  const accent = attentionAccent(band);
-  if (!accent) return null;
-  return {
-    position: 'absolute',
-    top: 2,
-    right: 6,
-    bottom: 2,
-    left: 6,
-    borderRadius: 8,
-    background: `color-mix(in srgb, ${accent} 10%, transparent)`,
-    zIndex: 0,
-  };
-}
 
 export function ArchivedLaneCompactRow({
   lane,
@@ -225,7 +195,6 @@ export function HistoryChatRow({
   ownedCount = 0,
   repoLabel,
   recede = false,
-  washBand,
   preview,
   scheduled = false,
   roomy = false,
@@ -242,7 +211,6 @@ export function HistoryChatRow({
   ownedCount?: number;
   repoLabel?: string | null;
   recede?: boolean;
-  washBand?: AttentionBand | null;
   preview?: string;
   scheduled?: boolean;
   roomy?: boolean;
@@ -361,12 +329,10 @@ export function HistoryChatRow({
           lighter var(--t-hover) fill so sibling states stay cohesive. Inset
           so the fill never touches the rail edges; text X stays exactly 37
           (the hurttlocker indent is untouched — this layer is behind it). */}
-      {(active || hovered || washBand) ? (
+      {(active || hovered) ? (
         <span
           aria-hidden
           style={{
-            ...(attentionWashStyle(washBand ?? 'neutral') ?? {}),
-            ...(active || hovered ? {
               position: 'absolute',
               top: 2,
               right: 4,
@@ -375,7 +341,6 @@ export function HistoryChatRow({
               borderRadius: 9,
               background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
               zIndex: 0,
-            } : {}),
           }}
         />
       ) : null}
@@ -410,7 +375,7 @@ export function HistoryChatRow({
           position: 'relative',
         }}
       >
-        {scheduled ? <span aria-label="Scheduled task" title="Scheduled task">◷</span> : null}
+        {scheduled ? <ScheduledTaskMark /> : null}
         {compact && ownedCount > 0 ? (
           <span
             style={{

@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { SmoothCorners } from '@lisse/react';
 import { AutoFlash, ControlSlider, Delivery, HomeSimple } from 'iconoir-react';
-import { CircleUser, Gauge, GitPullRequest, MessageSquare, Play, Terminal, Settings2 as Settings } from '@/components/desktop/lucide-shims';
+import { CircleUser, Gauge, GitPullRequest, Play, Terminal, Settings2 as Settings } from '@/components/desktop/lucide-shims';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
 import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
@@ -37,7 +37,7 @@ const railButton: CSSProperties = {
   fontFamily: 'var(--font-sans-system)',
 };
 
-type RailNavAction = 'handoffs' | 'automations' | 'customize' | 'projects';
+type RailNavAction = 'automations' | 'customize' | 'projects';
 
 export function CompactNavigationRail({
   sidebarVisible, onToggleSidebar, activeDestination, glassSurface,
@@ -137,7 +137,6 @@ export function CompactNavigationRail({
     window.dispatchEvent(new CustomEvent(`o8:open-${action}`));
   };
   const navItems = [
-    { id: 'handoffs', label: 'Handoffs', icon: <MessageSquare size={18} strokeWidth={1.8} /> },
     { id: 'automations', label: 'Automations', icon: <AutoFlash width={19} height={19} strokeWidth={1.8} /> },
     { id: 'customize', label: 'Customize', icon: <ControlSlider width={19} height={19} strokeWidth={1.8} /> },
     { id: 'projects', label: 'Projects', icon: <Delivery width={19} height={19} strokeWidth={1.8} /> },

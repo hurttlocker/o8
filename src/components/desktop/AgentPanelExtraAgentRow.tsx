@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
-import { attentionWashStyle } from './repo-focus/tabs/chats/HistoryRows';
+import { ScheduledTaskMark } from './ScheduledTaskMark';
 import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
@@ -37,6 +37,7 @@ export interface ExtraAgentRow {
    *  sidebar agrees with the decision banner (which reads the same verdict).
    *  Detachment-proof: derived from durable approvals, not the lane status. */
   rejected?: boolean;
+  scheduled?: boolean;
 }
 
 export interface ExtraAgentActionMenuState {
@@ -188,24 +189,6 @@ export function ExtraAgentRowView({
     : link === 'dimmed'
       ? true
       : shouldRecede({ band, active, hovered });
-  // Linked rows with no band wash (in-flight/settled) still get the neutral
-  // hover-layer fill so the whole fleet visibly lights up; dimmed rows drop
-  // their wash entirely — attention lives with the hovered thread's agents.
-  const bandWash = attentionWashStyle(band);
-  const washStyle = link === 'dimmed'
-    ? null
-    : link === 'linked'
-      ? bandWash ?? {
-        position: 'absolute' as const,
-        top: 2,
-        right: 6,
-        bottom: 2,
-        left: 6,
-        borderRadius: 8,
-        background: 'var(--t-hover)',
-        zIndex: 0,
-      }
-      : bandWash;
   const handleClick = useCallback(() => {
     if (onFocusRow) {
       onFocusRow(row);
@@ -260,12 +243,10 @@ export function ExtraAgentRowView({
       onFocus={(event) => onOpenHoverCard?.(row, event.currentTarget.getBoundingClientRect())}
       onBlur={() => onCloseHoverCard?.()}
     >
-      {(active || hovered || washStyle) ? (
+      {(active || hovered || link === 'linked') ? (
         <span
           aria-hidden
           style={{
-            ...(washStyle ?? {}),
-            ...(active || hovered ? {
               position: 'absolute',
               top: 2,
               right: 6,
@@ -274,7 +255,6 @@ export function ExtraAgentRowView({
               borderRadius: 8,
               background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
               zIndex: 0,
-            } : {}),
           }}
         />
       ) : null}
@@ -359,6 +339,7 @@ export function ExtraAgentRowView({
           rows above (Q ruling 2026-07-12: spawned agents carry the time
           too). Hidden while hovered so it never fights the Retry action. */}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 17, flexShrink: 0, position: 'relative' }}>
+      {row.scheduled ? <ScheduledTaskMark /> : null}
       {row.lastActivityAt > 0 && !(canRetry && hovered) ? (
         <span
           style={{
