@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
 import { commitPiWrite } from './approved-write';
 import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
-import { PiConfinementUnavailable } from './confine';
+import { ConfinementUnavailable } from '@/lib/sandbox/confine';
 
 export const PI_SDK_TOOLS = [
   { name: 'read_file', description: 'Read a UTF-8 file in the selected workspace.', parameters: {
@@ -114,7 +114,7 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
   try {
     text = await run(Boolean(confine));
   } catch (error) {
-    if (!confine || !(error instanceof PiConfinementUnavailable)) throw error;
+    if (!confine || !(error instanceof ConfinementUnavailable)) throw error;
     // Nothing started. Lane rules cover only a confined command, so the operator approves this one.
     if (!await confine.inbox({ name: call.name, args: structuredClone(args), risk: policy.risk,
       policyRuleId: policy.ruleId }, signal)) throw new Error('Command was not approved');
