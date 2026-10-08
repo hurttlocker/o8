@@ -231,6 +231,7 @@ export function HistoryChatRow({
   washBand,
   preview,
   scheduled = false,
+  roomy = false,
   onHoverChange,
 }: {
   item: ChatHistoryItem;
@@ -248,6 +249,7 @@ export function HistoryChatRow({
   washBand?: AttentionBand | null;
   preview?: string;
   scheduled?: boolean;
+  roomy?: boolean;
   /** Fleet-reveal hook: rect on enter, null on leave. Wired only for threads
    *  that own live packets — see ChatsTab. */
   onHoverChange?: (rect: DOMRect | null) => void;
@@ -333,7 +335,7 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: preview ? 64 : compact && !(repoLabel || branchLabel || statusLabel) ? 33 : 47,
+        minHeight: roomy ? (preview ? 78 : 52) : preview ? 64 : compact && !(repoLabel || branchLabel || statusLabel) ? 33 : 47,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -348,9 +350,9 @@ export function HistoryChatRow({
         outline: keyboardFocused ? '2px solid var(--t-accent)' : 'none',
         outlineOffset: -3,
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: 3,
+        paddingTop: roomy ? 8 : 3,
         paddingRight: 12,
-        paddingBottom: 3,
+        paddingBottom: roomy ? 8 : 3,
         // Indented to align with top-nav text X (MiniAgentPanelAction =
         // paddingLeft 12 + 17 icon + 8 gap = 37). Folder icon on repo
         // header sits at X=12, so chats nest visually under their group.
@@ -419,7 +421,7 @@ export function HistoryChatRow({
         >
           {item.title}
         </span>
-        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: 4, fontSize: 11.5, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
+        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: roomy ? 6 : 4, fontSize: 11.5, lineHeight: roomy ? 1.45 : 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
         {(repoLabel || branchLabel || statusLabel || backendLabel) ? (
           <span
             style={{

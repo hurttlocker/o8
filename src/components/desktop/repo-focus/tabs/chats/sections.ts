@@ -16,6 +16,7 @@ export type AttentionBand =
   | 'human'
   | 'review'
   | 'merged'
+  | 'finished'
   | 'in-flight'
   | 'settled'
   | 'neutral';
@@ -33,6 +34,7 @@ const ATTENTION_RANK: Record<AttentionBand, number> = {
   human: 3,
   review: 2,
   merged: 1,
+  finished: 1,
   'in-flight': 0,
   settled: 0,
   neutral: 0,
@@ -67,6 +69,9 @@ export function attentionBand(subject: AttentionSubject): AttentionBand {
   if (REVIEW_STATUSES.has(status) || outcome === 'pr_opened') return 'review';
   if ((outcome === 'merged' || status === 'merged' || status === 'released') && subject.unread) {
     return 'merged';
+  }
+  if (subject.unread && (status === 'completed' || outcome === 'no_changes' || outcome === 'discarded')) {
+    return 'finished';
   }
   if (IN_FLIGHT_STATUSES.has(status)) return 'in-flight';
   if (outcome || TERMINAL_STATUSES.has(status)) return 'settled';
@@ -109,11 +114,10 @@ export function isCompletionUnread(
   completionAt: string | number | null | undefined,
   lastVisited: number | null,
 ): boolean {
-  if (lastVisited == null) return false;
   const completedAt = typeof completionAt === 'number'
     ? completionAt
     : Date.parse(completionAt ?? '');
-  return Number.isFinite(completedAt) && completedAt > lastVisited;
+  return Number.isFinite(completedAt) && completedAt > (lastVisited ?? 0);
 }
 
 export function deriveSweptThreads(

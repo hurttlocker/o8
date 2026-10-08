@@ -85,7 +85,8 @@ function rowDotState(row: ExtraAgentRow): AgentDotState {
   // 'merged'/'released' are real lane terminal states (the DB carries them) —
   // they were missing here, so a merged packet's row kept the reviewing dot
   // (operator report 2026-07-15).
-  if (lane === 'completed' || lane === 'merged' || lane === 'released') return 'merged';
+  if (lane === 'completed') return 'merged';
+  if (lane === 'merged' || lane === 'released') return 'merged';
   if (lane === 'failed' || lane === 'recovering') return 'failed';
   if (lane === 'archived') return 'idle';
   // A declined review reads as 'rejected' — checked before the generic review
@@ -112,7 +113,8 @@ function rowStatusLabel(row: ExtraAgentRow): string {
   if (lane === 'awaiting_orchestrator') return 'escalated';
   if (lane === 'failed' || lane === 'recovering') return 'failed';
   if (lane === 'archived') return 'archived';
-  if (lane === 'completed' || lane === 'merged' || lane === 'released') return 'merged';
+  if (lane === 'completed') return 'finished';
+  if (lane === 'merged' || lane === 'released') return 'merged';
   if (lane === 'launching' || lane === 'running' || lane === 'merging') return 'running';
   if (lane === 'paused' || lane === 'idle') return 'idle';
   if (row.status === 'running') return 'running';
@@ -152,8 +154,10 @@ export function ExtraAgentRowView({
   band,
   repoLabel,
   link,
+  roomy = false,
 }: {
   row: ExtraAgentRow;
+  roomy?: boolean;
   active: boolean;
   onSelectSession?: (sessionKey: string) => void;
   onFocusRow?: (row: ExtraAgentRow) => void;
@@ -222,9 +226,9 @@ export function ExtraAgentRowView({
       title={row.statusEvidence?.summary ?? (canFocus ? `Focus ${row.name}` : row.name)}
       style={{
         width: '100%',
-        minHeight: 31,
-        paddingTop: 5,
-        paddingBottom: 5,
+        minHeight: roomy ? 52 : 31,
+        paddingTop: roomy ? 10 : 5,
+        paddingBottom: roomy ? 10 : 5,
         paddingLeft: 37,
         paddingRight: 12,
         borderWidth: 0,
@@ -329,7 +333,7 @@ export function ExtraAgentRowView({
         ) : null}
       </span>
       <OriginChip origin={row.origin} />
-      {row.outcome ? (
+      {row.outcome || row.laneStatus === 'completed' ? (
         <span
           style={{
             flexShrink: 1,
@@ -347,7 +351,9 @@ export function ExtraAgentRowView({
             position: 'relative',
           }}
         >
-          {row.outcome === 'merged'
+          {row.laneStatus === 'completed' && !row.outcome
+            ? 'Finished'
+            : row.outcome === 'merged'
             ? 'Merged'
             : row.outcome === 'no_changes'
               ? 'Finished — no changes'

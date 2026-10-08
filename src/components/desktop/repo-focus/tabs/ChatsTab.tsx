@@ -46,6 +46,7 @@ import {
   repoSuffix,
   SIDEBAR_HOVER_THREAD_EVENT,
 } from './chats/sections';
+import { useRowReadState } from './chats/use-row-read-state';
 import { getLastVisited, markVisited } from './chats/read-state';
 import type {
   ArchivedLaneRow,
@@ -175,11 +176,6 @@ export function ChatsTab({
     if (!historyItems.some((item) => item.tabId === activeThreadId)) return;
     markVisited(`thread:${activeThreadId}`);
   }, [activeSessionKey, historyItems]);
-
-  const openHistoryItem = useCallback((item: ChatHistoryItem) => {
-    markVisited(`thread:${item.tabId}`);
-    onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item));
-  }, [onOpenHistoryChat]);
 
   // Archived agent sessions (Codex / lanes table) — only fetched in the
   // compact left-rail variant where they render inline under each repo.
@@ -356,14 +352,30 @@ export function ChatsTab({
     return map;
   }, [visiblePackets]);
 
-  const historyAttentionPackets = useMemo(() => new Map(visibleHistory.map((item) => {
+  const readStateVersion = useRowReadState();
+  const packetAttention = useCallback((packet: typeof packets[number]) => ({
+    status: packet.status, rejected: packet.review?.approved === false,
+    outcome: packet.releaseState === 'released' ? 'merged' : null,
+    unread: isCompletionUnread(packetTimestamp(packet), getLastVisited(`packet:${packet.id}`)),
+  }), []);
+  const historyAttentionPackets = useMemo(() => {
+    void readStateVersion; // Receipt reads change priority without a server refresh.
+    return new Map(visibleHistory.map((item) => {
     const candidates = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])]
       .filter((packet): packet is typeof visiblePackets[number] => Boolean(packet));
-    candidates.sort((a, b) => attentionRank({ status: b.status }) - attentionRank({ status: a.status })
+    candidates.sort((a, b) => attentionRank(packetAttention(b)) - attentionRank(packetAttention(a))
       || Number(staysInWorkingView({ status: b.status })) - Number(staysInWorkingView({ status: a.status }))
       || packetSortTime(b) - packetSortTime(a));
     return [item.tabId, candidates[0]];
-  })), [historyPacketsByTabId, ownedPacketsByThread, visibleHistory]);
+    }));
+  }, [historyPacketsByTabId, ownedPacketsByThread, packetAttention, readStateVersion, visibleHistory]);
+
+  const openHistoryItem = useCallback((item: ChatHistoryItem) => {
+    markVisited(`thread:${item.tabId}`);
+    const related = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])];
+    for (const packet of related) if (packet) markVisited(`packet:${packet.id}`);
+    onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item));
+  }, [historyPacketsByTabId, onOpenHistoryChat, ownedPacketsByThread]);
 
   const visibleSessions = useMemo(() => (
     ideWorkspaceSessions
@@ -380,7 +392,9 @@ export function ChatsTab({
   const shownSessions = showLiveSessions ? visibleSessions : visibleSessions.filter(isAutomationSession);
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
-  const sortedChatItems = useMemo(() => (
+  const sortedChatItems = useMemo(() => {
+    void readStateVersion;
+    return (
     sweptThreads.chats.filter((item) => {
       if (!compact || chatGroupBy !== 'working') return true;
       const selected = activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`;
@@ -392,8 +406,9 @@ export function ChatsTab({
       })) || ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId)
         && staysInWorkingView({ status: session.status }));
     }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
-  ), [activeSessionKey, chatGroupBy, compact, effectiveModifiedAtMs, historyPacketsByTabId,
-    ideWorkspaceSessions, ownedPacketsByThread, sweptThreads.chats]);
+    );
+  }, [activeSessionKey, chatGroupBy, compact, effectiveModifiedAtMs, historyPacketsByTabId,
+    ideWorkspaceSessions, ownedPacketsByThread, readStateVersion, sweptThreads.chats]);
   const chatCap = compact && !showAllChats ? 12 : Number.POSITIVE_INFINITY;
   const historyCap = Number.isFinite(remainingHistorySlots) ? remainingHistorySlots : Number.POSITIVE_INFINITY;
   const flatHistoryItems = sortedChatItems.slice(0, Math.max(0, Math.min(chatCap, historyCap)));
@@ -407,6 +422,7 @@ export function ChatsTab({
     [flatHistoryItems],
   );
   const flatPrioritySplit = useMemo(() => {
+    void readStateVersion;
     const eligibleItems = sortedChatItems.slice(0, historyCap);
     const split = derivePrioritySplit(eligibleItems.map((item) => {
       const packet = historyAttentionPackets.get(item.tabId);
@@ -426,7 +442,7 @@ export function ChatsTab({
       priority: [...split.priority, ...split.remainder.filter((entry) => staysInWorkingView(entry))].map((entry) => entry.item),
       remainder: split.remainder.filter((entry) => !staysInWorkingView(entry)).map((entry) => entry.item),
     };
-  }, [historyAttentionPackets, historyCap, sortedChatItems]);
+  }, [historyAttentionPackets, historyCap, readStateVersion, sortedChatItems]);
   usePublishSidebarAttention(flatPrioritySplit.needsAttention, compact);
   const flatRemainderItems = [...flatPrioritySplit.remainder].sort((a, b) => Number(b.pinned) - Number(a.pinned)).slice(
     0,
@@ -536,6 +552,7 @@ export function ChatsTab({
         repoLabel={compact && !showRepoSuffix && contextRepo ? null : repoSuffix(item)}
         branchLabel={!showRepoSuffix && (!compact || branch !== contextRepo?.defaultBranch) ? branch : null}
         ownedCount={owned.length}
+        roomy={compact && chatGroupBy === 'flat'}
         preview={compact && chatGroupBy === 'flat' ? item.preview : undefined}
         scheduled={ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId) && isAutomationSession(session))}
         onHoverChange={owned.length > 0

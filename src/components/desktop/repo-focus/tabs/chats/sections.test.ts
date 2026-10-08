@@ -99,13 +99,13 @@ describe('sidebar section derivation', () => {
     expect(active.archivedAt).toBeUndefined();
   });
 
-  it('treats an empty read-state map as zero unread rows', () => {
+  it('treats a valid never-read completion as unread', () => {
     const storage: RowReadStorage = {
       getItem: () => '{}',
       setItem: () => {},
     };
     const lastVisited = getLastVisited('packet:p1', storage);
     expect(lastVisited).toBeNull();
-    expect(isCompletionUnread('2026-07-31T12:00:00.000Z', lastVisited)).toBe(false);
+    expect(isCompletionUnread('2026-07-31T12:00:00.000Z', lastVisited)).toBe(true);
   });
 });
