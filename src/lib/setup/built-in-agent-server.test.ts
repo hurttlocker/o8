@@ -53,7 +53,7 @@ describe('bundled-agent registry gate', () => {
     expect((await readBuiltInAgentRuntime())?.builtIn?.planDetail).toContain('free daily');
     for (const plan of ['pro', 'team', 'founder'] as const) {
       state.plan = plan;
-      expect((await readBuiltInAgentRuntime())?.builtIn?.planDetail).toBe('Uses the included managed model.');
+      expect((await readBuiltInAgentRuntime())?.builtIn?.planDetail).toBe('Uses the included managed model on your weekly o8 model allowance. Resets Monday at 00:00 UTC.');
     }
   });
 

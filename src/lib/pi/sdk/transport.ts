@@ -12,28 +12,56 @@ export interface ManagedPiTransportOptions {
   observeRawUsage?: (usage: unknown) => void;
 }
 
+/** Shown when the relay's over-cap reply carries no period or reset time. */
 export const PI_ALLOWANCE_EXHAUSTED_MESSAGE = 'Your daily o8 model allowance is used up. It resets at midnight UTC.';
 
-/** The relay's over-cap reply is small JSON. Read at most 4 KiB, and stop reading when the run stops. */
-async function isDailyCapResponse(response: Response, signal: AbortSignal): Promise<boolean> {
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
+  'November', 'December'];
+/** Every allowance message o8 writes, so the session can let exactly these through. */
+export const PI_ALLOWANCE_MESSAGE_TEXT = new RegExp(`^Your (?:daily |weekly )?o8 model allowance is used up\\. It resets (?:`
+  + `at midnight UTC|Monday at 00:00 UTC|(?:${WEEKDAYS.join('|')}), (?:${MONTHS.join('|')}) \\d{1,2} at \\d{2}:\\d{2} UTC)\\.$`);
+
+/**
+ * The relay meters paid plans per UTC week (reset Monday 00:00 UTC) and the free
+ * plan per day. Its 402 body names the `period` and `resetsAt`; either may be absent.
+ */
+export function piAllowanceExhaustedMessage(cap: { period?: unknown; resetsAt?: unknown } = {}): string {
+  const period = cap.period === 'week' ? 'weekly' : cap.period === 'day' ? 'daily' : null;
+  const at = typeof cap.resetsAt === 'string' ? new Date(cap.resetsAt) : null;
+  if (at && Number.isFinite(at.getTime())) {
+    const time = `${String(at.getUTCHours()).padStart(2, '0')}:${String(at.getUTCMinutes()).padStart(2, '0')}`;
+    return `Your ${period ? `${period} ` : ''}o8 model allowance is used up. It resets ${WEEKDAYS[at.getUTCDay()]}, `
+      + `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()} at ${time} UTC.`;
+  }
+  if (period === 'weekly') return 'Your weekly o8 model allowance is used up. It resets Monday at 00:00 UTC.';
+  return PI_ALLOWANCE_EXHAUSTED_MESSAGE;
+}
+
+/**
+ * The relay's over-cap reply is small JSON. Read at most 4 KiB, and stop reading
+ * when the run stops. Returns the user-facing message, or null for any other 402.
+ */
+async function allowanceExhaustedMessage(response: Response, signal: AbortSignal): Promise<string | null> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const stop = () => { void reader?.cancel().catch(() => {}); };
   signal.addEventListener('abort', stop, { once: true });
   try {
     reader = response.body?.getReader();
-    if (!reader || signal.aborted) return false;
+    if (!reader || signal.aborted) return null;
     const chunks: Uint8Array[] = [];
     let size = 0;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 4096) return false;
+      if (size > 4096) return null;
       chunks.push(value);
     }
-    return (JSON.parse(Buffer.concat(chunks).toString('utf8')) as { error?: unknown }).error === 'daily cap reached';
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { error?: unknown; period?: unknown; resetsAt?: unknown };
+    return body.error === 'daily cap reached' ? piAllowanceExhaustedMessage(body) : null;
   } catch {
-    return false;
+    return null;
   } finally {
     signal.removeEventListener('abort', stop);
     await reader?.cancel().catch(() => {});
@@ -65,7 +93,7 @@ export function createManagedPiTransport(options: ManagedPiTransportOptions): Pi
     const timeout = AbortSignal.timeout(options.timeoutMs ?? 60_000);
     const requestSignal = AbortSignal.any([signal, timeout]);
     let responseStatus: number | undefined;
-    let allowanceExhausted = false;
+    let allowanceExhausted: string | null = null;
     const guardedFetch: typeof fetch = async (_input, init) => {
       requestSignal.throwIfAborted();
       // Pi's OpenAI adapter constructs /chat/completions; only its body is reused.
@@ -76,9 +104,9 @@ export function createManagedPiTransport(options: ManagedPiTransportOptions): Pi
       });
       responseStatus = response.status;
       if (!response.ok) {
-        // An exhausted allowance stays exhausted until the relay's daily reset; Pi
+        // An exhausted allowance stays exhausted until the relay's reset; Pi
         // retries are off, so this one failed call ends the run.
-        if (response.status === 402) allowanceExhausted = await isDailyCapResponse(response, requestSignal);
+        if (response.status === 402) allowanceExhausted = await allowanceExhaustedMessage(response, requestSignal);
         else await response.body?.cancel();
         throw new Error(`Managed inference rejected request (${response.status})`);
       }
@@ -100,8 +128,8 @@ export function createManagedPiTransport(options: ManagedPiTransportOptions): Pi
       yield { type: 'error', reason: event.reason, error: {
         role: 'assistant', content: [], api: options.model.api, provider: options.model.provider,
         model: options.model.id, timestamp: Date.now(), stopReason: event.reason,
-        errorMessage: event.reason === 'aborted' ? 'Stopped' : allowanceExhausted ? PI_ALLOWANCE_EXHAUSTED_MESSAGE : responseStatus && responseStatus !== 200
-          ? `Managed inference rejected request (${responseStatus})` : 'Managed inference failed',
+        errorMessage: event.reason === 'aborted' ? 'Stopped' : allowanceExhausted ?? (responseStatus && responseStatus !== 200
+          ? `Managed inference rejected request (${responseStatus})` : 'Managed inference failed'),
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       } };

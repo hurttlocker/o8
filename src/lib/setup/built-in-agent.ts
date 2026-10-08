@@ -28,7 +28,7 @@ export function createBuiltInAgentRuntime(registration: BuiltInAgentRegistration
     builtIn: {
       backend: registration.backend,
       planDetail: isPaidPlan(plan)
-        ? 'Uses the included managed model.'
+        ? 'Uses the included managed model on your weekly o8 model allowance. Resets Monday at 00:00 UTC.'
         : 'Uses your free daily o8 model allowance. Resets at midnight UTC.',
     },
   };

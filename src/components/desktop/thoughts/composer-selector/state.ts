@@ -96,7 +96,7 @@ export function composerEffortConsequence(
   effort: ThinkingEffort,
 ): string {
   if (backend === 'o8' && effort === 'low') {
-    return `${THINKING_EFFORT_LABELS[effort].long} · free`;
+    return `${THINKING_EFFORT_LABELS[effort].long} · managed model`;
   }
   return THINKING_EFFORT_LABELS[effort].detail;
 }
