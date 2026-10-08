@@ -294,7 +294,7 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     // The o8 turn prepares a mission from this thread through the o8 command set, carrying its turn ids.
     relay.requests.length = 0;
     relay.answers.push(
-      callTool('d1', 'o8_run', { name: 'create_mission', arguments: JSON.stringify({ repoPath: repo, runtime: 'codex', dispatch: false,
+      callTool('d1', 'o8_run', { name: 'create_mission', arguments: JSON.stringify({ repoPath: repo, runtime: 'pi-builtin', dispatch: false,
         issues_inline: [{ title: 'Review fixture', body: 'Prepared only.' }], orchestratorThreadId: threadId, orchestratorTurnId: turnId }) }),
       say('Prepared the mission.'),
     );
@@ -306,6 +306,7 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     const created = dispatched.events.find((event): event is Extract<OrchestratorEvent, { type: 'tool_result' }> =>
       event.type === 'tool_result' && event.name === 'o8_run');
     expect(created?.isError).not.toBe(true);
+    expect(created?.output).toMatch(/^\{/);
     const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
     const packetId = readMissionRegistryEntry(JSON.parse(created!.output).missionId)!.mission.packets[0].id;
 
