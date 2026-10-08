@@ -5,6 +5,7 @@ import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtime
 import { createPiApproval } from './approval';
 import { requirePiNode, requirePiPlatform } from './platform';
 import { piSdkScriptPath } from './scripts';
+import { createPiContinuityGuard, type PiContinuityPolicy } from './continuity';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval, type PiAuthority } from './tools';
 import { createManagedPiTransport, PI_ALLOWANCE_EXHAUSTED_MESSAGE, type PiModelTransport } from './transport';
 
@@ -34,6 +35,8 @@ export interface PiSdkSessionOptions {
   runTimeoutMs?: number;
   /** Per-command limit for `run_command`. Host-set only. */
   commandTimeoutMs?: number;
+  /** Optional source precondition. Trusted host only; dormant unless supplied. */
+  continuity?: PiContinuityPolicy;
   /** Extra host-run tools, alongside the file and command tools. */
   hostTools?: PiHostTool[];
   /** Replaces the default system prompt. Host-set only. */
@@ -57,6 +60,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   requirePiPlatform();
   requirePiNode();
   const root = await realpath(options.workspace);
+  const continuity = options.continuity === undefined ? undefined : createPiContinuityGuard(root, options.continuity);
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const stateDir = await realpath(options.stateDir);
   const stateRelative = relative(root, stateDir);
@@ -118,7 +122,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       const turn = toolTail.then(() => hostTool
         ? (signal.throwIfAborted(), hostTool.execute(structuredClone(args as Record<string, unknown>), signal))
         : executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal,
-          { timeoutMs: options.commandTimeoutMs, authorize: options.authorize }));
+          { timeoutMs: options.commandTimeoutMs, authorize: options.authorize, continuity }));
       toolTail = turn.catch(() => {});
       return turn;
     }

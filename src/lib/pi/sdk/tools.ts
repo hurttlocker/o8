@@ -4,6 +4,8 @@ import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/worksp
 import { commitPiWrite } from './approved-write';
 import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
 
+import type { PiContinuityGuard } from './continuity';
+
 export const PI_SDK_TOOLS = [
   { name: 'read_file', description: 'Read a UTF-8 file in the selected workspace.', parameters: {
     type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false,
@@ -27,6 +29,7 @@ export type PiAuthority = (call: PiToolCall) => Promise<boolean>;
 export interface PiToolOptions extends PiCommandOptions {
   /** When set, a false result refuses the call, whatever approval or policy said. Host-set only. */
   authorize?: PiAuthority;
+  continuity?: PiContinuityGuard;
 }
 const MAX_BYTES = 50_000;
 
@@ -101,6 +104,8 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
   return { content: [{ type: 'text' as const,
     text: await withPiExclusive(async () => {
       await requireAuthority(call, authorize);
+      await options.continuity?.assertCurrent(root, { name: 'run_command', command }, signal);
+      if (options.continuity) await requireAuthority(call, authorize);
       return runPiCommand(root, command, signal, options);
     }, signal) }] };
 }
@@ -125,7 +130,11 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
     });
     const before = opened ? await snapshot(root, opened) : null;
     if (call.name === 'read_file') {
+      const readPath = relative(root, opened!.realPath);
+      await opened!.handle.close();
+      opened = null;
       signal.throwIfAborted();
+      options.continuity?.observeRead(root, readPath, before!, signal);
       return { content: [{ type: 'text' as const, text: before!.toString('utf8') }] };
     }
     if (typeof args.content !== 'string' || Buffer.byteLength(args.content) > MAX_BYTES) {
@@ -152,6 +161,12 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
           || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
       }
       await requireAuthority(call, options.authorize);
+      signal.throwIfAborted();
+      // Recheck after approval, lock wait and target checks. This closes those
+      // host scheduling gaps, not arbitrary external filesystem mutation after
+      // inspection. The native commit still enforces its own target invariants.
+      await options.continuity?.assertCurrent(root, { name: 'write_file', path }, signal);
+      if (options.continuity) await requireAuthority(call, options.authorize);
       signal.throwIfAborted();
       await commitPiWrite(root, path, parent, opened, before, content, signal);
       return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
