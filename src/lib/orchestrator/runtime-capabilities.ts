@@ -498,7 +498,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     binaryName: 'o8-pi-worker',
     workerProvider: 'pi-builtin',
     authHouse: 'pi-builtin',
-    modelIdPattern: /^google\/gemini-2\.5-flash-lite$/,
+    modelIdPattern: /^openai\/gpt-6-luna$/,
     reasoningEffort: false,
     tier: 'standard',
     description: 'Pi SDK bundled with o8 on the managed model route (your plan or the free daily allowance). Writes and commands stay in the packet worktree.',
