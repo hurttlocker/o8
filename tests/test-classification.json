@@ -370,12 +370,6 @@
       ]
     },
     {
-      "path": "src/lib/lane/merge-gate-script.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "src/lib/lane/merge-gate.test.ts",
       "reasons": [
         "child-process",
@@ -2704,6 +2698,14 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/merge-gate-host-code-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {
