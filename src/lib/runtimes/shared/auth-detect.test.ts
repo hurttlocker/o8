@@ -48,6 +48,7 @@ vi.mock("node:os", async (importOriginal) => {
 
 vi.mock("./cli-locate", () => ({
   scanAndLink: scanAndLinkMock,
+  scanForBinary: (binaryName: string) => authFixture.installed.has(binaryName) ? `/test-bin/${binaryName}` : null,
 }));
 
 authFixture.home = mkdtempSync(path.join(os.tmpdir(), "o8-opencode-auth-"));

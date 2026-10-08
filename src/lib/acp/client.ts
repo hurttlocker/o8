@@ -426,6 +426,12 @@ export class AcpClient {
     }
   }
 
+  /** Select a model on agents whose model axis is the dedicated ACP method. */
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    const result = await this.request('session/set_model', { sessionId, modelId });
+    if (!asRecord(result)) throw new Error('ACP session/set_model did not confirm a session.');
+  }
+
   /** Run one prompt turn. Resolves with the stopReason when the agent finishes;
    *  streaming arrives via onEvent in between. */
   async prompt(sessionId: string, text: string, timeoutMs?: number): Promise<AcpStopReason> {

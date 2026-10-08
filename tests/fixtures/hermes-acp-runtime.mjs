@@ -1,4 +1,5 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import readline from 'node:readline';
 
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -9,6 +10,9 @@ const update = (sessionId, value) => send({
 });
 const input = readline.createInterface({ input: process.stdin });
 let turn = 0;
+let model = 'fixture/default';
+const statePath = path.join(process.env.HERMES_HOME, 'fixture-session.json');
+const saveState = () => writeFileSync(statePath, JSON.stringify({ turn, model }));
 const pendingPrompts = new Map();
 
 if (process.env.O8_HERMES_LAUNCH_LOG) {
@@ -23,6 +27,9 @@ if (process.env.O8_HERMES_LAUNCH_LOG) {
 
 function finishPrompt(frame) {
   const sessionId = frame.params.sessionId;
+  if (process.env.O8_HERMES_EXECUTED_MODEL_LOG) {
+    appendFileSync(process.env.O8_HERMES_EXECUTED_MODEL_LOG, `${model}\n`);
+  }
   update(sessionId, { sessionUpdate: 'usage_update', size: 256000, used: turn });
   update(sessionId, {
     sessionUpdate: 'tool_call',
@@ -47,6 +54,7 @@ function finishPrompt(frame) {
     sessionUpdate: 'agent_message_chunk',
     content: { type: 'text', text: String(turn) },
   });
+  saveState();
   send({ jsonrpc: '2.0', id: frame.id, result: { stopReason: 'end_turn' } });
 }
 
@@ -90,6 +98,21 @@ input.on('line', (line) => {
   }
 
   if (frame.method === 'session/resume') {
+    if (existsSync(statePath)) {
+      const state = JSON.parse(readFileSync(statePath, 'utf8'));
+      turn = state.turn;
+      model = state.model;
+    }
+    for (let previous = 1; previous <= turn; previous += 1) {
+      update(frame.params.sessionId, {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: `hermes fixture response ${previous}` },
+      });
+      update(frame.params.sessionId, {
+        sessionUpdate: 'tool_call', toolCallId: `replayed-tool-${previous}`,
+        title: 'Replayed history', status: 'completed', rawInput: {},
+      });
+    }
     send({
       jsonrpc: '2.0',
       id: frame.id,
@@ -99,10 +122,26 @@ input.on('line', (line) => {
   }
 
   if (frame.method === 'session/set_model') {
+    if (frame.params.modelId === 'fixture/unconfirmed') {
+      send({ jsonrpc: '2.0', id: frame.id, result: null });
+      return;
+    }
+    if (frame.params.modelId === 'fixture/unavailable') {
+      send({ jsonrpc: '2.0', id: frame.id, error: { code: -32602, message: 'model unavailable' } });
+      return;
+    }
+    model = frame.params.modelId;
+    saveState();
     if (process.env.O8_HERMES_MODEL_LOG) {
       appendFileSync(process.env.O8_HERMES_MODEL_LOG, `${frame.params.modelId}\n`);
     }
     send({ jsonrpc: '2.0', id: frame.id, result: {} });
+    return;
+  }
+
+  // Current server accepts opaque config keys without switching the active model.
+  if (frame.method === 'session/set_config_option') {
+    send({ jsonrpc: '2.0', id: frame.id, result: { configOptions: [] } });
     return;
   }
 

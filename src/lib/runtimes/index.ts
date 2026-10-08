@@ -78,6 +78,7 @@ import './pi-cost-parser';
 import './pi-builtin-cost-parser';
 import './prime-agent-cost-parser';
 import './deepseek-harness-cost-parser';
+import './hermes-cost-parser';
 
 /**
  * Flush the fleet cache across all owned-session stores. Callers (e.g. the

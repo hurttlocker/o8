@@ -185,7 +185,7 @@ const hermesStore = createOwnedAcpSessionStore({
   supportsResume: hermesSupportsResume,
   async configureSession({ client, sessionId, model }) {
     const selected = model?.trim();
-    if (selected) await client.setModel(sessionId, selected);
+    if (selected) await client.setSessionModel(sessionId, selected);
   },
   handleRequest: handleHermesRequest,
   notificationSummary: hermesSummary,

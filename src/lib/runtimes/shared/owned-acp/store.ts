@@ -261,6 +261,9 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
         env: launch.env,
         requestTimeoutMs: 30_000,
         onNotification: (notification) => {
+          // Resume can replay prior turns before the session response arrives.
+          // Capture readiness before queueing persistence for the new run.
+          if (!activeProcess.sessionId) return;
           void handleNotification(session.surfaceId, notification).catch((error) => {
             console.error(`[${adapter.runtimeId}] ACP notification persistence failed`, error);
           });
