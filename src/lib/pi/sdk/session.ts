@@ -28,6 +28,11 @@ export interface PiSdkSessionOptions {
   approve?: PiApproval;
   /** Checked inside the host-wide lock before every write and command, whatever approval or policy said. */
   authorize?: PiAuthority;
+  /**
+   * Lane rules (#3385): every command runs confined (no network, writes only in
+   * the workspace and a private temp dir), or needs inbox approval where it cannot be.
+   */
+  confineCommands?: boolean;
   onEvent?: (event: Record<string, unknown>) => void;
   maxModelCalls?: number;
   maxToolCalls?: number;
@@ -85,7 +90,9 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     throw new Error('Invalid system prompt');
   }
   let surfaceId = '';
-  const approve: PiApproval = options.approve ?? ((call, signal) => createPiApproval(surfaceId, root)(call, signal));
+  const inbox: PiApproval = (call, signal) => createPiApproval(surfaceId, root)(call, signal);
+  const approve: PiApproval = options.approve ?? inbox;
+  const confine = options.confineCommands ? { inbox } : undefined;
   const transport = options.transport ?? createManagedPiTransport({ model: options.model });
   const workerPath = piSdkScriptPath('worker.mjs');
   const peer = new StdioJsonRpcPeer({ command: process.execPath, args: [workerPath], cwd: stateDir,
@@ -121,7 +128,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       const turn = toolTail.then(() => hostTool
         ? (signal.throwIfAborted(), hostTool.execute(structuredClone(args as Record<string, unknown>), signal))
         : executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal,
-          { timeoutMs: options.commandTimeoutMs, authorize: options.authorize }));
+          { timeoutMs: options.commandTimeoutMs, authorize: options.authorize, confine }));
       toolTail = turn.catch(() => {});
       return turn;
     }

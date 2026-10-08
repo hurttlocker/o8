@@ -1,5 +1,9 @@
 import { execFile, spawn } from 'node:child_process';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { piConfinement, PiConfinementUnavailable } from './confine';
 import { piWriteHelperPath } from './scripts';
 
 export const PI_COMMAND_OUTPUT_BYTES = 50_000;
@@ -154,7 +158,11 @@ async function endCommandTree(tree: CommandTree): Promise<boolean> {
   return false;
 }
 
-export interface PiCommandOptions { timeoutMs?: number; maxOutputBytes?: number }
+export interface PiCommandOptions {
+  timeoutMs?: number; maxOutputBytes?: number;
+  /** Lane rules (#3385): no network, and writes only in the workspace and a private temp dir. Host-set only. */
+  confined?: boolean;
+}
 
 // The outer shell checks that its working directory is still the workspace
 // before it runs the command, so a root swapped for a symlink after the host's
@@ -193,17 +201,35 @@ function drained(stream: NodeJS.ReadableStream | null | undefined): Promise<void
  * command's processes. On Linux the native supervisor ends every descendant; on
  * macOS the host tracks the group and descendants from process-table reads,
  * which can miss a descendant that leaves the group and outlives its parent.
+ *
+ * With `confined`, the command runs confined and its TMPDIR is a fresh directory
+ * removed afterwards. When confinement cannot be applied it throws
+ * `PiConfinementUnavailable` and nothing has started.
  */
 export async function runPiCommand(root: string, command: string, abort: AbortSignal, options: PiCommandOptions = {}) {
+  if (!options.confined) return runCommand(root, command, abort, options);
+  abort.throwIfAborted();
+  const tmp = await mkdtemp(join(await realpath(tmpdir()), 'o8-pi-command-'));
+  try {
+    return await runCommand(root, command, abort, options, { tmp, args: await piConfinement(root, tmp) });
+  } finally {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function runCommand(root: string, command: string, abort: AbortSignal, options: PiCommandOptions,
+  confined?: { tmp: string; args: string[] }) {
   abort.throwIfAborted();
   if (cleanupUnconfirmed) throw new Error('Earlier command processes could not be confirmed stopped. Restart o8 before running more commands.');
   const timeoutMs = options.timeoutMs ?? PI_COMMAND_TIMEOUT_MS;
   const maxOutputBytes = options.maxOutputBytes ?? PI_COMMAND_OUTPUT_BYTES;
-  const launch = ['/bin/sh', '-c', LAUNCHER, 'o8-pi-command', root, command];
+  const env = confined ? { ...piCommandEnv(), TMPDIR: confined.tmp } : piCommandEnv();
+  // On macOS the confinement is a `sandbox-exec` prefix; on Linux, supervisor arguments.
+  const launch = [...(confined && !SUPERVISED ? confined.args : []), '/bin/sh', '-c', LAUNCHER, 'o8-pi-command', root, command];
   const child = SUPERVISED
-    ? spawn(piWriteHelperPath(), ['supervise', String(process.pid), ...launch], { cwd: root, env: piCommandEnv(), detached: true,
+    ? spawn(piWriteHelperPath(), ['supervise', ...(confined?.args ?? []), String(process.pid), ...launch], { cwd: root, env, detached: true,
       stdio: ['ignore', 'pipe', 'pipe', 'pipe'] })
-    : spawn(launch[0], launch.slice(1), { cwd: root, env: piCommandEnv(), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    : spawn(launch[0], launch.slice(1), { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let hasExited = false;
   const exited = new Promise<{ code: number | null; error?: boolean }>(resolve => {
     child.once('exit', code => { hasExited = true; resolve({ code }); });
@@ -272,6 +298,8 @@ export async function runPiCommand(root: string, command: string, abort: AbortSi
       throw new Error('The command processes could not be confirmed stopped. Restart o8 before running more commands.');
     }
     abort.throwIfAborted();
+    // A confined command the supervisor refused to start never ran unconfined.
+    if (confined && notStarted) throw new PiConfinementUnavailable();
     if (result.error || notStarted) throw new Error('Command could not start');
     // Exit can arrive before the last buffered output; with no writer left, the
     // pipes end promptly.

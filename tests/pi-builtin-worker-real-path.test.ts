@@ -81,6 +81,15 @@ vi.mock('@/lib/pi/sdk/session', async (importOriginal) => {
     return actual.createPiSdkSession(options);
   } };
 });
+// Makes command confinement unavailable, as on a kernel without Landlock.
+const confinement = vi.hoisted(() => ({ unavailable: false }));
+vi.mock('@/lib/pi/sdk/confine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/pi/sdk/confine')>();
+  return { ...actual, piConfinement: async (...args: Parameters<typeof actual.piConfinement>) => {
+    if (confinement.unavailable) throw new actual.PiConfinementUnavailable();
+    return actual.piConfinement(...args);
+  } };
+});
 vi.mock('@/lib/push/notify', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/push/notify')>(),
   notifyApprovalCreated: vi.fn(),
@@ -150,7 +159,7 @@ const { approveAndMergePacket, submitPacketReview } = await import('@/lib/orches
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { previewPacketMerge } = await import('@/lib/lane/preview-merge');
-const { addRepo } = await import('@/lib/repos/registry');
+const { addRepo, updateRepo } = await import('@/lib/repos/registry');
 const { listApprovals } = await import('@/lib/approvals/store');
 const { resolveApproval } = await import('@/lib/approvals/resolution');
 const { hasCurrentCleanWorkerExit } = await import('@/lib/lane/worker-session-state');
@@ -158,7 +167,7 @@ const { createPiLaneApproval } = await import('@/lib/pi/sdk/lane-approval');
 const { getRuntime } = await import('@/lib/runtimes');
 const capabilities = await import('@/lib/orchestrator/runtime-capabilities');
 const { getOwnedPiBuiltinReviewPacket } = await import('@/lib/pi-builtin/owned');
-const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+const { getOrCreateWsToken, WS_TOKEN_PATH } = await import('@/lib/ws-auth');
 const { setLaneStatus } = await import('@/lib/lane/registry');
 const { withPiExclusive } = await import('@/lib/pi/sdk/command');
 const { refreshPolicyRules } = await import('@/lib/approvals/policies');
@@ -168,7 +177,7 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-async function makeRepo(name: string) {
+async function makeRepo(name: string, isolation?: 'git-worktree') {
   const origin = join(root, `${name}.git`);
   const repoPath = join(root, name);
   execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
@@ -182,7 +191,8 @@ async function makeRepo(name: string) {
   git(repoPath, ['commit', '-m', 'base']);
   git(repoPath, ['push', '-u', 'origin', 'main']);
   git(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
-  await addRepo(realpathSync.native(repoPath));
+  const entry = await addRepo(realpathSync.native(repoPath));
+  if (isolation) await updateRepo(entry.id, { setup: { ...entry.setup, workspaceIsolationPreference: isolation } });
   return { repoPath, baseSha: git(repoPath, ['rev-parse', 'main']) };
 }
 
@@ -261,8 +271,9 @@ describe('bundled Pi worker (#3258)', () => {
       call('w1', 'write_file', { path: featureFile, content: 'written by pi\n' }),
       // A blocked command is refused by policy before lane rules are asked.
       call('b1', 'run_command', { command: 'eval "touch blocked.txt"' }),
-      call('c1', 'run_command', { command: `git add ${featureFile} && git commit -m "feat: pi worker [via-o8]"` }),
-      message([{ type: 'text', text: 'Wrote and committed the feature file.' }]),
+      // A lane command runs confined, without inbox approval; o8, not the worker, commits.
+      call('c1', 'run_command', { command: `cat ${featureFile}` }),
+      message([{ type: 'text', text: 'Wrote the feature file.' }]),
     );
 
     const response = await delegatePost(new NextRequest('http://127.0.0.1/api/orchestrator/delegate', {
@@ -270,7 +281,7 @@ describe('bundled Pi worker (#3258)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         clientMutationId: `pi-builtin-3258-${Date.now()}`,
-        prompt: 'Add pi-feature.txt and commit it.',
+        prompt: 'Add pi-feature.txt.',
         taskName: 'pi builtin worker 3258',
         repoPath: target.repoPath,
         runtime: 'pi-builtin',
@@ -292,16 +303,14 @@ describe('bundled Pi worker (#3258)', () => {
     expect(realpathSync(workspacePath)).not.toBe(realpathSync(target.repoPath));
 
     const packet = await lastRunOutcome(sessionKey, 'finished');
-    expect(packet.summary).toBe('Wrote and committed the feature file.');
+    expect(packet.summary).toBe('Wrote the feature file.');
     // Only the managed transport, for the managed model, ever served this worker.
     expect(new Set(model.managedModels)).toEqual(new Set(['openai/gpt-6-luna']));
     expect(model.seen[0].tools).toEqual(['read_file', 'write_file', 'run_command']);
 
-    // The work happened in the lane worktree and nowhere else, with no inbox approval.
-    const reviewedHeadSha = git(workspacePath, ['rev-parse', 'HEAD']);
-    expect(git(workspacePath, ['rev-parse', 'HEAD^'])).toBe(target.baseSha);
-    expect(git(workspacePath, ['show', '--name-only', '--format=', 'HEAD'])).toBe(featureFile);
-    expect(git(workspacePath, ['status', '--porcelain'])).toBe('');
+    // The work happened in the lane worktree and nowhere else, with no inbox approval, and is not committed yet.
+    expect(git(workspacePath, ['rev-parse', 'HEAD'])).toBe(target.baseSha);
+    expect(git(workspacePath, ['status', '--porcelain'])).toBe(`?? ${featureFile}`);
     expect(existsSync(join(workspacePath, 'blocked.txt'))).toBe(false);
     expect(existsSync(join(target.repoPath, featureFile))).toBe(false);
     expect(listApprovals({ status: 'all' }).filter((approval) => approval.runtime === 'pi')).toEqual([]);
@@ -309,13 +318,13 @@ describe('bundled Pi worker (#3258)', () => {
     // Truthful runtime surfaces: transcript, discovery, changed-file review, completion receipt.
     const runtime = getRuntime('pi-builtin')!;
     const transcript = await runtime.readTranscript(sessionKey);
-    expect(transcript.find((entry) => entry.role === 'user')?.text).toContain('Add pi-feature.txt and commit it.');
+    expect(transcript.find((entry) => entry.role === 'user')?.text).toContain('Add pi-feature.txt.');
     const tools = transcript.flatMap((entry) => entry.toolCalls ?? []);
     expect(tools.map((tool) => [tool.name, tool.status])).toEqual([
       ['write_file', 'done'], ['run_command', 'done'], ['run_command', 'done']]);
     expect(tools[1].preview).toMatch(/^Failed: /);
-    expect(tools[2].preview).not.toMatch(/^Failed: /);
-    expect(transcript.filter((entry) => entry.role === 'assistant').at(-1)?.text).toBe('Wrote and committed the feature file.');
+    expect(tools[2].preview).toContain('Exit code 0');
+    expect(transcript.filter((entry) => entry.role === 'assistant').at(-1)?.text).toBe('Wrote the feature file.');
     expect(await runtime.discoverSessions()).toEqual(expect.arrayContaining([
       expect.objectContaining({ sessionKey, runtimeId: 'pi-builtin', ownership: 'owned', status: 'reviewing' }),
     ]));
@@ -329,6 +338,11 @@ describe('bundled Pi worker (#3258)', () => {
     const reviewRequested = await dispatch({ verb: 'request_review', laneId, actor: 'system' });
     expect(reviewRequested.ok).toBe(true);
     expect(getLane(laneId)?.status).toBe('reviewing');
+    // o8 committed the work when it went to review.
+    const reviewedHeadSha = git(workspacePath, ['rev-parse', 'HEAD']);
+    expect(git(workspacePath, ['rev-parse', 'HEAD^'])).toBe(target.baseSha);
+    expect(git(workspacePath, ['show', '--name-only', '--format=', 'HEAD'])).toBe(featureFile);
+    expect(git(workspacePath, ['status', '--porcelain'])).toBe('');
     await submitPacketReview({ packetId, approved: true, findings: [], reviewedHeadSha });
     const preview = await previewPacketMerge(packetId);
     expect({ wouldMerge: preview.wouldMerge, blockers: preview.blockers }).toEqual({ wouldMerge: true, blockers: [] });
@@ -425,6 +439,97 @@ describe('bundled Pi worker (#3258)', () => {
     expect(seams.laneAnswers.filter((answer) => answer.laneId === laneId)).toEqual([]);
     expect(existsSync(join(workspacePath, 'after-archive.txt'))).toBe(false);
     expect((await toolCalls(sessionKey))[0]?.preview).toMatch(/^Failed: /);
+  }, 120_000);
+
+  // `auto` is a copy-on-write clone with its own Git directory where the volume
+  // supports it (APFS); `git-worktree` is a linked worktree whose `.git` file
+  // points into the main repository.
+  it.each(['auto', 'git-worktree'] as const)('confines lane commands to the lane worktree and a private temp dir (%s, #3385)', async (isolation) => {
+    const repo = await makeRepo(`confined-${isolation}`, isolation === 'auto' ? undefined : isolation);
+    const away = realpathSync(mkdtempSync(join(root, 'away-')));
+    const tmpTarget = join('/tmp', `o8-3385-${randomUUID()}.txt`);
+    const piApprovals = () => listApprovals({ status: 'all' }).filter((approval) => approval.runtime === 'pi').length;
+    const approvalsBefore = piApprovals();
+    getOrCreateWsToken();
+    const macos = process.platform === 'darwin';
+    // Each escape must exit non-zero; the effects are checked below.
+    const escapes = [
+      'touch ../outside-3385.txt',
+      `printf x > ${tmpTarget}`,
+      `ln -s ${away} escape && printf x > escape/through-link.txt`,
+      // No network, loopback included: the o8 API stand-in must never see this.
+      `${process.execPath} -e "fetch('http://127.0.0.1:${process.env.O8_API_PORT}/escape-3385').then(() => process.exit(0), () => process.exit(3))"`,
+      // o8 commits at review; the lane cannot write Git state, here or in the main repository.
+      'git add inside.txt && git commit -m "feat: lane commit"',
+      'git update-ref refs/heads/main HEAD',
+      'printf x > "$(git rev-parse --git-common-dir)/refs/heads/main"',
+      'printf x >> "$(git rev-parse --git-common-dir)/config"',
+      // macOS only: Landlock cannot deny `.git` beneath the worktree or deny reads.
+      ...(macos ? ['if [ -d .git ]; then touch .git/o8-probe; else printf x >> .git; fi', `wc -c < ${WS_TOKEN_PATH}`] : []),
+    ];
+    model.answers.push(
+      call('i1', 'run_command', { command: 'printf inside > inside.txt && printf t > "$TMPDIR/private.txt" && echo "tmp=$TMPDIR"' }),
+      ...escapes.map((command, index) => call(`e${index}`, 'run_command', { command })),
+      message([{ type: 'text', text: 'Tried every write.' }]),
+    );
+    try {
+      const { sessionKey, workspacePath } = await delegate(repo.repoPath, 'Try writes inside and outside the lane.');
+      const headBefore = git(workspacePath, ['rev-parse', 'HEAD']);
+      const gitPointer = isolation === 'git-worktree' ? readFileSync(join(workspacePath, '.git'), 'utf8') : null;
+      await lastRunOutcome(sessionKey, 'finished');
+      const previews = (await toolCalls(sessionKey)).map((tool) => tool.preview ?? '');
+      // Writes inside the worktree and the private temp dir succeed; the temp dir ends with the command.
+      expect(previews[0]).toContain('Exit code 0');
+      const privateTmp = /tmp=(\S+)/.exec(previews[0])?.[1];
+      expect(privateTmp).toBeTruthy();
+      expect(existsSync(privateTmp!)).toBe(false);
+      expect(readFileSync(join(workspacePath, 'inside.txt'), 'utf8')).toBe('inside');
+      // Each escape ran, failed, and changed nothing.
+      expect(previews.slice(1).map((preview, index) => [escapes[index], /Exit code [1-9]/.test(preview)]))
+        .toEqual(escapes.map((command) => [command, true]));
+      expect(existsSync(join(workspacePath, '..', 'outside-3385.txt'))).toBe(false);
+      expect(existsSync(tmpTarget)).toBe(false);
+      expect(readdirSync(away)).toEqual([]);
+      expect(pushes.some((push) => push.url === '/escape-3385')).toBe(false);
+      expect(git(workspacePath, ['rev-parse', 'HEAD'])).toBe(headBefore);
+      expect(git(repo.repoPath, ['rev-parse', 'main'])).toBe(repo.baseSha);
+      expect(readFileSync(join(repo.repoPath, '.git', 'config'), 'utf8')).not.toMatch(/x$/);
+      if (gitPointer !== null) {
+        expect(git(workspacePath, ['rev-parse', '--git-dir'])).toContain(join(repo.repoPath, '.git', 'worktrees'));
+        expect(readFileSync(join(workspacePath, '.git'), 'utf8')).toBe(gitPointer);
+      } else {
+        expect(existsSync(join(workspacePath, '.git', 'o8-probe'))).toBe(false);
+      }
+      // Confinement was available, so lane rules needed no inbox approval.
+      expect(piApprovals()).toBe(approvalsBefore);
+    } finally {
+      rmSync(tmpTarget, { force: true });
+    }
+  }, 120_000);
+
+  it('sends a lane command to inbox approval when confinement is unavailable (#3385)', async () => {
+    const repo = await makeRepo('unconfinable');
+    confinement.unavailable = true;
+    model.answers.push(
+      call('u1', 'run_command', { command: 'touch rejected.txt' }),
+      call('u2', 'run_command', { command: 'touch approved.txt' }),
+      message([{ type: 'text', text: 'Asked twice.' }]),
+    );
+    try {
+      const { sessionKey, workspacePath } = await delegate(repo.repoPath, 'Touch two files.');
+      const pendingCommand = (command: string) => waitFor(() => listApprovals({ status: 'pending' })
+        .find((approval) => approval.runtime === 'pi' && approval.command === command) ?? null, `inbox approval of ${command}`);
+      // Nothing ran before the operator answered.
+      resolveApproval((await pendingCommand('touch rejected.txt')).id, 'reject', 'desktop', 'No');
+      expect(existsSync(join(workspacePath, 'rejected.txt'))).toBe(false);
+      resolveApproval((await pendingCommand('touch approved.txt')).id, 'approve', 'desktop');
+      await lastRunOutcome(sessionKey, 'finished');
+      expect(existsSync(join(workspacePath, 'rejected.txt'))).toBe(false);
+      expect(existsSync(join(workspacePath, 'approved.txt'))).toBe(true);
+      expect((await toolCalls(sessionKey)).map((tool) => tool.preview?.startsWith('Failed: '))).toEqual([true, false]);
+    } finally {
+      confinement.unavailable = false;
+    }
   }, 120_000);
 
   /** Starts a laneless launch whose Pi startup is held; resolves once startup is reached. */

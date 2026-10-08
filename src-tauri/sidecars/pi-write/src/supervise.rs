@@ -18,6 +18,15 @@
 //! when pidfds are unavailable (kernels before 5.3, or a seccomp policy that
 //! denies them), since teardown could not signal anything.
 //!
+//! With `--write <path>` options before the host pid (#3385), the supervisor
+//! applies Landlock before it starts the command, so the command and everything
+//! it starts can create, change, remove or rename files only beneath those
+//! paths, and can neither connect nor bind TCP sockets. Reads stay as they are.
+//! It needs Landlock ABI 4 (Linux 6.7) for the TCP rights; without it the
+//! supervisor refuses to start the command, and the host never runs it
+//! unconfined. Landlock does not cover file metadata (mode, owner, timestamps),
+//! UDP, or Unix sockets.
+//!
 //! The receipt goes to fd 3, never to the command: one JSON line with the
 //! command's exit code or signal and whether teardown was confirmed.
 //!
@@ -166,6 +175,83 @@ fn teardown(set: &libc::sigset_t, command: libc::pid_t, status: &mut Option<libc
     reap(command, status)
 }
 
+// Landlock filesystem rights (linux/landlock.h).
+#[cfg(target_os = "linux")]
+const FS_WRITE_FILE: u64 = 1 << 1;
+#[cfg(target_os = "linux")]
+const FS_TRUNCATE: u64 = 1 << 14;
+/// Every right that creates, changes, removes, renames or links: bits 1 and 4 to 14, through ABI 3.
+#[cfg(target_os = "linux")]
+const FS_WRITES: u64 = FS_WRITE_FILE | 0x7ff0;
+/// TCP bind and connect. No port is allowed.
+#[cfg(target_os = "linux")]
+const NET_TCP: u64 = 0b11;
+#[cfg(target_os = "linux")]
+const RULE_PATH_BENEATH: libc::c_int = 1;
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct RulesetAttr {
+    handled_access_fs: u64,
+    handled_access_net: u64,
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C, packed)]
+struct PathBeneathAttr {
+    allowed_access: u64,
+    parent_fd: i32,
+}
+
+/// Grants writes beneath a directory, or to a single file. A missing path grants nothing.
+#[cfg(target_os = "linux")]
+fn allow_writes(ruleset: libc::c_int, path: &OsString) -> bool {
+    let Ok(path) = CString::new(path.as_bytes()) else { return false };
+    let fd = unsafe { libc::open(path.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT);
+    }
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    let added = unsafe { libc::fstat(fd, &mut stat) } == 0 && {
+        let directory = stat.st_mode & libc::S_IFMT == libc::S_IFDIR;
+        let rule = PathBeneathAttr {
+            allowed_access: if directory { FS_WRITES } else { FS_WRITE_FILE | FS_TRUNCATE },
+            parent_fd: fd,
+        };
+        let added = unsafe {
+            libc::syscall(libc::SYS_landlock_add_rule, ruleset, RULE_PATH_BENEATH, &rule as *const PathBeneathAttr, 0u32)
+        };
+        added == 0
+    };
+    unsafe { libc::close(fd) };
+    added
+}
+
+/// Limits writes by this process and everything it starts to `paths`, and
+/// denies TCP. False when Landlock is below ABI 4 or any step fails; the
+/// command must not start then.
+#[cfg(target_os = "linux")]
+fn confine_writes(paths: &[OsString]) -> bool {
+    let abi = unsafe {
+        libc::syscall(libc::SYS_landlock_create_ruleset, std::ptr::null::<RulesetAttr>(), 0usize, 1u32)
+    };
+    if abi < 4 {
+        return false;
+    }
+    let attr = RulesetAttr { handled_access_fs: FS_WRITES, handled_access_net: NET_TCP };
+    let ruleset = unsafe {
+        libc::syscall(libc::SYS_landlock_create_ruleset, &attr as *const RulesetAttr, std::mem::size_of::<RulesetAttr>(), 0u32)
+    } as libc::c_int;
+    if ruleset < 0 {
+        return false;
+    }
+    let confined = paths.iter().all(|path| allow_writes(ruleset, path))
+        && unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } == 0
+        && unsafe { libc::syscall(libc::SYS_landlock_restrict_self, ruleset, 0u32) } == 0;
+    unsafe { libc::close(ruleset) };
+    confined
+}
+
 #[cfg(target_os = "linux")]
 fn write_receipt(status: Option<libc::c_int>, confirmed: bool) {
     let (code, signal) = match status {
@@ -189,6 +275,12 @@ pub fn run(argv: &[OsString]) -> i32 {
     // The receipt is required; without fd 3 the host could not confirm teardown.
     if unsafe { libc::fcntl(RECEIPT, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
         return 125;
+    }
+    let mut writes = Vec::new();
+    let mut argv = argv;
+    while argv.len() > 1 && argv[0] == "--write" {
+        writes.push(argv[1].clone());
+        argv = &argv[2..];
     }
     let Some(host) = argv.first().and_then(|arg| arg.to_str()).and_then(|arg| arg.parse::<libc::pid_t>().ok()) else {
         write_receipt(None, false);
@@ -230,6 +322,12 @@ pub fn run(argv: &[OsString]) -> i32 {
             write_receipt(None, true);
             return 125;
         }
+    }
+    // Applied to the supervisor itself, so the command inherits it from the start.
+    if !writes.is_empty() && !confine_writes(&writes) {
+        eprintln!("The command supervisor could not confine the command (Landlock ABI 4, Linux 6.7 or later).");
+        write_receipt(None, true);
+        return 125;
     }
     let mut pointers: Vec<*const libc::c_char> = program.iter().map(|arg| arg.as_ptr()).collect();
     pointers.push(std::ptr::null());
