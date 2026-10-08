@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -12,13 +13,16 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import type { OwnedWorkspaceBindingReceipt } from '@/lib/runtimes/shared/owned-session';
+import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session';
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-workspace-real-path-'));
 const dataDir = path.join(root, 'data');
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+const priorOwnedCodexRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+const ownedCodexRoot = path.join(root, 'owned-codex');
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedCodexRoot;
 
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
 vi.mock('@/lib/auth/principal', () => ({
@@ -32,7 +36,7 @@ const { closeDb } = await import('@/lib/db');
 const { createLane, findLatestLaneByPacket, setLaneStatus } = await import('@/lib/lane/registry');
 const { readLaneReviewDiff, resolveLaneReviewSource } = await import('@/lib/lane/review-source');
 const { addRepo } = await import('@/lib/repos/registry');
-const { registerOwnedSessionLifecycleHandler } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
+const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
 const { measureWorkspaceStorage } = await import('@/lib/workspace/hibernator');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
@@ -52,6 +56,8 @@ function post(action: 'park' | 'restore', packetId: string, clientMutationId: st
 
 afterAll(() => {
   closeDb();
+  if (priorOwnedCodexRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+  else process.env.CORTEX_IDE_OWNED_CODEX_ROOT = priorOwnedCodexRoot;
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -69,6 +75,7 @@ describe('workspace park production route', () => {
 
     const repo = await addRepo(repoPath);
     const packetId = 'packet-real-park';
+    const surfaceId = 'codex-owned:codex-owned-real-path-test';
     const worktreeId = 'packet-real-park';
     const branch = 'inline/packet-real-park';
     const registeredRepoPath = repo.localPath;
@@ -94,7 +101,7 @@ describe('workspace park production route', () => {
         [worktreeId]: {
           id: worktreeId,
           agentType: 'codex',
-          sessionKey: 'workspace-real-owned:session',
+          sessionKey: surfaceId,
           baseBranch: 'main',
           createdAt: Date.now(),
           claudeManaged: false,
@@ -108,12 +115,22 @@ describe('workspace park production route', () => {
       },
     }));
 
-    const surfaceId = 'workspace-real-owned:session';
-    let binding: OwnedWorkspaceBindingReceipt = {
+    const sessionDir = path.join(ownedCodexRoot, 'codex-owned-real-path-test');
+    mkdirSync(sessionDir, { recursive: true });
+    const session: OwnedSessionRecord = {
       surfaceId,
-      runtimeId: 'codex',
-      sessionState: 'active',
-      binding: {
+      packetId,
+      sessionDir,
+      cwd: worktreePath,
+      repoPath: worktreePath,
+      branch,
+      head: reviewedHead,
+      title: 'Workspace route owned-session fixture',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      latestPrompt: 'Review the packet change.',
+      latestSummary: 'Packet change is ready for review.',
+      workspaceBinding: {
         logicalWorkspaceId: `packet:${packetId}`,
         repositoryUuid: null,
         packetId,
@@ -121,36 +138,16 @@ describe('workspace park production route', () => {
         version: 1,
         verifiedAt: '2026-08-14T00:00:00.000Z',
       },
-      activeRun: null,
-      retainedRuns: [],
-      retainedRunsComplete: true,
-      retainedRunTotal: 0,
+      recentRuns: [],
+      runIdentityLedger: { version: 1, totalRuns: 0, complete: true },
     };
-    registerOwnedSessionLifecycleHandler({
-      runtimeId: 'codex',
-      surfaceIdPrefix: 'workspace-real-owned:',
-      commandLabel: 'real-path-test',
-      resolveRoot: () => root,
-      sessionState: async () => 'active',
-      archiveSession: async () => ({ archived: false, note: 'unused' }),
-      getWorkspaceBinding: async () => binding,
-      rebindWorkspace: async (_surfaceId, input) => {
-        if (input.expectedVersion !== binding.binding.version
-          || input.logicalWorkspaceId !== binding.binding.logicalWorkspaceId) {
-          return { status: 'conflict', receipt: binding, note: 'binding mismatch' };
-        }
-        binding = {
-          ...binding,
-          binding: {
-            ...binding.binding,
-            repositoryUuid: input.repositoryUuid,
-            packetId: input.packetId,
-            cwd: path.resolve(input.nextCwd),
-            version: binding.binding.version + 1,
-          },
-        };
-        return { status: 'rebound', receipt: binding };
-      },
+    const metadataPath = path.join(sessionDir, 'session.json');
+    writeFileSync(metadataPath, JSON.stringify(session));
+    const lifecycle = getOwnedSessionLifecycle(surfaceId);
+    expect(lifecycle?.runtimeId).toBe('codex');
+    expect(await lifecycle?.getWorkspaceBinding?.(surfaceId)).toMatchObject({
+      binding: session.workspaceBinding,
+      retainedRunsComplete: true,
     });
     const lane = createLane({
       repoPath: registeredRepoPath,
@@ -176,6 +173,9 @@ describe('workspace park production route', () => {
     expect(JSON.stringify(parkedBody)).not.toContain(worktreePath);
     expect(JSON.stringify(parkedBody)).not.toContain(surfaceId);
     expect(existsSync(worktreePath)).toBe(false);
+    const replayedPark = await POST(post('park', packetId, 'real-park-1'));
+    expect(replayedPark.status).toBe(200);
+    expect((await replayedPark.json()).result).toMatchObject({ status: 'parked', state: 'parked' });
     const parkedTransition = listWorkspaceSnapshotTransitions(repo.id, packetId)
       .find((transition) => transition.transitionId === 'real-park-1:parked');
     const logicalBytesBefore = parkedTransition?.receipt?.logicalBytesBefore;
@@ -206,7 +206,7 @@ describe('workspace park production route', () => {
       kind: 'materialized',
       mergeAvailable: true,
     });
-    expect(binding).toMatchObject({
+    expect(await lifecycle?.getWorkspaceBinding?.(surfaceId)).toMatchObject({
       surfaceId,
       binding: {
         logicalWorkspaceId: `packet:${packetId}`,
@@ -215,6 +215,32 @@ describe('workspace park production route', () => {
         version: 2,
       },
     });
+    const restoredSession = JSON.parse(readFileSync(metadataPath, 'utf8')) as OwnedSessionRecord;
+    expect(restoredSession.workspaceBinding).toMatchObject({
+      logicalWorkspaceId: `packet:${packetId}`,
+      repositoryUuid: repo.id,
+      packetId,
+      cwd: worktreePath,
+      version: 2,
+    });
+    const wrongRebind = {
+      logicalWorkspaceId: `packet:${packetId}`,
+      repositoryUuid: repo.id,
+      packetId,
+      expectedCwd: worktreePath,
+      nextCwd: path.join(root, 'unexpected-workspace'),
+      expectedVersion: 1,
+    };
+    await expect(lifecycle?.rebindWorkspace?.(surfaceId, wrongRebind)).resolves.toMatchObject({ status: 'conflict' });
+    await expect(lifecycle?.rebindWorkspace?.(surfaceId, {
+      ...wrongRebind,
+      logicalWorkspaceId: 'packet:another-owner',
+      expectedVersion: 2,
+    })).resolves.toMatchObject({ status: 'conflict' });
+    expect(JSON.parse(readFileSync(metadataPath, 'utf8')).workspaceBinding).toEqual(restoredSession.workspaceBinding);
+    const replayedRestore = await POST(post('restore', packetId, 'real-restore-1'));
+    expect(replayedRestore.status).toBe(200);
+    expect(JSON.parse(readFileSync(metadataPath, 'utf8')).workspaceBinding).toEqual(restoredSession.workspaceBinding);
     const restoredStorage = await measureWorkspaceStorage(worktreePath);
     if (process.env.O8_THIN_WORKSPACE_DOGFOOD === '1') {
       console.info('[thin-workspaces-dogfood]', JSON.stringify({

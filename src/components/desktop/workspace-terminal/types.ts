@@ -65,7 +65,7 @@ export interface TerminalTab {
    *                       canvas (experimentalCanvas flag).
    *                       NOT the same as 'canvas'.
    */
-  kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas';
+  kind: 'terminal' | 'chat' | 'llm-chat' | 'chatgpt-plan' | 'canvas' | 'orchestrator' | 'fleet-canvas';
   tmuxSession: string | null;
   /** Live run views attach to an existing PTY but must never send it input. */
   readOnly?: boolean;

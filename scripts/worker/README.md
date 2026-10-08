@@ -84,8 +84,8 @@ the transition; do not reuse a legacy credential as a cloud worker key.
   `o8.workspace.json` bytes at that base SHA, the worker runs setup and starts
   declared services in its clone. A remote service must declare a port and a
   loopback health check. The worker writes lease-bound `service` receipts for
-  healthy, stopped, or failed states. Services stop before the job completes;
-  this is not a persistent preview or a user-facing preview URL.
+  healthy, stopped, or failed states. Services stop before an agent job completes.
+  A declared preview can be requested separately through the native task menu.
 - With the manifest policy disabled, no manifest command runs. With the
   one-approval policy, an unapproved manifest blocks dispatch until its exact
   bytes are approved. A follow-up whose agent changed the manifest fails
@@ -105,6 +105,30 @@ the transition; do not reuse a legacy credential as a cloud worker key.
   leased to a stopped process becomes claimable again after lease expiry, in a
   fresh clone. Repeated execution failures park the job after its attempt
   budget; an operator can inspect its transcript and retry deliberately.
+
+## Completed-result review previews
+
+An operator can request a preview for a completed remote result from the task
+menu. The server creates a separate service-only child at that result's exact
+reported commit SHA, using the original approved manifest and service contract.
+The worker verifies those manifest bytes again before running any command. It
+runs setup and services, without invoking Codex, committing, or pushing. The
+completed job stays completed and remains the task's primary execution receipt.
+
+The child has its own session, authenticated claim and lease, plus an absolute
+ten-minute deadline persisted at creation. Reconnect reuses the same session and
+deadline. The coordinator allows at most two active review service sessions per
+team; the worker keeps those sessions alongside its ordinary execution loop.
+Services stop on operator close, deadline, health or socket ownership failure,
+key revocation, parent supersession, or worker shutdown. A clean worker restart
+may recover an unclosed session before its original deadline; closed or expired
+sessions cannot recover. Service-only sessions refuse steer controls.
+
+This HTTP preview currently requires a Linux service runner and the macOS native
+preview surface. It supports bounded GET/HEAD reads, not streaming or writes.
+After coordinator state is reopened, request a fresh local preview connection;
+old connection tickets are not reused. This does not provide an independent
+host or make a runner hosted on the operator's laptop survive laptop shutdown.
 
 ## Stopping and restarting
 

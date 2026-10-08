@@ -55,7 +55,9 @@ function fixture(runtime: 'claude-code' | 'codex', config?: Record<string, strin
   const session: OwnedSessionRecord = {
     surfaceId: surface, laneId: lane.id, sessionDir, cwd: worktree, repoPath: worktree,
     title: 'retry fixture', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    latestPrompt: 'read only', latestSummary: '', recentRuns: [], effort: 'high',
+    latestPrompt: 'read only', latestSummary: '', recentRuns: [{ id: `failed-${id}`, mode: 'launch',
+      prompt: 'read only', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+      pid: 0, stdoutPath: '', stderrPath: '', outcome: 'failed' }], effort: 'high',
     model: runtime === 'codex' || config?.modelSource === 'codex-subscription' ? 'gpt-5.6-sol' : 'claude-opus-5',
     runtimeConfig: config,
   };
@@ -159,6 +161,24 @@ describe('supervisor retry identity through persisted state and the launch route
     expect(callbacks.broadcastAgentUpdate.mock.calls.filter(([event]) => event.status === 'retrying')).toHaveLength(1);
   });
 
+  it('holds a persisted single-attempt worker before any supervisor retry request', async () => {
+    const f = fixture('codex', { workMode: 'read-only' });
+    f.session.executionPolicy = { version: 1, mode: 'single-attempt', runtime: 'codex',
+      model: f.session.model!, effort: 'high', runtimeConfig: { workMode: 'read-only' } };
+    f.save();
+    closeDb();
+    const transport = serveLaunchRoute();
+    const callbacks = watch(f);
+    await vi.waitFor(() => expect(callbacks.broadcastAgentUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'awaiting_input' }),
+    ));
+    expect(getLane(f.lane.id)?.outcomeNote).toContain('single-attempt');
+    expect(transport).not.toHaveBeenCalled();
+    expect(h.launch).not.toHaveBeenCalled();
+    expect(callbacks.onAgentRetry).not.toHaveBeenCalled();
+    expect(supervisor.getWatchedAgents(f.repo)[0]).toMatchObject({ retryCount: 0, completionReported: true });
+  });
+
   it.each([
     ['claude-code', 'native'],
     ['claude-code', 'codex-subscription'],
@@ -172,6 +192,7 @@ describe('supervisor retry identity through persisted state and the launch route
       .toEqual({ status: 'launched', surfaceId: `${runtime}-owned:retried` });
     expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       runtime, model: f.session.model, effort: 'high', workMode: 'read-only',
+      automaticRecoverySurfaceId: f.surface, automaticRecoveryRunId: f.session.recentRuns[0].id,
       ...(carrier ? { claudeCodeModel: f.session.model, claudeCodeCarrier: carrier } : {}),
       repoPath: f.worktree, cwd: f.worktree, projectRepoPath: f.repo,
       isolate: false, skipSetup: true, existingLaneId: f.lane.id,

@@ -207,7 +207,7 @@ NavRail was retired in epic #1089 — do not reference or reintroduce it.
 
 ### Asymmetry
 
-The desktop layout is not centered. Content lives against a firm left edge (the AgentPanel card). Panels on the right (Changes) float over vibrancy. No surface is horizontally centered.
+The active workspace uses a firm left edge (the AgentPanel card). Panels on the right (Changes) float over vibrancy. Focused setup and connection flows use a centered, stable content frame; their width and reading order follow [`STYLEGUIDE.md` §4](./STYLEGUIDE.md#4--screen-structure-and-layout). Keep dense navigation geometry separate from full-window task layout.
 
 ---
 
@@ -364,6 +364,12 @@ Framer Motion with restrained curves.
 - Spring: `stiffness: 400, damping: 30` — the default for all interactive transitions
 - Duration-based: 150ms for hover states, 200ms for panel slides, 300ms for tab switches
 - No bounce. No scale-on-hover > 1.02. No parallax.
+
+First-run step and disclosure changes use the pointer-only 180 ms contract in
+[`STYLEGUIDE.md` §4](./STYLEGUIDE.md#optional-setup-and-sensory-feedback). A
+predetermined opacity/transform transition may use the Web Animations API without
+adding a motion dependency. Keyboard navigation and reduced-motion mode stay
+instant. Optional sound cues follow the same section's explicit opt-in contract.
 
 ### Specifically banned
 

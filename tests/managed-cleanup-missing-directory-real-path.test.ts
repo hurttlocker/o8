@@ -425,6 +425,10 @@ it('retires an existing snapshot with its durable cleanup reason and removes onl
       version: before!.version + 2,
     });
     expect(retiredTransition?.receipt?.terminalAction).toBe('cleanup');
+    expect(retiredTransition?.receipt).toMatchObject({
+      sourceMissingAtAdmission: true, preservationUnavailable: 'source-already-absent',
+    });
+    expect(retiredTransition?.receipt?.preservationId).toBeUndefined();
     expect(await readDurableEntry(fixture.repoPath, fixture.id)).toBeUndefined();
     expect(await readDurableEntry(fixture.repoPath, fixture.unrelatedId)).toBeDefined();
     expect(existsSync(fixture.unrelatedPath)).toBe(true);
@@ -438,10 +442,10 @@ it('preserves a conflicting durable retirement action instead of bypassing the s
   const fixture = await setupTrackedWorkspace(`conflict-${Date.now()}`, { gitWorktree: true });
   const { closeDb } = await import('@/lib/db');
   await seedSnapshot(fixture);
-  const { beginWorkspaceMaterializationRetirement, getWorkspaceRetirementAction } = await import(
+  const { prepareWorkspaceMaterializationRetirement, getWorkspaceRetirementAction } = await import(
     '@/lib/workspace/workspace-materialization-retirement'
   );
-  beginWorkspaceMaterializationRetirement(fixture.worktreePath, 'discard');
+  await prepareWorkspaceMaterializationRetirement(fixture.repoPath, fixture.worktreePath, 'discard');
   rmSync(fixture.worktreePath, { recursive: true, force: true });
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {
@@ -496,10 +500,10 @@ it('replays a legitimate non-cleanup retirement from preexisting verified snapsh
   const fixture = await setupTrackedWorkspace(`replay-${Date.now()}`, { gitWorktree: true });
   const { closeDb } = await import('@/lib/db');
   await seedSnapshot(fixture);
-  const { beginWorkspaceMaterializationRetirement } = await import(
+  const { prepareWorkspaceMaterializationRetirement } = await import(
     '@/lib/workspace/workspace-materialization-retirement'
   );
-  beginWorkspaceMaterializationRetirement(fixture.worktreePath, 'discard');
+  await prepareWorkspaceMaterializationRetirement(fixture.repoPath, fixture.worktreePath, 'discard');
   rmSync(fixture.worktreePath, { recursive: true, force: true });
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {

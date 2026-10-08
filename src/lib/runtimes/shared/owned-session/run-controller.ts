@@ -1,3 +1,11 @@
+import { controlledProviderSandbox } from './controlled-provider-sandbox';
+import { revokeControlledGateway } from '@/lib/claude-code/controlled-gateway';
+import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
+import { ownedSpawnEnvironment } from './restricted-spawn-env';
+import { assertControlledLaunchGrantCurrent, withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
+import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
+import { createFailureRetry } from './failure-retry';
+import { assertOwnedSingleAttemptSpawn } from './execution-policy';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
@@ -10,6 +18,7 @@ import {
 } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
@@ -24,8 +33,6 @@ import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
-  AUTO_RETRY_FRESHNESS_MS,
-  MAX_AUTO_RETRIES,
   RUNS_DIR,
   compactText,
   deriveRunOutcome,
@@ -94,7 +101,6 @@ export function createOwnedRunController({
   workspaceSpawnGuard: OwnedWorkspaceSpawnGuard;
   invalidateFleetCache: () => void;
 }): OwnedRunController {
-  const pendingAutoRetries = new Set<string>();
   const runArtifactCache = new Map<string, {
     key: string;
     /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit. */
@@ -105,6 +111,8 @@ export function createOwnedRunController({
   const RUN_ARTIFACT_CACHE_MAX = 48;
   const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
+  const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
+    notify: emitRuntimeFallbackNotification, invalidateFleetCache, retryDelayMs });
   function recordSandboxDenialEvent(
     laneId: string,
     surfaceId: string,
@@ -206,6 +214,7 @@ export function createOwnedRunController({
     stderrPath: string,
     outcome: OwnedChildExitOutcome,
   ) {
+    revokeControlledGateway(surfaceId);
     const stderrTail = await readAbnormalStderrTail(stderrPath, outcome);
     const childExit = stderrTail ? { ...outcome, stderrTail } : outcome;
 
@@ -283,16 +292,21 @@ export function createOwnedRunController({
         } catch (error) {
           console.warn(`[owned-store] Failed to record sandbox_denied for lane ${laneId}:`, error);
         }
-      } else if (!finishedClean && !recovered) {
+      } else if (recordedRun.outcome === 'failed' && !recovered) {
+        const failedLaneId = laneId;
         try {
           const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
-          await handleWorkerRuntimeFailure({
-            laneId,
-            runtime: runtimeId,
-            model,
-            surfaceId,
-            prompt: latestPrompt,
-            rawFailure: compactText(rawFailure, 4_000),
+          await withSurfaceLock(surfaceId, async () => {
+            const current = await io.findSession(surfaceId);
+            if (!current || current.executionPolicy !== undefined || currentRecoveryRun(current)?.id !== runId || recoveryInterrupted(current)) return;
+            await handleWorkerRuntimeFailure({
+              laneId: failedLaneId,
+              runtime: runtimeId,
+              model,
+              surfaceId,
+              prompt: latestPrompt,
+              rawFailure: compactText(rawFailure, 4_000),
+            });
           });
         } catch (error) {
           console.error(`[owned-store] Worker quota fallback handling failed for lane ${laneId}:`, error);
@@ -301,11 +315,11 @@ export function createOwnedRunController({
     }
 
     if (finishedClean) {
-      void notifySupervisorOfCleanExit(surfaceId);
+      void notifySupervisorOfCleanExit(surfaceId, runId);
     }
   }
 
-  async function notifySupervisorOfCleanExit(surfaceId: string): Promise<void> {
+  async function notifySupervisorOfCleanExit(surfaceId: string, runId: string): Promise<void> {
     try {
       const [{ resolvePortInfo }, { getOrCreateWsToken }] = await Promise.all([
         import('@/lib/panel/api-port'),
@@ -315,7 +329,7 @@ export function createOwnedRunController({
       await fetch(`http://127.0.0.1:${wsPort}/supervisor/completed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
-        body: JSON.stringify({ surfaceId }),
+        body: JSON.stringify({ surfaceId, runId }),
         signal: AbortSignal.timeout(3000),
       });
     } catch (err) {
@@ -393,7 +407,7 @@ export function createOwnedRunController({
 
       const runAlive = await isOwnedRunAlive(run);
       if (runAlive) {
-        if (run.outcome !== 'running') {
+        if (run.outcome !== 'running' && !run.interruptRequestedAt && run.outcome !== 'interrupted') {
           run.outcome = 'running';
           dirty = true;
         }
@@ -439,55 +453,19 @@ export function createOwnedRunController({
     }
 
     if (allowRetry && await recoverModelCompatibility(session, surfaceLockHeld)) return session;
-    const retryBudget = adapter.chooseRetryModel ? MAX_AUTO_RETRIES : 1;
-    if (allowRetry && session.autoRetry && (session.retryCount ?? 0) < retryBudget) {
-      const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
-      if (latestFailedRun && !latestFailedRun.sandboxDenial && !session.activeRun) {
-        const failAge = latestFailedRun.finishedAt
-          ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
-          : Infinity;
-        if (failAge < AUTO_RETRY_FRESHNESS_MS && !pendingAutoRetries.has(session.surfaceId)) {
-          pendingAutoRetries.add(session.surfaceId);
-          if (adapter.chooseRetryModel) {
-            try {
-              const failedRaw = await readOwnedRunStdout(latestFailedRun);
-              const decision = adapter.chooseRetryModel({
-                failedRunRaw: failedRaw,
-                currentModel: session.model,
-              });
-              if (decision && decision.nextModel !== session.model) {
-                const fromModel = session.model ?? '(default)';
-                session.model = decision.nextModel;
-                dirty = true;
-                console.log(`[owned-store] ${runtimeId} fallback ${fromModel} → ${decision.nextModel} (${decision.reason})`);
-                void emitRuntimeFallbackNotification(session, fromModel, decision.nextModel, decision.reason);
-              }
-            } catch (hookErr) {
-              console.error(`[owned-store] chooseRetryModel hook failed for ${session.surfaceId}:`, hookErr);
-            }
-          }
-          session.retryCount = (session.retryCount ?? 0) + 1;
-          await io.saveSession(session);
-          console.log(`[owned-store] Auto-retrying ${runtimeId} session ${session.surfaceId} after failure (attempt ${session.retryCount})`);
-          setTimeout(async () => {
-            try {
-              await withSurfaceLock(session.surfaceId, () =>
-                spawnOwnedRun(session, session.latestPrompt, session.threadId ? 'resume' : 'launch'));
-              invalidateFleetCache();
-            } catch (err) {
-              console.error(`[owned-store] Auto-retry failed for ${session.surfaceId}:`, err);
-            } finally {
-              pendingAutoRetries.delete(session.surfaceId);
-            }
-          }, retryDelayMs);
-        }
-      }
-    }
+    if (allowRetry) scheduleFailureRetry(session);
 
     return session;
   }
 
   async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+    return withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
+      spawnOwnedRunInner(session, prompt, mode)
+    ));
+  }
+
+  async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+    assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await ensureDir(path.join(session.sessionDir, RUNS_DIR));
 
     const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -504,6 +482,7 @@ export function createOwnedRunController({
       })).path;
     } catch (error) {
       if (!(error instanceof CliNotFoundError)) {
+        if (session.executionPolicy !== undefined) throw error;
         console.error(`[owned-session] ${runtimeId} CLI resolution failed, falling back to bare "${adapter.binaryName}":`, error);
         binary = adapter.binaryName;
       } else {
@@ -551,7 +530,9 @@ export function createOwnedRunController({
     const sandboxEnvExtra: Record<string, string> = {};
     if (sandboxEnabled) {
       try {
+        const controlledSandbox = controlledProviderSandbox(session, spawnBinary);
         const prepared = await prepareWorkerSandbox({
+          ...controlledSandbox,
           runId,
           profileDir: path.join(session.sessionDir, RUNS_DIR),
           cwd: session.repoPath,
@@ -560,7 +541,7 @@ export function createOwnedRunController({
           args: spawnArgs,
           extraReadPaths: executionCarrierSandboxReadPaths(workerMcp.sandboxReadPaths, carrierLaunch),
           readBackingProjectConfig: runtimeId === 'codex',
-          finalAllowReadPaths: workerMcp.configPath ? [workerMcp.configPath] : undefined,
+          finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : [])],
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
@@ -614,7 +595,7 @@ export function createOwnedRunController({
     let pendingDetachedExit: OwnedChildExitOutcome | undefined;
 
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
-    const workerToken = session.packetId
+    const workerToken = session.executionPolicy !== undefined ? mintReadOnlyWorkerToken(runId) : session.packetId
       ? mintPacketWorkerToken(session.packetId, { processMarker: runId })
       : getOrCreateLocalWorkerToken();
     const spawnEnv = {
@@ -637,153 +618,170 @@ export function createOwnedRunController({
       ...(session.packetId ? { O8_WORKER_PACKET_ID: session.packetId } : {}),
       ...sandboxEnvExtra,
     };
-    await ensureDispatchBackendReady(runtimeId, mode);
-    const durableSession = await io.findSession(session.surfaceId);
-    if (!durableSession) throw new Error('Owned session disappeared before its run could start.');
-    Object.assign(session, durableSession);
-    const spawnDecision = await assertOwnedWorkspaceSpawnAvailable({
-      surfaceId: session.surfaceId, sessionPacketId: session.packetId ?? null, laneId: session.laneId ?? null,
-      runtimeId, mode, binding: session.workspaceBinding ?? null, repoPath: session.repoPath,
-    }, workspaceSpawnGuard);
-    const materializationIdentity = spawnDecision.materializationIdentity ?? null;
-    const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
-    const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
-    const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
-
-    const preparedRun: OwnedRunRecord = {
-      id: runId,
-      mode,
-      prompt,
-      startedAt: nowIso(),
-      pid: 0,
-      commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
-      processMarker: runId,
-      spawnState: 'prepared',
-      stdoutPath,
-      stderrPath,
-      outcome: 'running',
-      sandboxed: sandboxEnabled,
-    };
-    session.latestPrompt = prompt;
-    session.latestSummary = compactText(prompt, 140) || session.latestSummary;
-    session.reviewDisposition = 'watching';
-    session.reviewDispositionUpdatedAt = nowIso();
-    session.activeRun = preparedRun;
-    prependOwnedRun(session, preparedRun);
-    await io.saveSession(session);
-
     try {
-      if (!carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
-        try {
-          const result = await spawnBridgeTerminalSession({
-            sessionName: bridgeSessionName,
-            shellCommand: shellCmd,
-            cwd: session.repoPath,
-            env: spawnEnv,
-          });
-          terminalSessionName = result.sessionName;
-          pid = typeof result.pid === 'number' ? result.pid : 0;
-        } catch {
-          // bridge spawn failed; fall through to detached spawn
-        }
+      await ensureDispatchBackendReady(runtimeId, mode);
+      const durableSession = await io.findSession(session.surfaceId);
+      if (!durableSession) throw new Error('Owned session disappeared before its run could start.');
+      if (JSON.stringify(durableSession.executionPolicy) !== JSON.stringify(session.executionPolicy)) {
+        throw new Error('Single-attempt worker policy changed before spawn.');
       }
+      if (JSON.stringify(durableSession.controlledTask) !== JSON.stringify(session.controlledTask)) {
+        throw new Error('Controlled task binding changed before spawn.');
+      }
+      assertOwnedSingleAttemptSpawn(durableSession, runtimeId, mode);
+      Object.assign(session, durableSession);
+      return await withControlledTaskSpawn(session, runtimeId, runId, async () => {
+        const spawnDecision = await assertOwnedWorkspaceSpawnAvailable({
+          surfaceId: session.surfaceId, sessionPacketId: session.packetId ?? null, laneId: session.laneId ?? null,
+          runtimeId, mode, binding: session.workspaceBinding ?? null, repoPath: session.repoPath,
+        }, workspaceSpawnGuard);
+        const materializationIdentity = spawnDecision.materializationIdentity ?? null;
+        const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
+        const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
+        const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
 
-      if (!terminalSessionName) {
-        const stdoutFd = openSync(stdoutPath, 'a');
-        const stderrFd = openSync(stderrPath, 'a');
+        const preparedRun: OwnedRunRecord = {
+          id: runId,
+          mode,
+          prompt,
+          startedAt: nowIso(),
+          pid: 0,
+          commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
+          processMarker: runId,
+          spawnState: 'prepared',
+          stdoutPath,
+          stderrPath,
+          outcome: 'running',
+          sandboxed: sandboxEnabled,
+        };
+        session.latestPrompt = prompt;
+        session.latestSummary = compactText(prompt, 140) || session.latestSummary;
+        session.reviewDisposition = 'watching';
+        session.reviewDispositionUpdatedAt = nowIso();
+        session.activeRun = preparedRun;
+        prependOwnedRun(session, preparedRun);
+        await io.saveSession(session);
+
         try {
-          // On Windows the resolved CLI is usually a `.cmd` shim (that is what npm
-          // installs), and Node refuses to execute one without an interpreter —
-          // it fails before a process exists, so the run dies in milliseconds with
-          // pid 0 and an empty stderr, which reads like the agent instantly gave
-          // up. cliInvocation is the identity for real executables. See #1758.
-          const winLaunch = cliInvocation(spawnBinary, spawnArgs);
-          const directLaunch = process.platform === 'win32'
-            ? guardedWorkspaceInvocation(winLaunch.command, winLaunch.args, materializationIdentity)
-            : guardedWorkspaceInvocation(
-                '/usr/bin/nice',
-                ['-n', '10', spawnBinary, ...spawnArgs],
-                materializationIdentity,
-              );
-          const child = process.platform === 'win32'
-            ? spawn(directLaunch.command, directLaunch.args, {
-                windowsHide: true,
+          if (session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+            try {
+              const result = await spawnBridgeTerminalSession({
+                sessionName: bridgeSessionName,
+                shellCommand: shellCmd,
                 cwd: session.repoPath,
-                detached: true,
-                stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
-                env: { ...process.env, ...spawnEnv },
-              })
-            : spawn(directLaunch.command, directLaunch.args, {
-                windowsHide: true,
-                cwd: session.repoPath,
-                detached: true,
-                stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
-                env: { ...process.env, ...spawnEnv },
+                env: spawnEnv,
+                packetId: session.packetId ?? undefined,
+                laneId: session.laneId ?? undefined,
               });
-          detachedChild = child;
-          observeChildExit(child, (childExit) => {
-            if (!runPersisted) {
-              pendingDetachedExit = childExit;
-              return;
+              terminalSessionName = result.sessionName;
+              pid = typeof result.pid === 'number' ? result.pid : 0;
+            } catch {
+              // bridge spawn failed; fall through to detached spawn
             }
-            void recordDetachedChildExit(session.surfaceId, runId, stderrPath, childExit).catch((err) => {
-              console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
-            });
-          });
-          if (stdinPayload && child.stdin) {
-            child.stdin.end(stdinPayload, 'utf8');
           }
-          child.unref();
-          pid = child.pid ?? 0;
-          detachMode = 'detached';
-        } finally {
-          closeSync(stdoutFd);
-          closeSync(stderrFd);
+
+          if (!terminalSessionName) {
+            const stdoutFd = openSync(stdoutPath, 'a');
+            const stderrFd = openSync(stderrPath, 'a');
+            try {
+              // On Windows the resolved CLI is usually a `.cmd` shim (that is what npm
+              // installs), and Node refuses to execute one without an interpreter —
+              // it fails before a process exists, so the run dies in milliseconds with
+              // pid 0 and an empty stderr, which reads like the agent instantly gave
+              // up. cliInvocation is the identity for real executables. See #1758.
+              const winLaunch = cliInvocation(spawnBinary, spawnArgs);
+              const directLaunch = process.platform === 'win32'
+                ? guardedWorkspaceInvocation(winLaunch.command, winLaunch.args, materializationIdentity)
+                : guardedWorkspaceInvocation(
+                    '/usr/bin/nice',
+                    ['-n', '10', spawnBinary, ...spawnArgs],
+                    materializationIdentity,
+                  );
+              assertControlledLaunchGrantCurrent(session);
+              const child = process.platform === 'win32'
+                ? spawn(directLaunch.command, directLaunch.args, {
+                    windowsHide: true,
+                    cwd: session.repoPath,
+                    detached: true,
+                    stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
+                    env: ownedSpawnEnvironment(session, spawnEnv),
+                  })
+                : spawn(directLaunch.command, directLaunch.args, {
+                    windowsHide: true,
+                    cwd: session.repoPath,
+                    detached: true,
+                    stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
+                    env: ownedSpawnEnvironment(session, spawnEnv),
+                  });
+              detachedChild = child;
+              observeChildExit(child, (childExit) => {
+                if (!runPersisted) {
+                  pendingDetachedExit = childExit;
+                  return;
+                }
+                void recordDetachedChildExit(session.surfaceId, runId, stderrPath, childExit).catch((err) => {
+                  console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
+                });
+              });
+              if (stdinPayload && child.stdin) {
+                child.stdin.end(stdinPayload, 'utf8');
+              }
+              child.unref();
+              pid = child.pid ?? 0;
+              detachMode = 'detached';
+            } finally {
+              closeSync(stdoutFd);
+              closeSync(stderrFd);
+            }
+          }
+        } catch (error) {
+          // A synchronous failure can still follow an ambiguous bridge response,
+          // so settle only when the durable marker scan proves no process exists.
+          await reconcilePreparedRuns(session);
+          throw error;
         }
-      }
-    } catch (error) {
-      // A synchronous failure can still follow an ambiguous bridge response,
-      // so settle only when the durable marker scan proves no process exists.
-      await reconcilePreparedRuns(session);
-      throw error;
-    }
 
-    const processGroupId = process.platform !== 'win32' && detachMode === 'detached' && pid > 0
-      ? pid
-      : await resolveSpawnedProcessGroupId(pid);
-    const run: OwnedRunRecord = {
-      ...preparedRun,
-      pid,
-      processGroupId,
-      spawnState: 'started',
-      tmuxSession: terminalSessionName,
-      detachMode,
-    };
-
-    if (session.packetId) {
-      try {
-        bindPacketWorkerTokenProcess(workerToken, {
+        const processGroupId = process.platform !== 'win32' && detachMode === 'detached' && pid > 0
+          ? pid
+          : await resolveSpawnedProcessGroupId(pid);
+        const run: OwnedRunRecord = {
+          ...preparedRun,
           pid,
           processGroupId,
-          processMarker: runId,
-        });
-      } catch (error) {
-        console.warn(
-          `[owned-session] ${runtimeId} worker credential process binding failed closed for lease mutations: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
+          spawnState: 'started',
+          tmuxSession: terminalSessionName,
+          detachMode,
+        };
 
-    session.activeRun = run;
-    session.recentRuns = session.recentRuns.map((candidate) => candidate.id === run.id ? run : candidate);
-    await io.saveSession(session);
-    runPersisted = true;
-    if (detachedChild && pendingDetachedExit) {
-      void recordDetachedChildExit(session.surfaceId, run.id, run.stderrPath, pendingDetachedExit).catch((err) => {
-        console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
+        if (session.packetId && session.executionPolicy === undefined) {
+          try {
+            bindPacketWorkerTokenProcess(workerToken, {
+              pid,
+              processGroupId,
+              processMarker: runId,
+            });
+          } catch (error) {
+            console.warn(
+              `[owned-session] ${runtimeId} worker credential process binding failed closed for lease mutations: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        session.activeRun = run;
+        session.recentRuns = session.recentRuns.map((candidate) => candidate.id === run.id ? run : candidate);
+        await io.saveSession(session);
+        runPersisted = true;
+        if (detachedChild && pendingDetachedExit) {
+          void recordDetachedChildExit(session.surfaceId, run.id, run.stderrPath, pendingDetachedExit).catch((err) => {
+            console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
+          });
+        }
+        return run;
       });
+    } catch (error) {
+      if (session.executionPolicy !== undefined) revokeReadOnlyWorkerToken(runId);
+      throw error;
     }
-    return run;
   }
 
   return {

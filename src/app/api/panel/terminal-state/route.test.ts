@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { GET, POST } from './route';
 import { listReposFresh } from '@/lib/repos/registry';
+import { buildNewChatGPTPlanTab, buildPersistedState } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { computeRestoredTabs } from '@/components/desktop/workspace-terminal/terminal-restore';
 
 const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
 const stateDir = path.join(dataDir, 'terminal-states');
@@ -17,6 +19,20 @@ beforeEach(async () => {
 });
 
 describe('terminal state restore without a registered repo', () => {
+  it('persists and restores a plan chat through the desktop state route without adopting a repository or terminal', async () => {
+    const tab = buildNewChatGPTPlanTab();
+    const persisted = buildPersistedState([tab], tab.id);
+    const save = await POST(new Request(stateUrl, { method: 'POST', body: JSON.stringify(persisted) }));
+    expect(save.status).toBe(200);
+    const response = await GET(new Request(stateUrl));
+    expect(response.status).toBe(200);
+    const restored = await computeRestoredTabs(await response.json(), { preferredRepo: { name: 'unrelated', localPath: '/unrelated' }, defaultTab: 'terminal', createDefaultChatTab: () => { throw new Error('The explicit plan tab must restore'); } });
+    expect(restored?.activeTabId).toBe(tab.id);
+    expect(restored?.tabs).toEqual([expect.objectContaining({ id: tab.id, label: 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null })]);
+    expect(restored?.tabs[0].repo).toBeUndefined();
+    expect(restored?.sessionsToAttach).toEqual([]); expect(restored?.deadTerminalTabs).toEqual([]);
+  });
+
   it('reloads a persisted global terminal and filters an orphaned repo tab', async () => {
     const save = await POST(new Request(stateUrl, {
       method: 'POST',

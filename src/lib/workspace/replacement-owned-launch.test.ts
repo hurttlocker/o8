@@ -45,6 +45,8 @@ const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { addRepo } = await import('@/lib/repos/registry');
 const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-session');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
+const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const {
   createWorkspaceSnapshot,
   getWorkspaceSnapshot,
@@ -56,7 +58,7 @@ const {
 } = await import('./hibernator');
 const { inspectOwnedWorkspaceMaterialization } = await import('./materialization-guard');
 const {
-  beginWorkspaceMaterializationRetirement,
+  prepareWorkspaceMaterializationRetirement,
   finishWorkspaceMaterializationRetirement,
 } = await import('./workspace-materialization-retirement');
 
@@ -227,6 +229,13 @@ describe('parked replacement through the production owned launch guard', { timeo
     const oldWorktreePath = path.join(worktreeRoot, `packet-${packetId}-old`);
     mkdirSync(path.dirname(oldWorktreePath), { recursive: true });
     git(repoPath, 'worktree', 'add', '-qb', branch, oldWorktreePath, 'main');
+    const oldId = path.basename(oldWorktreePath);
+    await withWorktreeMetaTransaction(repoPath, async (transaction) => transaction.save(oldId, {
+      id: oldId, agentType: 'codex', baseBranch: 'main', createdAt: 1,
+      claudeManaged: false, taskName: oldId, branchName: branch, status: 'ready', isolationKind: 'git-worktree',
+      materializationIdentity: await captureWorktreeMaterializationIdentity(oldWorktreePath),
+      materializationParentIdentity: await captureWorktreeMaterializationIdentity(worktreeRoot),
+    }));
     const priorLane: Lane = {
       id: 'retired-replacement-prior-lane', projectId: null, label: 'prior', repoPath,
       worktreePath: oldWorktreePath, branch, baseBranch: 'main', runtime: 'codex',
@@ -244,19 +253,17 @@ describe('parked replacement through the production owned launch guard', { timeo
       diffFingerprint: priorTruth.diffFingerprint, sessionIdentities: [],
       creationId: 'retired-replacement-generation-one',
     });
-    beginWorkspaceMaterializationRetirement(oldWorktreePath, 'cleanup');
+    await prepareWorkspaceMaterializationRetirement(repoPath, oldWorktreePath, 'cleanup');
     git(repoPath, 'worktree', 'remove', oldWorktreePath);
     git(repoPath, 'branch', '-D', branch);
     await finishWorkspaceMaterializationRetirement(oldWorktreePath, 'cleanup');
+    await withWorktreeMetaTransaction(repoPath, (transaction) => transaction.remove(oldId));
     expect(getWorkspaceSnapshot(repo.id, packetId)).toMatchObject({ state: 'retired' });
 
     const replacementId = `packet-${packetId}-next`;
     const replacementPath = path.join(worktreeRoot, replacementId);
     git(repoPath, 'worktree', 'add', '-qb', branch, replacementPath, 'main');
-    writeFileSync(path.join(worktreeRoot, '.meta.json'), JSON.stringify({
-      version: 1,
-      worktrees: {
-        [replacementId]: {
+    await withWorktreeMetaTransaction(repoPath, async (transaction) => transaction.save(replacementId, {
           id: replacementId, agentType: 'codex', baseBranch: 'main', createdAt: 2,
           claudeManaged: false, taskName: replacementId, branchName: branch,
           status: 'ready', isolationKind: 'git-worktree',
@@ -265,8 +272,7 @@ describe('parked replacement through the production owned launch guard', { timeo
             inode: lstatSync(replacementPath).ino,
             canonicalPath: realpathSync(replacementPath),
           },
-        },
-      },
+          materializationParentIdentity: await captureWorktreeMaterializationIdentity(worktreeRoot),
     }));
     const lane = createLane({
       repoPath, branch, baseBranch: 'main', runtime: 'codex', label: 'replacement',

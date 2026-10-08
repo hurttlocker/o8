@@ -86,6 +86,34 @@ describe('runtime launch persisted idempotency through the real route', () => {
     expect(h.publish).not.toHaveBeenCalled();
   });
 
+  it('retains the single-attempt limit in the real route and its persisted request binding', async () => {
+    const body = { runtime: 'codex', prompt: 'Inspect once.', cwd: dataDir,
+      model: 'gpt-6.1-sol', effort: 'high', workMode: 'read-only',
+      executionPolicy: 'single-attempt', clientMutationId: 'single-attempt-route-proof' };
+    expect((await route.POST(post(body))).status).toBe(200);
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executionPolicy: 'single-attempt' }));
+    closeDb();
+    expect((await route.POST(post(body))).headers.get('x-o8-idempotency-replayed')).toBe('1');
+    expect((await route.POST(post({ ...body, executionPolicy: undefined }))).status).toBe(409);
+    expect(h.launch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unknown execution limits before the launch boundary', async () => {
+    const response = await route.POST(post({ runtime: 'codex', prompt: 'Inspect', cwd: dataDir,
+      clientMutationId: 'invalid-execution-policy', executionPolicy: 'retry-until-success' }));
+    expect(response.status).toBe(400);
+    expect(h.launch).not.toHaveBeenCalled();
+  });
+
+  it.each([{ model: undefined }, { effort: 'adaptive' }, { executionCarrier: 'ori' },
+    { model: 'ollama:qwen2.5-coder:32b' }])('rejects widened single-attempt pins before reserving a launch: %j', async (override) => {
+    const response = await route.POST(post({ runtime: 'codex', prompt: 'Inspect', cwd: dataDir,
+      clientMutationId: 'invalid-single-attempt-pins', executionPolicy: 'single-attempt',
+      model: 'gpt-6.1-sol', effort: 'high', workMode: 'read-only', ...override }));
+    expect(response.status).toBe(400);
+    expect(h.launch).not.toHaveBeenCalled();
+  });
+
   it('fails closed when persisted mutation binding throws', async () => {
     const bind = vi.spyOn(idempotency, 'bindIdempotencyClientMutation').mockImplementationOnce(() => {
       throw new Error('runtime launch idempotency write failed');

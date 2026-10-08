@@ -17,12 +17,8 @@
  * - commands.ts: final hard gate before merge execution
  */
 
-import { execFileSync } from 'node:child_process';
+import { laneGitSync, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
-import path from 'node:path';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
@@ -34,7 +30,6 @@ import { getRelocatedDeletionCredits } from './diff-relocation';
 import { hasScopePartitionToken } from './review-risk';
 import { inspectOperatorCheckoutMergeSafety } from './operator-checkout-merge';
 import type { Lane } from './types';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 // ── Budget Constants (shared with dispatch.ts preservation envelope) ──
 
@@ -118,44 +113,6 @@ function isWorkerScratchNoise(file: string | null): boolean {
 const WEBVIEW_LATCH_FILE = 'src-tauri/src/webview_latch.rs';
 const WEBVIEW_LATCH_BRIDGE_CALL = 'webview.' + 'ev' + 'al(js.as_ref())';
 const MERGE_GATE_FILE = 'src/lib/lane/merge-gate.ts';
-const BRANCH_GATE_ACTIVE_ENV = 'O8_BRANCH_MERGE_GATE_ACTIVE';
-const BRANCH_GATE_LANE_ENV = 'O8_BRANCH_MERGE_GATE_LANE';
-const BRANCH_GATE_SELF_REVIEW_ENV = 'O8_BRANCH_MERGE_GATE_SELF_REVIEW';
-const BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV = 'O8_BRANCH_MERGE_GATE_ORCHESTRATOR_APPROVED';
-const BRANCH_GATE_JSON_MARKER = '__O8_BRANCH_MERGE_GATE_RESULT__';
-/**
- * The gate script, with the module it loads resolved ABSOLUTELY against the
- * worktree.
- *
- * This used to be a module-level constant containing a RELATIVE specifier,
- * which worked only because it was passed to `--eval` and therefore resolved
- * against the process cwd. Moving it into a temp file (to dodge cmd.exe's
- * quoting on Windows) would have silently re-pointed that specifier at the temp
- * directory — and since the gate is fail-CLOSED, a failed import blocks every
- * packet, on every platform. A file:// URL is also the only form Windows
- * accepts: a bare C:\... path is not a valid ESM specifier.
- */
-export function branchGateScript(cwd: string): string {
-  const gateModule = pathToFileURL(path.join(cwd, 'src', 'lib', 'lane', 'merge-gate.ts')).href;
-  const serverOnlyStub = pathToFileURL(path.join(cwd, 'scripts', 'register-server-only-stub.mjs')).href;
-  return `
-(async () => {
-  console.log = (...args) => process.stderr.write(args.map(String).join(' ') + '\\n');
-  await import(${JSON.stringify(serverOnlyStub)});
-  const loaded = await import(${JSON.stringify(gateModule)});
-  const api = loaded.runMergeGate ? loaded : (loaded.default ?? loaded['module.exports']);
-  const lane = JSON.parse(process.env.${BRANCH_GATE_LANE_ENV} ?? '{}');
-  const rawSelfReview = process.env.${BRANCH_GATE_SELF_REVIEW_ENV};
-  const selfReview = rawSelfReview ? JSON.parse(rawSelfReview) : undefined;
-  const orchestratorApproved = process.env.${BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV} === '1';
-  const result = await api.runMergeGate(lane, selfReview, orchestratorApproved);
-  process.stdout.write('${BRANCH_GATE_JSON_MARKER}' + JSON.stringify(result));
-})().catch((error) => {
-  console.error(error && error.stack ? error.stack : String(error));
-  process.exitCode = 1;
-});
-`;
-}
 
 // ── Helpers ──
 
@@ -165,10 +122,10 @@ function parseGitDiffFilePath(line: string): string | null {
   return path.startsWith('b/') ? path.slice(2) : path;
 }
 
-function getAddedLines(cwd: string, baseBranch: string, headSha: string): AddedDiffLine[] {
+function getAddedLines(cwd: string, baseBranch: string, headSha: string, repoPath: string): AddedDiffLine[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const diff = execFileSync('git', ['diff', `${baseBranch}...${headSha}`, '--no-color'], {
+    const diff = laneGitSync(cwd, repoPath, ['diff', `${baseBranch}...${headSha}`, '--no-color'], {
       windowsHide: true,
       cwd,
       timeout: 15_000,
@@ -190,13 +147,14 @@ function getAddedLines(cwd: string, baseBranch: string, headSha: string): AddedD
     }
 
     return addedLines;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }
 
-function readHeadSha(cwd: string): string {
-  return execFileSync('git', ['rev-parse', 'HEAD'], {
+function readHeadSha(cwd: string, repoPath: string): string {
+  return laneGitSync(cwd, repoPath, ['rev-parse', 'HEAD'], {
     windowsHide: true,
     cwd,
     timeout: 5_000,
@@ -210,10 +168,10 @@ interface DiffNumstat {
   deletions: number;
 }
 
-function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
+function getDiffNumstat(cwd: string, baseBranch: string, repoPath: string): DiffNumstat[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const output = execFileSync('git', ['diff', '--numstat', `${baseBranch}...HEAD`], {
+    const output = laneGitSync(cwd, repoPath, ['diff', '--numstat', `${baseBranch}...HEAD`], {
       windowsHide: true,
       cwd,
       timeout: 10_000,
@@ -236,15 +194,16 @@ function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
         return isWorkerScratchNoise(file) ? null : { file, insertions, deletions };
       })
       .filter((entry): entry is DiffNumstat => entry !== null);
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }
 
-function getChangedFiles(cwd: string, baseBranch: string): string[] {
+function getChangedFiles(cwd: string, baseBranch: string, repoPath: string): string[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const output = execFileSync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
+    const output = laneGitSync(cwd, repoPath, ['diff', '--name-only', `${baseBranch}...HEAD`], {
       windowsHide: true,
       cwd,
       timeout: 10_000,
@@ -253,153 +212,15 @@ function getChangedFiles(cwd: string, baseBranch: string): string[] {
     }).trim();
 
     return output.split('\n').map((line) => line.trim()).filter(Boolean);
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }
 
-function shouldUseBranchMergeGate(cwd: string, baseBranch: string): boolean {
-  if (process.env[BRANCH_GATE_ACTIVE_ENV] === '1') return false;
-  return getChangedFiles(cwd, baseBranch).includes(MERGE_GATE_FILE);
-}
-
-function normalizeMergeViolation(value: unknown): MergeViolation | null {
-  if (!value || typeof value !== 'object') return null;
-  const entry = value as Partial<Record<keyof MergeViolation, unknown>>;
-  if (entry.category !== 'security' && entry.category !== 'budget' && entry.category !== 'integrity') return null;
-  if (entry.severity !== 'block' && entry.severity !== 'warn') return null;
-  if (typeof entry.label !== 'string' || typeof entry.detail !== 'string') return null;
-
-  return {
-    category: entry.category,
-    severity: entry.severity,
-    label: entry.label,
-    detail: entry.detail,
-    file: typeof entry.file === 'string' ? entry.file : undefined,
-  };
-}
-
-function normalizeMergeGateResult(value: unknown): MergeGateResult | null {
-  if (!value || typeof value !== 'object') return null;
-  const result = value as { passed?: unknown; violations?: unknown; diffBase?: unknown };
-  if (typeof result.passed !== 'boolean' || !Array.isArray(result.violations)) return null;
-
-  const violations = result.violations.map(normalizeMergeViolation);
-  if (violations.some((violation) => violation === null)) return null;
-
-  return {
-    passed: result.passed,
-    violations: violations as MergeViolation[],
-    diffBase: normalizePacketDiffBaseResolution(result.diffBase),
-  };
-}
-
-function normalizePacketDiffBaseResolution(value: unknown): PacketDiffBaseResolution | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const entry = value as Partial<Record<keyof PacketDiffBaseResolution, unknown>>;
-  if (
-    typeof entry.baseBranch !== 'string'
-    || typeof entry.requestedRef !== 'string'
-    || typeof entry.comparisonRef !== 'string'
-    || (typeof entry.mergeBase !== 'string' && entry.mergeBase !== null)
-    || typeof entry.fetchedRemoteBase !== 'boolean'
-    || typeof entry.usedFallback !== 'boolean'
-    || (typeof entry.warning !== 'string' && entry.warning !== null)
-  ) {
-    return undefined;
-  }
-
-  return {
-    baseBranch: entry.baseBranch,
-    requestedRef: entry.requestedRef,
-    comparisonRef: entry.comparisonRef,
-    mergeBase: entry.mergeBase,
-    fetchedRemoteBase: entry.fetchedRemoteBase,
-    usedFallback: entry.usedFallback,
-    warning: entry.warning,
-  };
-}
-
-function formatBranchGateError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const execError = error as Error & { stderr?: Buffer | string; stdout?: Buffer | string };
-  const stderr = execError.stderr ? String(execError.stderr).trim() : '';
-  const stdout = execError.stdout ? String(execError.stdout).trim() : '';
-  const detail = stderr || stdout;
-  return detail ? `${error.message}: ${detail.slice(0, 500)}` : error.message;
-}
-
-function branchMergeGateFailure(error: unknown): MergeGateResult {
-  return {
-    passed: false,
-    violations: [{
-      category: 'integrity',
-      severity: 'block',
-      label: 'Branch merge gate failed',
-      detail: `The packet updates ${MERGE_GATE_FILE}, but the worktree's merge gate could not execute: ${formatBranchGateError(error)}`,
-      file: MERGE_GATE_FILE,
-    }],
-  };
-}
-
-function runBranchMergeGate(
-  lane: Lane,
-  selfReview: PacketSelfReview | undefined,
-  orchestratorApproved: boolean,
-  cwd: string,
-): MergeGateResult {
-  try {
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      [BRANCH_GATE_ACTIVE_ENV]: '1',
-      [BRANCH_GATE_LANE_ENV]: JSON.stringify(lane),
-      [BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV]: orchestratorApproved ? '1' : '0',
-    };
-
-    if (selfReview) {
-      env[BRANCH_GATE_SELF_REVIEW_ENV] = JSON.stringify(selfReview);
-    } else {
-      delete env[BRANCH_GATE_SELF_REVIEW_ENV];
-    }
-
-    // The gate script is 15 lines. Passing it as an --eval ARGUMENT through
-    // cmd.exe on Windows is a quoting gamble on a fail-CLOSED path: if cmd's
-    // line-oriented parser truncates it, every packet touching this file is
-    // blocked. A temp file removes the gamble entirely and costs one write.
-    const scriptDir = mkdtempSync(path.join(tmpdir(), 'o8-merge-gate-'));
-    const scriptFile = path.join(scriptDir, 'gate.mts');
-    writeFileSync(scriptFile, branchGateScript(cwd), 'utf-8');
-    const gate = cliInvocation('npx', ['--no-install', 'tsx', scriptFile]);
-    let output: string;
-    try {
-      output = execFileSync(gate.command, gate.args, {
-        windowsHide: true,
-        cwd,
-        env,
-        timeout: 30_000,
-        encoding: 'utf-8',
-        maxBuffer: 2 * 1024 * 1024,
-      });
-    } finally {
-      // The gate runs on every merge; without this each one leaks a temp dir.
-      rmSync(scriptDir, { recursive: true, force: true });
-    }
-
-    const markerIndex = output.lastIndexOf(BRANCH_GATE_JSON_MARKER);
-    if (markerIndex === -1) {
-      throw new Error('Branch merge gate did not emit a result marker.');
-    }
-
-    const json = output.slice(markerIndex + BRANCH_GATE_JSON_MARKER.length);
-    const result = normalizeMergeGateResult(JSON.parse(json));
-    if (!result) {
-      throw new Error('Branch merge gate emitted an invalid result shape.');
-    }
-
-    return result;
-  } catch (error) {
-    return branchMergeGateFailure(error);
-  }
+/** True when the packet edits the gate itself (#3414). The host still runs its own gate. */
+function changesMergeGate(cwd: string, baseBranch: string, repoPath: string): boolean {
+  return getChangedFiles(cwd, baseBranch, repoPath).includes(MERGE_GATE_FILE);
 }
 
 // ── Check 1: Security Patterns ──
@@ -413,23 +234,24 @@ function isCanonicalWebviewLatchBridge(file: string | null, text: string): boole
   return text.slice(1).replace(/\s+/g, '') === WEBVIEW_LATCH_BRIDGE_CALL;
 }
 
-function hasReviewedCliExit(cwd: string, headSha: string): boolean {
+function hasReviewedCliExit(cwd: string, headSha: string, repoPath: string): boolean {
   try {
-    const contents = execFileSync('git', ['show', `${headSha}:${REVIEWED_CLI_EXIT_FILE}`], {
+    const contents = laneGitSync(cwd, repoPath, ['show', `${headSha}:${REVIEWED_CLI_EXIT_FILE}`], {
       cwd, windowsHide: true, timeout: 5_000, maxBuffer: 64 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     return createHash('sha256').update(contents).digest('hex') === REVIEWED_CLI_EXIT_SHA256;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return false;
   }
 }
 
-function checkSecurityPatterns(cwd: string, headSha: string, addedLines: AddedDiffLine[]): MergeViolation[] {
+function checkSecurityPatterns(cwd: string, headSha: string, addedLines: AddedDiffLine[], repoPath: string): MergeViolation[] {
   const violations: MergeViolation[] = [];
   const reviewedCliExit = addedLines.some(({ file, text }) => (
     file === REVIEWED_CLI_EXIT_FILE && PROCESS_EXIT_PATTERN.test(text)
-  )) && hasReviewedCliExit(cwd, headSha);
+  )) && hasReviewedCliExit(cwd, headSha, repoPath);
 
   for (const { pattern, label } of HARD_BLOCK_PATTERNS) {
     for (const { file, text } of addedLines) {
@@ -491,11 +313,11 @@ function checkDiffBudgets(
   repoPath: string,
   orchestratorApproved: boolean,
 ): MergeViolation[] {
-  const numstat = getDiffNumstat(cwd, baseBranch);
+  const numstat = getDiffNumstat(cwd, baseBranch, repoPath);
   if (numstat.length === 0) return [];
 
   const skeleton = getAllCached(repoPath);
-  const relocationCredits = getRelocatedDeletionCredits(cwd, baseBranch);
+  const relocationCredits = getRelocatedDeletionCredits(cwd, baseBranch, (args) => laneGitSync(cwd, repoPath, args));
   const violations: MergeViolation[] = [];
 
   for (const { file, insertions, deletions } of numstat) {
@@ -540,8 +362,8 @@ function checkDiffBudgets(
 
 // ── Check 3: Untracked Imported Files ──
 
-function checkUntrackedImportViolations(cwd: string, baseBranch: string): MergeViolation[] {
-  const result = checkUntrackedImports(cwd, baseBranch);
+function checkUntrackedImportViolations(cwd: string, baseBranch: string, repoPath: string): MergeViolation[] {
+  const result = checkUntrackedImports(cwd, baseBranch, repoPath, (args) => laneGitSync(cwd, repoPath, args));
   if (result.ok) return [];
 
   const fileCount = result.untrackedFiles.length;
@@ -605,13 +427,14 @@ export async function runMergeGate(
 ): Promise<MergeGateResult> {
   const cwd = lane.worktreePath || lane.repoPath;
   const baseBranch = lane.baseBranch || 'main';
-  const headSha = readHeadSha(cwd);
-  const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha);
+  const headSha = readHeadSha(cwd, lane.repoPath);
+  const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha, (args) => laneGit(cwd, lane.repoPath, args));
   const comparisonRef = diffBase.mergeBase ?? diffBase.comparisonRef;
   const checkoutSafety = await inspectOperatorCheckoutMergeSafety({
     repoPath: lane.repoPath,
     candidateCwd: cwd,
     candidateBaseRef: comparisonRef,
+    candidateGit: (args) => laneGit(cwd, lane.repoPath, args),
     baseBranch,
   });
   const checkoutViolations: MergeViolation[] = checkoutSafety.status === 'safe'
@@ -625,30 +448,28 @@ export async function runMergeGate(
       detail: checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
     }];
 
-  if (shouldUseBranchMergeGate(cwd, comparisonRef)) {
-    const branchResult = runBranchMergeGate(lane, selfReview, orchestratorApproved, cwd);
-    const alreadyChecked = branchResult.violations.some((violation) => (
-      violation.label === 'Operator checkout blocks base fast-forward'
-    ));
-    const violations = alreadyChecked
-      ? branchResult.violations
-      : [...branchResult.violations, ...checkoutViolations];
-    return {
-      passed: branchResult.passed && checkoutSafety.status !== 'unsafe',
-      violations,
-      diffBase: branchResult.diffBase ?? diffBase,
-    };
-  }
-
-  const addedLines = getAddedLines(cwd, comparisonRef, headSha);
-  const securityViolations = checkSecurityPatterns(cwd, headSha, addedLines);
+  const gateSelfUpdate = changesMergeGate(cwd, comparisonRef, lane.repoPath);
+  const addedLines = getAddedLines(cwd, comparisonRef, headSha, lane.repoPath);
+  const securityViolations = checkSecurityPatterns(cwd, headSha, addedLines, lane.repoPath);
   const scopePartitionViolations = checkScopePartitionHeuristics(addedLines);
   const budgetViolations = checkDiffBudgets(cwd, comparisonRef, lane.repoPath, orchestratorApproved);
-  const importViolations = checkUntrackedImportViolations(cwd, comparisonRef);
+  const importViolations = checkUntrackedImportViolations(cwd, comparisonRef, lane.repoPath);
   const integrityViolations = checkSelfReviewIntegrity(
     selfReview,
     [...securityViolations, ...scopePartitionViolations, ...budgetViolations, ...importViolations],
   );
+
+  // The gate is host code. A packet that edits it is checked by the installed
+  // gate, its copy never runs, and a person approves the change (#3414).
+  const gateViolations: MergeViolation[] = gateSelfUpdate
+    ? [{
+      category: 'integrity',
+      severity: 'block',
+      label: 'Packet changes the merge gate',
+      detail: `This packet edits ${MERGE_GATE_FILE}. o8 checked it with the installed gate and did not run the packet's copy. A person must approve this merge.`,
+      file: MERGE_GATE_FILE,
+    }]
+    : [];
 
   const violations = [
     ...securityViolations,
@@ -657,6 +478,7 @@ export async function runMergeGate(
     ...importViolations,
     ...checkoutViolations,
     ...integrityViolations,
+    ...gateViolations,
   ];
   const hasBlocks = violations.some((v) => v.severity === 'block');
 

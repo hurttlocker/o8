@@ -4,6 +4,7 @@ import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { preparePacketsForExplicitDispatch } from './dispatch-runtime-override';
+import { captureCurrentDispatchRegistry } from './dispatch-registry-publication';
 import { resolveMissionDispatchTarget } from './mission';
 import { currentMissionState } from './shared';
 import type { DispatchMissionInput } from './types';
@@ -32,6 +33,7 @@ export async function prepareMissionDispatch(input: DispatchMissionInput) {
 
     const { state } = await withLockedState(async (stored) => {
       assertOrchestratorRepoPath(stored.repoPath);
+      captureCurrentDispatchRegistry(stored);
       const prepared = releaseAbandonedMissionLifecycleHold(stored, { allowOwnerTakeover: true });
       if (!prepared.lifecycleHold) preparePacketsForExplicitDispatch(prepared, input.runtime);
       Object.assign(stored, prepared);

@@ -11,11 +11,11 @@ export function createModelCompatibilityRecovery({ adapter, io, withSurfaceLock,
   spawnOwnedRun: OwnedRunController['spawnOwnedRun'];
 }) {
   return async (session: OwnedSessionRecord, surfaceLockHeld = false): Promise<boolean> => {
-    if (!adapter.modelCompatibilityFallback || session.activeRun || session.recentRuns[0]?.outcome !== 'failed') return false;
+    if (session.executionPolicy !== undefined || !adapter.modelCompatibilityFallback || session.activeRun || session.recentRuns[0]?.outcome !== 'failed') return false;
     const recover = async () => {
       const current = await io.findSession(session.surfaceId);
       const run = current?.recentRuns[0];
-      if (!current || !current.model || !run || run.outcome !== 'failed' || current.activeRun
+      if (!current || current.executionPolicy !== undefined || !current.model || !run || run.id !== session.recentRuns[0]?.id || run.outcome !== 'failed' || current.activeRun
         || current.orphanedAt || current.detachedAt || run.interruptRequestedAt || run.sandboxDenial || run.modelFallback) return false;
       const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run);
       if (parsed.entries.some((entry) => entry.kind !== 'event')) return false;

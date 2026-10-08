@@ -3,7 +3,7 @@ import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getDb, laneEvents, sessionOutcomes, usageLogs } from '@/lib/db';
 import { getLaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 import type { AgentSummary } from '@/lib/fleet/types';
@@ -23,6 +23,12 @@ import {
 import { persistTaskContractCapture } from '@/lib/orchestrator/persist-task-contract-capture';
 import type { OrchestratorRuntime, PacketContext } from '@/lib/orchestrator/types';
 import {
+  beginCompletionHandoffCapture,
+  finishCompletionHandoffCapture,
+  packetCompletionContextStore,
+  readPacketCompletionContext,
+} from '@/lib/orchestrator/completion-handoff';
+import {
   isDispatchableRuntime,
   isOrchestratorRuntime,
   runtimeFromOwnedSessionKey,
@@ -39,13 +45,13 @@ import {
   isReviewFinding,
   readLatestPersistedReview,
 } from '@/lib/orchestrator/context-relay-review';
+export { readPacketCompletionContext } from '@/lib/orchestrator/completion-handoff';
 
 const TRANSCRIPT_CAPTURE_LIMIT = 5_000;
 const SUMMARY_LIMIT = 1_200;
 const NOTE_LIMIT = 320;
 const NOTE_PATTERN = /\b(blocker|blocked|blocking|note|notes|remaining|next step|todo|unable|could not|can't|cannot|failed|failure|error|waiting)\b/i;
 type PacketReviewContext = NonNullable<PacketContext['review']>;
-const packetCompletionContextStore = new Map<string, PacketContext>();
 
 function inferRuntimeId(sessionKey: string): RuntimeId | null {
   const ownedRuntime = runtimeFromOwnedSessionKey(sessionKey);
@@ -348,14 +354,6 @@ function extractApprovalReviewContext(
   };
 }
 
-export async function readPacketCompletionContext(packetId: string): Promise<PacketContext | null> {
-  const normalizedPacketId = packetId.trim();
-  if (!normalizedPacketId) {
-    return null;
-  }
-  return packetCompletionContextStore.get(normalizedPacketId) ?? null;
-}
-
 export async function recordPacketReviewContext(
   packetId: string,
   review: {
@@ -413,7 +411,8 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const normalizedSessionKey = sessionKey.trim();
   const runtimeId = inferRuntimeId(normalizedSessionKey);
   const runtime = runtimeId ? getRuntime(runtimeId) : undefined;
-  const lane = findLaneByPacket(normalizedPacketId);
+  const lane = findLaneByPacket(normalizedPacketId) ?? findLatestLaneByPacket(normalizedPacketId);
+  const handoffCapture = await beginCompletionHandoffCapture(lane, normalizedSessionKey);
   const projectId = getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
 
   const [transcriptResult, changedFilesResult, agentResult, telemetryResult, spokenDiffResult] = await Promise.allSettled([
@@ -479,7 +478,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     ...approvalReviewContext,
   };
 
-  packetCompletionContextStore.set(normalizedPacketId, context);
+  await finishCompletionHandoffCapture(context, handoffCapture);
   await persistTaskContractCapture({ packetId: normalizedPacketId, sessionKey: normalizedSessionKey, contract: taskContract, lane, runtime: runtimeId, transcript, capture: taskContractCapture, telemetry });
 
   // #984 Stage 1 — index the transcript once, at packet completion. Cmd+K

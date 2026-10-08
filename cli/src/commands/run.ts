@@ -15,6 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { extractRunCommand, loadRunSettlementBinding, registerRunWithReplay, settlementBindingDigest } from './run-settlement.js';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -40,21 +41,8 @@ import {
 } from './run-receipts.js';
 import { printJson, printHumanHeading, printHumanKv, type OutputMode } from '../output.js';
 
-/** Flags consumed by `o8 run` itself (everything else is the command). */
-const RUN_LEADING_FLAGS = new Set([
-  '--detach',
-  '--list',
-  '--last',
-  '--human',
-  '--json',
-  '--verbose',
-  '-v',
-  '--help',
-  '-h',
-]);
-
 /** env vars that must NOT leak into the pane (confuse tmux / cwd). */
-const ENV_DENYLIST = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL', 'TMUX', 'TMUX_PANE']);
+const ENV_DENYLIST = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL', 'TMUX', 'TMUX_PANE', 'O8_MANAGED_RUN_SETTLEMENT_BINDING']);
 const CALLER_ROUTING_ENV = [
   'O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
   'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR',
@@ -97,7 +85,7 @@ export function managedRunEnvironmentLines(
 function liveMarkerPids(marker: string): number[] | null {
   if (process.platform === 'win32') return null;
   try {
-    const output = execFileSync('ps', ['eww', '-axo', 'pid=,command='], {
+    const output = execFileSync('ps', ['axeww', '-o', 'pid=,command='], {
       encoding: 'utf8',
       timeout: 3_000,
       windowsHide: true,
@@ -204,40 +192,6 @@ async function discardUnreleasedManagedRun(input: {
     try { rmSync(path, { force: true }); } catch {}
   }
   return settled;
-}
-
-/**
- * Pull the command out of the RAW argv. The shared dispatcher greedily eats the
- * first two bare tokens as command words, so it can't be trusted to carry an
- * arbitrary command — re-parse from process.argv. Supports both
- * `o8 run <cmd...>` and `o8 run [--detach] -- <cmd...>`.
- */
-function extractRunCommand(): { detach: boolean; list: boolean; last: boolean; command: string[] } {
-  const argv = process.argv.slice(2);
-  const runIdx = argv.indexOf('run');
-  const after = runIdx >= 0 ? argv.slice(runIdx + 1) : [];
-
-  const dashIdx = after.indexOf('--');
-  let flags: string[];
-  let command: string[];
-  if (dashIdx >= 0) {
-    flags = after.slice(0, dashIdx);
-    command = after.slice(dashIdx + 1);
-  } else {
-    flags = [];
-    let i = 0;
-    while (i < after.length && after[i].startsWith('-') && RUN_LEADING_FLAGS.has(after[i])) {
-      flags.push(after[i]);
-      i += 1;
-    }
-    command = after.slice(i);
-  }
-  return {
-    detach: flags.includes('--detach'),
-    list: flags.includes('--list'),
-    last: flags.includes('--last'),
-    command,
-  };
 }
 
 interface ManagedRunRow {
@@ -375,10 +329,22 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     );
   }
 
-  const id = randomUUID().replace(/-/g, '').slice(0, 8);
+  const settlementLaunch = loadRunSettlementBinding();
+  const id = settlementLaunch?.id ?? randomUUID().replace(/-/g, '').slice(0, 8);
   const session = `cortex-run-${id}`;
   const cwd = process.cwd();
-  const cmd = command.join(' ');
+  const cmd = settlementLaunch ? command.map(sq).join(' ') : command.join(' ');
+  if (settlementLaunch) {
+    const existing = await apiFetch<{ runs?: Array<ManagedRunRow & { cwd: string; settlement?: { binding: unknown } }> }>(resolveConfig(), '/api/panel/managed-runs');
+    const run = existing.data?.runs?.find((row) => row.id === id);
+    if (run) {
+      if (run.cwd !== cwd || run.command !== cmd || JSON.stringify(run.settlement?.binding) !== JSON.stringify(settlementLaunch.binding)) {
+        throw new CliError('managed_run_registration_conflict', 'This execution generation is already bound to another command.', EXIT.CONFLICT);
+      }
+      printJson({ schema: 'o8/run/v1', run, replayed: true, launched: false });
+      return 0;
+    }
+  }
   const startedAt = new Date().toISOString();
   const processMarker = randomUUID().replace(/-/g, '');
   const packetWorktree = detectWorktree(cwd);
@@ -437,6 +403,8 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   // Mirror the agent's full env into the pane (the tmux server may have stale
   // env — at minimum PATH would be wrong → "command not found").
   const envLines = managedRunEnvironmentLines(process.env, cwd);
+  envLines.push(`unset O8_MANAGED_RUN_SETTLEMENT_BINDING`);
+  if (settlementLaunch) envLines.push(`export O8_MANAGED_RUN_ID=${sq(id)}`);
   envLines.push(`export O8_MANAGED_RUN_MARKER=${sq(processMarker)}`);
   // Mode 0600 — the env-file mirrors the agent's full environment (incl.
   // O8_API_TOKEN + provider keys) into shared /tmp; never world-readable.
@@ -554,9 +522,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   let registered = false;
   let registrationError: unknown = null;
   try {
-    const res = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
-      method: 'POST',
-      body: {
+    const res = await registerRunWithReplay(cfg, {
         action: 'register',
         id,
         session,
@@ -569,14 +535,18 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
         processMarker,
         mode: detach ? 'detach' : 'stream',
         startedAt,
-      },
-    });
+        ...(settlementLaunch ? { settlementBinding: settlementLaunch.binding } : {}),
+    }, Boolean(settlementLaunch));
     registered = Boolean(res.data?.ok);
+    if (settlementLaunch) registered = registered && res.data?.run?.id === id && res.data.run.status === 'running'
+      && res.data.run.settlement?.bindingDigest === settlementBindingDigest(settlementLaunch.binding, cwd)
+      && res.data.run.settlement.stopRequestId === null && res.data.run.settlement.wrapperFinished === false
+      && res.data.run.settlement.receipt?.state !== 'quiet';
   } catch (error) {
     registrationError = error;
   }
 
-  if (packetId && !registered) {
+  if ((packetId || settlementLaunch) && !registered) {
     process.off('SIGINT', onSigint);
     const settled = await discardUnreleasedManagedRun({
       session,
@@ -588,8 +558,8 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
       ? registrationError.message
       : 'the server declined registration';
     throw new CliError(
-      'packet_run_registration_failed',
-      `Packet-bound run was not started: ${detail}${settled ? '' : ' The gated tmux process could not be confirmed dead.'}`,
+      settlementLaunch ? 'settlement_run_registration_failed' : 'packet_run_registration_failed',
+      `${settlementLaunch ? 'Settlement-bound' : 'Packet-bound'} run was not started: ${detail}${settled ? '' : ' The gated tmux process could not be confirmed dead.'}`,
       registrationError instanceof CliError ? registrationError.exit : EXIT.CONFLICT,
     );
   }
@@ -701,6 +671,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   let tick = 0;
   let exitFound = false;
   let exitCode = 0;
+  let settlementUnconfirmed = false;
   try {
     for (;;) {
       pump();
@@ -718,6 +689,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
         }
         if (!confirmed) {
           confirmed = await settleOwnedSessionLocally(session, processGroupId, processMarker);
+          if (settlementLaunch) confirmed = false;
           if (confirmed && registered) {
             try {
               const response = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
@@ -765,14 +737,16 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
         try { writeFileSync(exitFile, 'signal:UNKNOWN', { mode: 0o600 }); } catch {}
       }
       try {
-        await apiFetch(cfg, '/api/panel/managed-runs', {
+        const result = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
           method: 'POST',
           body: { action: 'finish', session, exitCode },
         });
-      } catch { /* best effort */ }
+        if (settlementLaunch && result.data?.ok !== true) settlementUnconfirmed = true;
+      } catch { if (settlementLaunch) settlementUnconfirmed = true; }
     }
 
     process.stderr.write(`[o8 run] ${session} exited ${exitCode}\n`);
+    if (settlementUnconfirmed) throw new CliError('run_finish_unsettled', 'The command wrapper exited, but complete settlement remains unverified.', EXIT.CONFLICT);
     return exitCode;
   } finally {
     process.off('SIGINT', onSigint);

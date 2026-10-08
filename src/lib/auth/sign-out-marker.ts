@@ -1,6 +1,8 @@
 import 'server-only';
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { holdAccountRefresh, mutateAccountState } from './account-state';
+import { removeAccountFile, writeAccountFile } from './account-state-files';
 import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -17,21 +19,14 @@ function markerPath(): string {
  * distinguish an explicit sign-out from a transient entitlement-cache miss.
  */
 export function markAuthSignedOut(now: number = Date.now()): void {
-  try {
-    const filePath = markerPath();
-    mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${Math.floor(now / 1_000)}\n`, { mode: 0o600 });
-  } catch (error) {
-    console.error('[entitlement] failed to mark sign-out:', error);
-  }
+  mutateAccountState(() => {
+    holdAccountRefresh();
+    writeAccountFile(markerPath(), `${Math.floor(now / 1_000)}\n`);
+  });
 }
 
 export function clearAuthSignOutMarker(): void {
-  try {
-    rmSync(markerPath(), { force: true });
-  } catch (error) {
-    console.error('[entitlement] failed to clear sign-out marker:', error);
-  }
+  mutateAccountState(() => removeAccountFile(markerPath()));
 }
 
 export function readAuthSignedOutAt(now: number = Date.now()): number | null {
@@ -39,7 +34,6 @@ export function readAuthSignedOutAt(now: number = Date.now()): number | null {
     const parsed = Number(readFileSync(markerPath(), 'utf8').trim());
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
     if (Math.floor(now / 1_000) - parsed > SIGN_OUT_MARKER_MAX_AGE_SECONDS) {
-      clearAuthSignOutMarker();
       return null;
     }
     return parsed;

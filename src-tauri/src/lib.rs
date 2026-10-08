@@ -7,6 +7,7 @@ mod spatial_ink_window;
 mod audio_ducker;
 mod background;
 mod browser_view;
+mod remote_preview;
 mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
@@ -1772,6 +1773,14 @@ fn prune_compile_cache() {
 
 fn compile_cache_dir() -> String {
     format!("{}/compile-cache", o8_data_dir())
+}
+
+/// The native approved-write helper for Pi workers (#3289), shipped as an
+/// externalBin next to the app binary. The packaged servers refuse approved
+/// writes without it.
+fn pi_write_helper() -> Option<std::path::PathBuf> {
+    let helper = std::env::current_exe().ok()?.parent()?.join("o8-pi-write");
+    helper.is_file().then_some(helper)
 }
 
 fn open_child_log(name: &str) -> Option<std::fs::File> {
@@ -6725,6 +6734,9 @@ impl BundledNextSpawn {
             .env("WS_PORT", self.ws_port.to_string())
             .env("O8_SIDECAR_PID", std::process::id().to_string())
             .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = pi_write_helper() {
+            command.env("O8_PI_WRITE_BIN", path);
+        }
         if let Some(path) = self.bundled_operator_mcp.as_ref() {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
@@ -6787,6 +6799,9 @@ impl BundledWsSpawn {
             .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
             .env("O8_SIDECAR_PID", std::process::id().to_string())
             .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = pi_write_helper() {
+            command.env("O8_PI_WRITE_BIN", path);
+        }
         if let Some(path) = self.bundled_operator_mcp.as_ref() {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
@@ -7860,6 +7875,7 @@ pub fn run() {
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
             }
@@ -7954,6 +7970,10 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            remote_preview::remote_preview_supported,
+            remote_preview::remote_preview_open,
+            remote_preview::remote_preview_set_rect,
+            remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
             #[cfg(target_os = "macos")]
@@ -8985,6 +9005,10 @@ pub fn run() {
         .build({ boot_trace("builder chain constructed (plugins registered, not yet init)"); context })
         .expect("error while building Cortex IDE")
         .run(move |_app_handle, event| match event {
+            // Auxiliary windows can keep has_visible_windows true while main
+            // is hidden. Every Dock reopen restores the existing main window.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_desktop_window(_app_handle),
             // Finder "Open With → o8" / dock drop (file:// URLs) AND the auth
             // deep-link handoff (o8://auth/callback?...). macOS delivers both
             // through Opened; we partition by scheme. Buffer for cold launch

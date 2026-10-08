@@ -25,6 +25,7 @@ import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })), { label: 'Canvas' });
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 const LazyFleetCanvasTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/FleetCanvasTab').then((module) => ({ default: module.FleetCanvasTab })), { label: 'Fleet canvas' });
+const LazyChatGPTPlanChat = retryingLazy(() => import('@/components/desktop/workspace-terminal/ChatGPTPlanChat').then((module) => ({ default: module.ChatGPTPlanChat })), { label: 'ChatGPT plan chat' });
 
 interface WorkspaceTerminalPanelsProps {
   workspaceId: string;
@@ -189,7 +190,7 @@ function WorkspaceTerminalPanelsBase({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {!restoreSettled && !restoreHoldExpired ? <WorkspaceBootLoaderClaim /> : null}
-      {visibleTabs.map((tab) => residentTabIdSet.has(tab.id) ? (
+      {visibleTabs.map((tab) => residentTabIdSet.has(tab.id) || tab.kind === 'chatgpt-plan' ? (
         tab.kind === 'orchestrator' ? (
           <OrchestratorResidentPanel
             key={tab.id}
@@ -208,6 +209,10 @@ function WorkspaceTerminalPanelsBase({
             projectContextRailVisible={projectContextRailVisible}
             onUpdateLlmSummary={onUpdateLlmSummary}
           />
+        ) : tab.kind === 'chatgpt-plan' ? (
+          <div key={tab.id} style={{ display: tab.id === effectiveActiveTabId ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <Suspense fallback={<div role="status">Opening ChatGPT plan chat…</div>}><LazyChatGPTPlanChat tabId={tab.id} /></Suspense>
+          </div>
         ) : tab.kind === 'chat' ? (
           <ChatResidentPanel
             key={tab.id}

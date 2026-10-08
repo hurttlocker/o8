@@ -4,6 +4,7 @@
 import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 // RotateCcw shim removed with the in-workspace reconnect banner —
 // recovery now lives in the AgentPanel ConnectionPill.
+import { registerFreshOrchestratorAction } from '@/lib/desktop/fresh-orchestrator-action';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
@@ -17,9 +18,9 @@ import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/c
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
     const {
-      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
+      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, getTabInventory, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
     } = useWorkspaceTerminalController(props, ref);
-    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
+    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
     const workspaceInstanceId = useId();
     const handleNewTab = controller.handleNewTab;
     const createTerminalModeShellTab = useCallback(
@@ -64,7 +65,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       if (chatLabel) return chatLabel;
       const repoName = activeTab.repo?.name
         ?? (activeTab.repo?.localPath ? activeTab.repo.localPath.split('/').filter(Boolean).pop() ?? null : null);
-      const kindLabel = activeTab.kind === 'terminal'
+      const kindLabel = activeTab.kind === 'chatgpt-plan' ? 'ChatGPT plan' : activeTab.kind === 'terminal'
         ? 'Shell'
         : activeTab.kind === 'canvas' || activeTab.kind === 'fleet-canvas'
           ? 'Canvas'
@@ -98,6 +99,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // the lone pane responds (canCloseTile = false). Lets two split
     // panes' header play buttons drive their own spawns.
     const handleNewLLMChatTab = controller.handleNewLLMChatTab;
+    const handleNewChatGPTPlanTab = controller.handleNewChatGPTPlanTab;
     const spawnOrchestratorTab = controller.spawnOrchestratorTab;
     const spawnFleetCanvasTab = controller.spawnFleetCanvasTab;
     const activeRepo = controller.activeRepo;
@@ -122,6 +124,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         const repo = preferredRepo ?? activeRepo ?? undefined;
         if (detail?.kind === 'orchestrator') spawnOrchestratorTab?.();
         else if (detail?.kind === 'chat') handleNewLLMChatTab(repo ?? undefined);
+        else if (detail?.kind === 'chatgpt-plan') handleNewChatGPTPlanTab();
         else if (detail?.kind === 'terminal') handleNewTab('shell', repo ?? undefined);
         else if (detail?.kind === 'fleet-canvas') spawnFleetCanvasTab?.();
       };
@@ -174,7 +177,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         window.removeEventListener('o8:open-agent-terminal', onOpenAgentTerminal as EventListener);
         window.removeEventListener('o8:request-open-remote-terminal', onOpenRemoteTerminal as EventListener);
       };
-    }, [props.canCloseTile, props.stateScope, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, spawnFleetCanvasTab, activeRepo, preferredRepo, onCloseTile, onSplitVertical, onSplitHorizontal, workspaceInstanceId, activeWorkspaceSurface, attachLiveRun, selectLiveRunTab, openRemoteTerminal]);
+    }, [props.canCloseTile, props.stateScope, handleNewTab, handleNewLLMChatTab, handleNewChatGPTPlanTab, spawnOrchestratorTab, spawnFleetCanvasTab, activeRepo, preferredRepo, onCloseTile, onSplitVertical, onSplitHorizontal, workspaceInstanceId, activeWorkspaceSurface, attachLiveRun, selectLiveRunTab, openRemoteTerminal]);
 
     // Broadcast the active-tab label + tabId + kind + workspaceId + full
     // tabs list so the dashboard can route the title to the column-level
@@ -183,6 +186,20 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // `…` / right-click menu actions when applicable.
     const activeTabId = activeTab?.id ?? null;
     const activeTabKind = activeTab?.kind ?? null;
+    const freshActionRepo = activeTab?.repo ?? controller.activeRepo;
+    useEffect(() => {
+      const root = containerDivRef.current;
+      if (!root || !freshActionRepo || !activeTabId) return;
+      return registerFreshOrchestratorAction(root, {
+        workspaceId: workspaceInstanceId,
+        activeTabId,
+        repo: freshActionRepo,
+        tabIds: controller.tabs.map(tab => tab.id),
+        getTabIds: getTabInventory,
+        enabled: activeWorkspaceSurface && controller.primaryRestoreSettled,
+        spawnFresh: repo => spawnOrchestratorTab(repo, true),
+      });
+    }, [activeTabId, activeWorkspaceSurface, containerDivRef, getTabInventory, controller.primaryRestoreSettled, controller.tabs, freshActionRepo, spawnOrchestratorTab, workspaceInstanceId]);
     const projectContextRailAvailable = activeTabKind === 'orchestrator' || activeTabKind === 'llm-chat';
     const [projectContextRailVisible, setProjectContextRailVisible] = useState(true);
     const tabsForBroadcast = useMemo(() => (
@@ -358,10 +375,13 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         ref={containerDivRef}
         data-vibrancy-passthrough=""
         data-o8-workspace-root="1"
+        data-o8-workspace-id={workspaceInstanceId}
         data-o8-workspace-active={props.activeWorkspaceSurface === true ? 'true' : undefined}
         data-o8-active-tab-id={activeTab?.id ?? undefined}
         data-o8-active-tab-kind={activeTab?.kind ?? undefined}
         data-o8-active-repo={activeWorkspaceRepoName ?? undefined}
+        data-o8-active-repo-path={freshActionRepo?.localPath ?? undefined}
+        data-o8-tab-inventory={JSON.stringify(controller.tabs.map(tab => tab.id))}
         style={{
           flex: 1,
           display: 'flex',

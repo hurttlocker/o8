@@ -33,7 +33,7 @@ import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/oper
 import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
 import { resolveJudgmentPath } from '@/lib/judgment/route';
 import { getEntitlementSync } from '@/lib/entitlement/store';
-import { isDispatchRuntime } from '@/lib/operator/defaults-env';
+import { isDispatchRuntime, isParallelCap } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import { projectAgentRoleRoutes } from '@/lib/operator/role-routing';
@@ -53,7 +53,7 @@ import {
 } from '@/lib/runtimes/shared/auth-detect';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
 import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
-import { readRuntimeSetupRecommendation } from '@/lib/setup/runtime-setup-server';
+import { readBuiltInAgentRuntime, readOnboardingRuntimeSetup } from '@/lib/setup/built-in-agent-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -116,13 +116,16 @@ function isWorkerRuntimeList(value: unknown): value is OperatorDefaults['workerR
   return Array.isArray(value) && value.length > 0 && value.every(isDispatchRuntime);
 }
 
+function parseStorageReserveRatio(value: unknown): number {
+  if (typeof value === 'number') return value;
+  return typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+}
+
 function workspaceStorageValidationError(body: Record<string, unknown>): string | null {
   if (body.storageReserveRatio !== undefined) {
-    const parsed = typeof body.storageReserveRatio === 'number'
-      ? body.storageReserveRatio
-      : Number(body.storageReserveRatio);
-    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
-      return 'storageReserveRatio must be greater than 0 and no more than 1.';
+    const parsed = parseStorageReserveRatio(body.storageReserveRatio);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+      return 'storageReserveRatio must be between 0 and 1.';
     }
   }
   if (body.storageReserveFloorGb !== undefined) {
@@ -156,12 +159,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     const parsed = typeof raw === 'number'
       ? raw
       : typeof raw === 'string'
-        ? Number.parseInt(raw, 10)
+        ? Number(raw)
         : Number.NaN;
-    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 32) {
-      throw new Error('parallelCap must be an integer between 1 and 32.');
+    if (!isParallelCap(parsed)) {
+      throw new Error('parallelCap must be a positive safe integer.');
     }
-    update.parallelCap = Math.floor(parsed);
+    update.parallelCap = parsed;
   }
 
   for (const field of ['meteredPacketCostCapUsd', 'meteredPacketInputTokenCap'] as const) {
@@ -680,10 +683,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   }
 
   if (body.storageReserveRatio !== undefined) {
-    const parsed = typeof body.storageReserveRatio === 'number'
-      ? body.storageReserveRatio
-      : Number(body.storageReserveRatio);
-    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 1) update.storageReserveRatio = parsed;
+    const parsed = parseStorageReserveRatio(body.storageReserveRatio);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) update.storageReserveRatio = parsed;
   }
 
   if (body.storageReserveFloorGb !== undefined) {
@@ -715,9 +716,10 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
 export async function GET(request: Request) {
   try {
-    if (new URL(request.url).searchParams.get('refresh') === 'runtime') invalidateRuntimeAuthCache();
-    const valuesOnly = new URL(request.url).searchParams.get('include') === 'values';
-    if (valuesOnly) {
+    const query = new URL(request.url).searchParams;
+    if (query.get('include') === 'setup-built-in') return response({ builtInAgent: await readBuiltInAgentRuntime() });
+    if (query.get('refresh') === 'runtime') invalidateRuntimeAuthCache();
+    if (query.get('include') === 'values') {
       const [data, settingsToml] = await Promise.all([
         getOperatorDefaults(),
         getOperatorDefaultsTomlState(),
@@ -730,9 +732,8 @@ export async function GET(request: Request) {
       getRuntimeAuthSnapshot(),
     ]);
     const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
-    if (new URL(request.url).searchParams.get('include') === 'setup') {
-      const setupRecommendation = await readRuntimeSetupRecommendation(data, dispatchableRuntimes);
-      return response({ ...operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes), setupRecommendation });
+    if (query.get('include') === 'setup') {
+      return response({ ...operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes), ...await readOnboardingRuntimeSetup(data, dispatchableRuntimes) });
     }
     return response(operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {

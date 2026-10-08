@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
       // available to the compiler, but never copy it into the runtime bundle.
       './.next/cache/**/*',
       './.next/dev/**/*',
+      './.next/trace',
+      './.next/trace-build',
       '**/node_modules/sharp/**/*',
       '**/node_modules/@img/**/*',
     ],

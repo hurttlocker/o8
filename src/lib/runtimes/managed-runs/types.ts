@@ -7,13 +7,44 @@
  * tracks those sessions so the ports surface can tag agent-owned ports and the
  * UI can offer a "watch live" chip.
  *
- * v1 is an in-process (globalThis) registry — single Next server process, no
- * cross-process (ws-server) or restart survival. Disk/SQLite persistence is a
- * deliberate later step.
+ * The registry persists across server restarts. An optional operator-owned
+ * settlement contract also accounts for work outside the owned process tree.
  */
 
 /** running · finished (exited, code may be known) · killed (operator stopped it) · gone (vanished, no code) */
-export type ManagedRunStatus = 'running' | 'finished' | 'killed' | 'gone';
+export type ManagedRunStatus = 'running' | 'settling' | 'finished' | 'killed' | 'gone';
+
+export interface ManagedRunSettlementBinding {
+  schema: 'o8/managed-run-settlement-binding/v1';
+  executionKey: string;
+  generation: number;
+  branch: string;
+  providerSessionId: string | null;
+  profileDigest: string;
+  receiptId: string;
+}
+
+export interface ManagedRunSettlementReceipt {
+  receiptId: string;
+  bindingDigest: string;
+  sequence: number;
+  state: 'active' | 'unknown' | 'quiet';
+  providerSessionId: string | null;
+  cancelledBeforeLaunch: boolean;
+  stopRequestId: string | null;
+  receivedAt: string;
+}
+
+export interface ManagedRunSettlement {
+  binding: ManagedRunSettlementBinding;
+  bindingDigest: string;
+  /** Assigned once by the operator when the provider acknowledges a new session. */
+  providerSessionId: string | null;
+  receipt: ManagedRunSettlementReceipt | null;
+  stopRequestId: string | null;
+  stopRequestedAt: string | null;
+  wrapperFinished: boolean;
+}
 
 /** stream = CLI blocks + mirrors output to its own stdout; detach = fire-and-register. */
 export type ManagedRunMode = 'stream' | 'detach';
@@ -36,6 +67,7 @@ export interface ManagedRunTerminationReceipt {
     markerPidsAfter: number[];
     errors: string[];
   }>;
+  externalSettlement?: 'quiet' | 'unknown';
 }
 
 export interface ManagedRunRecord {
@@ -69,4 +101,6 @@ export interface ManagedRunRecord {
   status: ManagedRunStatus;
   /** Durable only after the server proved both the tmux session and marked descendants dead. */
   termination?: ManagedRunTerminationReceipt | null;
+  /** Host receipts are accepted only from the operator principal. */
+  settlement?: ManagedRunSettlement | null;
 }

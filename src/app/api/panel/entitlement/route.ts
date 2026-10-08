@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { rm } from 'node:fs/promises';
+import { captureAccountGeneration, requireAccountGeneration, withAccountStateLease } from '@/lib/auth/account-state';
 
 import { resolveFlags } from '@/lib/entitlement/flags';
-import { clearFounderRecord, readFounderRecord } from '@/lib/entitlement/founder';
-import { readCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
-import { getEntitlement, getEntitlementPath } from '@/lib/entitlement/store';
+import { readFounderRecord } from '@/lib/entitlement/founder';
+import { clearCachedEntitlement, readCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
+import { getEntitlement } from '@/lib/entitlement/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: Request) {
   try {
+    const generation = await captureAccountGeneration();
     let activeSubject: string | null = null;
     try {
       activeSubject = (await auth()).userId;
@@ -35,7 +36,11 @@ export async function GET(request: Request) {
         activeSubject = null;
       }
     }
-    readCachedEntitlement({ activeSubject });
+    await withAccountStateLease(() => {
+      requireAccountGeneration(generation);
+      const cache = readCachedEntitlement();
+      if (cache?.licenseKey && !readCachedEntitlement({ activeSubject })) clearCachedEntitlement();
+    });
     const entitlement = await getEntitlement();
     // founder is cosmetic display metadata (Founding Operator #N) — null for
     // everyone who isn't a founder. The signed plan above is the real gate.
@@ -90,8 +95,7 @@ export async function POST(request: Request) {
   // file a no-op (the common case when already free).
   if (body.clear === true) {
     try {
-      await rm(getEntitlementPath(), { force: true });
-      clearFounderRecord();
+      await withAccountStateLease(() => { clearCachedEntitlement(); });
       const entitlement = await getEntitlement();
       return NextResponse.json(entitlement);
     } catch (error) {
@@ -105,19 +109,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, reason: 'no licenseKey or clear flag provided' });
   }
 
+  let generation: string;
+  try { generation = await captureAccountGeneration(); }
+  catch { return NextResponse.json({ ok: false, reason: 'account_state_unavailable' }, { status: 503 }); }
   const result = await verifyLicense(licenseKey);
   if (!result.valid || !result.plan) {
     return NextResponse.json({ ok: false, reason: result.reason ?? 'invalid license' });
   }
 
-  const wrote = writeCachedEntitlement({
-    plan: result.plan,
-    status: 'active',
-    expiresAt: result.expiresAt,
-    licenseKey,
-  });
-  if (!wrote) {
-    return NextResponse.json({ ok: false, reason: 'failed to persist license' });
+  try {
+    const wrote = await withAccountStateLease(() => {
+      requireAccountGeneration(generation);
+      return writeCachedEntitlement({ plan: result.plan!, status: 'active', expiresAt: result.expiresAt, licenseKey });
+    });
+    if (!wrote) return NextResponse.json({ ok: false, reason: 'failed to persist license' });
+  } catch {
+    return NextResponse.json({ ok: false, reason: 'account_state_changed' }, { status: 409 });
   }
 
   const entitlement = await getEntitlement();

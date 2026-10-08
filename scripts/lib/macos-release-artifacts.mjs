@@ -32,6 +32,7 @@ const REQUIRED_BINARIES = Object.freeze([
   'Contents/MacOS/o8',
   'Contents/MacOS/speech_recognizer',
   'Contents/MacOS/speech-local',
+  'Contents/MacOS/o8-pi-write',
 ]);
 
 function architectureForCpuType(cpuType) {

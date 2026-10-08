@@ -31,6 +31,7 @@ export interface LLMMessage {
   model?: string;
   tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   costUsd?: number;
+  inferenceRoute?: { provider: 'chatgpt-plan'; billing: 'subscription'; allowanceUse: 'unknown'; meter: 'provider-tokens' };
   timestamp: number;
   images?: string[];
   toolCalls?: ToolCallInfo[];
@@ -114,7 +115,7 @@ export interface MissionCardData {
 export interface ModelOption {
   id: string;
   label: string;
-  provider: 'anthropic' | 'openai' | 'google' | 'openrouter' | 'local' | 'operator';
+  provider: 'anthropic' | 'openai' | 'google' | 'openrouter' | 'local' | 'operator' | 'chatgpt';
   color: string;
   description: string;
   /** 'cli' = routed through installed CLI runtime, 'api' = direct API via BYOK key */

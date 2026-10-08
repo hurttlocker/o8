@@ -15,6 +15,7 @@ import {
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { useModelSettings } from './useModelSettings';
+import { ChatGPTPlanConnection } from './ChatGPTPlanConnection';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import {
   PickerMenu,
@@ -176,6 +177,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       />
 
       <CliUpdatePrompt />
+      <ChatGPTPlanConnection />
 
       {notice ? (
         <div style={{ marginBottom: 28, fontSize: 13, color: 'var(--t-text)', lineHeight: 1.55 }}>

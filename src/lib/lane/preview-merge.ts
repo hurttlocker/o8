@@ -12,7 +12,7 @@
  * "gate could not run".
  */
 
-import { execFileSync } from 'node:child_process';
+import { laneGitSync } from '@/lib/lane/lane-git';
 
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
@@ -176,9 +176,9 @@ function hasApprovedOrchestratorReview(packetId: string): boolean {
   return mission.packets.find((packet) => packet.id === packetId)?.review?.approved === true;
 }
 
-function readDirtyWorktreeDetail(cwd: string): string | null {
+function readDirtyWorktreeDetail(cwd: string, repoPath: string): string | null {
   try {
-    const output = execFileSync('git', ['status', '--porcelain'], {
+    const output = laneGitSync(cwd, repoPath, ['status', '--porcelain'], {
       windowsHide: true,
       cwd,
       timeout: 5000,
@@ -227,6 +227,7 @@ export async function buildPreviewForLane(
     ?? lane.baseBranch;
   const lint = await runLaneRebaseLint({
     cwd: reviewSource.cwd,
+    gitRepoPath: lane.repoPath,
     baseRef,
     actualBranch: lane.branch ?? 'packet branch',
     logPrefix: 'merge-preview',
@@ -279,7 +280,7 @@ export async function buildPreviewForLane(
       blockers.push('contract-review');
     }
   }
-  const dirtyDetail = readDirtyWorktreeDetail(reviewSource.cwd);
+  const dirtyDetail = readDirtyWorktreeDetail(reviewSource.cwd, lane.repoPath);
   if (dirtyDetail) {
     const cleanCheck = checks.find((check) => check.name === 'clean-worktree');
     if (cleanCheck) {

@@ -1,3 +1,4 @@
+export { handleCreateMission } from './mission-create';
 import {
   isAgentReportReason,
   normalizeAgentReportEvent,
@@ -5,8 +6,6 @@ import {
   normalizeAgentReportMetadata,
 } from '@/lib/lane/agent-report';
 import {
-  createMission,
-  createMissionInline,
   dispatchMission,
   getMissionStatus,
   rerunWithFeedback,
@@ -24,7 +23,6 @@ import {
   reportTask,
 } from '@/lib/tasks/actions';
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
-import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import {
   apiFetch,
@@ -35,7 +33,6 @@ import {
   optionalString,
   parseDirectivesApplied,
   parseDirectivesViolated,
-  parseIssueList,
   parseMissionRuntime,
   parseReviewFindings,
   requiredString,
@@ -46,15 +43,14 @@ import {
   missionPacketSignature,
   type MinimalMissionStatusShape,
 } from './mission-wait';
-import { parseMissionCandidateMode, parseTaskContractSetting, QUALITY_SEARCH_INPUT_SCHEMA, TASK_CONTRACT_SETTING_SCHEMA } from './quality-search-input';
-import { MISSION_WORKER_PIN_PROPERTIES, parseMissionWorkerPinInput, parseWorkerProvider, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
+import { MISSION_CONTRACT_INPUT_PROPERTIES, SEALED_TASK_CONTRACT_GUIDANCE } from './quality-search-input';
+import { MISSION_WORKER_PIN_PROPERTIES, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
-import { parseExistingBranchPolicy, parseWorkerIntent } from './mission-input';
 export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'create_mission',
     description:
-      'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns CLI runtimes in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.',
+      'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns CLI runtimes in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.' + SEALED_TASK_CONTRACT_GUIDANCE,
     inputSchema: {
       type: 'object',
       properties: {
@@ -76,6 +72,7 @@ export const MISSION_TOOLS: McpTool[] = [
           description: 'Ad-hoc inline tasks — no GitHub issue required. Each becomes its own packet.',
         },
         repoPath: { type: 'string', description: 'Absolute local path to the repository.' },
+        projectId: { type: 'string', description: 'Exact project identifier. Overrides the current project; omission captures the creation context once. Thread ids provide placement and rules, not project selection.' },
         origin: { type: 'string', enum: ['design-mode'], description: 'Set to design-mode when the mission comes from an element-edit payload so follow-up edits can reuse its warm packet lane.' },
         runtime: {
           type: 'string',
@@ -108,7 +105,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         dispatch: {
           type: 'boolean',
-          description: 'When true (default), immediately dispatches all packets after creation. Set false to create without dispatching.',
+          description: 'When true (default), immediately dispatches all packets after creation. Set false to prepare without launching; then call dispatch_mission with the returned missionId when ready.',
         },
         useBrain: {
           type: 'boolean',
@@ -118,14 +115,13 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',
         },
-        taskContract: TASK_CONTRACT_SETTING_SCHEMA,
+        ...MISSION_CONTRACT_INPUT_PROPERTIES,
         readOnly: { type: 'boolean', description: 'When true, the worker inspects and reports without editing. A clean zero-diff exit is recorded as a successful read-only completion.' },
         comparisonModels: {
           type: 'array',
           items: { type: 'string' },
           description: 'Best-of-N — race the task across N candidates (one per model string), each in its own isolated worktree. The operator then compares the N diffs side-by-side and merges the winner through the review gate, archiving the losers. Same model repeated (["codex","codex","codex"]) runs N attempts of one runtime; mix runtimes (["codex","gemini"]) to compare them. Max 4. Omit for a single packet. Use when a task is worth a bake-off — risky, ambiguous, or when you want the best of several attempts.',
         },
-        qualitySearch: QUALITY_SEARCH_INPUT_SCHEMA,
         orchestratorThreadId: {
           type: 'string',
           description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
@@ -143,7 +139,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'dispatch_mission',
     description:
-      'USE THIS RARELY — create_mission already dispatches by default. Only call this after reset_packet to relaunch a packet, or if the user explicitly says "redispatch". Example: dispatch_mission() dispatches current mission. dispatch_mission({missionId: "mission-abc123"}) dispatches a specific one.',
+      'Dispatch the existing packets of a prepared mission created with dispatch:false. Pass the exact missionId returned by create_mission: dispatch_mission({missionId: "mission-abc123"}). This starts that mission without creating a new mission or generic delegate packet. Also use after reset_packet or retry_packet when a relaunch is needed, or for explicit redispatch. Omit runtime to preserve the prepared routing and contract. create_mission dispatches by default; do not dispatch it again unless it was prepared or needs relaunch. Omitted missionId selects the current stored mission.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -772,116 +768,6 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
 ];
-
-export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const repoPath = requiredString(args, 'repoPath');
-    const runtime = parseMissionRuntime(args.runtime);
-    const workerIntent = parseWorkerIntent(args.workerIntent);
-    const requestedProvider = parseWorkerProvider(args.requestedProvider);
-    const workerPinInput = parseMissionWorkerPinInput(args);
-    const constraints = optionalString(args, 'constraints');
-    const inlineIssues = Array.isArray(args.issues_inline) ? args.issues_inline : null;
-    const ghIssues = Array.isArray(args.issues) && args.issues.length > 0 ? args.issues : null;
-    if (!inlineIssues && !ghIssues) {
-      return textResult('Provide either `issues` (GitHub refs) or `issues_inline` (inline objects).', true);
-    }
-    const shouldDispatch = args.dispatch !== false;
-    const sequential = args.sequential === true;
-    if (args.origin !== undefined && args.origin !== 'design-mode') return textResult('origin must be `design-mode` when provided.', true);
-    const origin = args.origin === 'design-mode' ? 'design-mode' as const : undefined;
-    const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
-    const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
-    const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
-    const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
-    const orchestratorTurnId = optionalString(args, 'orchestratorTurnId') || undefined;
-    const parentWorkspaceId = optionalString(args, 'parentWorkspaceId') || undefined;
-    const caller = optionalString(args, 'caller') || undefined;
-    const readOnly = args.readOnly === true;
-    const candidateMode = parseMissionCandidateMode(args, huddle);
-    if (!candidateMode.ok) return textResult(candidateMode.error, true);
-    const { comparisonModels, qualitySearch } = candidateMode;
-    if (inlineIssues) {
-      // #453 — Auto-assign synthetic numbers when not provided. Centralized so
-      // every inline creator uses the same collision-resistant allocator.
-      const syntheticNumbers = nextInlineIssueNumbers(inlineIssues.length);
-      const parsed = inlineIssues.map((entry, index) => {
-        if (typeof entry !== 'object' || entry === null) throw new Error('Each inline issue must be an object.');
-        const e = entry as Record<string, unknown>;
-        const title = typeof e.title === 'string' ? e.title.trim() : '';
-        if (!title) throw new Error('Each inline issue must have a title.');
-        const syntheticNumber = syntheticNumbers[index]!;
-        return { number: syntheticNumber, title, body: typeof e.body === 'string' ? e.body : '' };
-      });
-      const createResult = await createMissionInline({
-        issues_inline: parsed,
-        repoPath,
-        runtime, origin,
-        workerIntent,
-        requestedProvider,
-        requestedRuntime: runtime,
-        ...workerPinInput,
-        constraints,
-        dispatchOnCreate: shouldDispatch,
-        sequential,
-        existingBranchPolicy,
-        useBrain,
-        huddle, taskContract: parseTaskContractSetting(args.taskContract),
-        comparisonModels,
-        qualitySearch,
-        orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
-      });
-      if (shouldDispatch && createResult && !('error' in createResult)) {
-        // Fire-and-forget: dispatch can take 30–60s on its own, and the
-        // combined create+dispatch path often exceeds the MCP client's
-        // tool-call timeout (~60s), which closes the transport while the
-        // backend is still processing. Return the create result immediately
-        // so the caller gets a clean response, and run dispatch in the
-        // background. Callers can poll get_mission_status for progress.
-        void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
-          console.error('[mcp-operator] background dispatch failed', errorText(err));
-        });
-        return jsonResult({
-          ...createResult,
-          dispatch: { queued: true, note: 'Dispatch running in background. Use get_mission_status to poll.' },
-        });
-      }
-      return jsonResult(createResult);
-    }
-
-    const createResult = await createMission({
-      issues: parseIssueList(args.issues),
-      repoPath,
-      runtime, origin,
-      workerIntent,
-      requestedProvider,
-      requestedRuntime: runtime,
-      ...workerPinInput,
-      constraints,
-      dispatchOnCreate: shouldDispatch,
-      sequential,
-      existingBranchPolicy,
-      useBrain,
-      huddle, taskContract: parseTaskContractSetting(args.taskContract),
-      comparisonModels,
-      qualitySearch,
-      orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
-    });
-    if (shouldDispatch && createResult && !('error' in createResult)) {
-      void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
-        console.error('[mcp-operator] background dispatch failed', errorText(err));
-      });
-      return jsonResult({
-        ...createResult,
-        dispatch: { queued: true, note: 'Dispatch running in background. Use get_mission_status to poll.' },
-      });
-    }
-    return jsonResult(createResult);
-  } catch (error) {
-    console.error(`${'[mcp-operator]'} create_mission failed: ${errorText(error)}`);
-    return textResult(`Failed to create mission: ${errorText(error)}`, true);
-  }
-}
 
 export async function handleDispatchMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {

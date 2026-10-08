@@ -5,6 +5,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { captureWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
+import { withWorktreeMetaTransaction } from '@/lib/worktree/metadata-store';
+import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import {
   completeExactManagedDirectoryRetirement,
   finishPendingExactManagedDirectoryRetirements,
@@ -13,12 +15,25 @@ import {
 
 const roots: string[] = [];
 
-function fixture(name: string) {
+async function creationAuthority(root: string, workspacePath: string) {
+  const owner = await probeMetadataLockProcessIdentity(process.pid);
+  if (owner.state !== 'live') throw new Error('Fixture creator process is not proven live.');
+  await withWorktreeMetaTransaction(root, async (transaction) => transaction.save('packet-workspace', {
+    id: 'packet-workspace', agentType: 'codex', baseBranch: 'main', createdAt: Date.now(),
+    claudeManaged: false, taskName: 'Incomplete fixture creation', status: 'creating',
+    materializationIdentity: await captureWorktreeMaterializationIdentity(workspacePath),
+    materializationParentIdentity: await captureWorktreeMaterializationIdentity(root),
+    creationOwner: { pid: process.pid, identity: owner.identity },
+  }));
+}
+
+async function fixture(name: string) {
   const root = mkdtempSync(path.join(tmpdir(), `o8-exact-retire-${name}-`));
   roots.push(root);
   const workspacePath = path.join(root, 'packet-workspace');
   mkdirSync(workspacePath);
   writeFileSync(path.join(workspacePath, 'sentinel.txt'), 'owned bytes');
+  await creationAuthority(root, workspacePath);
   return { root, workspacePath };
 }
 
@@ -28,7 +43,7 @@ afterEach(() => {
 
 describe('exact managed directory retirement', () => {
   it('refuses a same-name replacement after proof and preserves both directories', async () => {
-    const { root, workspacePath } = fixture('replacement');
+    const { root, workspacePath } = await fixture('replacement');
     const identity = await captureWorktreeMaterializationIdentity(workspacePath);
     const retainedPath = path.join(root, 'retained-owner');
 
@@ -37,6 +52,7 @@ describe('exact managed directory retirement', () => {
       worktreeId: 'packet-workspace',
       directoryPath: workspacePath,
       identity,
+      retirementReason: 'creation-rollback',
       beforeRetirementRename: async () => {
         renameSync(workspacePath, retainedPath);
         mkdirSync(workspacePath);
@@ -49,7 +65,7 @@ describe('exact managed directory retirement', () => {
   });
 
   it('replays a crash after exact rename from its trusted claim', async () => {
-    const { root, workspacePath } = fixture('replay');
+    const { root, workspacePath } = await fixture('replay');
     const identity = await captureWorktreeMaterializationIdentity(workspacePath);
 
     await expect(retireExactManagedDirectory({
@@ -57,6 +73,7 @@ describe('exact managed directory retirement', () => {
       worktreeId: 'packet-workspace',
       directoryPath: workspacePath,
       identity,
+      retirementReason: 'creation-rollback',
       afterRetirementRename: async () => {
         throw new Error('simulated process death after exact rename');
       },
@@ -77,17 +94,19 @@ describe('exact managed directory retirement', () => {
   });
 
   it('leaves no retirement namespace across repeated cycles', async () => {
-    const { root, workspacePath } = fixture('cycles');
+    const { root, workspacePath } = await fixture('cycles');
     for (let index = 0; index < 3; index += 1) {
       if (!existsSync(workspacePath)) mkdirSync(workspacePath);
       writeFileSync(path.join(workspacePath, `cycle-${index}.txt`), `cycle ${index}`);
+      await creationAuthority(root, workspacePath);
       await retireExactManagedDirectory({
         repositoryPath: root,
-        worktreeId: `packet-cycle-${index}`,
+        worktreeId: 'packet-workspace',
         directoryPath: workspacePath,
         identity: await captureWorktreeMaterializationIdentity(workspacePath),
+        retirementReason: 'creation-rollback',
       });
-      completeExactManagedDirectoryRetirement(root, `packet-cycle-${index}`);
+      completeExactManagedDirectoryRetirement(root, 'packet-workspace');
     }
     expect(readdirSync(root)).toEqual([]);
   }, 15_000);
@@ -115,7 +134,7 @@ describe('exact managed directory retirement', () => {
   });
 
   it('ignores forged receipt files without trusted database authority', async () => {
-    const { root, workspacePath } = fixture('forged-receipt');
+    const { root, workspacePath } = await fixture('forged-receipt');
     const forgedReceipt = path.join(root, `.o8-retire-receipt-${'b'.repeat(64)}.json`);
     writeFileSync(forgedReceipt, JSON.stringify({
       sourcePath: workspacePath,

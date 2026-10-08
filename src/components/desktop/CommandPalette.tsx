@@ -51,6 +51,7 @@ export interface CommandPaletteSearchTarget {
   issueNumber?: number;
   repo?: string;
   filePath?: string;
+  workspace?: string;
   line?: number;
   sessionKey?: string;
   chatTabId?: string;
@@ -108,7 +109,7 @@ export interface CommandPaletteProps {
   initialScope?: 'all' | 'file';
   fileItems?: CommandPaletteFileItem[];
   onSelectIssue: (issueNumber: number, repo?: string) => void;
-  onSelectFile: (filePath: string, line?: number) => void;
+  onSelectFile: (filePath: string, line?: number, workspace?: string) => void;
   onSelectAgent: (sessionKey: string) => void;
   onSelectChat?: (
     chatTabId: string,
@@ -572,7 +573,8 @@ export const CommandPalette = memo(function CommandPalette({
     } else if (target.issueNumber !== undefined) {
       onSelectIssue(target.issueNumber, target.repo);
     } else if (target.filePath) {
-      onSelectFile(target.filePath, target.line);
+      if (target.workspace) onSelectFile(target.filePath, target.line, target.workspace);
+      else onSelectFile(target.filePath, target.line);
     } else if (target.sessionKey) {
       onSelectAgent(target.sessionKey);
     } else if (target.chatTabId) {

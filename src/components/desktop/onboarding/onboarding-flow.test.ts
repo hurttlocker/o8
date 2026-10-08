@@ -19,16 +19,43 @@ async function render(request: OnboardingRequest = createOnboardingPreviewReques
   return { container, complete };
 }
 
-it('starts with projects and a quiet runtime recommendation without changing settings', async () => {
+it('shows project, agent, and workspace progress without changing settings', async () => {
   const request = vi.fn(createOnboardingPreviewRequest());
   const { container } = await render(request);
   expect(container.textContent).toContain('Open a project');
-  expect(container.textContent).toContain('Suggested lead: Codex');
+  expect(container.textContent).toContain('Codex is ready');
   expect(button('Open Sample project')).toBeDefined();
   expect(container.querySelector('textarea')).toBeNull();
-  expect(container.querySelector('nav[aria-label="Setup progress"]')).toBeNull();
+  expect(container.querySelector('nav[aria-label="Setup progress"] [aria-current="step"]')?.textContent).toContain('Project');
+  expect(container.querySelector('nav[aria-label="Setup progress"]')?.textContent).toContain('Workspace');
   expect(container.textContent).not.toContain('Workers:');
   expect(request.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('shows projects while agent discovery is still pending and never reports them ready early', async () => {
+  const fixture = createOnboardingPreviewRequest();
+  let finishScan!: (response: Response) => void;
+  const scan = new Promise<Response>((resolve) => { finishScan = resolve; });
+  const request: OnboardingRequest = (url, init) => new URL(String(url), 'http://127.0.0.1').searchParams.get('include') === 'setup' ? scan : fixture(url, init);
+  const { container } = await render(request);
+  expect(button('Open Sample project')).toBeDefined();
+  expect(container.textContent).toContain('Checking your coding tools');
+  expect(container.textContent).not.toContain('Codex is ready');
+  await act(async () => finishScan(await fixture('/api/panel/operator-defaults?include=setup')));
+  expect(container.textContent).toContain('Codex is ready');
+});
+
+it('shows the built-in agent on the project screen before external tool discovery finishes', async () => {
+  const fixture = createOnboardingPreviewRequest(null, 'built-in-free');
+  let finishScan!: (response: Response) => void;
+  const scan = new Promise<Response>((resolve) => { finishScan = resolve; });
+  const request: OnboardingRequest = (url, init) => new URL(String(url), 'http://127.0.0.1').searchParams.get('include') === 'setup' ? scan : fixture(url, init);
+  const { container } = await render(request);
+  expect(button('Open Sample project')).toBeDefined();
+  expect(container.querySelector('[aria-label="Agent readiness"]')?.textContent).toContain('Built-in agent (Pi)');
+  expect(container.querySelector('[aria-label="Agent readiness"]')?.textContent).toContain('Ready');
+  await act(async () => finishScan(await fixture('/api/panel/operator-defaults?include=setup')));
+  expect(container.textContent).toContain('Built-in agent (Pi) is ready');
 });
 
 it('wraps keyboard focus inside setup instead of entering the obscured workspace', async () => {
@@ -68,7 +95,7 @@ it('recovers focus taken by the workspace after startup while allowing another d
 
 it('uses an opaque overlay and visible button ink even when workspace glass is transparent', async () => {
   const { container } = await render();
-  expect((container.firstElementChild as HTMLElement).style.background).toBe('var(--t-onboarding-bg)');
+  expect(container.querySelector<HTMLElement>('[data-o8-onboarding]')?.style.background).toBe('var(--t-onboarding-surface-bg, var(--t-onboarding-bg))');
   expect(button('Open a folder').style.color).toBe('var(--t-onboarding-bg)');
   const { PALETTES } = await import('@/lib/theme/registry');
   for (const palette of PALETTES) {
@@ -221,7 +248,7 @@ it('routes a project to tool setup when no runtime is usable', async () => {
   const { complete } = await render(request);
   await click('Open Sample project');
   expect(document.body.textContent).toContain('Connect a coding tool');
-  expect(button('Use this setup').disabled).toBe(true);
+  expect(button('Continue to Sample project').disabled).toBe(true);
   expect(complete).not.toHaveBeenCalled();
 });
 
@@ -260,7 +287,7 @@ it('keeps saved routing and consent, and prevents duplicate workspace openings',
   let finish!: (value: boolean) => void;
   const complete = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
   await render(request, complete);
-  expect(document.body.textContent).toContain('Using Claude Code');
+  expect(document.body.textContent).toContain('Claude Code is ready · Saved setup');
   await click('Open Sample project');
   expect(button('Open Sample project').disabled).toBe(true);
   await click('Open Sample project');
@@ -276,12 +303,12 @@ it('returns from optional tool settings without starting work', async () => {
   expect(content).not.toBeNull();
   content!.scrollTop = 240;
   await click('Change');
-  expect(document.body.textContent).toContain('Your setup');
+  expect(document.body.textContent).toContain('Choose your agent');
   expect(content!.scrollTop).toBe(0);
   expect(document.activeElement?.tagName).toBe('H1');
   await click('Use this setup');
   expect(document.body.textContent).toContain('Open a project');
-  expect(document.body.textContent).toContain('Using Codex');
+  expect(document.body.textContent).toContain('Codex is ready · Saved setup');
   expect(complete).not.toHaveBeenCalled();
 });
 
@@ -364,4 +391,15 @@ it('recovers a persisted handoff after remount and clears a cancelled agent rece
   expect(next.complete).toHaveBeenCalledOnce();
   expect(fixture.state.status).toBe('cancelled');
   expect(document.body.textContent).not.toContain('could not be confirmed');
+});
+
+
+it('returns keyboard focus to the setup action that opened a page', async () => {
+  await render();
+  await click('Change');
+  await click('← Projects');
+  expect(document.activeElement).toBe(button('Change'));
+  await click('Clone from GitHub');
+  await click('Choose later');
+  expect(document.activeElement).toBe(button('Clone from GitHub'));
 });

@@ -42,6 +42,12 @@ export async function prepareOwnedWorkerMcpConfig({
   mode: OwnedRunMode;
   sandboxEnabled: boolean;
 }): Promise<PreparedOwnedWorkerMcpConfig> {
+  if (session.executionPolicy !== undefined) {
+    if (adapter.workerMcpInjection !== 'config-file') return { sandboxReadPaths: [], servers: [] };
+    const configPath = path.join(session.sessionDir, `o8-worker-mcp-${runId}.json`);
+    await writeFile(configPath, '{"mcpServers":{}}\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    return { configPath, sandboxReadPaths: [configPath], servers: [] };
+  }
   if (!session.packetId || !adapter.workerMcpInjection) {
     return { sandboxReadPaths: [], servers: [] };
   }

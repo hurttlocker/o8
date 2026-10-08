@@ -1,9 +1,6 @@
-/**
- * Review-ready self-continuation (#1481), moved out of the ws-server so the
- * real path is reachable from tests (#2467). Behaviour is unchanged; the one
- * addition is the record-only wake triage started before the enqueue.
- */
+/** Review-ready routing preserves a persisted chat origin before considering legacy defaults. */
 import { resolveReviewContinuationSync } from '@/lib/operator/defaults';
+import { resolveReviewChatOrigin, type ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
 import { startWakeTriage } from '@/lib/orchestrator/wake-triage';
 
 export interface ReviewContinuationLane { id: string; label: string; repoPath: string; packetId?: string | null; branch?: string | null }
@@ -12,8 +9,19 @@ export function routeReviewContinuation(
   lane: ReviewContinuationLane,
   enqueue: (repoPath: string, message: string, label: string) => void,
   enqueuePersistentLead: (lane: ReviewContinuationLane & { packetId: string }) => boolean,
+  enqueueOrigin?: (lane: ReviewContinuationLane, origin: ReviewChatOrigin) => void,
 ): void {
   if (lane.packetId && enqueuePersistentLead({ ...lane, packetId: lane.packetId })) return;
+  if (!lane.packetId) return;
+  const resolution = resolveReviewChatOrigin(lane);
+  if (resolution.kind === 'refused') {
+    console.warn(`[review-continuation] Refused: ${resolution.reason}`);
+    return;
+  }
+  if (resolution.kind === 'bound') {
+    enqueueOrigin?.(lane, resolution.origin);
+    return;
+  }
   queueReviewContinuation(lane, enqueue);
 }
 
@@ -30,13 +38,14 @@ const reviewContinuationQueuedAt = new Map<string, number>();
 export function queueReviewContinuation(
   lane: ReviewContinuationLane,
   enqueue: (repoPath: string, message: string, label: string) => void,
+  dedupe: 'memory' | 'durable' = 'memory',
 ): void {
   if (!lane.packetId) return; // ad-hoc lanes have no mission contract to continue
   if (!resolveReviewContinuationSync()) return;
-  const last = reviewContinuationQueuedAt.get(lane.id);
+  const last = dedupe === 'memory' ? reviewContinuationQueuedAt.get(lane.id) : undefined;
   const now = Date.now();
   if (last && now - last < REVIEW_CONTINUATION_DEDUPE_MS) return;
-  reviewContinuationQueuedAt.set(lane.id, now);
+  if (dedupe === 'memory') reviewContinuationQueuedAt.set(lane.id, now);
   if (reviewContinuationQueuedAt.size > 200) {
     for (const [key, ts] of reviewContinuationQueuedAt) {
       if (now - ts > REVIEW_CONTINUATION_DEDUPE_MS) reviewContinuationQueuedAt.delete(key);

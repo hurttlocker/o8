@@ -78,7 +78,6 @@ const {
   writeOrchestratorControlPlaneState,
 } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-const { removeMergedWorktree } = await import('@/lib/orchestrator/worktree-cleanup');
 
 const store = createOwnedSessionStore({
   runtimeId: 'codex',
@@ -248,8 +247,9 @@ async function archiveLaneAndSession(
   packet.blockedReason = 'operator_stopped';
   writeOrchestratorControlPlaneState({ ...state, updatedAt: new Date().toISOString() });
   if (removeWorktree) {
-    const cleanup = await removeMergedWorktree(fixture.lane);
-    expect(cleanup.removed).toBe(true);
+    // Simulate an externally removed workspace. This is fixture setup, not
+    // proof of supported retirement after owned-session authority is archived.
+    git(fixture.repoPath, ['worktree', 'remove', '--force', fixture.worktreePath]);
     expect(existsSync(fixture.worktreePath)).toBe(false);
   }
   updateLane(fixture.lane.id, {
@@ -279,7 +279,7 @@ afterAll(() => {
 });
 
 describe('discard packet after an owned session already retired', () => {
-  it('closes on the first attempt after Stop archived the exact run', async () => {
+  it('retains a present workspace when its exact owned-session authority was already archived', async () => {
     const fixture = await createFixture('first-clean-close', 'wait-for-stop');
     await stopThroughLaneRoute(fixture);
     const preservedSha = commitResult(fixture);
@@ -298,20 +298,13 @@ describe('discard packet after an owned session already retired', () => {
     const response = await closePacket(fixture.packetId);
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload).toMatchObject({
-      ok: true,
-      result: {
-        closed: true,
-        packetId: fixture.packetId,
-        worktreeRemoved: true,
-        worktreeCleanup: 'removed',
-      },
-    });
+    expect(response.status).toBe(409);
+    expect(payload).toMatchObject({ ok: false, error: { code: 'close_failed' } });
     expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
       id: fixture.packetId,
-      status: 'archived',
-      lane: null,
+      status: 'blocked',
+      blockedReason: 'worktree_cleanup_failed',
+      lane: { laneId: fixture.lane.id, sessionKey: fixture.surfaceId },
     });
     const preservedRef = git(fixture.repoPath, [
       'for-each-ref',
@@ -320,8 +313,9 @@ describe('discard packet after an owned session already retired', () => {
     ]);
     expect(preservedRef).toMatch(/^preserved\//);
     expect(git(fixture.repoPath, ['rev-parse', preservedRef])).toBe(preservedSha);
-    expect(existsSync(fixture.worktreePath)).toBe(false);
-    expect(getLane(fixture.lane.id)?.status).toBe('archived');
+    expect(existsSync(fixture.worktreePath)).toBe(true);
+    expect(readFileSync(join(fixture.worktreePath, 'result.txt'), 'utf8')).toBe(`${fixture.packetId}\n`);
+    expect(getLane(fixture.lane.id)?.worktreePath).toBe(fixture.worktreePath);
     const eventsAfterClose = getLaneEvents(fixture.lane.id, 200);
     expect(eventsAfterClose.filter((event) => event.verb === 'kill_escalated')).toHaveLength(killCount);
     expect(eventsAfterClose.filter((event) => event.verb === 'detach_session')).toHaveLength(detachCount);

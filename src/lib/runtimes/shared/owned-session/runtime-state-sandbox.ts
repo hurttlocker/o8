@@ -1,3 +1,4 @@
+import { providerFromConfig } from './controlled-provider';
 import path from 'node:path';
 
 import type { OwnedRuntimeAdapter, OwnedSessionRecord } from './types';
@@ -13,7 +14,7 @@ export function preparedRuntimeStateSandboxPolicy(
   session: OwnedSessionRecord,
   adapterEnv: Record<string, string>,
 ): { configHome?: string; immutablePaths?: string[] } {
-  if (adapter.isolatedConfigHomeEnv && session.identity?.configHomeRef) {
+  if (adapter.isolatedConfigHomeEnv && session.identity?.configHomeRef && !providerFromConfig(session.runtimeConfig)) {
     adapterEnv[adapter.isolatedConfigHomeEnv] = session.identity.configHomeRef;
   }
   const configHome = adapter.isolatedConfigHomeEnv

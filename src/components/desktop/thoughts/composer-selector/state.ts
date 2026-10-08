@@ -42,6 +42,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     fable: 'anthropic',
     o8: 'o8',
     opencode: 'terminal',
+    pi: 'terminal',
   },
   workerRuntimes: {
     codex: 'openai',
@@ -61,6 +62,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     aider: 'terminal',
     '3code': 'terminal',
     pi: 'terminal',
+    'pi-builtin': 'terminal',
     cursor: 'terminal',
     grok: 'x',
     'prime-agent': 'terminal',
@@ -94,7 +96,7 @@ export function composerEffortConsequence(
   effort: ThinkingEffort,
 ): string {
   if (backend === 'o8' && effort === 'low') {
-    return `${THINKING_EFFORT_LABELS[effort].long} · free`;
+    return `${THINKING_EFFORT_LABELS[effort].long} · managed model`;
   }
   return THINKING_EFFORT_LABELS[effort].detail;
 }

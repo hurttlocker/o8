@@ -28,6 +28,7 @@ interface SessionArgs {
   runtimeId: string;
   checkpointId?: string;
   message?: string;
+  idempotencyKey?: string;
   confirmNoContinuation: boolean;
 }
 
@@ -38,11 +39,12 @@ function runtimeFromSessionKey(sessionKey: string) {
   return sessionKey.split(':')[0] || '';
 }
 
-function parseSessionArgs(rest: string[]): SessionArgs {
+function parseSessionArgs(rest: string[], allowIdempotencyKey = false): SessionArgs {
   let sessionKey = '';
   let runtimeId = '';
   let checkpointId: string | undefined;
   let message: string | undefined;
+  let idempotencyKey: string | undefined;
   let confirmNoContinuation = false;
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index]!;
@@ -52,6 +54,16 @@ function parseSessionArgs(rest: string[]): SessionArgs {
     else if (token.startsWith('--checkpoint=')) checkpointId = token.slice('--checkpoint='.length).trim();
     else if (token === '--message') message = rest[++index]?.trim();
     else if (token.startsWith('--message=')) message = token.slice('--message='.length).trim();
+    else if (allowIdempotencyKey && (token === '--idempotency-key' || token.startsWith('--idempotency-key='))) {
+      if (idempotencyKey !== undefined) {
+        throw new CliError('invalid_args', 'Pass one --idempotency-key for a session resume.', EXIT.INVALID_ARGS);
+      }
+      const value = token === '--idempotency-key' ? rest[++index] : token.slice('--idempotency-key='.length);
+      idempotencyKey = value?.trim();
+      if (!idempotencyKey || idempotencyKey.startsWith('--')) {
+        throw new CliError('invalid_args', 'Session resume requires a nonempty --idempotency-key value.', EXIT.INVALID_ARGS);
+      }
+    }
     else if (token === '--confirm-no-continuation') confirmNoContinuation = true;
     else if (!token.startsWith('-') && !sessionKey) sessionKey = token.trim();
     else throw new CliError('invalid_args', `Unknown session argument: ${token}`, EXIT.INVALID_ARGS);
@@ -66,7 +78,7 @@ function parseSessionArgs(rest: string[]): SessionArgs {
   }
   runtimeId ||= runtimeFromSessionKey(sessionKey);
   if (!runtimeId) throw new CliError('invalid_args', 'Unable to infer runtime; pass --runtime <id>.', EXIT.INVALID_ARGS);
-  return { sessionKey, runtimeId, checkpointId, message, confirmNoContinuation };
+  return { sessionKey, runtimeId, checkpointId, message, idempotencyKey, confirmNoContinuation };
 }
 
 async function readState(args: SessionArgs) {
@@ -189,7 +201,7 @@ async function runTransform(mode: OutputMode, action: SessionTransformAction, re
 }
 
 async function runResume(mode: OutputMode, rest: string[]) {
-  const args = parseSessionArgs(rest);
+  const args = parseSessionArgs(rest, true);
   if (!args.message) {
     throw new CliError('invalid_args', 'Session resume requires --message <text>.', EXIT.INVALID_ARGS);
   }
@@ -197,13 +209,14 @@ async function runResume(mode: OutputMode, rest: string[]) {
   const body = {
     action: 'send_input',
     surfaceId: args.sessionKey,
-    clientMutationId: randomUUID(),
+    clientMutationId: args.idempotencyKey ?? randomUUID(),
     message: args.message,
   };
   const response = await fetchCorrelatedPacketMutation<Record<string, unknown>>(
     cfg,
     '/api/runtime/action',
     body,
+    { acceptQueuedAdmission: true },
   );
   const payload = { schema: 'o8/cli/session.resume/v1', ...response.data };
   if (!mode.human) printJson(payload);

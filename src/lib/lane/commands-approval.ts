@@ -1,3 +1,4 @@
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import type { ApprovalRisk } from '@/lib/approvals/types';
 import { buildPolicyContext } from '@/lib/approvals/policies';
 import { startApprovalReferee } from '@/lib/approvals/referee';
@@ -21,18 +22,17 @@ const RECOVERABLE_MERGE_FAILURE_POLICIES = new Set([
 
 export async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
   const cwd = lane.worktreePath || lane.repoPath;
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const execFileAsync = promisify(execFile);
 
   try {
-    const result = await execFileAsync('git', ['diff', `${lane.baseBranch}...HEAD`, '--no-color'], { windowsHide: true, cwd, maxBuffer: 10 * 1024 * 1024 });
+    const result = await laneGit(cwd, lane.repoPath, ['diff', `${lane.baseBranch}...HEAD`, '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
     return result.stdout.trim();
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     try {
-      const fallback = await execFileAsync('git', ['diff', 'HEAD~1', '--no-color'], { windowsHide: true, cwd, maxBuffer: 10 * 1024 * 1024 });
+      const fallback = await laneGit(cwd, lane.repoPath, ['diff', 'HEAD~1', '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
       return fallback.stdout.trim();
-    } catch {
+    } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
       return '';
     }
   }

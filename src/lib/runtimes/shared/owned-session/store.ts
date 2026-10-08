@@ -1,3 +1,4 @@
+import { providerFromConfig } from './controlled-provider';
 /**
  * createOwnedSessionStore — the generic primitive.
  *
@@ -7,10 +8,13 @@
  */
 
 import path from 'node:path';
+import { registerOwnedSessionLifecycle } from '../owned-session-lifecycle';
+import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, registerOwnedRecoveryStore } from './automatic-recovery';
 import { randomUUID } from 'node:crypto';
 
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+import { bindControlledTaskSession } from '@/lib/mcp/task-execution-admission';
 import {
   getOrPinPacketRuntimeIdentity,
   getSelectedRuntimeIdentity,
@@ -42,6 +46,7 @@ import {
   OwnedWorkspaceUnavailableError,
   type OwnedWorkspaceSpawnGuard,
 } from './workspace-spawn-guard';
+import { createOwnedExecutionPolicy, refuseOwnedSingleAttemptResume } from './execution-policy';
 import type {
   OwnedFleetAdditions,
   OwnedLaunchRequest,
@@ -105,6 +110,7 @@ export function createOwnedSessionStore(
     invalidateFleetCache,
   });
   registerOwnedStopHandler(surfacePrefix, io, withSurfaceLock, invalidateFleetCache);
+  registerOwnedRecoveryStore(surfacePrefix, io, withSurfaceLock);
   const runController = createOwnedRunController({
     adapter,
     runtimeId,
@@ -140,6 +146,7 @@ export function createOwnedSessionStore(
   });
 
   async function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
+    const executionPolicy = createOwnedExecutionPolicy(request, runtimeId);
     const prompt = request.prompt.trim();
     if (!prompt) {
       throw new Error('prompt is required');
@@ -148,6 +155,7 @@ export function createOwnedSessionStore(
     const repoPath = await validateWorkspace(request.cwd);
     const repo = await resolveRepoContext(repoPath);
     const id = `${sessionIdPrefix}${Date.now()}-${randomUUID().slice(0, 8)}`;
+    await bindControlledTaskSession(request, runtimeId, `${surfacePrefix}${id}`);
     const sessionDir = path.join(await io.ensureRoot(), id);
     await ensureDir(sessionDir);
     let selectedIdentity: Awaited<ReturnType<typeof getSelectedRuntimeIdentity>> = null;
@@ -177,14 +185,16 @@ export function createOwnedSessionStore(
           configHomeRef: defaultConfigHome,
         },
       });
-    } else if (adapter.isolatedConfigHomeEnv) {
+    } else if (adapter.isolatedConfigHomeEnv && !providerFromConfig(request.runtimeConfig)) {
       selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
     }
 
     const createdAt = nowIso();
     const session = {
       surfaceId: `${surfacePrefix}${id}`,
+      ...(executionPolicy ? { executionPolicy, autoRetry: false } : {}),
       launchMutationId: request.clientMutationId?.trim() || undefined,
+      controlledTask: request.controlledTask ? { ...request.controlledTask } : undefined,
       laneId: request.laneId?.trim() || undefined,
       packetId: request.packetId?.trim() || undefined,
       sessionDir,
@@ -257,10 +267,14 @@ export function createOwnedSessionStore(
 
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
+    refuseOwnedSingleAttemptResume(session);
+    const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
+    if (automaticRunId) assertAutomaticRecoveryGeneration(session, automaticRunId);
     let coldRestored = false;
 
     if (!session) {
       const archived = await io.findArchivedSession(surfaceId);
+      refuseOwnedSingleAttemptResume(archived);
       if (archived?.threadId) {
         const restore = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix);
         if (restore.restored) {
@@ -290,7 +304,7 @@ export function createOwnedSessionStore(
     };
 
     try {
-      await runController.refreshSession(session, true);
+      await runController.refreshSession(session, true, !automaticRunId);
 
       if (session.activeRun?.spawnState === 'prepared') {
         throw new Error(`This owned ${adapter.squadShortName} session has an unresolved prepared run. Wait for marker reconciliation before resuming it.`);
@@ -302,6 +316,7 @@ export function createOwnedSessionStore(
         throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
       }
 
+      if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume');
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();
@@ -661,7 +676,7 @@ export function createOwnedSessionStore(
 
   void sweepRecentlyOrphanedActiveRuns().catch(() => {});
 
-  return {
+  const store: OwnedSessionStore = {
     runtimeId,
     surfaceIdPrefix: surfacePrefix,
     launch,
@@ -671,7 +686,7 @@ export function createOwnedSessionStore(
     getReviewPacket: (surfaceId) => withSurfaceLock(surfaceId, () => reviewTailController.getReviewPacket(surfaceId)),
     getFleetAdditions,
     sessionState: (surfaceId) => readOwnedSessionState(root, surfaceId, surfacePrefix),
-    archiveSession: io.archiveSession,
+    archiveSession: (surfaceId) => withSurfaceLock(surfaceId, () => io.archiveSession(surfaceId)),
     setDetachedSession,
     sweepOrphanedSessions: fleetComputer.sweepOrphanedSessions,
     getTelemetrySources: reviewTailController.getTelemetrySources,
@@ -681,4 +696,13 @@ export function createOwnedSessionStore(
     setReviewDisposition,
     invalidateFleetCache,
   };
+  registerOwnedSessionLifecycle({
+    runtimeId,
+    surfaceIdPrefix: surfacePrefix,
+    commandLabel: adapter.binaryName,
+    rootEnvVar: adapter.rootEnvVar,
+    rootDefault: adapter.rootDefault,
+    store,
+  });
+  return store;
 }

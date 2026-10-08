@@ -11,6 +11,7 @@ import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state'
 import type { WorkspaceSnapshotRecord } from '@/lib/worktree/snapshot-state';
 import { materializeReplacementWorkspace } from './replacement-materialization';
 import { assertManagedWorkspaceMaterialization } from './managed-materialization-identity';
+import { hasActiveWorkspaceArtifactRestore } from './artifact-restore-state';
 
 interface MaterializationGuardDependencies {
   listRepos: () => Promise<Array<{ id: string; localPath: string }>>;
@@ -47,6 +48,9 @@ export async function inspectOwnedWorkspaceMaterialization(
 
   let snapshots: WorkspaceSnapshotRecord[];
   try {
+    if (hasActiveWorkspaceArtifactRestore(packetId, input.binding.cwd)) {
+      return { status: 'held', state: 'restoring', note: 'Artifact recovery is incomplete; resume its exact receipt before starting another run.' };
+    }
     snapshots = listWorkspaceSnapshotsByPacketId(packetId);
   } catch {
     return { status: 'unknown', note: 'Owned workspace snapshot truth could not be verified, so the run was refused.' };

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { getSqlite } from '@/lib/db';
+import { assertWorkspaceRetentionReleased } from './retention-holds';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 
@@ -114,28 +115,33 @@ export function prepareExactWorkspaceClaim(
     updatedAt: now,
   };
   const sqlite = getSqlite();
-  sqlite.prepare(`
-    INSERT OR IGNORE INTO workspace_exact_claims (
-      kind, repository_path, worktree_id, operation_id,
-      expected_path, source_path, claim_path, state,
-      parent_device, parent_inode, parent_canonical_path,
-      source_device, source_inode, claim_device, claim_inode,
-      content_digest, authority_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
-  `).run(
-    candidate.kind, candidate.repositoryPath, candidate.worktreeId, candidate.operationId,
-    candidate.expectedPath, candidate.sourcePath, candidate.claimPath,
-    candidate.parentIdentity.device, candidate.parentIdentity.inode,
-    candidate.parentIdentity.canonicalPath,
-    candidate.sourceIdentity?.device ?? null, candidate.sourceIdentity?.inode ?? null,
-    candidate.contentDigest, candidate.authority ? JSON.stringify(candidate.authority) : null,
-    now, now,
-  );
-  const actual = readExactWorkspaceClaim(candidate.kind, candidate.repositoryPath, candidate.worktreeId);
-  if (!actual || !exactMatch(actual, candidate)) {
-    throw new Error('Exact workspace claim conflicts with durable trusted authority.');
-  }
-  return actual;
+  return sqlite.transaction(() => {
+    if (candidate.kind === 'managed-retirement') {
+      assertWorkspaceRetentionReleased(candidate.sourcePath, candidate.sourceIdentity ?? undefined);
+    }
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO workspace_exact_claims (
+        kind, repository_path, worktree_id, operation_id,
+        expected_path, source_path, claim_path, state,
+        parent_device, parent_inode, parent_canonical_path,
+        source_device, source_inode, claim_device, claim_inode,
+        content_digest, authority_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
+    `).run(
+      candidate.kind, candidate.repositoryPath, candidate.worktreeId, candidate.operationId,
+      candidate.expectedPath, candidate.sourcePath, candidate.claimPath,
+      candidate.parentIdentity.device, candidate.parentIdentity.inode,
+      candidate.parentIdentity.canonicalPath,
+      candidate.sourceIdentity?.device ?? null, candidate.sourceIdentity?.inode ?? null,
+      candidate.contentDigest, candidate.authority ? JSON.stringify(candidate.authority) : null,
+      now, now,
+    );
+    const actual = readExactWorkspaceClaim(candidate.kind, candidate.repositoryPath, candidate.worktreeId);
+    if (!actual || !exactMatch(actual, candidate)) {
+      throw new Error('Exact workspace claim conflicts with durable trusted authority.');
+    }
+    return actual;
+  }).immediate();
 }
 
 export function readExactWorkspaceClaim(
@@ -198,6 +204,7 @@ export function transitionExactWorkspaceClaim(input: {
   expectedState: ExactWorkspaceClaimState;
   toState: ExactWorkspaceClaimState;
   claimIdentity?: { device: number; inode: number } | null;
+  authority?: Record<string, unknown>;
   now?: number;
 }): ExactWorkspaceClaimRecord {
   const now = input.now ?? Date.now();
@@ -206,6 +213,7 @@ export function transitionExactWorkspaceClaim(input: {
       state = ?,
       claim_device = COALESCE(?, claim_device),
       claim_inode = COALESCE(?, claim_inode),
+      authority_json = COALESCE(?, authority_json),
       updated_at = ?
     WHERE kind = ? AND repository_path = ? AND worktree_id = ?
       AND operation_id = ? AND state = ?
@@ -213,6 +221,7 @@ export function transitionExactWorkspaceClaim(input: {
     input.toState,
     input.claimIdentity?.device ?? null,
     input.claimIdentity?.inode ?? null,
+    input.authority ? JSON.stringify(input.authority) : null,
     now,
     input.kind,
     path.resolve(input.repositoryPath),
@@ -223,6 +232,7 @@ export function transitionExactWorkspaceClaim(input: {
   const current = readExactWorkspaceClaim(input.kind, input.repositoryPath, input.worktreeId);
   if (result.changes !== 1 && (current?.operationId !== input.operationId
     || current.state !== input.toState
+    || (input.authority && JSON.stringify(current.authority) !== JSON.stringify(input.authority))
     || (input.claimIdentity && (current.claimIdentity?.device !== input.claimIdentity.device
       || current.claimIdentity.inode !== input.claimIdentity.inode)))) {
     throw new Error('Exact workspace claim transition lost its trusted CAS.');

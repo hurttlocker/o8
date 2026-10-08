@@ -62,13 +62,13 @@ describe('cached entitlement read guards', () => {
     expect(existsSync(founderPath())).toBe(true);
   });
 
-  it('drops an account-bound cached license when the active subject differs', async () => {
+  it('refuses a mismatched subject without mutating account files during a read', async () => {
     writeCache(tokenWithSubject('user_founder'));
     const { readCachedEntitlement } = await import('./license');
 
     expect(readCachedEntitlement({ activeSubject: 'user_other' })).toBeNull();
-    expect(existsSync(entitlementPath())).toBe(false);
-    expect(existsSync(founderPath())).toBe(false);
+    expect(existsSync(entitlementPath())).toBe(true);
+    expect(existsSync(founderPath())).toBe(true);
   });
 
   it('keeps install-bound cached licenses without an active subject', async () => {

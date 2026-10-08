@@ -1,4 +1,4 @@
-export const ONBOARDING_STEPS = ['open', 'repos', 'dispatch', 'privacy', 'permissions'] as const;
+export const ONBOARDING_STEPS = ['open', 'repos', 'dispatch', 'privacy', 'permissions', 'mobile'] as const;
 export type OnboardingStep = typeof ONBOARDING_STEPS[number];
 export interface OnboardingProject { id: string; name: string; localPath: string; defaultBranch?: string; remoteUrl?: string }
 export interface OnboardingTask { project: OnboardingProject; text: string }
@@ -7,6 +7,7 @@ export interface OnboardingProgress {
   project: OnboardingProject | null;
   toolsConfigured: boolean;
   task: string;
+  continueProjectAfterTools?: boolean;
 }
 export type ProgressStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 export const PROGRESS_KEY = 'o8:onboarding-progress:v1';
@@ -27,6 +28,7 @@ export function readProgress(storage: ProgressStorage | null): OnboardingProgres
     if ((value as { step?: string } | null)?.step === 'ready') value!.step = 'open';
     if (!value || !ONBOARDING_STEPS.includes(value.step as OnboardingStep)) return emptyProgress();
     return { step: value.step as OnboardingStep, project: isOnboardingProject(value.project) ? value.project : null,
+      continueProjectAfterTools: typeof value.continueProjectAfterTools === 'boolean' ? value.continueProjectAfterTools : value.step === 'dispatch' && isOnboardingProject(value.project),
       toolsConfigured: value.toolsConfigured === true, task: typeof value.task === 'string' && value.task !== EXPLAIN_PROJECT && value.task !== PLAN_CHANGE ? value.task.slice(0, 12000) : '' };
   } catch { return emptyProgress(); }
 }

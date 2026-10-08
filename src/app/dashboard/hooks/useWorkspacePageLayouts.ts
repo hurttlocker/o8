@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { createDefaultTileLayout, deserializeTileLayout, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
+import { createDefaultTileLayout, deserializeTileLayout, findTile, getFirstLeaf, serializeTileLayout } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
 import { loadValidatedRestorePaths, validatePersistedLayoutRepos } from './tileLayoutRestore';
 
@@ -64,7 +64,16 @@ export function useWorkspacePageLayouts({ activeTabId, hydrated, layout, setActi
     }
 
     const revision = ++revisionRef.current;
-    const next = layoutsRef.current.get(activeTabId) ?? createDefaultTileLayout();
+    let next = layoutsRef.current.get(activeTabId);
+    if (!next) {
+      next = createDefaultTileLayout();
+      const primary = findTile(layoutRef.current.root, 'tile-root');
+      if (primary?.type === 'leaf' && primary.content.kind === 'terminal') {
+        // Top tabs share the primary terminal controller. A new page must
+        // keep its scope or the fallback repo can restore over the new tab.
+        next.root = { ...getFirstLeaf(next.root), content: { kind: 'terminal', repoPath: primary.content.repoPath ?? null } };
+      }
+    }
     const activate = (safeNext: TileLayout) => {
       if (revision !== revisionRef.current) return;
       if (currentTabRef.current) layoutsRef.current.set(currentTabRef.current, layoutRef.current);

@@ -282,7 +282,7 @@ export async function persistMissionRegistryState(state: OrchestratorMissionStat
   return withRegistryMutationLock(missionId, async () => writeMissionRegistryStateUnlocked(state, true));
 }
 
-/** Persist an outgoing current mission only when its registry mirror has not advanced. */
+/** Publish a current mission only when its captured registry version has not advanced. */
 export async function persistMissionRegistryStateIfVersion(
   state: OrchestratorMissionState,
   expectedUpdatedAt: number,
@@ -290,9 +290,12 @@ export async function persistMissionRegistryStateIfVersion(
   const missionId = state.missionId?.trim();
   if (!missionId) return false;
   return withRegistryMutationLock(missionId, async () => {
-    const current = readMissionRegistryEntry(missionId, { includeArchived: true });
-    if (!current || current.updatedAt !== expectedUpdatedAt) return false;
-    return writeMissionRegistryStateUnlocked(state, true) !== null;
+    const publish = getSqlite().transaction(() => {
+      const current = readMissionRegistryEntry(missionId, { includeArchived: true });
+      if (!current || current.updatedAt !== expectedUpdatedAt) return false;
+      return writeMissionRegistryStateUnlocked(state, true) !== null;
+    });
+    return publish.immediate();
   });
 }
 

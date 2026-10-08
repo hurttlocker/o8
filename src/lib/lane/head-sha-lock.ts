@@ -1,7 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 
 export interface HeadShaLockMatch {
   ok: true;
@@ -27,28 +24,25 @@ export function isValidHeadSha(value?: string | null): boolean {
   return normalized !== undefined && /^[0-9a-f]{7,40}$/i.test(normalized);
 }
 
-export async function readHeadSha(cwd: string) {
-  const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
-    windowsHide: true,
-    cwd,
+export async function readHeadSha(cwd: string, repoPath: string) {
+  const { stdout } = await laneGit(cwd, repoPath, ['rev-parse', 'HEAD'], {
     timeout: 5000,
   });
   return stdout.trim();
 }
 
-export async function resolveHeadSha(cwd: string, value: string): Promise<string | undefined> {
+export async function resolveHeadSha(cwd: string, value: string, repoPath: string): Promise<string | undefined> {
   const normalized = normalizeHeadSha(value);
   if (!isValidHeadSha(normalized)) return undefined;
 
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', `${normalized}^{commit}`], {
-      windowsHide: true,
-      cwd,
+    const { stdout } = await laneGit(cwd, repoPath, ['rev-parse', '--verify', `${normalized}^{commit}`], {
       timeout: 5000,
     });
     const resolved = stdout.trim().toLowerCase();
     return /^[0-9a-f]{40}$/.test(resolved) ? resolved : undefined;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return undefined;
   }
 }
@@ -62,14 +56,15 @@ export function headShaMatches(currentHeadSha: string, expectedHeadSha: string) 
 
 export async function checkExpectedHeadSha(
   cwd: string,
-  expectedHeadShaInput?: string | null,
+  expectedHeadShaInput: string | null | undefined,
+  repoPath: string,
 ): Promise<HeadShaLockResult> {
   const expectedHeadSha = normalizeHeadSha(expectedHeadShaInput);
   if (!expectedHeadSha) {
     return { ok: true };
   }
 
-  const currentHeadSha = await readHeadSha(cwd);
+  const currentHeadSha = await readHeadSha(cwd, repoPath);
   if (headShaMatches(currentHeadSha, expectedHeadSha)) {
     return { ok: true, expectedHeadSha, currentHeadSha };
   }

@@ -135,6 +135,11 @@ export function useLLMChatLifecycle({
             setModelResolved(true);
             return;
           }
+          if (saved.model.startsWith('chatgpt:')) {
+            setModel({ id: saved.model, label: saved.model.slice('chatgpt:'.length), provider: 'chatgpt', backend: 'api', color: 'var(--t-text)', description: 'Using ChatGPT plan · reconnect if unavailable' });
+            setModelResolved(true);
+            return;
+          }
         }
       }
       // o8 Operator is the default for new chats — it's branded, free, and zero-setup.

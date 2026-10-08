@@ -120,6 +120,10 @@ function verifyMonotonicManifest(current, expected) {
 }
 
 async function releaseContent(manifest) {
+  // Refuse every unsupported node before releasing even one file's contents.
+  if (manifest.some((entry) => entry.kind === 'other')) {
+    throw new Error('Exact purge refuses non-file workspace entries.');
+  }
   const expectedChildNames = childNamesByParent(manifest);
   for (const expected of manifest) {
     const actual = await fsp.lstat(expected.relative);

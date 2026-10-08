@@ -33,10 +33,8 @@ export const ORCHESTRATOR_BACKEND_BILLING: Record<OrchestratorBackendId, Orchest
   acp: 'subscription',
   collide: 'subscription',
   fable: 'metered',
-  // The free conversational backend streams the Vercel AI Gateway free model —
-  // no subscription pool, no per-token operator billing. `free` = no
-  // metered-window policies apply (this is the first shipping `free` backend).
-  o8: 'free',
+  // The composer's o8 choice runs on bundled Pi (#3408), so it bills like Pi.
+  o8: 'metered',
   // opencode routes through the operator's OWN provider credentials (OpenRouter,
   // Google, xAI, or opencode's gateway), so cost tracks the model they pick,
   // not a pool o8 knows about. `metered` is the safe read: it applies the
@@ -44,6 +42,9 @@ export const ORCHESTRATOR_BACKEND_BILLING: Record<OrchestratorBackendId, Orchest
   // money. Claiming `subscription` here would disable those policies on a rail
   // that can be genuinely per-token billed.
   opencode: 'metered',
+  // Bundled Pi draws per token on the o8 model allowance (the paid weekly or
+  // free daily allowance), so the decisions-only window policies apply.
+  pi: 'metered',
 };
 
 export function orchestratorBackendBillingClass(id: OrchestratorBackendId): OrchestratorBillingClass {

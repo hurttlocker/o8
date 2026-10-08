@@ -121,6 +121,7 @@ try {
   } else {
     console.log(`[tauri-prebuild] rebuilding artifact: ${verification.reason}`);
     await cachedPhase('speech', 'speech sidecar', process.execPath, ['scripts/build-speech-local.mjs']);
+    phase('Pi write helper', process.execPath, ['scripts/build-pi-write.mjs']);
     await cachedPhase('web', 'web build', 'npm', ['run', 'build']);
     phase('Tauri export', process.execPath, ['scripts/tauri-export.mjs']);
     const receipt = writeReleaseArtifactManifest(root, recipe);

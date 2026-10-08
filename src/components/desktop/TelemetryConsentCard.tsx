@@ -41,11 +41,13 @@ function ShieldGlyph() {
 
 function ChoiceButton({
   label,
+  inverseColor,
   selected,
   disabled,
   onPress,
 }: {
   label: string;
+  inverseColor: string;
   selected: boolean;
   disabled: boolean;
   onPress: () => void;
@@ -79,7 +81,7 @@ function ChoiceButton({
           : hovered
             ? 'var(--t-hover)'
             : 'var(--t-chat-surface-bg)',
-        color: selected ? 'var(--t-chat-surface-bg)' : 'var(--t-text)',
+        color: selected ? inverseColor : 'var(--t-text)',
         fontFamily: 'var(--font-sans-system)',
         fontSize: 12.5,
         fontWeight: 400,
@@ -103,12 +105,14 @@ function DecisionButtons({
   value,
   shareLabel,
   declineLabel,
+  inverseColor,
   disabled,
   onChange,
 }: {
   value: ConsentChoice;
   shareLabel: string;
   declineLabel: string;
+  inverseColor: string;
   disabled: boolean;
   onChange: (value: boolean) => void;
 }) {
@@ -125,12 +129,14 @@ function DecisionButtons({
     >
       <ChoiceButton
         label={shareLabel}
+        inverseColor={inverseColor}
         selected={value === true}
         disabled={disabled}
         onPress={() => onChange(true)}
       />
       <ChoiceButton
         label={declineLabel}
+        inverseColor={inverseColor}
         selected={value === false}
         disabled={disabled}
         onPress={() => onChange(false)}
@@ -217,6 +223,7 @@ export function TelemetryConsentCard({
     {error ? <button type="button" onClick={() => { setError(null); setRevision((value) => value + 1); }}>Retry privacy choices</button> : null}
   </div> : null;
 
+  const inverseColor = embedded ? 'var(--t-onboarding-bg)' : 'var(--t-chat-surface-bg)';
   const canSave = crashReports !== null && productUsage !== null && !saving;
   const keepFocusInDialog = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -283,9 +290,9 @@ export function TelemetryConsentCard({
         justifyContent: 'center',
         width: embedded ? '100%' : undefined,
         padding: embedded ? 0 : 32,
-        background: 'var(--t-bg)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
+        background: embedded ? 'transparent' : 'var(--t-bg)',
+        backdropFilter: embedded ? undefined : 'blur(20px)',
+        WebkitBackdropFilter: embedded ? undefined : 'blur(20px)',
       } as React.CSSProperties}
     >
       <div
@@ -298,12 +305,12 @@ export function TelemetryConsentCard({
         style={{
           width: 'min(960px, 100%)',
           boxSizing: 'border-box',
-          maxHeight: '100%',
-          overflowY: 'auto',
+          maxHeight: embedded ? undefined : '100%',
+          overflowY: embedded ? 'visible' : 'auto',
           padding: embedded ? 0 : 28,
           borderRadius: 16,
           border: embedded ? 'none' : '1px solid var(--t-chat-surface-border)',
-          background: 'var(--t-chat-surface-bg)',
+          background: embedded ? 'transparent' : 'var(--t-chat-surface-bg)',
           color: 'var(--t-chat-surface-text)',
           boxShadow: embedded ? 'none' : 'var(--t-glass-shadow)',
           fontFamily: 'var(--font-sans-system)',
@@ -412,6 +419,7 @@ export function TelemetryConsentCard({
             </details>
             <DecisionButtons
               value={crashReports}
+              inverseColor={inverseColor}
               shareLabel="Share crash reports"
               declineLabel="Keep crash reports off"
               disabled={saving}
@@ -472,6 +480,7 @@ export function TelemetryConsentCard({
             </details>
             <DecisionButtons
               value={productUsage}
+              inverseColor={inverseColor}
               shareLabel="Share product usage"
               declineLabel="Keep product usage off"
               disabled={saving}
@@ -482,12 +491,17 @@ export function TelemetryConsentCard({
 
         {embedded && choicesSaved ? <div style={{ marginTop: 16 }}><OnboardingFeedback title="Privacy choices saved">You can change either choice later in Settings.</OnboardingFeedback></div> : null}
         <footer style={{
+          position: embedded ? 'sticky' : undefined,
+          bottom: embedded ? 0 : undefined,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'wrap',
           gap: 16,
           marginTop: 20,
           paddingTop: 20,
+          paddingBottom: embedded ? 12 : undefined,
+          background: embedded ? 'var(--t-onboarding-dock-bg, var(--t-onboarding-bg))' : undefined,
           borderTop: '1px solid var(--t-divider-subtle)',
         }}>
           <div style={{ minHeight: 20, fontSize: 11.5, fontWeight: 300, lineHeight: 1.45, color: error ? 'var(--t-danger)' : 'var(--t-text-muted)' }} role={error ? 'alert' : undefined}>
@@ -507,7 +521,7 @@ export function TelemetryConsentCard({
               border: '1px solid var(--t-text)',
               borderRadius: 10,
               background: canSave ? 'var(--t-text)' : 'var(--t-chat-surface-bg)',
-              color: canSave ? 'var(--t-chat-surface-bg)' : 'var(--t-text-faint)',
+              color: canSave ? inverseColor : 'var(--t-text-faint)',
               fontFamily: 'var(--font-sans-system)',
               fontSize: 12.5,
               fontWeight: 400,

@@ -10,7 +10,7 @@ const clearCachedEntitlementMock = vi.fn();
 const clearFounderRecordMock = vi.fn();
 const getEntitlementMock = vi.fn(async () => ({ plan: 'free', flags: {}, source: 'default' }));
 const verifyLicenseMock = vi.fn();
-const writeCachedEntitlementMock = vi.fn(() => true);
+const writeCachedEntitlementMock = vi.fn<(input: { licenseKey?: string; plan?: string }) => boolean>(() => true);
 const writeFounderRecordMock = vi.fn();
 let tempDataDir: string | null = null;
 
@@ -83,7 +83,11 @@ describe('entitlement sync route', () => {
       expiresAt: 4_102_444_800,
       subject: 'user_founder',
     });
-    writeCachedEntitlementMock.mockReturnValue(true);
+    writeCachedEntitlementMock.mockImplementation((input: { licenseKey?: string; plan?: string }) => {
+      writeFileSync(path.join(tempDataDir!, 'entitlement.json'), JSON.stringify(input));
+      return true;
+    });
+    writeFounderRecordMock.mockReturnValue(true);
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/account/link-install')) return new Response('{}', { status: 200 });
@@ -235,7 +239,7 @@ describe('entitlement sync route', () => {
       await flush();
       await flush();
 
-      expect(readManagedGithubState()).toBeNull();
+      await vi.waitFor(() => expect(readManagedGithubState()).toBeNull());
     });
 
     it('drops user B\'s delayed refresh that completes AFTER user A signs in', async () => {

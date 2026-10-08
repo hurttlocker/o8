@@ -54,6 +54,11 @@ import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 import { TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
+import {
+  GovernedTerminalWriteError,
+  MAX_GOVERNED_TERMINAL_REQUEST_BYTES,
+  writeGovernedAgentTerminal,
+} from '@/lib/terminal/governed-agent-write';
 import { TerminalHiddenBuffer } from '@/lib/ws-server/terminal-hidden-buffer';
 import { resizeTerminalIfChanged } from '@/lib/ws-server/terminal-resize';
 import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/ws-server/terminal-resync-barrier';
@@ -114,11 +119,14 @@ import {
 } from '@/lib/symon/machine-registry';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
+import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
+import { recordLaneEvent } from '@/lib/lane/events';
 import { resolveAppVersion } from '@/lib/telemetry/crash-store';
 import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
+import { pluginTerminalSessionReferences } from '@/lib/action-plugins/host';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserProvider } from './lib/browser/inventory';
@@ -227,6 +235,9 @@ import {
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
 import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orchestrator/review-continuation';
+import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
+import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
+import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
 import {
   findLeadThreadBinding,
   getLeadStatus,
@@ -961,6 +972,8 @@ interface TerminalAttachment {
   snapshotSource: 'tmux' | 'scrollback';
   /** The first attach came from a viewer; its tmux client ignores window size. */
   observerOwned?: boolean;
+  /** Direct setup shells are temporary and must not survive their last view. */
+  transient?: boolean;
   cols: number;
   rows: number;
   batchBuffer: string;
@@ -975,6 +988,9 @@ interface TerminalAttachment {
   streamEndOffset: number;
   cwd?: string;
   commandHint?: string;
+  /** Trusted ownership metadata stamped by the owned-runtime bridge. */
+  ownerPacketId?: string;
+  ownerLaneId?: string;
 }
 
 interface InternalTerminalSpawnPayload {
@@ -984,6 +1000,8 @@ interface InternalTerminalSpawnPayload {
   cols?: number;
   rows?: number;
   env?: Record<string, string>;
+  packetId?: string;
+  laneId?: string;
 }
 
 interface InternalTerminalSignalPayload {
@@ -1002,7 +1020,7 @@ const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
 const TERMINAL_TMUX_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
-const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean }>();
+const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean; clientId?: string }>();
 
 // ── Orchestrator channel state ──
 
@@ -1331,6 +1349,7 @@ interface OrchestratorAutoMessage {
   repoPath: string;
   message: string;
   createdAt: number;
+  reviewChat?: { lane: ReviewContinuationLane; origin: ReviewChatOrigin };
   symon?: {
     sessionId: string;
     callId: string;
@@ -1367,13 +1386,37 @@ function queueReviewContinuation(lane: ReviewContinuationLane): void {
     packetId: reviewLane.packetId,
     laneId: reviewLane.id,
     label: reviewLane.label,
-  }));
+  }), (reviewLane, origin) => {
+    queueChatReviewMessage(reviewLane, (repoPath, message) => {
+      if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) return;
+      orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now(), reviewChat: { lane: reviewLane, origin } });
+      void drainOrchestratorAutoQueue();
+    }, 'durable');
+  });
 }
 
 async function drainOrchestratorAutoQueue(): Promise<void> {
   if (orchestratorAutoQueue.length === 0) return;
 
   const next = orchestratorAutoQueue[0];
+  if (next.reviewChat) {
+    const { lane, origin } = next.reviewChat;
+    const backend = getOrchestratorBackend(origin.backend);
+    const key = orchestratorAbortKey(next.repoPath, origin.backend, '', origin.threadId);
+    if (orchestratorInflightAborts.has(key) || backend.peekSession(next.repoPath, undefined, origin.threadId)?.status === 'busy') return;
+    orchestratorAutoQueue.shift();
+    await runReviewChatContinuation(lane, origin, next.message, {
+      registerAbort: (_repoPath, _origin, controller) => {
+        orchestratorInflightAborts.set(key, controller);
+        return () => { if (orchestratorInflightAborts.get(key) === controller) orchestratorInflightAborts.delete(key); };
+      },
+      publish: (sessionName, event, data) => broadcastToOrchestratorSession(
+        orchestratorRouteSessionName(sessionName, origin.threadId), JSON.stringify({ channel: 'orchestrator', event, data }),
+      ),
+    }).catch(error => console.warn('[review-continuation] Bound turn failed:', error));
+    void drainOrchestratorAutoQueue();
+    return;
+  }
   const backend = getActiveOrchestratorBackend();
   let session = backend.peekSession(next.repoPath);
   if (!session || session.status === 'dead') {
@@ -1613,6 +1656,7 @@ function reapOrphanDashSessions() {
   let referenced: Set<string>;
   try {
     referenced = collectPersistedTmuxSessions();
+    for (const sessionName of pluginTerminalSessionReferences()) referenced.add(sessionName);
   } catch {
     return;
   }
@@ -6930,6 +6974,7 @@ function materializePendingDashSession(
     id: randomUUID(),
     sessionName,
     kind: 'dash-shell',
+    transient: pending.directPty,
     ptyProcess,
     clientIds: new Set([client.id]),
     clientViews: new Map(),
@@ -7002,7 +7047,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   }
 
   const sessionName = ownerSessionName ?? `cortex-dash-${randomUUID().slice(0, 8)}`;
-  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty });
+  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty, clientId: directPty ? client.id : undefined });
   console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });
 }
@@ -7265,7 +7310,7 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   if (!attachment) {
     if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
       const pending = pendingDashSessions.get(sessionName);
-      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true });
+      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true, clientId: pending?.clientId });
     }
     return;
   }
@@ -7340,7 +7385,7 @@ function handleTerminalDetach(client: ClientState, msg: Record<string, unknown>)
   sendTerminal(client, 'detached', { sessionName });
 }
 
-function removeClientFromTerminal(clientId: string, sessionName: string) {
+function removeClientFromTerminal(clientId: string, sessionName: string, disconnected = false) {
   const attachment = terminalAttachments.get(sessionName);
   if (!attachment) return;
 
@@ -7366,6 +7411,17 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
 
   // If no more clients, destroy the PTY handle and clean up the tmux session
   if (attachment.clientIds.size === 0) {
+    if (attachment.transient) {
+      if (attachment.orphanTimer) clearTimeout(attachment.orphanTimer);
+      // A live view may briefly detach while xterm reinitializes. A disconnected
+      // setup transport has no owner left, so terminate it immediately.
+      if (disconnected) terminateTerminalSession(sessionName);
+      else attachment.orphanTimer = setTimeout(() => {
+        const latest = terminalAttachments.get(sessionName);
+        if (latest?.clientIds.size === 0) terminateTerminalSession(sessionName);
+      }, 1_000);
+      return;
+    }
     if (attachment.kind === 'dash-shell') {
       // #6 persistent terminals — when persistence is on, a dash PTY is a
       // `tmux attach` client over a detached session, so detaching costs us
@@ -7566,6 +7622,12 @@ function isAuthorizedInternalRequest(req: import('http').IncomingMessage) {
   return wsTokenMatches(token);
 }
 
+function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
+  const auth = req.headers.authorization ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  return resolvePacketWorkerToken(token);
+}
+
 // ── Server startup ──
 
 const httpServer = createServer((req, res) => {
@@ -7619,6 +7681,8 @@ const httpServer = createServer((req, res) => {
       const cwd = payload?.cwd?.trim();
       const cols = typeof payload?.cols === 'number' ? payload.cols : 120;
       const rows = typeof payload?.rows === 'number' ? payload.rows : 30;
+      const ownerPacketId = payload?.packetId?.trim() || undefined;
+      const ownerLaneId = payload?.laneId?.trim() || undefined;
       if (!sessionName || !shellCommand || !cwd) {
         res.writeHead(400);
         res.end('sessionName, shellCommand, and cwd are required');
@@ -7629,6 +7693,13 @@ const httpServer = createServer((req, res) => {
         res.end('invalid session name');
         return;
       }
+      if ((ownerPacketId && !ownerLaneId) || (!ownerPacketId && ownerLaneId)
+        || (ownerPacketId && !/^[A-Za-z0-9_-]{1,160}$/.test(ownerPacketId))
+        || (ownerLaneId && !/^[A-Za-z0-9_-]{1,200}$/.test(ownerLaneId))) {
+        res.writeHead(400);
+        res.end('packetId and laneId must be supplied together and valid');
+        return;
+      }
       if (!terminalHost) {
         res.writeHead(503);
         res.end('node-pty unavailable');
@@ -7636,6 +7707,12 @@ const httpServer = createServer((req, res) => {
       }
       if (terminalAttachments.has(sessionName)) {
         const existing = terminalAttachments.get(sessionName);
+        if ((ownerPacketId || ownerLaneId)
+          && (existing?.ownerPacketId !== ownerPacketId || existing?.ownerLaneId !== ownerLaneId)) {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'terminal_owner_mismatch' }));
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, sessionName, pid: existing?.ptyProcess?.pid ?? null }));
         return;
@@ -7666,6 +7743,8 @@ const httpServer = createServer((req, res) => {
           streamEndOffset: 0,
           cwd,
           commandHint: shellCommand,
+          ownerPacketId,
+          ownerLaneId,
         };
         terminalAttachments.set(sessionName, attachment);
         registerTerminalAttachment(attachment);
@@ -7995,6 +8074,85 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.url === '/terminal-agent-input' && req.method === 'POST') {
+    const worker = resolvePacketWorkerRequest(req);
+    if (!worker) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'packet_worker_required' }));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      receivedBytes += buffer.length;
+      if (receivedBytes > MAX_GOVERNED_TERMINAL_REQUEST_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(buffer);
+    });
+    req.on('end', () => {
+      if (tooLarge) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'request_too_large' }));
+        return;
+      }
+      let payload: { sessionId?: string; data?: string; reason?: string } | null = null;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
+          sessionId?: string;
+          data?: string;
+          reason?: string;
+        };
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid_json' }));
+        return;
+      }
+
+      try {
+        const receipt = writeGovernedAgentTerminal({
+          packetId: worker.packetId,
+          sessionId: typeof payload?.sessionId === 'string' ? payload.sessionId : '',
+          data: typeof payload?.data === 'string' ? payload.data : '',
+          reason: typeof payload?.reason === 'string' ? payload.reason : '',
+        }, {
+          resolveTarget: (sessionId) => {
+            const attachment = terminalAttachments.get(sessionId);
+            if (!attachment) return null;
+            return {
+              sessionId,
+              packetId: attachment.ownerPacketId ?? null,
+              laneId: attachment.ownerLaneId ?? null,
+              controlHeld: Boolean(attachment.controlClientId),
+              write: (data) => attachment.ptyProcess.write(data),
+              markInput: (at) => { attachment.lastInputAt = at; },
+            };
+          },
+          record: (laneId, event) => {
+            recordLaneEvent(laneId, 'terminal_action', 'orchestrator', event);
+          },
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, receipt }));
+      } catch (error) {
+        if (error instanceof GovernedTerminalWriteError) {
+          res.writeHead(error.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: error.code, message: error.message }));
+          return;
+        }
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'terminal_agent_input_failed' }));
+      }
+    });
+    return;
+  }
+
   if (req.url === '/terminal-exec' && req.method === 'POST') {
     if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);
@@ -8180,7 +8338,7 @@ const httpServer = createServer((req, res) => {
     req.on('end', () => {
       void (async () => {
         try {
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { surfaceId?: string };
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { surfaceId?: string; runId?: string };
           const surfaceId = typeof body.surfaceId === 'string' ? body.surfaceId.trim() : '';
           if (!surfaceId) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -8197,12 +8355,13 @@ const httpServer = createServer((req, res) => {
             if (exit && watched) watchedAttemptIds.set(watched, workerExitAttemptId(exit));
           };
           stampAttempt();
-          let ingested = await ingestAgentCompletionSignal(surfaceId);
+          const runId = typeof body.runId === 'string' ? body.runId : undefined;
+          let ingested = await ingestAgentCompletionSignal(surfaceId, runId);
           if (!ingested) {
             if (lane && !isTerminalLaneStatus(lane.status)) {
               registerWatchedAgent(surfaceId, lane.repoPath, lane.label || lane.branch, '');
               stampAttempt();
-              ingested = await ingestAgentCompletionSignal(surfaceId);
+              ingested = await ingestAgentCompletionSignal(surfaceId, runId);
             }
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -8748,7 +8907,10 @@ wss.on('connection', (ws, req) => {
     client.backpressureQueue.length = 0;
     // Detach from all terminal sessions
     for (const sessionName of client.terminalSessions) {
-      removeClientFromTerminal(client.id, sessionName);
+      removeClientFromTerminal(client.id, sessionName, true);
+    }
+    for (const [sessionName, pending] of pendingDashSessions) {
+      if (pending.directPty && pending.clientId === client.id) pendingDashSessions.delete(sessionName);
     }
     // Clean up orchestrator subscriptions (one per backend the client used).
     for (const key of orchestratorSubscriptions.keys()) {
@@ -9606,11 +9768,12 @@ async function bootstrapWsServer() {
           toolName: entry.toolName,
         }));
       },
-      async steerAgent(surfaceId, message) {
+      async steerAgent(surfaceId, message, automaticRecoveryRunId) {
         await fetchRuntimeAction({
           action: 'steer',
           surfaceId,
           message,
+          automaticRecoveryRunId,
           clientMutationId: randomUUID(),
         });
       },

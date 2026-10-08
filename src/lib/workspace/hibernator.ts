@@ -8,6 +8,7 @@ import { spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { assertNoActiveWorkspaceArtifactRestore } from './artifact-restore-state';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
@@ -347,6 +348,7 @@ export async function parkWorkspace(
     if (contended) return { status: 'refused', code: 'lifecycle_contended', note: 'Another packet lifecycle mutation ran first.' };
     let repo: RepoRegistryEntry | undefined;
     try {
+      assertNoActiveWorkspaceArtifactRestore(input.packetId);
       if (!input.operationId.trim()) throw new Error('operationId is required.');
       repo = (await deps.listRepos()).find((entry) => entry.id === input.repositoryUuid);
       if (!repo) throw new Error('Registered repository UUID was not found.');

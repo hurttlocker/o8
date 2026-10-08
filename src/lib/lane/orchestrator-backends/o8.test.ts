@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 
-// The o8 backend streams the desktop free-chat rail (`/api/v2/proxy/llm`). Mock
-// the two impure seams it touches — the loopback API base and the thread
-// transcript reader — and stub global fetch to feed it fake proxy responses.
-// Everything else (SSE parsing, event mapping, ordering) is the backend's own
-// logic and is what these tests exercise.
+// The o8 backend runs the built-in Pi agent, and where Pi cannot start it streams
+// a text-only reply from `/api/v2/proxy/llm`. Mock the impure seams the fallback
+// touches — the loopback API base and the thread transcript reader — and stub
+// global fetch to feed it fake proxy responses. Everything else (delegation, SSE
+// parsing, event mapping, ordering) is the backend's own logic. The Pi path
+// itself is driven end to end in tests/o8-model-pi-real-path.test.ts.
 const mockReadMessages = vi.fn();
 const mockFetch = vi.fn();
 const mockEntitlement = vi.fn();
 
-vi.mock('@/lib/panel/api-port', () => ({
+vi.mock('@/lib/panel/api-port', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/panel/api-port')>(),
   getApiBase: () => 'http://127.0.0.1:3001',
 }));
 vi.mock('@/lib/ws-auth', () => ({
@@ -24,7 +26,21 @@ vi.mock('@/lib/entitlement/store', () => ({
 }));
 
 // Imported after the mocks so the backend binds them.
-import { o8Backend, o8TierAccess, o8SystemPrompt } from './o8';
+import { createO8Backend, o8BuiltInAgentBlocker, o8FallbackTier, o8SystemPrompt } from './o8';
+import type { OrchestratorBackend } from './types';
+
+const BLOCKER = 'o8\'s built-in agent runs on macOS and Linux, and Windows support is not available yet';
+const NOTICE = { type: 'text', text: `${BLOCKER}, so this reply is text only, without o8 commands, file edits or tools.\n\n` };
+const piSendTurn = vi.fn<OrchestratorBackend['sendTurn']>(async () => {});
+const fakePi: OrchestratorBackend = {
+  id: 'pi',
+  label: 'Pi',
+  peekSession: () => ({ sessionName: 'pi-session', status: 'busy' }),
+  ensureSession: () => ({ sessionName: 'pi-session', status: 'ready' }),
+  sendTurn: piSendTurn,
+};
+/** The text-only fallback, as on a machine where Pi cannot start. */
+const o8Backend = createO8Backend({ pi: fakePi, blocker: () => BLOCKER });
 
 /** A fake SSE proxy response streaming the given `data: …\n\n` frames. */
 function sseResponse(frames: string[]): Response {
@@ -50,6 +66,7 @@ function collect(): { events: OrchestratorEvent[]; onEvent: (e: OrchestratorEven
 beforeEach(() => {
   mockReadMessages.mockReset().mockReturnValue([{ role: 'user', content: 'hi' }]);
   mockFetch.mockReset();
+  piSendTurn.mockClear();
   // Default the whole suite to the FREE plan so the tools-off assertions are
   // deterministic on any machine (getEntitlementSync would otherwise read the
   // real founder entitlement on Q's box). Paid-tier tests override per-case.
@@ -73,7 +90,8 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' },
+      NOTICE,
       { type: 'text', text: 'Hel' },
       { type: 'text', text: 'lo' },
       { type: 'done', sessionId: expect.any(String), cost: 0 },
@@ -99,9 +117,10 @@ describe('o8 backend event mapping', () => {
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
-    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' });
-    expect(events[1]).toEqual({ type: 'text', text: 'partial' });
-    expect(events[2]).toEqual({ type: 'error', error: 'model exploded' });
+    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' });
+    expect(events[1]).toEqual(NOTICE);
+    expect(events[2]).toEqual({ type: 'text', text: 'partial' });
+    expect(events[3]).toEqual({ type: 'error', error: 'model exploded' });
     expect(events[events.length - 1].type).toBe('done');
   });
 
@@ -114,7 +133,8 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', signal: controller.signal });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' },
+      NOTICE,
       { type: 'done', sessionId: expect.any(String), cost: 0 },
     ]);
   });
@@ -131,8 +151,8 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(events[1].type).toBe('error');
-    expect((events[1] as { error: string }).error).toContain('Gemini quota exhausted');
+    expect(events[2].type).toBe('error');
+    expect((events[2] as { error: string }).error).toContain('Gemini quota exhausted');
     expect(events[events.length - 1].type).toBe('done');
   });
 
@@ -153,8 +173,7 @@ describe('o8 backend event mapping', () => {
     };
     expect(body.model).toBe('o8-operator');
     expect(body.provider).toBe('operator');
-    // A scoped repo ('/repo') enables tools for any plan now.
-    expect(body.disableTools).toBe(false);
+    expect(body.disableTools).toBe(true);
     // System prompt first, then the transcript verbatim (no appended duplicate turn).
     expect(body.messages[0].role).toBe('system');
     expect(body.messages.slice(1)).toEqual(transcript);
@@ -175,70 +194,69 @@ describe('o8 backend event mapping', () => {
   });
 });
 
-describe('o8 backend tool gating (Composer parity) — through the real sendTurn path', () => {
+describe('o8 backend runs the built-in Pi agent', () => {
+  it('hands the turn, session lookups and options to Pi untouched, and never calls the proxy', async () => {
+    const backend = createO8Backend({ pi: fakePi, blocker: () => null });
+    const { onEvent } = collect();
+    const options = { threadId: 'thoughts-1', permissionMode: 'plan' as const, thinkingEffort: 'low' as const };
+
+    await backend.sendTurn('/repo', 'list the repos', onEvent, options);
+
+    expect(piSendTurn).toHaveBeenCalledWith('/repo', 'list the repos', expect.any(Function), options);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(backend.id).toBe('o8');
+    expect(backend.peekSession('/repo', undefined, 'thoughts-1')).toEqual({ sessionName: 'pi-session', status: 'busy' });
+    expect(backend.ensureSession('/repo', undefined, 'thoughts-1')).toEqual({ sessionName: 'pi-session', status: 'ready' });
+  });
+
+  it('puts the o8 model the turn was sent with on Pi\'s receipt, so the thread and its receipt agree', async () => {
+    piSendTurn.mockImplementation(async (_repoPath, _message, onEvent) => {
+      onEvent({ type: 'turn_receipt', leadModel: 'pi', effort: 'low' });
+      onEvent({ type: 'text', text: 'ok' });
+    });
+    const backend = createO8Backend({ pi: fakePi, blocker: () => null });
+    for (const [model, leadModel] of [['o8-next', 'o8-next'], [undefined, 'o8-free']] as const) {
+      const { events, onEvent } = collect();
+      await backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', thinkingEffort: 'low', model });
+      expect(events).toEqual([{ type: 'turn_receipt', leadModel, effort: 'low' }, { type: 'text', text: 'ok' }]);
+    }
+    piSendTurn.mockReset();
+  });
+
+  it('names the reason Pi cannot start on Windows', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      expect(o8BuiltInAgentBlocker()).toBe(BLOCKER);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+});
+
+describe('o8 text-only fallback where Pi cannot start', () => {
   function bodyOf(): { disableTools: boolean; repoPath?: string; messages: Array<{ role: string; content: string }> } {
     return JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
   }
 
-  it('paid plan + scoped repo → attaches tools, scopes them to the repo, capable + repo-aware prompt', async () => {
-    mockEntitlement.mockReturnValue({ plan: 'founder' });
-    mockReadMessages.mockReturnValue([{ role: 'user', content: 'build a game' }]);
+  it.each(['free', 'founder'])('%s plan + scoped repo → no tools, no repoPath, a text-only prompt', async (plan) => {
+    mockEntitlement.mockReturnValue({ plan });
     mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
-    const { onEvent } = collect();
+    const { events, onEvent } = collect();
 
     await o8Backend.sendTurn('/Users/me/proj', 'build a game', onEvent, { threadId: 'thoughts-1' });
-
-    const body = bodyOf();
-    expect(body.disableTools).toBe(false);
-    expect(body.repoPath).toBe('/Users/me/proj');
-    expect(body.messages[0].role).toBe('system');
-    expect(body.messages[0].content).toMatch(/"proj" repository/);        // repo-aware
-    expect(body.messages[0].content).not.toMatch(/conversational only/i);  // capable, not chat-only
-  });
-
-  it('FREE plan + scoped repo → ALSO gets tools (Composer parity for free — Q ruling 2026-07-14)', async () => {
-    mockEntitlement.mockReturnValue({ plan: 'free' });
-    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
-    const { onEvent } = collect();
-
-    await o8Backend.sendTurn('/Users/me/proj', 'build a game', onEvent, { threadId: 'thoughts-1' });
-
-    const body = bodyOf();
-    expect(body.disableTools).toBe(false);
-    expect(body.repoPath).toBe('/Users/me/proj');
-    expect(body.messages[0].content).not.toMatch(/conversational only/i);
-  });
-
-  it('founders-LOW + scoped repo → still gets tools (rides the free rail, which now runs the loop)', async () => {
-    mockEntitlement.mockReturnValue({ plan: 'founder' });
-    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
-    const { onEvent } = collect();
-
-    await o8Backend.sendTurn('/Users/me/proj', 'q', onEvent, { threadId: 'thoughts-1', thinkingEffort: 'low' });
-
-    const body = bodyOf();
-    expect(body.disableTools).toBe(false);
-    expect(body.repoPath).toBe('/Users/me/proj');
-  });
-
-  it('NO repo scoped → tools OFF for any plan, no repoPath leaks, conversational prompt', async () => {
-    mockEntitlement.mockReturnValue({ plan: 'founder' });
-    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
-    const { onEvent } = collect();
-
-    await o8Backend.sendTurn('', 'just chatting', onEvent, { threadId: 'thoughts-1' });
 
     const body = bodyOf();
     expect(body.disableTools).toBe(true);
     expect(body.repoPath).toBeUndefined();
-    expect(body.messages[0].content).toMatch(/conversational only/i);
+    expect(body.messages[0].content).toMatch(/text only/i);
+    expect(events[1]).toEqual(NOTICE);
+    expect(piSendTurn).not.toHaveBeenCalled();
   });
 
-  it('maps the tool loop frames to tool_use / tool_result events', async () => {
-    mockEntitlement.mockReturnValue({ plan: 'founder' });
+  it('ignores tool frames: the fallback renders text only', async () => {
     mockFetch.mockResolvedValue(sseResponse([
       `data: ${JSON.stringify({ type: 'tool_use', toolName: 'create_file', toolCallId: 't1', arguments: { file_path: 'x.html' } })}\n\n`,
-      `data: ${JSON.stringify({ type: 'tool_result', toolName: 'create_file', toolCallId: 't1', output: 'Created x.html (10 bytes).', status: 'done' })}\n\n`,
       contentFrame('Done.'),
       'data: [DONE]\n\n',
     ]));
@@ -246,9 +264,7 @@ describe('o8 backend tool gating (Composer parity) — through the real sendTurn
 
     await o8Backend.sendTurn('/Users/me/proj', 'make x.html', onEvent, { threadId: 'thoughts-1' });
 
-    expect(events).toContainEqual({ type: 'tool_use', id: 't1', name: 'create_file', input: { file_path: 'x.html' } });
-    expect(events).toContainEqual({ type: 'tool_result', id: 't1', name: 'create_file', output: 'Created x.html (10 bytes).' });
-    expect(events.some((e) => e.type === 'text' && e.text === 'Done.')).toBe(true);
+    expect(events.map((event) => event.type)).toEqual(['turn_receipt', 'text', 'text', 'done']);
   });
 });
 
@@ -290,8 +306,8 @@ describe('o8 backend inactivity watchdog (wedged-turn class)', () => {
     await vi.advanceTimersByTimeAsync(300_000);
     await turn;
 
-    expect(events[1].type).toBe('error');
-    expect((events[1] as { error: string }).error).toMatch(/went silent/);
+    expect(events[2].type).toBe('error');
+    expect((events[2] as { error: string }).error).toMatch(/went silent/);
     expect(events[events.length - 1].type).toBe('done');
   });
 
@@ -308,8 +324,8 @@ describe('o8 backend inactivity watchdog (wedged-turn class)', () => {
     await vi.advanceTimersByTimeAsync(300_000);
     await turn;
 
-    expect(events[1].type).toBe('error');
-    expect((events[1] as { error: string }).error).toMatch(/went silent/);
+    expect(events[2].type).toBe('error');
+    expect((events[2] as { error: string }).error).toMatch(/went silent/);
     expect(events[events.length - 1].type).toBe('done');
   });
 
@@ -327,36 +343,21 @@ describe('o8 backend inactivity watchdog (wedged-turn class)', () => {
   });
 });
 
-// Pure decision matrix — the exact gate sendTurn calls. New invariant: tools gate
-// on a scoped repo, NOT the plan — both free and founders edit files when a repo
-// is present, and NO repo means no tools for anyone.
-describe('o8TierAccess', () => {
-  it('free + repo → low tier, tools ON', () => {
-    expect(o8TierAccess(false, undefined, true)).toEqual({ tier: 'low', toolsEnabled: true });
-  });
-  it('free + NO repo → tools OFF', () => {
-    expect(o8TierAccess(false, undefined, false)).toEqual({ tier: 'low', toolsEnabled: false });
-  });
-  it('paid + repo → high tier, tools ON', () => {
-    expect(o8TierAccess(true, undefined, true)).toEqual({ tier: 'high', toolsEnabled: true });
-  });
-  it('paid choosing low + repo → low tier, tools ON (both effort rails edit)', () => {
-    expect(o8TierAccess(true, 'low', true)).toEqual({ tier: 'low', toolsEnabled: true });
-  });
-  it('paid + NO repo → tools OFF', () => {
-    expect(o8TierAccess(true, 'high', false)).toEqual({ tier: 'high', toolsEnabled: false });
+describe('o8FallbackTier', () => {
+  it('follows an explicit effort, else the plan', () => {
+    expect(o8FallbackTier(false, undefined)).toBe('low');
+    expect(o8FallbackTier(true, undefined)).toBe('high');
+    expect(o8FallbackTier(true, 'low')).toBe('low');
+    expect(o8FallbackTier(false, 'high')).toBe('high');
   });
 });
 
 describe('o8SystemPrompt', () => {
-  it('tools-on prompt is capable + repo-aware and forbids commit/push/merge', () => {
-    const prompt = o8SystemPrompt('high', true, 'my-repo');
-    expect(prompt).toMatch(/"my-repo" repository/);
-    expect(prompt).toMatch(/never commit, push, or merge/i);
-    expect(prompt).not.toMatch(/conversational only/i);
-  });
-  it('tools-off prompt stays conversational and names no repo/tools', () => {
-    const prompt = o8SystemPrompt('low', false, '');
-    expect(prompt).toMatch(/conversational only/i);
+  it('says the reply is text only on both tiers', () => {
+    for (const tier of ['low', 'high'] as const) {
+      const prompt = o8SystemPrompt(tier);
+      expect(prompt).toMatch(/text only/i);
+      expect(prompt).not.toMatch(/file tools attached/i);
+    }
   });
 });

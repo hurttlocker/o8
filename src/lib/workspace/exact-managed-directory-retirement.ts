@@ -4,8 +4,10 @@ import path from 'node:path';
 
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
-import { purgeExactDirectory } from './exact-directory-purge';
+import { captureExactDirectoryManifest, purgeExactDirectory, type ExactDirectoryManifest } from './exact-directory-purge';
 import { renameExactChildDirectory } from './exact-parent-operation';
+import { assertWorkspaceRetentionReleased } from './retention-holds';
+import { admitRetirementAuthority, verifyRetirementAuthority, withRetirementAuthorityLock, type ManagedRetirementReason } from './retirement-authority';
 import {
   listExactWorkspaceClaims,
   prepareExactWorkspaceClaim,
@@ -21,8 +23,10 @@ export interface ExactManagedDirectoryRetirementInput {
   directoryPath: string;
   identity: WorktreeMaterializationIdentity;
   parentIdentity?: WorktreeMaterializationIdentity;
+  retirementReason?: ManagedRetirementReason;
   beforeRetirementRename?: () => Promise<void>;
   afterRetirementRename?: () => Promise<void>;
+  beforeRetirementPurge?: (candidatePath: string) => Promise<void>;
 }
 
 function sameIdentity(
@@ -117,6 +121,13 @@ async function prepareRetirement(
   }
   if (!(await directoryIdentity(directoryPath))) return null;
   await assertWorktreeMaterializationIdentity(directoryPath, input.identity);
+  const authority = await admitRetirementAuthority({
+    ...input, directoryPath, reason: input.retirementReason ?? 'terminal',
+  });
+  if (authority.retirementReason === 'empty-orphan') {
+    const manifest = await captureExactDirectoryManifest(directoryPath, input.identity);
+    if (manifest.entries.length !== 1) throw new Error('Unowned nonempty workspace contents must be retained.');
+  }
   const operationId = randomUUID();
   const claimPath = path.join(parentIdentity.canonicalPath, `.o8-retired-managed-${operationId}`);
   const contentDigest = createHash('sha256').update(JSON.stringify({
@@ -135,7 +146,7 @@ async function prepareRetirement(
     parentIdentity,
     sourceIdentity: input.identity,
     contentDigest,
-    authority: { sourceCanonicalPath: input.identity.canonicalPath },
+    authority: { sourceCanonicalPath: input.identity.canonicalPath, ...authority },
   });
 }
 
@@ -143,12 +154,25 @@ async function finishClaim(
   initial: ExactWorkspaceClaimRecord,
   beforeRetirementRename?: () => Promise<void>,
   afterRetirementRename?: () => Promise<void>,
+  beforeRetirementPurge?: (candidatePath: string) => Promise<void>,
+): Promise<void> {
+  return withRetirementAuthorityLock(initial.authority, () => finishClaimUnlocked(
+    initial, beforeRetirementRename, afterRetirementRename, beforeRetirementPurge,
+  ));
+}
+
+async function finishClaimUnlocked(
+  initial: ExactWorkspaceClaimRecord,
+  beforeRetirementRename?: () => Promise<void>,
+  afterRetirementRename?: () => Promise<void>,
+  beforeRetirementPurge?: (candidatePath: string) => Promise<void>,
 ): Promise<void> {
   let claim = initial;
   await assertWorktreeMaterializationIdentity(
     path.dirname(claim.sourcePath), claim.parentIdentity,
   );
   const expected = sourceIdentity(claim);
+  assertWorkspaceRetentionReleased(claim.sourcePath, expected);
   const original = await directoryIdentity(claim.sourcePath);
   const retired = await directoryIdentity(claim.claimPath);
   if (original && retired) throw new Error('Exact managed retirement found both source and claim.');
@@ -161,6 +185,10 @@ async function finishClaim(
 
   if (claim.state === 'prepared') {
     if (original) {
+      await verifyRetirementAuthority({
+        authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.sourcePath,
+        identity: expected, verifyContents: true,
+      });
       await beforeRetirementRename?.();
       await renameExactChildDirectory(
         path.dirname(claim.sourcePath), claim.parentIdentity,
@@ -184,6 +212,16 @@ async function finishClaim(
     if (!claim.claimIdentity || !sameIdentity(claim.claimIdentity, expected)) {
       throw new Error('Exact managed retirement claim identity is missing or changed.');
     }
+    await verifyRetirementAuthority({
+      authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.claimPath,
+      identity: expected, verifyContents: true,
+    });
+    await beforeRetirementPurge?.(claim.claimPath);
+    const manifest = await captureExactDirectoryManifest(claim.claimPath, expected);
+    if (manifest.entries.some((entry) => entry.kind === 'other')
+      || (claim.authority?.retirementReason === 'empty-orphan' && manifest.entries.length !== 1)) {
+      throw new Error('Exact retirement refuses unsupported or unowned nonempty content before purge.');
+    }
     claim = transitionExactWorkspaceClaim({
       kind: 'managed-retirement',
       repositoryPath: claim.repositoryPath,
@@ -191,6 +229,7 @@ async function finishClaim(
       operationId: claim.operationId,
       expectedState: 'claimed',
       toState: 'purging',
+      authority: { ...claim.authority, purgeManifest: manifest },
     });
   }
   if (claim.state !== 'purging') {
@@ -203,7 +242,16 @@ async function finishClaim(
     if (!sameIdentity(remainingClaim, expected)) {
       throw new Error('Exact managed retirement claim changed before purge.');
     }
-    await purgeExactDirectory(claim.claimPath, expected);
+    await verifyRetirementAuthority({
+      authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.claimPath,
+      identity: expected, verifyContents: false,
+    });
+    await beforeRetirementPurge?.(claim.claimPath);
+    const manifest = claim.authority?.purgeManifest as ExactDirectoryManifest | undefined;
+    if (!manifest?.fingerprint || !Array.isArray(manifest.entries) || manifest.entries.length === 0) {
+      throw new Error('Exact retirement has no durable pre-purge descendant manifest.');
+    }
+    await purgeExactDirectory(claim.claimPath, expected, undefined, undefined, undefined, manifest.fingerprint, manifest.entries);
   }
 }
 
@@ -213,7 +261,7 @@ export async function retireExactManagedDirectory(
 ): Promise<void> {
   const claim = await prepareRetirement(input);
   if (!claim) return;
-  await finishClaim(claim, input.beforeRetirementRename, input.afterRetirementRename);
+  await finishClaim(claim, input.beforeRetirementRename, input.afterRetirementRename, input.beforeRetirementPurge);
 }
 
 /** Remove durable authority only after the caller has removed managed metadata. */

@@ -31,6 +31,9 @@ import { approvedFromCardFact } from '@/lib/mobile/inbox-referee-chips';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { findLaneBySession, getLane } from '@/lib/lane/registry';
 import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
+import { requireDesktopAccount } from '@/lib/auth/desktop-account';
+import { getChatGPTPlanService } from '@/lib/chatgpt-plan/service';
+import { ChatGPTPlanError } from '@/lib/chatgpt-plan/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -231,6 +234,18 @@ export async function POST(request: NextRequest) {
   if (!current) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
   }
+  if (action === 'approve' && current.continuation?.kind === 'llm-chat' && current.continuation.provider === 'chatgpt') {
+    try {
+      const owner = await requireDesktopAccount(request);
+      const selection = await getChatGPTPlanService().selection(owner);
+      const continuation = current.continuation;
+      if (owner !== continuation.planOwner || selection.accountId !== continuation.planAccountId || selection.generation !== continuation.planGeneration || selection.desktopEpoch !== continuation.planDesktopEpoch) {
+        throw new ChatGPTPlanError('plan_selection_changed', 'Resume this approval in the original signed-in ChatGPT connection.', 409);
+      }
+    } catch (error) {
+      return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Sign in to o8 to resume this ChatGPT turn.', code: error instanceof ChatGPTPlanError ? error.code : 'plan_resume_held' }, { status: error instanceof ChatGPTPlanError ? error.status : 403 });
+    }
+  }
   if (current.status !== 'pending') {
     return NextResponse.json({ ok: true, approval: current, resolved: action, note: 'Approval was already resolved.' }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
@@ -402,7 +417,7 @@ export async function POST(request: NextRequest) {
     if (continuation?.kind === 'llm-chat') {
       // LLM chat continuation
       const decision = action === 'approve'
-        ? await resumeLlmApproval(request.url, approval, { actor: 'desktop', editedCommand })
+        ? await resumeLlmApproval(request.url, approval, { actor: 'desktop', editedCommand, sessionToken: request.headers.get('x-clerk-session-token') ?? undefined })
         : rejectLlmApproval(approval, 'desktop');
       decisionNote = mergeDecisionNotes(appliedEdit?.message, decision.note);
       assistantMessage = decision.assistantMessage;
