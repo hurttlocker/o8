@@ -18,6 +18,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { laneGitSync, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -165,10 +166,10 @@ function parseGitDiffFilePath(line: string): string | null {
   return path.startsWith('b/') ? path.slice(2) : path;
 }
 
-function getAddedLines(cwd: string, baseBranch: string, headSha: string): AddedDiffLine[] {
+function getAddedLines(cwd: string, baseBranch: string, headSha: string, repoPath: string): AddedDiffLine[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const diff = execFileSync('git', ['diff', `${baseBranch}...${headSha}`, '--no-color'], {
+    const diff = laneGitSync(cwd, repoPath, ['diff', `${baseBranch}...${headSha}`, '--no-color'], {
       windowsHide: true,
       cwd,
       timeout: 15_000,
@@ -190,13 +191,14 @@ function getAddedLines(cwd: string, baseBranch: string, headSha: string): AddedD
     }
 
     return addedLines;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }
 
-function readHeadSha(cwd: string): string {
-  return execFileSync('git', ['rev-parse', 'HEAD'], {
+function readHeadSha(cwd: string, repoPath: string): string {
+  return laneGitSync(cwd, repoPath, ['rev-parse', 'HEAD'], {
     windowsHide: true,
     cwd,
     timeout: 5_000,
@@ -210,10 +212,10 @@ interface DiffNumstat {
   deletions: number;
 }
 
-function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
+function getDiffNumstat(cwd: string, baseBranch: string, repoPath: string): DiffNumstat[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const output = execFileSync('git', ['diff', '--numstat', `${baseBranch}...HEAD`], {
+    const output = laneGitSync(cwd, repoPath, ['diff', '--numstat', `${baseBranch}...HEAD`], {
       windowsHide: true,
       cwd,
       timeout: 10_000,
@@ -236,15 +238,16 @@ function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
         return isWorkerScratchNoise(file) ? null : { file, insertions, deletions };
       })
       .filter((entry): entry is DiffNumstat => entry !== null);
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }
 
-function getChangedFiles(cwd: string, baseBranch: string): string[] {
+function getChangedFiles(cwd: string, baseBranch: string, repoPath: string): string[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const output = execFileSync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
+    const output = laneGitSync(cwd, repoPath, ['diff', '--name-only', `${baseBranch}...HEAD`], {
       windowsHide: true,
       cwd,
       timeout: 10_000,
@@ -253,14 +256,15 @@ function getChangedFiles(cwd: string, baseBranch: string): string[] {
     }).trim();
 
     return output.split('\n').map((line) => line.trim()).filter(Boolean);
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }
 
-function shouldUseBranchMergeGate(cwd: string, baseBranch: string): boolean {
+function shouldUseBranchMergeGate(cwd: string, baseBranch: string, repoPath: string): boolean {
   if (process.env[BRANCH_GATE_ACTIVE_ENV] === '1') return false;
-  return getChangedFiles(cwd, baseBranch).includes(MERGE_GATE_FILE);
+  return getChangedFiles(cwd, baseBranch, repoPath).includes(MERGE_GATE_FILE);
 }
 
 function normalizeMergeViolation(value: unknown): MergeViolation | null {
@@ -398,6 +402,7 @@ function runBranchMergeGate(
 
     return result;
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return branchMergeGateFailure(error);
   }
 }
@@ -413,23 +418,24 @@ function isCanonicalWebviewLatchBridge(file: string | null, text: string): boole
   return text.slice(1).replace(/\s+/g, '') === WEBVIEW_LATCH_BRIDGE_CALL;
 }
 
-function hasReviewedCliExit(cwd: string, headSha: string): boolean {
+function hasReviewedCliExit(cwd: string, headSha: string, repoPath: string): boolean {
   try {
-    const contents = execFileSync('git', ['show', `${headSha}:${REVIEWED_CLI_EXIT_FILE}`], {
+    const contents = laneGitSync(cwd, repoPath, ['show', `${headSha}:${REVIEWED_CLI_EXIT_FILE}`], {
       cwd, windowsHide: true, timeout: 5_000, maxBuffer: 64 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     return createHash('sha256').update(contents).digest('hex') === REVIEWED_CLI_EXIT_SHA256;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return false;
   }
 }
 
-function checkSecurityPatterns(cwd: string, headSha: string, addedLines: AddedDiffLine[]): MergeViolation[] {
+function checkSecurityPatterns(cwd: string, headSha: string, addedLines: AddedDiffLine[], repoPath: string): MergeViolation[] {
   const violations: MergeViolation[] = [];
   const reviewedCliExit = addedLines.some(({ file, text }) => (
     file === REVIEWED_CLI_EXIT_FILE && PROCESS_EXIT_PATTERN.test(text)
-  )) && hasReviewedCliExit(cwd, headSha);
+  )) && hasReviewedCliExit(cwd, headSha, repoPath);
 
   for (const { pattern, label } of HARD_BLOCK_PATTERNS) {
     for (const { file, text } of addedLines) {
@@ -491,11 +497,11 @@ function checkDiffBudgets(
   repoPath: string,
   orchestratorApproved: boolean,
 ): MergeViolation[] {
-  const numstat = getDiffNumstat(cwd, baseBranch);
+  const numstat = getDiffNumstat(cwd, baseBranch, repoPath);
   if (numstat.length === 0) return [];
 
   const skeleton = getAllCached(repoPath);
-  const relocationCredits = getRelocatedDeletionCredits(cwd, baseBranch);
+  const relocationCredits = getRelocatedDeletionCredits(cwd, baseBranch, (args) => laneGitSync(cwd, repoPath, args));
   const violations: MergeViolation[] = [];
 
   for (const { file, insertions, deletions } of numstat) {
@@ -540,8 +546,8 @@ function checkDiffBudgets(
 
 // ── Check 3: Untracked Imported Files ──
 
-function checkUntrackedImportViolations(cwd: string, baseBranch: string): MergeViolation[] {
-  const result = checkUntrackedImports(cwd, baseBranch);
+function checkUntrackedImportViolations(cwd: string, baseBranch: string, repoPath: string): MergeViolation[] {
+  const result = checkUntrackedImports(cwd, baseBranch, (args) => laneGitSync(cwd, repoPath, args));
   if (result.ok) return [];
 
   const fileCount = result.untrackedFiles.length;
@@ -605,13 +611,14 @@ export async function runMergeGate(
 ): Promise<MergeGateResult> {
   const cwd = lane.worktreePath || lane.repoPath;
   const baseBranch = lane.baseBranch || 'main';
-  const headSha = readHeadSha(cwd);
-  const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha);
+  const headSha = readHeadSha(cwd, lane.repoPath);
+  const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha, (args) => laneGit(cwd, lane.repoPath, args));
   const comparisonRef = diffBase.mergeBase ?? diffBase.comparisonRef;
   const checkoutSafety = await inspectOperatorCheckoutMergeSafety({
     repoPath: lane.repoPath,
     candidateCwd: cwd,
     candidateBaseRef: comparisonRef,
+    candidateGit: (args) => laneGit(cwd, lane.repoPath, args),
     baseBranch,
   });
   const checkoutViolations: MergeViolation[] = checkoutSafety.status === 'safe'
@@ -625,7 +632,7 @@ export async function runMergeGate(
       detail: checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
     }];
 
-  if (shouldUseBranchMergeGate(cwd, comparisonRef)) {
+  if (shouldUseBranchMergeGate(cwd, comparisonRef, lane.repoPath)) {
     const branchResult = runBranchMergeGate(lane, selfReview, orchestratorApproved, cwd);
     const alreadyChecked = branchResult.violations.some((violation) => (
       violation.label === 'Operator checkout blocks base fast-forward'
@@ -640,11 +647,11 @@ export async function runMergeGate(
     };
   }
 
-  const addedLines = getAddedLines(cwd, comparisonRef, headSha);
-  const securityViolations = checkSecurityPatterns(cwd, headSha, addedLines);
+  const addedLines = getAddedLines(cwd, comparisonRef, headSha, lane.repoPath);
+  const securityViolations = checkSecurityPatterns(cwd, headSha, addedLines, lane.repoPath);
   const scopePartitionViolations = checkScopePartitionHeuristics(addedLines);
   const budgetViolations = checkDiffBudgets(cwd, comparisonRef, lane.repoPath, orchestratorApproved);
-  const importViolations = checkUntrackedImportViolations(cwd, comparisonRef);
+  const importViolations = checkUntrackedImportViolations(cwd, comparisonRef, lane.repoPath);
   const integrityViolations = checkSelfReviewIntegrity(
     selfReview,
     [...securityViolations, ...scopePartitionViolations, ...budgetViolations, ...importViolations],

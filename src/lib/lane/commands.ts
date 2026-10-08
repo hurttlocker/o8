@@ -38,6 +38,7 @@ import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
@@ -459,19 +460,12 @@ async function dispatchUnlocked(
       // #454 — Guard: auto-commit dirty worktrees before allowing review transition
       const reviewCwd = lane.worktreePath ?? lane.repoPath;
       try {
-        const { execFile } = await import('node:child_process');
-        const { promisify } = await import('node:util');
-        const execFileAsync = promisify(execFile);
-        const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain'], {
-          windowsHide: true,
-          cwd: reviewCwd,
+        const { stdout: porcelain } = await laneGit(reviewCwd, lane.repoPath, ['status', '--porcelain'], {
           maxBuffer: 10 * 1024 * 1024,
         });
         if (porcelain.trim().length > 0) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
-          await execFileAsync('git', ['add', '-A', '--', '.'], {
-            windowsHide: true,
-            cwd: reviewCwd,
+          await laneGit(reviewCwd, lane.repoPath, ['add', '-A', '--', '.'], {
             maxBuffer: 10 * 1024 * 1024,
           });
           // Unstage o8-injected worktree artifacts so they never land in the review
@@ -480,20 +474,19 @@ async function dispatchUnlocked(
           // the target repo's main). Use `git reset` to unstage rather than a negative
           // `git add` pathspec — the latter errors ("paths are ignored") when an ignored
           // dir like node_modules exists in the worktree.
-          await execFileAsync('git', ['reset', '-q', '--', '.claude', 'node_modules'], {
-            windowsHide: true,
-            cwd: reviewCwd,
+          await laneGit(reviewCwd, lane.repoPath, ['reset', '-q', '--', '.claude', 'node_modules'], {
             maxBuffer: 10 * 1024 * 1024,
           });
-          await execFileAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
-            windowsHide: true,
-            cwd: reviewCwd,
+          await laneGit(reviewCwd, lane.repoPath, ['commit', '-m', 'auto-commit: agent work before review'], {
             maxBuffer: 10 * 1024 * 1024,
           });
         }
       } catch (err) {
         console.warn(`[lane] request_review: git status/commit check failed for ${reviewCwd}:`, err);
-        // Non-fatal — proceed with the review transition even if the commit check fails
+        if (err instanceof LaneGitMetadataError) {
+          return { ok: false, laneId: command.laneId, note: err.message };
+        }
+        // Other commit failures retain the existing review transition.
       }
 
       // Empty-commit guard — if the worktree has zero commits ahead of base
@@ -503,7 +496,7 @@ async function dispatchUnlocked(
       // a clean <self-review> block but never actually landed a commit.)
       try {
         const baseBranch = lane.baseBranch || 'main';
-        const probe = await probeNoChangesProduced(reviewCwd, baseBranch);
+        const probe = await probeNoChangesProduced(reviewCwd, baseBranch, (args) => laneGit(reviewCwd, lane.repoPath, args));
         if (probe.noChangesProduced) {
           if (lane.lastEventLabel === 'launch_failed' || lane.lastEventLabel === 'launch_error') {
             return {
@@ -554,6 +547,9 @@ async function dispatchUnlocked(
         }
       } catch (err) {
         console.warn(`[lane] request_review: empty-commit check failed for ${reviewCwd}:`, err);
+        if (err instanceof LaneGitMetadataError) {
+          return { ok: false, laneId: command.laneId, note: err.message };
+        }
         if (lane.lastEventLabel === 'launch_failed' || lane.lastEventLabel === 'launch_error') {
           return {
             ok: false,

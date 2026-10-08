@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { LaneGitMetadataError } from '@/lib/lane/lane-git';
+
 const SOURCE_FILE_PATTERN = /\.(ts|tsx)$/i;
 const STATIC_IMPORT_PATTERN = /\b(?:import|export)\s+(?:type\s+)?(?:[\w*\s{},]*\s+from\s+)?['"]([^'"]+)['"]/g;
 const DYNAMIC_IMPORT_PATTERN = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
@@ -20,8 +22,8 @@ export interface UntrackedImportCheckResult {
   untrackedFiles: string[];
 }
 
-export function checkUntrackedImports(cwd: string, baseBranch: string): UntrackedImportCheckResult {
-  const untrackedFiles = getUntrackedFiles(cwd);
+export function checkUntrackedImports(cwd: string, baseBranch: string, runGit?: (args: string[]) => string): UntrackedImportCheckResult {
+  const untrackedFiles = getUntrackedFiles(cwd, runGit);
   if (untrackedFiles.size === 0) {
     return {
       ok: true,
@@ -32,7 +34,7 @@ export function checkUntrackedImports(cwd: string, baseBranch: string): Untracke
   }
 
   const referencesByKey = new Map<string, UntrackedImportReference>();
-  for (const importingFile of getChangedSourceFiles(cwd, baseBranch)) {
+  for (const importingFile of getChangedSourceFiles(cwd, baseBranch, runGit)) {
     const importingPath = path.join(cwd, importingFile);
     if (!existsSync(importingPath)) {
       continue;
@@ -72,15 +74,12 @@ export function checkUntrackedImports(cwd: string, baseBranch: string): Untracke
   };
 }
 
-function getUntrackedFiles(cwd: string): Set<string> {
+function getUntrackedFiles(cwd: string, runGit?: (args: string[]) => string): Set<string> {
   try {
-    const output = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
-      windowsHide: true,
-      cwd,
-      encoding: 'utf-8',
-      timeout: 10_000,
-      maxBuffer: 1024 * 1024,
-    }).trim();
+    const execute = runGit ?? ((args: string[]) => execFileSync('git', args, {
+      cwd, windowsHide: true, encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024,
+    }));
+    const output = execute(['ls-files', '--others', '--exclude-standard']).trim();
 
     return new Set(
       output
@@ -88,27 +87,26 @@ function getUntrackedFiles(cwd: string): Set<string> {
         .filter(Boolean)
         .map(normalizeRepoPath),
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return new Set();
   }
 }
 
-function getChangedSourceFiles(cwd: string, baseBranch: string): string[] {
+function getChangedSourceFiles(cwd: string, baseBranch: string, runGit?: (args: string[]) => string): string[] {
   try {
-    const output = execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', `${baseBranch}...HEAD`], {
-      windowsHide: true,
-      cwd,
-      encoding: 'utf-8',
-      timeout: 10_000,
-      maxBuffer: 1024 * 1024,
-    }).trim();
+    const execute = runGit ?? ((args: string[]) => execFileSync('git', args, {
+      cwd, windowsHide: true, encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024,
+    }));
+    const output = execute(['diff', '--name-only', '--diff-filter=ACMR', `${baseBranch}...HEAD`]).trim();
 
     return output
       .split('\n')
       .filter(Boolean)
       .map(normalizeRepoPath)
       .filter((file) => SOURCE_FILE_PATTERN.test(file));
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }

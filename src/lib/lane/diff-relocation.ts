@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 
+import { LaneGitMetadataError } from '@/lib/lane/lane-git';
+
 interface DiffFileContent {
   file: string;
   isNew: boolean;
@@ -122,15 +124,12 @@ function relocatedLinesInHunk(hunk: string[], available: Map<string, number>): n
  * Credits are conservative: a deleted hunk must be mostly composed of matching
  * three-line sequences, and each target sequence can be consumed only once.
  */
-export function getRelocatedDeletionCredits(cwd: string, baseBranch: string): Map<string, number> {
+export function getRelocatedDeletionCredits(cwd: string, baseBranch: string, runGit?: (args: string[]) => string): Map<string, number> {
   try {
-    const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', '--no-ext-diff', `${baseBranch}...HEAD`], {
-      windowsHide: true,
-      cwd,
-      timeout: 15_000,
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024,
-    });
+    const execute = runGit ?? ((args: string[]) => execFileSync('git', args, {
+      cwd, windowsHide: true, encoding: 'utf8', timeout: 15_000, maxBuffer: 10 * 1024 * 1024,
+    }));
+    const diff = execute(['diff', '--unified=0', '--no-color', '--no-ext-diff', `${baseBranch}...HEAD`]);
     const files = parseDiffContent(diff);
     const available = buildNewFileShingles(files);
     const credits = new Map<string, number>();
@@ -145,7 +144,8 @@ export function getRelocatedDeletionCredits(cwd: string, baseBranch: string): Ma
       if (relocated > 0) credits.set(file.file, relocated);
     }
     return credits;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return new Map();
   }
 }

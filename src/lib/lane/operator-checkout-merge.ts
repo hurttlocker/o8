@@ -6,6 +6,8 @@ import {
   isAncestor,
 } from '@/lib/lane/worktree-merge-git';
 
+import { LaneGitMetadataError } from '@/lib/lane/lane-git';
+
 export interface OperatorCheckoutMergeSafety {
   foundBranch: string;
   neededBranch: string;
@@ -61,6 +63,7 @@ export async function inspectOperatorCheckoutMergeSafety(input: {
   repoPath: string;
   candidateCwd: string;
   candidateBaseRef: string;
+  candidateGit?: (args: string[]) => Promise<{ stdout: string; stderr: string }>;
   baseBranch: string;
 }): Promise<OperatorCheckoutMergeSafety> {
   const foundBranch = await currentBranch(input.repoPath);
@@ -79,12 +82,10 @@ export async function inspectOperatorCheckoutMergeSafety(input: {
       changedPaths(input.repoPath, ['diff', '--name-only', '-z']),
       changedPaths(input.repoPath, ['diff', '--cached', '--name-only', '-z']),
       changedPaths(input.repoPath, ['ls-files', '--others', '--exclude-standard', '-z']),
-      changedPaths(input.candidateCwd, [
-        'diff',
-        '--name-only',
-        '-z',
-        `${input.candidateBaseRef}...HEAD`,
-      ]),
+      input.candidateGit
+        ? input.candidateGit(['diff', '--name-only', '-z', `${input.candidateBaseRef}...HEAD`])
+          .then(({ stdout }) => nullDelimitedPaths(stdout))
+        : changedPaths(input.candidateCwd, ['diff', '--name-only', '-z', `${input.candidateBaseRef}...HEAD`]),
     ]);
     const dirtyPaths = [...new Set([...unstaged, ...staged, ...untracked])];
     const conflictingPaths = dirtyPaths.filter((dirtyPath) => (
@@ -101,6 +102,7 @@ export async function inspectOperatorCheckoutMergeSafety(input: {
         : `o8 found operator checkout branch "${foundBranch}"; merge needs base branch "${input.baseBranch}". Uncommitted changes to ${conflictingPaths.join(', ')} would be disturbed by the fast-forward.`,
     };
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return {
       foundBranch,
       neededBranch: input.baseBranch,
@@ -146,6 +148,7 @@ export async function fastForwardBaseBranch(input: {
     ], { timeout: 5000 });
     return { foundBranch };
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     throw new Error(
       `o8 found operator checkout branch "${foundBranch}"; merge needs base branch "${input.baseBranch}". Fast-forward failed: ${gitErrorMessage(error)}`,
     );
