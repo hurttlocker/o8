@@ -20,7 +20,8 @@
 
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
-import { readOrchestratorThreadMessages } from '@/lib/mobile/orchestrator-thread-history';
+import { readFile } from 'node:fs/promises';
+import { readOrchestratorThreadMessages, safeOrchestratorHistoryPath } from '@/lib/mobile/orchestrator-thread-history';
 import { requirePiNode, requirePiPlatform } from '@/lib/pi/sdk/platform';
 import { buildNextUrl } from '@/lib/ws-server/next-fetch';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -350,10 +351,50 @@ async function sendTextOnlyTurn(
   }
 }
 
+type O8Pi = OrchestratorBackend & { hasSession?(repoPath: string, threadId?: string | null): Promise<boolean> };
+
 /** Trusted seams for tests. Production uses the registered Pi backend and this machine's support. */
 export interface O8BackendDeps {
-  pi?: OrchestratorBackend;
+  pi?: O8Pi;
   blocker?: () => string | null;
+}
+
+/**
+ * An o8 thread that began on the text-only rail (or before #3408) has no Pi
+ * session, and ws-server sends no handoff because the backend id is unchanged.
+ * Its first Pi turn carries the earlier turns as the same cold-continuation
+ * packet a backend switch uses, so the model sees what the operator sees. A
+ * packet too large for one Pi prompt is rebuilt with the handoff's compaction.
+ */
+async function carriedThreadPrelude(pi: O8Pi, repoPath: string, message: string,
+  options: OrchestratorTurnOptions): Promise<{ prelude: string } | { lost: true } | null> {
+  const threadId = options.threadId;
+  if (!threadId?.startsWith('thoughts-') || !pi.hasSession || await pi.hasSession(repoPath, threadId)) return null;
+  const [{ backendSwitchRequiresExplicitHandoff, renderBackendSwitchHandoffPrelude }, { buildHandoffPacket, HandoffPacketError },
+    { PI_PROMPT_MAX_BYTES }] = await Promise.all([import('@/lib/orchestrator/backend-switch-carry'),
+    import('@/lib/orchestrator/handoff-packet'), import('@/lib/pi/sdk/session')]);
+  // A real backend switch already gets ws-server's handoff prelude.
+  if (backendSwitchRequiresExplicitHandoff({ threadId, toBackend: 'o8' })) return null;
+  // ws-server persisted this turn's message before calling the backend; the turn itself carries it.
+  const record = await readFile(safeOrchestratorHistoryPath(threadId), 'utf8')
+    .then(raw => JSON.parse(raw) as { messages?: Array<{ id?: unknown; role?: unknown }> }).catch(() => null);
+  const current = record?.messages?.findLast(entry => entry.role === 'user')?.id;
+  const fits = (prelude: string) => Buffer.byteLength(`${prelude}\n\n${message}`) <= PI_PROMPT_MAX_BYTES;
+  try {
+    for (const narrativeMode of ['auto', 'compact'] as const) {
+      const packet = await buildHandoffPacket({ threadId, to: { backend: 'o8', model: options.model ?? null },
+        excludeMessageId: typeof current === 'string' ? current : undefined, narrativeMode });
+      const prelude = renderBackendSwitchHandoffPrelude(packet);
+      if (fits(prelude)) return { prelude };
+    }
+  } catch (error) {
+    // A new thread has no earlier assistant turn, or no persisted record, to carry.
+    if (error instanceof HandoffPacketError && (error.code === 'handoff_thread_empty' || error.code === 'handoff_thread_not_found')) {
+      return null;
+    }
+    console.warn('[o8] Earlier turns could not be carried into Pi:', error);
+  }
+  return { lost: true };
 }
 
 export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
@@ -376,7 +417,19 @@ export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
     sendTurn(repoPath, message, onEvent, options) {
       const reason = blocker();
       // Pi's own default approval stays in force: repo writes and commands ask in the inbox.
-      if (!reason) return pi.sendTurn(repoPath, message, onEvent, options);
+      if (!reason) {
+        const carried = carriedThreadPrelude(pi, repoPath, message, options ?? {}).catch((error: unknown) => {
+          console.warn('[o8] Earlier turns could not be carried into Pi:', error);
+          return { lost: true as const };
+        });
+        return carried.then((carry) => {
+          // Never let the agent look like it remembers what it was not given.
+          if (carry && 'lost' in carry) {
+            onEvent({ type: 'text', text: 'Earlier turns in this thread could not be carried into o8\'s built-in agent, so it starts without them.\n\n' });
+          }
+          return pi.sendTurn(repoPath, carry && 'prelude' in carry ? `${carry.prelude}\n\n${message}` : message, onEvent, options);
+        });
+      }
       const sessionName = o8SessionName(repoPath, options?.threadId);
       ensured.add(sessionName);
       return sendTextOnlyTurn(sessionName, reason, message, onEvent, options ?? {});

@@ -15,7 +15,7 @@ import type { AddressInfo } from 'node:net';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { exportSPKI, generateKeyPair, SignJWT } from 'jose';
 import { NextRequest } from 'next/server';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
@@ -30,6 +30,7 @@ vi.mock('@/lib/pi/sdk/platform', async (importOriginal) => {
 
 const { getDataDir } = await import('@/lib/data-dir-migration');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+const { safeOrchestratorHistoryPath } = await import('@/lib/mobile/orchestrator-thread-history');
 const { resetToolSpinePortIdentityForTests } = await import('@/lib/mcp/tool-spine/build');
 const { getOrchestratorBackend } = await import('@/lib/lane/orchestrator-backends/registry');
 const { isOrchestratorBackendId } = await import('@/lib/lane/orchestrator-backends/types');
@@ -222,6 +223,45 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
       .toBe('Listed the repos, skipped the declined command, and wrote notes.md.');
     expect(events.at(-1)).toMatchObject({ type: 'done' });
   }, 300_000);
+
+  it('carries an existing o8 thread\'s earlier turns into its first Pi turn, once', async () => {
+    const repo = join(root, 'repo-existing-thread');
+    await mkdir(repo);
+    const threadId = 'thoughts-o8-model-existing';
+    // A thread from the text-only rail, as ws-server persists it: the new message is already on disk.
+    const history = [
+      { id: 'u1', role: 'user', content: 'Remember that the release codename is BLUE-HERON.', timestamp: 1 },
+      { id: 'a1', role: 'assistant', content: 'Noted: the release codename is BLUE-HERON.', backend: 'o8', model: 'o8-free', timestamp: 2 },
+      { id: 'u2', role: 'user', content: 'What is the release codename?', timestamp: 3 },
+    ];
+    const historyPath = safeOrchestratorHistoryPath(threadId);
+    await mkdir(dirname(historyPath), { recursive: true });
+    await writeFile(historyPath, JSON.stringify({ repoPath: repo, model: 'o8-free', backend: 'o8', savedAt: new Date().toISOString(), messages: history }));
+    relay.requests.length = 0;
+    relay.answers.push(say('It is BLUE-HERON.'));
+    const first = await composerO8Turn(repo, 'What is the release codename?', threadId);
+    expect(first.events.filter(event => event.type === 'error')).toEqual([]);
+    expect(first.events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'pi' });
+    const prompt = (request: { body: Record<string, unknown> }) => JSON.stringify(
+      (request.body.messages as Array<{ role: string; content: unknown }>).filter(entry => entry.role === 'user').at(-1)?.content);
+    const carried = prompt(relay.requests[0]);
+    expect(carried).toContain('<o8_handoff_packet>');
+    expect(carried).toContain('Remember that the release codename is BLUE-HERON.');
+    expect(carried).toContain('Noted: the release codename is BLUE-HERON.');
+    // The new message is the turn itself, not part of the carried history.
+    expect(carried.split('What is the release codename?')).toHaveLength(2);
+
+    // The next turn resumes the Pi session, so nothing is carried twice.
+    history.push({ id: 'a2', role: 'assistant', content: 'It is BLUE-HERON.', backend: 'o8', model: 'o8-free', timestamp: 4 },
+      { id: 'u3', role: 'user', content: 'Thanks.', timestamp: 5 });
+    await writeFile(historyPath, JSON.stringify({ repoPath: repo, model: 'o8-free', backend: 'o8', savedAt: new Date().toISOString(), messages: history }));
+    relay.answers.push(say('You are welcome.'));
+    const second = await composerO8Turn(repo, 'Thanks.', threadId);
+    expect(second.events.filter(event => event.type === 'error')).toEqual([]);
+    expect(relay.requests).toHaveLength(2);
+    expect(prompt(relay.requests[1])).not.toContain('<o8_handoff_packet>');
+    expect(JSON.stringify(relay.requests[1].body.messages).split('<o8_handoff_packet>')).toHaveLength(2);
+  }, 180_000);
 
   it('falls back to an honest text-only reply where Pi cannot start', async () => {
     const repo = join(root, 'repo-windows');

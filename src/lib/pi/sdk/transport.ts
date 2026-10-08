@@ -18,9 +18,14 @@ export const PI_ALLOWANCE_EXHAUSTED_MESSAGE = 'Your daily o8 model allowance is 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
   'November', 'December'];
-/** Every allowance message o8 writes, so the session can let exactly these through. */
-export const PI_ALLOWANCE_MESSAGE_TEXT = new RegExp(`^Your (?:daily |weekly )?o8 model allowance is used up\\. It resets (?:`
-  + `at midnight UTC|Monday at 00:00 UTC|(?:${WEEKDAYS.join('|')}), (?:${MONTHS.join('|')}) \\d{1,2} at \\d{2}:\\d{2} UTC)\\.$`);
+const WEEKLY_NO_RESET_MESSAGE = 'Your weekly o8 model allowance is used up. It resets Monday at 00:00 UTC.';
+const DATED_ALLOWANCE_MESSAGE = new RegExp(`^Your (?:daily |weekly )?o8 model allowance is used up\\. It resets `
+  + `(?:${WEEKDAYS.join('|')}), (?:${MONTHS.join('|')}) (?:[1-9]|[12]\\d|3[01]) at (?:[01]\\d|2[0-3]):[0-5]\\d UTC\\.$`);
+
+/** True only for text `piAllowanceExhaustedMessage` can produce, so the session lets exactly these through. */
+export function isPiAllowanceMessage(text: string): boolean {
+  return text === PI_ALLOWANCE_EXHAUSTED_MESSAGE || text === WEEKLY_NO_RESET_MESSAGE || DATED_ALLOWANCE_MESSAGE.test(text);
+}
 
 /**
  * The relay meters paid plans per UTC week (reset Monday 00:00 UTC) and the free
@@ -34,7 +39,7 @@ export function piAllowanceExhaustedMessage(cap: { period?: unknown; resetsAt?: 
     return `Your ${period ? `${period} ` : ''}o8 model allowance is used up. It resets ${WEEKDAYS[at.getUTCDay()]}, `
       + `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()} at ${time} UTC.`;
   }
-  if (period === 'weekly') return 'Your weekly o8 model allowance is used up. It resets Monday at 00:00 UTC.';
+  if (period === 'weekly') return WEEKLY_NO_RESET_MESSAGE;
   return PI_ALLOWANCE_EXHAUSTED_MESSAGE;
 }
 

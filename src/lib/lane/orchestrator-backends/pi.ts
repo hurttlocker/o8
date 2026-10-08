@@ -104,6 +104,7 @@ export function piEventToOrchestratorEvents(event: Record<string, unknown>): Orc
 
 export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): OrchestratorBackend & {
   closeAll(): Promise<void>;
+  hasSession(repoPath: string, threadId?: string | null): Promise<boolean>;
 } {
   const resident = new Map<string, ResidentPi>();
   /** Threads with a turn in flight, startup included. Reserved before any await. */
@@ -114,6 +115,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
   const stateRoot = deps.stateRoot ?? (() => join(getDataDir(), 'pi', 'orchestrator'));
 
   const nameFor = (repoPath: string, threadId?: string | null) => sessionNameForRepo('pi-orchestrator', repoPath, threadId);
+  const stateDirFor = (name: string) => join(stateRoot(), createHash('sha256').update(name).digest('hex').slice(0, 32));
 
   /** Closes one resident; the map entry goes only if it still names this resident. */
   async function close(pi: ResidentPi) {
@@ -123,7 +125,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
   }
 
   async function start(name: string, repoPath: string, options: OrchestratorTurnOptions, surface: PiSurface): Promise<ResidentPi> {
-    const stateDir = join(stateRoot(), createHash('sha256').update(name).digest('hex').slice(0, 32));
+    const stateDir = stateDirFor(name);
     const signal = options.signal ?? new AbortController().signal;
     const servers = await (deps.openServers ?? openO8Servers)(repoPath, { profile: surface.profile, threadId: options.threadId });
     try {
@@ -250,6 +252,11 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
       return { sessionName: name, status: status(name) };
     },
     sendTurn,
+    /** True once this repo and thread have a Pi conversation to resume. */
+    async hasSession(repoPath, threadId) {
+      const name = nameFor(repoPath, threadId);
+      return resident.has(name) || Boolean(await newestPiSessionFile(join(stateDirFor(name), 'sessions')));
+    },
     /** Ends every turn and process, including ones still starting. */
     async closeAll() {
       closing = true;
