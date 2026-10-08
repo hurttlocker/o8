@@ -19,7 +19,7 @@ import { appendFile, mkdir, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
-import { createPiLaneApproval } from '@/lib/pi/sdk/lane-approval';
+import { createPiLaneApproval, createPiLaneAuthority } from '@/lib/pi/sdk/lane-approval';
 import { O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
 import type { createPiSdkSession } from '@/lib/pi/sdk/session';
 import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
@@ -72,11 +72,15 @@ const SYSTEM_PROMPT = 'You are an o8 packet worker in this workspace. Use only t
 
 type PiSession = Awaited<ReturnType<typeof createPiSdkSession>>;
 
+/** A turn this host owns from before its Pi process starts until the turn has settled. */
 interface LiveTurn {
-  session: PiSession;
   runId: string;
+  /** Unset while the Pi process is still starting. */
+  session?: PiSession;
   log: Promise<void>;
-  done?: Promise<void>;
+  /** Set by Stop, synchronously, so a turn that has not sent its prompt never sends it. */
+  stopped: boolean;
+  done: Promise<void>;
 }
 
 const root = () => process.env.O8_OWNED_PI_BUILTIN_ROOT || path.join(getDataDir(), 'owned-pi-builtin');
@@ -226,14 +230,27 @@ async function createRun(surfaceId: string, prompt: string, mode: 'launch' | 're
   });
 }
 
-/** Runs the prompt on its own Pi process; resolves when the turn has settled and the process is closed. */
+/** True while `runId` is still the session's current run and no Stop was recorded for it. */
+async function isCurrentRun(surfaceId: string, runId: string) {
+  const active = (await findSession(surfaceId, false))?.activeRun;
+  return active?.id === runId && active.outcome === 'running' && !active.interruptRequestedAt;
+}
+
+/**
+ * Runs the prompt on its own Pi process, unless the turn was stopped or replaced
+ * while the process started; resolves once the process is closed and the turn
+ * has settled.
+ */
 async function runTurn(turn: LiveTurn, surfaceId: string, run: PiWorkerRunRecord, prompt: string) {
   let outcome: OwnedRunOutcome = 'failed';
   let summary = 'Pi run failed.';
   try {
-    // Stop can arrive before the prompt is sent; the turn then never starts.
-    const stopped = Boolean((await findSession(surfaceId, false))?.activeRun?.interruptRequestedAt);
-    const result: { text?: string; errorMessage?: string } = stopped ? { errorMessage: 'Stopped' } : await turn.session.prompt(prompt);
+    const current = await isCurrentRun(surfaceId, run.id);
+    // No await between this check and prompt(), which marks the session busy before
+    // its first await, so a later Stop always finds a run to abort.
+    const result: { text?: string; errorMessage?: string } = turn.stopped || !current
+      ? { errorMessage: 'Stopped' }
+      : await turn.session!.prompt(prompt);
     if (result.errorMessage === 'Stopped') {
       outcome = 'interrupted';
       summary = 'Pi was stopped.';
@@ -246,7 +263,7 @@ async function runTurn(turn: LiveTurn, surfaceId: string, run: PiWorkerRunRecord
   } catch {
     summary = 'Pi stopped unexpectedly.';
   } finally {
-    await turn.session.close().catch(() => {});
+    await turn.session?.close().catch(() => {});
     await turn.log;
     if (live.get(surfaceId) === turn) live.delete(surfaceId);
   }
@@ -255,7 +272,11 @@ async function runTurn(turn: LiveTurn, surfaceId: string, run: PiWorkerRunRecord
 
 async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' | 'resume') {
   const { session, run } = await createRun(surfaceId, prompt, mode);
-  const turn = { runId: run.id, log: Promise.resolve() } as LiveTurn;
+  let finished!: () => void;
+  const turn: LiveTurn = { runId: run.id, log: Promise.resolve(), stopped: false,
+    done: new Promise<void>((resolve) => { finished = resolve; }) };
+  // Owned before the process starts, so Stop and discovery see this turn throughout startup.
+  live.set(surfaceId, turn);
   const write = (line: PiWorkerLogLine) => {
     turn.log = turn.log.then(() => appendFile(run.stdoutPath, `${JSON.stringify({ at: nowIso(), ...line })}\n`, 'utf8'))
       .catch(() => {});
@@ -270,6 +291,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
       model: O8_MANAGED_FLASH_LITE_MODEL,
       sessionFile: await newestPiSessionFile(path.join(stateDir, 'sessions')),
       approve: session.laneId ? createPiLaneApproval(session.cwd, session.laneId) : undefined,
+      authorize: session.laneId ? createPiLaneAuthority(session.cwd, session.laneId) : undefined,
       systemPrompt: SYSTEM_PROMPT,
       readOnly: session.readOnly,
       onEvent: (event) => { for (const line of piWorkerLogLines(event)) write(line); },
@@ -280,17 +302,18 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     const known = /^The Pi prototype (?:needs Node|does not support)/.test(detail);
     if (!known) console.warn('[pi-builtin] Pi could not start:', error);
     const note = known ? detail : 'Pi could not start. Details are in the o8 log.';
+    if (live.get(surfaceId) === turn) live.delete(surfaceId);
     await settle(surfaceId, run.id, 'failed', note);
+    finished();
     return { ok: false, note, sideEffect: 'none' as const };
   }
-  // Held from here on, so Stop always finds this turn and waits for it to settle.
-  live.set(surfaceId, turn);
-  turn.done = (async () => {
+  const started = turn.session;
+  void (async () => {
     await withSession(surfaceId, async () => {
       const current = await findSession(surfaceId, false);
       if (!current?.activeRun || current.activeRun.id !== run.id) return;
-      current.threadId = turn.session.sessionId;
-      current.activeRun.pid = turn.session.pid;
+      current.threadId = started.sessionId;
+      current.activeRun.pid = started.pid;
       current.activeRun.commandIdentity = path.basename(process.execPath);
       replaceRun(current, current.activeRun);
       await saveSession(current);
@@ -298,7 +321,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     await runTurn(turn, surfaceId, run, prompt);
   })().catch((error) => {
     console.error('[pi-builtin] turn settlement failed', error);
-  });
+  }).finally(finished);
   return {
     ok: true,
     note: mode === 'launch' ? 'Pi (built-in) started the first turn.' : 'Pi (built-in) started the follow-up turn.',
@@ -366,6 +389,7 @@ async function interrupt(surfaceId: string) {
   const turn = live.get(surfaceId);
   const run = session.activeRun;
   if (turn) {
+    turn.stopped = true;
     await withSession(surfaceId, async () => {
       const current = await findSession(surfaceId, false);
       if (current?.activeRun?.id !== turn.runId) return;
@@ -373,7 +397,8 @@ async function interrupt(surfaceId: string) {
       replaceRun(current, current.activeRun);
       await saveSession(current);
     });
-    await turn.session.abort().catch(() => {});
+    // A turn still starting has no process to abort; it sees `stopped` and never prompts.
+    await turn.session?.abort().catch(() => {});
     await turn.done;
     return { interrupted: true, note: 'Pi stopped. The next message resumes the same session.' };
   }

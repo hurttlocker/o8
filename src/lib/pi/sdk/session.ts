@@ -5,7 +5,7 @@ import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtime
 import { createPiApproval } from './approval';
 import { requirePiNode, requirePiPlatform } from './platform';
 import { piSdkScriptPath } from './scripts';
-import { executePiTool, PI_SDK_TOOLS, type PiApproval } from './tools';
+import { executePiTool, PI_SDK_TOOLS, type PiApproval, type PiAuthority } from './tools';
 import { createManagedPiTransport, PI_ALLOWANCE_EXHAUSTED_MESSAGE, type PiModelTransport } from './transport';
 
 export { requirePiNode, requirePiPlatform } from './platform';
@@ -26,6 +26,8 @@ export interface PiSdkSessionOptions {
   /** Trusted host adapters only. Never populate these from model or request arguments. */
   transport?: PiModelTransport;
   approve?: PiApproval;
+  /** Checked inside the host-wide lock before every write and command, whatever approval or policy said. */
+  authorize?: PiAuthority;
   onEvent?: (event: Record<string, unknown>) => void;
   maxModelCalls?: number;
   maxToolCalls?: number;
@@ -116,7 +118,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       const turn = toolTail.then(() => hostTool
         ? (signal.throwIfAborted(), hostTool.execute(structuredClone(args as Record<string, unknown>), signal))
         : executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal,
-          { timeoutMs: options.commandTimeoutMs }));
+          { timeoutMs: options.commandTimeoutMs, authorize: options.authorize }));
       toolTail = turn.catch(() => {});
       return turn;
     }

@@ -184,10 +184,19 @@ Lane rules govern a packet worker (`src/lib/pi/sdk/lane-approval.ts`). Inside
 its lane worktree, `write_file` and `run_command` get no per-call inbox approval,
 as for every other worker. The command policy still runs first, so a blocked
 command never starts. A call is allowed only while the lane is open and still
-bound to the session's workspace, and a write path must resolve inside it.
-Review and merge stay the gate. A launch without a lane keeps per-call inbox
-approval. A read-only packet gets `read_file` only. The orchestrator backend
-keeps inbox approval for its own writes and commands.
+bound to the session's workspace, and a write path must resolve inside it. That
+lane authority is a separate, mandatory check: the host repeats it inside the
+host-wide lock immediately before a write commits or a command starts, whatever
+approval or an operator policy rule said, so a call approved or queued earlier
+cannot outlive its lane. Review and merge stay the gate. A launch without a lane
+keeps per-call inbox approval. A read-only packet is supported and gets
+`read_file` only. The orchestrator backend keeps inbox approval for its own
+writes and commands.
+
+A turn is owned from before its Pi process starts until it settles. Stop during
+startup marks the turn stopped; before sending the prompt, the turn checks that
+it is still the session's current run and was not stopped, and otherwise closes
+the process and settles once. Discovery during startup leaves the turn running.
 
 When a turn settles, the store records a `runtime_process_exit` lane event whose
 classification follows the turn outcome, and a clean finish posts the
@@ -210,7 +219,10 @@ command that never runs, the transcript, discovery, the completion receipt and
 supervisor push, review, merge preview and merge. It also covers Stop, resume on
 the same session file, inbox approval for a launch without a lane, lane rules
 ending with the lane, and an impossible workspace refused before any process
-starts.
+starts. Regression cases cover an approved write that waited on the host lock
+while its lane was archived, a command on an archived lane whose approval an
+operator rule lifted, Stop and discovery while Pi is still starting, and a
+read-only packet through the delegate route.
 
 ## Managed inference boundary
 

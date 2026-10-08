@@ -22,6 +22,12 @@ export interface PiToolCall {
   risk?: 'low' | 'medium' | 'high'; policyRuleId?: string;
 }
 export type PiApproval = (call: PiToolCall, signal: AbortSignal) => Promise<boolean>;
+/** A host check run inside the host-wide lock immediately before a write commits or a command starts. */
+export type PiAuthority = (call: PiToolCall) => Promise<boolean>;
+export interface PiToolOptions extends PiCommandOptions {
+  /** When set, a false result refuses the call, whatever approval or policy said. Host-set only. */
+  authorize?: PiAuthority;
+}
 const MAX_BYTES = 50_000;
 
 function protectedPath(path: string) {
@@ -68,8 +74,14 @@ async function snapshot(root: string, opened: OpenWorkspaceFileResult) {
   return buffer.subarray(0, offset);
 }
 
+async function requireAuthority(call: PiToolCall, authorize: PiAuthority | undefined) {
+  if (authorize && !await authorize({ name: call.name, args: structuredClone(call.args) })) {
+    throw new Error('The workspace no longer allows this call');
+  }
+}
+
 async function executePiCommand(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
-  options: PiCommandOptions) {
+  { authorize, ...options }: PiToolOptions) {
   const args = structuredClone(call.args);
   const command = args.command;
   if (typeof command !== 'string' || !command.trim() || command.includes('\0')
@@ -87,11 +99,14 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
   }
   // The launcher checks the physical working directory at spawn time.
   return { content: [{ type: 'text' as const,
-    text: await withPiExclusive(() => runPiCommand(root, command, signal, options), signal) }] };
+    text: await withPiExclusive(async () => {
+      await requireAuthority(call, authorize);
+      return runPiCommand(root, command, signal, options);
+    }, signal) }] };
 }
 
 export async function executePiTool(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
-  options: PiCommandOptions = {}) {
+  options: PiToolOptions = {}) {
   signal.throwIfAborted();
   if (!PI_SDK_TOOLS.some(tool => tool.name === call.name)) throw new Error('Tool is not available');
   if (call.name === 'run_command') return executePiCommand(root, call, approve, signal, options);
@@ -136,6 +151,7 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
         if (target.dev !== opened.stat.dev || target.ino !== opened.stat.ino || current.nlink !== 1
           || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
       }
+      await requireAuthority(call, options.authorize);
       signal.throwIfAborted();
       await commitPiWrite(root, path, parent, opened, before, content, signal);
       return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };

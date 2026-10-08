@@ -10,7 +10,8 @@
  * preview passes and the reviewed commit merges.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -51,6 +52,35 @@ vi.mock('@/lib/pi/sdk/transport', async (importOriginal) => ({
   },
 }));
 
+// Records each lane-rules answer, and can hold Pi's startup, without changing either.
+const seams = vi.hoisted(() => ({
+  laneAnswers: [] as Array<{ laneId: string; name: string; allowed: boolean }>,
+  startGate: null as null | Promise<void>,
+  startReached: null as null | (() => void),
+}));
+vi.mock('@/lib/pi/sdk/lane-approval', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/pi/sdk/lane-approval')>();
+  return { ...actual, createPiLaneApproval: (root: string, laneId: string) => {
+    const approve = actual.createPiLaneApproval(root, laneId);
+    return async (call: Parameters<typeof approve>[0], signal: AbortSignal) => {
+      const allowed = await approve(call, signal);
+      seams.laneAnswers.push({ laneId, name: call.name, allowed });
+      return allowed;
+    };
+  } };
+});
+vi.mock('@/lib/pi/sdk/session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/pi/sdk/session')>();
+  return { ...actual, createPiSdkSession: async (options: Parameters<typeof actual.createPiSdkSession>[0]) => {
+    const gate = seams.startGate;
+    if (gate) {
+      seams.startGate = null;
+      seams.startReached?.();
+      await gate;
+    }
+    return actual.createPiSdkSession(options);
+  } };
+});
 vi.mock('@/lib/push/notify', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/push/notify')>(),
   notifyApprovalCreated: vi.fn(),
@@ -129,6 +159,10 @@ const { getRuntime } = await import('@/lib/runtimes');
 const capabilities = await import('@/lib/orchestrator/runtime-capabilities');
 const { getOwnedPiBuiltinReviewPacket } = await import('@/lib/pi-builtin/owned');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+const { setLaneStatus } = await import('@/lib/lane/registry');
+const { withPiExclusive } = await import('@/lib/pi/sdk/command');
+const { refreshPolicyRules } = await import('@/lib/approvals/policies');
+const { getDataDir } = await import('@/lib/data-dir-migration');
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -167,6 +201,28 @@ async function lastRunOutcome(sessionKey: string, outcome: string) {
     const packet = await getOwnedPiBuiltinReviewPacket(sessionKey);
     return packet.lastRun?.outcome === outcome ? packet : null;
   }, `Pi run outcome ${outcome}`);
+}
+
+/** Dispatches one packet to bundled Pi through the real delegate route and waits for its bound lane. */
+async function delegate(repoPath: string, prompt: string, extra: Record<string, unknown> = {}) {
+  const response = await delegatePost(new NextRequest('http://127.0.0.1/api/orchestrator/delegate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ clientMutationId: `pi-builtin-${randomUUID()}`, prompt, taskName: prompt.slice(0, 40),
+      repoPath, runtime: 'pi-builtin', ...extra }),
+  }));
+  const delegated = await response.json() as { ok: boolean; laneId: string; packetId: string; error?: string };
+  expect({ status: response.status, ok: delegated.ok, error: delegated.error }).toMatchObject({ status: 200, ok: true });
+  const lane = await waitFor(() => {
+    const current = getLane(delegated.laneId);
+    return current?.worktreePath && current.sessionKey ? current : null;
+  }, 'lane worktree and session');
+  return { ...delegated, workspacePath: lane.worktreePath!, sessionKey: lane.sessionKey! };
+}
+
+/** The tool calls in a session's transcript, in order. */
+async function toolCalls(sessionKey: string) {
+  return (await getRuntime('pi-builtin')!.readTranscript(sessionKey)).flatMap((entry) => entry.toolCalls ?? []);
 }
 
 beforeAll(() => { buildPiWriteHelper(); }, 600_000);
@@ -327,5 +383,97 @@ describe('bundled Pi worker (#3258)', () => {
 
     // An impossible workspace is refused before any process starts.
     await expect(runtime.launch({ cwd: join(root, 'missing'), prompt: 'x' })).resolves.toMatchObject({ ok: false, sideEffect: 'none' });
+  }, 120_000);
+  it('refuses an approved write that waited on the host lock while its lane was archived', async () => {
+    const repo = await makeRepo('queued');
+    let releaseLock!: () => void;
+    const holding = withPiExclusive(() => new Promise<void>((resolve) => { releaseLock = resolve; }));
+    model.answers.push(call('q1', 'write_file', { path: 'late.txt', content: 'late\n' }),
+      message([{ type: 'text', text: 'Tried the write.' }]));
+    const { laneId, sessionKey, workspacePath } = await delegate(repo.repoPath, 'Write late.txt');
+    // Lane rules allowed the write while the lane was open; it now waits behind the held lock.
+    await waitFor(() => seams.laneAnswers.find((answer) => answer.laneId === laneId
+      && answer.name === 'write_file' && answer.allowed) ?? null, 'lane approval of the write');
+    setLaneStatus(laneId, 'archived', 'system', 'test_archived');
+    releaseLock();
+    await holding;
+    await lastRunOutcome(sessionKey, 'finished');
+    expect(existsSync(join(workspacePath, 'late.txt'))).toBe(false);
+    expect((await toolCalls(sessionKey))[0]?.preview).toMatch(/^Failed: /);
+  }, 120_000);
+
+  it('refuses a command on an archived lane even when an operator rule lifts its approval', async () => {
+    const repo = await makeRepo('policy');
+    let release!: () => void;
+    model.block = new Promise<void>((resolve) => { release = resolve; });
+    model.answers.push(call('p1', 'run_command', { command: 'echo ran > after-archive.txt' }),
+      message([{ type: 'text', text: 'Tried the command.' }]));
+    const { laneId, sessionKey, workspacePath } = await delegate(repo.repoPath, 'Run the command');
+    const policyFile = join(getDataDir(), 'policies.json');
+    try {
+      writeFileSync(policyFile, JSON.stringify([
+        { id: 'mutation-shell', requiresApproval: false, workspacePath: realpathSync(workspacePath) }]));
+      refreshPolicyRules();
+      setLaneStatus(laneId, 'archived', 'system', 'test_archived');
+      release();
+      await lastRunOutcome(sessionKey, 'finished');
+    } finally {
+      rmSync(policyFile, { force: true });
+      refreshPolicyRules();
+    }
+    // The rule skipped approval, so only the lane guard could refuse it.
+    expect(seams.laneAnswers.filter((answer) => answer.laneId === laneId)).toEqual([]);
+    expect(existsSync(join(workspacePath, 'after-archive.txt'))).toBe(false);
+    expect((await toolCalls(sessionKey))[0]?.preview).toMatch(/^Failed: /);
+  }, 120_000);
+
+  /** Starts a laneless launch whose Pi startup is held; resolves once startup is reached. */
+  async function launchHeldAtStartup(name: string, prompt: string) {
+    const repo = await makeRepo(name);
+    let open!: () => void;
+    const reached = new Promise<void>((resolve) => { seams.startReached = resolve; });
+    seams.startGate = new Promise<void>((resolve) => { open = resolve; });
+    const launching = getRuntime('pi-builtin')!.launch({ cwd: repo.repoPath, prompt });
+    await reached;
+    const ownedRoot = process.env.O8_OWNED_PI_BUILTIN_ROOT!;
+    const sessionKey = readdirSync(ownedRoot).map((dir) => JSON.parse(readFileSync(join(ownedRoot, dir, 'session.json'), 'utf8')) as
+      { surfaceId: string; latestPrompt: string }).find((session) => session.latestPrompt === prompt)!.surfaceId;
+    return { sessionKey, open, launching };
+  }
+
+  it('stops a turn whose Pi process is still starting, so the prompt never runs', async () => {
+    const before = model.seen.length;
+    model.answers.push(message([{ type: 'text', text: 'should not run' }]));
+    const { sessionKey, open, launching } = await launchHeldAtStartup('stop-start', 'Stop me while starting');
+    const stopping = getRuntime('pi-builtin')!.interrupt(sessionKey);
+    open();
+    await launching;
+    await expect(stopping).resolves.toMatchObject({ ok: true });
+    await lastRunOutcome(sessionKey, 'interrupted');
+    expect(model.seen.length).toBe(before);
+    model.answers.shift();
+  }, 120_000);
+
+  it('keeps a starting turn owned when discovery runs during startup', async () => {
+    model.answers.push(message([{ type: 'text', text: 'Started fine.' }]));
+    const { sessionKey, open, launching } = await launchHeldAtStartup('discover-start', 'Discover me while starting');
+    expect(await getRuntime('pi-builtin')!.discoverSessions()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sessionKey, status: 'running' })]));
+    open();
+    await expect(launching).resolves.toMatchObject({ ok: true });
+    const packet = await lastRunOutcome(sessionKey, 'finished');
+    expect(packet.summary).toBe('Started fine.');
+  }, 120_000);
+
+  it('runs a read-only packet with read_file only', async () => {
+    const repo = await makeRepo('read-only');
+    const before = model.seen.length;
+    model.answers.push(call('r1', 'read_file', { path: 'base.txt' }), message([{ type: 'text', text: 'base.txt says base.' }]));
+    const { sessionKey, workspacePath } = await delegate(repo.repoPath, 'Read base.txt and report it.', { readOnly: true });
+    const packet = await lastRunOutcome(sessionKey, 'finished');
+    expect(packet.summary).toBe('base.txt says base.');
+    expect(model.seen[before].tools).toEqual(['read_file']);
+    expect((await toolCalls(sessionKey)).map((tool) => [tool.name, tool.preview])).toEqual([['read_file', 'base']]);
+    expect(git(workspacePath, ['rev-parse', 'HEAD'])).toBe(repo.baseSha);
   }, 120_000);
 });
