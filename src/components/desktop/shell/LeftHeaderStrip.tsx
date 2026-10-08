@@ -5,7 +5,7 @@
  * Hosts the macOS traffic-light inset and the sidebar toggle. Part of epic #1089.
  */
 
-import Image from 'next/image';
+import { SidebarBrand } from './SidebarBrand';
 import { SidebarHeaderActions } from './SidebarHeaderActions';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
@@ -39,8 +39,8 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
     <ColumnHeaderStrip
       drag
       bottomHairline={!inCard}
-      style={inCard ? { background: 'transparent' } : undefined}
-      // Strip height 32 — the toggle pill centers at ~y=20. The traffic
+      style={{ ...(inCard ? { background: 'transparent' } : {}), ...(!windowControls ? { paddingLeft: 4.5 } : {}) }}
+      // Compact rail controls share the workspace header centerline. The traffic
       // lights center on the same line: tao's inset semantics are
       // center = (buttonHeight + y) / 2 (bitmap-verified 2026-07-15: y=15
       // measured center 14.75, NOT y+6 — the y=15 attempt overshot UP by
@@ -48,7 +48,7 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
       // Calibrated at 100% zoom; zoom-tracking via runtime repositioning
       // was tried (0.1.605) and REVERTED — resizing the titlebar container
       // outside tao's draw_rect left the webview under-filling the window.
-      height={32}
+      height={windowControls ? 32 : 34}
       right={!windowControls ? <SidebarHeaderActions onSearch={onSearch} /> : undefined}
       left={
         <>
@@ -63,26 +63,10 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
               so the cluster doesn't jump when the sidebar collapses.
               See TrafficLights.tsx. */}
           {windowControls ? <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} leadInPx={6} /> : null}
-          {!windowControls ? (
-            <span
-              data-sidebar-brand="true"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                paddingLeft: 8,
-                transform: 'translateX(-11.5px)',
-                pointerEvents: 'none',
-                userSelect: 'none',
-              }}
-            >
-              <Image src="/logos/o8-desktop.png" alt="o8" width={24} height={24} unoptimized style={{ display: 'block', objectFit: 'contain' }} />
-            </span>
-          ) : null}
           {onToggleSidebar ? <SidebarTogglePill
-            sidebarVisible={sidebarVisible}
-            onClick={onToggleSidebar}
-            yNudge={togglePillYNudge}
+            sidebarVisible={sidebarVisible} onClick={onToggleSidebar} yNudge={0}
           /> : null}
+          {!windowControls ? <SidebarBrand /> : null}
         </>
       }
     />

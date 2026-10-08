@@ -3,6 +3,9 @@ import { act, createElement, Fragment } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentPanelExtraAgents, type LaneSummary } from '../../../AgentPanelExtraAgents';
+import { ExtraAgentRowView, type ExtraAgentRow } from '../../../AgentPanelExtraAgentRow';
+import { HistoryChatRow } from './HistoryRows';
+import { OrchestratorHoverCard } from '../../../OrchestratorHoverCard';
 import { SidebarHeaderActions } from '../../../shell/SidebarHeaderActions';
 import { ChatsTab } from '../ChatsTab';
 import { CHAT_GROUP_BY_KEY } from './sidebar-view';
@@ -10,7 +13,6 @@ import { COMPLETION_START_KEY, getLastVisited, markVisited } from './read-state'
 import type { ChatHistoryItem } from './types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
-vi.mock('@/components/desktop/OrchestratorHoverCard', () => ({ OrchestratorHoverCard: () => null }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const repo = { id: 'project', name: 'project', localPath: '/tmp/sidebar-project', remoteUrl: null, defaultBranch: 'main' };
 const started = Date.now() - 60_000;
@@ -45,6 +47,7 @@ describe('completion notifications through the live sidebar components', () => {
     lanes = [lane('one', 'completed')]; await refresh();
     expect(dot()).not.toBeNull(); expect(container.textContent).toContain('Finished');
     await act(async () => bell().click()); expect(dot()).not.toBeNull();
+    expect(container.textContent).toContain('sidebar-project');
     await refresh(); expect(dot()).not.toBeNull();
     const row = container.querySelector<HTMLButtonElement>('[data-o8-agent-row="lane:one"]')!;
     await act(async () => row.click());
@@ -88,4 +91,67 @@ describe('completion notifications through the live sidebar components', () => {
     expect(container.textContent).toContain(history.preview); expect(getLastVisited('packet:finished-packet')).not.toBeNull();
     await act(async () => root.unmount()); root = createRoot(container); await show(); expect(dot()).toBeNull();
   });
+  it('keeps idle context beside the title, hides it while working, and exposes context to keyboard users', async () => {
+    const item: ChatHistoryItem = { tabId: 'context', title: 'Inspect sidebar context', preview: 'Saved summary',
+      empty: false, messageCount: 2, model: 'codex', savedAt: new Date(started).toISOString(),
+      modifiedAt: new Date(completed).toISOString(), starred: false, pinned: false,
+      repoPath: repo.localPath, repoBranch: 'topic', repoName: repo.name };
+    const onHover = vi.fn();
+    const show = async (running: boolean) => act(async () => root.render(createElement(HistoryChatRow, {
+      item, active: false, disabled: false, compact: true, repoLabel: repo.name, onOpen: vi.fn(),
+      onHoverChange: onHover, tone: running ? { key: 'running', label: 'Running', accent: '',
+        background: '', border: '', iconBackground: '', iconColor: '' } : null })));
+    await show(false);
+    expect(container.textContent).toContain(repo.name);
+    await act(async () => container.querySelector<HTMLElement>('[role="button"]')!.focus());
+    expect(onHover).toHaveBeenCalledWith(expect.any(Object));
+    await show(true); expect(container.textContent).not.toContain(repo.name);
+    expect(container.querySelector('[aria-label="Running"]')).not.toBeNull();
+    await act(async () => root.render(createElement(OrchestratorHoverCard, { title: item.title,
+      repoLabel: repo.name, branchLabel: item.repoBranch, workspacePath: item.repoPath,
+      backendLabel: null, packets: [], anchorRect: new DOMRect(0, 0, 200, 30),
+      onMouseEnter: vi.fn(), onMouseLeave: vi.fn() })));
+    const card = document.querySelector('[role="tooltip"]')!;
+    expect(card.textContent).toContain('topic'); expect(card.textContent).toContain(repo.localPath);
+    expect(card.textContent).not.toContain('0 dispatched');
+  });
+
+  it('keeps worker status and time in one trailing slot through running, waiting, failed and merged states', async () => {
+    const row: ExtraAgentRow = { key: 'worker', origin: 'CLI', status: 'running', runtime: 'codex', model: null,
+      name: 'Worker task', subtitle: '', lastActivityAt: completed, sessionKey: 'worker', repoPath: repo.localPath,
+      packetId: null, laneId: 'worker', laneStatus: 'running', outcome: null, outcomeNote: null, lastEventLabel: null };
+    for (const [status, mark] of [['running', 'fam-working'], ['awaiting_input', 'fam-review'],
+      ['failed', 'fam-stopped'], ['merged', 'fam-merged']] as const) {
+      await act(async () => root.render(createElement(ExtraAgentRowView, { row: { ...row, laneStatus: status,
+        status: status === 'running' ? 'running' : status === 'failed' ? 'error' : 'waiting' },
+        active: false, busy: false, band: 'neutral', repoLabel: repo.name, onFocusRow: vi.fn() })));
+      const markNode = container.querySelector(`.${mark}`)!;
+      expect(markNode).not.toBeNull(); expect(markNode.parentElement!.textContent).toMatch(/ago|just now/);
+      if (status === 'running') expect(container.textContent).not.toContain(repo.name);
+      else expect(container.textContent).toContain(repo.name);
+      if (status === 'awaiting_input') expect(container.textContent).toContain('Waiting for your reply');
+    }
+  });
+
+  it('closes idle context when the chat view changes', async () => {
+    const item: ChatHistoryItem = { tabId: 'hover-thread', title: 'Hover context', preview: 'Saved context',
+      empty: false, messageCount: 1, model: 'codex', savedAt: new Date(started).toISOString(),
+      modifiedAt: new Date(completed).toISOString(), starred: false, pinned: false,
+      repoPath: repo.localPath, repoBranch: 'topic' };
+    localStorage.setItem(CHAT_GROUP_BY_KEY, 'flat');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ conversations: [item], lanes: [] }) })));
+    await act(async () => root.render(createElement(ChatsTab, { repos: [repo], variant: 'mini',
+      groupMode: 'flat', onOpenHistoryChat: vi.fn() })));
+    await act(async () => {
+      container.querySelector<HTMLElement>('[role="button"][title^="Hover context"]')!.focus();
+      await new Promise((resolve) => setTimeout(resolve, 270));
+    });
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Change chat view"]')!.click());
+    const scheduled = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+      .find((button) => button.textContent?.trim() === 'Scheduled')!;
+    await act(async () => scheduled.click());
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  });
+
 });

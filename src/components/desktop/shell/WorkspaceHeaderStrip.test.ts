@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, Fragment, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceHeaderStrip } from './WorkspaceHeaderStrip';
+import { LeftHeaderStrip } from './LeftHeaderStrip';
+import { setSidebarView, usePublishSidebarAttention } from '../repo-focus/tabs/chats/sidebar-view-store';
+import { CHAT_GROUP_BY_KEY } from '../repo-focus/tabs/chats/sidebar-view';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -77,6 +80,54 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
       expect(button('Forward').disabled).toBe(true);
     } finally { window.removeEventListener('o8:request-select-tab', select); }
   });
+  it('keeps collapsed logo, toggle and search ordered while restoring priority on reopen', async () => {
+    localStorage.clear();
+    setSidebarView('scheduled');
+    const search = vi.fn();
+    let attentionCount = 1;
+    function HeaderHarness() {
+      const [open, setOpen] = useState(true);
+      usePublishSidebarAttention(attentionCount);
+      const toggle = () => setOpen((value) => !value);
+      return createElement(Fragment, null,
+        open ? createElement(LeftHeaderStrip, { sidebarVisible: true, windowControls: false, onToggleSidebar: toggle, onSearch: search }) : null,
+        createElement(WorkspaceHeaderStrip, stripProps({ sidebarVisible: open, leadingInset: false, onToggleSidebar: toggle, onSearch: search })));
+    }
+    await act(async () => root.render(createElement(HeaderHarness)));
+    const button = (name: string) => container.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
+    const order = () => Array.from(container.querySelectorAll('[aria-label="Toggle sidebar"], [data-sidebar-brand], [aria-label="Priority chats"], [aria-label="Search chats"], [aria-label="Back"], [aria-label="Forward"], [role="tablist"]'))
+      .map((el) => el.getAttribute('data-sidebar-brand') !== null ? 'Logo' : el.getAttribute('role') === 'tablist' ? 'Tabs' : el.getAttribute('aria-label'));
+    const expected = ['Toggle sidebar', 'Logo', 'Priority chats', 'Search chats', 'Back', 'Forward', 'Tabs'];
+    expect(order()).toEqual(expected);
+    expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
+    await act(async () => button('Priority chats').click());
+    expect(localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('flat');
+    await act(async () => button('Toggle sidebar').click());
+    expect(order()).toEqual(['Logo', 'Toggle sidebar', 'Search chats', 'Back', 'Forward', 'Tabs']);
+    expect(button('Priority chats')).toBeNull();
+    expect(button('Toggle sidebar').querySelector('[data-attention-dot]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-attention-dot]')).toHaveLength(1);
+    attentionCount = 0;
+    await act(async () => root.render(createElement(HeaderHarness)));
+    expect(button('Toggle sidebar').querySelector('[data-attention-dot]')).toBeNull();
+    attentionCount = 1;
+    await act(async () => root.render(createElement(HeaderHarness)));
+    expect(button('Toggle sidebar').querySelector('[data-attention-dot]')).not.toBeNull();
+    await act(async () => button('Search chats').click());
+    expect(search).toHaveBeenCalledOnce();
+    expect(localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('flat');
+    await act(async () => button('Toggle sidebar').click());
+    expect(button('Priority chats').getAttribute('aria-pressed')).toBe('true');
+    expect(button('Priority chats').querySelector('[data-attention-dot]')).not.toBeNull();
+    expect(button('Toggle sidebar').querySelector('[data-attention-dot]')).toBeNull();
+    expect(container.querySelectorAll('[data-attention-dot]')).toHaveLength(1);
+    await act(async () => button('Priority chats').click());
+    expect(localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('scheduled');
+    expect(order()).toEqual(expected);
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Rename me later');
+    expect(button('Priority chats').getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('exposes the pill strip as a tablist of tabs with aria-selected', async () => {
     await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps())));
 

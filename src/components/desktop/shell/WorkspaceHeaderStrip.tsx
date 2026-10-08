@@ -14,6 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { WorkspaceHistoryControls } from './WorkspaceHistoryControls';
+import { SidebarBrand } from './SidebarBrand';
+import { SidebarHeaderActions } from './SidebarHeaderActions';
+import { useSidebarAttention } from '../repo-focus/tabs/chats/sidebar-view-store';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { TrafficLightsOrSpacer } from './TrafficLights';
 import { HeaderIconPill } from './HeaderIconPill';
@@ -47,6 +50,7 @@ export function WorkspaceHeaderStrip({
   leadingInset = false,
   sidebarVisible = true,
   onToggleSidebar,
+  onSearch,
   onSidebarHoverEnter,
   onSidebarHoverLeave,
   onSplitWorkspacePanel,
@@ -63,6 +67,7 @@ export function WorkspaceHeaderStrip({
   headerActiveTabId,
   finishedTabCount = 0,
 }: WorkspaceHeaderStripProps) {
+  const sidebarAttention = useSidebarAttention();
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   const showApprovalBadge = approvalCount > 0 && Boolean(onOpenInbox);
   const tabs = headerTabs ?? [];
@@ -74,6 +79,7 @@ export function WorkspaceHeaderStrip({
       // columns' hairlines lined up into one faint line across the whole
       // app. The side strips keep theirs.
       bottomHairline={false}
+      style={!sidebarVisible && !leadingInset ? { paddingLeft: 5.5 } : undefined}
       left={
         <>
           {/* When this strip is leftmost (sidebar collapsed) it carries the
@@ -82,22 +88,15 @@ export function WorkspaceHeaderStrip({
               screen-pixel spacer on older shells. Same yNudge as the toggle
               pill below so their centers ride one line. */}
           {leadingInset ? <TrafficLightsOrSpacer yNudge={1.3} leadInPx={2} /> : null}
-          <WorkspaceHistoryControls tabs={tabs} activeTabId={headerActiveTabId} workspaceId={tabWorkspaceId ?? workspaceId} />
-          {onToggleSidebar ? (
-            <SidebarTogglePill
-              sidebarVisible={sidebarVisible}
-              onClick={onToggleSidebar}
-              onHoverEnter={onSidebarHoverEnter}
-              onHoverLeave={onSidebarHoverLeave}
-              // Calibrated LIVE against the left strip (2026-07-16): with the
-              // left card's pill at yNudge 3.3 → center-y 22.39, this strip's
-              // geometry needs 1.3 to land the SAME 22.39 (2.3 measured 0.5px
-              // low at 22.89). Keeps the whole cluster from jumping when the
-              // sidebar collapses. Re-verify with gBCR center-y in both
-              // states after ANY titlebar geometry change.
-              yNudge={1.3}
-            />
+          {!sidebarVisible && onToggleSidebar ? (
+            <>
+              <SidebarBrand />
+              <SidebarTogglePill sidebarVisible={false} attention={sidebarAttention} onClick={onToggleSidebar}
+                onHoverEnter={onSidebarHoverEnter} onHoverLeave={onSidebarHoverLeave} yNudge={0} />
+              <SidebarHeaderActions onSearch={onSearch} showPriority={false} />
+            </>
           ) : null}
+          <WorkspaceHistoryControls tabs={tabs} activeTabId={headerActiveTabId} workspaceId={tabWorkspaceId ?? workspaceId} />
         </>
       }
       center={usePillStrip || headerLabel || paneCount ? (

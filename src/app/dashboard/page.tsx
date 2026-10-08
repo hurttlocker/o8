@@ -4739,7 +4739,7 @@ function DashboardInner() {
         // transparent; solid keeps the paper card with the header inside.
         const leftHeader = (
           <LeftHeaderStrip
-            sidebarVisible={sidebarVisible}
+            sidebarVisible={showSidebarColumn} onToggleSidebar={toggleSidebarFromChrome}
             windowControls={!showCompactNavigationRail} onSearch={handlePaletteOpen}
             // Solid: the strip renders inside the floating card and must be
             // the same continuous tone (Claude-desktop float, Q 2026-07-17).
@@ -4944,8 +4944,8 @@ function DashboardInner() {
       }}>
         {(!workspaceSurfaceHidden || !showSidebarColumn) && <WorkspaceHeaderStrip
           leadingInset={!showCompactNavigationRail}
-          sidebarVisible={sidebarVisible}
-          onToggleSidebar={toggleSidebarFromChrome}
+          sidebarVisible={showSidebarColumn}
+          onToggleSidebar={toggleSidebarFromChrome} onSearch={handlePaletteOpen}
           rightPanelOpen={showRightPanelColumn}
           rightPanelDisabled={viewportBands?.belowRightCollapse ?? false}
           onToggleRightPanel={compactShell || isPullRequestWorkspace ? undefined : handleToggleO8Panel}

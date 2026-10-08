@@ -7,6 +7,7 @@ import { ChatsTab } from '../ChatsTab';
 import { SidebarHeaderActions } from '../../../shell/SidebarHeaderActions';
 import { CHAT_GROUP_BY_KEY, staysInWorkingView } from './sidebar-view';
 import type { ChatHistoryItem } from './types';
+import type { IdeWorkspaceSession } from '../../types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 vi.mock('@/components/desktop/OrchestratorHoverCard', () => ({ OrchestratorHoverCard: () => null }));
@@ -90,6 +91,32 @@ describe('compact sidebar view through the chat panel', () => {
     await render('thoughts-Pinned'); expect(rows()).toEqual(before);
     await choose('Group by repo'); expect(container.textContent).toContain('project');
     await choose('Group by date'); expect(container.textContent).toContain('Today');
+  });
+  it('shows only scheduled chats owned here, retains notifications and restores the selected view', async () => {
+    const sessions = [
+      { sessionKey: 'llm-chat:thoughts-Pinned', sessionKind: 'automation', workspace: repo.localPath,
+        runtimeSurface: { ownership: 'owned' } },
+      { sessionKey: 'llm-chat:thoughts-Idle', sessionKind: 'automation', workspace: repo.localPath,
+        runtimeSurface: { ownership: 'discovered' } },
+      { sessionKey: 'llm-chat:thoughts-Running', sessionKind: 'chat', workspace: repo.localPath,
+        runtimeSurface: { ownership: 'owned' } },
+      { sessionKey: 'owned-schedule', name: 'Owned scheduled run', sessionKind: 'automation', workspace: repo.localPath,
+        branch: 'main', runtime: 'codex', status: 'idle', lastEventAt: new Date().toISOString(),
+        runtimeSurface: { ownership: 'owned' } },
+    ] as IdeWorkspaceSession[];
+    const show = async () => act(async () => root.render(createElement(Fragment, null,
+      createElement(SidebarHeaderActions), createElement(ChatsTab, { repos: [repo], variant: 'mini',
+        groupMode: 'flat', showLiveSessions: false, packets, ideWorkspaceSessions: sessions,
+        onOpenHistoryChat: onOpen, agentsSection: createElement('span', null, 'Worker section') }))));
+    await show(); await choose('Scheduled');
+    expect(rows()).toContain('Pinned'); expect(rows()).not.toContain('Idle'); expect(rows()).not.toContain('Running');
+    expect(container.textContent).toContain('Owned scheduled run');
+    expect(container.querySelector<HTMLElement>('[data-sidebar-workers]')?.style.display).toBe('none');
+    expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
+    expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('scheduled');
+    await act(async () => root.unmount()); root = createRoot(container); await show();
+    expect(rows()).toContain('Pinned'); expect(rows()).not.toContain('Idle');
+    await choose('Chronological'); expect(rows()).toContain('Idle');
   });
   it('centers the hit area, moves keyboard focus in the menu and returns it on Escape', async () => {
     window.localStorage.setItem(CHAT_GROUP_BY_KEY, 'flat');

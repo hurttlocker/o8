@@ -120,7 +120,7 @@ export function ChatGroupPicker({
             letterSpacing: 0,
           }}
         >
-          {(['flat', 'chronological', 'working'] as const).map((value) => (
+          {(['flat', 'chronological', 'working', 'scheduled'] as const).map((value) => (
             <ChatGroupPickerItem key={value} label={CHAT_VIEW_LABELS[value]} selected={mode === value} onClick={() => choose(value)} />
           ))}
           <div role="separator" style={{ height: 1, marginTop: 4, marginBottom: 4, background: 'var(--t-divider)' }} />

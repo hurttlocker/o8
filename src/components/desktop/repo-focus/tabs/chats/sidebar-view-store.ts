@@ -3,6 +3,7 @@
 import { useEffect, useId, useSyncExternalStore } from 'react';
 import { CHAT_GROUP_BY_KEY, isChatGroupMode, type ChatGroupMode } from './sidebar-view';
 
+const RETURN_VIEW_KEY = 'o8:chat-return-view';
 const VIEW_EVENT = 'o8:chat-view-changed';
 const listeners = new Set<() => void>();
 const attentionSources = new Map<string, number>();
@@ -17,9 +18,18 @@ function getView(): ChatGroupMode {
   return transientView ?? 'chronological';
 }
 export function setSidebarView(mode: ChatGroupMode) {
+  const previous = getView();
   transientView = mode;
-  try { localStorage.setItem(CHAT_GROUP_BY_KEY, mode); } catch { /* Keep navigation usable. */ }
+  try {
+    if (mode !== 'flat') localStorage.setItem(RETURN_VIEW_KEY, mode);
+    else if (previous !== 'flat') localStorage.setItem(RETURN_VIEW_KEY, previous);
+    localStorage.setItem(CHAT_GROUP_BY_KEY, mode);
+  } catch { /* Keep navigation usable. */ }
   window.dispatchEvent(new Event(VIEW_EVENT));
+}
+export function getSidebarReturnView(): ChatGroupMode {
+  try { const value = localStorage.getItem(RETURN_VIEW_KEY); if (isChatGroupMode(value) && value !== 'flat') return value; } catch { /* Storage unavailable. */ }
+  return 'chronological';
 }
 export function useSidebarView() {
   return useSyncExternalStore(subscribeView, getView, () => 'chronological' as ChatGroupMode);

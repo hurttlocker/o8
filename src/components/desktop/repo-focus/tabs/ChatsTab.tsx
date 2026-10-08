@@ -20,6 +20,7 @@ import {
   historyRepoContext,
   historySection,
   isAutomationSession,
+  isOwnedAutomationSession,
   packetSortTime,
   packetStateTone,
   packetTimestamp,
@@ -29,6 +30,7 @@ import {
 } from './chats/helpers';
 import {
   ArchivedLaneCompactRow,
+  CompactSessionRow,
   HistoryChatRow,
   MergedPacketRow,
 } from './chats/HistoryRows';
@@ -40,7 +42,6 @@ import {
   deriveHistoryDateGroups,
   deriveHistoryRepoGroups,
   derivePrioritySplit,
-  deriveShowRepoSuffix,
   deriveSweptThreads,
   isCompletionUnread,
   repoSuffix,
@@ -396,6 +397,8 @@ export function ChatsTab({
     void readStateVersion;
     return (
     sweptThreads.chats.filter((item) => {
+      if (compact && chatGroupBy === 'scheduled') return ideWorkspaceSessions.some((session) =>
+        isOwnedAutomationSession(session) && sessionIdentity(session).includes(item.tabId));
       if (!compact || chatGroupBy !== 'working') return true;
       const selected = activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`;
       const related = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])];
@@ -443,7 +446,7 @@ export function ChatsTab({
       remainder: split.remainder.filter((entry) => !staysInWorkingView(entry)).map((entry) => entry.item),
     };
   }, [historyAttentionPackets, historyCap, readStateVersion, sortedChatItems]);
-  usePublishSidebarAttention(flatPrioritySplit.needsAttention, compact);
+  usePublishSidebarAttention([...historyAttentionPackets.values()].filter((packet) => packet && attentionRank(packetAttention(packet)) > 0).length, compact);
   const flatRemainderItems = [...flatPrioritySplit.remainder].sort((a, b) => Number(b.pinned) - Number(a.pinned)).slice(
     0,
     compact && !showAllChats ? Math.max(0, 12 - flatPrioritySplit.priority.length) : Number.POSITIVE_INFINITY,
@@ -452,7 +455,6 @@ export function ChatsTab({
   const hiddenChatCount = Math.max(0, cappedChatCount - (
     chatGroupBy === 'flat' || chatGroupBy === 'working' ? shownActivityCount : flatHistoryItems.length
   ));
-  const showRepoSuffix = deriveShowRepoSuffix([...visibleHistory, ...visibleArchivedHistory]);
 
   const flatArchivedLanes = useMemo(
     () => deriveArchivedLanes(archivedLanes, targetRepos.map((repo) => repo.localPath)),
@@ -493,7 +495,7 @@ export function ChatsTab({
     return groups.filter((group) => group.items.length > 0);
   }, [allowedSections, remainingHistorySlots, sectionLabel, visibleChatHistory, visibleOrchestratorHistory]);
   const showMergedPackets = groupMode === 'sections' && !compact && visibleMergedPackets.length > 0;
-  const showArchivedHistory = combinedArchivedHistory.length > 0 || flatArchivedLanes.length > 0;
+  const showArchivedHistory = chatGroupBy !== 'scheduled' && (combinedArchivedHistory.length > 0 || flatArchivedLanes.length > 0);
   const hasContent = displayedSessions.length > 0 || (
     groupMode === 'flat'
       ? flatHistoryItems.length > 0
@@ -534,13 +536,12 @@ export function ChatsTab({
     // Never leave the Agents section stuck dimmed if this tab unmounts mid-hover.
     clearThreadHoverTimers();
     broadcastThreadLink(null);
-  }, [broadcastThreadLink, clearThreadHoverTimers]);
+    setThreadHover(null);
+  }, [broadcastThreadLink, chatGroupBy, clearThreadHoverTimers]);
 
   const renderHistoryRow = (item: ChatHistoryItem, archived = false) => {
     const owned = archived ? [] : ownedPacketsByThread.get(item.tabId) ?? [];
     const packet = historyAttentionPackets.get(item.tabId);
-    const contextRepo = targetRepos.find((repo) => repo.localPath === item.repoPath);
-    const branch = item.repoBranch ?? packet?.branchTarget ?? null;
     return (
       <HistoryChatRow
         key={item.tabId}
@@ -549,15 +550,12 @@ export function ChatsTab({
         disabled={!onOpenHistoryChat}
         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
         tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(packet)}
-        repoLabel={compact && !showRepoSuffix && contextRepo ? null : repoSuffix(item)}
-        branchLabel={!showRepoSuffix && (!compact || branch !== contextRepo?.defaultBranch) ? branch : null}
+        repoLabel={compact && chatGroupBy === 'repo' ? null : repoSuffix(item)}
         ownedCount={owned.length}
         roomy={compact && chatGroupBy === 'flat'}
         preview={compact && chatGroupBy === 'flat' ? item.preview : undefined}
-        scheduled={ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId) && isAutomationSession(session))}
-        onHoverChange={owned.length > 0
-          ? (rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)
-          : undefined}
+        scheduled={ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId) && isOwnedAutomationSession(session))}
+        onHoverChange={(rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)}
         onOpen={() => openHistoryItem(item)}
         onOpenMenu={(event) => setHistoryActionMenu({ item, archived, x: event.clientX, y: event.clientY })}
       />
@@ -604,6 +602,9 @@ export function ChatsTab({
                 onCreateOrchestratorForRepo={onCreateOrchestratorForRepo} renderHistoryRow={renderHistoryRow}
                 hiddenChatCount={hiddenChatCount} showMore={() => setShowAllChats(true)}
               />
+              {chatGroupBy === 'scheduled' ? visibleSessions.filter(isOwnedAutomationSession).map((session) => (
+                <CompactSessionRow key={session.sessionKey} session={session} onSelectSession={onSelectSession} />
+              )) : null}
             </>
           ) : (
             <>
@@ -651,7 +652,9 @@ export function ChatsTab({
         </div>
       )) : null}
 
-      {typeof agentsSection === 'function' ? agentsSection(compact && chatGroupBy === 'working') : agentsSection}
+      <div data-sidebar-workers style={{ display: chatGroupBy === 'scheduled' ? 'none' : undefined }}>
+        {typeof agentsSection === 'function' ? agentsSection(compact && chatGroupBy === 'working') : agentsSection}
+      </div>
 
       {showArchivedHistory ? (
         <div>
@@ -716,6 +719,9 @@ export function ChatsTab({
         <OrchestratorHoverCard
           title={threadHover.item.title}
           repoLabel={repoSuffix(threadHover.item)}
+          branchLabel={threadHover.item.repoBranch}
+          workspacePath={threadHover.item.repoPath}
+          updatedAt={threadHover.item.modifiedAt}
           backendLabel={threadHover.item.backend
             ? orchestratorBackendDisplayLabel({ backend: threadHover.item.backend, agent: threadHover.item.agent })
             : null}

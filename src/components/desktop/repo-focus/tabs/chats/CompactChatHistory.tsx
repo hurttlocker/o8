@@ -31,7 +31,7 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   hiddenChatCount, showMore }: Props) {
   const normal = chatGroupBy === 'chronological';
   const source = normal ? flatHistoryItems : remainder;
-  const heading = (chatGroupBy === 'flat' || chatGroupBy === 'working') && priority.length > 0 ? 'Priority' : source.some((item) => item.pinned) ? 'Pinned' : 'Recents';
+  const heading = chatGroupBy === 'scheduled' ? 'Scheduled' : (chatGroupBy === 'flat' || chatGroupBy === 'working') && priority.length > 0 ? 'Priority' : source.some((item) => item.pinned) ? 'Pinned' : 'Recents';
   const pinned = source.filter((item) => item.pinned);
   const conversations = source.filter((item) => !item.pinned);
   return (
@@ -46,6 +46,8 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
           {conversations.length > 0 && heading !== 'Recents' ? <RepoGroupLabel label={chatGroupBy === 'working' ? 'Working' : 'Recents'} noIcon /> : null}
           {conversations.map(renderHistoryRow)}
         </>
+      ) : chatGroupBy === 'scheduled' ? (
+        flatHistoryItems.map(renderHistoryRow)
       ) : chatGroupBy === 'chronological' ? (
         <>
           {flatHistoryItems.filter((item) => item.pinned).map(renderHistoryRow)}

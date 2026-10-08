@@ -81,7 +81,10 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
 function rowDotState(row: ExtraAgentRow): AgentDotState {
   const lane = row.laneStatus;
   if (row.outcome === 'merged') return 'merged';
-  if (row.outcome === 'no_changes' || row.outcome === 'discarded' || row.outcome === 'pr_opened' || row.outcome === 'asked') return 'idle';
+  if (row.outcome === 'no_changes') return 'merged';
+  if (row.outcome === 'discarded') return 'idle';
+  if (row.outcome === 'pr_opened' || row.outcome === 'asked') return 'review';
+  if (lane === 'awaiting_input' || lane === 'awaiting_human' || lane === 'awaiting_orchestrator') return 'review';
   // 'merged'/'released' are real lane terminal states (the DB carries them) —
   // they were missing here, so a merged packet's row kept the reviewing dot
   // (operator report 2026-07-15).
@@ -105,15 +108,15 @@ function rowStatusLabel(row: ExtraAgentRow): string {
   if (row.outcome === 'no_changes') return 'Finished — no changes';
   if (row.outcome === 'discarded') return 'discarded';
   if (row.outcome === 'pr_opened') return 'PR open';
-  if (row.outcome === 'asked') return 'asked';
+  if (row.outcome === 'asked') return 'Waiting for your reply';
   if (row.rejected) return 'declined';
   if (lane === 'reviewing') return row.lastEventLabel === 'pr_created' ? 'PR open' : 'review ready';
-  if (lane === 'awaiting_input') return 'needs input';
+  if (lane === 'awaiting_input') return 'Waiting for your reply';
   if (lane === 'awaiting_human') return 'needs you';
   if (lane === 'awaiting_orchestrator') return 'escalated';
   if (lane === 'failed' || lane === 'recovering') return 'failed';
   if (lane === 'archived') return 'archived';
-  if (lane === 'completed') return 'finished';
+  if (lane === 'completed') return 'Finished';
   if (lane === 'merged' || lane === 'released') return 'merged';
   if (lane === 'launching' || lane === 'running' || lane === 'merging') return 'running';
   if (lane === 'paused' || lane === 'idle') return 'idle';
@@ -175,6 +178,7 @@ export function ExtraAgentRowView({
 }) {
   const dotState = rowDotState(row);
   const dotLabel = rowStatusLabel(row);
+  const preview = row.outcomeNote || (row.outcome || row.laneStatus === 'completed' || row.laneStatus === 'awaiting_input' ? dotLabel : null);
   const canFocus = Boolean((row.packetId || row.sessionKey || row.laneId) && (onFocusRow || onSelectSession));
   const canRetry = Boolean(row.packetId && onRetryPacket && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
   const canInteract = canFocus || canRetry;
@@ -223,13 +227,13 @@ export function ExtraAgentRowView({
         onOpenMenu?.(event, row);
       }}
       aria-current={active ? 'true' : undefined}
-      title={row.statusEvidence?.summary ?? (canFocus ? `Focus ${row.name}` : row.name)}
+      title={[row.name, dotLabel, row.repoPath, row.statusEvidence?.summary].filter(Boolean).join(' · ')}
       style={{
         width: '100%',
         minHeight: roomy ? 52 : 31,
         paddingTop: roomy ? 10 : 5,
         paddingBottom: roomy ? 10 : 5,
-        paddingLeft: 37,
+        paddingLeft: 12,
         paddingRight: 12,
         borderWidth: 0,
         // EXPERIMENT (Q 2026-07-14): no active-row pill — the ShinyText title
@@ -237,14 +241,11 @@ export function ExtraAgentRowView({
         // HISTORY_ROW_TONES.active in chats/constants.ts — revert both together.
         background: 'transparent',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: 9,
         textAlign: 'left',
         cursor: canInteract ? 'pointer' : 'default',
         fontFamily: FONT,
-        // Anchor for the left-gutter status dot below — same treatment as
-        // HistoryRow/CompactSessionRow (Q ruling 2026-07-12: status icons
-        // sit LEFT of every sidebar row, like Claude's panel).
         position: 'relative',
         isolation: 'isolate',
       }}
@@ -256,6 +257,8 @@ export function ExtraAgentRowView({
         setHovered(false);
         onCloseHoverCard?.();
       }}
+      onFocus={(event) => onOpenHoverCard?.(row, event.currentTarget.getBoundingClientRect())}
+      onBlur={() => onCloseHoverCard?.()}
     >
       {(active || hovered || washStyle) ? (
         <span
@@ -275,14 +278,6 @@ export function ExtraAgentRowView({
           }}
         />
       ) : null}
-      {/* Status dot in the absolute left gutter — matches HistoryRows so the
-          whole sidebar reads one vocabulary: state left, metadata right. */}
-      <span
-        aria-hidden
-        style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', display: 'inline-flex', alignItems: 'center' }}
-      >
-        <AgentStatusDot state={dotState} label={dotLabel} />
-      </span>
       <span
         style={{
           flex: 1,
@@ -299,71 +294,23 @@ export function ExtraAgentRowView({
           transition: 'color 140ms ease',
           lineHeight: 1.25,
           overflow: 'hidden',
-          textOverflow: 'ellipsis',
+          textOverflow: 'clip',
           whiteSpace: 'nowrap',
           position: 'relative',
         }}
       >
-        {row.name}
-        {row.subtitle ? (
-          <span
-            style={{
-              marginLeft: 6,
-              fontSize: 9.5,
-              color: active ? 'inherit' : 'var(--t-text-muted)',
-              fontWeight: 260,
-              letterSpacing: '-0.4px',
-            }}
-          >
-            {row.subtitle}
-          </span>
-        ) : null}
-        {repoLabel ? (
-          <span
-            style={{
-              marginLeft: 6,
-              fontSize: 9.5,
-              color: 'var(--t-text-faint)',
-              fontWeight: 260,
-              letterSpacing: '-0.4px',
-            }}
-          >
-            {repoLabel}
-          </span>
-        ) : null}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, height: 17, minWidth: 0 }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>{row.name}</span>
+          {repoLabel && dotState !== 'running' ? (
+            <span style={{ minWidth: 0, flexShrink: 1, overflow: 'hidden', whiteSpace: 'nowrap',
+              fontSize: 11.5, color: 'var(--t-text-faint)', fontWeight: 260 }}>{repoLabel}</span>
+          ) : null}
+        </span>
+        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          overflow: 'hidden', whiteSpace: 'normal', marginTop: roomy ? 6 : 4, fontSize: 11.5,
+          lineHeight: 1.45, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
       </span>
       <OriginChip origin={row.origin} />
-      {row.outcome || row.laneStatus === 'completed' ? (
-        <span
-          style={{
-            flexShrink: 1,
-            minWidth: 0,
-            maxWidth: 120,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            color: row.outcome === 'merged'
-              ? 'var(--t-terminal-ansi-bright-green, #16a34a)'
-              : 'var(--t-text-muted)',
-            fontSize: 9.5,
-            fontWeight: 300,
-            letterSpacing: '-0.3px',
-            whiteSpace: 'nowrap',
-            position: 'relative',
-          }}
-        >
-          {row.laneStatus === 'completed' && !row.outcome
-            ? 'Finished'
-            : row.outcome === 'merged'
-            ? 'Merged'
-            : row.outcome === 'no_changes'
-              ? 'Finished — no changes'
-              : row.outcome === 'discarded'
-                ? 'Discarded'
-                : row.outcome === 'pr_opened'
-                  ? 'PR open'
-                  : 'Asked'}
-        </span>
-      ) : null}
       {canRetry ? (
         <span
           title="Retry failed packet"
@@ -411,6 +358,7 @@ export function ExtraAgentRowView({
       {/* Trailing relative age — same meta treatment as the chat history
           rows above (Q ruling 2026-07-12: spawned agents carry the time
           too). Hidden while hovered so it never fights the Retry action. */}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 17, flexShrink: 0, position: 'relative' }}>
       {row.lastActivityAt > 0 && !(canRetry && hovered) ? (
         <span
           style={{
@@ -425,6 +373,8 @@ export function ExtraAgentRowView({
           {formatElapsedAgo(new Date(row.lastActivityAt).toISOString())}
         </span>
       ) : null}
+        <AgentStatusDot state={dotState} label={dotLabel} />
+      </span>
     </button>
   );
 }
@@ -511,10 +461,10 @@ export function ExtraAgentActionMenu({
         }}
       >
         <div style={{ paddingTop: 4, paddingRight: 7, paddingBottom: 7, paddingLeft: 7 }}>
-          <div style={{ fontSize: 11.25, lineHeight: '15px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 11.25, lineHeight: '15px', fontWeight: 500, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>
             {state.row.name}
           </div>
-          <div style={{ marginTop: 1, color: 'var(--t-text-faint)', fontSize: 10, lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ marginTop: 1, color: 'var(--t-text-faint)', fontSize: 10, lineHeight: '13px', overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>
             {state.row.subtitle || state.row.runtime}
           </div>
         </div>

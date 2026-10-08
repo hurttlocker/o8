@@ -118,6 +118,11 @@ export function isAutomationSession(session: IdeWorkspaceSession): boolean {
     || session.squadId === 'automation';
 }
 
+/** Only runs managed here belong in the scheduled chat view. */
+export function isOwnedAutomationSession(session: IdeWorkspaceSession): boolean {
+  return isAutomationSession(session) && session.runtimeSurface?.ownership === 'owned';
+}
+
 export function historyRepoContext(item: ChatHistoryItem): SavedChatRepoContext | null {
   if (!item.repoName && !item.repoPath && !item.repoBranch && !item.remoteUrl) return null;
   return {

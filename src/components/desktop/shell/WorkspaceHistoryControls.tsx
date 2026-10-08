@@ -31,7 +31,7 @@ export function WorkspaceHistoryControls({ tabs, activeTabId, workspaceId }: {
   const openIds = new Set(tabs.map((tab) => tab.id));
   return <>{([-1, 1] as const).map((direction) => {
     const target = adjacentVisit(history, direction, openIds);
-    return <HeaderIconPill key={direction} label={direction === -1 ? 'Back' : 'Forward'} disabled={target === null} yNudge={1.3}
+    return <HeaderIconPill key={direction} label={direction === -1 ? 'Back' : 'Forward'} disabled={target === null} yNudge={0}
       onClick={() => {
         if (target === null) return;
         setState((current) => ({ ...current, history: { ...current.history, index: target } }));

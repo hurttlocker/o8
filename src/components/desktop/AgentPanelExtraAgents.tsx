@@ -711,7 +711,7 @@ function AgentPanelExtraAgentsBase({
           link={linkedPacketIds
             ? (row.packetId && linkedPacketIds.has(row.packetId) ? 'linked' : 'dimmed')
             : null}
-          repoLabel={showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
+          repoLabel={priorityView || showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
           active={Boolean(activeSessionKey && row.sessionKey === activeSessionKey)}
           busy={busy}
           onSelectSession={onSelectSession}
