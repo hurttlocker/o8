@@ -3,6 +3,9 @@
  */
 
 export function formatModelLabel(model: string): string {
+  // The built-in agent's receipt ids, matched whole.
+  if (model === 'o8-free') return 'o8';
+  if (model === 'pi') return 'Pi';
   return model
     // Vendor-prefixed model ids from runtime and config surfaces
     .replace('openai-codex/gpt-6.1-sol', 'Codex GPT-6.1 Sol')

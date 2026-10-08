@@ -90,7 +90,7 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' },
       NOTICE,
       { type: 'text', text: 'Hel' },
       { type: 'text', text: 'lo' },
@@ -117,7 +117,7 @@ describe('o8 backend event mapping', () => {
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
-    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' });
+    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' });
     expect(events[1]).toEqual(NOTICE);
     expect(events[2]).toEqual({ type: 'text', text: 'partial' });
     expect(events[3]).toEqual({ type: 'error', error: 'model exploded' });
@@ -133,7 +133,7 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', signal: controller.signal });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-operator', effort: 'low' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' },
       NOTICE,
       { type: 'done', sessionId: expect.any(String), cost: 0 },
     ]);
@@ -202,11 +202,25 @@ describe('o8 backend runs the built-in Pi agent', () => {
 
     await backend.sendTurn('/repo', 'list the repos', onEvent, options);
 
-    expect(piSendTurn).toHaveBeenCalledWith('/repo', 'list the repos', onEvent, options);
+    expect(piSendTurn).toHaveBeenCalledWith('/repo', 'list the repos', expect.any(Function), options);
     expect(mockFetch).not.toHaveBeenCalled();
     expect(backend.id).toBe('o8');
     expect(backend.peekSession('/repo', undefined, 'thoughts-1')).toEqual({ sessionName: 'pi-session', status: 'busy' });
     expect(backend.ensureSession('/repo', undefined, 'thoughts-1')).toEqual({ sessionName: 'pi-session', status: 'ready' });
+  });
+
+  it('puts the o8 model the turn was sent with on Pi\'s receipt, so the thread and its receipt agree', async () => {
+    piSendTurn.mockImplementation(async (_repoPath, _message, onEvent) => {
+      onEvent({ type: 'turn_receipt', leadModel: 'pi', effort: 'low' });
+      onEvent({ type: 'text', text: 'ok' });
+    });
+    const backend = createO8Backend({ pi: fakePi, blocker: () => null });
+    for (const [model, leadModel] of [['o8-next', 'o8-next'], [undefined, 'o8-free']] as const) {
+      const { events, onEvent } = collect();
+      await backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', thinkingEffort: 'low', model });
+      expect(events).toEqual([{ type: 'turn_receipt', leadModel, effort: 'low' }, { type: 'text', text: 'ok' }]);
+    }
+    piSendTurn.mockReset();
   });
 
   it('names the reason Pi cannot start on Windows', () => {

@@ -12,6 +12,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -39,6 +40,13 @@ const { sendOrchestratorBackendTurn } = await import('@/lib/lane/orchestrator-se
 const { O8_MANAGED_PI_MODEL } = await import('@/lib/pi/sdk/live-contract');
 const { COMPOSER_MODEL_GROUPS } = await import('@/components/desktop/thoughts/ModelThinkingChip');
 const { buildOrchestratorSendPayload } = await import('@/components/desktop/thoughts/use-orchestrator-stream/send-payload');
+const { appendMobileOrchestratorUserMessage, upsertMobileOrchestratorAssistantMessage } = await import('@/lib/mobile/orchestrator-thread-history');
+const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+const { resolveTurnReceiptMode } = await import('@/lib/lane/orchestrator-send-entry');
+const { withOrchestratorTurnReceiptContext } = await import('@/lib/orchestrator/turn-receipt-context');
+const { createLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { resolveReviewChatOrigin } = await import('@/lib/orchestrator/review-continuation-origin');
+const { runReviewChatContinuation } = await import('@/lib/ws-server/review-chat-continuation');
 const { prepareOrchestratorTurn } = await import('@/components/desktop/thoughts/use-orchestrator-stream/turn-option-resolution');
 type OrchestratorEvent = import('@/lib/lane/orchestrator-stream-events').OrchestratorEvent;
 
@@ -87,6 +95,7 @@ beforeAll(async () => {
   const { panelGateMiddleware } = await import('@/middleware');
   const routes: Record<string, Record<string, (request: NextRequest) => Promise<Response>>> = {
     '/api/mcp': await import('@/app/api/mcp/route') as never,
+    '/api/orchestrator/create-mission': await import('@/app/api/orchestrator/create-mission/route') as never,
     '/api/panel/repos': await import('@/app/api/panel/repos/route') as never,
     '/api/panel/approvals': await import('@/app/api/panel/approvals/route') as never,
     '/api/v2/proxy/llm': await import('@/app/api/v2/proxy/llm/route') as never,
@@ -128,8 +137,11 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-/** The composer's o8 choice, sent the way the composer and ws-server send it. */
-async function composerO8Turn(repo: string, text: string, threadId: string) {
+/**
+ * The composer's o8 choice, sent the way the composer and ws-server send it. With a turn id the
+ * turn also carries its receipt context and is persisted to the thread the way ws-server persists it.
+ */
+async function composerO8Turn(repo: string, text: string, threadId: string, turnId?: string) {
   const option = COMPOSER_MODEL_GROUPS.flatMap(group => group.options).find(entry => entry.label === 'o8');
   if (!option || option.backend === 'auto') throw new Error('The composer offers no o8 choice');
   const turn = prepareOrchestratorTurn(text, { backend: option.backend, model: option.model, thinkingEffort: 'low' });
@@ -142,10 +154,18 @@ async function composerO8Turn(repo: string, text: string, threadId: string) {
   if (!isOrchestratorBackendId(wire.backend)) throw new Error('The o8 choice sent no backend');
   const backend = getOrchestratorBackend(wire.backend);
   const events: OrchestratorEvent[] = [];
-  await sendOrchestratorBackendTurn(backend, String(wire.repoPath), String(wire.message), event => events.push(event), {
+  const message = turnId ? withOrchestratorTurnReceiptContext({ message: String(wire.message), threadId, turnId }) : String(wire.message);
+  if (turnId) appendMobileOrchestratorUserMessage({ tabId: threadId, repoPath: repo, message: text, backend: backend.id });
+  await sendOrchestratorBackendTurn(backend, String(wire.repoPath), message, event => events.push(event), {
     permissionMode: wire.permissionMode as 'full', thinkingEffort: wire.thinkingEffort as 'low',
     model: String(wire.model), threadId,
   }, wire.orchestrationMode);
+  const receipt = events.find((event): event is Extract<OrchestratorEvent, { type: 'turn_receipt' }> => event.type === 'turn_receipt');
+  if (turnId && receipt) {
+    upsertMobileOrchestratorAssistantMessage({ tabId: threadId, repoPath: repo, messageId: turnId, backend: backend.id,
+      model: String(wire.model), content: events.filter(event => event.type === 'text').map(event => (event as { text: string }).text).join(''),
+      receipt: { leadModel: receipt.leadModel, effort: receipt.effort, mode: resolveTurnReceiptMode(backend.id, wire.orchestrationMode) } });
+  }
   return { backend, events };
 }
 
@@ -196,7 +216,7 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     expect(backend.id).toBe('o8');
     expect(events.filter(event => event.type === 'error')).toEqual([]);
     // The turn reached Pi: its receipt, its o8 command catalogue, and the managed model on the paid token.
-    expect(events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'pi' });
+    expect(events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'o8-free' });
     expect(relay.requests).toHaveLength(4);
     for (const request of relay.requests) {
       expect(request.auth).toBe(`Bearer ${paidToken}`);
@@ -241,7 +261,7 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     relay.answers.push(say('It is BLUE-HERON.'));
     const first = await composerO8Turn(repo, 'What is the release codename?', threadId);
     expect(first.events.filter(event => event.type === 'error')).toEqual([]);
-    expect(first.events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'pi' });
+    expect(first.events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'o8-free' });
     const prompt = (request: { body: Record<string, unknown> }) => JSON.stringify(
       (request.body.messages as Array<{ role: string; content: unknown }>).filter(entry => entry.role === 'user').at(-1)?.content);
     const carried = prompt(relay.requests[0]);
@@ -263,6 +283,58 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     expect(JSON.stringify(relay.requests[1].body.messages).split('<o8_handoff_packet>')).toHaveLength(2);
   }, 180_000);
 
+  it('continues a mission dispatched from an o8 thread in that thread when it reaches review (#3410)', async () => {
+    const repo = join(root, 'repo-review');
+    await mkdir(repo);
+    for (const args of [['init', '-q', '-b', 'main'], ['commit', '-q', '--allow-empty', '-m', 'fixture']]) {
+      execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=test@o8.test', ...args], { cwd: repo });
+    }
+    const threadId = 'thoughts-o8-model-review';
+    const turnId = 'assistant-o8-dispatch';
+    // The o8 turn prepares a mission from this thread through the o8 command set, carrying its turn ids.
+    relay.requests.length = 0;
+    relay.answers.push(
+      callTool('d1', 'o8_run', { name: 'create_mission', arguments: JSON.stringify({ repoPath: repo, runtime: 'codex', dispatch: false,
+        issues_inline: [{ title: 'Review fixture', body: 'Prepared only.' }], orchestratorThreadId: threadId, orchestratorTurnId: turnId }) }),
+      say('Prepared the mission.'),
+    );
+    const dispatcher = inbox(() => 'approve');
+    const dispatched = await composerO8Turn(repo, 'Prepare a mission for the review fixture', threadId, turnId);
+    await dispatcher.stop();
+    expect(dispatched.events.filter(event => event.type === 'error')).toEqual([]);
+    expect(JSON.stringify(relay.requests[0].body.messages)).toContain(`orchestratorTurnId: \\"${turnId}\\"`);
+    const created = dispatched.events.find((event): event is Extract<OrchestratorEvent, { type: 'tool_result' }> =>
+      event.type === 'tool_result' && event.name === 'o8_run');
+    expect(created?.isError).not.toBe(true);
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const packetId = readMissionRegistryEntry(JSON.parse(created!.output).missionId)!.mission.packets[0].id;
+
+    // No worker runs here, so the packet's lane reaches review through the lane store.
+    const row = createLane({ repoPath: repo, branch: 'o8/review-fixture', runtime: 'codex', packetId, label: 'Review fixture' });
+    setLaneStatus(row.id, 'reviewing');
+    const lane = { id: row.id, label: row.label, repoPath: repo, packetId };
+    const resolution = resolveReviewChatOrigin(lane);
+    expect(resolution).toEqual({ kind: 'bound', origin: { threadId, turnId, backend: 'o8', model: 'o8-free', effort: 'low', mode: 'fleet' } });
+    if (resolution.kind !== 'bound') return;
+
+    relay.answers.push(callTool('r1', 'write_file', { path: 'review.md', content: 'reviewed' }), say('Reviewed the packet.'));
+    const reviewer = inbox(() => 'approve');
+    await runReviewChatContinuation(lane, resolution.origin, '[FLEET] Lane reached review-ready', {
+      registerAbort: () => () => {}, publish: () => {},
+    });
+    await reviewer.stop();
+    // The review turn ran on Pi with its usual approval: the write waited for the inbox.
+    expect(reviewer.seen).toEqual([{ toolName: 'write_file', command: undefined, runtime: 'pi', action: 'approve' }]);
+    expect(await readFile(join(repo, 'review.md'), 'utf8')).toBe('reviewed');
+    const messages = readPersistedLlmChat(threadId)!.history.messages;
+    expect(messages.at(-2)).toMatchObject({ role: 'user', content: '[FLEET] Lane reached review-ready' });
+    expect(messages.at(-1)).toMatchObject({ role: 'assistant', backend: 'o8', model: 'o8-free', content: 'Reviewed the packet.',
+      receipt: { leadModel: 'o8-free', effort: 'low', mode: 'multitask' } });
+    expect(getLaneEvents(lane.id).filter(event => event.payload.event === 'chat_review_continuation_claimed')).toHaveLength(1);
+    // The thread stays bound for the packet's next review transition.
+    expect(resolveReviewChatOrigin(lane)).toEqual(resolution);
+  }, 300_000);
+
   it('falls back to an honest text-only reply where Pi cannot start', async () => {
     const repo = join(root, 'repo-windows');
     await mkdir(repo);
@@ -273,7 +345,7 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
       const { backend, events } = await composerO8Turn(repo, 'Write notes.md', 'thoughts-o8-model-windows');
       expect(backend.id).toBe('o8');
       expect(events.filter(event => event.type === 'error')).toEqual([]);
-      expect(events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'o8-operator' });
+      expect(events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'o8-free' });
       const text = events.filter(event => event.type === 'text').map(event => (event as { text: string }).text).join('');
       expect(text).toBe('o8\'s built-in agent runs on macOS and Linux, and Windows support is not available yet, so this reply '
         + 'is text only, without o8 commands, file edits or tools.\n\nHere is a plan in text.');

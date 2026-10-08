@@ -170,6 +170,11 @@ export function o8BuiltInAgentBlocker(): string | null {
   return null;
 }
 
+/** The receipt names the o8 model the turn was sent with, the same id ws-server persists for the turn. */
+function o8ReceiptModel(options: OrchestratorTurnOptions): string {
+  return options.model ?? 'o8-free';
+}
+
 async function sendTextOnlyTurn(
   sessionName: string,
   blocker: string,
@@ -189,7 +194,7 @@ async function sendTextOnlyTurn(
       ? prior
       : [...prior, { role: 'user', content: message }];
   const tier = o8FallbackTier(getEntitlementSync().plan !== 'free', options.thinkingEffort);
-  onEvent({ type: 'turn_receipt', leadModel: 'o8-operator', effort: tier });
+  onEvent({ type: 'turn_receipt', leadModel: o8ReceiptModel(options), effort: tier });
   // Say why before anything streams, so a text-only answer is never mistaken for the agent.
   onEvent({ type: 'text', text: `${blocker}, so this reply is text only, without o8 commands, file edits or tools.\n\n` });
   const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier) }, ...history];
@@ -427,7 +432,8 @@ export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
           if (carry && 'lost' in carry) {
             onEvent({ type: 'text', text: 'Earlier turns in this thread could not be carried into o8\'s built-in agent, so it starts without them.\n\n' });
           }
-          return pi.sendTurn(repoPath, carry && 'prelude' in carry ? `${carry.prelude}\n\n${message}` : message, onEvent, options);
+          return pi.sendTurn(repoPath, carry && 'prelude' in carry ? `${carry.prelude}\n\n${message}` : message,
+            event => onEvent(event.type === 'turn_receipt' ? { ...event, leadModel: o8ReceiptModel(options ?? {}) } : event), options);
         });
       }
       const sessionName = o8SessionName(repoPath, options?.threadId);

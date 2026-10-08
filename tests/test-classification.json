@@ -2859,6 +2859,8 @@
     {
       "path": "tests/o8-model-pi-real-path.test.ts",
       "reasons": [
+        "child-process",
+        "git-cli",
         "network-listener",
         "real-path"
       ]
