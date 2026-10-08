@@ -12,6 +12,7 @@ import { O8HeaderTabs } from '../o8-panel/O8HeaderTabs';
 import type { O8Tab } from '../o8-panel/types';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
+import { HeaderIconPill } from './HeaderIconPill';
 
 interface PanelHeaderStripProps {
   o8PanelVisible?: boolean;
@@ -63,9 +64,21 @@ export function PanelHeaderStrip({
           {onOpenInbox ? (
             <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
           ) : null}
-          {onToggleSplit ? <button type="button" onClick={onToggleSplit} aria-label={splitEnabled ? 'Close right panel split' : 'Split right panel'} aria-pressed={splitEnabled} title={splitEnabled ? 'Show one panel view' : 'Show two panel views'} data-no-drag style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: splitEnabled ? '1px solid var(--t-divider)' : '1px solid transparent', borderRadius: 7, background: splitEnabled ? 'var(--t-panel-hover)' : 'transparent', color: splitEnabled ? 'var(--t-text)' : 'var(--t-text-muted)', cursor: 'pointer', ['WebkitAppRegion' as string]: 'no-drag' }}>
-            <span aria-hidden style={{ display: 'block', position: 'relative', width: 16, height: 16, flexShrink: 0, border: '1.8px solid currentColor', borderRadius: 4 }}><span style={{ position: 'absolute', top: '50%', left: 0, right: 0, borderTop: '1.8px solid currentColor' }} /></span>
-          </button> : null}
+          {onToggleSplit ? (
+            <HeaderIconPill
+              onClick={onToggleSplit}
+              label={splitEnabled ? 'Close right panel split' : 'Split right panel'}
+              pressed={splitEnabled}
+              title={splitEnabled ? 'Show one panel view' : 'Show two panel views'}
+              yNudge={-3}
+              icon={
+                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true" focusable="false" style={{ display: 'block', flexShrink: 0 }}>
+                  <rect x="3" y="3" width="18" height="18" rx="4" />
+                  <path d="M3 12h18" />
+                </svg>
+              }
+            />
+          ) : null}
           <RightPanelMorphButton
             workspacePanelVisible={workspacePanelVisible}
             o8PanelVisible={o8PanelVisible}
