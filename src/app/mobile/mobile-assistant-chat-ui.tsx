@@ -1,7 +1,9 @@
 'use client';
 
 import { ComposerPrimitive, MessagePrimitive, useAuiState, useComposerRuntime, type MessageState } from '@assistant-ui/react';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import type { RippleChoice, RippleChoiceResolution, RippleDraftScope } from '@/lib/mobile/ripple-contract';
+import { discardRippleDraft, rememberRippleResolution, requestRippleResolution } from '@/lib/mobile/ripple-client';
 import { MobileMarkdown } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
@@ -22,6 +24,7 @@ import {
   type ModelOption,
 } from './mobile-approvals-shared';
 import { renderToolPart } from './mobile-tool-cards';
+import { MobileRippleOverlay } from './mobile-ripple-overlay';
 
 function StreamingDot({ palette }: { palette: MobilePalette }) {
   const [expanded, setExpanded] = useState(false);
@@ -306,9 +309,13 @@ export function EmptyState({
 export function ComposerBar({
   palette,
   selectedModel,
+  repoPath,
+  threadId,
 }: {
   palette: MobilePalette;
   selectedModel: ModelOption;
+  repoPath: string | null;
+  threadId: string;
 }) {
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const isLoading = useAuiState((state) => state.thread.isLoading);
@@ -318,6 +325,29 @@ export function ComposerBar({
 
   const voice = usePressToDictate();
   const baseTextAtRecordingStartRef = useRef('');
+  const rippleRequestIdRef = useRef(0);
+  const draftRef = useRef<(RippleDraftScope & { utterance: string; confirmed: boolean }) | null>(null);
+  const consumedTranscriptRef = useRef('');
+  const scopeRef = useRef({ threadId, repoPath });
+  scopeRef.current = { threadId, repoPath };
+  const [rippleResolution, setRippleResolution] = useState<RippleChoiceResolution | null>(null);
+  const [rippleUtterance, setRippleUtterance] = useState('');
+  const [rippleStartedAt, setRippleStartedAt] = useState(0);
+  const invalidateDraft = useCallback(() => {
+    if (draftRef.current) discardRippleDraft(draftRef.current.draftId);
+    draftRef.current = null;
+    rippleRequestIdRef.current += 1;
+    setRippleResolution(null);
+    setRippleUtterance('');
+  }, []);
+  useEffect(() => {
+    invalidateDraft();
+    return invalidateDraft;
+  }, [threadId, repoPath, invalidateDraft]);
+  useEffect(() => composerRuntime.subscribe(() => {
+    const text = composerRuntime.getState().text;
+    if (draftRef.current && draftRef.current.utterance !== text) invalidateDraft();
+  }), [composerRuntime, invalidateDraft]);
   // Snapshot composer text on the rising edge of recording so the
   // transcript appends to whatever the user already typed.
   useEffect(() => {
@@ -327,17 +357,78 @@ export function ComposerBar({
   }, [voice.isRecording]);
 
   // Append final transcript into the composer when it lands. Don't
-  // auto-submit (packet acceptance #3 — user must tap to send).
+  // auto-submit (packet acceptance #3 — user must tap to send). Ripple
+  // asynchronously checks only the final voice draft and never blocks send.
   useEffect(() => {
-    if (!voice.transcript) return;
+    if (!voice.transcript) { consumedTranscriptRef.current = ''; return; }
+    if (consumedTranscriptRef.current === voice.transcript) return;
+    consumedTranscriptRef.current = voice.transcript;
+    invalidateDraft();
     const base = baseTextAtRecordingStartRef.current;
     const sep = base && !base.endsWith(' ') ? ' ' : '';
-    composerRuntime.setText(`${base}${sep}${voice.transcript}`);
-  }, [voice.transcript, composerRuntime]);
+    const nextText = `${base}${sep}${voice.transcript}`;
+    composerRuntime.setText(nextText);
+    const scope = { ...scopeRef.current, draftId: crypto.randomUUID() };
+    draftRef.current = { ...scope, utterance: nextText, confirmed: false };
+
+    const requestId = rippleRequestIdRef.current + 1;
+    rippleRequestIdRef.current = requestId;
+    setRippleResolution(null);
+    setRippleUtterance(nextText);
+    const startedAt = Date.now();
+    setRippleStartedAt(startedAt);
+
+    const repoName = repoPath?.split(/[\\/]/).filter(Boolean).at(-1);
+    void requestRippleResolution({ utterance: nextText, repoName }).then((result) => {
+      if (rippleRequestIdRef.current !== requestId) return;
+      if (composerRuntime.getState().text !== nextText) return;
+      if (scopeRef.current.threadId !== scope.threadId || scopeRef.current.repoPath !== scope.repoPath) return;
+      if (result.kind === 'choice') {
+        setRippleResolution(result);
+      }
+    });
+  }, [voice.transcript, composerRuntime, repoPath, invalidateDraft]);
+
+  const resolveRipple = (choice: RippleChoice) => {
+    if (!rippleResolution || !rippleUtterance) return;
+    const draft = draftRef.current;
+    if (!draft || draft.threadId !== threadId || draft.repoPath !== repoPath || composerRuntime.getState().text !== draft.utterance) return;
+    rememberRippleResolution({
+      utterance: rippleUtterance,
+      resolution: rippleResolution,
+      choice,
+      resolutionMs: Math.max(0, Date.now() - rippleStartedAt),
+      scope: { draftId: draft.draftId, threadId, repoPath },
+    });
+    draft.confirmed = true;
+    setRippleResolution(null);
+    setRippleUtterance('');
+  };
 
   return (
-    <ComposerPrimitive.Root
+    <>
+      {rippleResolution ? (
+        <MobileRippleOverlay
+          palette={palette}
+          resolution={rippleResolution}
+          onResolve={resolveRipple}
+          onDismiss={invalidateDraft}
+        />
+      ) : null}
+      <ComposerPrimitive.Root
       onSubmit={() => {
+        const draft = draftRef.current;
+        const state = composerRuntime.getState();
+        const custom = { ...state.runConfig.custom };
+        delete custom.rippleDraftId;
+        const confirmed = draft?.confirmed && draft.threadId === threadId && draft.repoPath === repoPath && draft.utterance === state.text;
+        composerRuntime.setRunConfig({ ...state.runConfig, custom: {
+          ...custom, ...(confirmed ? { rippleDraftId: draft.draftId } : {}),
+        } });
+        // The model consumes the submitted token. Composer clearing must not
+        // discard it while assistant-ui awaits attachments before dispatch.
+        if (confirmed) draftRef.current = null;
+        invalidateDraft();
         if (!isRunning && !isComposerEmpty) {
           playSendClick();
         }
@@ -368,6 +459,7 @@ export function ComposerBar({
         }}
       >
         <ComposerPrimitive.Input
+          onChange={() => invalidateDraft()}
           placeholder={`Message ${selectedModel.label}...`}
           submitMode="enter"
           minRows={1}
@@ -488,7 +580,8 @@ export function ComposerBar({
           ) : null}
         </div>
       )}
-    </ComposerPrimitive.Root>
+      </ComposerPrimitive.Root>
+    </>
   );
 }
 

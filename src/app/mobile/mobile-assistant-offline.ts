@@ -26,9 +26,11 @@ import {
   getPendingQueue,
   removePending,
   PENDING_QUEUE_MAX,
+  isPendingStale,
 } from '@/lib/mobile/pending-queue';
+import { discardRippleDraft, rippleDraftForQueue, restoreQueuedRippleDraft } from '@/lib/mobile/ripple-client';
 
-export function wrapWithOfflineQueue(base: ChatModelAdapter, tabId: string): ChatModelAdapter {
+export function wrapWithOfflineQueue(base: ChatModelAdapter, tabId: string, repoPath: string | null = null): ChatModelAdapter {
   return {
     run: async function* (options) {
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -45,7 +47,16 @@ export function wrapWithOfflineQueue(base: ChatModelAdapter, tabId: string): Cha
           if (lastUserText) break;
         }
         if (lastUserText && tabId) {
-          const stored = enqueuePending('assistant', tabId, lastUserText);
+          const draftId = options.runConfig?.custom?.rippleDraftId;
+          const ripple = rippleDraftForQueue(draftId, tabId, repoPath, lastUserText);
+          if (draftId && !ripple) {
+            yield {
+              content: [{ type: 'text', text: 'This intent confirmation expired. Reconnect and confirm the choice again before sending.' }],
+              status: { type: 'incomplete', reason: 'error' },
+            };
+            return;
+          }
+          const stored = enqueuePending('assistant', tabId, lastUserText, undefined, ripple ?? undefined);
           if (!stored) {
             yield {
               content: [{ type: 'text', text: `Queue full (${PENDING_QUEUE_MAX} pending). Retry once you have signal.` }],
@@ -53,6 +64,7 @@ export function wrapWithOfflineQueue(base: ChatModelAdapter, tabId: string): Cha
             };
             return;
           }
+          if (ripple?.scope) discardRippleDraft(ripple.scope.draftId);
         }
         yield {
           content: [{ type: 'text', text: 'Queued — will retry when you are back online.' }],
@@ -73,7 +85,7 @@ export function wrapWithOfflineQueue(base: ChatModelAdapter, tabId: string): Cha
   };
 }
 
-export function useDrainAssistantQueueOnline(tabId: string | null) {
+export function useDrainAssistantQueueOnline(tabId: string | null, repoPath: string | null = null) {
   const assistantRuntime = useAssistantRuntime();
   useEffect(() => {
     if (typeof window === 'undefined' || !tabId) return;
@@ -82,8 +94,16 @@ export function useDrainAssistantQueueOnline(tabId: string | null) {
       if (pending.length === 0) return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       for (const item of pending) {
+        if ('ripple' in item && isPendingStale(item)) continue;
+        const ripple = 'ripple' in item ? restoreQueuedRippleDraft(item.ripple, tabId, repoPath, item.text) : null;
+        // Keep invalid, stale, or out-of-scope confirmations queued. Never
+        // dispatch their original ambiguous words without the chosen field.
+        if ('ripple' in item && !ripple) continue;
         try {
-          assistantRuntime.thread.append(item.text);
+          assistantRuntime.thread.append(ripple ? {
+            role: 'user', content: [{ type: 'text', text: ripple.utterance }],
+            runConfig: { custom: { rippleDraftId: ripple.draftId } },
+          } : item.text);
         } catch {
           return;
         }
@@ -93,5 +113,5 @@ export function useDrainAssistantQueueOnline(tabId: string | null) {
     window.addEventListener('online', drain);
     drain();
     return () => window.removeEventListener('online', drain);
-  }, [assistantRuntime, tabId]);
+  }, [assistantRuntime, tabId, repoPath]);
 }
