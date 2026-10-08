@@ -33,6 +33,7 @@ import {
   readOpencodeConfig,
 } from './opencode-readiness';
 import { deepSeekHarnessInstallGuidance, resolveDeepSeekHarnessLaunch } from '@/lib/deepseek-harness/runtime-resolution';
+import { hermesReadiness } from './hermes-readiness';
 import { piBuiltinReadiness } from './pi-builtin-readiness';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
@@ -101,7 +102,6 @@ class DispatchPreflightError extends Error {
 }
 
 export { DispatchPreflightError };
-
 let cache: { snapshot: RuntimeAuthSnapshot; cachedAt: number } | null = null;
 let cacheGeneration = 0;
 let snapshotRefresh: { generation: number; promise: Promise<RuntimeAuthSnapshot> } | null = null;
@@ -605,6 +605,7 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt
     case 'grok': return detectGrok();
     case 'pi': return detectPi();
     case 'prime-agent': return detectPrimeAgent();
+    case 'hermes': return hermesReadiness().then(status => nowStatus('hermes', 'hermes', status));
     case 'deepseek-harness': return detectDeepSeekHarness();
     case 'pi-builtin': return piBuiltinReadiness().then(status => nowStatus('pi-builtin', 'pi-builtin', status));
     default: return detectDeclarativeRuntime(runtime);

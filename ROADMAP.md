@@ -81,6 +81,8 @@ Project rules and prior outcomes stay attached to the project, not to one model 
 
 Local worker adapters launch the coding-agent CLIs you already pay for and reuse the authentication those tools already hold. The runtime contract keeps callers independent of any one provider's protocol.
 
+Hermes worker dispatch is implemented through the shared owned ACP path in [#3391](https://github.com/hurttlocker/o8/pull/3391). Entry-point fixtures cover model selection, launch, interrupt, reconnect, and persisted transcripts. Installed provider acceptance remains open in [#3388](https://github.com/hurttlocker/o8/issues/3388).
+
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
 | Carrier coverage and auth probes | A new carrier lands as a registry entry plus a readiness and auth probe, with no fork in the dispatch path. | open | Readiness and auth checks are written per CLI, and the operator cannot see what evidence o8 used to call a runtime connected. The one adapter waiting is blocked on an upstream build for Intel Macs. | [#2200](https://github.com/hurttlocker/o8/issues/2200) |

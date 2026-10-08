@@ -16,6 +16,7 @@ describe('runtimeIdFromSessionKey', () => {
     ['pi-owned:surface-7', 'pi'],
     ['prime-agent-owned:surface-8', 'prime-agent'],
     ['deepseek-harness-owned:surface-9', 'deepseek-harness'],
+    ['hermes-owned:surface-10', 'hermes'],
   ])('resolves %s to %s', (sessionKey, runtimeId) => {
     expect(runtimeIdFromSessionKey(sessionKey)).toBe(runtimeId);
   });

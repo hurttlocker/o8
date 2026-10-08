@@ -64,6 +64,7 @@ describe('worker launch context', () => {
     ['claude-code:surface-3', 'claude-code'],
     ['prime-agent-owned:surface-4', 'prime-agent'],
     ['deepseek-harness-owned:surface-5', 'deepseek-harness'],
+    ['hermes-owned:surface-6', 'hermes'],
     ['unknown:surface-4', 'codex'],
   ] as const)('derives %s as %s for supervisor launches', (sessionKey, runtime) => {
     expect(runtimeFromWorkerSessionKey(sessionKey)).toBe(runtime);

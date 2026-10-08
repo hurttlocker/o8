@@ -2284,6 +2284,13 @@
       ]
     },
     {
+      "path": "tests/hermes-worker-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/huddle-zero-diff-classification.test.ts",
       "reasons": [
         "child-process",

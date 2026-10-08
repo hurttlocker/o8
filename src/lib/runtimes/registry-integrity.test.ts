@@ -11,6 +11,7 @@ import {
   getAllRuntimes,
   getCostParser,
   getRuntime,
+  parseCost,
 } from '@/lib/runtimes';
 
 const REQUIRED_ADAPTER_METHODS = [
@@ -23,6 +24,12 @@ const REQUIRED_ADAPTER_METHODS = [
 ] as const;
 
 describe('dispatchable runtime registry integrity', () => {
+  it('reports unknown Hermes cost evidence through the registered runtime', async () => {
+    expect(getRuntime('hermes')?.capabilities.costTelemetry).toBe(false);
+    expect(await parseCost('hermes', [], { fallbackModel: 'fixture/model' })).toMatchObject({
+      costSource: 'unknown', totalCostUsd: 0, inputTokens: 0, outputTokens: 0, model: 'fixture/model',
+    });
+  });
   it('keeps every advertised runtime fully registered and dispatchable consistently', () => {
     const advertised = listDispatchableRuntimes();
 
