@@ -20,7 +20,7 @@ import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-pl
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import type { DirectiveCitationsPreview } from '@/lib/judgment/directive-citations-format';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
-import { runLaneRebaseLint, type LaneRebaseLintResult } from './rebase-lint';
+import { runLaneRebaseLint, UNCONFINED_LINT_NOTE, type LaneRebaseLintResult } from './rebase-lint';
 import { immutableSnapshotDiffBase, resolveLaneReviewSource } from './review-source';
 
 // ── Public Types ──
@@ -163,10 +163,18 @@ export function buildBlockerList(
 }
 
 
-function lintPreviewCheck(result: LaneRebaseLintResult): MergeCheckResult {
-  if (!result.ok) return { name: 'lint', verdict: 'fail', detail: result.output };
-  if (result.skipped) return { name: 'lint', verdict: 'skipped', detail: result.skipped };
-  return { name: 'lint', verdict: 'pass', detail: result.detail };
+/** Appends a card line to a check's detail. */
+export function withCheckNote(detail: string | undefined, note: string | false | undefined): string | undefined {
+  return [detail, note].filter(Boolean).join('\n') || undefined;
+}
+
+/** The lint row of the merge card; it says plainly when the lane's lint config ran without the sandbox. */
+export function lintPreviewCheck(result: LaneRebaseLintResult): MergeCheckResult {
+  const note = result.unconfined && UNCONFINED_LINT_NOTE;
+  if (!result.ok) return { name: 'lint', verdict: 'fail', detail: withCheckNote(result.output, note) };
+  if (result.skipped) return { name: 'lint', verdict: 'skipped', detail: withCheckNote(result.skipped, note) };
+  const detail = withCheckNote(result.detail, note);
+  return { name: 'lint', verdict: 'pass', ...(detail ? { detail } : {}) };
 }
 
 // ── Preview runner ──

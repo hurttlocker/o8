@@ -83,11 +83,11 @@ vi.mock('@/lib/pi/sdk/session', async (importOriginal) => {
 });
 // Makes command confinement unavailable, as on a kernel without Landlock.
 const confinement = vi.hoisted(() => ({ unavailable: false }));
-vi.mock('@/lib/pi/sdk/confine', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/pi/sdk/confine')>();
-  return { ...actual, piConfinement: async (...args: Parameters<typeof actual.piConfinement>) => {
-    if (confinement.unavailable) throw new actual.PiConfinementUnavailable();
-    return actual.piConfinement(...args);
+vi.mock('@/lib/sandbox/confine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/sandbox/confine')>();
+  return { ...actual, confinementArgs: async (...args: Parameters<typeof actual.confinementArgs>) => {
+    if (confinement.unavailable) throw new actual.ConfinementUnavailable();
+    return actual.confinementArgs(...args);
   } };
 });
 vi.mock('@/lib/push/notify', async (importOriginal) => ({

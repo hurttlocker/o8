@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 /** Confinement could not be applied, so the command did not start. */
-export class PiConfinementUnavailable extends Error {
+export class ConfinementUnavailable extends Error {
   constructor() { super('Command confinement is unavailable'); }
 }
 
@@ -20,7 +20,7 @@ function succeeds(file: string, args: string[]): Promise<boolean> {
 }
 
 /**
- * Arguments that confine one lane command (#3385): writes only inside `root`
+ * Arguments that confine one process that runs lane content (#3385, #3414): writes only inside `root`
  * (never its `.git`) and the private `tmp`, and no network. Both paths must
  * already be real paths. This is a guardrail for lane-approved commands, not
  * a boundary against a hostile one.
@@ -37,9 +37,9 @@ function succeeds(file: string, args: string[]): Promise<boolean> {
  * (writes and TCP) before the command starts and refuses to start it when
  * Landlock cannot. Landlock cannot deny `.git` beneath an allowed root.
  */
-export async function piConfinement(root: string, tmp: string, platform: NodeJS.Platform = process.platform): Promise<string[]> {
+export async function confinementArgs(root: string, tmp: string, platform: NodeJS.Platform = process.platform): Promise<string[]> {
   if (platform === 'linux') return [root, tmp, '/dev/null'].flatMap(path => ['--write', path]);
-  if (platform !== 'darwin') throw new PiConfinementUnavailable();
+  if (platform !== 'darwin') throw new ConfinementUnavailable();
   const dataDir = await realpath(getDataDir()).catch(() => getDataDir());
   const params = { ROOT: root, TMP: tmp, GIT: join(root, '.git'), DATA: dataDir };
   const profile = ['(version 1)', '(allow default)', '(deny network*)',
@@ -49,6 +49,6 @@ export async function piConfinement(root: string, tmp: string, platform: NodeJS.
     `(allow file-write* (subpath (param "ROOT")) (subpath (param "TMP")) ${DEVICES.map(device => `(literal "${device}")`).join(' ')} (subpath "/dev/fd"))`,
     '(deny file-write* (subpath (param "GIT")))'].join('');
   const prefix = [SANDBOX_EXEC, ...Object.entries(params).flatMap(([key, value]) => ['-D', `${key}=${value}`]), '-p', profile];
-  if (!await succeeds(prefix[0], [...prefix.slice(1), '/usr/bin/true'])) throw new PiConfinementUnavailable();
+  if (!await succeeds(prefix[0], [...prefix.slice(1), '/usr/bin/true'])) throw new ConfinementUnavailable();
   return prefix;
 }

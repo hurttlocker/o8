@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { piConfinement, PiConfinementUnavailable } from './confine';
+import { confinementArgs, ConfinementUnavailable } from '@/lib/sandbox/confine';
 import { piWriteHelperPath } from './scripts';
 
 export const PI_COMMAND_OUTPUT_BYTES = 50_000;
@@ -204,14 +204,14 @@ function drained(stream: NodeJS.ReadableStream | null | undefined): Promise<void
  *
  * With `confined`, the command runs confined and its TMPDIR is a fresh directory
  * removed afterwards. When confinement cannot be applied it throws
- * `PiConfinementUnavailable` and nothing has started.
+ * `ConfinementUnavailable` and nothing has started.
  */
 export async function runPiCommand(root: string, command: string, abort: AbortSignal, options: PiCommandOptions = {}) {
   if (!options.confined) return runCommand(root, command, abort, options);
   abort.throwIfAborted();
   const tmp = await mkdtemp(join(await realpath(tmpdir()), 'o8-pi-command-'));
   try {
-    return await runCommand(root, command, abort, options, { tmp, args: await piConfinement(root, tmp) });
+    return await runCommand(root, command, abort, options, { tmp, args: await confinementArgs(root, tmp) });
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
@@ -299,7 +299,7 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
     }
     abort.throwIfAborted();
     // A confined command the supervisor refused to start never ran unconfined.
-    if (confined && notStarted) throw new PiConfinementUnavailable();
+    if (confined && notStarted) throw new ConfinementUnavailable();
     if (result.error || notStarted) throw new Error('Command could not start');
     // Exit can arrive before the last buffered output; with no writer left, the
     // pipes end promptly.
