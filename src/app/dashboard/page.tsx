@@ -4946,12 +4946,6 @@ function DashboardInner() {
             },
           ] : []}
         />
-        {/* The full-page Analytics branch was here when NavSection was
-            'analytics'. Audit found that section is never set by any
-            code path (NavRail retired, no other setter calls
-            setActiveNavSection('analytics')). Analytics still reaches
-            the operator through Settings → Analytics tab. Dropped
-            2026-05-27. */}
 
         {activeNavSection === 'automations' && (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -5264,6 +5258,10 @@ function DashboardInner() {
           } : undefined);
         }}
         onCreateTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
+        onOpenUsage={() => {
+          leaveNavTakeover();
+          openCanvasTab({ id: 'usage', kind: 'usage', label: 'Usage', resourceId: 'usage' });
+        }}
         onOpenPRs={() => {
           leaveNavTakeover();
           const repoPath = focusedWorkspaceTab?.repoPath ?? globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;

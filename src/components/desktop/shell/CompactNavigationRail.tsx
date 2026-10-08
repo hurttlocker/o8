@@ -8,16 +8,11 @@ import { AutoFlash, ControlSlider, Delivery, HomeSimple } from 'iconoir-react';
 import { CircleUser, Gauge, GitPullRequest, Play, Terminal, Settings2 as Settings } from '@/components/desktop/lucide-shims';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
-import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
+import { RuntimeUsageSummary } from '@/components/desktop/analytics/RuntimeUsageSummary';
+import { useRuntimeUsage } from '@/components/desktop/analytics/use-runtime-usage';
 import type { NavSection } from '@/app/dashboard/types';
 import { TrafficLightsOrSpacer } from './TrafficLights';
 import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@/components/desktop/branch-rail-geometry';
-
-function runtimeName(runtime: string): string {
-  if (runtime === 'codex') return 'Codex';
-  if (runtime === 'claude-code') return 'Claude';
-  return runtime;
-}
 
 const railButton: CSSProperties = {
   position: 'relative',
@@ -41,7 +36,7 @@ type RailNavAction = 'automations' | 'customize' | 'projects';
 
 export function CompactNavigationRail({
   sidebarVisible, onToggleSidebar, activeDestination, glassSurface,
-  onHome, onNewSession, onCreateTerminal, onOpenProjects, onOpenSettings, onOpenShortcuts, onOpenPRs,
+  onHome, onNewSession, onCreateTerminal, onOpenProjects, onOpenSettings, onOpenShortcuts, onOpenPRs, onOpenUsage,
 }: {
   sidebarVisible: boolean;
   onToggleSidebar: () => void;
@@ -54,6 +49,7 @@ export function CompactNavigationRail({
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenPRs: () => void;
+  onOpenUsage: () => void;
 }) {
   const auth = useO8Auth();
   const profileRef = useRef<HTMLButtonElement | null>(null);
@@ -69,9 +65,7 @@ export function CompactNavigationRail({
   const isGlass = glassSurface;
   const [usageOpen, setUsageOpen] = useState(false);
   const [usagePosition, setUsagePosition] = useState({ left: 0, bottom: 0 });
-  const [usageSnapshot, setUsageSnapshot] = useState<RuntimeCapacityControlSnapshot | null>(null);
-  const [usageLoading, setUsageLoading] = useState(false);
-  const [usageError, setUsageError] = useState<string | null>(null);
+  const { snapshot: usageSnapshot, loading: usageLoading, error: usageError } = useRuntimeUsage(usageOpen);
   const usageCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const knownUsageRatios = usageSnapshot?.capacities.flatMap((capacity) =>
     capacity.status === 'available'
@@ -91,34 +85,6 @@ export function CompactNavigationRail({
     usageCloseTimerRef.current = setTimeout(() => setUsageOpen(false), 160);
   }, [cancelUsageClose]);
   useEffect(() => () => cancelUsageClose(), [cancelUsageClose]);
-  useEffect(() => {
-    if (!usageOpen) return;
-    const controller = new AbortController();
-    const loadUsage = async () => {
-      setUsageLoading(true);
-      try {
-        const response = await fetch('/api/runtime/capacity', { cache: 'no-store', signal: controller.signal });
-        const payload = await response.json() as RuntimeCapacityControlSnapshot & { error?: string };
-        if (!response.ok || payload.schema !== 'o8/runtime-capacity-control/v1') {
-          throw new Error(payload.error || 'Runtime usage unavailable');
-        }
-        if (controller.signal.aborted) return;
-        setUsageSnapshot(payload);
-        setUsageError(null);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setUsageError(error instanceof Error ? error.message : 'Runtime usage unavailable');
-      } finally {
-        if (!controller.signal.aborted) setUsageLoading(false);
-      }
-    };
-    void loadUsage();
-    const refresh = window.setInterval(() => { void loadUsage(); }, 30_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(refresh);
-    };
-  }, [usageOpen]);
   const showUsage = (button: HTMLButtonElement) => {
     cancelUsageClose();
     const rect = button.getBoundingClientRect();
@@ -191,7 +157,8 @@ export function CompactNavigationRail({
         type="button"
         aria-label="Runtime usage"
         aria-describedby={usageOpen ? 'o8-rail-usage-tooltip' : undefined}
-        title="Runtime usage"
+        title="Usage — click to open"
+        onClick={() => { cancelUsageClose(); setUsageOpen(false); onOpenUsage(); }}
         onMouseEnter={(event) => showUsage(event.currentTarget)}
         onMouseLeave={scheduleUsageClose}
         onFocus={(event) => showUsage(event.currentTarget)}
@@ -244,38 +211,10 @@ export function CompactNavigationRail({
             <div style={{ paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, display: 'grid', gap: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                 <span style={{ fontSize: 13.5, fontWeight: 400 }}>Runtime usage</span>
-                <span style={{ color: 'var(--t-text-muted)', fontSize: 10 }}>{usageLoading ? 'Updating…' : usageSnapshot ? 'Local CLI data' : 'Loading…'}</span>
+                <span style={{ color: 'var(--t-text-muted)', fontSize: 10 }}>{usageLoading ? 'Updating…' : usageSnapshot ? 'Connected accounts' : 'Loading…'}</span>
               </div>
-              {usageSnapshot?.capacities.map((capacity, index) => (
-                <div key={`${capacity.runtime}:${capacity.identityId ?? index}`} style={{ display: 'grid', gap: 7, borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5 }}>
-                    <span>{runtimeName(capacity.runtime)}</span>
-                    <span style={{ color: 'var(--t-text-muted)', fontSize: 10 }}>
-                      {capacity.status === 'stale' ? 'Stale' : capacity.status === 'available' ? capacity.confidence === 'exact' ? 'Exact' : 'Estimated' : 'Unavailable'}
-                    </span>
-                  </div>
-                  {capacity.buckets.length > 0 ? capacity.buckets.map((bucket) => (
-                    <div key={bucket.id} style={{ display: 'grid', gap: 4 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: 'var(--t-text-secondary)', fontSize: 10.5 }}>
-                        <span>{bucket.label}</span>
-                        <span>{typeof bucket.usedRatio === 'number'
-                          ? `${Math.round(bucket.usedRatio * 100)}% used`
-                          : typeof bucket.remaining === 'number'
-                            ? `${bucket.remaining} remaining`
-                            : typeof bucket.used === 'number' && bucket.unit
-                              ? `${bucket.used} ${bucket.unit} used`
-                              : 'No quota total'}</span>
-                      </div>
-                      {typeof bucket.usedRatio === 'number' ? (
-                        <div aria-hidden="true" style={{ height: 2, borderRadius: 2, background: 'var(--t-divider-subtle)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${Math.max(0, Math.min(1, bucket.usedRatio)) * 100}%`, background: bucket.usedRatio >= 0.8 ? 'var(--t-brand-orange)' : 'var(--t-accent)' }} />
-                        </div>
-                      ) : null}
-                    </div>
-                  )) : <span style={{ color: 'var(--t-text-muted)', fontSize: 10.5 }}>{capacity.reason?.replaceAll('_', ' ') ?? 'No observation'}</span>}
-                </div>
-              ))}
-              {usageSnapshot?.capacities.length === 0 ? <span style={{ color: 'var(--t-text-muted)', fontSize: 10.5 }}>No runtime capacity reported</span> : null}
+              <RuntimeUsageSummary snapshot={usageSnapshot} compact />
+              <span style={{ color: 'var(--t-text-muted)', fontSize: 10 }}>Click the meter to open Usage</span>
               {!usageSnapshot && usageLoading ? <span style={{ color: 'var(--t-text-muted)', fontSize: 10.5 }}>Reading connected runtimes…</span> : null}
               {usageError ? <span style={{ color: 'var(--t-text-muted)', fontSize: 10.5 }}>{usageError}</span> : null}
             </div>

@@ -82,6 +82,15 @@
       ]
     },
     {
+      "path": "src/app/api/panel/prs/[number]/checkout/route-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/panel/prs/route.test.ts",
       "reasons": [
         "child-process",
@@ -241,6 +250,12 @@
       "path": "src/lib/chatgpt-plan/plan-entry.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "src/lib/claude-code/live-capacity.test.ts",
+      "reasons": [
+        "executable-fixture"
       ]
     },
     {

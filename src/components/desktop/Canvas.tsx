@@ -27,6 +27,7 @@ import {
   GitCommit,
   GitPullRequest,
   Globe,
+  Gauge,
   Hexagon,
   Plus,
   Smartphone,
@@ -43,6 +44,7 @@ const IssueViewer = retryingLazy(() => import('@/components/desktop/IssueViewer'
 const MobilePairingView = retryingLazy(() => import('@/components/desktop/canvas/MobilePairingView').then(m => ({ default: m.MobilePairingView })), { label: 'Mobile pairing' });
 const PRViewer = retryingLazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })), { label: 'PR viewer' });
 const RepositoryPullRequests = retryingLazy(() => import('@/components/desktop/RepositoryPullRequests').then(m => ({ default: m.RepositoryPullRequests })), { label: 'Pull requests' });
+const UsageWorkspace = retryingLazy(() => import('@/components/desktop/analytics/UsageWorkspace').then(m => ({ default: m.UsageWorkspace })), { label: 'Usage' });
 import {
   CanvasEmpty,
   CIViewer,
@@ -68,6 +70,7 @@ export type CanvasTabKind =
   | 'commit'
   | 'pr'
   | 'pull-requests'
+  | 'usage'
   | 'readme'
   | 'ci'
   | 'new-issue'
@@ -366,6 +369,8 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
       return <GitCommit size={size} />;
     case 'pull-requests':
       return <GitPullRequest size={size} />;
+    case 'usage':
+      return <Gauge size={size} />;
     case 'readme':
       return <BookOpen size={size} />;
     case 'ci':
@@ -462,6 +467,8 @@ const TabContent = memo(function TabContent({
             return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
           case 'pull-requests':
             return <RepositoryPullRequests active={active} repoPath={tab.meta?.workspace || tab.resourceId || null} />;
+          case 'usage':
+            return <UsageWorkspace active={active} />;
           case 'readme':
             return <ReadmeViewer workspace={tab.resourceId} />;
           case 'ci':

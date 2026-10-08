@@ -37,7 +37,7 @@ import {
   continueOwnedClaudeCodeSession,
 } from '@/lib/claude-code/owned';
 import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
-import { readClaudeRuntimeCapacity } from '@/lib/usage/cli-scrape';
+import { readClaudeAccountCapacity } from '@/lib/claude-code/live-capacity';
 import {
   createLiveClaudeSessionMatcher,
   findLiveClaudeProcesses,
@@ -747,7 +747,7 @@ export const claudeCodeRuntime: AgentRuntime = {
   id: 'claude-code',
   displayName: 'Claude Code',
   capabilities,
-  getCapacity: () => readClaudeRuntimeCapacity(),
+  getCapacity: (_identityId, options) => readClaudeAccountCapacity(options),
 
   async discoverSessions(options = {}): Promise<RuntimeSession[]> {
     const fresh = options.fresh ?? false;

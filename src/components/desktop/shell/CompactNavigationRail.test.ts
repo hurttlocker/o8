@@ -17,7 +17,7 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
   const callbacks = {
     onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(),
     onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(),
-    onOpenPRs: vi.fn(), onOpenShortcuts: vi.fn(),
+    onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn(),
   };
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     if (String(input) === '/api/runtime/capacity') return Response.json({
@@ -50,6 +50,9 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     expect(host.querySelector('[aria-label="Handoffs"]')).toBeNull();
     await act(async () => button('Runtime usage').focus());
     expect(document.getElementById('o8-rail-usage-tooltip')?.textContent).toContain('40% used');
+    await act(async () => button('Runtime usage').click());
+    expect(callbacks.onOpenUsage).toHaveBeenCalledOnce();
+    await act(async () => { button('Runtime usage').blur(); button('Runtime usage').focus(); });
     for (const scroller of host.querySelectorAll<HTMLElement>('[style*="overflow-y: auto"]')) expect(scroller.style.scrollbarWidth).toBe('none');
     await act(async () => button('Runtime usage').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(document.getElementById('o8-rail-usage-tooltip')).toBeNull();
@@ -75,7 +78,7 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(), onOpenPRs: vi.fn(), onOpenShortcuts: vi.fn() };
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
   const settings = vi.fn();
   const help = vi.fn();
   window.addEventListener(OPEN_SETTINGS_TAB_EVENT, settings);
