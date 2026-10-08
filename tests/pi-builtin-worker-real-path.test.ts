@@ -105,7 +105,7 @@ vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn(async () => u
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => undefined) }));
 
 function message(content: AssistantMessage['content'], stopReason: AssistantMessage['stopReason'] = 'stop'): AssistantMessage {
-  return { role: 'assistant', content, stopReason, model: 'google/gemini-2.5-flash-lite', api: 'openai-completions',
+  return { role: 'assistant', content, stopReason, model: 'openai/gpt-6-luna', api: 'openai-completions',
     provider: 'o8-managed', timestamp: Date.now(),
     usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
@@ -294,7 +294,7 @@ describe('bundled Pi worker (#3258)', () => {
     const packet = await lastRunOutcome(sessionKey, 'finished');
     expect(packet.summary).toBe('Wrote and committed the feature file.');
     // Only the managed transport, for the managed model, ever served this worker.
-    expect(new Set(model.managedModels)).toEqual(new Set(['google/gemini-2.5-flash-lite']));
+    expect(new Set(model.managedModels)).toEqual(new Set(['openai/gpt-6-luna']));
     expect(model.seen[0].tools).toEqual(['read_file', 'write_file', 'run_command']);
 
     // The work happened in the lane worktree and nowhere else, with no inbox approval.

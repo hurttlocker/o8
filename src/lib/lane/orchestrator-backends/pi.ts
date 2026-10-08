@@ -23,7 +23,7 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { createO8CommandTools, listO8Commands, o8CommandPrompt } from '@/lib/pi/orchestrator/o8-commands';
 import { openO8Servers, type O8ServerSet } from '@/lib/pi/orchestrator/o8-servers';
-import { O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
+import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
 import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
@@ -138,7 +138,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
       pi.session = await createPiSdkSession({
         workspace: repoPath,
         stateDir,
-        model: O8_MANAGED_FLASH_LITE_MODEL,
+        model: O8_MANAGED_PI_MODEL,
         sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
         transport: deps.transport,
         approve: deps.approve,

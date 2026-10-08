@@ -307,7 +307,7 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
   // One managed model on o8's relay, under the plan or the free allowance.
   'pi-builtin': {
     ...unknownEvidence('pi-builtin', ['stdio-json-rpc'], 'fixed'),
-    advertisedModelIds: ['google/gemini-2.5-flash-lite'],
+    advertisedModelIds: ['openai/gpt-6-luna'],
   },
   cursor: unknownEvidence('cursor', ['stream-json'], 'provider-native'),
   grok: {

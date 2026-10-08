@@ -491,7 +491,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     shortLabel: 'Pi built-in',
     dispatchable: true,
     requiresModel: false,
-    defaultModel: 'google/gemini-2.5-flash-lite',
+    defaultModel: 'openai/gpt-6-luna',
     accentColor: '#16a34a',
     // No CLI on PATH: Pi runs as o8's own Node worker script. A name no other
     // process uses keeps process detection from claiming every `node` process.

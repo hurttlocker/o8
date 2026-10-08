@@ -180,6 +180,12 @@ Session metadata, run logs and Pi's state live in
 gets no credential. The requested model does not change the route: the session
 records the one managed model.
 
+The orchestrator and the packet worker both run on `O8_MANAGED_PI_MODEL`
+(`openai/gpt-6-luna`, `src/lib/pi/sdk/live-contract.ts`). The hosted endpoint
+forwards it to OpenAI on paid plans and replaces it with its free model on the
+free plan. Its Chat Completions accepts tools only with reasoning effort `none`,
+which the endpoint sets, so Pi sends no reasoning field.
+
 Lane rules govern a packet worker (`src/lib/pi/sdk/lane-approval.ts`). Inside
 its lane worktree, `write_file` and `run_command` get no per-call inbox approval,
 as for every other worker. The command policy still runs first, so a blocked

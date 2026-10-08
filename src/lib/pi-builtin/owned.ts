@@ -20,7 +20,7 @@ import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createPiLaneApproval, createPiLaneAuthority } from '@/lib/pi/sdk/lane-approval';
-import { O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
+import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import type { createPiSdkSession } from '@/lib/pi/sdk/session';
 import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
 import { escalateInterrupt } from '@/lib/runtime/interrupt-escalation';
@@ -288,7 +288,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     turn.session = await createPiSdkSession({
       workspace: session.cwd,
       stateDir,
-      model: O8_MANAGED_FLASH_LITE_MODEL,
+      model: O8_MANAGED_PI_MODEL,
       sessionFile: await newestPiSessionFile(path.join(stateDir, 'sessions')),
       approve: session.laneId ? createPiLaneApproval(session.cwd, session.laneId) : undefined,
       authorize: session.laneId ? createPiLaneAuthority(session.cwd, session.laneId) : undefined,
@@ -362,7 +362,7 @@ async function launch(request: OwnedLaunchRequest & { workMode?: WorkerWorkMode 
     latestPrompt: prompt,
     latestSummary: compactText(prompt, 140),
     // One managed model; a requested model does not change the route.
-    model: O8_MANAGED_FLASH_LITE_MODEL.id,
+    model: O8_MANAGED_PI_MODEL.id,
     readOnly: request.workMode === 'read-only',
     reviewDisposition: 'watching',
     reviewDispositionUpdatedAt: nowIso(),
