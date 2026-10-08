@@ -16,20 +16,15 @@ import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { refreshProjectsFromExternalMutation, useProjects, type ProjectRecord } from './repo-registry/useProjects';
 import { MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
+import { SymonSidebarRow } from './agent-panel/SymonSidebarRow';
 import { MiniAgentPanelAction } from './MiniAgentPanelAction';
 import { MiniAgentPanelNavigation } from './agent-panel/MiniAgentPanelNavigation';
-import { Delivery } from 'iconoir-react';
+import { ProjectIcon as FolderIcon } from './agent-panel/SidebarActionIcons';
 import { repoSlugFromRemote } from './canvas-utils';
 import { canCreateOrchestratorForRepo, deriveActiveProjectRepos, deriveAgentPanelRailRepos, resolveGlobalNewSessionRepo } from './agent-panel-repo-selection';
 import { groupProjectNavigationItems, selectWorkingRepository, visibleProjectNavigationItems } from './agent-panel/project-navigation';
 import { dispatchFocusRepoWorkspaceTab } from '@/lib/desktop/events';
 
-// ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
-// MiniAgentPanelAction wants a LucideIcon (size + strokeWidth). Iconoir
-// uses width/height. Tiny wrappers keep the AgentPanel callsite clean.
-const FolderIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
-  <Delivery width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
-);
 import {
   AgentPanelEmptyState,
   SidebarSection,
@@ -309,17 +304,17 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
           WebkitOverflowScrolling: 'touch',
-          paddingTop: effectiveTitlebarSpacerHeight > 10 ? 14 : 12,
+          paddingTop: 4,
           paddingBottom: 18,
           display: 'flex',
           flexDirection: 'column',
           gap: 0,
           // Symmetric fade — top edge softens against the navigation
           // section above, bottom edge fades into the button dock below.
-          // Matches the o8.md panel pattern; 16px top + 32px bottom keeps
+          // Matches the o8.md panel pattern; 4px top + 32px bottom keeps
           // the bottom dock visually anchored while letting the top blend.
-          maskImage: 'linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 32px), transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 32px), transparent 100%)',
+          maskImage: 'linear-gradient(to bottom, transparent 0px, black 4px, black calc(100% - 32px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 4px, black calc(100% - 32px), transparent 100%)',
         } as CSSProperties}
         className="hide-scrollbar"
       >
@@ -426,8 +421,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             onCreateOrchestratorForRepo={handleCreateOrchestratorForRepo}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
             // Agents stay flat between Chats and Archived, never nested under a chat.
-            agentsSection={(
-              <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} packets={orchestratorMissionState?.packets ?? orchestratorPackets} />
+            agentsSection={(workingOnly) => (
+              <AgentPanelExtraAgents workingOnly={workingOnly} activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} packets={orchestratorMissionState?.packets ?? orchestratorPackets} />
             )}
           />
         </section>
@@ -497,13 +492,14 @@ function MiniAgentPanelHeader({
         flexShrink: 0,
         paddingTop: 3,
         paddingRight: 0,
-        paddingBottom: 5,
+        paddingBottom: 4,
         paddingLeft: 0,
         borderBottom: '1px solid var(--t-divider-subtle)',
         fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {navigationRail ? <SymonSidebarRow /> : null}
         <MiniAgentPanelAction
           icon={Play}
           label="New session"

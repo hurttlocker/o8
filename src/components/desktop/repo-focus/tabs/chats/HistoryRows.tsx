@@ -15,7 +15,7 @@ import {
 } from './helpers';
 import { AGENT_STATUS_ACCENT, AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
-import type { AttentionBand } from './sections';
+import { repoSuffix, type AttentionBand } from './sections';
 import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
@@ -249,6 +249,7 @@ export function HistoryChatRow({
   onHoverChange?: (rect: DOMRect | null) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [keyboardFocused, setKeyboardFocused] = useState(false);
   // Drag-to-split (Claude Code parity): a pointerdown that travels past the
   // threshold becomes a workspace drag; the trailing click is suppressed so
   // a real drag never ALSO opens the thread in place.
@@ -278,15 +279,16 @@ export function HistoryChatRow({
   const rowTone = active
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
+  const statusTone = tone ?? rowTone;
   const dotState: AgentDotState =
-    rowTone.key === 'running' ? 'running'
-      : rowTone.key === 'review' ? 'review'
-        : rowTone.key === 'merged' ? 'merged'
-          : rowTone.key === 'failed' ? 'failed'
+    statusTone.key === 'running' ? 'running'
+      : statusTone.key === 'review' ? 'review'
+        : statusTone.key === 'merged' ? 'merged'
+          : statusTone.key === 'failed' ? 'failed'
             : 'idle';
   // Status rides WITH the repo (Q ruling 2026-07-31) — the meta line reads
   // "repo · branch · status", each part optional but never mutually exclusive.
-  const statusLabel = tone?.label ?? rowTone.label ?? 'Idle';
+  const statusLabel = compact && dotState === 'idle' ? null : statusTone.label ?? 'Idle';
   const backendLabel = !repoLabel && !compact && item.backend
     ? orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent })
     : null;
@@ -294,6 +296,9 @@ export function HistoryChatRow({
   return (
     <div
       role="button"
+      title={[item.title, repoSuffix(item), item.repoBranch].filter(Boolean).join(' · ')}
+      onFocus={(event) => setKeyboardFocused(event.currentTarget.matches(':focus-visible'))}
+      onBlur={() => setKeyboardFocused(false)}
       tabIndex={disabled ? -1 : 0}
       onClick={() => {
         if (dragActivatedRef.current) {
@@ -324,7 +329,7 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: 47,
+        minHeight: compact && !(repoLabel || branchLabel || statusLabel) ? 33 : 47,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -336,7 +341,8 @@ export function HistoryChatRow({
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.72 : 1,
         textAlign: 'left',
-        outline: 'none',
+        outline: keyboardFocused ? '2px solid var(--t-accent)' : 'none',
+        outlineOffset: -3,
         fontFamily: REPO_FOCUS_FONT,
         paddingTop: 3,
         paddingRight: 12,

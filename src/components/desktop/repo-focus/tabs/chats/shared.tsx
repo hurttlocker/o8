@@ -71,6 +71,7 @@ export function SectionLabel({
             {count}
           </span>
         ) : null}
+        {action}
       </div>
     );
   }

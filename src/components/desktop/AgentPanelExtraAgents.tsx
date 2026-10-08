@@ -55,6 +55,7 @@ import {
   repoSuffix,
   SIDEBAR_HOVER_THREAD_EVENT,
 } from './repo-focus/tabs/chats/sections';
+import { staysInWorkingView } from './repo-focus/tabs/chats/sidebar-view';
 import { getLastVisited, markVisited } from './repo-focus/tabs/chats/read-state';
 
 // ── Types ──
@@ -85,6 +86,7 @@ export interface AgentPanelExtraAgentsProps {
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
   packets?: OrchestratorPacket[];
+  workingOnly?: boolean;
 }
 
 // ── Constants ──
@@ -329,6 +331,7 @@ function AgentPanelExtraAgentsBase({
   activeSessionKey,
   onSelectSession,
   packets = [],
+  workingOnly = false,
 }: AgentPanelExtraAgentsProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -572,8 +575,10 @@ function AgentPanelExtraAgentsBase({
         band: attentionBand(subject),
         rank: attentionRank(subject),
       };
-    }).sort((a, b) => b.rank - a.rank || b.row.lastActivityAt - a.row.lastActivityAt);
-  }, [readStateVersion, rows]);
+    }).filter(({ row, rank }) => !workingOnly || rank > 0 || staysInWorkingView({
+      status: row.laneStatus ?? row.status, rejected: row.rejected, outcome: row.outcome,
+    }, Boolean(activeSessionKey && row.sessionKey === activeSessionKey))).sort((a, b) => b.rank - a.rank || b.row.lastActivityAt - a.row.lastActivityAt);
+  }, [activeSessionKey, readStateVersion, rows, workingOnly]);
   // #2154 — the rows a bulk clear would retire. Lane-terminal only, so the
   // affordance can never reach live work; the count drives the header reveal.
   const clearableRowKeys = useMemo(

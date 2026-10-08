@@ -5,18 +5,16 @@ import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import { OrchestratorHoverCard } from '@/components/desktop/OrchestratorHoverCard';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import { clearLastOrchestratorThreadForId } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
-import { canCreateOrchestratorForRepo } from '../../agent-panel-repo-selection';
 import {
   packetBelongsToRepo,
   packetVisualState,
   REPO_FOCUS_FONT,
 } from '../utils';
 import { SessionRow } from './AgentRows';
-import { ChatGroupPicker, type ChatGroupMode } from './chats/ChatGroupPicker';
-import { MissingRepoRailNotice } from './chats/MissingRepoRailNotice';
+import { CompactChatHistory } from './chats/CompactChatHistory';
+import { CHAT_GROUP_BY_KEY, isChatGroupMode, staysInWorkingView, type ChatGroupMode } from './chats/sidebar-view';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
-  CONVERSATIONS_GROUP_KEY,
   historyIsVisibleForRepos,
   historyRepoContext,
   historySection,
@@ -34,7 +32,7 @@ import {
   MergedPacketRow,
 } from './chats/HistoryRows';
 import { HistoryActionMenu } from './chats/Menus';
-import { RepoGroupLabel, SectionLabel } from './chats/shared';
+import { SectionLabel } from './chats/shared';
 import {
   deriveArchivedLanes,
   deriveHistoryDateGroups,
@@ -79,19 +77,18 @@ export function ChatsTab({
   const [showAllChats, setShowAllChats] = useState(false);
 
   // Group-by mode for the left-rail chat list (mini / flat variant).
-  // Three modes, persisted to localStorage. The filter icon on a
-  // group header opens a Group by / Sort by popover.
-  const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
+  // Keep the existing persisted grouping ids compatible with the view menu.
   const [chatGroupBy, setChatGroupBy] = useState<ChatGroupMode>('flat');
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
-    if (stored === 'repo' || stored === 'date' || stored === 'flat') {
-      setChatGroupBy(stored);
-    }
+    try {
+      const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
+      if (isChatGroupMode(stored)) setChatGroupBy(stored);
+    } catch { /* Storage can be unavailable in a restricted webview. */ }
   }, []);
   const updateChatGroupBy = useCallback((next: ChatGroupMode) => {
     setChatGroupBy(next);
+    setShowAllChats(false);
     if (typeof window !== 'undefined') {
       try { window.localStorage.setItem(CHAT_GROUP_BY_KEY, next); } catch { /* ignore */ }
     }
@@ -382,10 +379,19 @@ export function ChatsTab({
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
   const sortedChatItems = useMemo(() => (
-    [...sweptThreads.chats].sort((a, b) => (
-      effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a)
-    ))
-  ), [effectiveModifiedAtMs, sweptThreads.chats]);
+    sweptThreads.chats.filter((item) => {
+      if (!compact || chatGroupBy !== 'working') return true;
+      const selected = activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`;
+      const related = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])];
+      return selected || related.some((packet) => packet && staysInWorkingView({
+        status: packet.status, rejected: packet.review?.approved === false,
+        outcome: packet.releaseState === 'released' ? 'merged' : null,
+        unread: isCompletionUnread(packetTimestamp(packet), getLastVisited(`packet:${packet.id}`)),
+      })) || ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId)
+        && staysInWorkingView({ status: session.status }));
+    }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
+  ), [activeSessionKey, chatGroupBy, compact, effectiveModifiedAtMs, historyPacketsByTabId,
+    ideWorkspaceSessions, ownedPacketsByThread, sweptThreads.chats]);
   const chatCap = compact && !showAllChats ? 12 : Number.POSITIVE_INFINITY;
   const historyCap = Number.isFinite(remainingHistorySlots) ? remainingHistorySlots : Number.POSITIVE_INFINITY;
   const flatHistoryItems = sortedChatItems.slice(0, Math.max(0, Math.min(chatCap, historyCap)));
@@ -418,13 +424,13 @@ export function ChatsTab({
       remainder: split.remainder.map((entry) => entry.item),
     };
   }, [historyCap, historyPacketsByTabId, sortedChatItems]);
-  const flatRemainderItems = flatPrioritySplit.remainder.slice(
+  const flatRemainderItems = [...flatPrioritySplit.remainder].sort((a, b) => Number(b.pinned) - Number(a.pinned)).slice(
     0,
     compact && !showAllChats ? Math.max(0, 12 - flatPrioritySplit.priority.length) : Number.POSITIVE_INFINITY,
   );
   const shownActivityCount = flatPrioritySplit.priority.length + flatRemainderItems.length;
   const hiddenChatCount = Math.max(0, cappedChatCount - (
-    chatGroupBy === 'flat' ? shownActivityCount : flatHistoryItems.length
+    chatGroupBy === 'flat' || chatGroupBy === 'working' ? shownActivityCount : flatHistoryItems.length
   ));
   const showRepoSuffix = deriveShowRepoSuffix([...visibleHistory, ...visibleArchivedHistory]);
 
@@ -513,6 +519,8 @@ export function ChatsTab({
   const renderHistoryRow = (item: ChatHistoryItem, archived = false) => {
     const owned = archived ? [] : ownedPacketsByThread.get(item.tabId) ?? [];
     const packet = historyPacketsByTabId.get(item.tabId);
+    const contextRepo = targetRepos.find((repo) => repo.localPath === item.repoPath);
+    const branch = item.repoBranch ?? packet?.branchTarget ?? null;
     return (
       <HistoryChatRow
         key={item.tabId}
@@ -521,11 +529,8 @@ export function ChatsTab({
         disabled={!onOpenHistoryChat}
         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
         tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(packet)}
-        // Repo ALWAYS shows (Q ruling 2026-07-31: glanceability — "where" is
-        // what you scan for). Branch only when the list is single-repo, so
-        // multi-repo meta lines don't crowd at 9.5px.
-        repoLabel={repoSuffix(item)}
-        branchLabel={!showRepoSuffix ? item.repoBranch ?? packet?.branchTarget ?? null : null}
+        repoLabel={compact && !showRepoSuffix && contextRepo ? null : repoSuffix(item)}
+        branchLabel={!showRepoSuffix && (!compact || branch !== contextRepo?.defaultBranch) ? branch : null}
         ownedCount={owned.length}
         onHoverChange={owned.length > 0
           ? (rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)
@@ -563,99 +568,19 @@ export function ChatsTab({
         ))
       ) : null}
 
-      {groupMode === 'flat' && (flatHistoryItems.length > 0 || (compact && chatGroupBy === 'flat')) ? (
+      {groupMode === 'flat' && (flatHistoryItems.length > 0 || compact) ? (
         <div>
           {compact ? (
             <>
-              <SectionLabel label="Chats" compact />
-              {chatGroupBy === 'flat' ? (
-                <>
-                  <RepoGroupLabel
-                    label="Priority"
-                    noIcon
-                    trailing={<ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />}
-                  />
-                  {flatPrioritySplit.priority.length > 0 ? (
-                    flatPrioritySplit.priority.map((item) => renderHistoryRow(item))
-                  ) : (
-                    <div
-                      style={{
-                        paddingTop: 2,
-                        paddingRight: 12,
-                        paddingBottom: 5,
-                        paddingLeft: 29,
-                        color: 'var(--t-text-faint)',
-                        fontSize: 9.5,
-                        lineHeight: 1.25,
-                        fontWeight: 260,
-                        letterSpacing: '-0.4px',
-                      }}
-                    >
-                      Nothing needs attention
-                    </div>
-                  )}
-                  {flatRemainderItems.map((item) => renderHistoryRow(item))}
-                </>
-              ) : chatGroupBy === 'date' ? (
-                flatHistoryDateGroups.map((group, index) => (
-                  <div key={group.key}>
-                    <RepoGroupLabel
-                      label={group.label}
-                      trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
-                    />
-                    {group.items.map((item) => renderHistoryRow(item))}
-                  </div>
-                ))
-              ) : (
-                flatHistoryRepoGroups.map((group, index) => {
-                  const isConversations = group.key === CONVERSATIONS_GROUP_KEY;
-                  const groupCollapsed = collapsedRepoGroups.has(group.key);
-                  const groupRepo = isConversations ? undefined : repoByGroupKey.get(group.key);
-                  const groupRepoMissing = groupRepo?.readiness?.state === 'missing';
-                  return (
-                    <div key={group.key}>
-                      <RepoGroupLabel
-                        label={group.label}
-                        noIcon={isConversations}
-                        collapsed={groupCollapsed}
-                        onToggle={() => toggleRepoGroup(group.key)}
-                        onCreate={canCreateOrchestratorForRepo(groupRepo) && onCreateOrchestratorForRepo
-                          ? () => onCreateOrchestratorForRepo(groupRepo)
-                          : undefined}
-                        createTitle={groupRepo ? `New session in ${groupRepo.name}` : undefined}
-                        trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
-                      />
-                      {groupRepoMissing ? <MissingRepoRailNotice summary={groupRepo.readiness?.summary ?? ''} /> : null}
-                      {groupCollapsed ? null : group.items.map((item) => renderHistoryRow(item))}
-                    </div>
-                  );
-                })
-              )}
-              {hiddenChatCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAllChats(true)}
-                  style={{
-                    width: '100%',
-                    minHeight: 25,
-                    borderWidth: 0,
-                    background: 'transparent',
-                    color: 'var(--t-text-faint)',
-                    cursor: 'pointer',
-                    paddingTop: 4,
-                    paddingRight: 12,
-                    paddingBottom: 4,
-                    paddingLeft: 37,
-                    textAlign: 'left',
-                    fontFamily: REPO_FOCUS_FONT,
-                    fontSize: 9.5,
-                    fontWeight: 260,
-                    letterSpacing: '-0.4px',
-                  }}
-                >
-                  Show {hiddenChatCount} more
-                </button>
-              ) : null}
+              <CompactChatHistory
+                chatGroupBy={chatGroupBy} updateChatGroupBy={updateChatGroupBy}
+                priority={flatPrioritySplit.priority} remainder={flatRemainderItems}
+                flatHistoryItems={flatHistoryItems} flatHistoryDateGroups={flatHistoryDateGroups}
+                flatHistoryRepoGroups={flatHistoryRepoGroups} collapsedRepoGroups={collapsedRepoGroups}
+                repoByGroupKey={repoByGroupKey} toggleRepoGroup={toggleRepoGroup}
+                onCreateOrchestratorForRepo={onCreateOrchestratorForRepo} renderHistoryRow={renderHistoryRow}
+                hiddenChatCount={hiddenChatCount} showMore={() => setShowAllChats(true)}
+              />
             </>
           ) : (
             <>
@@ -703,7 +628,7 @@ export function ChatsTab({
         </div>
       )) : null}
 
-      {agentsSection}
+      {typeof agentsSection === 'function' ? agentsSection(compact && chatGroupBy === 'working') : agentsSection}
 
       {showArchivedHistory ? (
         <div>
