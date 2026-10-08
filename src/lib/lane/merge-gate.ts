@@ -547,7 +547,7 @@ function checkDiffBudgets(
 // ── Check 3: Untracked Imported Files ──
 
 function checkUntrackedImportViolations(cwd: string, baseBranch: string, repoPath: string): MergeViolation[] {
-  const result = checkUntrackedImports(cwd, baseBranch, (args) => laneGitSync(cwd, repoPath, args));
+  const result = checkUntrackedImports(cwd, baseBranch, repoPath, (args) => laneGitSync(cwd, repoPath, args));
   if (result.ok) return [];
 
   const fileCount = result.untrackedFiles.length;

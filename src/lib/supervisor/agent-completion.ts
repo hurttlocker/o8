@@ -80,7 +80,7 @@ export async function handleAgentCompletion(
         // by the silent-exit detector, not lost.)
         const { autoCommitCompletionWorktree } = await guard.wait(() => import('@/lib/supervisor/completion-verification'));
         try {
-          await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.label));
+          await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.repoPath, lane.label));
         } catch { /* non-fatal — fall through to probe */
           guard.check();
         }
@@ -88,7 +88,7 @@ export async function handleAgentCompletion(
         if (probe.noChangesProduced) {
           await guard.wait(() => new Promise((resolve) => setTimeout(resolve, 2000)));
           try {
-            await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.label));
+            await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.repoPath, lane.label));
           } catch { /* non-fatal */
             guard.check();
           }
@@ -214,7 +214,7 @@ export async function handleAgentCompletion(
         console.warn(`[supervisor] No-changes completion probe failed for ${completionCwd}:`, error);
       }
       const { autoCommitCompletionWorktree, runCompletionVerification, } = await guard.wait(() => import('@/lib/supervisor/completion-verification'));
-      const verification = await guard.wait(() => runCompletionVerification(completionCwd, lane.baseBranch));
+      const verification = await guard.wait(() => runCompletionVerification(completionCwd, lane.baseBranch, lane.repoPath));
       if (!verification.ok) {
         console.warn(`[supervisor] Agent ${surfaceId} failed post-completion ${verification.kind} in ${completionCwd}`);
         let retryPacketId = lane.packetId?.trim() || undefined;
@@ -252,7 +252,7 @@ export async function handleAgentCompletion(
           if (currentAttempt < maxAttempts - 1) {
             const completionContext = await guard.wait(() => capturePacketCompletionContext(packetId, surfaceId));
             await guard.wait(() => persistAttemptLearnings(completionCwd, packetId, attemptNumber, buildAttemptLearningFromFailure(verification.output, completionContext.selfReview)));
-            await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.label));
+            await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.repoPath, lane.label));
             markRalphRetryRequeued(lane.id, packetId);
             await guard.wait(() => withLockedState((state) => {
               guard.check();
@@ -331,7 +331,7 @@ export async function handleAgentCompletion(
         }
       }
       try {
-        const committed = await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.label));
+        const committed = await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.repoPath, lane.label));
         if (committed) {
           console.log(`[supervisor] Agent ${surfaceId} left dirty worktree, auto-committing in ${completionCwd}`);
         }

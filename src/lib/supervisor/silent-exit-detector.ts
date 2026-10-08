@@ -393,7 +393,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
 
   if (state.hasUncommittedWork) {
     try {
-      const committed = await commitCrashedWorkerWork(cwd, lane.label);
+      const committed = await commitCrashedWorkerWork(cwd, lane.repoPath, lane.label);
       if (committed) {
         console.log(`[silent-exit] Auto-committed salvaged work in ${cwd} for lane ${lane.id}`);
       }
@@ -414,7 +414,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
       return true;
     }
 
-    const verification = await runCompletionVerification(cwd, lane.baseBranch);
+    const verification = await runCompletionVerification(cwd, lane.baseBranch, lane.repoPath);
     if (!verification.ok) {
       console.warn(
         `[silent-exit] Lane ${lane.id} post-silent-exit ${verification.kind} failed`,

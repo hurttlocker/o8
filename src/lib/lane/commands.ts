@@ -707,11 +707,11 @@ async function dispatchUnlocked(
         if (publicationGovernanceDrift) return publicationGovernanceDrift;
 
         // Push the immutable reviewed commit, never the mutable local branch.
-        await materializationAwareExecFile('git', [
+        await laneGit(lockedLane.worktreePath, lockedLane.repoPath, [
           'push',
           'origin',
           `${reviewedSnapshotSha}:refs/heads/${lockedLane.branch}`,
-        ], { windowsHide: true, cwd: lockedLane.worktreePath });
+        ]);
 
         // Create PR via gh CLI
         const prTitle = lockedLane.label || `${lockedLane.branch}`;

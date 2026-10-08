@@ -2368,6 +2368,21 @@
       ]
     },
     {
+      "path": "tests/lane-git-guard.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/lane-git-remaining-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-host-git-hardening-real-path.test.ts",
       "reasons": [
         "child-process",

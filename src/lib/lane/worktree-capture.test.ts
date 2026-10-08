@@ -40,7 +40,7 @@ describe('captureWorktreeState', () => {
     writeFileSync(join(repo, 'tracked.ts'), 'export const x = 2;\n'); // modify tracked
     writeFileSync(join(repo, 'untracked.ts'), 'export const y = 3;\n'); // new untracked
 
-    const result = await captureWorktreeState(repo, 'lane-abc');
+    const result = await captureWorktreeState(repo, 'lane-abc', repo);
 
     expect(result.captured).toBe(true);
     expect(result.ref).toBe('refs/o8-capture/lane-abc');
@@ -63,7 +63,7 @@ describe('captureWorktreeState', () => {
     writeFileSync(join(repo, 'untracked.ts'), 'export const y = 3;\n');
     const statusBefore = git(repo, ['status', '--porcelain']);
 
-    await captureWorktreeState(repo, 'lane-abc');
+    await captureWorktreeState(repo, 'lane-abc', repo);
 
     // working tree + index unchanged (add -A went to a throwaway index)
     expect(git(repo, ['status', '--porcelain'])).toBe(statusBefore);
@@ -73,7 +73,7 @@ describe('captureWorktreeState', () => {
 
   it('returns captured:false and creates no ref for a clean worktree', async () => {
     const repo = initRepo();
-    const result = await captureWorktreeState(repo, 'lane-clean');
+    const result = await captureWorktreeState(repo, 'lane-clean', repo);
     expect(result.captured).toBe(false);
     expect(result.ref).toBeUndefined();
     expect(() => git(repo, ['rev-parse', 'refs/o8-capture/lane-clean'])).toThrow();
@@ -83,7 +83,7 @@ describe('captureWorktreeState', () => {
     const repo = initRepo(false); // no commits
     writeFileSync(join(repo, 'wip.ts'), 'export const z = 4;\n');
 
-    const result = await captureWorktreeState(repo, 'lane-fresh');
+    const result = await captureWorktreeState(repo, 'lane-fresh', repo);
 
     expect(result.captured).toBe(true);
     // no parents on a root capture

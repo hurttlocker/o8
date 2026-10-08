@@ -734,7 +734,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   ]);
   let currentHeadSha: string | undefined;
   try {
-    currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath));
+    currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath));
   } catch (error) {
     console.warn(`[auto-review] Failed to re-read HEAD after second pass for lane ${lane.id}:`, error);
     return { kind: 'reviewed' };

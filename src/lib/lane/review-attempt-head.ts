@@ -20,7 +20,7 @@
  * nonce are cancelled, never the lane or a later retry that reuses the row id.
  */
 
-import { execFileSync } from 'node:child_process';
+import { laneGitSync, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
@@ -69,24 +69,24 @@ export function normalizeAttemptHeadSha(value?: string | null): string | undefin
  * synchronously too. Failure is not fatal: an unreadable HEAD leaves rows
  * unkeyed, which is exactly the pre-v46 behaviour.
  */
-export function readWorktreeHeadShaSync(cwd?: string | null): string | undefined {
+export function readWorktreeHeadShaSync(cwd: string | null | undefined, repoPath: string): string | undefined {
   const path = cwd?.trim();
   if (!path) return undefined;
   try {
-    return normalizeAttemptHeadSha(execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: path,
+    return normalizeAttemptHeadSha(laneGitSync(path, repoPath, ['rev-parse', 'HEAD'], {
       encoding: 'utf8',
       timeout: 5_000,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],
     }));
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return undefined;
   }
 }
 
 export function laneReviewHeadSha(lane: Pick<Lane, 'worktreePath' | 'repoPath'>): string | undefined {
-  return readWorktreeHeadShaSync(lane.worktreePath || lane.repoPath);
+  return readWorktreeHeadShaSync(lane.worktreePath || lane.repoPath, lane.repoPath);
 }
 
 /**
