@@ -3012,6 +3012,15 @@
       ]
     },
     {
+      "path": "tests/orchestrator-mcp-owned-root-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-model-attribution-real-path.test.ts",
       "reasons": [
         "child-process",
