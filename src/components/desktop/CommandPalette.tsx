@@ -379,7 +379,7 @@ export const CommandPalette = memo(function CommandPalette({
       || scope === 'directive'
       ? scope
       : null;
-    if (trimmed.length < 2 && !browseScope) {
+    if (trimmed.length < 2 && (!browseScope || browseScope === 'file')) {
       setGroups(EMPTY_GROUPS);
       setError(null);
       setLoading(false);
@@ -396,12 +396,14 @@ export const CommandPalette = memo(function CommandPalette({
         if (repo) params.set('repo', repo);
         if (browseScope) params.set('scope', browseScope);
         const response = await fetch(`/api/panel/search?${params.toString()}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
         if (!response.ok) {
           setError('Search is unavailable.');
           setGroups(EMPTY_GROUPS);
           return;
         }
         const data = await response.json() as SearchResponse;
+        if (controller.signal.aborted) return;
         if (data.error) {
           setError(data.error);
           setGroups(EMPTY_GROUPS);
@@ -416,11 +418,11 @@ export const CommandPalette = memo(function CommandPalette({
         }
         setError(null);
       } catch (caught) {
-        if ((caught as { name?: string })?.name === 'AbortError') return;
+        if (controller.signal.aborted || (caught as { name?: string })?.name === 'AbortError') return;
         setError('Search failed.');
         setGroups(EMPTY_GROUPS);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, trimmed.length < 2 ? 0 : DEBOUNCE_MS);
 
@@ -641,6 +643,7 @@ export const CommandPalette = memo(function CommandPalette({
 
   const trimmed = query.trim();
   const showEmpty = !loading && !error && items.length === 0;
+  const needsMoreFileCharacters = scope === 'file' && fileItems === undefined && trimmed.length === 1;
 
   return (
     <AnimatePresence>
@@ -727,7 +730,9 @@ export const CommandPalette = memo(function CommandPalette({
 
             {showEmpty ? (
               <div style={statusRowStyle}>
-                {trimmed.length < 2
+                {needsMoreFileCharacters
+                  ? 'Enter at least 2 characters to search files.'
+                  : trimmed.length === 0 || (scope !== 'file' && trimmed.length < 2)
                   ? scope === 'file'
                     ? 'Type to search files.'
                     : scope === 'all'
