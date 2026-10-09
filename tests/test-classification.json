@@ -4166,6 +4166,12 @@
       ]
     },
     {
+      "path": "tests/symon-phone-pi-brain-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-text-say-loop.test.ts",
       "reasons": [
         "child-process",

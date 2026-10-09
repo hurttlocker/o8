@@ -256,6 +256,16 @@ export class SymonBrain {
       .reverse();
   }
 
+  /** Stops a thread's running turn. False when the thread is unknown. */
+  async stop(key: string): Promise<boolean> {
+    const row = await this.summary(key);
+    if (!row) return false;
+    const conversation = await this.harness.conversation(row.conversationId as unknown as Conversation['id'], BACKGROUND_CONTEXT);
+    if (!conversation) return false;
+    await conversation.abort(BACKGROUND_CONTEXT);
+    return true;
+  }
+
   async close(): Promise<void> {
     await this.harness.close(BACKGROUND_CONTEXT);
   }

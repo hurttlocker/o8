@@ -18,6 +18,18 @@ import {
   type SymonTextPlannerInfo,
 } from '@/lib/mobile/symon-text-bridge-client';
 import { getRuntimeAuthSnapshotForClaudeCarrier } from '@/lib/runtimes/shared/auth-detect';
+import { SYMON_MANAGED_MODEL } from '@/lib/symon/durable/managed-provider';
+import { readSymonTextBrainMode } from '@/lib/symon/durable/text-brain-setting';
+
+/** The planner selection a phone text session binds when the built-in Pi brain answers it (#3453). */
+const PI_BRAIN_INFO: SymonTextPlannerInfo = {
+  available: true,
+  engine: 'pi',
+  model: SYMON_MANAGED_MODEL.id,
+  effort: 'default',
+  allowDefaultFallback: false,
+  tools: [],
+};
 
 function requestBearer(request: NextRequest): string {
   const auth = request.headers.get('authorization');
@@ -88,21 +100,49 @@ export async function POST(request: NextRequest) {
   // Symon brain setting actually resolves — since #2176 the text surface binds
   // by registry id, so an open runtime seats it the same way. The availability
   // gate below reports the native side's own reason when there is no seat.
+  //
+  // The built-in Pi brain (#3453) answers when the operator chose it, when the
+  // phone asks for the managed model, or, on auto, when no native planner is
+  // reachable. An explicit native model pin is never replaced by it.
+  const brainMode = readSymonTextBrainMode();
+  const managedRequested = normalizeMobileAskModelId(context.model) === 'managed-free';
   let info: SymonTextPlannerInfo;
-  try {
-    const requestedPlanner = await resolveRequestedPlanner(context.model);
-    info = await readSymonTextPlannerInfo(requestedPlanner ?? undefined);
-  } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'Desktop bridge unavailable.' },
-      { status: 503 },
-    );
+  if (brainMode === 'pi' || managedRequested) {
+    info = PI_BRAIN_INFO;
+  } else {
+    let requestedPlanner: SymonTextPlannerSelection | null;
+    try {
+      requestedPlanner = await resolveRequestedPlanner(context.model);
+    } catch (error) {
+      return NextResponse.json(
+        { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'Desktop bridge unavailable.' },
+        { status: 503 },
+      );
+    }
+    const piFallback = brainMode === 'auto' && !requestedPlanner;
+    try {
+      info = await readSymonTextPlannerInfo(requestedPlanner ?? undefined);
+    } catch (error) {
+      if (!piFallback) {
+        return NextResponse.json(
+          { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'Desktop bridge unavailable.' },
+          { status: 503 },
+        );
+      }
+      info = PI_BRAIN_INFO;
+    }
+    if (!info.available || !info.engine || !info.model || !info.effort) {
+      if (!piFallback) {
+        return NextResponse.json(
+          { ok: false, error: 'no_cli', detail: info.detail || 'No supported Symon planner CLI is installed.' },
+          { status: 501 },
+        );
+      }
+      info = PI_BRAIN_INFO;
+    }
   }
-  if (!info.available || !info.engine || !info.model || !info.effort) {
-    return NextResponse.json(
-      { ok: false, error: 'no_cli', detail: info.detail || 'No supported Symon planner CLI is installed.' },
-      { status: 501 },
-    );
+  if (!info.engine || !info.model || !info.effort) {
+    return NextResponse.json({ ok: false, error: 'no_cli', detail: 'No supported Symon planner is available.' }, { status: 501 });
   }
   const allowedTools = Array.from(new Set((info.tools ?? []).flatMap((tool) => {
     const name = tool.name;
