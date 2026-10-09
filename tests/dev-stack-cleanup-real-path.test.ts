@@ -82,6 +82,12 @@ describe('dev stack cleanup real path', () => {
         O8_API_PORT: String(apiPort),
         WS_PORT: String(wsPort),
         O8_WS_PORT: String(wsPort),
+        __NEXT_PRIVATE_STANDALONE_CONFIG: JSON.stringify({
+          outputFileTracingRoot: path.join(dataDir, 'deleted-packaged-checkout'),
+          turbopack: { root: path.join(dataDir, 'deleted-packaged-checkout') },
+        }),
+        O8_PACKAGED_APP: '1',
+        NEXT_PHASE: 'phase-production-server',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

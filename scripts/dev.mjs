@@ -21,6 +21,12 @@ const env = {
   WS_PORT: process.env.WS_PORT || '47125',
   O8_WS_PORT: process.env.O8_WS_PORT || process.env.WS_PORT || '47125',
 };
+// Next reads standalone production configuration before the checkout's config.
+// A dev command must always resolve this checkout, including when launched from
+// a packaged application or an older terminal server.
+delete env.__NEXT_PRIVATE_STANDALONE_CONFIG;
+delete env.O8_PACKAGED_APP;
+delete env.NEXT_PHASE;
 
 function readEntries() {
   try {

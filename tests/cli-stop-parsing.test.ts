@@ -115,7 +115,8 @@ describe('CLI stop command parsing', () => {
   it('clears stale tmux Node options and anchors an inherited legacy preload', () => {
     const cwd = '/tmp/o8 repo';
     const clearRouting = ['O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
-      'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR'].map((key) => `unset ${key}`);
+      'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR',
+      '__NEXT_PRIVATE_STANDALONE_CONFIG', 'O8_PACKAGED_APP', 'NEXT_PHASE'].map((key) => `unset ${key}`);
     expect(managedRunEnvironmentLines({ PATH: '/usr/bin' }, cwd)).toEqual([
       'unset NODE_OPTIONS',
       ...clearRouting,
