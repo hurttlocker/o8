@@ -60,6 +60,19 @@ message. A Pi turn that a restart interrupted is finished on the next delivery
 instead of being answered with a request to send it again. Limited-access
 shared groups keep their tool-free path.
 
+## Phone text sessions
+
+`POST /api/mobile/symon/text-session` binds a new phone session to the Pi brain
+(engine `pi`, the managed model, effort `default`) when the mode is `pi`, when
+the phone asks for the managed model (`managed-free`), or on `auto` when the
+desktop bridge or a planner CLI is missing and the phone named no model. An
+explicit native model pin is never replaced. `POST /api/mobile/symon/text-turn`
+answers a Pi session on the brain under the key `phone:<sessionId>`, with the
+newest message (`text`) only, since the brain keeps the history; the turn id is
+the request id, so a repeated poll reaches the same turn. A turn naming another
+engine than its session's is refused with `409`. `DELETE` stops a running Pi
+turn.
+
 ## Conversations API
 
 Panel-authenticated routes over the same store, for the Symon tab:
@@ -77,7 +90,7 @@ phone or the messaging thread.
 
 - The Pi brain has no tools yet. It cannot act on the computer or change o8, and
   its prompt says so.
-- The phone text session and voice transcripts do not use the store yet.
+- Voice transcripts do not use the store yet.
 - The conversations API lists only threads the Pi brain has answered.
 
 ## Tests
@@ -87,5 +100,8 @@ phone or the messaging thread.
   managed request body.
 - `tests/symon-managed-messages-pi-brain-real-path.test.ts`: the inbound route
   on each mode, planner-to-Pi context, and a restart mid-turn.
+- `tests/symon-phone-pi-brain-real-path.test.ts`: phone sessions bound by
+  mode, by the managed model and on auto fallback; native pins unchanged; engine
+  mismatch refused; repeated polls; Stop.
 - `tests/symon-conversations-api-real-path.test.ts`: list, transcript,
   continue, a repeated request id, refusals, and bounded failure text.
