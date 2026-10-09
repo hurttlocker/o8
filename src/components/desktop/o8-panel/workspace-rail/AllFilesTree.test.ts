@@ -30,8 +30,8 @@ afterEach(async () => {
   await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals();
   await rm(workspace, { recursive: true, force: true });
 });
-async function render(repoPath = workspace) {
-  await act(async () => root.render(createElement(AllFilesTree, { repoPath, selectedFile: null, dirtyFiles: new Set<string>(), onSelectFile: selectFile })));
+async function render(repoPath = workspace, selectedFile: string | null = null) {
+  await act(async () => root.render(createElement(AllFilesTree, { repoPath, selectedFile, dirtyFiles: new Set<string>(), onSelectFile: selectFile })));
   await settled(() => !host.textContent?.includes('Loading files...'));
 }
 async function settled(check: () => boolean) {
@@ -45,6 +45,50 @@ async function click(text: string) {
 }
 
 describe('workspace file navigation through the directory route', () => {
+  it('reveals a linked file through only its ancestors without stealing composer focus', async () => {
+    const deep = 'src/app/dashboard';
+    await mkdir(join(workspace, deep), { recursive: true });
+    await mkdir(join(workspace, 'unopened')); await writeFile(join(workspace, 'unopened', 'other.ts'), 'export {};');
+    await writeFile(join(workspace, deep, 'page.tsx'), 'export {};');
+    const composer = document.createElement('textarea'); document.body.append(composer); composer.focus();
+    await render(workspace, join(workspace, deep, 'page.tsx'));
+    await settled(() => host.querySelector('[aria-current="page"]')?.getAttribute('title') === `${deep}/page.tsx`);
+    expect(requests.map(request => request.url.searchParams.get('directory'))).toEqual(['.', 'src', 'src/app', deep]);
+    expect(document.activeElement).toBe(composer);
+    await click('src');
+    expect(host.querySelector('[title="src"]')?.getAttribute('aria-expanded')).toBe('false');
+    await render(workspace, join(workspace, deep, 'page.tsx'));
+    expect(host.querySelector('[title="src"]')?.getAttribute('aria-expanded')).toBe('false');
+    composer.remove();
+  });
+
+  it('does not read folders for a file outside this repo or a missing selected path', async () => {
+    await mkdir(join(workspace, 'src'));
+    await render(workspace, '/somewhere/else/file.ts');
+    expect(requests).toHaveLength(1);
+    await render(workspace, 'missing/deep/file.ts');
+    expect(requests).toHaveLength(1);
+    await render(workspace, '../src/file.ts');
+    expect(requests).toHaveLength(1);
+  });
+
+  it('stops automatic reveal after a folder error and resumes from its Retry action', async () => {
+    await mkdir(join(workspace, 'src')); await writeFile(join(workspace, 'src', 'file.ts'), 'export {};');
+    const fetcher = vi.mocked(fetch); const realRead = fetcher.getMockImplementation()!;
+    let attempts = 0;
+    fetcher.mockImplementation(async (input, init) => {
+      const directory = new URL(String(input), 'http://localhost').searchParams.get('directory');
+      if (directory === 'src' && ++attempts === 1) return new Response(null, { status: 503 });
+      return realRead(input, init);
+    });
+    await render(workspace, 'src/file.ts');
+    await settled(() => Boolean(host.textContent?.includes("Couldn't load this folder.")));
+    expect(attempts).toBe(1);
+    await click('Retry');
+    await settled(() => host.querySelector('[aria-current="page"]')?.getAttribute('title') === 'src/file.ts');
+    expect(attempts).toBe(2);
+  });
+
   it('opens a file beyond the old depth cap without reading unopened folders', async () => {
     const deep = 'one/two/three/four/five';
     await mkdir(join(workspace, deep), { recursive: true });

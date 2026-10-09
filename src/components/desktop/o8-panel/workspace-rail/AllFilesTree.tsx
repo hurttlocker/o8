@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/set-state-in-effect -- repo changes intentionally reset and refetch file tree state */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FileNode } from '@/app/dashboard/types';
 import { QuickDocs } from './QuickDocs';
 import { RamsButton } from '../../settings/shared';
@@ -71,6 +71,15 @@ function extensionColor(name: string): string {
   }
 }
 
+function relativeSelection(repoPath: string | null | undefined, selectedFile: string | null): string | null {
+  if (!repoPath || !selectedFile) return null;
+  const prefix = `${repoPath.replace(/\/$/, '')}/`;
+  const relative = selectedFile.startsWith(prefix) ? selectedFile.slice(prefix.length) : selectedFile;
+  const parts = relative.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..') || relative.startsWith('/')) return null;
+  return relative;
+}
+
 function TreeNode({
   node,
   depth,
@@ -119,8 +128,9 @@ function TreeNode({
           color: 'var(--t-text)',
           cursor: 'pointer',
           fontFamily: UI_FONT,
-          fontSize: 12.5,
-          fontWeight: isDir ? 460 : 380,
+          fontSize: 13.5,
+          fontWeight: 300,
+          lineHeight: 1.25,
           letterSpacing: '-0.1px',
           paddingTop: 0,
           paddingRight: 8,
@@ -185,7 +195,44 @@ export function AllFilesTree({
   const repoName = repoPath?.split('/').filter(Boolean).pop() ?? 'workspace';
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [rootFilesExpanded, setRootFilesExpanded] = useState(true);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const revealRef = useRef<string | null>(null);
+  const selection = relativeSelection(repoPath, selectedFile);
   useEffect(() => { setExpandedDirs(new Set()); setRootFilesExpanded(true); }, [repoPath]);
+  useEffect(() => {
+    revealRef.current = selection;
+    if (!selection) return;
+    const parts = selection.split('/');
+    const ancestors = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'));
+    setExpandedDirs((current) => new Set([...current, ...ancestors]));
+    if (!ancestors.length) setRootFilesExpanded(true);
+  }, [repoPath, selection]);
+  useEffect(() => {
+    const pending = revealRef.current;
+    if (!pending || pending !== selection || !root || root.loading || root.error) return;
+    const parts = pending.split('/');
+    let entries = root.entries;
+    // Walk only the selected file's known ancestors. Stop at a failed or
+    // missing directory; Retry and Refresh can resume without a fetch loop.
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      const path = parts.slice(0, index + 1).join('/');
+      if (!entries.some((entry) => entry.path === path && entry.type === 'dir')) return;
+      const directory = directories[path];
+      if (!directory) { void loadDirectory(path); return; }
+      if (directory.loading || directory.error) return;
+      entries = directory.entries;
+    }
+    if (!entries.some((entry) => entry.path === pending && entry.type === 'file')) return;
+    const scroller = treeRef.current;
+    const target = scroller?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!scroller || !target) return;
+    const viewport = scroller.getBoundingClientRect();
+    const bounds = target.getBoundingClientRect();
+    const scale = scroller.clientHeight && viewport.height ? viewport.height / scroller.clientHeight : 1;
+    const delta = bounds.top < viewport.top ? bounds.top - viewport.top : bounds.bottom > viewport.bottom ? bounds.bottom - viewport.bottom : 0;
+    if (delta) scroller.scrollTop += delta / scale;
+    revealRef.current = null;
+  }, [directories, expandedDirs, rootFilesExpanded, loadDirectory, root, selection]);
   const handleToggleDir = useCallback((dirPath: string) => {
     const opening = !expandedDirs.has(dirPath);
     setExpandedDirs((current) => {
@@ -213,7 +260,7 @@ export function AllFilesTree({
           <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3a7 7 0 0 0 11.5-1" /></svg>
         </button>
       </div>
-      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingTop: 3, paddingBottom: 3 }}>
+      <div ref={treeRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', scrollbarWidth: 'none', paddingTop: 3, paddingBottom: 3 }}>
         <QuickDocs repoPath={repoPath} selectedFile={selectedFile} onSelectFile={onSelectFile} />
         {!repoPath ? (
           <div style={{ paddingTop: 13, paddingRight: 12, paddingBottom: 13, paddingLeft: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>
@@ -235,7 +282,7 @@ export function AllFilesTree({
                 key={node.path}
                 node={node}
                 depth={0}
-                selectedFile={selectedFile}
+                selectedFile={selection}
                 expandedDirs={expandedDirs}
                 dirtyFiles={dirtyFiles}
                 directories={directories}
@@ -263,7 +310,7 @@ export function AllFilesTree({
                     cursor: 'pointer',
                     fontFamily: UI_FONT,
                     fontSize: 11,
-                    fontWeight: 400,
+                    fontWeight: 300,
                     letterSpacing: 0,
                     marginTop: 4,
                     paddingTop: 0,
@@ -277,7 +324,7 @@ export function AllFilesTree({
                 >
                   <ChevronIcon open={rootFilesExpanded} size={9} />
                   <span>Files</span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 16, height: 14, borderRadius: 999, background: 'var(--t-divider-subtle)', color: 'var(--t-text-secondary)', fontFamily: MONO_FONT, fontSize: 9, fontWeight: 800, marginLeft: 2, paddingTop: 0, paddingRight: 4, paddingBottom: 0, paddingLeft: 4 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 16, height: 14, borderRadius: 999, background: 'var(--t-divider-subtle)', color: 'var(--t-text-secondary)', fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 260, marginLeft: 2, paddingTop: 0, paddingRight: 4, paddingBottom: 0, paddingLeft: 4 }}>
                     {rootFiles.length}
                   </span>
                 </button>
@@ -286,7 +333,7 @@ export function AllFilesTree({
                     key={node.path}
                     node={node}
                     depth={0}
-                    selectedFile={selectedFile}
+                    selectedFile={selection}
                     expandedDirs={expandedDirs}
                     dirtyFiles={dirtyFiles}
                     directories={directories}

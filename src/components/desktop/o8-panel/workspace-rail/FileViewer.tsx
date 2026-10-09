@@ -77,7 +77,7 @@ function PreviewToggle({
               cursor: 'pointer',
               fontFamily: UI_FONT,
               fontSize: 11,
-              fontWeight: 350,
+              fontWeight: 300,
               letterSpacing: '-0.1px',
               paddingTop: 0,
               paddingRight: 8,
@@ -325,13 +325,13 @@ export function FileViewer({
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div title={selectedFile} style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, fontFamily: UI_FONT }}>
-        <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--t-text)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{fileName}</span>
-        <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{selectedFile}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 300, color: 'var(--t-text)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{fileName}</span>
+        {selectedFile.includes('/') ? <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-muted)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{selectedFile.slice(0, selectedFile.lastIndexOf('/')) || '/'}</span> : null}
       </div>
       {dirty || error || canTogglePreview ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>
-          <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 12, fontWeight: 400, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {error ?? (dirty ? 'Modified' : fileKind === 'markdown' ? 'Markdown preview' : 'SVG preview')}
+          <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {error ?? (dirty ? 'Modified' : '')}
           </span>
           {canTogglePreview ? <PreviewToggle mode={viewMode} onModeChange={handleViewModeChange} /> : null}
           {dirty ? (
@@ -374,7 +374,7 @@ export function FileViewer({
             onError={() => setError('Unable to preview this file.')}
           />
         ) : fileKind === 'markdown' && viewMode === 'preview' && fileContent !== null ? (
-          <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingTop: 18, paddingRight: 22, paddingBottom: 22, paddingLeft: 22 }}>
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none', paddingTop: 18, paddingRight: 22, paddingBottom: 22, paddingLeft: 22 }}>
             <MarkdownRender content={editContent} />
           </div>
         ) : fileContent !== null ? (

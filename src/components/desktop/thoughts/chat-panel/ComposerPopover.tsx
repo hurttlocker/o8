@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
  * ancestor's overflow (the chat transcript above the composer is itself a
  * scroll container, so merely dropping the card's overflow would not help).
  *
- * This primitive is positional-only: it owns the portal, anchor-rect
+ * This primitive owns the portal, focus, anchor-rect
  * positioning (with a viewport-bottom-aware up-flip — the composer lives at
  * the bottom, so menus open upward by default), the shared z-layer, and the
  * click-outside / Escape / scroll-resize lifecycle. Consumers bring their own
@@ -41,9 +41,18 @@ interface ComposerPopoverProps {
 const COMPOSER_OVERLAY_Z = 1000;
 const GAP = 8;
 const EDGE = 12;
+const FOCUSABLE = 'button:not(:disabled), input:not([type="hidden"]):not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]';
+const MENU_ITEM = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
+
+function focusTrigger(anchor: HTMLElement | null) {
+  const trigger = anchor?.matches(FOCUSABLE) ? anchor : anchor?.querySelector<HTMLElement>(FOCUSABLE);
+  trigger?.focus({ preventScroll: true });
+}
 
 export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align = 'end', children }: ComposerPopoverProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const restoreFocusRef = useRef(true);
+  const focusedControlRef = useRef<HTMLElement | null>(null);
   // Keep onClose out of the effect deps so an inline arrow from the consumer
   // doesn't re-run the whole listener setup on every render.
   const onCloseRef = useRef(onClose);
@@ -53,9 +62,30 @@ export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align =
     onOpenReadyRef.current = onOpenReady;
   }, [onClose, onOpenReady]);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = true;
+    focusedControlRef.current = null;
+    const panel = panelRef.current;
+    const anchor = anchorRef.current;
+    return () => {
+      // React can remove the portal before layout cleanup. In that case the
+      // browser has moved focus to body; remember which removed control owned it.
+      const removedFocus = document.activeElement === document.body && focusedControlRef.current && !focusedControlRef.current.isConnected;
+      if (restoreFocusRef.current && (panel?.contains(document.activeElement) || removedFocus)) focusTrigger(anchor);
+    };
+  }, [open, anchorRef]);
+
   const ready = open && pos !== null;
   useLayoutEffect(() => {
-    if (ready) onOpenReadyRef.current?.();
+    if (!ready) return;
+    onOpenReadyRef.current?.();
+    const panel = panelRef.current;
+    if (!panel || panel.contains(document.activeElement)) return;
+    const target = panel.querySelector<HTMLElement>('input:not([type="hidden"]):not(:disabled), textarea:not(:disabled), select:not(:disabled)')
+      ?? panel.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled):not([aria-disabled="true"])')
+      ?? panel.querySelector<HTMLElement>(FOCUSABLE);
+    target?.focus({ preventScroll: true });
   }, [ready]);
 
   useLayoutEffect(() => {
@@ -100,10 +130,33 @@ export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align =
       const target = event.target as Node;
       if (anchor.contains(target)) return;
       if (panelRef.current?.contains(target)) return;
+      restoreFocusRef.current = false;
       onCloseRef.current();
     };
     const onKey = (event: KeyboardEvent) => {
-      if (!event.defaultPrevented && event.key === 'Escape') onCloseRef.current();
+      if (event.defaultPrevented) return;
+      const panel = panelRef.current;
+      const target = event.target;
+      const inPanel = target instanceof Node && panel?.contains(target);
+      if (event.key === 'Escape') {
+        if (!inPanel && !(target instanceof Node && anchor.contains(target))) return;
+        event.preventDefault();
+        focusTrigger(anchor);
+        onCloseRef.current();
+        return;
+      }
+      if (!inPanel || !(target instanceof HTMLElement) || !target.matches(MENU_ITEM)) return;
+      if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+      const menu = target.closest('[role="menu"]');
+      if (!menu) return;
+      const items = Array.from(menu.querySelectorAll<HTMLElement>(MENU_ITEM))
+        .filter((item) => !item.matches(':disabled, [aria-disabled="true"]'));
+      if (!items.length) return;
+      const index = items.indexOf(target);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      event.preventDefault();
+      items[next].focus({ preventScroll: true });
     };
     document.addEventListener('mousedown', onDown, true);
     document.addEventListener('keydown', onKey);
@@ -124,6 +177,10 @@ export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align =
     <div
       ref={panelRef}
       data-composer-overlay=""
+      onFocusCapture={(event) => { focusedControlRef.current = event.target; }}
+      onBlurCapture={(event) => {
+        if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) focusedControlRef.current = null;
+      }}
       style={{
         position: 'fixed',
         left: pos ? pos.left : -9999,

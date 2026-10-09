@@ -26,25 +26,13 @@ import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
+import { revealHeaderTab, scrollTabStripFromWheel } from './tab-scroll';
 
 /** Right-edge inset that lands the header's rightmost control on the branch rail
  *  capsule's centre, one row below. Measured, not guessed.
  *
  *  The panel toggle is 30px wide; the margin positions its centre. */
 const RAIL_COLUMN_ALIGN_NUDGE = 4;
-
-/** Reveal a pill in this strip only, including when the shell uses CSS zoom. */
-function revealHeaderTab(scroller: HTMLDivElement, tab: Element) {
-  const viewport = scroller.getBoundingClientRect();
-  if (!viewport.width || !scroller.clientWidth) return;
-  const target = tab.getBoundingClientRect();
-  const scale = viewport.width / scroller.clientWidth;
-  const inset = Math.min(22, scroller.clientWidth / 4);
-  const left = (target.left - viewport.left) / scale;
-  const right = (target.right - viewport.left) / scale;
-  const delta = left < inset ? left - inset : right > scroller.clientWidth - inset ? right - scroller.clientWidth + inset : 0;
-  if (delta) scroller.scrollLeft = Math.max(0, Math.min(scroller.scrollWidth - scroller.clientWidth, scroller.scrollLeft + delta));
-}
 
 export function WorkspaceHeaderStrip({
   leadingInset = false,
@@ -269,17 +257,7 @@ export function HeaderPillStrip({
     const strip = stripRef.current;
     if (!el || !strip) return;
     const onWheel = (e: WheelEvent) => {
-      if (e.defaultPrevented || !e.cancelable || e.ctrlKey || e.metaKey) return;
-      if (e.deltaX !== 0 && el.contains(e.target as Node)) return;
-      const maxScroll = el.scrollWidth - el.clientWidth;
-      const delta = e.deltaX || e.deltaY;
-      if (maxScroll <= 0 || delta === 0) return;
-      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1;
-      const next = Math.max(0, Math.min(maxScroll, el.scrollLeft + delta * unit));
-      if (next === el.scrollLeft) return;
-      e.preventDefault();
-      el.scrollLeft = next;
-      recomputeEdges();
+      if (scrollTabStripFromWheel(el, e)) recomputeEdges();
     };
     strip.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('scroll', recomputeEdges, { passive: true });

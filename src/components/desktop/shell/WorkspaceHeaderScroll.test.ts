@@ -145,7 +145,13 @@ it('reveals externally selected tabs without scrolling the surrounding workspace
 it('keeps the active or keyboard-focused tab visible when the available width shrinks', async () => {
   await act(async () => root.render(createElement(HeaderPillStrip, { tabs, activeTabId: 'tab-5', workspaceId: 'fixture-workspace' })));
   await act(async () => { Object.defineProperty(scroller, 'clientWidth', { value: 100 }); resize(); });
-  expect(scroller.scrollLeft).toBe(500);
+  const viewport = scroller.getBoundingClientRect();
+  const target = pills[5].getBoundingClientRect();
+  expect(target.left).toBeGreaterThanOrEqual(viewport.left);
+  expect(target.right).toBeLessThanOrEqual(viewport.right);
+  const settledPosition = scroller.scrollLeft;
+  await act(async () => resize());
+  expect(scroller.scrollLeft).toBe(settledPosition);
   await act(async () => { pills[0].focus(); Object.defineProperty(scroller, 'clientWidth', { value: 70 }); resize(); });
   expect(scroller.scrollLeft).toBe(0);
   expect(document.activeElement).toBe(pills[0]);

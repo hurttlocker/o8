@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { Terminal as TablerTerminal } from '@/components/desktop/tabler-shims';
 import type { O8Tab, RightUtilityTab } from './types';
+import { revealHeaderTab, scrollTabStripFromWheel } from '../shell/tab-scroll';
 export type { RightUtilityTab } from './types';
 
 function FilesIcon({ size = 18 }: { size?: number }) {
@@ -74,6 +75,12 @@ const RIGHT_UTILITY_BY_ID = Object.fromEntries(
   RIGHT_UTILITY_TABS.map((tab) => [tab.id, tab]),
 ) as Record<RightUtilityTab, RightUtilityDefinition>;
 
+function revealUtilityTab(scroller: HTMLDivElement, tab: Element) {
+  // Include the close control beside the label. The landing tab has no wrapper.
+  const target = tab.parentElement === scroller ? tab : tab.parentElement ?? tab;
+  revealHeaderTab(scroller, target);
+}
+
 export function RightUtilityTabStrip({
   tabs,
   activeTab,
@@ -90,6 +97,24 @@ export function RightUtilityTabStrip({
   onClose: (tab: RightUtilityTab) => void;
 }) {
   const stripRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const scroller = tabsRef.current;
+    if (!scroller) return;
+    const onWheel = (event: WheelEvent) => { scrollTabStripFromWheel(scroller, event); };
+    scroller.addEventListener('wheel', onWheel, { passive: false });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+      const target = scroller.querySelector('[role="tab"]:focus-within') ?? scroller.querySelector('[aria-selected="true"]');
+      if (target) revealUtilityTab(scroller, target);
+    });
+    observer?.observe(scroller);
+    return () => { scroller.removeEventListener('wheel', onWheel); observer?.disconnect(); };
+  }, []);
+  useLayoutEffect(() => {
+    const scroller = tabsRef.current;
+    const active = scroller?.querySelector('[aria-selected="true"]');
+    if (scroller && active) revealUtilityTab(scroller, active);
+  }, [activeTab, tabs.length]);
   const closeTab = (tab: RightUtilityTab) => {
     const list = stripRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     const index = tabs.indexOf(tab);
@@ -100,7 +125,12 @@ export function RightUtilityTabStrip({
   };
   return (
     <div ref={stripRef} data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1, minHeight: inHeader ? 28 : 34, paddingTop: inHeader ? 0 : 4, paddingRight: inHeader ? 0 : 8, paddingBottom: inHeader ? 0 : 4, paddingLeft: inHeader ? 0 : 8, borderBottom: inHeader ? 'none' : '1px solid var(--t-divider)', background: inHeader ? 'transparent' : 'var(--t-bg)' }}>
-      <div role="tablist" aria-label="Right panel tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflowX: 'auto', overflowY: 'hidden' }}>
+      <div ref={tabsRef} role="tablist" aria-label="Right panel tabs" aria-orientation="horizontal"
+        onFocusCapture={(event) => {
+          const tab = event.target.closest('[role="tab"]');
+          if (tab) revealUtilityTab(event.currentTarget, tab);
+        }}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'none', overscrollBehaviorX: 'contain' }}>
         {tabs.map((tab) => {
           const def = RIGHT_UTILITY_BY_ID[tab];
           const active = activeTab === tab;
@@ -178,6 +208,8 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
         minHeight: 0,
         overflowY: 'auto',
         overflowX: 'hidden',
+        overscrollBehavior: 'contain',
+        scrollbarWidth: 'none',
         background: 'var(--t-bg)',
         paddingTop: 14,
         paddingRight: 14,
