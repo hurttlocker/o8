@@ -63,7 +63,8 @@ export async function ensureFreeEntitlement(options: { allowPinnedPlan?: boolean
   // operation such as private feedback may still request an install credential
   // solely for server authentication; the env pin continues to own the local
   // plan resolution.
-  if (process.env.O8_PLAN && !options.allowPinnedPlan) return;
+  const pinnedPlan = process.env.O8_PLAN;
+  if (pinnedPlan && !options.allowPinnedPlan) return;
   const licenseServerBaseUrl = configuredLicenseServerBaseUrl();
   if (!licenseServerBaseUrl) {
     console.debug('[entitlement] License server not configured; using free plan.');
@@ -107,7 +108,13 @@ export async function ensureFreeEntitlement(options: { allowPinnedPlan?: boolean
 
       await withAccountStateLease(() => {
         requireAccountGeneration(generation);
-        if (readCachedEntitlement()?.licenseKey) return;
+        // Issuance, verification and lease acquisition can yield to other
+        // entitlement writers or configuration changes. Recheck before writing.
+        if (
+          readCachedEntitlement()?.licenseKey
+          || process.env.O8_PLAN !== pinnedPlan
+          || !configuredLicenseServerBaseUrl()
+        ) return;
         writeCachedEntitlement({
           plan: verified.plan!,
           status: 'active',

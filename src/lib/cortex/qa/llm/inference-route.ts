@@ -225,7 +225,7 @@ export async function probeLocalInference(baseUrl: string): Promise<LocalInferen
 export async function resolveOpenRouterRoute(
   options: ResolveOpenRouterRouteOptions = {},
 ): Promise<InferenceRoute | null> {
-  const token = planToken();
+  let token = planToken();
   if (token) {
     return {
       url: `${proxyBaseUrl()}/v1/inference`,
@@ -272,12 +272,14 @@ export async function resolveOpenRouterRoute(
   let freeToken = freeAllowanceToken();
   if (!freeToken && options.provisionInstallAllowance) {
     await ensureFreeEntitlement();
+    token = planToken();
     freeToken = freeAllowanceToken();
   }
-  if (freeToken) {
+  const proxyToken = token ?? freeToken;
+  if (proxyToken) {
     return {
       url: `${proxyBaseUrl()}/v1/inference`,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freeToken}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${proxyToken}` },
       via: 'proxy',
     };
   }
@@ -305,11 +307,12 @@ export async function resolvePiInferenceRoute(): Promise<InferenceRoute | null> 
     let freeToken = freeAllowanceToken();
     if (!freeToken) {
       await ensureFreeEntitlement();
+      token = planToken();
       freeToken = freeAllowanceToken();
     }
     // An O8_PLAN pin can resolve a paid install as free; its paid token must
     // not ride the free route. The relay still verifies the signature.
-    token = freeToken && tokenPlanClaim(freeToken) === 'free' ? freeToken : null;
+    token ??= freeToken && tokenPlanClaim(freeToken) === 'free' ? freeToken : null;
   }
   return token
     ? {
