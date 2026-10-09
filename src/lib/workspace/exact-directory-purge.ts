@@ -1,12 +1,8 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { lstat, realpath, readdir } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
-import {
-  removeExactEmptyChildDirectory,
-  renameExactChildDirectory,
-} from './exact-parent-operation';
+import { removeExactEmptyChildDirectory } from './exact-parent-operation';
 
 export interface ExactDirectoryManifestEntry {
   relative: string;
@@ -345,34 +341,7 @@ export async function purgeExactDirectory(
     afterTreeCapture,
   );
   await afterContentRelease?.(candidatePath);
-  const retiredPath = path.join(
-    parentPath,
-    `.o8-retired-tree-${path.basename(candidatePath)}-${randomUUID()}`,
-  );
-  await renameExactChildDirectory(
-    parentPath,
-    parentIdentity,
-    candidatePath,
-    retiredPath,
-    identity,
-  );
-  const moved = await lstat(retiredPath);
-  if (!moved.isDirectory() || moved.isSymbolicLink()
-    || moved.dev !== identity.device || moved.ino !== identity.inode) {
-    throw new Error('Exact purge retirement moved an unexpected directory identity.');
-  }
-  await removeExactEmptyChildDirectory(parentPath, parentIdentity, retiredPath, identity);
-  await Promise.all((await readdir(parentPath))
-    .filter((name) => name.startsWith('.o8-retired-tree-'))
-    .map(async (name) => {
-      const candidate = path.join(parentPath, name);
-      const stat = await lstat(candidate).catch(() => null);
-      if (!stat?.isDirectory() || stat.isSymbolicLink()) return;
-      await removeExactEmptyChildDirectory(
-        parentPath,
-        parentIdentity,
-        candidate,
-        { device: stat.dev, inode: stat.ino },
-      ).catch(() => undefined);
-    }));
+  // The caller already journals this exact namespace. Keep it replayable until
+  // final removal and never infer authority over similarly named siblings.
+  await removeExactEmptyChildDirectory(parentPath, parentIdentity, candidatePath, identity);
 }
