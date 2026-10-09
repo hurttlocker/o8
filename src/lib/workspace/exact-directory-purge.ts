@@ -2,7 +2,51 @@ import { spawn } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
+import { readProcessCwdSnapshot, type ProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
+import { probeMetadataLockProcessIdentity, sameMetadataLockProcessIdentity,
+  type MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { removeExactEmptyChildDirectory } from './exact-parent-operation';
+
+const capturedPurgeBrand: unique symbol = Symbol('captured-purge');
+export interface CapturedPurgeProcessWitness { readonly [capturedPurgeBrand]: true }
+const capturedPurgeProcesses = new WeakMap<CapturedPurgeProcessWitness, {
+  pid: number;
+  identity: MetadataLockProcessIdentity;
+  candidatePath: string;
+  device: number;
+  inode: number;
+}>();
+type AfterTreeCapture = (candidatePath: string, witness: CapturedPurgeProcessWitness) => Promise<void>;
+
+/** Only the currently paused, birth-verified native helper may be excluded. */
+export async function readCapturedPurgeCwdSnapshot(
+  witness: CapturedPurgeProcessWitness,
+  scopePath: string,
+): Promise<ProcessCwdSnapshot> {
+  const captured = capturedPurgeProcesses.get(witness);
+  const scope = path.resolve(scopePath);
+  if (!captured || scope === path.parse(scope).root
+    || (captured.candidatePath !== scope && !captured.candidatePath.startsWith(scope + path.sep))) {
+    throw new Error('Purge process witness is not live authority for this workspace.');
+  }
+  const stat = await lstat(captured.candidatePath);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== captured.device
+    || stat.ino !== captured.inode || await realpath(captured.candidatePath) !== captured.candidatePath) {
+    throw new Error('Captured purge namespace changed during the process probe.');
+  }
+  const snapshot = await readProcessCwdSnapshot({ forceRefresh: true });
+  const probe = await probeMetadataLockProcessIdentity(captured.pid);
+  if (snapshot.status !== 'ready' || probe.state !== 'live'
+    || !sameMetadataLockProcessIdentity(probe.identity, captured.identity)
+    || capturedPurgeProcesses.get(witness) !== captured) {
+    throw new Error('Captured purge process truth is unknown or no longer live.');
+  }
+  const rows = snapshot.rows.filter(row => row.pid === captured.pid);
+  if (rows.length !== 1 || path.resolve(rows[0].cwd) !== captured.candidatePath) {
+    throw new Error('Captured purge process has no exact native cwd observation.');
+  }
+  return { ...snapshot, rows: snapshot.rows.filter(row => row.pid !== captured.pid) };
+}
 
 export interface ExactDirectoryManifestEntry {
   relative: string;
@@ -223,7 +267,7 @@ async function runCapturedPurge(
   identity: { device: number; inode: number },
   expectedFingerprint: string | undefined,
   expectedManifest: ExactDirectoryManifestEntry[] | undefined,
-  afterTreeCapture?: (candidatePath: string) => Promise<void>,
+  afterTreeCapture?: AfterTreeCapture,
 ): Promise<void> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
     cwd: candidatePath,
@@ -238,28 +282,43 @@ async function runCapturedPurge(
   });
   let stdout = '';
   let stderr = '';
-  const closed = new Promise<number | null>((resolve) => child.once('close', resolve));
+  let witness: CapturedPurgeProcessWitness | undefined;
+  const closed = new Promise<number | null>((resolve) => child.once('close', code => {
+    if (witness) capturedPurgeProcesses.delete(witness);
+    resolve(code);
+  }));
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+  child.stdin.on('error', () => { /* Native close outcome remains authoritative. */ });
   child.stdin.write(`${JSON.stringify({ entries: expectedManifest ?? [] })}\n`);
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Exact purge capture timed out.')), 60_000);
-    const inspect = () => {
-      if (/O8_PURGE_CAPTURED [0-9a-f]{64}\n/.test(stdout)) {
-        clearTimeout(timeout);
-        resolve();
-      }
-    };
-    child.stdout.on('data', inspect);
-    void closed.then((code) => {
-      if (code !== null && code !== 0) {
-        clearTimeout(timeout);
-        reject(new Error(stderr.trim() || 'Exact purge capture failed.'));
-      }
-    });
-  });
   try {
-    await afterTreeCapture?.(candidatePath);
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Exact purge capture timed out.')), 60_000);
+      const inspect = () => {
+        if (/O8_PURGE_CAPTURED [0-9a-f]{64}\n/.test(stdout)) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+      child.stdout.on('data', inspect);
+      void closed.then(() => {
+        if (!/O8_PURGE_CAPTURED [0-9a-f]{64}\n/.test(stdout)) {
+          clearTimeout(timeout);
+          reject(new Error(stderr.trim() || 'Exact purge capture failed.'));
+        }
+      });
+    });
+    const stat = await lstat(candidatePath);
+    const probe = child.pid ? await probeMetadataLockProcessIdentity(child.pid) : null;
+    if (!probe || probe.state !== 'live' || !child.pid || !stat.isDirectory() || stat.isSymbolicLink()
+      || stat.dev !== identity.device || stat.ino !== identity.inode
+      || await realpath(candidatePath) !== path.resolve(candidatePath)) {
+      throw new Error('Exact purge could not attest its paused native process and namespace.');
+    }
+    witness = Object.freeze({ [capturedPurgeBrand]: true as const });
+    capturedPurgeProcesses.set(witness, { pid: child.pid, identity: probe.identity,
+      candidatePath: path.resolve(candidatePath), device: identity.device, inode: identity.inode });
+    await afterTreeCapture?.(candidatePath, witness);
   } catch (error) {
     // EOF refuses release. Settle the captured child before reporting refusal,
     // so the caller cannot race an authorized writer after seeing an error.
@@ -317,7 +376,7 @@ export async function purgeExactDirectory(
   candidatePath: string,
   identity: { device: number; inode: number },
   beforeCapture?: (candidatePath: string) => Promise<void>,
-  afterTreeCapture?: (candidatePath: string) => Promise<void>,
+  afterTreeCapture?: AfterTreeCapture,
   afterContentRelease?: (candidatePath: string) => Promise<void>,
   expectedFingerprint?: string,
   expectedManifest?: ExactDirectoryManifestEntry[],

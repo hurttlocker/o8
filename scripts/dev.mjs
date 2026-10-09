@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolveSpawn, withServerOnlyStubNodeOptions } from './run-lib.mjs';
+import { generatedOutputLaunch } from './lib/generated-output-launch.mjs';
 
 const root = process.cwd();
 const stateDir = join(
@@ -102,7 +103,11 @@ function run(label, command, args) {
   // package's JS entry here but a .cmd shim on Windows that bare spawn() cannot
   // exec. resolveSpawn() runs that JS entry under process.execPath instead, so
   // the PID we remember below stays the real child on every platform (#1744).
-  const { file, args: spawnArgs, shell } = resolveSpawn(command, args);
+  const invocation = command === 'next'
+    ? generatedOutputLaunch('dev', args.slice(1)) : null;
+  const { file, args: spawnArgs, shell } = invocation
+    ? { file: invocation.command, args: invocation.args, shell: false }
+    : resolveSpawn(command, args);
   const child = spawn(file, spawnArgs, { cwd: root, env, stdio: 'inherit', shell });
   remember(child.pid, label);
 

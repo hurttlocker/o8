@@ -109,9 +109,15 @@ export function acquireWorkspaceRetentionHold(input: {
       throw new Error('The workspace already has a different retention hold.');
     }
     const claim = sqlite.prepare(`
-      SELECT operation_id FROM workspace_exact_claims WHERE kind = 'managed-retirement'
-        AND (expected_path = ? OR (source_device = ? AND source_inode = ?)) LIMIT 1
-    `).get(workspacePath, input.identity.device, input.identity.inode);
+      SELECT operation_id FROM workspace_exact_claims
+      WHERE kind IN ('managed-retirement', 'generated-output-retirement', 'generated-output-recovery-retirement') AND (
+        expected_path = ? OR (source_device = ? AND source_inode = ?)
+        OR (kind = 'generated-output-retirement' AND (
+          parent_canonical_path = ? OR (parent_device = ? AND parent_inode = ?)
+        ))
+      ) LIMIT 1
+    `).get(workspacePath, input.identity.device, input.identity.inode,
+      workspacePath, input.identity.device, input.identity.inode);
     const retiring = sqlite.prepare(`
       SELECT packet_id FROM workspace_snapshots
       WHERE (original_path = ? OR (repository_uuid = ? AND packet_id = ?))

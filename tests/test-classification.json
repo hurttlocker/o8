@@ -2101,6 +2101,13 @@
       ]
     },
     {
+      "path": "tests/exact-purge-captured-process-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/exact-purge-finalization-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2237,6 +2244,42 @@
         "executable-fixture",
         "git-cli",
         "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/generated-output-bank-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/generated-output-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/generated-output-parent-retention-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/generated-output-retirement-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "terminal-tool",
         "worktree-api"
       ]
     },

@@ -8,7 +8,8 @@ import { assertWorkspaceRetentionReleased } from './retention-holds';
 
 function binding(claim: ExactWorkspaceClaimRecord) {
   const fingerprint = (claim.authority?.purgeManifest as { fingerprint?: unknown } | undefined)?.fingerprint;
-  if (claim.kind !== 'managed-retirement' || claim.state !== 'purging'
+  if (!['managed-retirement', 'generated-output-retirement', 'generated-output-recovery-retirement'].includes(claim.kind)
+    || claim.state !== 'purging'
     || !claim.sourceIdentity || !claim.claimIdentity
     || claim.sourceIdentity.device !== claim.claimIdentity.device
     || claim.sourceIdentity.inode !== claim.claimIdentity.inode
@@ -47,7 +48,7 @@ interface FinalizationRow {
 
 /** Keep the fresh claim binding distinct from a receipt-like filesystem name. */
 export function assertExactManagedFinalizationClaim(claim: ExactWorkspaceClaimRecord): ExactWorkspaceClaimRecord {
-  const current = readExactWorkspaceClaim('managed-retirement', claim.repositoryPath, claim.worktreeId);
+  const current = readExactWorkspaceClaim(claim.kind, claim.repositoryPath, claim.worktreeId);
   if (!current || JSON.stringify(binding(current)) !== JSON.stringify(binding(claim))) {
     throw new Error('Exact managed retirement lost its owning purge claim before final removal.');
   }
