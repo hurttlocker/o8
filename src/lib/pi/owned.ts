@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { appendFile, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -23,6 +23,7 @@ import type { OwnedTailEntry, OwnedTailGroup } from '@/lib/runtimes/shared/owned
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
+import { findUserPiSession, piUserAgentDir, PI_SESSION_COPY_BYTES, readPiFile } from '@/lib/pi/user-setup';
 
 export {
   buildPiPermissionDefaultResponse,
@@ -64,6 +65,7 @@ interface PiSessionRecord {
   model?: string;
   piSessionId?: string;
   piSessionFile?: string;
+  agentDir?: string;
   reviewDisposition?: 'watching' | 'resolved';
   reviewDispositionUpdatedAt?: string;
   activeRun?: PiRunRecord;
@@ -302,9 +304,9 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
   const launch = cliInvocation(binary, args);
   const child = spawn(launch.command, launch.args, {
     windowsHide: true,
-    cwd: session.repoPath,
+    cwd: session.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    env: { ...process.env, PI_CODING_AGENT_DIR: session.agentDir ?? piUserAgentDir(), FORCE_COLOR: '0', NO_COLOR: '1' },
   });
   run.pid = child.pid;
   let carry = '';
@@ -419,7 +421,7 @@ function buildSurface(session: PiSessionRecord): RuntimeSurfaceSummary {
     kind: 'runtime-session',
     ownership: 'owned',
     title: session.title,
-    cwd: session.repoPath.replace(os.homedir(), '~'),
+    cwd: session.cwd.replace(os.homedir(), '~'),
     branch: session.branch,
     sourceLabel: running ? `IDE-owned Pi RPC • active pid ${session.activeRun?.pid ?? 'unknown'}` : 'IDE-owned Pi RPC • ready',
     tailSourceLabel: `${session.sessionDir}/${RUNS_DIR}/*.jsonl`,
@@ -483,10 +485,20 @@ export async function launchOwnedPiSession(request: {
   model?: string;
   laneId?: string;
   packetId?: string;
+  userSessionKey?: string;
 }) {
   const prompt = request.prompt.trim();
   if (!prompt) throw new Error('prompt is required');
-  const repoPath = await validateWorkspace(request.cwd);
+  const source = request.userSessionKey ? await findUserPiSession(request.userSessionKey) : null;
+  if (request.userSessionKey && !source) {
+    return { ok: false, runtime: 'pi' as const, note: 'User Pi session was not found in the configured session directory.' };
+  }
+  const sourceBytes = source ? await readPiFile(source.sessionKey.slice('pi:'.length), PI_SESSION_COPY_BYTES) : null;
+  if (source && !sourceBytes) {
+    return { ok: false, runtime: 'pi' as const, note: 'User Pi session could not be read within the session size limit.' };
+  }
+  const targetCwd = source?.cwd ?? request.cwd;
+  const repoPath = await validateWorkspace(targetCwd);
   const repo = await resolveRepoContext(repoPath);
   const id = `${SESSION_PREFIX}${Date.now()}-${randomUUID().slice(0, 8)}`;
   const sessionDir = path.join(await ensureRoot(), id);
@@ -497,7 +509,7 @@ export async function launchOwnedPiSession(request: {
     laneId: request.laneId?.trim() || undefined,
     packetId: request.packetId?.trim() || undefined,
     sessionDir,
-    cwd: repoPath,
+    cwd: source ? await realpath(targetCwd) : repoPath,
     repoPath,
     repoSlug: repo.repoSlug,
     branch: repo.branch,
@@ -508,12 +520,18 @@ export async function launchOwnedPiSession(request: {
     latestPrompt: prompt,
     latestSummary: compactText(prompt, 140),
     model: request.model?.trim() || undefined,
+    agentDir: piUserAgentDir(),
     reviewDisposition: 'watching',
     reviewDispositionUpdatedAt: nowIso(),
     recentRuns: [],
   };
+  if (sourceBytes) {
+    // Pi appends to --session. Resume a private working copy, leaving the source intact.
+    session.piSessionFile = path.join(sessionDir, 'pi-session.jsonl');
+    await writeFile(session.piSessionFile, sourceBytes, { flag: 'wx', mode: 0o600 });
+  }
   await saveSession(session);
-  await startRun(session, prompt, 'launch');
+  await startRun(session, prompt, source ? 'resume' : 'launch');
   return { ok: true, runtime: 'pi' as const, surfaceId: session.surfaceId, note: `Owned Pi RPC run launched for ${repo.title}.` };
 }
 
