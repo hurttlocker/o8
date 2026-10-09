@@ -126,7 +126,7 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     key: 'o8',
     label: 'o8',
     options: [
-      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'built-in agent · managed model' },
+      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'Managed model' },
     ],
   },
 ];

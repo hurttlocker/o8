@@ -58,8 +58,10 @@ describe('composer selector state', () => {
         expect(turn.wireMessage, mode).toContain(resolved.modeDirective);
         expect(route.orchestrationMode, mode).toBe(resolved.orchestrationMode);
         expect(route.wireMessage, mode).toContain(resolved.modeDirective);
-        expect(route.thinkingEffort, `${mode}:${effort}`).toBe(effort);
-        expect(resolved.effort, `${mode}:${effort}`).toBe(effort);
+        const expected = effort === 'adaptive' ? 'high' : effort;
+        expect(route.thinkingEffort, `${mode}:${effort}`).toBe(expected);
+        expect(resolved.effort, `${mode}:${effort}`).toBe(expected);
+        expect(resolved.effortOptions).not.toContain('adaptive');
       }
     }
   });

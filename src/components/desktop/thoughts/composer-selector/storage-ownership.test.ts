@@ -13,6 +13,7 @@ const directPersistenceSeams: Record<string, string> = {
   'chat-panel/useAgentVoiceMode.ts': 'Owns the per-agent voice-mode preference.',
   'composer-mode-storage.ts': 'Owns tab-scoped composer mode persistence and legacy migration.',
   'composer-selector/state.ts': 'Owns selector feature flags plus global and per-thread effort maps.',
+  'composer-selector/model-favorites.ts': 'Owns browser-local model favorites scoped to orchestrator, workers, or a catalogue. Selection still requires a current catalogue match.',
   'mission-panel/PacketCard.tsx': 'Owns the selected detail tab for each packet card.',
   'use-orchestrator-stream/pending-send-store.ts': 'Owns durable pending-send records through an injectable storage seam.',
 };

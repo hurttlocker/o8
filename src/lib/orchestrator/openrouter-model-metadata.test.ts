@@ -71,6 +71,19 @@ describe('getOpenRouterModelMetadata', () => {
     expect(second).toBe(first);
   });
 
+  it('matches display metadata to exact public ids and omits malformed prices and dates', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [
+      { id: 'stealth/model', created: 1_790_000_000, context_length: 200000, pricing: { prompt: '0.000001', completion: '0.000004' } },
+      { id: 'vendor/model', created: 'invalid', context_length: -1, pricing: { prompt: '', completion: '-1' } },
+    ] }), { status: 200 })));
+    const data = await getOpenRouterModelMetadata('newest');
+    expect(data?.get('openrouter/stealth/model')).toMatchObject({ stealth: true, created: 1_790_000_000, contextLength: 200000, inputPricePerMillion: 1, outputPricePerMillion: 4 });
+    expect(data?.get('openrouter/vendor/model')).not.toHaveProperty('created');
+    expect(data?.get('openrouter/vendor/model')).not.toHaveProperty('inputPricePerMillion');
+    expect(data?.get('openrouter/vendor/model')).not.toHaveProperty('contextLength');
+    expect(data?.has('stealth/model')).toBe(false);
+  });
+
   it('falls back honestly when public metadata is unavailable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('timed out', 'AbortError')));
     await expect(getOpenRouterModelMetadata('newest')).resolves.toBeNull();

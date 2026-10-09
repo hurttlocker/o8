@@ -86,6 +86,7 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-text-faint': '#94a3b8',
   // Accent
   '--t-accent': '#2563eb',
+  '--t-accent-contrast': '#ffffff',
   '--t-accent-soft': 'rgba(37, 99, 235, 0.1)',
   '--t-accent-soft-strong': 'rgba(37, 99, 235, 0.18)',
   '--t-accent-border': 'rgba(37, 99, 235, 0.26)',
@@ -303,6 +304,7 @@ const DARK_BASE: Record<string, string> = {
   '--t-text-muted': '#8b95a3',
   '--t-text-faint': '#5f6b7a',
   '--t-accent': '#8fb4ff',
+  '--t-accent-contrast': '#141414',
   '--t-accent-soft': 'rgba(143, 180, 255, 0.14)',
   '--t-accent-soft-strong': 'rgba(143, 180, 255, 0.22)',
   '--t-accent-border': 'rgba(143, 180, 255, 0.28)',

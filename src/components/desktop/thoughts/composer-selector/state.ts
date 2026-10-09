@@ -21,7 +21,7 @@ export const LEGACY_COMPOSER_EFFORT_STORAGE_KEY = 'o8:orchestrator:thinking-effo
 
 export type ComposerSelectorMode = 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
 export type ComposerEffortMap = Partial<Record<string, ThinkingEffort>>;
-export type ComposerProviderMark = 'anthropic' | 'openai' | 'gemini' | 'x' | 'deepseek' | 'copilot' | 'ollama' | 'o8' | 'terminal';
+export type ComposerProviderMark = import('./provider-marks').ProviderMark;
 
 export const COMPOSER_PROVIDER_MARK_TABLE = {
   leadModelFamilies: [
@@ -41,7 +41,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     collide: 'terminal',
     fable: 'anthropic',
     o8: 'o8',
-    opencode: 'terminal',
+    opencode: 'opencode',
     pi: 'terminal',
   },
   workerRuntimes: {
@@ -49,9 +49,9 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     cloud: 'openai',
     'claude-code': 'anthropic',
     gemini: 'gemini',
-    antigravity: 'gemini',
+    antigravity: 'antigravity',
     magnitude: 'terminal',
-    opencode: 'terminal',
+    opencode: 'opencode',
     'copilot-cli': 'copilot',
     crush: 'terminal',
     openhands: 'terminal',
@@ -60,10 +60,10 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     qoder: 'terminal',
     kimi: 'terminal',
     aider: 'terminal',
-    '3code': 'terminal',
-    pi: 'terminal',
-    'pi-builtin': 'terminal',
-    cursor: 'terminal',
+    '3code': 'threecode',
+    pi: 'pi',
+    'pi-builtin': 'pi',
+    cursor: 'cursor',
     grok: 'x',
     'prime-agent': 'terminal',
     'deepseek-harness': 'deepseek',
@@ -161,7 +161,7 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
 /** Visible choices; the advanced execution modes remain available internally. */
 export const VISIBLE_COMPOSER_SELECTOR_MODES = ['solo', 'fast', 'multitask'] as const;
 
-const BASE_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
+const BASE_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT_RANK: Record<ThinkingEffort, number> = {
   low: 0,
   medium: 1,
@@ -312,13 +312,14 @@ export function resolveComposerSelectorExecutionMode(mode: ComposerSelectorMode)
 export function supportedEffortsForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
-  adaptiveEnabled: boolean,
+  _adaptiveEnabled: boolean,
   _isFreePlan = false,
   ultraEnabled = false,
 ): readonly ThinkingEffort[] {
   if (backend === 'o8') return ['low'];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
-  const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
+  // Adaptive is a provider thinking mode, not a manual effort level.
+  const base = [...BASE_EFFORTS];
   const supportsMax = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'max');
   const supportsUltra = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'ultra');
   if (backend === 'codex') {

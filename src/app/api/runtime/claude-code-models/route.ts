@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { buildModelCatalogue, catalogueSize } from '@/lib/orchestrator/acp-model-catalogue';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { getOpenRouterModelMetadata, type OpenRouterModelSort } from '@/lib/orchestrator/openrouter-model-metadata';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ type OpenRouterModel = {
   supported_parameters?: unknown;
 };
 
-let cache: { groups: ReturnType<typeof buildModelCatalogue>; fetchedAt: number } | null = null;
+const caches = new Map<OpenRouterModelSort, { groups: ReturnType<typeof buildModelCatalogue>; fetchedAt: number; rankingAvailable: boolean }>();
 
 function supportsClaudeCodeTools(model: OpenRouterModel): boolean {
   if (!Array.isArray(model.supported_parameters)) return false;
@@ -28,8 +29,10 @@ export async function GET(request: NextRequest) {
   if (denied) return denied;
 
   const force = request.nextUrl.searchParams.get('refresh') === '1';
+  const sort = request.nextUrl.searchParams.get('sort') === 'newest' ? 'newest' : 'most-popular';
+  const cache = caches.get(sort);
   if (!force && cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
-    return NextResponse.json({ available: true, groups: cache.groups, total: catalogueSize(cache.groups), source: 'cache' });
+    return NextResponse.json({ available: true, groups: cache.groups, total: catalogueSize(cache.groups), rankingAvailable: cache.rankingAvailable, source: 'cache' });
   }
 
   try {
@@ -45,9 +48,14 @@ export async function GET(request: NextRequest) {
       .flatMap((model) => typeof model.id === 'string' && model.id.trim()
         ? [{ value: model.id.trim(), name: typeof model.name === 'string' ? model.name : undefined }]
         : []);
-    const groups = buildModelCatalogue(options);
-    cache = { groups, fetchedAt: Date.now() };
-    return NextResponse.json({ available: true, groups, total: catalogueSize(groups), source: 'live' });
+    const metadata = await getOpenRouterModelMetadata(sort);
+    const mapped = metadata ? new Map([...metadata].map(([id, value]) => [id.replace(/^openrouter\//, ''), value])) : undefined;
+    const models = buildModelCatalogue(options, mapped).flatMap((group) => group.models).map((model) => ({ ...model, provider: 'openrouter' }));
+    models.sort((a, b) => (a.metadata?.rank ?? Infinity) - (b.metadata?.rank ?? Infinity) || a.id.localeCompare(b.id));
+    const groups = [{ provider: 'openrouter', models }];
+    const rankingAvailable = Boolean(metadata?.size);
+    caches.set(sort, { groups, fetchedAt: Date.now(), rankingAvailable });
+    return NextResponse.json({ available: true, groups, total: catalogueSize(groups), rankingAvailable, source: 'live' });
   } catch (error) {
     return NextResponse.json({
       available: true,

@@ -8,6 +8,9 @@ interface OpenRouterModelResponse {
   data?: Array<{
     id?: unknown;
     name?: unknown;
+    created?: unknown;
+    context_length?: unknown;
+    description?: unknown;
     pricing?: { prompt?: unknown; completion?: unknown; request?: unknown } | null;
     architecture?: { output_modalities?: unknown } | null;
   }>;
@@ -20,6 +23,13 @@ interface CachedMetadata {
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const cache = new Map<OpenRouterModelSort, CachedMetadata>();
+
+function pricePerMillion(value: unknown): number | undefined {
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+  if (typeof value === 'string' && !value.trim()) return undefined;
+  const price = Number(value);
+  return Number.isFinite(price) && price >= 0 ? price * 1_000_000 : undefined;
+}
 
 function knownZero(value: unknown): boolean {
   if (typeof value === 'number') return value === 0;
@@ -65,11 +75,18 @@ export async function getOpenRouterModelMetadata(
       if (typeof model.id !== 'string' || !model.id.trim()) return;
       const label = typeof model.name === 'string' && model.name.trim() ? model.name.trim() : undefined;
       const free = freeFromPricing(model.id, model.pricing);
+      const inputPricePerMillion = pricePerMillion(model.pricing?.prompt);
+      const outputPricePerMillion = pricePerMillion(model.pricing?.completion);
       metadata.set(`openrouter/${model.id}`, {
         rank,
         ...(label ? { label } : {}),
         ...(free === undefined ? {} : { free }),
         compatible: textOutputCompatible(model.architecture),
+        ...(typeof model.created === 'number' && Number.isFinite(model.created) && model.created > 0 ? { created: model.created } : {}),
+        ...(typeof model.context_length === 'number' && Number.isFinite(model.context_length) && model.context_length > 0 ? { contextLength: model.context_length } : {}),
+        ...(inputPricePerMillion === undefined ? {} : { inputPricePerMillion }),
+        ...(outputPricePerMillion === undefined ? {} : { outputPricePerMillion }),
+        ...(model.id.startsWith('stealth/') || (typeof model.description === 'string' && /\bstealth model\b/i.test(model.description)) ? { stealth: true } : {}),
       });
     });
     cache.set(sort, { metadata, expiresAt: Date.now() + CACHE_TTL_MS });
