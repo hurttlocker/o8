@@ -13,6 +13,9 @@ import { TaskArtifactCard, type TaskArtifactDeliverInput } from './TaskArtifactC
 import type { TaskArtifactView } from '@/lib/task-artifacts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { noteUserScroll } from '@/lib/tts/scroll-follow';
+import { useTranscriptVisualizations } from '@/components/desktop/visualizations/useTranscriptVisualizations';
+import { VisualizationFrame } from '@/components/desktop/visualizations/VisualizationFrame';
+import { placeTranscriptVisualizations } from '@/lib/visualizations/transcript';
 
 // A run of ≥2 consecutive mission-complete cards collapses into ONE aggregate
 // (MissionCompleteGroupCard); everything else renders as its own message. Keys
@@ -150,6 +153,11 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   // line) instead of a stack of shimmer rows. Render-time derivation — the
   // underlying message state is untouched.
   const displayMessages = mergeAdjacentToolOnlyEntries(rawDisplayMessages);
+  const visualizations = useTranscriptVisualizations({ repoPath, threadId, active, length: rawDisplayMessages.length });
+  const visualsByIndex = placeTranscriptVisualizations(visualizations, displayMessages);
+  const renderVisualizations = (index: number) => (visualsByIndex.get(index) ?? []).map(reference => (
+    <VisualizationFrame key={reference.id} reference={reference} />
+  ));
   // Each artifact renders after the last transcript entry that precedes its
   // creation; anything newer than the transcript lands at the end. Key -1 is
   // the "no entries yet" bucket.
@@ -254,6 +262,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
         {showEmptyWithFallback ? emptyStateFallback : null}
 
         {topContent}
+        {renderVisualizations(-1)}
 
         {buildMissionRenderItems(displayMessages).map((item) => {
           if (item.kind === 'mission-group') {
@@ -313,12 +322,14 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
                   isStreaming={isLatestAssistant && !!displayWaiting}
                   repoPath={repoPath}
                   onRetryDelivery={onRetryDelivery}
+                  visualizations={msg.role === 'assistant' ? visualsByIndex.get(index) : undefined}
                 />
               </div>
               {summaryAnchorsAfter && turnSummary ? (
                 <TurnSummaryCard summary={turnSummary} persistedEntry={turnSummaryReceiptEntry} />
               ) : null}
               {renderTaskArtifacts(index)}
+              {msg.role !== 'assistant' ? renderVisualizations(index) : null}
               {showChipsHere ? (
                 <SuggestedReplies
                   chips={suggestedReplies ?? []}

@@ -192,6 +192,7 @@ function resolveCodebaseMemoryBin(): string | null {
  * read-only proposer profile (Collide): it strips the operator server (dispatch)
  * and relaunches the MIXED cortex surface read-only (CORTEX_READONLY=1, only its
  * allowlisted read tools survive) — the #1075 lockout (see `ToolProfile`).
+ * Non-dispatch profiles retain a separate display-only visualization server.
  */
 export function buildToolRegistry(
   repoPath: string,
@@ -241,6 +242,8 @@ export function buildToolRegistry(
       env: {
         O8_API_BASE: apiBase,
         O8_DATA_DIR: getDataDir(),
+        O8_VISUALIZATION_REPO_PATH: repoPath,
+        ...(options?.threadId ? { O8_VISUALIZATION_THREAD_ID: options.threadId } : {}),
         ...ownedCodexEnv,
       },
     },
@@ -331,5 +334,12 @@ export function buildToolRegistry(
         )
     : entries;
 
+  if (dropOperator) {
+    // Solo/proposer turns can display an explanation without dispatch authority.
+    const operator = entries.find(entry => entry.id === 'builtin:operator')!;
+    if (operator.config.type === 'stdio') projected.push({ ...operator, id: 'builtin:visualizations', name: 'visualizations',
+      label: 'Transcript visualizations', config: { ...operator.config,
+        env: { ...operator.config.env, O8_OPERATOR_MCP_PROFILE: 'visualizations' } } });
+  }
   return { repoPath, entries: projected };
 }

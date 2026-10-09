@@ -11,9 +11,11 @@ import { createManagedPiTransport, isPiAllowanceMessage, type PiModelTransport }
 export { requirePiNode, requirePiPlatform } from './platform';
 
 /** A tool the host runs itself. Trusted host adapters only, never built from model or request input. */
+export type PiHostToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+
 export interface PiHostTool {
   definition: { name: string; description: string; parameters: Record<string, unknown> };
-  execute(args: Record<string, unknown>, signal: AbortSignal): Promise<{ content: Array<{ type: 'text'; text: string }> }>;
+  execute(args: Record<string, unknown>, signal: AbortSignal): Promise<{ content: PiHostToolContent[] }>;
 }
 
 const HOST_TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;

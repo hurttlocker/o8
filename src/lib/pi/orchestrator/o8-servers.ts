@@ -4,6 +4,7 @@ import { StdioJsonRpcPeer } from '@/lib/runtimes/shared/stdio-json-rpc';
 import { buildNextUrl } from '@/lib/ws-server/next-fetch';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { O8CommandServer, O8ServerRequest } from './o8-commands';
+import { withVisualizationContext } from '@/lib/mcp/visualization-context';
 
 /** Long enough for blocking commands such as wait_for_mission_ready. */
 const SERVER_REQUEST_TIMEOUT_MS = 15 * 60_000;
@@ -83,7 +84,9 @@ export async function openO8Servers(repoPath: string, options: {
     for (const { name, config, entry } of entriesForSurface(registry, 'claude-orchestrator')) {
       if (entry.source !== 'builtin') continue;
       if (entry.id === 'builtin:operator') {
-        servers.push({ name, request: options.operatorRequest ?? operatorOverHttp });
+        const request = options.operatorRequest ?? operatorOverHttp;
+        servers.push({ name, request: (method, params, signal) => request(method,
+          withVisualizationContext({ method, params }, { repoPath, threadId: options.threadId ?? undefined }).params, signal) });
       } else if (config.type === 'stdio') {
         const opened = await openStdioServer(name, config, repoPath);
         closers.push(opened.close);

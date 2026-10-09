@@ -595,6 +595,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               markLast={status !== 'running'}
               isStreaming={status === 'running'}
               repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace ?? null}
+              packetId={packet?.id}
             />
           </div>
         )}

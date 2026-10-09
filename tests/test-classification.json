@@ -4291,6 +4291,14 @@
       ]
     },
     {
+      "path": "tests/transcript-visualizations-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/transient-materialization-fallback-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4383,6 +4391,19 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/visualization-browser-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/visualization-mcp-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

@@ -285,3 +285,28 @@ and ship verification. It is Brain-ingested: `o8 ask "orchestration playbook
 orchestrator would do next, that file is the answer — follow it even when a
 shortcut looks cheaper; every rule in it is a failure someone already paid for.
 <!-- o8:/dispatch -->
+
+<!-- o8:visualizations -->
+## Interactive explanations in the transcript
+
+For a request to visualize, compare, explore, or mock up something in the reply,
+use `o8_html_preview` followed by `o8_html_render`. They work in Solo as well as
+fleet modes on every orchestrator backend. The explicit `/visualization` command
+requests this workflow; `/visualize` is an alias. Natural language such as
+"show me a visualization", "I want to see how this works", or "illustrate the
+flow" also calls for a visual when it materially clarifies the answer. Do not
+require a slash command, and do not turn a simple file lookup into a chart.
+Build a self-contained HTML page with inline CSS, classic JavaScript, and
+SVG or canvas. It can contain working filters, hover details, tables, diagrams,
+and multiple UI alternatives. Read the tool description for theme variables,
+offline asset rules, and the shared design guidance. Use restrained color,
+clear units, aligned values, truthful scales, and readable axes. Give diagrams
+consistent nodes and a focused detail view. Bind controls with addEventListener.
+Inspect the preview screenshot at the reply width and a narrow width, in light
+and dark appearances, and inspect
+diagnostics, revise until readable, then save the finished page before replying.
+The current transcript target is supplied by o8 when available. A saved page
+appears inline and can open larger in a workspace tab. It has no app or network
+access. Do not paste HTML or reference JSON into the final message; explain only
+what the visual does not already show. Use ordinary prose for simple facts.
+<!-- o8:/visualizations -->

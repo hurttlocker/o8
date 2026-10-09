@@ -33,7 +33,6 @@ import { serializeThreadToMarkdown } from '@/lib/llm/export-thread';
 import {
   executeOrchestratorSlashCommand,
   parseOrchestratorSlashCommand,
-  type SlashOrchestrationRequest,
 } from '@/lib/slash-commands';
 import type { AgentTarget, FleetAgent } from './types';
 import {
@@ -48,6 +47,7 @@ import {
   resolveThreadLoadPlan,
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
+import { useSlashOrchestration } from './useSlashOrchestration';
 import type { OrchestratorSendOptions } from './use-orchestrator-stream/types';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
 import { getPendingMissionCards } from './mission-complete-detector';
@@ -1584,20 +1584,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     });
   }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, resolvedRepoPath, setOrchestratorModel]);
 
-  const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
-    const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
-    sendOrchestrator(request.displayMessage, {
-      permissionMode,
-      backend: composerBackendTurnOverride(orchestratorBackend),
-      thinkingEffort,
-      model: orchestratorModel,
-      wireMessage: request.prompt,
-      displayMessage: request.displayMessage,
-      localEntriesAfterUser,
-      orchestrationMode: resolveComposerExecutionMode('multitask', soloOrchestrator),
-      collide: collideEnabled,
-    });
-  }, [sendOrchestrator, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, soloOrchestrator, collideEnabled]);
+  const slashAttachments = useMemo(() => attachedImages.length
+    ? attachedImages.map(image => ({ dataUri: image.dataUri, name: image.name })) : undefined, [attachedImages]);
+  const startSlashOrchestration = useSlashOrchestration(sendOrchestrator, {
+    permissionMode, backend: composerBackendTurnOverride(orchestratorBackend), thinkingEffort, model: orchestratorModel,
+    orchestrationMode: resolveComposerExecutionMode('multitask', soloOrchestrator), collide: collideEnabled,
+    attachments: slashAttachments,
+  });
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
@@ -1648,10 +1641,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       openRulesManager: () => window.dispatchEvent(new CustomEvent('o8:open-session-rules')), openPromptLibrary: () => window.dispatchEvent(new CustomEvent('o8:prompt-library:open')),
     });
     if (!handled.handled) return false;
-    if (isCurrentThread()) latestInputRef.current = '';
+    if (isCurrentThread()) {
+      latestInputRef.current = '';
+      if (parsedCommand?.command.name === 'visualization' && parsedCommand.args && resolvedRepoPath) clearAttachments();
+    }
     return true;
   }, [
     displayMessages,
+    clearAttachments,
     handleClearCommand,
     isChatMode,
     isOrchestratorMode,

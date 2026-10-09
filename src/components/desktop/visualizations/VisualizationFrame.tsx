@@ -1,0 +1,101 @@
+'use client';
+
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useTheme } from '@/lib/theme/context';
+import { visualizationSrcdoc, type VisualizationTheme } from '@/lib/visualizations/document';
+import { VISUALIZATION_LIMITS, type VisualizationDocument, type VisualizationReference } from '@/lib/visualizations/types';
+import { cachedVisualization, loadVisualization } from './document-cache';
+import { readVisualizationTheme } from './theme';
+
+export function VisualizationFrame({ reference, expanded = false }: { reference: VisualizationReference; expanded?: boolean }) {
+  const nonce = useId();
+  const { paletteId, workspaceGlass, surface } = useTheme();
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const themeRef = useRef<VisualizationTheme | null>(null);
+  const [doc, setDoc] = useState<VisualizationDocument | undefined>(() => cachedVisualization(reference.id));
+  const [error, setError] = useState<string | null>(null);
+  const [height, setHeight] = useState(reference.height);
+  const [ready, setReady] = useState(false);
+  const [controls, setControls] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [srcdoc, setSrcdoc] = useState('');
+
+  useEffect(() => {
+    const theme = readVisualizationTheme();
+    themeRef.current = theme;
+    // Updating theme preserves the page's filters and other interactive state.
+    frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:theme', nonce, theme }, '*');
+  }, [paletteId, workspaceGlass, surface, nonce]);
+
+  useEffect(() => {
+    if (!doc) return;
+    let stopped = false;
+    void visualizationSrcdoc(doc.html, nonce, themeRef.current ?? readVisualizationTheme()).then(source => {
+      if (!stopped) setSrcdoc(source);
+    }).catch(() => { if (!stopped) setError('This browser could not prepare the visualization.'); });
+    return () => { stopped = true; };
+  }, [doc, nonce]);
+
+  useEffect(() => {
+    let stopped = false;
+    const load = () => void loadVisualization(reference.id).then(document => {
+      if (!stopped) { setDoc(document); setError(null); }
+    }).catch(reason => { if (!stopped) setError(reason instanceof Error ? reason.message : 'This visualization could not be loaded.'); });
+    const node = containerRef.current;
+    if (expanded || !node || typeof IntersectionObserver === 'undefined') load();
+    else {
+      const observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); load(); }
+      }, { rootMargin: '400px' });
+      observer.observe(node);
+      return () => { stopped = true; observer.disconnect(); };
+    }
+    return () => { stopped = true; };
+  }, [reference.id, expanded, attempt]);
+
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      if (event.source !== frameRef.current?.contentWindow || event.origin !== 'null' || event.data?.nonce !== nonce
+        || event.data.type !== 'o8-visualization:height' || typeof event.data.height !== 'number' || !Number.isFinite(event.data.height)) return;
+      setHeight(Math.min(expanded ? 4000 : VISUALIZATION_LIMITS.maxHeight, Math.max(VISUALIZATION_LIMITS.minHeight, Math.ceil(event.data.height))));
+      setReady(true);
+      if (themeRef.current) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:theme', nonce, theme: themeRef.current }, '*');
+    };
+    window.addEventListener('message', receive);
+    return () => window.removeEventListener('message', receive);
+  }, [nonce, expanded]);
+
+  useEffect(() => {
+    if (!doc || ready) return;
+    const timer = window.setTimeout(() => setError('The visualization did not finish loading. Try again.'), 12_000);
+    return () => window.clearTimeout(timer);
+  }, [doc, ready, attempt]);
+
+  const open = useCallback(() => window.dispatchEvent(new CustomEvent('o8:open-visualization', { detail: reference })), [reference]);
+  const buttonStyle: React.CSSProperties = { border: '1px solid var(--t-border)', borderRadius: 8, background: 'var(--t-bg-elevated)',
+    color: 'var(--t-text-primary)', font: '12px var(--font-sans-system)', paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, cursor: 'pointer',
+    backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' };
+
+  return <div ref={containerRef} data-o8-visualization={reference.id} style={{ position: 'relative', width: '100%', minWidth: 0, minHeight: error ? 96 : height }}
+    onMouseEnter={() => setControls(true)} onMouseLeave={() => setControls(false)} onFocusCapture={() => setControls(true)}
+    onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setControls(false); }}>
+    {error ? <div role="status" style={{ paddingTop: 16, paddingBottom: 16, color: 'var(--t-text-muted)', fontSize: 13 }}>
+      <div>{error}</div>
+      <button style={{ ...buttonStyle, marginTop: 10 }} onClick={() => { setError(null); setReady(false); setDoc(undefined); setAttempt(value => value + 1); }}>Retry visualization</button>
+    </div> : <>
+      {srcdoc ? <iframe key={`${reference.id}:${attempt}`} ref={frameRef} title={reference.title} sandbox="allow-scripts" referrerPolicy="no-referrer"
+        srcDoc={srcdoc} style={{ display: 'block', border: 0, width: '100%', height, background: 'transparent', opacity: ready ? 1 : 0 }} /> : null}
+      {!ready ? <div role="status" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'var(--t-text-muted)', fontSize: 12, background: 'var(--t-bg-hover)', borderRadius: 10 }}>Loading visualization…</div> : null}
+      {ready && !expanded ? <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6, opacity: controls ? 1 : 0,
+        pointerEvents: controls ? 'auto' : 'none' }}>
+        <button aria-label={`Open ${reference.title} in workspace`} style={{ ...buttonStyle, display: 'flex', alignItems: 'center', gap: 6,
+          background: 'transparent', border: 0, paddingTop: 4, paddingBottom: 4, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)', backdropFilter: 'none', WebkitBackdropFilter: 'none' }} onClick={open}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5" /></svg>
+          Open in workspace
+        </button>
+      </div> : null}
+    </>}
+  </div>;
+}

@@ -1,5 +1,5 @@
 import type { McpTool } from '@/lib/mcp/operator-handlers/shared';
-import type { PiHostTool } from '@/lib/pi/sdk/session';
+import type { PiHostTool, PiHostToolContent } from '@/lib/pi/sdk/session';
 
 /** One JSON-RPC request to an o8 MCP server; resolves with its `result`. */
 export type O8ServerRequest = (method: string, params: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
@@ -119,7 +119,7 @@ export function createO8CommandTools(commands: O8Command[]): PiHostTool[] {
         if (!commandArgs || typeof commandArgs !== 'object' || Array.isArray(commandArgs)) {
           return text('The arguments for an o8 command must be a JSON object.');
         }
-        let result: { content?: Array<{ type?: string; text?: string }>; isError?: boolean } | undefined;
+        let result: { content?: Array<{ type?: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean } | undefined;
         try {
           result = await command.server.request('tools/call', { name: command.tool.name, arguments: commandArgs }, signal) as typeof result;
         } catch (error) {
@@ -129,9 +129,17 @@ export function createO8CommandTools(commands: O8Command[]): PiHostTool[] {
           return text(`o8 command ${name} could not reach the o8 ${command.server.name} server.`);
         }
         const output = (result?.content ?? [])
+          .filter(part => !(command.tool.name === 'o8_html_preview' && part.type === 'image'))
           .map(part => (part.type === 'text' && typeof part.text === 'string' ? part.text : `[${part.type ?? 'unknown'} content omitted]`))
           .join('\n');
-        return text(capped(result?.isError ? `o8 command ${name} returned an error:\n${output}` : output || '(no output)'));
+        const content: PiHostToolContent[] = [{ type: 'text', text: capped(result?.isError ? `o8 command ${name} returned an error:\n${output}` : output || '(no output)') }];
+        // Only bounded preview screenshots are passed through as model-visible evidence.
+        if (command.tool.name === 'o8_html_preview' && !result?.isError) {
+          const image = result?.content?.find(part => part.type === 'image' && part.mimeType === 'image/png'
+            && typeof part.data === 'string' && part.data.length <= 5_592_408 && /^[A-Za-z0-9+/]*={0,2}$/.test(part.data));
+          if (image?.data) content.unshift({ type: 'image', data: image.data, mimeType: 'image/png' });
+        }
+        return { content };
       },
     },
   ];

@@ -45,6 +45,7 @@ const MobilePairingView = retryingLazy(() => import('@/components/desktop/canvas
 const PRViewer = retryingLazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })), { label: 'PR viewer' });
 const RepositoryPullRequests = retryingLazy(() => import('@/components/desktop/RepositoryPullRequests').then(m => ({ default: m.RepositoryPullRequests })), { label: 'Pull requests' });
 const UsageWorkspace = retryingLazy(() => import('@/components/desktop/analytics/UsageWorkspace').then(m => ({ default: m.UsageWorkspace })), { label: 'Usage' });
+const VisualizationWorkspace = retryingLazy(() => import('@/components/desktop/visualizations/VisualizationWorkspace').then(m => ({ default: m.VisualizationWorkspace })), { label: 'Visualization' });
 import {
   CanvasEmpty,
   CIViewer,
@@ -71,6 +72,7 @@ export type CanvasTabKind =
   | 'pr'
   | 'pull-requests'
   | 'usage'
+  | 'visualization'
   | 'readme'
   | 'ci'
   | 'new-issue'
@@ -371,6 +373,8 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
       return <GitPullRequest size={size} />;
     case 'usage':
       return <Gauge size={size} />;
+    case 'visualization':
+      return <FileText size={size} />;
     case 'readme':
       return <BookOpen size={size} />;
     case 'ci':
@@ -469,6 +473,8 @@ const TabContent = memo(function TabContent({
             return <RepositoryPullRequests active={active} repoPath={tab.meta?.workspace || tab.resourceId || null} />;
           case 'usage':
             return <UsageWorkspace active={active} />;
+          case 'visualization':
+            return <VisualizationWorkspace id={tab.resourceId} />;
           case 'readme':
             return <ReadmeViewer workspace={tab.resourceId} />;
           case 'ci':

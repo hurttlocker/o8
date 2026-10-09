@@ -99,6 +99,25 @@ const supervisorIt = it.runIf(process.platform === 'linux' || process.platform =
 let helperPath = '';
 
 describe('Pi governed command tool through the real worker', () => {
+  it('delivers a host preview image through the actual SDK tool-result channel', async () => {
+    const paths = await fixture();
+    let turn = 0;
+    const seen: unknown[] = [];
+    const session = await client({ ...paths, model, readOnly: true,
+      hostTools: [{ definition: { name: 'preview_fixture', description: 'A local preview', parameters: { type: 'object', properties: {} } },
+        execute: async () => ({ content: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }] }) }],
+      transport: async function* (context) {
+        if (++turn === 1) {
+          yield* events(message([{ type: 'toolCall', id: 'preview-image', name: 'preview_fixture', arguments: {} }], 'toolUse'));
+        } else {
+          seen.push(...context.messages.filter(entry => entry.role === 'toolResult'));
+          yield* events(message([{ type: 'text', text: 'Done' }]));
+        }
+      } });
+    expect(await session.prompt('Inspect this local preview')).toMatchObject({ text: 'Done', stopReason: 'stop' });
+    expect(seen).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'toolResult',
+      content: expect.arrayContaining([expect.objectContaining({ type: 'image', mimeType: 'image/png' })]) })]));
+  }, 20000);
   // The parent stays alive briefly so its fork event can be handled, then exits.
   // The child closes the output pipes, ignores TERM and leaves the process group.
   const MAC_ESCAPE = `perl -MPOSIX -e '$p=fork(); die unless defined $p; if ($p) { select undef, undef, undef, 0.15; exit; } $SIG{TERM}=q(IGNORE); $sid=POSIX::setsid(); open(STDOUT, q(>), q(/dev/null)); open(STDERR, q(>), q(/dev/null)); open(my $f, q(>), q(hard.pid)); print $f $$; close $f; open($f, q(>), q(hard.sid)); print $f $sid; close $f; select undef, undef, undef, 0.3; open($f, q(>), q(hard.ppid)); print $f getppid(); close $f; sleep 30'; while [ ! -s hard.ppid ]; do sleep 0.02; done`;

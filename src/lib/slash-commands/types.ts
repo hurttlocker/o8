@@ -4,6 +4,7 @@ import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 export type OrchestratorSlashCommandName =
   | 'ask'
   | 'orchestrate'
+  | 'visualization'
   | 'compact'
   | 'clear'
   | 'focus'

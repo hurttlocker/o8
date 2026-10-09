@@ -162,7 +162,8 @@ describe('Pi orchestrator (#3258)', () => {
     const servers = await openO8Servers(repo, { profile: 'propose', threadId: 'thoughts-pi-test' });
     try {
       const names = (await listO8Commands(servers.servers, new AbortController().signal)).map(({ name }) => name);
-      expect(servers.servers.map(server => server.name)).toEqual(['cortex']);
+      expect(servers.servers.map(server => server.name)).toEqual(['cortex', 'visualizations']);
+      expect(names).toEqual(expect.arrayContaining(['o8_html_preview', 'o8_html_render']));
       expect(names).toContain('cortex_read_packets');
       for (const mutator of ['dispatch_mission', 'approve_and_merge', 'create_mission', 'cortex_launch_agent']) {
         expect(names).not.toContain(mutator);
@@ -341,7 +342,7 @@ describe('Pi orchestrator (#3258)', () => {
     const run = createO8CommandTools(commands).find(tool => tool.definition.name === 'o8_run')!;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = await run.execute({ name: 'cortex_fleet_status', arguments: '{}' }, new AbortController().signal);
-    expect(result.content[0].text).toBe('o8 command cortex_fleet_status could not reach the o8 cortex server.');
+    expect(result.content[0]).toEqual({ type: 'text', text: 'o8 command cortex_fleet_status could not reach the o8 cortex server.' });
     expect(JSON.stringify(result)).not.toContain('secret-value');
     warn.mockRestore();
   });

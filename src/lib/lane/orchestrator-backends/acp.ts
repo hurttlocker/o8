@@ -46,6 +46,7 @@ interface AcpSession {
   key: string;
   sessionName: string;
   repoPath: string;
+  threadId: string | null;
   client: AcpClient;
   sessionId: string | null;
   status: 'ready' | 'busy' | 'dead';
@@ -111,9 +112,9 @@ function sessionKey(backendId: string, repoPath: string, threadId?: string | nul
 }
 
 /** o8's operator MCP server in ACP's session/new shape (env as {name,value}[]). */
-function o8McpServersForAcp(repoPath: string): AcpMcpServer[] {
+function o8McpServersForAcp(repoPath: string, threadId: string | null): AcpMcpServer[] {
   try {
-    const o8 = toOpenclawJson(buildToolRegistry(repoPath)).servers['o8'] as
+    const o8 = toOpenclawJson(buildToolRegistry(repoPath, { threadId })).servers['o8'] as
       | { command: string; args: string[]; env?: Record<string, string> }
       | undefined;
     if (!o8) return [];
@@ -184,6 +185,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       key,
       sessionName: key,
       repoPath,
+      threadId: threadId ?? null,
       sessionId: null,
       status: 'ready',
       createdAt: Date.now(),
@@ -214,7 +216,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
   async function ensureHandshake(session: AcpSession): Promise<string> {
     if (session.sessionId) return session.sessionId;
     await session.client.initialize();
-    const created = await session.client.newSession(session.repoPath, o8McpServersForAcp(session.repoPath));
+    const created = await session.client.newSession(session.repoPath, o8McpServersForAcp(session.repoPath, session.threadId));
     session.sessionId = created.sessionId;
     session.configOptions = created.configOptions;
     // The agent reports what it booted with, so a composer pick that already

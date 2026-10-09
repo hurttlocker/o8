@@ -31,6 +31,7 @@ import {
   supersedeHistoryOpenRequest,
 } from '@/components/desktop/repo-focus/tabs/chats/helpers';
 import type { CanvasTab } from '@/components/desktop/Canvas';
+import { useVisualizationWorkspaceEvents } from '@/components/desktop/visualizations/useVisualizationWorkspaceEvents';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { EntitlementProvider } from '@/lib/entitlement/context';
@@ -2475,6 +2476,8 @@ function DashboardInner() {
       meta: repo ? { repo } : undefined,
     });
   }, [openCanvasTab, openRightPanelFromUser]);
+
+  useVisualizationWorkspaceEvents(openCanvasTab);
 
   // Stable callbacks passed to CommandPalette — extracted to avoid defeating
   // memo boundaries with fresh inline arrows on every render (#809).

@@ -2,6 +2,16 @@ import type { OrchestratorSlashCommandDefinition } from './types';
 
 export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] = [
   {
+    command: '/visualization',
+    name: 'visualization',
+    title: 'Visualize',
+    description: 'Create an interactive chart, diagram, or illustration in this reply.',
+    argHint: '<what to show>',
+    requiresArgument: true,
+    group: 'command',
+    aliases: ['/visualize'],
+  },
+  {
     command: '/orchestrate',
     name: 'orchestrate',
     title: 'Orchestrate',

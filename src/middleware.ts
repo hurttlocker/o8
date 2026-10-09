@@ -156,6 +156,10 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
 ];
 
 const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  // Display-only pages are checked against the worker's exact packet in every handler.
+  { methods: new Set(['GET', 'POST']), path: /^\/api\/visualizations\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/visualizations\/vis-[0-9a-f-]+\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/visualizations\/preview\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:approvals|problem-dossiers|status)\/?$/ },
   { methods: new Set(['GET', 'POST', 'DELETE']), path: /^\/api\/panel\/managed-runs\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/artifacts(?:\/mirror)?\/?$/ },

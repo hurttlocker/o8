@@ -25,6 +25,7 @@ import { piBackend } from './pi';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { applyOrchestrationMode } from './orchestration-mode';
+import { withVisualizationInstructions } from '@/lib/visualizations/orchestrator-prompt';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -39,7 +40,9 @@ export function withOrchestrationMode(
     ...backend,
     sendTurn(repoPath, message, onEvent, options) {
       const resolved = applyOrchestrationMode(message, options);
-      return backend.sendTurn(repoPath, withOperatingAgreement(resolved.message), onEvent, resolved.options);
+      const prompt = ['openclaw', 'hermes', 'acp', 'opencode'].includes(backend.id)
+        ? withVisualizationInstructions(resolved.message, repoPath, options?.threadId) : resolved.message;
+      return backend.sendTurn(repoPath, withOperatingAgreement(prompt), onEvent, resolved.options);
     },
   };
 }

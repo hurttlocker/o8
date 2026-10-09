@@ -387,6 +387,8 @@ function WorkspaceChatPaneBase({
                         entries={chat.packetTranscriptEntries}
                         packetHeader={packetHeader}
                         repoPath={transcriptRepoPath}
+                        packetId={tab.orchestrationPacket?.packetId}
+                        active={active}
                         onRunInTerminal={onRunInTerminal}
                         onPermissionDecision={chat.handleClaudePermissionDecision}
                       />
@@ -570,6 +572,8 @@ function WorkspaceChatPaneBase({
               entries={chat.visibleTranscriptEntries}
               packetHeader={packetHeader}
               repoPath={transcriptRepoPath}
+              packetId={tab.orchestrationPacket?.packetId}
+              active={active}
               markLast={!chat.sending}
               onRunInTerminal={onRunInTerminal}
               onPermissionDecision={chat.handleClaudePermissionDecision}
