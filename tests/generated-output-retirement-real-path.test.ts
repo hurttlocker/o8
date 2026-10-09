@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rmdir, symlink, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -48,9 +48,9 @@ async function fixture() {
       throw new Error(result.stderr?.trim() || 'Native fixture command failed without stderr', { cause: error });
     }
   };
-  const cold = async (script: string) => {
+  const cold = async (script: string, commandEnv: NodeJS.ProcessEnv = env) => {
     const result = await invoke(['--import', path.join(source, 'scripts/register-server-only-stub.mjs'),
-      '--import', require.resolve('tsx'), '--input-type=module', '-e', script]);
+      '--import', require.resolve('tsx'), '--input-type=module', '-e', script], commandEnv);
     const match = /^O8_GENERATED_RESULT (.+)$/m.exec(result.stdout);
     if (!match) throw new Error(result.stdout + result.stderr);
     return JSON.parse(match[1]);
@@ -170,10 +170,31 @@ it('cold-replays source and disposable-copy interruptions while refusing changed
   await expect(input.cli('retire-verification', '--resource', id)).rejects.toThrow();
   expect((await lstat(held)).ino).toBe(rootInode); expect((await lstat(recovery.path)).ino).toBe(replacement);
   await rmdir(recovery.path); await rename(held, recovery.path);
-  const noExecutables = path.join(input.root, 'no-executables'); await mkdir(noExecutables, { mode: 0o700 });
-  // Native lsof cannot execute in this process environment; never substitute an empty snapshot.
+  const noProcessScanner = path.join(input.root, 'no-process-scanner');
+  await mkdir(noProcessScanner, { mode: 0o700 });
+  if (process.platform === 'linux') {
+    // Preserve the real volume probe while withholding only the native cwd scanner.
+    const findmnt = await exec('which', ['findmnt'], { env: input.env });
+    const executable = await realpath(findmnt.stdout.trim());
+    await symlink(executable, path.join(noProcessScanner, 'findmnt'));
+  }
+  const unavailableCwdEnv = { ...input.env, PATH: noProcessScanner };
+  const unavailableCwd = await input.cold(`
+    const identityNs = await import(${url('src/lib/worktree/materialization-identity.ts')});
+    const cwdNs = await import(${url('src/lib/runtime/process-cwd-snapshot.ts')});
+    const { captureWorktreeMaterializationIdentity } = identityNs.default ?? identityNs;
+    const { readProcessCwdSnapshot } = cwdNs.default ?? cwdNs;
+    const identity = await captureWorktreeMaterializationIdentity(${JSON.stringify(recovery.parent.canonicalPath)});
+    const snapshot = await readProcessCwdSnapshot({ forceRefresh: true });
+    console.log('O8_GENERATED_RESULT ' + JSON.stringify({ identity, snapshot }));
+  `, unavailableCwdEnv) as { identity: typeof recovery.parent;
+    snapshot: { status: string; rows: unknown[]; reason: string } };
+  expect(unavailableCwd.identity).toEqual(recovery.parent);
+  expect(unavailableCwd.snapshot).toMatchObject({ status: 'unavailable', rows: [] });
+  expect(unavailableCwd.snapshot.reason).toContain('ENOENT');
+  // The actual CLI must reach the unknown-consumer guard after volume identity remains valid.
   await expect(input.invoke([path.join(source, 'scripts/generated-output.mjs'), 'retire-verification', '--resource', id],
-    { ...input.env, PATH: noExecutables })).rejects.toThrow('live or unknown consumer');
+    unavailableCwdEnv)).rejects.toThrow('live or unknown consumer');
   expect((await lstat(recovery.path)).ino).toBe(rootInode);
   const consumer = spawn(process.execPath, ['-e', "process.stdout.write('ready\\n');setInterval(()=>{},1000)"],
     { cwd: recovery.path, env: input.env, stdio: ['ignore', 'pipe', 'pipe'] });
