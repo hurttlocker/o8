@@ -1,6 +1,7 @@
 /** Shared controls live inside the visualization sandbox, never in application chrome. */
 export const VISUALIZATION_STYLES = `
   :root { --viz-gap: 16px; --viz-control-height: 28px; }
+  [hidden] { display:none !important; }
   .viz-row, .viz-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .viz-controls { margin:14px 0; }
   .viz-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); gap:20px; }
@@ -48,6 +49,24 @@ export const VISUALIZATION_STYLES = `
   .viz-chart-legend button[aria-pressed=false] { color:var(--muted-foreground); opacity:.55; }
   .viz-chart-description { margin-top:6px; min-height:17px; font-size:11px; color:var(--muted-foreground); }
   .viz-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+  .viz-dashboard { min-width:0; }
+  .viz-dashboard .viz-controls { justify-content:space-between; }
+  .viz-dashboard .viz-grid { margin:22px 0; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+  .viz-dashboard .viz-button { display:inline-flex; align-items:center; gap:7px; }
+  .viz-dashboard button[aria-pressed=true] { background:var(--card); color:var(--foreground); }
+  .viz-dashboard[data-density=compact] .viz-grid { margin:12px 0; gap:12px; }
+  .viz-dashboard[data-density=compact] .viz-value { font-size:24px; }
+  .viz-selection { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:8px 0; }
+  .viz-heatmap { position:relative; margin:20px 0; }
+  .viz-heat-grid { display:grid; gap:4px; width:100%; min-width:max-content; align-items:center; }
+  .viz-heat-grid > .viz-caption { font-size:10px; white-space:nowrap; overflow:hidden; }
+  .viz-heat-cell { width:100%; min-width:16px; min-height:22px; border:0; border-radius:3px; padding:0; cursor:pointer; }
+  .viz-heat-cell[data-selected=false] { opacity:.25; }
+  .viz-heat-cell[aria-pressed=true] { outline:1px solid var(--foreground); outline-offset:1px; }
+  .viz-detail { margin:18px 0; padding:14px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .viz-detail h3 { margin:0 0 7px; }
+  .viz-dashboard > [data-viz-source] { margin-top:20px; }
+  @media (pointer:coarse) { .viz-heat-cell { min-height:32px; min-width:32px; } }
   @media (hover:hover) and (pointer:fine) {
     .viz-button:hover:not(:disabled), .viz-tabs button:hover { background:var(--secondary,var(--muted)); color:var(--foreground); }
     .viz-chart-legend button:hover { opacity:1; }

@@ -8,8 +8,8 @@ export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
-    const { document, warnings } = await publishVisualization(await visualizationBody(request), resolveRequestPrincipalContext(request));
-    return visualizationResponse({ visualization: visualizationReference(document), warnings }, 201);
+    const { document, warnings, check } = await publishVisualization(await visualizationBody(request), resolveRequestPrincipalContext(request));
+    return visualizationResponse({ visualization: visualizationReference(document), warnings, check }, 201);
   } catch (error) { return visualizationFailure(error); }
 }
 

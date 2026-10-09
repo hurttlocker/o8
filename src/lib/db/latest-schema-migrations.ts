@@ -32,6 +32,7 @@ import { ensureV65OrchestratorLeadSchema } from '@/lib/db/v65-orchestrator-lead-
 import { ensureV66CloudWorkerPresenceSchema } from '@/lib/db/v66-cloud-worker-presence-migration';
 import { ensureV67WorkspacePreservationSchema } from '@/lib/db/v67-workspace-preservation-migration';
 import { ensureV68TranscriptVisualizationsSchema } from '@/lib/db/v68-transcript-visualizations-migration';
+import { ensureV69VisualizationVersionsSchema } from '@/lib/db/v69-visualization-versions-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -75,4 +76,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV66CloudWorkerPresenceSchema(sqlite);
   ensureV67WorkspacePreservationSchema(sqlite);
   ensureV68TranscriptVisualizationsSchema(sqlite);
+  ensureV69VisualizationVersionsSchema(sqlite);
 }

@@ -43,7 +43,7 @@ function namedTools(prompt: string): string[] {
 
 function toolsFor(surface: OrchestratorPromptSurface): Set<string> {
   if (surface.dispatch) return ALL_TOOLS;
-  return surface.cortexReads ? new Set([...CORTEX_READONLY_TOOLS, 'o8_html_preview', 'o8_html_render']) : new Set();
+  return surface.cortexReads ? new Set([...CORTEX_READONLY_TOOLS, 'o8_html_preview', 'o8_html_render', 'o8_visualization_read']) : new Set();
 }
 
 const PROFILES: ToolProfile[] = ['full', 'propose', 'solo', 'fable', 'fable-solo'];
@@ -56,6 +56,7 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     expect(prompt).toContain('show me a visualization');
     expect(prompt).toContain('o8_html_preview');
     expect(prompt).toContain('o8_html_render');
+    expect(prompt).toContain('o8_visualization_read');
     expect(prompt).not.toContain('## ORCHESTRATOR PROTOCOL');
   });
   it('finds the registered tool catalogs it guards', () => {

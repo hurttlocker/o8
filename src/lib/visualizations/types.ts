@@ -18,6 +18,9 @@ export interface VisualizationReference {
   title: string;
   height: number;
   createdAt: string;
+  rootId?: string;
+  parentId?: string;
+  version?: number;
 }
 
 export interface VisualizationDocument extends VisualizationReference {
@@ -25,11 +28,12 @@ export interface VisualizationDocument extends VisualizationReference {
   repoPath: string;
   threadId: string | null;
   packetId: string | null;
+  source?: { html: string } | { layout: import('./templates').VisualizationLayout };
 }
 
 export function visualizationReference(document: VisualizationDocument): VisualizationReference {
   const { kind, id, title, height, createdAt } = document;
-  return { kind, id, title, height, createdAt };
+  return { kind, id, title, height, createdAt, ...(document.rootId ? { rootId: document.rootId, version: document.version, parentId: document.parentId } : {}) };
 }
 
 export function isVisualizationReference(value: unknown): value is VisualizationReference {
@@ -39,5 +43,8 @@ export function isVisualizationReference(value: unknown): value is Visualization
     && typeof ref.title === 'string' && ref.title.length <= VISUALIZATION_LIMITS.titleChars
     && typeof ref.height === 'number' && Number.isFinite(ref.height)
     && ref.height >= VISUALIZATION_LIMITS.minHeight && ref.height <= VISUALIZATION_LIMITS.maxHeight
+    && (ref.rootId === undefined || (typeof ref.rootId === 'string' && VISUALIZATION_ID.test(ref.rootId)))
+    && (ref.parentId === undefined || (typeof ref.parentId === 'string' && VISUALIZATION_ID.test(ref.parentId)))
+    && (ref.version === undefined || (Number.isSafeInteger(ref.version) && ref.version! >= 1))
     && typeof ref.createdAt === 'string' && Number.isFinite(Date.parse(ref.createdAt));
 }

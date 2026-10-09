@@ -25,10 +25,19 @@ export function toolVisualizationReferences(calls: MobileTranscriptToolCall[] = 
 
 /** Fallback for providers that do not retain full tool results. */
 export function placeTranscriptVisualizations(refs: VisualizationReference[], messages: MobileTranscriptEntry[]): Map<number, VisualizationReference[]> {
-  const embedded = new Set(messages.flatMap(message => toolVisualizationReferences(message.toolCalls).map(ref => ref.id)));
+  const embedded = new Map<string, { index: number; reference: VisualizationReference }>();
+  messages.forEach((message, index) => {
+    for (const reference of toolVisualizationReferences(message.toolCalls)) if (!embedded.has(reference.rootId ?? reference.id)) embedded.set(reference.rootId ?? reference.id, { index, reference });
+  });
   const buckets = new Map<number, VisualizationReference[]>();
   for (const ref of refs) {
-    if (embedded.has(ref.id)) continue;
+    const anchor = embedded.get(ref.rootId ?? ref.id);
+    if (anchor !== undefined) {
+      if ((ref.version ?? 1) > (anchor.reference.version ?? 1)) {
+        const bucket = buckets.get(anchor.index) ?? []; bucket.push(ref); buckets.set(anchor.index, bucket);
+      }
+      continue;
+    }
     const time = Date.parse(ref.createdAt);
     let index = -1;
     for (let i = 0; i < messages.length; i++) {

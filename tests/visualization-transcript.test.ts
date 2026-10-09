@@ -17,4 +17,12 @@ describe('transcript placement across providers', () => {
     expect(placeTranscriptVisualizations([ref], [{ ...messages[0], toolCalls: [{ name: 'o8_html_render', result: JSON.stringify({ visualization: ref }) }] }]).size).toBe(0);
     expect(placeTranscriptVisualizations([ref], []).get(-1)).toEqual([ref]);
   });
+  it('updates the original reply with the latest revision instead of adding another full visual', () => {
+    const original = { ...ref, rootId: ref.id, version: 1 };
+    const latest = { ...original, id: 'vis-22222222-2222-4222-8222-222222222222', parentId: original.id, version: 2 };
+    const messages = [{ id: 'a1', role: 'assistant' as const, text: 'Explore', timestamp: 1000, toolCalls: [{ name: 'o8_html_render', result: JSON.stringify({ visualization: original }) }] },
+      { id: 'a2', role: 'assistant' as const, text: 'Revised', timestamp: 3000, toolCalls: [{ name: 'o8_html_render', result: JSON.stringify({ visualization: latest }) }] }];
+    const placed = placeTranscriptVisualizations([latest], messages);
+    expect(placed.get(0)).toEqual([latest]); expect(placed.has(1)).toBe(false);
+  });
 });

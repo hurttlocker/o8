@@ -300,7 +300,11 @@ Build a self-contained HTML page with inline CSS, classic JavaScript, and
 SVG or canvas. It can contain working filters, hover details, tables, diagrams,
 and multiple UI alternatives. Read the tool description for theme variables,
 offline asset rules, and the shared design guidance. Use restrained color,
-clear units, aligned values, truthful scales, and readable axes. Give diagrams
+measured units and a source note. Prefer a reusable layout for linked charts,
+heatmaps and tables. To revise a saved visual, read its source and latest version
+with `o8_visualization_read`, keep stable control keys, then render with
+`revisionOf` equal to the latest id. Earlier versions and reader selections remain.
+Use aligned values, truthful scales, and readable axes. Give diagrams
 consistent nodes and a focused detail view. Bind controls with addEventListener.
 Inspect the preview screenshot at the reply width and a narrow width, in light
 and dark appearances, and inspect

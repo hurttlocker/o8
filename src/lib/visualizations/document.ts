@@ -3,6 +3,7 @@ import { sealVisualizationScripts } from './scripts';
 import { VISUALIZATION_STYLES } from './runtime-styles';
 import { VISUALIZATION_CONTROLS } from './runtime-controls';
 import { VISUALIZATION_CHARTS } from './runtime-charts';
+import { VISUALIZATION_LAYOUTS } from './runtime-layouts';
 import { visualizationState } from './view-state';
 import { D3_LICENSE } from './vendor/license-notices';
 
@@ -112,7 +113,7 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
     button { touch-action: manipulation; }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }
   </style><style>${VISUALIZATION_STYLES}</style><script>${bootstrap}</script>
-  <script data-o8-toolkit="d3">/* ${D3_LICENSE} */\n${D3_SOURCE}</script><script>${VISUALIZATION_CONTROLS}</script><script>${VISUALIZATION_CHARTS}</script>
+  <script data-o8-toolkit="d3">/* ${D3_LICENSE} */\n${D3_SOURCE}</script><script>${VISUALIZATION_CONTROLS}</script><script>${VISUALIZATION_CHARTS}</script><script>${VISUALIZATION_LAYOUTS}</script>
   </head><body>${html.replace(/^\s*<!doctype[^>]*>/i, '')}</body></html>`;
   const sealed = await sealVisualizationScripts(page);
   // Both policies apply: hashes seal inline scripts; the base policy separately

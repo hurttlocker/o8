@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { withVisualizationContext } from '@/lib/mcp/visualization-context';
-import { createO8CommandTools } from '@/lib/pi/orchestrator/o8-commands';
+import { createO8CommandTools, O8_COMMAND_OUTPUT_BYTES } from '@/lib/pi/orchestrator/o8-commands';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 
 const dir = mkdtempSync(join(tmpdir(), 'o8-visual-mcp-'));
@@ -21,9 +21,9 @@ function req(message: unknown, profile = 'visualizations') {
     'x-o8-mcp-profile': profile }, body: JSON.stringify(message) });
 }
 describe('visualization tools use the actual MCP route and narrow profile', () => {
-  it('advertises only preview/render, refuses dispatch, and intersects the server profile', async () => {
+  it('advertises only visualization tools, refuses dispatch, and intersects the server profile', async () => {
     const list = async () => (await (await POST(req({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))).json()).result.tools;
-    expect((await list()).map((tool: { name: string }) => tool.name)).toEqual(['o8_html_preview', 'o8_html_render']);
+    expect((await list()).map((tool: { name: string }) => tool.name)).toEqual(['o8_html_preview', 'o8_html_render', 'o8_visualization_read']);
     const denied = await (await POST(req({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'dispatch_mission', arguments: {} } }))).json();
     expect(denied.result.isError).toBe(true);
     vi.stubEnv('O8_OPERATOR_MCP_PROFILE', 'dogfood');
@@ -32,16 +32,41 @@ describe('visualization tools use the actual MCP route and narrow profile', () =
     expect(await list()).toEqual([]);
   });
 
-  it('passes a render reference and a preview image through the real tool handlers', async () => {
+  it('passes a render reference, preview image and revision source through the real tool handlers', async () => {
     const reference = { kind: 'o8-visualization', id: 'vis-12345678-1234-1234-1234-123456789abc', title: 'Explore', height: 240, createdAt: new Date().toISOString() };
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => Response.json({ ok: true, result: String(url).endsWith('/preview')
       ? { image: 'aGVsbG8=', mimeType: 'image/png', width: 728, height: 240, contentHeight: 240, diagnostics: [] }
-      : { visualization: reference, warnings: [] } }));
-    for (const name of ['o8_html_render', 'o8_html_preview']) {
-      const response = await POST(req({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: { title: 'Explore', html: '<p>Explore</p>' } } }));
+      : { visualization: reference, warnings: [], source: { html: '<p>Explore</p>' }, versions: [reference] } }));
+    for (const name of ['o8_html_render', 'o8_html_preview', 'o8_visualization_read']) {
+      const response = await POST(req({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: name.endsWith('read') ? { id: reference.id } : { title: 'Explore', html: '<p>Explore</p>' } } }));
       const body = await response.json();
       expect(body.result.isError).not.toBe(true);
       expect(body.result.content[0].type).toBe(name.endsWith('preview') ? 'image' : 'text');
+      if (name.endsWith('read')) expect(JSON.parse(body.result.content[0].text).result.source).toMatchObject({ kind: 'html', text: '<p>Explore</p>', complete: true });
+    }
+  });
+
+  it('reads complete large and escaped sources through the managed command cap with valid JSON in every chunk', async () => {
+    const reference = { kind: 'o8-visualization', id: 'vis-12345678-1234-1234-1234-123456789abc', title: 'Explore', height: 240, createdAt: new Date().toISOString() };
+    const server = { name: 'visualizations', request: async (_method: string, params: Record<string, unknown>) =>
+      (await (await POST(req({ jsonrpc: '2.0', id: 7, method: 'tools/call', params }))).json()).result };
+    const tool = { name: 'o8_visualization_read', description: 'Read', inputSchema: { type: 'object' } };
+    const run = createO8CommandTools([{ name: tool.name, tool, server }]).find(tool => tool.definition.name === 'o8_run')!;
+    for (const source of [{ html: '<p>' + 'a'.repeat(50_000) + '</p>' }, { html: '<p>' + '\u0000🌱"\\'.repeat(6_000) + '</p>' }]) {
+      const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, result: { visualization: reference, source, versions: [reference] } }));
+      let offset = 0, complete = false, rebuilt = '', chunks = 0;
+      while (!complete && chunks++ < 100) {
+        const result = await run.execute({ name: tool.name, arguments: JSON.stringify({ id: reference.id, offset }) }, new AbortController().signal);
+        const output = result.content[0]; expect(output.type).toBe('text');
+        if (output.type !== 'text') throw new Error('Missing source text');
+        expect(Buffer.byteLength(output.text, 'utf8')).toBeLessThan(O8_COMMAND_OUTPUT_BYTES);
+        const read = JSON.parse(output.text).result;
+        expect(read.latest.id).toBe(reference.id); expect(read.source.offset).toBe(offset);
+        expect(read.source.text).not.toContain('\uFFFD'); expect(read.source.nextOffset).toBeGreaterThan(offset);
+        rebuilt += read.source.text; offset = read.source.nextOffset; complete = read.source.complete;
+      }
+      expect(complete).toBe(true); expect(rebuilt).toBe(source.html); expect(offset).toBe(Buffer.byteLength(source.html, 'utf8'));
+      fetch.mockRestore();
     }
   });
 

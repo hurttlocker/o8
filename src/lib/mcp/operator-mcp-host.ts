@@ -9,7 +9,7 @@ import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview
 import { AGENT_MESSAGE_TOOLS, handleAgentMessageAgents, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
 import { TASK_ARTIFACT_TOOLS, handleTaskArtifact } from '@/lib/mcp/operator-handlers/task-artifact';
-import { VISUALIZATION_TOOLS, handleHtmlPreview, handleHtmlRender } from '@/lib/mcp/operator-handlers/visualization';
+import { VISUALIZATION_TOOLS, handleHtmlPreview, handleHtmlRender, handleVisualizationRead } from '@/lib/mcp/operator-handlers/visualization';
 import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
 import { CORTEX_TOOLS, handleAsk, handleProposeObservation } from '@/lib/mcp/operator-handlers/cortex';
@@ -417,6 +417,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_task_artifact: handleTaskArtifact,
   o8_html_preview: handleHtmlPreview,
   o8_html_render: handleHtmlRender,
+  o8_visualization_read: handleVisualizationRead,
   o8_user_context: handleUserContext,
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,

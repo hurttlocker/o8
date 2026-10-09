@@ -8,7 +8,9 @@ import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { ORCHESTRATOR_THREAD_ID_PATTERN } from '@/lib/task-artifacts/types';
 import { VisualizationError } from './errors';
 import { prepareVisualizationHtml } from './prepare';
-import { getVisualization, insertVisualization, listVisualizations } from './store';
+import { getVisualization, getVisualizationMetadata, insertVisualization, latestVisualizationId, listVisualizations } from './store';
+import { checkVisualization } from './preflight';
+import { visualizationInputSource } from './templates';
 import { VISUALIZATION_ID, VISUALIZATION_LIMITS, type VisualizationDocument } from './types';
 
 export interface VisualizationTarget {
@@ -49,28 +51,52 @@ export async function resolveVisualizationTarget(input: Record<string, unknown>,
 
 export async function publishVisualization(input: Record<string, unknown>, principal: RequestPrincipalContext) {
   const target = await resolveVisualizationTarget(input, principal);
-  const title = string(input.title);
+  const { html, layout } = visualizationInputSource(input);
+  const parent = input.revisionOf === undefined ? undefined : readVisualizationMetadata(string(input.revisionOf), principal);
+  if (parent && (parent.repoPath !== target.repoPath || parent.threadId !== target.threadId || parent.packetId !== target.packetId)) {
+    throw new VisualizationError('invalid_revision_target', 'Revisions must stay in the same transcript and workspace.', 403);
+  }
+  if (parent && latestVisualizationId(parent.rootId ?? parent.id) !== parent.id) {
+    throw new VisualizationError('revision_conflict', 'A newer revision exists. Read it before revising again.', 409);
+  }
+  const title = string(input.title) || layout?.title || parent?.title || '';
   if (!title || title.length > VISUALIZATION_LIMITS.titleChars) throw new VisualizationError('invalid_title', 'Provide a title of at most 120 characters.');
   const height = input.height === undefined ? VISUALIZATION_LIMITS.defaultHeight : input.height;
   if (typeof height !== 'number' || !Number.isFinite(height) || height < VISUALIZATION_LIMITS.minHeight || height > VISUALIZATION_LIMITS.maxHeight) {
     throw new VisualizationError('invalid_height', 'Height must be between 80 and 1800 pixels.');
   }
-  const prepared = await prepareVisualizationHtml(input.html, target.assetRoot);
-  const document: VisualizationDocument = { kind: 'o8-visualization', id: `vis-${randomUUID()}`, title,
-    html: prepared.html, height: Math.round(height), repoPath: target.repoPath, threadId: target.threadId,
-    packetId: target.packetId, createdAt: new Date().toISOString() };
+  const prepared = await prepareVisualizationHtml(html, target.assetRoot);
+  const checked = await checkVisualization(prepared.html);
+  const id = `vis-${randomUUID()}`;
+  const document: VisualizationDocument = { kind: 'o8-visualization', id, title,
+    html: checked.html, height: Math.round(height), repoPath: target.repoPath, threadId: target.threadId,
+    packetId: target.packetId, createdAt: new Date().toISOString(), rootId: parent?.rootId ?? parent?.id ?? id,
+    ...(parent ? { parentId: parent.id } : {}), version: (parent?.version ?? (parent ? 1 : 0)) + 1,
+    source: layout ? { layout } : { html: html as string } };
   insertVisualization(document);
-  return { document, warnings: prepared.warnings };
+  return { document, warnings: [...prepared.warnings, ...checked.check.diagnostics], check: checked.check };
 }
 
-export function readVisualization(id: string, principal: RequestPrincipalContext): VisualizationDocument {
+function validateRead(id: string, principal: RequestPrincipalContext): void {
   if (principal.role !== 'operator' && principal.role !== 'worker') throw new VisualizationError('unauthorized', 'Visualization access requires an operator or packet worker credential.', 401);
   if (!VISUALIZATION_ID.test(id)) throw new VisualizationError('not_found', 'Visualization not found.', 404);
-  const document = getVisualization(id);
+}
+
+function authorizeRead<T extends { packetId: string | null }>(document: T | null, principal: RequestPrincipalContext): T {
   if (!document || (principal.role === 'worker' && (principal.readOnly || !principal.packetId || principal.packetId !== document.packetId))) {
     throw new VisualizationError('not_found', 'Visualization not found.', 404);
   }
   return document;
+}
+
+export function readVisualization(id: string, principal: RequestPrincipalContext): VisualizationDocument {
+  validateRead(id, principal);
+  return authorizeRead(getVisualization(id), principal);
+}
+
+export function readVisualizationMetadata(id: string, principal: RequestPrincipalContext) {
+  validateRead(id, principal);
+  return authorizeRead(getVisualizationMetadata(id), principal);
 }
 
 export async function listTranscriptVisualizations(input: Record<string, unknown>, principal: RequestPrincipalContext) {

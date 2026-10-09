@@ -54,7 +54,7 @@ export const VISUALIZATION_CHARTS = `
       const stored = kit.getState().charts?.[key]?.hidden;
       hidden = new Set(Array.isArray(stored) ? stored.filter(id => typeof id==='string') : []);
       svg.attr('aria-label',config.description || [config.xLabel,config.yLabel].filter(Boolean).join(' by ') || 'Interactive chart');
-      hit.setAttribute('aria-label','Explore '+(config.description || 'chart values')+'. Use left and right arrow keys; Home and End reach the first and last values.');
+      hit.setAttribute('aria-label','Explore '+(config.description || 'chart values')+'. Use left and right arrow keys; Home and End reach the first and last values. Enter or Space selects a value; Escape clears.');
     }
     function valueAt(s,value) {
       const index = d3.bisector(point => point.x).left(s.values,value), exact = s.values[index];
@@ -69,30 +69,39 @@ export const VISUALIZATION_CHARTS = `
       }
       return before.y+(after.y-before.y)*(value-before.x)/(after.x-before.x);
     }
+    function mark(value) {
+      const visible = series.filter(s => !hidden.has(s.id));
+      const guideX = config.type==='bar' ? x(value)+x.bandwidth()/2 : x(value);
+      guide.attr('data-chart-x',Number(value)).attr('x1',guideX).attr('x2',guideX).attr('y1',margin.top).attr('y2',height-margin.bottom).style('display',null);
+      const valid = visible.map(s => ({series:s,value:valueAt(s,value)})).filter(row => row.value!==null);
+      markers.selectAll('circle').data(config.type==='bar' ? [] : valid,row => row.series.id).join('circle')
+        .attr('cx',guideX).attr('cy',row => y(row.value)).attr('r',3.5).attr('fill',row => row.series.color)
+        .attr('stroke','var(--background)').attr('stroke-width',2).attr('pointer-events','none');
+      return guideX;
+    }
     function show(value,point,announce) {
       focusedX = value;
       const visible = series.filter(s => !hidden.has(s.id));
       const rows = visible.map(s => { const result=valueAt(s,value), exact=s.values[d3.bisector(point => point.x).left(s.values,value)]?.x===value;
         return {label:s.label,value:result===null ? '—' : (exact?'':'≈ ')+formatY(result),color:s.color}; });
-      const guideX = config.type==='bar' ? x(value)+x.bandwidth()/2 : x(value);
-      guide.attr('x1',guideX).attr('x2',guideX).attr('y1',margin.top).attr('y2',height-margin.bottom).style('display',null);
-      const valid = visible.map(s => ({series:s,value:valueAt(s,value)})).filter(row => row.value!==null);
-      markers.selectAll('circle').data(config.type==='bar' ? [] : valid,row => row.series.id).join('circle')
-        .attr('cx',guideX).attr('cy',row => y(row.value)).attr('r',3.5).attr('fill',row => row.series.color)
-        .attr('stroke','var(--background)').attr('stroke-width',2).attr('pointer-events','none');
+      const guideX = mark(value);
       const plotBounds = plot.getBoundingClientRect(), bounds = figure.getBoundingClientRect();
       const at = point || {x:guideX,y:margin.top+25};
       tip.show(formatX(value),rows,{x:at.x+plotBounds.left-bounds.left,y:at.y+plotBounds.top-bounds.top});
       if (announce) description.textContent = formatX(value)+'. '+rows.map(row => row.label+': '+row.value).join('. ');
     }
-    function hide() { guide.style('display','none'); markers.selectAll('*').remove(); tip.hide(); }
+    function hide() {
+      guide.style('display','none'); markers.selectAll('*').remove(); tip.hide();
+      if (typeof config.selectedX==='number' && allX.includes(config.selectedX)) mark(config.selectedX);
+    }
     function save() {
       const state = kit.getState();
       kit.setState(Object.assign({},state,{charts:Object.assign({},state.charts,{[key]:{hidden:[...hidden]}})}));
     }
     function drawLegend() {
       const focused = legend.contains(document.activeElement) ? document.activeElement?.dataset.series : null;
-      legend.replaceChildren(); legend.hidden = series.length < 2;
+      legend.replaceChildren(); legend.hidden = config.legend===false || series.length < 2;
+      if (config.legend===false) return;
       for (const s of series) {
         const button = document.createElement('button'); button.type = 'button'; button.dataset.series=s.id; button.setAttribute('aria-pressed',String(!hidden.has(s.id)));
         const swatch = document.createElement('span'); swatch.className = 'viz-swatch'; swatch.style.background = s.color;
@@ -103,6 +112,8 @@ export const VISUALIZATION_CHARTS = `
       }
     }
     function drawTable() {
+      details.hidden = config.table===false;
+      if (config.table===false) return;
       table.replaceChildren();
       const header = document.createElement('thead'), row = document.createElement('tr');
       for (const [index,label] of [config.xLabel || 'Value',...series.map(s => s.label)].entries()) {
@@ -136,7 +147,8 @@ export const VISUALIZATION_CHARTS = `
       grid.select('.domain').remove(); grid.selectAll('line').attr('stroke-opacity',.6);
       const ticks = Math.max(2,Math.min(7,Math.floor((width-margin.left)/90)));
       const bottom = d3.axisBottom(x).tickSize(0).tickPadding(12).tickFormat(value => formatX(Number(value)));
-      if (config.type==='bar') bottom.tickValues(allX.filter((_,index) => index%Math.max(1,Math.ceil(allX.length/ticks))===0)); else bottom.ticks(ticks);
+      const tickValues = config.xTicks || (config.type==='bar' ? allX : null);
+      if (tickValues) bottom.tickValues(tickValues.filter((_,index) => index%Math.max(1,Math.ceil(tickValues.length/ticks))===0)); else bottom.ticks(ticks);
       xAxis.attr('transform','translate(0,'+(height-margin.bottom)+')').call(bottom);
       yAxis.attr('transform','translate('+margin.left+',0)').call(d3.axisLeft(y).ticks(4).tickSize(0).tickPadding(10).tickFormat(formatY)); yAxis.select('.domain').remove();
       const xText = xAxis.selectAll('text').nodes();
@@ -174,7 +186,7 @@ export const VISUALIZATION_CHARTS = `
       }
       const single = config.type==='bar' ? [] : visible.flatMap(s => { const valid=s.values.filter(point => point.y!==null); return valid.length===1 ? [{...valid[0],series:s}] : []; });
       points.selectAll('circle').data(single,point => point.series.id).join('circle').attr('cx',point => x(point.x)).attr('cy',point => y(point.y)).attr('r',3).attr('fill',point => point.series.color);
-      Object.assign(hit.style,{left:margin.left+'px',top:margin.top+'px',width:(width-margin.left-margin.right)+'px',height:(height-margin.bottom-margin.top)+'px'});
+      Object.assign(hit.style,{left:margin.left+'px',right:margin.right+'px',top:margin.top+'px',width:'auto',height:(height-margin.bottom-margin.top)+'px'});
       drawLegend(); hide();
       if (!allX.length) description.textContent='No data to display.';
     }
@@ -185,11 +197,13 @@ export const VISUALIZATION_CHARTS = `
     }
     hit.addEventListener('pointermove',event => { if (event.pointerType==='touch' || pinned || !allX.length) return; const {value,at}=pointValue(event); show(value,at,false); });
     hit.addEventListener('pointerleave',() => { if (!pinned) hide(); });
-    hit.addEventListener('pointerdown',event => { if (!allX.length) return; const {value,at}=pointValue(event); pinned=!pinned; if (pinned) show(value,at,true); else hide(); });
+    function select(value) { if (typeof config.onSelect==='function') config.onSelect(value===null ? null : {x:allX[d3.bisectCenter(allX,value)]}); }
+    hit.addEventListener('pointerdown',event => { if (!allX.length) return; const {value,at}=pointValue(event); pinned=!pinned; if (pinned) show(value,at,true); else hide(); select(pinned ? value : null); });
     hit.addEventListener('focus',() => { if (allX.length) show(focusedX ?? allX[0],null,true); });
     hit.addEventListener('blur',() => { pinned=false; hide(); });
     hit.addEventListener('keydown',event => {
-      if (event.key==='Escape') { pinned=false; hide(); return; }
+      if (event.key==='Escape') { pinned=false; hide(); select(null); return; }
+      if (['Enter',' '].includes(event.key) && focusedX!==null) { event.preventDefault(); select(focusedX); return; }
       if (!allX.length || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
       event.preventDefault(); const index=d3.bisectCenter(allX,focusedX ?? allX[0]);
       const next=event.key==='Home'?0:event.key==='End'?allX.length-1:Math.max(0,Math.min(allX.length-1,index+(event.key==='ArrowRight'?1:-1)));
@@ -199,7 +213,7 @@ export const VISUALIZATION_CHARTS = `
     const unsubscribe=kit.onState(state => { const stored=state.charts?.[key]?.hidden; hidden=new Set(Array.isArray(stored)?stored.filter(id => typeof id==='string'):[]); draw(false); });
     read(); draw(false); drawTable();
     return {
-      update(next,interaction={}) { config=Object.assign({},config,next); read(); draw(interaction.animate && !interaction.keyboard); drawTable(); },
+      update(next,interaction={}) { config=Object.assign({},config,next); read(); draw(interaction.animate && !interaction.keyboard); drawTable(); if (pinned && focusedX!==null) show(focusedX,null,true); },
       selected() { return focusedX===null ? null : {x:focusedX,label:formatX(focusedX),series:series.filter(s => !hidden.has(s.id)).map(s => ({id:s.id,label:s.label,value:valueAt(s,focusedX)}))}; },
       destroy() { destroyed=true; observer.disconnect(); unsubscribe(); tip.destroy(); marks.selectAll('*').interrupt(); root.replaceChildren(); }
     };

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { RamsButton } from '@/components/desktop/settings/shared';
 import { useTheme } from '@/lib/theme/context';
 import { visualizationSrcdoc, type VisualizationTheme } from '@/lib/visualizations/document';
 import { VISUALIZATION_LIMITS, type VisualizationDocument, type VisualizationReference } from '@/lib/visualizations/types';
@@ -8,9 +9,18 @@ import { cachedVisualization, loadVisualization } from './document-cache';
 import { readVisualizationTheme } from './theme';
 import { VISUALIZATION_STATE_EVENT, readVisualizationState, writeVisualizationState } from './view-state';
 import { VisualizationQuestion } from './VisualizationQuestion';
+import { useVisualizationVersions } from './useVisualizationVersions';
 
-export function VisualizationFrame({ reference, expanded = false }: { reference: VisualizationReference; expanded?: boolean }) {
-  const nonce = useId();
+export function VisualizationFrame({ reference: original, expanded = false }: { reference: VisualizationReference; expanded?: boolean }) {
+  const version = useVisualizationVersions(original);
+  return <VisualizationDocumentFrame key={version.reference.id} version={version} expanded={expanded} />;
+}
+
+function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType<typeof useVisualizationVersions>; expanded: boolean }) {
+  const reference = version.reference;
+  const stateId = reference.rootId ?? reference.id;
+  const identity = useId();
+  const nonce = `${identity}:${reference.id}`;
   const { paletteId, workspaceGlass, surface } = useTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -34,24 +44,24 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
   useEffect(() => {
     if (!doc) return;
     let stopped = false;
-    void visualizationSrcdoc(doc.html, nonce, themeRef.current ?? readVisualizationTheme(), readVisualizationState(reference.id)).then(source => {
+    void visualizationSrcdoc(doc.html, nonce, themeRef.current ?? readVisualizationTheme(), readVisualizationState(stateId)).then(source => {
       if (!stopped) setSrcdoc(source);
     }).catch(() => { if (!stopped) setError('This browser could not prepare the visualization.'); });
     return () => { stopped = true; };
-  }, [doc, nonce, reference.id]);
+  }, [doc, nonce, stateId]);
 
   useEffect(() => {
     const sync = (event: Event) => {
       const detail = (event as CustomEvent<{ id: string; state: Record<string, unknown> }>).detail;
-      if (detail?.id === reference.id) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: detail.state }, '*');
+      if (detail?.id === stateId) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: detail.state }, '*');
     };
     const storage = (event: StorageEvent) => {
-      if (event.key === `o8:visualization-view:v1:${reference.id}`) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: readVisualizationState(reference.id) }, '*');
+      if (event.key === `o8:visualization-view:v1:${stateId}`) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: readVisualizationState(stateId) }, '*');
     };
     window.addEventListener(VISUALIZATION_STATE_EVENT, sync);
     window.addEventListener('storage', storage);
     return () => { window.removeEventListener(VISUALIZATION_STATE_EVENT, sync); window.removeEventListener('storage', storage); };
-  }, [nonce, reference.id]);
+  }, [nonce, stateId]);
 
   useEffect(() => {
     let stopped = false;
@@ -73,7 +83,7 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (event.source !== frameRef.current?.contentWindow || event.origin !== 'null' || event.data?.nonce !== nonce) return;
-      if (event.data.type === 'o8-visualization:state') { writeVisualizationState(reference.id, event.data.value); return; }
+      if (event.data.type === 'o8-visualization:state') { writeVisualizationState(stateId, event.data.value); return; }
       if (event.data.type === 'o8-visualization:question') {
         if (typeof event.data.value === 'string' && event.data.value.trim() && event.data.value.length <= 4000
           // WebKit does not carry transient activation across both opaque frames.
@@ -85,11 +95,11 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
       setHeight(Math.min(expanded ? 4000 : VISUALIZATION_LIMITS.maxHeight, Math.max(VISUALIZATION_LIMITS.minHeight, Math.ceil(event.data.height))));
       setReady(true);
       if (themeRef.current) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:theme', nonce, theme: themeRef.current }, '*');
-      frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: readVisualizationState(reference.id) }, '*');
+      frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: readVisualizationState(stateId) }, '*');
     };
     window.addEventListener('message', receive);
     return () => window.removeEventListener('message', receive);
-  }, [nonce, expanded, reference.id]);
+  }, [nonce, expanded, stateId]);
 
   useEffect(() => {
     if (!doc || ready) return;
@@ -107,19 +117,25 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setControls(false); }}>
     {error ? <div role="status" style={{ paddingTop: 16, paddingBottom: 16, color: 'var(--t-text-muted)', fontSize: 13 }}>
       <div>{error}</div>
-      <button style={{ ...buttonStyle, marginTop: 10 }} onClick={() => { setError(null); setReady(false); setDoc(undefined); setAttempt(value => value + 1); }}>Retry visualization</button>
+      <div style={{ marginTop: 10 }}><RamsButton variant="ghost" onClick={() => { setError(null); setReady(false); setDoc(undefined); setAttempt(value => value + 1); }}>Retry visualization</RamsButton></div>
     </div> : <>
       {srcdoc ? <iframe key={`${reference.id}:${attempt}`} ref={frameRef} title={reference.title} sandbox="allow-scripts" referrerPolicy="no-referrer"
         srcDoc={srcdoc} style={{ display: 'block', border: 0, width: '100%', height, background: 'transparent', opacity: ready ? 1 : 0 }} /> : null}
       {!ready ? <div role="status" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'var(--t-text-muted)', fontSize: 12, background: 'var(--t-bg-hover)', borderRadius: 10 }}>Loading visualization…</div> : null}
-      {ready && !expanded ? <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6, opacity: controls ? 1 : 0,
-        pointerEvents: controls ? 'auto' : 'none' }}>
+      {ready ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 12, marginTop: 6, opacity: controls || expanded ? 1 : 0,
+        pointerEvents: controls || expanded ? 'auto' : 'none' }}>
+        {version.versions.length > 1 ? <select aria-label="Visualization version" value={version.chosen} onChange={event => version.choose(event.target.value)} style={{ ...buttonStyle, fontSize: 11 }}>
+          <option value="">Latest (v{version.latest.version ?? 1})</option>
+          {version.versions.map(ref => <option key={ref.id} value={ref.id}>v{ref.version ?? 1}{ref.id === version.latest.id ? ' (current)' : ''}</option>)}
+        </select> : null}
+        <RamsButton variant="ghost" onClick={() => setQuestion(`Refine this visualization. Read it with o8_visualization_read (id: ${reference.id}), then revise the latest version with revisionOf. Keep its data and control keys. My requested change: `)}>Refine visual</RamsButton>
+        {!expanded ?
         <button aria-label={`Open ${reference.title} in workspace`} style={{ ...buttonStyle, display: 'flex', alignItems: 'center', gap: 6,
           background: 'transparent', border: 0, paddingTop: 4, paddingBottom: 4, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)', backdropFilter: 'none', WebkitBackdropFilter: 'none' }} onClick={open}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5" /></svg>
           Open in workspace
-        </button>
+        </button> : null}
       </div> : null}
       {question ? <VisualizationQuestion title={reference.title} question={question} onClose={() => setQuestion(null)} /> : null}
     </>}

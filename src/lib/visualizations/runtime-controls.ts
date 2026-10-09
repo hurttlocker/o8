@@ -10,7 +10,8 @@ export const VISUALIZATION_CONTROLS = `
     try {
       const json = JSON.stringify(value);
       if (!value || typeof value !== 'object' || Array.isArray(value) || new TextEncoder().encode(json).length > 16384) return false;
-      snapshot = JSON.parse(json); bridge.post('state', snapshot); return true;
+      if (JSON.stringify(snapshot)===json) return true;
+      snapshot = JSON.parse(json); bridge.post('state', snapshot); notify(); return true;
     } catch { return false; }
   }
   addEventListener('o8:visualization-state', event => { snapshot = event.detail || {}; notify(); });
@@ -39,10 +40,19 @@ export const VISUALIZATION_CONTROLS = `
     };
   }
   window.o8Viz = {
-    version: 3,
+    version: 4,
     getState(fallback = {}) { return Object.keys(snapshot).length ? clone(snapshot) : clone(fallback); },
     setState,
     onState(listener) { subscribers.add(listener); return () => subscribers.delete(listener); },
+    link(key) {
+      if (typeof key!=='string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(key)) throw new Error('Use a stable link key');
+      return {
+        get() { return clone(snapshot.links?.[key] || {}); },
+        set(value) { return setState(Object.assign({},snapshot,{links:Object.assign({},snapshot.links,{[key]:value || {}})})); },
+        clear() { return this.set({}); },
+        onChange(listener) { return window.o8Viz.onState(() => listener(clone(snapshot.links?.[key] || {}))); }
+      };
+    },
     ask(prompt) { if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) return false; bridge.post('question',prompt.trim()); return true; },
     tooltip,
     color(index = 0) { return getComputedStyle(document.documentElement).getPropertyValue('--chart-'+(index%6+1)).trim(); },

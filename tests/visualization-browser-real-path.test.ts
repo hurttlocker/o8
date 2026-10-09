@@ -3,6 +3,7 @@ import { createSocket } from 'node:dgram';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defaultVisualizationTheme, visualizationSrcdoc } from '@/lib/visualizations/document';
+import { parseVisualizationLayout, visualizationLayoutHtml } from '@/lib/visualizations/templates';
 
 // Dedicated receipt: O8_VISUALIZATION_BROWSER=/usr/bin/chromium vitest run this file.
 // The default hermetic suite does not download or require an installed browser.
@@ -212,5 +213,68 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
     expect(heights).toHaveLength(2); expect(heights.every(value => value > 0)).toBe(true);
     const hit = frame.locator('#bars [data-chart-hit]'); await hit.focus(); await hit.press('Home');
     expect(await frame.locator('#bars .viz-sr-only').textContent()).toContain('Change: −2');
+  });
+
+  it('links a series and day across chart, heatmap, details and values without losing context', async () => {
+    const spec = parseVisualizationLayout({ layout: 'explore', title: 'Weekly work', source: 'Illustrative fixture', unit: 'tasks', xLabel: 'Day',
+      series: [{ id: 'build', label: 'Build', values: [{ x: 1, y: 4, label: 'Mon' }, { x: 2, y: 8, label: 'Tue' }] },
+        { id: 'review', label: 'Review', values: [{ x: 1, y: 2, label: 'Mon' }, { x: 2, y: null, label: 'Tue' }] }] });
+    const frame = await mount(visualizationLayoutHtml(spec));
+    await frame.locator('[data-filter-series="review"]').click();
+    expect(await frame.locator('[data-filter-series="review"]').getAttribute('aria-pressed')).toBe('true');
+    expect(await frame.locator('thead').last().textContent()).toContain('Review (tasks)');
+    expect(await frame.locator('thead').last().textContent()).not.toContain('Build');
+    await frame.locator('[data-heat-series="review"][data-heat-x="2"]').click();
+    expect(await frame.locator('.viz-grid .viz-value').first().textContent()).toBe('—');
+    await frame.locator('[data-heat-series="build"][data-heat-x="2"]').click();
+    expect(await frame.locator('.viz-selection').textContent()).toContain('Build · Tue');
+    expect(await frame.locator('svg [data-chart-x="2"]').evaluate(node => getComputedStyle(node).display)).not.toBe('none');
+    expect(await frame.locator('.viz-detail').textContent()).toContain('1 recorded value.');
+    await frame.locator('summary').last().click();
+    expect(await frame.locator('tbody').last().locator('tr').count()).toBe(1);
+    expect(await frame.locator('tbody').last().textContent()).toContain('Tue8');
+    await frame.getByRole('button', { name: 'Clear selection', exact: true }).click();
+    expect(await frame.locator('tbody').last().locator('tr').count()).toBe(2);
+    for (const width of [320, 480, 1024]) {
+      await page.locator('#visual').evaluate((node, width) => { (node as HTMLElement).style.width = width + 'px'; }, width);
+      await frame.waitForFunction(expected => document.documentElement.clientWidth === expected, width);
+      await frame.waitForFunction(expected => document.querySelector('svg')?.getAttribute('viewBox')?.split(' ')[2] === String(expected), width);
+      expect(await frame.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+    }
+  });
+
+  it('retains linked choices and open values when the same data receives a quieter revision', async () => {
+    const spec = parseVisualizationLayout({ layout: 'explore', title: 'Revision fixture', source: 'Illustrative fixture', unit: 'tasks', xLabel: 'Day',
+      series: [{ id: 'build', label: 'Build', values: [{ x: 1, y: 4, label: 'Mon' }, { x: 2, y: 8, label: 'Tue' }] },
+        { id: 'review', label: 'Review', values: [{ x: 1, y: 2, label: 'Mon' }, { x: 2, y: null, label: 'Tue' }] }] });
+    const first = await mount(visualizationLayoutHtml(spec));
+    await first.locator('[data-heat-series="build"][data-heat-x="2"]').click();
+    await first.getByRole('button', { name: 'Compare', exact: true }).click(); await first.locator('.viz-dashboard > details summary').click();
+    await first.waitForFunction(() => (window as unknown as { o8Viz: { getState(): { dashboards?: { exploration?: { valuesOpen?: boolean } } } } }).o8Viz.getState().dashboards?.exploration?.valuesOpen === true);
+    const state = await first.evaluate(() => (window as unknown as { o8Viz: { getState(): Record<string, unknown> } }).o8Viz.getState());
+    const revised = await mount(visualizationLayoutHtml({ ...spec, style: 'quiet', density: 'compact' }), state);
+    expect(await revised.locator('.viz-selection').textContent()).toContain('Build · Tue');
+    expect(await revised.getByRole('button', { name: 'Compare', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    expect(await revised.locator('.viz-dashboard > details').getAttribute('open')).not.toBeNull();
+    expect(await revised.locator('.viz-dashboard > details tbody tr').count()).toBe(1); expect(await revised.locator('svg rect').count()).toBe(2);
+    expect(await revised.locator('body').textContent()).toContain('Illustrative fixture');
+  });
+
+  it('bounds sparse heatmap rendering and reaches every day without truncating the linked values', async () => {
+    const spec = parseVisualizationLayout({ layout: 'explore', title: 'A longer timeline', source: 'Sparse illustrative fixture', unit: 'tasks', xLabel: 'Day',
+      series: [{ id: 'build', label: 'Build', values: Array.from({ length: 80 }, (_, i) => ({ x: i + 1, y: i, label: 'D' + (i + 1) })) },
+        { id: 'review', label: 'Review', values: Array.from({ length: 80 }, (_, i) => ({ x: i + 81, y: i, label: 'D' + (i + 81) })) }] });
+    const frame = await mount(visualizationLayoutHtml(spec));
+    expect(await frame.locator('[data-heat-x]').count()).toBe(84);
+    await frame.getByRole('button', { name: 'Next pattern page', exact: true }).click();
+    expect(await frame.locator('[data-heat-x]').first().getAttribute('data-heat-x')).toBe('43');
+    const hit = frame.locator('[data-chart-hit]'); await hit.focus(); await hit.press('End'); await hit.press('Enter');
+    expect(await frame.locator('.viz-selection').textContent()).toContain('D160');
+    expect(await frame.locator('[data-heat-x="160"]').count()).toBe(2);
+    await frame.getByRole('button', { name: 'Clear selection', exact: true }).click();
+    await frame.locator('.viz-dashboard > details summary').click();
+    expect(await frame.locator('.viz-dashboard > details tbody tr').count()).toBe(60);
+    expect(await frame.locator('.viz-dashboard > details tbody').textContent()).toContain('D160');
+    expect(await frame.locator('[data-heat-x]').count()).toBeLessThanOrEqual(84);
   });
 });
