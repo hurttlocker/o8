@@ -22,6 +22,7 @@ import {
 } from '@/lib/voice/realtime-client';
 import { symonReviewGuardId } from '@/lib/mobile/symon-tool-relay';
 import { REALTIME_MODEL, DEFAULT_VOICE } from '@/lib/voice/realtime-session-config';
+import { createSymonVoiceTranscriptRecorder } from '@/lib/symon/voice-transcript-recorder';
 
 const LOG = '[realtime-host]';
 
@@ -223,6 +224,8 @@ export function RealtimeVoiceHost() {
       /* no localStorage in this context */
     }
     console.log(`${LOG} starting realtime voice (voice=${voice})`);
+    // Each voice session is one thread in the Symon store (#3455).
+    const recorder = createSymonVoiceTranscriptRecorder();
     sessionRef.current = startRealtimeSession({
       voice,
       onStatus: (s, detail) => {
@@ -230,6 +233,7 @@ export function RealtimeVoiceHost() {
         setStatusDetail(s === 'error' && detail ? detail : null);
       },
       onEvent: (e) => {
+        recorder.observe(e);
         const t = typeof e.type === 'string' ? e.type : '';
         // HARD-GATE the idle clock on a responding flag. We must NOT lean on
         // intermediate response.*/transcript-delta events to keep re-arming it:

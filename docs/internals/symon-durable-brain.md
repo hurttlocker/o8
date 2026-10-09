@@ -112,10 +112,18 @@ sees them as earlier conversation. Recording is best effort and never delays or
 fails the reply. A thread the brain has never seen still receives the managed
 store's last twelve turns as data on its first Pi turn.
 
+The desktop voice session records itself: `RealtimeVoiceHost` passes realtime
+events to `createSymonVoiceTranscriptRecorder()`
+(`src/lib/symon/voice-transcript-recorder.ts`), which posts each finished line
+to the record route. The operator's line is written when its input
+transcription completes and Symon's when its audio transcript is done. Each
+voice session is one `voice:` thread, and the event's item id is the request
+id, so a repeated event records nothing new.
+
 ## Current limits
 
 - The Pi brain only reads o8. It cannot act on the computer or change o8.
-- Voice clients must send their lines to the record route; none does yet.
+- Voice sessions the phone hosts are not recorded; only the desktop voice session is.
 - Limited-access shared group turns are not recorded.
 
 ## Tests
@@ -133,3 +141,6 @@ store's last twelve turns as data on its first Pi turn.
 - `tests/symon-brain-o8-commands-real-path.test.ts`: a command answered from
   its result, the offered tools and prompt, the read-only projection, an
   interrupted command after a restart, and idle close and reopen.
+- `tests/symon-voice-record-real-path.test.ts`: a desktop voice session from
+  the voice host through the record route into one voice thread, one thread
+  per session, and skipped or failed lines.
