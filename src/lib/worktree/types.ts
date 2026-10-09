@@ -159,6 +159,9 @@ export interface WorktreeMetaStore {
 }
 
 export interface WorktreeMetaEntry {
+  /** Creation-time association for bounded terminal discovery, including collision slots. */
+  packetId?: string;
+  laneId?: string;
   id: string;
   agentType: AgentType;
   sessionKey?: string;

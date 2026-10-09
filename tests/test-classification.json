@@ -1418,6 +1418,16 @@
       ]
     },
     {
+      "path": "tests/bounded-worktree-maintenance-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/brain-classifier-referee-real-path.test.ts",
       "reasons": [
         "executable-fixture",

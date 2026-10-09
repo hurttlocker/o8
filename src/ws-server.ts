@@ -122,7 +122,7 @@ import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { resolveAppVersion } from '@/lib/telemetry/crash-store';
-import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -9505,15 +9505,8 @@ async function bootstrapWsServer() {
   }
 
   try {
-    const { sweepKnownTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
-    const registeredRepoPaths = (await listRepos()).map((repo) => repo.localPath);
-    const result = await sweepKnownTerminalCortexWorktrees(REPO_ROOT, registeredRepoPaths);
-    if (result.removed > 0 || result.failed > 0) {
-      console.log(
-        `[cleanup] Startup worktree sweep repos=${result.reposScanned} scanned=${result.scanned} `
-        + `removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed}`,
-      );
-    }
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    await runWorktreeMaintenanceTick(REPO_ROOT);
   } catch (error) {
     console.warn(
       `[cleanup] Startup worktree sweep failed: ${error instanceof Error ? error.message : String(error)}`,

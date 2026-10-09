@@ -23,6 +23,8 @@ import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressu
 import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
 import { dependencyInstallCommandForManager } from '@/lib/workspace/dependency-manager-contract';
 import { loadWorkspaceManifest, workspaceManifestPath } from '@/lib/workspace/manifest';
+import { assertWorktreeMetadataEntryBudget, readBoundedMaintenanceFile,
+  worktreeMetadataReadLimit } from '@/lib/worktree/maintenance-budget';
 
 const execFileAsync = promisify(execFile);
 
@@ -376,6 +378,15 @@ function invalidateStoreCache() {
 }
 
 async function readStore(): Promise<RepoRegistryStore> {
+  // Automatic retirement must freshly admit this authority, including a cached registry.
+  if (worktreeMetadataReadLimit() !== undefined) {
+    const file = await readBoundedMaintenanceFile(REGISTRY_PATH);
+    if (!file) return { version: 1, repos: [] };
+    const parsed = JSON.parse(file.text) as Partial<RepoRegistryStore>;
+    if (!Array.isArray(parsed.repos)) throw new Error('Repository registry is unreadable.');
+    assertWorktreeMetadataEntryBudget(REGISTRY_PATH, parsed.repos.length);
+    return { version: 1, repos: sortRepos(parsed.repos.map(normalizeRepoEntry)) };
+  }
   if (_cachedStore && Date.now() - _cachedStore.ts < STORE_CACHE_TTL_MS) {
     return _cachedStore.value;
   }

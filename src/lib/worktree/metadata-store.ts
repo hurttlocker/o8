@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { lstat, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import type Database from 'better-sqlite3';
@@ -29,6 +30,7 @@ import {
   writePinnedWorkspaceFile,
 } from './materialization-leaf-io';
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
+import { assertWorktreeMetadataEntryBudget, chargeWorktreeMetadataRead, worktreeMetadataReadLimit, WorktreeMaintenanceHeldError } from './maintenance-budget';
 
 const META_FILENAME = '.meta.json';
 
@@ -73,6 +75,8 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const entry = value as Partial<WorktreeMetaEntry>;
   return entry.id === id
+    && (entry.packetId === undefined || typeof entry.packetId === 'string')
+    && (entry.laneId === undefined || typeof entry.laneId === 'string')
     && typeof entry.agentType === 'string'
     && entry.agentType.trim().length > 0
     && (entry.sessionKey === undefined || typeof entry.sessionKey === 'string')
@@ -162,6 +166,9 @@ function validatedMetaStore(value: unknown, metaPath: string): WorktreeMetaStore
     throw new Error(`Worktree metadata at ${metaPath} is not an object.`);
   }
   const store = value as Partial<WorktreeMetaStore>;
+  if (store.worktrees && typeof store.worktrees === 'object') {
+    assertWorktreeMetadataEntryBudget(metaPath, Object.keys(store.worktrees).length);
+  }
   if (store.version !== 1
     || !store.worktrees
     || typeof store.worktrees !== 'object'
@@ -190,6 +197,30 @@ async function readMeta(
   }
   if (!metaStat.isFile() || metaStat.isSymbolicLink()) {
     throw new Error(`Worktree metadata at ${metaPath} is not a regular file.`);
+  }
+  const limit = worktreeMetadataReadLimit();
+  if (limit !== undefined) {
+    const handle = await open(metaPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || before.size > limit) {
+        throw new WorktreeMaintenanceHeldError(metaPath, `metadata ${before.size} bytes exceeds the read allowance ${limit}`);
+      }
+      const bytes = Buffer.alloc(before.size);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+        if (read.bytesRead === 0) throw new Error('Metadata changed during bounded read.');
+        offset += read.bytesRead;
+      }
+      const after = await handle.stat();
+      if (before.dev !== after.dev || before.ino !== after.ino
+        || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+        throw new Error('Metadata changed during bounded read.');
+      }
+      chargeWorktreeMetadataRead(metaPath, bytes.length);
+      return validatedMetaStore(JSON.parse(bytes.toString('utf8')) as unknown, metaPath).worktrees;
+    } finally { await handle.close(); }
   }
   return validatedMetaStore(await readJsonFile<unknown>(metaPath), metaPath).worktrees;
 }
@@ -297,6 +328,7 @@ export async function withWorktreeMetaTransaction<T>(
         lease,
         JSON.stringify({ version: 1, worktrees: entries } satisfies WorktreeMetaStore),
         mirrorIdentity,
+        repoPath,
       );
     } else {
       entries = validatedMetaStore(JSON.parse(durableState.payload) as unknown, metaPath).worktrees;
@@ -304,7 +336,7 @@ export async function withWorktreeMetaTransaction<T>(
     }
     const persist = async (): Promise<void> => {
       const serialized = JSON.stringify({ version: 1, worktrees: entries } satisfies WorktreeMetaStore, null, 2);
-      writeMetadataTransactionState(lease, serialized, mirrorIdentity);
+      writeMetadataTransactionState(lease, serialized, mirrorIdentity, repoPath);
       mirrorIdentity = await writePinnedWorkspaceFile(
         path.dirname(metaPath),
         boundary.base,
@@ -313,7 +345,7 @@ export async function withWorktreeMetaTransaction<T>(
         undefined,
         mirrorIdentity,
       );
-      writeMetadataTransactionState(lease, serialized, mirrorIdentity);
+      writeMetadataTransactionState(lease, serialized, mirrorIdentity, repoPath);
       const persisted = await readMeta(metaPath, {
         basePath: path.dirname(metaPath), identity: boundary.base,
       });

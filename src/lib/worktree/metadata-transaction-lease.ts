@@ -6,6 +6,8 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { projectMaintenanceMetadata } from './maintenance-discovery';
+import { chargeWorktreeMetadataRead, worktreeMetadataReadLimit, WorktreeMaintenanceHeldError } from './maintenance-budget';
 import {
   isMetadataLockProcessIdentity,
   probeMetadataLockProcessIdentity,
@@ -254,25 +256,36 @@ function assertLeaseOwner(
   }
 }
 
+function readBoundedState(sqlite: Database.Database, metadataRoot: string) {
+  const limit = worktreeMetadataReadLimit();
+  const row = sqlite.prepare(`
+    SELECT length(CAST(payload_json AS BLOB)) + length(CAST(COALESCE(mirror_identity_json, '') AS BLOB)) AS bytes,
+      CASE WHEN length(CAST(payload_json AS BLOB)) + length(CAST(COALESCE(mirror_identity_json, '') AS BLOB)) <= ?
+        THEN payload_json END AS payload_json,
+      CASE WHEN length(CAST(payload_json AS BLOB)) + length(CAST(COALESCE(mirror_identity_json, '') AS BLOB)) <= ?
+        THEN mirror_identity_json END AS mirror_identity_json
+    FROM worktree_metadata_state WHERE metadata_root = ?
+  `).get(limit ?? Number.MAX_SAFE_INTEGER, limit ?? Number.MAX_SAFE_INTEGER, metadataRoot) as {
+    bytes: number; payload_json: string | null; mirror_identity_json: string | null;
+  } | undefined;
+  if (!row) return null;
+  if (row.payload_json === null) {
+    throw new WorktreeMaintenanceHeldError(metadataRoot, `metadata ${row.bytes} bytes exceeds the read allowance ${limit}`);
+  }
+  chargeWorktreeMetadataRead(metadataRoot, row.bytes);
+  return {
+    payload: row.payload_json,
+    mirrorIdentity: row.mirror_identity_json
+      ? JSON.parse(row.mirror_identity_json) as MetadataMirrorIdentity : null,
+  };
+}
+
 export function readMetadataTransactionState(
   lease: MetadataTransactionLease,
 ): { payload: string; mirrorIdentity: MetadataMirrorIdentity | null } | null {
   return withLeaseDatabase((sqlite) => {
     assertLeaseOwner(sqlite, lease);
-    const row = sqlite.prepare(`
-      SELECT payload_json, mirror_identity_json
-      FROM worktree_metadata_state WHERE metadata_root = ?
-    `).get(lease.metadataRoot) as {
-      payload_json: string;
-      mirror_identity_json: string | null;
-    } | undefined;
-    if (!row) return null;
-    return {
-      payload: row.payload_json,
-      mirrorIdentity: row.mirror_identity_json
-        ? JSON.parse(row.mirror_identity_json) as MetadataMirrorIdentity
-        : null,
-    };
+    return readBoundedState(sqlite, lease.metadataRoot);
   });
 }
 
@@ -284,26 +297,14 @@ export function readMetadataTransactionStateSnapshot(
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'worktree_metadata_state'
   `).get();
   if (!schema) return null;
-  const row = sqlite.prepare(`
-    SELECT payload_json, mirror_identity_json
-    FROM worktree_metadata_state WHERE metadata_root = ?
-  `).get(path.resolve(metadataRoot)) as {
-    payload_json: string;
-    mirror_identity_json: string | null;
-  } | undefined;
-  if (!row) return null;
-  return {
-    payload: row.payload_json,
-    mirrorIdentity: row.mirror_identity_json
-      ? JSON.parse(row.mirror_identity_json) as MetadataMirrorIdentity
-      : null,
-  };
+  return readBoundedState(sqlite, path.resolve(metadataRoot));
 }
 
 export function writeMetadataTransactionState(
   lease: MetadataTransactionLease,
   payload: string,
   mirrorIdentity: MetadataMirrorIdentity | null,
+  repositoryPath?: string,
 ): void {
   withLeaseDatabase((sqlite) => sqlite.transaction(() => {
     assertLeaseOwner(sqlite, lease);
@@ -321,5 +322,6 @@ export function writeMetadataTransactionState(
       mirrorIdentity ? JSON.stringify(mirrorIdentity) : null,
       Date.now(),
     );
+    if (repositoryPath) projectMaintenanceMetadata(sqlite, repositoryPath, lease.metadataRoot, payload);
   }).immediate());
 }
