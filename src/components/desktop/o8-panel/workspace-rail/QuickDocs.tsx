@@ -20,6 +20,8 @@ interface QuickDocsResponse {
   groups?: QuickDocGroup[];
 }
 
+const EMPTY_GROUPS: QuickDocGroup[] = [];
+
 function ChevronIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -43,7 +45,9 @@ export function QuickDocs({
   selectedFile: string | null;
   onSelectFile: (filePath: string) => void;
 }) {
-  const [groups, setGroups] = useState<QuickDocGroup[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [snapshot, setSnapshot] = useState<{ repoPath: string | null; groups: QuickDocGroup[] }>({ repoPath: null, groups: [] });
+  const groups = snapshot.repoPath === (repoPath ?? null) ? snapshot.groups : EMPTY_GROUPS;
 
   useEffect(() => {
     let cancelled = false;
@@ -54,10 +58,10 @@ export function QuickDocs({
     fetch(`/api/v2/files/quick-docs${query ? `?${query}` : ''}`)
       .then((response) => response.json() as Promise<QuickDocsResponse>)
       .then((data) => {
-        if (!cancelled) setGroups(Array.isArray(data.groups) ? data.groups : []);
+        if (!cancelled) setSnapshot({ repoPath: repoPath ?? null, groups: Array.isArray(data.groups) ? data.groups : [] });
       })
       .catch(() => {
-        if (!cancelled) setGroups([]);
+        if (!cancelled) setSnapshot({ repoPath: repoPath ?? null, groups: [] });
       });
 
     return () => { cancelled = true; };
@@ -72,17 +76,18 @@ export function QuickDocs({
 
   return (
     <div style={{ borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)' }}>
-      <div style={{ minHeight: 32, display: 'flex', alignItems: 'center', gap: 8, paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
-        <span style={{ color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 10, fontWeight: 850, letterSpacing: 0, textTransform: 'uppercase' }}>
+      <button type="button" aria-expanded={expanded} onClick={() => setExpanded(open => !open)} style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', minHeight: 32, display: 'flex', alignItems: 'center', gap: 8, paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10 }}>
+        <span style={{ display: 'inline-flex', transform: expanded ? 'rotate(90deg)' : 'none' }}><ChevronIcon size={10} /></span>
+        <span style={{ color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 11, fontWeight: 400, letterSpacing: 0 }}>
           Quick docs
         </span>
         <span style={{ marginLeft: 'auto', color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 10, fontWeight: 650 }}>
           {total}
         </span>
-      </div>
-      {groups.map((group) => (
+      </button>
+      {expanded && groups.map((group) => (
         <div key={group.label} style={{ paddingBottom: 6 }}>
-          <div style={{ height: 20, display: 'flex', alignItems: 'center', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10, color: 'var(--t-text-faint)', fontFamily: UI_FONT, fontSize: 9, fontWeight: 800, letterSpacing: 0, textTransform: 'uppercase' }}>
+          <div style={{ height: 24, display: 'flex', alignItems: 'center', paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10, color: 'var(--t-text-faint)', fontFamily: UI_FONT, fontSize: 11, fontWeight: 400, letterSpacing: 0 }}>
             {group.label}
           </div>
           {group.entries.map((entry) => {
@@ -95,7 +100,7 @@ export function QuickDocs({
                 onClick={() => onSelectFile(entry.path)}
                 title={displayPath}
                 style={{
-                  minHeight: 44,
+                  minHeight: 36,
                   width: '100%',
                   display: 'flex',
                   alignItems: 'center',
@@ -116,14 +121,11 @@ export function QuickDocs({
                 onMouseLeave={(event) => { if (!selected) event.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ color: selected ? 'var(--t-text)' : 'var(--t-text-muted)', fontSize: 10, fontWeight: 850, letterSpacing: 0, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: selected ? 'var(--t-text)' : 'var(--t-text-muted)', fontSize: 12, fontWeight: 300, letterSpacing: 0, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {entry.label}
                   </span>
                   <span style={{ color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 10, fontWeight: 500, letterSpacing: 0, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {entry.value}
-                  </span>
-                  <span style={{ color: 'var(--t-text-secondary)', fontFamily: MONO_FONT, fontSize: 9, fontWeight: 450, letterSpacing: 0, lineHeight: 1.1, opacity: 0.74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {displayPath}
                   </span>
                 </span>
                 <ChevronIcon />

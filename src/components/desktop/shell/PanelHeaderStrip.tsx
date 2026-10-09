@@ -9,7 +9,7 @@
 import type { ReactNode } from 'react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { O8HeaderTabs } from '../o8-panel/O8HeaderTabs';
-import type { O8Tab } from '../o8-panel/types';
+import { isRightUtilityTab, type O8Tab } from '../o8-panel/types';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { HeaderIconPill } from './HeaderIconPill';
@@ -24,12 +24,8 @@ interface PanelHeaderStripProps {
   onToggleSplit?: () => void;
   approvalCount?: number;
   onOpenInbox?: () => void;
-  /** Portal target for the browser's page tabs + URL well (Cursor header
-   *  borrow, Q 2026-07-12): the browser's whole top chrome renders HERE in
-   *  the strip's flex center, walled off from the state drawer by a hairline
-   *  divider. The standalone globe button is retired — the drawer's Browser
-   *  entry (orange globe when active) is the surface's one handle. */
-  browserTabsSlotRef?: (node: HTMLElement | null) => void;
+  /** Browser pages and utility tabs share the column's top header. */
+  panelTabsSlotRef?: (node: HTMLElement | null) => void;
   showBrowserTabs?: boolean;
   prTabsSlot?: ReactNode;
 }
@@ -44,19 +40,21 @@ export function PanelHeaderStrip({
   onToggleSplit,
   approvalCount = 0,
   onOpenInbox,
-  browserTabsSlotRef,
+  panelTabsSlotRef,
   showBrowserTabs = false,
   prTabsSlot,
 }: PanelHeaderStripProps) {
+  const showUtilityTabs = !splitEnabled && (o8ActiveTab === 'launcher' || (isRightUtilityTab(o8ActiveTab) && o8ActiveTab !== 'browser'));
+  const showTabs = panelTabsSlotRef !== undefined && (showBrowserTabs || showUtilityTabs);
   return (
     <ColumnHeaderStrip
       drag
       center={onO8TabChange ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1 }}>
           {prTabsSlot}
-          {showBrowserTabs && browserTabsSlotRef ? <div ref={browserTabsSlotRef} data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexShrink: 1, overflow: 'hidden', ['WebkitAppRegion' as string]: 'no-drag' }} /> : null}
-          <O8HeaderTabs activeTab={o8ActiveTab} onTabChange={onO8TabChange} opener onNewPage={() => { onO8TabChange('browser'); window.dispatchEvent(new CustomEvent('o8:browser-new-page')); }} />
-
+          {panelTabsSlotRef ? <div ref={panelTabsSlotRef} data-no-drag style={{ display: showTabs ? 'flex' : 'none', alignItems: 'center', gap: 1, minWidth: 0, flex: 1, overflow: 'hidden', ['WebkitAppRegion' as string]: 'no-drag' }} /> : null}
+          {!showTabs || o8ActiveTab === 'browser' ? <HeaderIconPill label="Open right panel tab picker" onClick={() => onO8TabChange('launcher')} icon={<svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>} /> : null}
+          <O8HeaderTabs activeTab={o8ActiveTab} onTabChange={onO8TabChange} opener more onNewPage={() => { onO8TabChange('browser'); window.dispatchEvent(new CustomEvent('o8:browser-new-page')); }} />
         </div>
       ) : null}
       right={

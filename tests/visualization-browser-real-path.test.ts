@@ -277,4 +277,46 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
     expect(await frame.locator('.viz-dashboard > details tbody').textContent()).toContain('D160');
     expect(await frame.locator('[data-heat-x]').count()).toBeLessThanOrEqual(84);
   });
+
+  it('asks about the visible selection when a revision removes saved series or days', async () => {
+    const spec = parseVisualizationLayout({ layout: 'explore', title: 'Changed data', source: 'Illustrative fixture', unit: 'tasks', xLabel: 'Day',
+      series: [{ id: 'build', label: 'Build', values: [{ x: 1, y: 4, label: 'Mon' }, { x: 2, y: 8, label: 'Tue' }] },
+        { id: 'review', label: 'Review', values: [{ x: 1, y: 2, label: 'Mon' }] }] });
+    const frame = await mount(visualizationLayoutHtml(spec), { links: { exploration: { seriesId: 'removed', x: 999 } } });
+    await page.evaluate(() => {
+      (window as unknown as { question: string }).question = '';
+      addEventListener('message', event => { if (event.data?.type === 'o8-visualization:question') (window as unknown as { question: string }).question = event.data.value; });
+    });
+    expect(await frame.locator('.viz-selection').textContent()).toContain('All series · Full range');
+    await frame.getByRole('button', { name: 'Ask about this selection', exact: true }).click();
+    await page.waitForFunction(() => Boolean((window as unknown as { question: string }).question));
+    const question = await page.evaluate(() => (window as unknown as { question: string }).question);
+    expect(question).toContain('all Day');
+    expect(question).toContain('Build: 12 tasks (sum, 2 recorded, 0 missing)');
+    expect(question).toContain('Review: 2 tasks (sum, 1 recorded, 1 missing)');
+    expect(question).not.toContain('undefined');
+  });
+
+  it('keeps the largest sparse layout bounded and usable at narrow widths in both themes', async () => {
+    const spec = parseVisualizationLayout({ layout: 'explore', title: 'A longer cross-series investigation', source: 'Maximum-size illustrative fixture', unit: 'tasks', xLabel: 'Day',
+      series: Array.from({ length: 8 }, (_, series) => ({ id: `series-${series}`, label: `Workstream ${series + 1}`, values: Array.from({ length: 366 }, (_, index) => ({ x: series * 366 + index + 1, y: index % 11 === 0 ? null : index - 100, label: `Day ${series * 366 + index + 1}` })) })) });
+    const frame = await mount(visualizationLayoutHtml(spec));
+    for (const appearance of ['light', 'dark'] as const) {
+      await page.evaluate(theme => document.querySelector<HTMLIFrameElement>('#visual')!.contentWindow!.postMessage({ type: 'o8-visualization:theme', nonce: 'fixture', theme }, '*'), defaultVisualizationTheme(appearance));
+      await frame.waitForFunction(expected => document.documentElement.dataset.theme === expected, appearance);
+      for (const width of [320, 480, 1024]) {
+        await page.locator('#visual').evaluate((node, width) => { (node as HTMLElement).style.width = width + 'px'; }, width);
+        await frame.waitForFunction(expected => document.documentElement.clientWidth === expected, width);
+        expect(await frame.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+        expect(await frame.locator('[data-heat-x]').count()).toBeLessThanOrEqual(8 * 42);
+      }
+    }
+    const hit = frame.locator('[data-chart-hit]'); await hit.focus(); await hit.press('End'); await hit.press('Enter');
+    expect(await frame.locator('.viz-selection').textContent()).toContain('Day 2928');
+    expect(await hit.evaluate(node => document.activeElement === node)).toBe(true);
+    await hit.press('Escape'); expect(await frame.locator('.viz-selection').textContent()).toContain('Full range');
+    await frame.locator('.viz-dashboard > details summary').click();
+    expect(await frame.locator('.viz-dashboard > details tbody tr').count()).toBeLessThanOrEqual(100);
+    expect(await frame.locator('.viz-dashboard > details tbody').textContent()).toContain('Day 2928');
+  });
 });

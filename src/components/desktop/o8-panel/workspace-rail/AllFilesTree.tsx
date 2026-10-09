@@ -4,14 +4,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileNode } from '@/app/dashboard/types';
 import { QuickDocs } from './QuickDocs';
+import { RamsButton } from '../../settings/shared';
+import { useWorkspaceFiles, type DirectoryState } from './useWorkspaceFiles';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
-
-interface FilesResponse {
-  tree?: FileNode[];
-  root?: string | null;
-}
 
 function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number }) {
   return (
@@ -80,6 +77,8 @@ function TreeNode({
   selectedFile,
   expandedDirs,
   dirtyFiles,
+  directories,
+  onRetry,
   onToggleDir,
   onSelectFile,
 }: {
@@ -88,6 +87,8 @@ function TreeNode({
   selectedFile: string | null;
   expandedDirs: Set<string>;
   dirtyFiles: Set<string>;
+  directories: Record<string, DirectoryState>;
+  onRetry: (path: string) => void;
   onToggleDir: (path: string) => void;
   onSelectFile: (path: string) => void;
 }) {
@@ -100,6 +101,9 @@ function TreeNode({
     <>
       <button
         type="button"
+        aria-expanded={isDir ? open : undefined}
+        aria-current={selected ? 'page' : undefined}
+        title={node.path}
         onClick={() => { if (isDir) onToggleDir(node.path); else onSelectFile(node.path); }}
         style={{
           display: 'flex',
@@ -148,22 +152,20 @@ function TreeNode({
           <span style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--t-terminal-ansi-bright-green, #22c55e)', flexShrink: 0 }} />
         ) : null}
       </button>
-      {isDir && open && node.children ? (
-        node.children.map((child) => (
-          <TreeNode
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            selectedFile={selectedFile}
-            expandedDirs={expandedDirs}
-            dirtyFiles={dirtyFiles}
-            onToggleDir={onToggleDir}
-            onSelectFile={onSelectFile}
-          />
-        ))
+      {isDir && open ? (
+        directories[node.path]?.loading || !directories[node.path] ? <FolderStatus depth={depth + 1}>Loading folder...</FolderStatus>
+          : directories[node.path].error ? <FolderStatus depth={depth + 1}><span>Couldn&apos;t load this folder.</span><RamsButton variant="ghost" onClick={() => onRetry(node.path)}>Retry</RamsButton></FolderStatus>
+            : directories[node.path].entries.length === 0 ? <FolderStatus depth={depth + 1}>Empty folder</FolderStatus>
+              : directories[node.path].entries.map((child) => (
+                <TreeNode key={child.path} node={child} depth={depth + 1} selectedFile={selectedFile} expandedDirs={expandedDirs} dirtyFiles={dirtyFiles} directories={directories} onRetry={onRetry} onToggleDir={onToggleDir} onSelectFile={onSelectFile} />
+              ))
       ) : null}
     </>
   );
+}
+
+function FolderStatus({ depth, children }: { depth: number; children: React.ReactNode }) {
+  return <div role="status" style={{ paddingTop: 6, paddingBottom: 8, paddingLeft: 20 + depth * 14, paddingRight: 8, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6, fontFamily: UI_FONT, fontSize: 11, color: 'var(--t-text-muted)' }}>{children}</div>;
 }
 
 export function AllFilesTree({
@@ -177,67 +179,39 @@ export function AllFilesTree({
   dirtyFiles: Set<string>;
   onSelectFile: (filePath: string) => void;
 }) {
-  const [tree, setTree] = useState<FileNode[]>([]);
-  const [repoName, setRepoName] = useState('workspace');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { directories, loadDirectory } = useWorkspaceFiles(repoPath);
+  const root = directories['.'];
+  const tree = root?.entries ?? [];
+  const repoName = repoPath?.split('/').filter(Boolean).pop() ?? 'workspace';
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
-  const [rootFilesExpanded, setRootFilesExpanded] = useState(false);
-
-  useEffect(() => {
-    if (!repoPath) {
-      setTree([]);
-      setRepoName('workspace');
-      setError(null);
-      setLoading(false);
-      setExpandedDirs(new Set());
-      setRootFilesExpanded(false);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`/api/panel/files?workspace=${encodeURIComponent(repoPath)}`)
-      .then((response) => {
-        if (!response.ok) throw new Error('Failed to load workspace files');
-        return response.json() as Promise<FilesResponse>;
-      })
-      .then((data) => {
-        if (cancelled) return;
-        setTree(Array.isArray(data.tree) ? data.tree : []);
-        const root = data.root ?? repoPath;
-        setRepoName(root.split('/').pop() ?? root);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setTree([]);
-          setError(err instanceof Error ? err.message : 'Unable to load workspace files');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [repoPath]);
-
+  const [rootFilesExpanded, setRootFilesExpanded] = useState(true);
+  useEffect(() => { setExpandedDirs(new Set()); setRootFilesExpanded(true); }, [repoPath]);
   const handleToggleDir = useCallback((dirPath: string) => {
+    const opening = !expandedDirs.has(dirPath);
     setExpandedDirs((current) => {
       const next = new Set(current);
-      if (next.has(dirPath)) next.delete(dirPath);
-      else next.add(dirPath);
+      if (opening) next.add(dirPath);
+      else next.delete(dirPath);
       return next;
     });
-  }, []);
+    if (opening) void loadDirectory(dirPath);
+  }, [expandedDirs, loadDirectory]);
+  const retryDirectory = (directory: string) => { void loadDirectory(directory, true); };
 
-  const directories = tree.filter((node) => node.type === 'dir');
+  const rootDirs = tree.filter((node) => node.type === 'dir');
   const rootFiles = tree.filter((node) => node.type === 'file');
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10 }}>
-        {repoName}
+      <div title={repoPath ?? undefined} style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', paddingTop: 4, paddingRight: 6, paddingBottom: 4, paddingLeft: 10 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{repoName}</span>
+        <button type="button" aria-label="Refresh file tree" title="Refresh files" disabled={!repoPath || root?.loading}
+          onClick={() => { retryDirectory('.'); for (const directory of expandedDirs) retryDirectory(directory); }}
+          style={{ width: 24, height: 24, border: 'none', borderRadius: 6, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', color: 'inherit', cursor: root?.loading ? 'wait' : 'pointer', opacity: !repoPath || root?.loading ? 0.45 : 1 }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+          onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}>
+          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3a7 7 0 0 0 11.5-1" /></svg>
+        </button>
       </div>
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingTop: 3, paddingBottom: 3 }}>
         <QuickDocs repoPath={repoPath} selectedFile={selectedFile} onSelectFile={onSelectFile} />
@@ -245,17 +219,18 @@ export function AllFilesTree({
           <div style={{ paddingTop: 13, paddingRight: 12, paddingBottom: 13, paddingLeft: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>
             Select a repo to browse files.
           </div>
-        ) : loading ? (
+        ) : !root || root.loading ? (
           <div style={{ paddingTop: 13, paddingRight: 12, paddingBottom: 13, paddingLeft: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>
             Loading files...
           </div>
-        ) : error ? (
-          <div style={{ paddingTop: 13, paddingRight: 12, paddingBottom: 13, paddingLeft: 12, color: 'var(--t-brand-red)', fontFamily: UI_FONT, fontSize: 12 }}>
-            {error}
+        ) : root.error ? (
+          <div style={{ paddingTop: 13, paddingRight: 12, paddingBottom: 13, paddingLeft: 12, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 9, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }} role="status">
+            <span>Couldn&apos;t load workspace files.</span>
+            <RamsButton variant="ghost" onClick={() => retryDirectory('.')}>Retry</RamsButton>
           </div>
         ) : (
           <>
-            {directories.map((node) => (
+            {rootDirs.map((node) => (
               <TreeNode
                 key={node.path}
                 node={node}
@@ -263,6 +238,8 @@ export function AllFilesTree({
                 selectedFile={selectedFile}
                 expandedDirs={expandedDirs}
                 dirtyFiles={dirtyFiles}
+                directories={directories}
+                onRetry={retryDirectory}
                 onToggleDir={handleToggleDir}
                 onSelectFile={onSelectFile}
               />
@@ -271,6 +248,7 @@ export function AllFilesTree({
               <>
                 <button
                   type="button"
+                  aria-expanded={rootFilesExpanded}
                   onClick={() => setRootFilesExpanded((open) => !open)}
                   style={{
                     display: 'flex',
@@ -284,8 +262,8 @@ export function AllFilesTree({
                     color: 'var(--t-text-muted)',
                     cursor: 'pointer',
                     fontFamily: UI_FONT,
-                    fontSize: 10,
-                    fontWeight: 800,
+                    fontSize: 11,
+                    fontWeight: 400,
                     letterSpacing: 0,
                     marginTop: 4,
                     paddingTop: 0,
@@ -293,7 +271,6 @@ export function AllFilesTree({
                     paddingBottom: 0,
                     paddingLeft: 7,
                     textAlign: 'left',
-                    textTransform: 'uppercase',
                   }}
                   onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
                   onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
@@ -312,6 +289,8 @@ export function AllFilesTree({
                     selectedFile={selectedFile}
                     expandedDirs={expandedDirs}
                     dirtyFiles={dirtyFiles}
+                    directories={directories}
+                    onRetry={retryDirectory}
                     onToggleDir={handleToggleDir}
                     onSelectFile={onSelectFile}
                   />

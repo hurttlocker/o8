@@ -120,12 +120,14 @@ export function O8HeaderTabs({
   onTabChange,
   ariaLabelPrefix = 'Panel view',
   opener = false,
+  more = false,
   onNewPage,
 }: {
   activeTab: O8Tab;
   onTabChange: (tab: O8Tab) => void;
   ariaLabelPrefix?: string;
   opener?: boolean;
+  more?: boolean;
   onNewPage?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -190,8 +192,8 @@ export function O8HeaderTabs({
         type="button"
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(event) => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); } }}
-        title={opener ? 'Open a panel' : 'Switch panel view'}
-        aria-label={opener ? 'Open a panel' : `${ariaLabelPrefix}: ${activeDef.label}`}
+        title={opener ? more ? 'More panel views' : 'Open a panel' : 'Switch panel view'}
+        aria-label={opener ? more ? 'More panel views' : 'Open a panel' : `${ariaLabelPrefix}: ${activeDef.label}`}
         aria-haspopup="menu"
         aria-expanded={open}
         data-no-drag
@@ -220,7 +222,7 @@ export function O8HeaderTabs({
         onMouseEnter={(event) => { if (!open) event.currentTarget.style.background = 'var(--t-hover)'; }}
         onMouseLeave={(event) => { if (!open) event.currentTarget.style.background = open ? 'var(--t-input-bg)' : 'transparent'; }}
       >
-        {opener ? <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg> : <>
+        {opener ? more ? <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg> : <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg> : <>
         {/* Browser keeps its brand-orange globe when selected (Q ruling
             2026-07-12) — same accent the TitleBar globe button carries. */}
         {activeDef.icon(activeDef.id === 'browser' ? 'var(--t-brand-orange, #FF5A1F)' : O8_ICON_ACTIVE)}

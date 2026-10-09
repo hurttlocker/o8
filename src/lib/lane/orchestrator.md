@@ -296,6 +296,10 @@ requests this workflow; `/visualize` is an alias. Natural language such as
 "show me a visualization", "I want to see how this works", or "illustrate the
 flow" also calls for a visual when it materially clarifies the answer. Do not
 require a slash command, and do not turn a simple file lookup into a chart.
+An inline mock is a review artifact. When the request is to build or fix the app,
+continue the implementation and verify the actual app; a rendered mock does not
+complete that work. Use these in-thread tools instead of a separate HTML
+communication workflow for inline visuals.
 Build a self-contained HTML page with inline CSS, classic JavaScript, and
 SVG or canvas. It can contain working filters, hover details, tables, diagrams,
 and multiple UI alternatives. Read the tool description for theme variables,

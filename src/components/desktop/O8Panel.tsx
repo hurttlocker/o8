@@ -9,6 +9,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
+import { createPortal } from 'react-dom';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8HandoffsPane } from './O8HandoffsPane';
 import { useHandoffSelection } from './o8-panel/useHandoffSelection';
@@ -30,9 +31,9 @@ import { WorkspaceBrowserPreview } from './o8-panel/WorkspaceBrowserPreview';
 import { AllFilesTree } from './o8-panel/workspace-rail/AllFilesTree';
 import { FileViewer } from './o8-panel/workspace-rail/FileViewer';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from './ContextualPanel';
-import type { O8Tab } from './o8-panel/types';
+import { isRightUtilityTab, type O8Tab } from './o8-panel/types';
 import { O8PanelSplitDivider, panelPaneStyle, panelPaneVisible } from './o8-panel/O8PanelSplit';
-import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityLauncher, isRightUtilityTab, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
+import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityLauncher, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
@@ -63,10 +64,8 @@ interface O8PanelProps {
   // Bubbles the browser pane's active URL up so the TitleBar Browser
   // button can render a hover preview iframe pointed at it.
   onBrowserActiveUrlChange?: (url: string | null) => void;
-  /** Header-rail portal target for the browser's page tabs
-   *  (Q 2026-07-12) — provided by the dashboard's PanelHeaderStrip. Pages
-   *  render up there next to the state drawer; the pane skips its own row. */
-  browserHeaderTabSlot?: HTMLElement | null;
+  /** Portal target for browser pages or utility tabs in the column header. */
+  headerTabSlot?: HTMLElement | null;
   onSelectedFileChange?: (filePath: string) => void;
   commitSha?: string | null;
   onClearCommit?: () => void;
@@ -107,7 +106,7 @@ export function O8Panel({
   browserUrl,
   browserStateKey = 'right-panel',
   onBrowserActiveUrlChange,
-  browserHeaderTabSlot = null,
+  headerTabSlot = null,
   onSelectedFileChange,
   onSelectCommit,
   onSelectIssue,
@@ -150,7 +149,7 @@ export function O8Panel({
   const { readyGroups: compareReadyGroups } = useComparisonGroups(orchestratorData?.missionState);
   const compareGroup = compareReadyGroups[0] ?? null;
   const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
-  const [localSelectedFile, setLocalSelectedFile] = useState<string | null>(null);
+  const [localSelectedFile, setLocalSelectedFile] = useState<{ repoPath: string | null; path: string } | null>(null);
   // #1169 — orchestrator-driven browser open. The o8:open-browser window event
   // (fired by the o8_view_open_browser MCP tool) sets this; it overrides the
   // parent-owned browserUrl prop so the agent can open the Browser tab to a URL
@@ -169,7 +168,7 @@ export function O8Panel({
     ?? null
   ), [registeredRepos, repoPath]);
   const dirtyFiles = useMemo(() => new Set<string>(), []);
-  const selectedUtilityFile = selectedFile ?? localSelectedFile;
+  const selectedUtilityFile = selectedFile ?? (localSelectedFile?.repoPath === (repoPath ?? null) ? localSelectedFile.path : null);
   const renderedUtilityTabs = activeUtilityTab && !utilityTabs.includes(activeUtilityTab)
     ? [...utilityTabs, activeUtilityTab]
     : utilityTabs;
@@ -197,21 +196,18 @@ export function O8Panel({
   }, [onActiveTabChange]);
 
   const closeRightUtilityTab = useCallback((tab: RightUtilityTab) => {
-    setUtilityTabs((prev) => {
-      const remaining = prev.filter((entry) => entry !== tab);
-      if (activeTab === tab) {
-        const currentIndex = prev.indexOf(tab);
-        const next = remaining[Math.min(currentIndex, remaining.length - 1)] ?? null;
-        onActiveTabChange?.(next ?? 'launcher');
-      }
-      return remaining;
-    });
-  }, [activeTab, onActiveTabChange]);
+    const remaining = utilityTabs.filter((entry) => entry !== tab);
+    setUtilityTabs(remaining);
+    if (activeTab === tab) {
+      const currentIndex = utilityTabs.indexOf(tab);
+      onActiveTabChange?.(remaining[Math.min(currentIndex, remaining.length - 1)] ?? 'launcher');
+    }
+  }, [activeTab, onActiveTabChange, utilityTabs]);
 
   const handleSelectUtilityFile = useCallback((path: string) => {
-    setLocalSelectedFile(path);
+    setLocalSelectedFile({ repoPath: repoPath ?? null, path });
     onSelectedFileChange?.(path);
-  }, [onSelectedFileChange]);
+  }, [onSelectedFileChange, repoPath]);
 
   const handleRightContextualPanelRef = useCallback((handle: ContextualPanelHandle | null) => {
     registerContextualPanelHandle?.('right-utility-panel', handle);
@@ -239,7 +235,7 @@ export function O8Panel({
       }
       onActiveTabChange?.('review');
       if (typeof detail.file === 'string' && detail.file) {
-        setLocalSelectedFile(detail.file);
+        setLocalSelectedFile({ repoPath: detail.repoPath || repoPath || null, path: detail.file });
         onSelectedFileChange?.(detail.file);
       }
     };
@@ -312,7 +308,7 @@ export function O8Panel({
           navigateToUrl={pendingBrowserUrl ?? browserUrl}
           stateScopeKey={browserStateKey}
           onActiveUrlChange={onBrowserActiveUrlChange}
-          tabStripSlot={browserHeaderTabSlot}
+          tabStripSlot={headerTabSlot}
           onFocusRequest={() => onActiveTabChange?.('browser')}
         />
       );
@@ -444,13 +440,10 @@ export function O8Panel({
       ) : null}
       {!secondaryTab && (utilityShellActive || renderedUtilityTabs.length > 0) ? (
         <div style={{ flex: 1, minHeight: 0, display: utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
-          <RightUtilityTabStrip
-            tabs={renderedUtilityTabs}
-            activeTab={activeTab}
-            onOpenLauncher={() => onActiveTabChange?.('launcher')}
-            onSelect={(tab) => onActiveTabChange?.(tab)}
-            onClose={closeRightUtilityTab}
-          />
+          {utilityShellActive && headerTabSlot ? createPortal(
+            <RightUtilityTabStrip tabs={renderedUtilityTabs} activeTab={activeTab} inHeader onOpenLauncher={() => onActiveTabChange?.('launcher')} onSelect={(tab) => onActiveTabChange?.(tab)} onClose={closeRightUtilityTab} />,
+            headerTabSlot,
+          ) : <RightUtilityTabStrip tabs={renderedUtilityTabs} activeTab={activeTab} onOpenLauncher={() => onActiveTabChange?.('launcher')} onSelect={(tab) => onActiveTabChange?.(tab)} onClose={closeRightUtilityTab} />}
           {activeTab === 'launcher' ? (
             <RightUtilityLauncher onOpen={openRightUtilityTab} />
           ) : null}
@@ -504,7 +497,7 @@ export function O8Panel({
           navigateToUrl={pendingBrowserUrl ?? browserUrl}
           stateScopeKey={browserStateKey}
           onActiveUrlChange={onBrowserActiveUrlChange}
-          tabStripSlot={secondaryTab === 'browser' || renderedUtilityTabs.includes('browser') ? null : browserHeaderTabSlot}
+          tabStripSlot={paneVisible('browser') && !secondaryTab ? headerTabSlot : null}
           onFocusRequest={() => onActiveTabChange?.('browser')}
         />
       </div>

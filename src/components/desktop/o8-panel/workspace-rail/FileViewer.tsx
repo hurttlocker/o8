@@ -324,6 +324,10 @@ export function FileViewer({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div title={selectedFile} style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, fontFamily: UI_FONT }}>
+        <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--t-text)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{fileName}</span>
+        <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{selectedFile}</span>
+      </div>
       {dirty || error || canTogglePreview ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>
           <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 12, fontWeight: 400, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

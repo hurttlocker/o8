@@ -913,10 +913,8 @@ function DashboardInner() {
   // navigation request from the port popover etc.) — this is the live
   // current URL of whichever tab is selected inside the pane.
   const [o8BrowserHoverUrl, setO8BrowserHoverUrl] = useState<string | null>(null);
-  // Header-rail portal target for the browser's page tabs
-  // (Q 2026-07-12) — PanelHeaderStrip renders the walled slot; O8Panel hands
-  // the element to O8BrowserPane, which portals its pills in.
-  const [browserHeaderTabSlot, setBrowserHeaderTabSlot] = useState<HTMLElement | null>(null);
+  // Shared top-header target for right-panel utility tabs and browser pages.
+  const [panelHeaderTabSlot, setPanelHeaderTabSlot] = useState<HTMLElement | null>(null);
   const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
   const [o8SelectedFileRepoPath, setO8SelectedFileRepoPath] = useState<string | null>(null);
   const [o8RepoPathOverride, setO8RepoPathOverride] = useState<string | null>(null);
@@ -5122,7 +5120,7 @@ function DashboardInner() {
                 onToggleSplit={rightPanelKind === 'o8' ? toggleO8PanelSplit : undefined}
                 approvalCount={approvalCount}
                 onOpenInbox={handleOpenInbox}
-                browserTabsSlotRef={setBrowserHeaderTabSlot}
+                panelTabsSlotRef={setPanelHeaderTabSlot}
                 showBrowserTabs={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
                 prTabsSlot={<RightPrTabs tabs={rightPrTabs} activeId={o8ActiveTab === 'activity' && o8PrNumber ? rightPrTabId(o8PrNumber, o8PrRepo, currentO8RepoPath) : null} onSelect={handleRightPrTabSelect} onClose={handleRightPrTabClose} />}
               />
@@ -5178,7 +5176,7 @@ function DashboardInner() {
                           browserUrl={o8BrowserUrl}
                           browserStateKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
                           onBrowserActiveUrlChange={setO8BrowserHoverUrl}
-                          browserHeaderTabSlot={browserHeaderTabSlot}
+                          headerTabSlot={panelHeaderTabSlot}
                           commitSha={o8CommitSha}
                           onClearCommit={handleClearCommit}
                           onSelectCommit={handleSelectCommit}

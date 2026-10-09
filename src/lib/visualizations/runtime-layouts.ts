@@ -13,6 +13,10 @@ export const VISUALIZATION_LAYOUTS = `
     const allX=[...new Set(spec.series.flatMap(s=>s.values.map(p=>p.x)))].sort((a,b)=>a-b);
     const valueMaps=new Map(spec.series.map(s=>[s.id,new Map(s.values.map(p=>[p.x,p.y]))]));
     const labels=new Map(spec.series.flatMap(s=>s.values.map(p=>[p.x,p.label || String(p.x)])));
+    function visibleSelection() {
+      const stored=link.get();
+      return {seriesId:spec.series.some(s=>s.id===stored.seriesId)?stored.seriesId:undefined,x:allX.includes(stored.x)?stored.x:undefined};
+    }
     const colors=new Map(spec.series.map((s,i)=>[s.id,spec.style==='quiet'?'color-mix(in srgb,'+kit.color(i)+' 55%,var(--foreground))':kit.color(i)]));
     const heatSize=42,tableSize=100;
     function choose(selection) {
@@ -32,12 +36,13 @@ export const VISUALIZATION_LAYOUTS = `
     const reset=button('Clear selection',()=>link.clear()); reset.dataset.variant='ghost'; selection.append(status,reset);
     const detail=node('div','viz-detail'), detailTitle=node('h3'), detailText=node('p','viz-caption'); detail.append(detailTitle,detailText);
     const ask=button('Ask about this selection',()=> {
-      const choice=link.get();
+      const choice=visibleSelection();
       const series=spec.series.filter(s=>!choice.seriesId || s.id===choice.seriesId);
       const values=series.map(s=> {
         const points=s.values.filter(p=>choice.x===undefined || p.x===choice.x),recorded=points.filter(p=>p.y!==null);
         const value=recorded.length?(spec.aggregate==='mean'?d3.mean(recorded,p=>p.y):d3.sum(recorded,p=>p.y)):null;
-        return s.label+': '+(value===null?'missing':value+' '+spec.unit)+' ('+spec.aggregate+', '+recorded.length+' recorded, '+(points.length-recorded.length)+' missing)';
+        const expected=choice.x===undefined?allX.length:1;
+        return s.label+': '+(value===null?'missing':value+' '+spec.unit)+' ('+spec.aggregate+', '+recorded.length+' recorded, '+(expected-recorded.length)+' missing)';
       }).join('; ');
       kit.ask('Investigate '+spec.title+'. Selection: '+(choice.x===undefined?'all '+spec.xLabel:labels.get(choice.x))+'. '+values+'. Source: '+spec.source);
     }); ask.dataset.variant='primary'; detail.append(ask);
@@ -96,7 +101,7 @@ export const VISUALIZATION_LAYOUTS = `
     }
     heatWrap.append(grid); heat.hidden=spec.layout!=='explore';
     function apply() {
-      const stored=link.get(), seriesId=spec.series.some(s=>s.id===stored.seriesId)?stored.seriesId:undefined, selectedX=allX.includes(stored.x)?stored.x:undefined;
+      const choice=visibleSelection(), seriesId=choice.seriesId, selectedX=choice.x;
       const active=spec.series.filter(s=>!seriesId || s.id===seriesId);
       drawHeat(heatPages.update()); const tablePage=tablePages.update(selectedX);
       plot=kit.getState().dashboards?.[key]?.plot || plot; if(!['line','bar'].includes(plot))plot=spec.plot;

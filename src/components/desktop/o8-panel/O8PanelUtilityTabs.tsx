@@ -1,17 +1,10 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { Terminal as TablerTerminal } from '@/components/desktop/tabler-shims';
-import type { O8Tab } from './types';
-
-export type RightUtilityTab = Extract<O8Tab, 'files' | 'side-chat' | 'browser' | 'review' | 'terminal' | 'inbox'>;
-
-const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'side-chat', 'browser', 'review', 'terminal', 'inbox'];
-
-export function isRightUtilityTab(tab: O8Tab): tab is RightUtilityTab {
-  return RIGHT_UTILITY_TAB_IDS.includes(tab as RightUtilityTab);
-}
+import type { O8Tab, RightUtilityTab } from './types';
+export type { RightUtilityTab } from './types';
 
 function FilesIcon({ size = 18 }: { size?: number }) {
   return <Folder width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
@@ -84,120 +77,69 @@ const RIGHT_UTILITY_BY_ID = Object.fromEntries(
 export function RightUtilityTabStrip({
   tabs,
   activeTab,
+  inHeader = false,
   onOpenLauncher,
   onSelect,
   onClose,
 }: {
   tabs: RightUtilityTab[];
   activeTab: O8Tab;
+  inHeader?: boolean;
   onOpenLauncher: () => void;
   onSelect: (tab: RightUtilityTab) => void;
   onClose: (tab: RightUtilityTab) => void;
 }) {
+  const stripRef = useRef<HTMLDivElement>(null);
+  const closeTab = (tab: RightUtilityTab) => {
+    const list = stripRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    const index = tabs.indexOf(tab);
+    const next = activeTab === tab ? list?.[index + 1] ?? list?.[index - 1] : stripRef.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+    next?.focus();
+    if (!next) stripRef.current?.querySelector<HTMLButtonElement>('[aria-label="Open right panel tab picker"]')?.focus();
+    onClose(tab);
+  };
   return (
-    <div style={{
-      // Cursor-density strip (browser siphon pass 1, Q 2026-07-12): 34px not
-      // 44, quiet weights per the locked tab language — active = bg fill,
-      // never bold.
-      display: 'flex',
-      alignItems: 'center',
-      gap: 5,
-      minHeight: 34,
-      paddingTop: 4,
-      paddingRight: 8,
-      paddingBottom: 4,
-      paddingLeft: 8,
-      borderBottom: '1px solid var(--t-divider)',
-      background: 'var(--t-bg)',
-      flexShrink: 0,
-    }}>
-      <button
-        type="button"
-        onClick={onOpenLauncher}
-        aria-label="Open right panel tab picker"
-        title="Open tab picker"
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: 7,
-          border: 'none',
-          background: activeTab === 'launcher' ? 'var(--t-panel-hover)' : 'transparent',
-          color: activeTab === 'launcher' ? 'var(--t-text)' : 'var(--t-text-muted)',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-        onMouseLeave={(event) => { event.currentTarget.style.background = activeTab === 'launcher' ? 'var(--t-panel-hover)' : 'transparent'; }}
-      >
-        <PlusIcon size={14} />
-      </button>
-
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        minWidth: 0,
-        flex: 1,
-        overflowX: 'auto',
-        overflowY: 'hidden',
-      }}>
+    <div ref={stripRef} data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1, minHeight: inHeader ? 28 : 34, paddingTop: inHeader ? 0 : 4, paddingRight: inHeader ? 0 : 8, paddingBottom: inHeader ? 0 : 4, paddingLeft: inHeader ? 0 : 8, borderBottom: inHeader ? 'none' : '1px solid var(--t-divider)', background: inHeader ? 'transparent' : 'var(--t-bg)' }}>
+      <div role="tablist" aria-label="Right panel tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflowX: 'auto', overflowY: 'hidden' }}>
         {tabs.map((tab) => {
           const def = RIGHT_UTILITY_BY_ID[tab];
-          const Icon = def.icon;
           const active = activeTab === tab;
           return (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => onSelect(tab)}
-              aria-label={def.label}
-              style={{
-                height: 24,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                paddingTop: 0,
-                paddingRight: 6,
-                paddingBottom: 0,
-                paddingLeft: 8,
-                borderRadius: 7,
-                border: '1px solid transparent',
-                background: active ? 'var(--t-panel-hover)' : 'transparent',
-                color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
-              onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--t-hover)'; }}
-              onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
-            >
-              {Icon({ size: 12.5 })}
-              <span style={{ fontSize: 12, fontWeight: active ? 400 : 300, letterSpacing: '-0.1px', whiteSpace: 'nowrap' }}>
-                {def.label}
-              </span>
-              <span
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onClose(tab);
+            <div key={tab} style={{ display: 'inline-flex', alignItems: 'center', height: 28, flexShrink: 0, borderRadius: 7, background: active ? 'var(--t-panel-hover)' : 'transparent', color: active ? 'var(--t-text)' : 'var(--t-text-muted)' }}>
+              <button type="button" role="tab" aria-label={def.label} aria-selected={active} tabIndex={active ? 0 : -1} onClick={() => onSelect(tab)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Delete') { event.preventDefault(); closeTab(tab); return; }
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                  event.preventDefault();
+                  const index = tabs.indexOf(tab);
+                  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                  onSelect(tabs[next]);
+                  stripRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
                 }}
-                style={{
-                  width: 15,
-                  height: 15,
-                  borderRadius: 4,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--t-text-faint)',
-                }}
-              >
-                <XIcon size={9} />
-              </span>
-            </button>
+                style={{ height: 28, display: 'inline-flex', alignItems: 'center', gap: 6, paddingTop: 0, paddingRight: 5, paddingBottom: 0, paddingLeft: 8, borderRadius: 7, border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontFamily: 'var(--font-sans-system)' }}
+                onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--t-hover)'; }}
+                onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}>
+                {def.icon({ size: 13 })}
+                <span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', whiteSpace: 'nowrap' }}>{def.label}</span>
+              </button>
+              <button type="button" aria-label={`Close ${def.label} tab`} onClick={() => closeTab(tab)} style={{ width: 20, height: 24, borderRadius: 5, border: 'none', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', color: 'var(--t-text-faint)', cursor: 'pointer' }}>
+                <XIcon size={10} />
+              </button>
+            </div>
           );
         })}
+        {activeTab === 'launcher' ? <button type="button" role="tab" aria-selected="true" onClick={onOpenLauncher}
+          onKeyDown={(event) => {
+            if (!tabs.length || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'ArrowLeft' || event.key === 'End' ? tabs.length - 1 : 0;
+            onSelect(tabs[next]); stripRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+          }}
+          style={{ height: 28, paddingTop: 0, paddingRight: 10, paddingBottom: 0, paddingLeft: 10, border: 'none', borderRadius: 7, flexShrink: 0, background: 'var(--t-panel-hover)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300 }}>New tab</button> : null}
       </div>
+      <button type="button" onClick={onOpenLauncher} aria-label="Open right panel tab picker" title="New tab" style={{ width: 28, height: 28, padding: 0, borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--t-text-muted)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}><PlusIcon size={14} /></button>
     </div>
   );
 }
@@ -213,11 +155,11 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
       if (entry) setPanelHeight(entry.contentRect.height);
     });
     observer.observe(node);
-    // Cleanup handled by callback-ref re-fire when node changes.
+    return () => observer.disconnect();
   }, []);
   // Available height per card after subtracting padding + gaps. Targets a
   // taller card on big screens; compact rows when the panel is short
-  // (e.g. split layouts) — never overflows into a scroll.
+  // (e.g. split layouts). Short panels scroll to keep every destination reachable.
   const padding = 28; // 14 top + 14 bottom
   const gapsTotal = 6 * (RIGHT_UTILITY_TABS.length - 1); // N cards = N−1 gaps × 6px
   const usable = Math.max(0, (panelHeight ?? 600) - padding - gapsTotal);
@@ -227,14 +169,15 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
   const iconSize = compact ? 14 : 16;
   const iconBoxSize = compact ? 26 : 30;
   const labelSize = compact ? 12.5 : 13.5;
-  const metaSize = compact ? 9 : 9.5;
+  const metaSize = 11;
   return (
     <div
       ref={measureRef}
       style={{
         flex: 1,
         minHeight: 0,
-        overflow: 'hidden',
+        overflowY: 'auto',
+        overflowX: 'hidden',
         background: 'var(--t-bg)',
         paddingTop: 14,
         paddingRight: 14,
@@ -244,7 +187,7 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
     >
       <div style={{
         width: '100%',
-        height: '100%',
+        minHeight: '100%',
         maxWidth: 460,
         marginLeft: 'auto',
         marginRight: 'auto',

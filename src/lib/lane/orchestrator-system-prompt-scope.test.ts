@@ -57,6 +57,7 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     expect(prompt).toContain('o8_html_preview');
     expect(prompt).toContain('o8_html_render');
     expect(prompt).toContain('o8_visualization_read');
+    expect(prompt).toContain('a rendered mock does not');
     expect(prompt).not.toContain('## ORCHESTRATOR PROTOCOL');
   });
   it('finds the registered tool catalogs it guards', () => {
