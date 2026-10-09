@@ -6,6 +6,8 @@ import {
   mkdtempSync,
   rmSync,
   readdirSync,
+  readFileSync,
+  readlinkSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -119,6 +121,38 @@ function signedAppFixture(version: string) {
 }
 
 describe('stable macOS release artifact identity', () => {
+  it.runIf(process.platform === 'darwin')('preserves staged bundle modes and relative links under umask 0077', () => {
+    const app = appFixture();
+    const staging = join(dirname(app), 'staging');
+    const resources = join(app, 'Contents', 'Resources');
+    mkdirSync(staging);
+    mkdirSync(resources);
+    writeFileSync(join(resources, 'asset.dat'), 'signed resource bytes');
+    chmodSync(join(resources, 'asset.dat'), 0o644);
+    writeFileSync(join(resources, 'helper'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(resources, 'helper'), 0o755);
+    chmodSync(resources, 0o755);
+    symlinkSync('asset.dat', join(resources, 'alias.dat'));
+
+    const moduleUrl = new URL('../scripts/lib/macos-release-artifacts.mjs', import.meta.url).href;
+    execFileSync(process.execPath, ['--input-type=module', '-e', `
+      const { stageMacosDmgApp } = await import(${JSON.stringify(moduleUrl)});
+      process.umask(0o077);
+      stageMacosDmgApp(process.argv[1], process.argv[2]);
+    `, app, staging]);
+
+    const stagedApp = join(staging, 'o8.app');
+    const stagedResources = join(stagedApp, 'Contents', 'Resources');
+    expect(statSync(stagedResources).mode & 0o777).toBe(0o755);
+    expect(statSync(join(stagedResources, 'asset.dat')).mode & 0o777).toBe(0o644);
+    expect(statSync(join(stagedResources, 'helper')).mode & 0o777).toBe(0o755);
+    expect(readFileSync(join(stagedResources, 'asset.dat'), 'utf8')).toBe('signed resource bytes');
+    expect(readlinkSync(join(stagedResources, 'alias.dat'))).toBe('asset.dat');
+    // Exercise the existing whole-bundle identity gate, including modes and links.
+    expect(verifyUniversalMacUpdaterArchive(app, archiveFixture(stagedApp)).binaries)
+      .toEqual(verifyUniversalMacApp(app).binaries);
+  });
+
   it('resolves the universal target without inferring architecture from an x64 filename', () => {
     expect(resolveMacosReleaseArtifacts('/repo', '0.1.999')).toEqual({
       target: 'universal-apple-darwin',

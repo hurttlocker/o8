@@ -125,6 +125,12 @@ export function resolveMacosReleaseArtifacts(root, version) {
   };
 }
 
+export function stageMacosDmgApp(appPath, stagingPath) {
+  // Preserve signed bundle modes and relative symlinks regardless of the
+  // process umask; fs.cpSync can strip permission bits during staging.
+  execFileSync('/usr/bin/ditto', [appPath, join(stagingPath, 'o8.app')], { stdio: 'pipe' });
+}
+
 export function verifyUniversalMacApp(appPath) {
   const binaries = REQUIRED_BINARIES.map((relativePath) => {
     const path = join(appPath, ...relativePath.split('/'));

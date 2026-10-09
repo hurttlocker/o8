@@ -24,6 +24,7 @@ export interface MacosUniversalArtifactIdentity {
 
 export function readMachOArchitectures(path: string): Array<'x86_64' | 'arm64'>;
 export function resolveMacosReleaseArtifacts(root: string, version: string): MacosReleaseArtifacts;
+export function stageMacosDmgApp(appPath: string, stagingPath: string): void;
 export function verifyUniversalMacApp(appPath: string): MacosUniversalArtifactIdentity;
 export function verifyUniversalMacUpdaterArchive(
   appPath: string,
