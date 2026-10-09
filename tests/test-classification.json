@@ -4170,6 +4170,18 @@
       ]
     },
     {
+      "path": "tests/symon-durable-brain-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-managed-messages-pi-brain-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-mcp-real-path.test.ts",
       "reasons": [
         "network-listener",
