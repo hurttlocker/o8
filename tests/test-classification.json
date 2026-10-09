@@ -2094,6 +2094,13 @@
       ]
     },
     {
+      "path": "tests/exact-purge-authorization-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/execution-carrier-real-path.test.ts",
       "reasons": [
         "child-process",

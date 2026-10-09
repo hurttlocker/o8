@@ -264,9 +264,14 @@ async function runCapturedPurge(
   });
   try {
     await afterTreeCapture?.(candidatePath);
-  } finally {
-    child.stdin.end('continue\n');
+  } catch (error) {
+    // EOF refuses release. Settle the captured child before reporting refusal,
+    // so the caller cannot race an authorized writer after seeing an error.
+    child.stdin.end();
+    await closed;
+    throw error;
   }
+  child.stdin.end('continue\n');
   const code = await closed;
   if (code !== 0) throw new Error(stderr.trim() || 'Exact purge content release failed.');
 }
