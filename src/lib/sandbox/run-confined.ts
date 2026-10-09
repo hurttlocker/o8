@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import { piWriteHelperPath } from '@/lib/pi/sdk/scripts';
 import { materializationAwareExecFile, materializationAwareInvocation } from '@/lib/worktree/materialization-execution';
@@ -10,26 +11,40 @@ import { confinementArgs, ConfinementUnavailable } from './confine';
 export interface ConfinedRunOptions { cwd: string; timeout: number; maxBuffer: number }
 export interface ConfinedRunResult { stdout: string; stderr: string; unconfined: boolean }
 
-/** The sandbox prefix for this host, or null when confinement is unavailable. */
-async function confinedPrefix(root: string, tmp: string): Promise<string[] | null> {
+/** The supervisor, or null in a source checkout that has not built it. */
+function supervisorPath(): string | null {
+  try { return piWriteHelperPath(); } catch { return null; }
+}
+
+/**
+ * The launch prefix for this host, or null when confinement is unavailable.
+ * `supervised` is false only on macOS without the helper, where the
+ * `sandbox-exec` prefix still confines but no supervisor ends descendants.
+ */
+async function confinedPrefix(root: string, tmp: string): Promise<{ prefix: string[]; supervised: boolean } | null> {
   try {
     const args = await confinementArgs(await realpath(root), tmp);
-    return process.platform === 'linux' ? [piWriteHelperPath(), 'supervise', ...args, String(process.pid)] : args;
+    const helper = supervisorPath();
+    if (process.platform === 'linux') return helper ? { prefix: [helper, 'supervise', ...args, String(process.pid)], supervised: true } : null;
+    return helper
+      ? { prefix: [helper, 'supervise', String(process.pid), ...args], supervised: true }
+      : { prefix: args, supervised: false };
   } catch {
     return null;
   }
 }
 
-function lastReceipt(text: string): { started: boolean } | null {
+function lastReceipt(text: string): { started: boolean; confirmed: boolean } | null {
   try {
-    const receipt = JSON.parse(text.trim().split('\n').at(-1) ?? '') as { code?: unknown; signal?: unknown };
-    return { started: receipt.code != null || receipt.signal != null };
+    const receipt = JSON.parse(text.trim().split('\n').at(-1) ?? '') as { code?: unknown; signal?: unknown; confirmed?: unknown };
+    return { started: receipt.code != null || receipt.signal != null, confirmed: receipt.confirmed === true };
   } catch { return null; }
 }
 
 /**
- * Linux: the pi-write supervisor applies Landlock, runs the command, ends every
- * descendant, and reports on fd 3. SIGTERM asks it to tear the tree down.
+ * The pi-write supervisor tracks descendants and reports teardown on fd 3.
+ * Linux uses Landlock; macOS launches the sandbox-exec prefix inside the supervisor.
+ * SIGTERM asks it to tear the tree down.
  * Failures carry `code`, `signal`, `killed`, `stdout` and `stderr` like `execFile`.
  */
 function runSupervised(command: string[], options: ConfinedRunOptions, env: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string }> {
@@ -42,7 +57,8 @@ function runSupervised(command: string[], options: ConfinedRunOptions, env: Node
     let size = 0;
     let receipt = '';
     let killed = false;
-    const stop = () => { if (!killed) { killed = true; child.kill('SIGTERM'); } };
+    let hasExited = false;
+    const stop = () => { if (!killed && !hasExited) { killed = true; child.kill('SIGTERM'); } };
     const take = (into: Buffer[]) => (chunk: Buffer) => {
       size += chunk.length;
       if (size > options.maxBuffer) { stop(); return; }
@@ -50,16 +66,27 @@ function runSupervised(command: string[], options: ConfinedRunOptions, env: Node
     };
     child.stdout?.on('data', take(stdout));
     child.stderr?.on('data', take(stderr));
-    (child.stdio[3] as NodeJS.ReadableStream | null)?.on('data', (chunk: Buffer) => {
+    const receiptStream = child.stdio[3] as import('node:stream').Readable | null;
+    receiptStream?.on('data', (chunk: Buffer) => {
       if (receipt.length < 4096) receipt += chunk.toString('utf8');
     });
     const timer = setTimeout(stop, options.timeout);
-    child.once('error', (error) => { clearTimeout(timer); reject(error); });
-    child.once('close', (code, signal) => {
+    const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+    child.once('error', (error) => { hasExited = true; clearTimeout(timer); reject(error); });
+    child.once('exit', async (code, signal) => {
+      hasExited = true;
       clearTimeout(timer);
+      // A lost supervisor can leave a descendant holding the pipes open.
+      // Wait briefly for the receipt and buffered output, then fail closed.
+      await Promise.race([closed, sleep(1_000)]);
       const output = { stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      receiptStream?.destroy();
       // No exit code and no signal: the supervisor refused before starting the command.
-      if (!killed && lastReceipt(receipt)?.started === false) { reject(new ConfinementUnavailable()); return; }
+      const parsed = lastReceipt(receipt);
+      if (!parsed?.confirmed) { reject(Object.assign(new Error('The command processes could not be confirmed stopped.'), output)); return; }
+      if (!killed && !parsed.started) { reject(new ConfinementUnavailable()); return; }
       if (code === 0 && !killed) { resolve(output); return; }
       reject(Object.assign(new Error(`Command failed: ${command.slice(-1)[0] ?? ''}`), {
         code, signal: killed ? 'SIGTERM' : signal, killed, ...output }));
@@ -75,9 +102,11 @@ function runSupervised(command: string[], options: ConfinedRunOptions, env: Node
  * dir, which is removed afterwards.
  *
  * Where confinement is unavailable on this host (Windows, an old kernel, a
- * missing helper) the process still runs, unconfined, and the result carries
+ * missing helper on Linux) the process still runs, unconfined, and the result carries
  * `unconfined: true` so callers can say so. A failure carries `code`,
- * `stdout`, `stderr` and `unconfined` like `execFile`.
+ * `stdout`, `stderr` and `unconfined` like `execFile`. On macOS the supervisor
+ * ends descendants whether or not confinement applies; a source checkout
+ * without the helper keeps the `sandbox-exec` confinement but not that teardown.
  */
 export async function runConfinedProcess(root: string, file: string, args: string[],
   options: ConfinedRunOptions): Promise<ConfinedRunResult> {
@@ -87,19 +116,23 @@ export async function runConfinedProcess(root: string, file: string, args: strin
   const execOptions = { cwd: options.cwd, env, timeout: options.timeout, maxBuffer: options.maxBuffer, windowsHide: true };
   const unconfined = async () => {
     try {
-      return { ...await materializationAwareExecFile(file, args, execOptions), unconfined: true };
+      const helper = process.platform === 'darwin' ? supervisorPath() : null;
+      const output = helper
+        ? await runSupervised([helper, 'supervise', String(process.pid), '/bin/sh', '-c', 'exec "$0" "$@"', file, ...args], options, env)
+        : await materializationAwareExecFile(file, args, execOptions);
+      return { ...output, unconfined: true };
     } catch (error) {
       throw Object.assign(error as Error, { unconfined: true });
     }
   };
   try {
-    const prefix = await confinedPrefix(root, tmp);
-    if (!prefix) return await unconfined();
+    const launch = await confinedPrefix(root, tmp);
+    if (!launch) return await unconfined();
     try {
-      const output = process.platform === 'linux'
-        // The supervisor execs an absolute path; the shell resolves `file` on PATH.
-        ? await runSupervised([...prefix, '/bin/sh', '-c', 'exec "$0" "$@"', file, ...args], options, env)
-        : await materializationAwareExecFile(prefix[0], [...prefix.slice(1), file, ...args], execOptions);
+      // The supervisor execs an absolute path; the shell resolves `file` on PATH.
+      const output = launch.supervised
+        ? await runSupervised([...launch.prefix, '/bin/sh', '-c', 'exec "$0" "$@"', file, ...args], options, env)
+        : await materializationAwareExecFile(launch.prefix[0], [...launch.prefix.slice(1), file, ...args], execOptions);
       return { ...output, unconfined: false };
     } catch (error) {
       // Nothing started, so running it unconfined (and saying so) is the fallback.
