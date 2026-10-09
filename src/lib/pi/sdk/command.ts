@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,9 +9,6 @@ import { piWriteHelperPath } from './scripts';
 export const PI_COMMAND_OUTPUT_BYTES = 50_000;
 export const PI_COMMAND_TIMEOUT_MS = 120_000;
 export const PI_COMMAND_MAX_BYTES = 10_000;
-const TERM_GRACE_MS = 1_500;
-const KILL_WAIT_MS = 2_000;
-const TRACK_INTERVAL_MS = 250;
 
 // Allowlist, not a denylist: no provider keys, host tokens, o8 internals or the
 // SSH agent socket reach a command, whatever names they use.
@@ -51,113 +48,6 @@ let cleanupUnconfirmed = false;
 /** Set when a command's processes could not be confirmed stopped; commands and writes stay refused until restart. */
 export function piCommandCleanupUnconfirmed() { return cleanupUnconfirmed; }
 
-interface ProcessRow { pid: number; ppid: number; pgid: number; started: string }
-
-/** Returns null when the process table cannot be read, never an empty table. */
-function listProcesses(): Promise<ProcessRow[] | null> {
-  return new Promise(resolve => {
-    execFile('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart='], { encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024 },
-      (error, stdout) => {
-        if (error) { resolve(null); return; }
-        const rows = (stdout ?? '').split('\n').flatMap(line => {
-          const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
-          // Zombies are already dead and only wait to be reaped.
-          if (!match || match[4].startsWith('Z')) return [];
-          return [{ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), started: match[5] }];
-        });
-        resolve(rows.some(row => row.pid === process.pid) ? rows : null);
-      });
-  });
-}
-
-/**
- * Tracks the command's process group and every descendant by pid and start
- * time. A process stays tracked after its parent dies and it is reparented, and
- * a pid whose start time changed belongs to someone else and is dropped.
- */
-class CommandTree {
-  private readonly tracked = new Map<number, ProcessRow>();
-  private started = 0;
-  private applied = 0;
-  private inFlight = 0;
-  /** Set once a readable table shows no member of the group; its number may then be reused. */
-  private groupGone = false;
-  constructor(private readonly leader: number) {}
-
-  /**
-   * Reads may overlap, so each is numbered and a result older than the last
-   * one applied is dropped: a late snapshot never undoes what a newer one found.
-   */
-  async refresh(): Promise<boolean> {
-    const sequence = ++this.started;
-    this.inFlight++;
-    try {
-      const rows = await listProcesses();
-      if (sequence < this.applied) return true;
-      if (!rows) return false;
-      this.applied = sequence;
-      this.apply(rows);
-      return true;
-    } finally { this.inFlight--; }
-  }
-
-  /** For the periodic watch: a stalled read does not stop new ones, but reads do not pile up. */
-  refreshIfIdle() { if (this.inFlight < 3) void this.refresh(); }
-
-  private apply(rows: ProcessRow[]) {
-    const live = new Map(rows.map(row => [row.pid, row]));
-    for (const [pid, row] of this.tracked) {
-      if (live.get(pid)?.started !== row.started) this.tracked.delete(pid);
-    }
-    if (!this.groupGone) {
-      const members = rows.filter(row => row.pgid === this.leader && row.pid !== process.pid);
-      if (!members.length) this.groupGone = true;
-      for (const row of members) this.tracked.set(row.pid, row);
-    }
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const row of rows) {
-        if (!this.tracked.has(row.pid) && this.tracked.has(row.ppid)) { this.tracked.set(row.pid, row); grew = true; }
-      }
-    }
-  }
-
-  get empty() { return this.tracked.size === 0; }
-
-  signal(name: NodeJS.Signals, groupUnverified: boolean) {
-    // The group id is only signalled while a tracked member still holds it, or
-    // when the table could not be read and the group was never seen empty.
-    if (!this.groupGone && (groupUnverified || [...this.tracked.values()].some(row => row.pgid === this.leader))) {
-      try { process.kill(-this.leader, name); } catch { /* The group is empty. */ }
-    }
-    for (const pid of this.tracked.keys()) { try { process.kill(pid, name); } catch { /* Already gone. */ } }
-  }
-}
-
-/**
- * Ends the group and its descendants: TERM, a grace period, then KILL on a fixed
- * schedule whether or not the table can be read. Returns true only when an
- * readable process table confirms nothing tracked is left.
- */
-async function endCommandTree(tree: CommandTree): Promise<boolean> {
-  let readable = await tree.refresh();
-  tree.signal('SIGTERM', !readable);
-  const graceEnds = Date.now() + TERM_GRACE_MS;
-  while (Date.now() < graceEnds) {
-    await sleep(100);
-    readable = await tree.refresh();
-    if (readable && tree.empty) return true;
-  }
-  tree.signal('SIGKILL', !readable);
-  const killEnds = Date.now() + KILL_WAIT_MS;
-  while (Date.now() < killEnds) {
-    await sleep(100);
-    readable = await tree.refresh();
-    if (readable && tree.empty) return true;
-  }
-  return false;
-}
-
 export interface PiCommandOptions {
   timeoutMs?: number; maxOutputBytes?: number;
   /** Lane rules (#3385): no network, and writes only in the workspace and a private temp dir. Host-set only. */
@@ -169,12 +59,7 @@ export interface PiCommandOptions {
 // checks is refused. The command gets a fresh shell with no positional arguments.
 const LAUNCHER = '[ "$(pwd -P)" = "$1" ] || { echo "The workspace changed before the command started." >&2; exit 126; }; exec /bin/sh -c "$2"';
 
-/**
- * Linux: the native supervisor (`o8-pi-write supervise`) is a child subreaper,
- * so every descendant stays its child and it ends them all. It reports on fd 3
- * whether `waitpid` confirmed none is left. SIGTERM asks it to tear down early.
- */
-const SUPERVISED = process.platform === 'linux';
+/** The native supervisor ends tracked descendants and reports teardown on fd 3. */
 const SUPERVISOR_EXIT_MS = 10_000;
 
 function parseReceipt(text: string): { confirmed: boolean; started: boolean } | null {
@@ -198,9 +83,8 @@ function drained(stream: NodeJS.ReadableStream | null | undefined): Promise<void
 /**
  * Runs one approved command at the workspace root. Stdout and stderr share one
  * capped buffer. Timeout, the output cap, Stop and a normal exit each end the
- * command's processes. On Linux the native supervisor ends every descendant; on
- * macOS the host tracks the group and descendants from process-table reads,
- * which can miss a descendant that leaves the group and outlives its parent.
+ * command's processes. The native supervisor uses a Linux subreaper or macOS
+ * kqueue process events to track descendants, including ones in new sessions.
  *
  * With `confined`, the command runs confined and its TMPDIR is a fresh directory
  * removed afterwards. When confinement cannot be applied it throws
@@ -225,25 +109,23 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
   const maxOutputBytes = options.maxOutputBytes ?? PI_COMMAND_OUTPUT_BYTES;
   const env = confined ? { ...piCommandEnv(), TMPDIR: confined.tmp } : piCommandEnv();
   // On macOS the confinement is a `sandbox-exec` prefix; on Linux, supervisor arguments.
-  const launch = [...(confined && !SUPERVISED ? confined.args : []), '/bin/sh', '-c', LAUNCHER, 'o8-pi-command', root, command];
-  const child = SUPERVISED
-    ? spawn(piWriteHelperPath(), ['supervise', ...(confined?.args ?? []), String(process.pid), ...launch], { cwd: root, env, detached: true,
-      stdio: ['ignore', 'pipe', 'pipe', 'pipe'] })
-    : spawn(launch[0], launch.slice(1), { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const linux = process.platform === 'linux';
+  const launch = [...(confined && !linux ? confined.args : []), '/bin/sh', '-c', LAUNCHER, 'o8-pi-command', root, command];
+  const child = spawn(piWriteHelperPath(), ['supervise', ...(linux ? confined?.args ?? [] : []), String(process.pid), ...launch],
+    { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
   let hasExited = false;
   const exited = new Promise<{ code: number | null; error?: boolean }>(resolve => {
     child.once('exit', code => { hasExited = true; resolve({ code }); });
     child.once('error', () => { hasExited = true; resolve({ code: null, error: true }); });
   });
   let receipt = '';
-  const receiptStream = SUPERVISED ? child.stdio[3] as NodeJS.ReadableStream | null : null;
+  const receiptStream = child.stdio[3] as NodeJS.ReadableStream | null;
   const receiptRead = new Promise<void>(resolve => {
     if (!receiptStream) { resolve(); return; }
     receiptStream.on('data', (chunk: Buffer) => { if (receipt.length < 4096) receipt += chunk.toString('utf8'); });
     receiptStream.once('end', () => resolve());
     receiptStream.once('error', () => resolve());
   });
-  const tree = !SUPERVISED && child.pid ? new CommandTree(child.pid) : null;
   const endSupervised = async () => {
     // Never signal a pid after its exit: it may already belong to someone else.
     if (!hasExited && child.pid) { try { process.kill(child.pid, 'SIGTERM'); } catch { /* Exited meanwhile. */ } }
@@ -259,7 +141,7 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
   };
   let notStarted = false;
   let teardown: Promise<boolean> | undefined;
-  const endTree = () => (teardown ??= SUPERVISED ? endSupervised() : tree ? endCommandTree(tree) : Promise.resolve(true));
+  const endTree = () => (teardown ??= endSupervised());
   const chunks: Buffer[] = [];
   let size = 0;
   let stopped: 'timeout' | 'output' | 'stop' | undefined;
@@ -282,10 +164,6 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
   child.stdout?.on('data', take);
   child.stderr?.on('data', take);
   const timer = setTimeout(() => stop('timeout'), timeoutMs);
-  // Track the tree while it runs, so a child that starts its own group is still
-  // known after its parent exits and it is reparented.
-  const watch = setInterval(() => { if (!teardown) tree?.refreshIfIdle(); }, TRACK_INTERVAL_MS);
-  void tree?.refresh();
   const onAbort = () => stop('stop');
   abort.addEventListener('abort', onAbort, { once: true });
   try {
@@ -315,7 +193,6 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
     return `$ ${command}\n${status}\n\n${output || '(no output)'}`;
   } finally {
     clearTimeout(timer);
-    clearInterval(watch);
     abort.removeEventListener('abort', onAbort);
     child.stdout?.destroy();
     child.stderr?.destroy();
