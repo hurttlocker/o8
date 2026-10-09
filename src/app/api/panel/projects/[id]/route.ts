@@ -44,7 +44,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update project.';
+    console.error('[api] panel/projects/[id] failed:', error);
+    const message = 'Failed to update project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }
@@ -55,7 +56,8 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     const ledger = await deleteProject(id);
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to delete project.';
+    console.error('[api] panel/projects/[id] failed:', error);
+    const message = 'Failed to delete project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }

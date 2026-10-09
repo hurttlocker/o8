@@ -14,7 +14,8 @@ export async function GET() {
     const ledger = await reconcileProjectsWithRegistry();
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to read projects.';
+    console.error('[api] panel/projects failed:', error);
+    const message = 'Failed to read projects.';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE });
   }
 }
@@ -29,7 +30,8 @@ export async function POST(request: NextRequest) {
     const ledger = await createProject(name);
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create project.';
+    console.error('[api] panel/projects failed:', error);
+    const message = 'Failed to create project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }

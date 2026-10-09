@@ -1,3 +1,4 @@
+import { McpInputError, safeErrorText } from '@/lib/mcp/api-error';
 import { randomUUID } from 'node:crypto';
 import { freshSessionScript } from '@/lib/mcp/o8-fresh-session-scripts';
 import type { FreshOrchestratorRequest } from '@/lib/desktop/fresh-orchestrator-action';
@@ -51,11 +52,12 @@ function isMcpToolResult(value: unknown): value is McpToolResult {
 }
 
 function toolError(step: CompositeStep, error: unknown, state?: unknown): McpToolResult {
+  if (state !== undefined && !isOk(state)) console.error('[mcp] Surface failure:', state);
   const payload: CompositeError = {
     ok: false,
     step,
-    error: error instanceof Error ? error.message : String(error),
-    ...(state === undefined ? {} : { state }),
+    error: safeErrorText(error),
+    ...(state !== undefined && isOk(state) ? { state } : {}),
   };
   return jsonResult(payload, true);
 }
@@ -67,7 +69,7 @@ function optionalString(args: Record<string, unknown>, key: string): string {
 function requiredString(args: Record<string, unknown>, key: string): string {
   const value = optionalString(args, key);
   if (!value) {
-    throw new Error(`${key} is required`);
+    throw new McpInputError(`${key} is required`);
   }
   return value;
 }
@@ -92,8 +94,8 @@ async function evalJson(client: O8WebviewClient, code: string): Promise<Record<s
   }
 }
 
-function isOk(value: Record<string, unknown>): boolean {
-  return value.ok === true;
+function isOk(value: unknown): boolean {
+  return !!value && typeof value === 'object' && 'ok' in value && value.ok === true;
 }
 
 function visibleDomHelpers(): string {
@@ -264,12 +266,12 @@ async function evalActionThenVerify(
       return toolError(step, typeof result.error === 'string' ? result.error : 'action returned ok:false', result);
     }
   } catch (error) {
-    warning = error instanceof Error ? error.message : String(error);
+    warning = safeErrorText(error);
   }
 
   const verified = await waitForEval(client, verifyCode, predicate, timeoutMs);
   if (!predicate(verified)) {
-    return toolError(step, warning ?? 'verification did not pass before timeout', verified);
+    return toolError(step, new McpInputError(warning ?? 'verification did not pass before timeout'), verified);
   }
   return warning ? { ...verified, warning } : verified;
 }
@@ -290,12 +292,12 @@ async function evalActionThenWaitFor(
       return toolError(actionStep, typeof result.error === 'string' ? result.error : 'action returned ok:false', result);
     }
   } catch (error) {
-    warning = error instanceof Error ? error.message : String(error);
+    warning = safeErrorText(error);
   }
 
   const verified = await waitForEval(client, verifyCode, predicate, timeoutMs);
   if (!predicate(verified)) {
-    return toolError(waitStep, warning ?? 'verification did not pass before timeout', verified);
+    return toolError(waitStep, new McpInputError(warning ?? 'verification did not pass before timeout'), verified);
   }
   return warning ? { ...verified, warning } : verified;
 }
@@ -387,7 +389,7 @@ export function createO8WebviewCompositeHandlers(getClient: () => O8WebviewClien
           const dispatched = await evalJson(client, freshSessionScript('dispatch', request));
           if (!isOk(dispatched)) return jsonResult(dispatched, true);
         } catch (error) {
-          warning = error instanceof Error ? error.message : String(error);
+          warning = safeErrorText(error);
         }
         // A pending app callback receipt is not completion. Observe React's
         // full inventory and active enabled composer; never repeat dispatch.
@@ -396,7 +398,7 @@ export function createO8WebviewCompositeHandlers(getClient: () => O8WebviewClien
         const focused = await evalJson(client, freshSessionScript('focus', request));
         return jsonResult({ ...focused, ...(warning ? { warning } : {}) }, !isOk(focused));
       } catch (error) {
-        return jsonResult({ ok: false, requestId, error: error instanceof Error ? error.message : String(error), ...(attempted
+        return jsonResult({ ok: false, requestId, error: safeErrorText(error), ...(attempted
           ? { mutationOutcome: 'unknown', automaticReplay: false } : { actionDispatched: false }) }, true);
       }
     },

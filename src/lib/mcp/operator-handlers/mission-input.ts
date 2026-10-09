@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import type { WorkerIntent } from '@/lib/orchestrator/types';
 
@@ -6,7 +7,7 @@ export function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy 
   if (value === 'auto' || value === 'reset' || value === 'continue' || value === 'error') {
     return value;
   }
-  throw new Error('existingBranchPolicy must be one of: auto, reset, continue, error.');
+  throw new McpInputError('existingBranchPolicy must be one of: auto, reset, continue, error.');
 }
 
 export function parseWorkerIntent(value: unknown): WorkerIntent | undefined {
@@ -20,5 +21,5 @@ export function parseWorkerIntent(value: unknown): WorkerIntent | undefined {
   ) {
     return value;
   }
-  throw new Error('workerIntent must be one of: light_worker, heavy_worker, reviewer, diagnostic, orchestrator.');
+  throw new McpInputError('workerIntent must be one of: light_worker, heavy_worker, reviewer, diagnostic, orchestrator.');
 }

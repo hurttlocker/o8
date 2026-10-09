@@ -233,7 +233,8 @@ export async function POST(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Command failed.';
+    console.error('[api] lanes failed:', err);
+    const message = 'Command failed.';
     return NextResponse.json({ ok: false, note: message }, { status: 500 });
   }
 }

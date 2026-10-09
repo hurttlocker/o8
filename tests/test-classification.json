@@ -2672,6 +2672,14 @@
       ]
     },
     {
+      "path": "tests/mcp-error-results-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-inner-retirement-durable-release-real-path.test.ts",
       "reasons": [
         "child-process",

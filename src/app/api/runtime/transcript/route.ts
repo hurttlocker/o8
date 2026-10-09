@@ -61,8 +61,9 @@ export async function GET(request: NextRequest) {
     const status = message.startsWith('Cannot determine runtime') || message.includes('does not support transcript reading')
       ? 400
       : 500;
+    console.error('[runtime-transcript] read failed:', error);
     return NextResponse.json(
-      { error: message },
+      { error: status < 500 ? message : 'Unable to read transcript' },
       { status, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
     );
   }
