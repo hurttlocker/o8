@@ -4128,6 +4128,12 @@
       ]
     },
     {
+      "path": "tests/symon-conversations-api-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-durable-brain-real-path.test.ts",
       "reasons": [
         "real-path"
