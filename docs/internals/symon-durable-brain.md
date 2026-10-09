@@ -83,15 +83,27 @@ Panel-authenticated routes over the same store, for the Symon tab:
 | `GET /api/panel/symon/conversations/transcript?key=&limit=` | One thread's user and assistant text, oldest first. `404` for an unknown key. |
 | `POST /api/panel/symon/conversations/continue` | Body `{ key, requestId, text }`. Continues a known thread, or starts one under an `app:` key. A repeated `requestId` returns the same turn. `202` while the turn runs. |
 
+| `POST /api/panel/symon/conversations/record` | Body `{ key, requestId, entries }` with a `voice:` key and up to 20 `{ role, text }` lines. Records voice transcript lines without asking the model. |
+
 An answer to a thread continued in o8 stays in o8; it is not sent back to the
 phone or the messaging thread.
+
+## Recorded exchanges
+
+Turns another surface answers are written into the brain's thread as
+`symon.relay` entries, without a model call: managed-message turns the native
+planner answered, native phone turns, and voice lines sent to the record route.
+They appear in the transcript as user and assistant lines, and a later Pi turn
+sees them as earlier conversation. Recording is best effort and never delays or
+fails the reply. A thread the brain has never seen still receives the managed
+store's last twelve turns as data on its first Pi turn.
 
 ## Current limits
 
 - The Pi brain has no tools yet. It cannot act on the computer or change o8, and
   its prompt says so.
-- Voice transcripts do not use the store yet.
-- The conversations API lists only threads the Pi brain has answered.
+- Voice clients must send their lines to the record route; none does yet.
+- Limited-access shared group turns are not recorded.
 
 ## Tests
 
