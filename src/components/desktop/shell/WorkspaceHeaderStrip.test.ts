@@ -97,7 +97,7 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     const button = (name: string) => container.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
     const order = () => Array.from(container.querySelectorAll('[aria-label="Toggle sidebar"], [data-sidebar-brand], [aria-label="Priority chats"], [aria-label="Search chats"], [aria-label="Back"], [aria-label="Forward"], [role="tablist"]'))
       .map((el) => el.getAttribute('data-sidebar-brand') !== null ? 'Logo' : el.getAttribute('role') === 'tablist' ? 'Tabs' : el.getAttribute('aria-label'));
-    const expected = ['Toggle sidebar', 'Logo', 'Priority chats', 'Search chats', 'Back', 'Forward', 'Tabs'];
+    const expected = ['Logo', 'Toggle sidebar', 'Priority chats', 'Search chats', 'Back', 'Forward', 'Tabs'];
     expect(order()).toEqual(expected);
     expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
     await act(async () => button('Priority chats').click());

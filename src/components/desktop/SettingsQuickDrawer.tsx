@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
 import {
   BookOpen,
   ChevronDown,
@@ -10,7 +9,6 @@ import {
   CircleUser,
   Download,
   ExternalLink,
-  Gauge,
   Globe,
   MessageSquare,
   Settings2,
@@ -19,18 +17,14 @@ import { useTheme } from '@/lib/theme/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { OPEN_KEYBOARD_SHORTCUTS_EVENT, OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { ThemeContrastGlyph } from './settings-quick-drawer/theme-rows';
-import { CapacityRows, capacitySummary } from './settings-quick-drawer/capacity-rows';
+import { FloatingSurface } from './FloatingSurface';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
-const POLL_MS = 30_000;
 const DOCS_URL = 'https://o8.run';
 // The canonical community invite — MUST match the README footer + o8.run
 // (the drawer previously carried a different, stale invite).
 const DISCORD_URL = 'https://o8.run/discord';
-// Paint the floating surface directly. It can be a gradient in glass mode,
-// which color-mix() cannot accept as a color argument.
-const PANEL_BG = 'var(--t-popover-surface)';
 const ROW_HOVER_BG = 'var(--t-panel-hover, rgba(15, 23, 42, 0.04))';
 const SUBTLE_BG = 'var(--t-bg-card, rgba(15, 23, 42, 0.04))';
 const BORDER = 'var(--t-panel-border, rgba(15, 23, 42, 0.1))';
@@ -45,13 +39,8 @@ interface SettingsQuickDrawerProps {
   onClose: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts?: () => void;
+  focusUpdates?: boolean;
 }
-
-type UsageState =
-  | { status: 'idle'; snapshot: null; error: null }
-  | { status: 'loading'; snapshot: RuntimeCapacityControlSnapshot | null; error: null }
-  | { status: 'ready'; snapshot: RuntimeCapacityControlSnapshot; error: null }
-  | { status: 'error'; snapshot: RuntimeCapacityControlSnapshot | null; error: string };
 
 function IconFrame({ children }: { children: ReactNode }) {
   return (
@@ -143,21 +132,16 @@ export function SettingsQuickDrawer({
   onClose,
   onOpenSettings,
   onOpenShortcuts,
+  focusUpdates = false,
 }: SettingsQuickDrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [usageOpen, setUsageOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
   const { paletteId, workspaceGlass } = useTheme();
   const openSettingsTab = (tab: string) => {
     onClose();
     window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab } }));
   };
-  // CLI usage telemetry is ungated (Q ruling 2026-07-31, supersedes the #1450
-  // founders-mode visibility): it reads the operator's OWN local CLI files, so
-  // neither an account nor an entitlement has any business gating it. The
-  // /api/panel/cli-usage route stays operator-bearer gated as always.
   const [version, setVersion] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'current' | 'available'>('idle');
 
@@ -199,42 +183,12 @@ export function SettingsQuickDrawer({
     }
   }, [onClose]);
 
-  const loadUsage = useCallback(async (preserveSnapshot = true, fresh = false) => {
-    setUsageState((current) => ({
-      status: 'loading',
-      snapshot: preserveSnapshot ? current.snapshot : null,
-      error: null,
-    }));
-    try {
-      const res = await fetch(`/api/runtime/capacity${fresh ? '?fresh=1' : ''}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok || data?.schema !== 'o8/runtime-capacity-control/v1') {
-        throw new Error(data?.error || 'Capacity data unavailable');
-      }
-      setUsageState({ status: 'ready', snapshot: data as RuntimeCapacityControlSnapshot, error: null });
-    } catch (err) {
-      setUsageState((current) => ({
-        status: 'error',
-        snapshot: current.snapshot,
-        error: err instanceof Error ? err.message : String(err),
-      }));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!open || !usageOpen) return;
-    void loadUsage();
-    const timer = window.setInterval(() => {
-      void loadUsage();
-    }, POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [loadUsage, open, usageOpen]);
-
   useEffect(() => {
     if (!open || !mounted) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusable = () => Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') ?? []);
-    focusable()[0]?.focus();
+    const first = focusUpdates ? focusable().find(button => button.textContent?.startsWith('Check for updates')) : focusable()[0];
+    first?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -256,7 +210,7 @@ export function SettingsQuickDrawer({
       document.removeEventListener('keydown', handleKeyDown, true);
       if (previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus();
     };
-  }, [onClose, open, mounted]);
+  }, [onClose, open, mounted, focusUpdates]);
 
   const panelStyle = useMemo<CSSProperties>(() => {
     const viewportWidth = typeof window === 'undefined' ? 640 : window.innerWidth;
@@ -275,26 +229,8 @@ export function SettingsQuickDrawer({
       maxHeight: 'min(340px, calc(100vh - 64px))',
       overflow: 'hidden',
       zIndex: 11000,
-      borderRadius: 16,
-      background: PANEL_BG,
-      border: `1px solid ${BORDER}`,
-      boxShadow: 'var(--t-panel-shadow, 0 24px 60px rgba(15, 23, 42, 0.1))',
-      backdropFilter: 'blur(24px) saturate(150%)',
-      WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-      color: TEXT,
-      fontFamily: FONT,
     };
   }, [anchorRect]);
-
-  const snapshot = usageState.snapshot;
-  // No sign-in requirement here (Q ruling 2026-07-31): this is the operator's
-  // OWN local CLI telemetry (~/.codex + Claude session files) — an account
-  // adds nothing to reading your own disk.
-  const usageSummary = snapshot
-    ? capacitySummary(snapshot)
-    : usageState.status === 'loading'
-      ? 'Syncing'
-      : 'Local runtimes';
 
   if (!mounted || !open) return null;
 
@@ -306,7 +242,8 @@ export function SettingsQuickDrawer({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div id={id} ref={panelRef} role="dialog" aria-modal="true" aria-label="Quick settings" style={panelStyle}>
+      <FloatingSurface id={id} ref={panelRef} role="dialog" aria-modal="true" aria-label="Quick settings" style={panelStyle}
+        contentStyle={{ maxHeight: 'inherit', overflow: 'hidden' }}>
         <div
           style={{
             maxHeight: 'inherit',
@@ -336,38 +273,6 @@ export function SettingsQuickDrawer({
             <span style={{ color: MUTED, fontSize: 10 }}>{workspaceGlass ? 'All Glass' : paletteId === 'light' ? 'Light Solid' : 'Dark Solid'}</span>
             <ChevronRight size={12} color={MUTED} />
           </RowButton>
-
-          <div style={separatorStyle()} />
-
-          <RowButton
-            ariaExpanded={usageOpen}
-            onClick={() => {
-              setUsageOpen((value) => !value);
-            }}
-          >
-            <IconFrame><Gauge size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Runtime capacity</span>
-            <span
-              style={{
-                color: MUTED,
-                fontFamily: MONO,
-                fontSize: 9.5,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {usageSummary}
-            </span>
-            {usageOpen ? <ChevronDown size={12} color={MUTED} /> : <ChevronRight size={12} color={MUTED} />}
-          </RowButton>
-
-          {usageOpen ? (
-            <CapacityRows
-              snapshot={snapshot}
-              loading={usageState.status === 'loading'}
-              error={usageState.error}
-              onRefresh={(fresh) => { void loadUsage(true, fresh); }}
-            />
-          ) : null}
 
           <div style={separatorStyle()} />
 
@@ -429,7 +334,7 @@ export function SettingsQuickDrawer({
             </div>
           ) : null}
         </div>
-      </div>
+      </FloatingSurface>
     </div>,
     document.body,
   );

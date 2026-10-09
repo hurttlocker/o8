@@ -3,16 +3,17 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import { SmoothCorners } from '@lisse/react';
-import { AutoFlash, ControlSlider, Delivery, HomeSimple } from 'iconoir-react';
-import { CircleUser, Gauge, GitPullRequest, Play, Terminal, Settings2 as Settings } from '@/components/desktop/lucide-shims';
+import { AutoFlash, HomeSimple } from 'iconoir-react';
+import { CircleUser, Download, Gauge, GitPullRequest, Play, Terminal, Settings2 as Settings } from '@/components/desktop/lucide-shims';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
+import { FloatingSurface } from '@/components/desktop/FloatingSurface';
 import { RuntimeUsageSummary } from '@/components/desktop/analytics/RuntimeUsageSummary';
 import { useRuntimeUsage } from '@/components/desktop/analytics/use-runtime-usage';
 import type { NavSection } from '@/app/dashboard/types';
 import { TrafficLightsOrSpacer } from './TrafficLights';
-import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@/components/desktop/branch-rail-geometry';
+import { RailMoreMenu } from './RailMoreMenu';
+import { openCustomizeTab, useCustomizeTab } from '../customize/navigation';
 
 const railButton: CSSProperties = {
   position: 'relative',
@@ -32,7 +33,7 @@ const railButton: CSSProperties = {
   fontFamily: 'var(--font-sans-system)',
 };
 
-type RailNavAction = 'automations' | 'customize' | 'projects';
+type RailNavAction = 'automations' | 'customize' | 'projects' | 'plugins';
 
 export function CompactNavigationRail({
   sidebarVisible, onToggleSidebar, activeDestination, glassSurface,
@@ -53,15 +54,18 @@ export function CompactNavigationRail({
 }) {
   const auth = useO8Auth();
   const profileRef = useRef<HTMLButtonElement | null>(null);
+  const updatesRef = useRef<HTMLButtonElement | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [focusUpdates, setFocusUpdates] = useState(false);
+  const [customizeTab] = useCustomizeTab();
   const [profileAnchor, setProfileAnchor] = useState<DOMRect | null>(null);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
   useEffect(() => {
     if (!profileOpen) return;
-    const updateAnchor = () => setProfileAnchor(profileRef.current?.getBoundingClientRect() ?? null);
+    const updateAnchor = () => setProfileAnchor((focusUpdates ? updatesRef : profileRef).current?.getBoundingClientRect() ?? null);
     window.addEventListener('resize', updateAnchor);
     return () => window.removeEventListener('resize', updateAnchor);
-  }, [profileOpen]);
+  }, [profileOpen, focusUpdates]);
   const isGlass = glassSurface;
   const [usageOpen, setUsageOpen] = useState(false);
   const [usagePosition, setUsagePosition] = useState({ left: 0, bottom: 0 });
@@ -100,13 +104,19 @@ export function CompactNavigationRail({
       onOpenProjects?.();
       return;
     }
+    if (action === 'customize' || action === 'plugins') {
+      openCustomizeTab(action === 'plugins' ? 'plugins' : undefined);
+      return;
+    }
     window.dispatchEvent(new CustomEvent(`o8:open-${action}`));
   };
-  const navItems = [
-    { id: 'automations', label: 'Automations', icon: <AutoFlash width={19} height={19} strokeWidth={1.8} /> },
-    { id: 'customize', label: 'Customize', icon: <ControlSlider width={19} height={19} strokeWidth={1.8} /> },
-    { id: 'projects', label: 'Projects', icon: <Delivery width={19} height={19} strokeWidth={1.8} /> },
-  ] as const;
+  const openQuickSettings = (button: HTMLButtonElement, updates: boolean) => {
+    setUsageOpen(false);
+    button.focus();
+    setProfileAnchor(button.getBoundingClientRect());
+    setFocusUpdates(updates);
+    setProfileOpen(current => !current || focusUpdates !== updates);
+  };
 
   return (
     <>
@@ -145,9 +155,15 @@ export function CompactNavigationRail({
       </button>
       <div style={{ width: 27, height: 1, marginTop: 6, marginBottom: 6, flexShrink: 0, background: 'var(--t-divider-subtle)' }} />
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 0, flexShrink: 1, overflowY: 'auto', scrollbarWidth: 'none' }}>
-        {navItems.map((item) => (
-          <button key={item.id} type="button" aria-label={item.label} title={item.label} aria-current={activeDestination === item.id ? 'page' : undefined} onClick={() => openNav(item.id)} style={{ ...railButton, flexShrink: 0, background: activeDestination === item.id ? 'var(--t-hover)' : 'transparent' }}>{item.icon}</button>
-        ))}
+        <button type="button" aria-label="Automations" title="Automations" aria-current={activeDestination === 'automations' ? 'page' : undefined}
+          onClick={() => openNav('automations')} style={{ ...railButton, flexShrink: 0, background: activeDestination === 'automations' ? 'var(--t-hover)' : 'transparent' }}><AutoFlash width={19} height={19} strokeWidth={1.8} /></button>
+        <button type="button" aria-label="Plugins" title="Plugins" aria-current={activeDestination === 'customize' && customizeTab === 'plugins' ? 'page' : undefined}
+          onClick={() => openNav('plugins')} style={{ ...railButton, flexShrink: 0, background: activeDestination === 'customize' && customizeTab === 'plugins' ? 'var(--t-hover)' : 'transparent' }}>
+          <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3a3 3 0 1 1 0 6v3a2 2 0 0 0 2 2h3a3 3 0 1 1 6 0h3a2 2 0 0 0 2-2v-3a3 3 0 1 0 0-6V5a2 2 0 0 0-2-2h-3a3 3 0 1 0-6 0Z" /></svg>
+        </button>
+        <RailMoreMenu buttonStyle={railButton} selected={activeDestination === 'projects' ? 'projects'
+          : activeDestination === 'customize' && customizeTab !== 'plugins' ? 'customize' : null}
+          onProjects={() => openNav('projects')} onCustomize={() => openNav('customize')} />
         <button type="button" aria-label="PRs" title="Pull requests" onClick={onOpenPRs} style={{ ...railButton, flexShrink: 0 }}><GitPullRequest size={19} strokeWidth={1.8} /></button>
       </div>
       <div style={{ width: 27, height: 1, marginTop: 6, marginBottom: 6, flexShrink: 0, background: 'var(--t-divider-subtle)' }} />
@@ -172,10 +188,12 @@ export function CompactNavigationRail({
         </span>
       </button>
       {usageOpen && typeof document !== 'undefined' ? createPortal(
-        <div
+        <FloatingSurface
           id="o8-rail-usage-tooltip"
           role="tooltip"
           data-mcp-scope="rail-usage-preview"
+          glass={isGlass}
+          contentStyle={{ maxHeight: 'min(360px, calc(100vh - 24px))', overflowY: 'auto', scrollbarWidth: 'none' }}
           onMouseEnter={cancelUsageClose}
           onMouseLeave={scheduleUsageClose}
           style={{
@@ -184,30 +202,9 @@ export function CompactNavigationRail({
             bottom: usagePosition.bottom,
             width: 284,
             maxHeight: 'min(360px, calc(100vh - 24px))',
-            border: `1px solid ${isGlass ? 'var(--t-border)' : 'var(--t-divider-subtle)'}`,
-            borderRadius: WORKSPACE_RAIL_CORNER_RADIUS,
-            boxShadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
-            color: 'var(--t-text)',
-            fontFamily: 'var(--font-sans-system)',
             zIndex: 210,
-            ...(isGlass ? {
-              ['--t-text' as string]: '#e8ecf2',
-              ['--t-text-secondary' as string]: '#bcc5d0',
-              ['--t-text-muted' as string]: '#8b95a3',
-            } : {}),
           } as CSSProperties}
         >
-          <SmoothCorners
-            corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
-            autoEffects={false}
-            style={{
-              maxHeight: 'min(360px, calc(100vh - 24px))',
-              overflowY: 'auto', scrollbarWidth: 'none',
-              background: isGlass ? 'var(--t-bg)' : 'var(--t-panel-solid)',
-              backdropFilter: isGlass ? 'blur(18px) saturate(1.15)' : undefined,
-              WebkitBackdropFilter: isGlass ? 'blur(18px) saturate(1.15)' : undefined,
-            } as CSSProperties}
-          >
             <div style={{ paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, display: 'grid', gap: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                 <span style={{ fontSize: 13.5, fontWeight: 400 }}>Runtime usage</span>
@@ -218,25 +215,25 @@ export function CompactNavigationRail({
               {!usageSnapshot && usageLoading ? <span style={{ color: 'var(--t-text-muted)', fontSize: 10.5 }}>Reading connected runtimes…</span> : null}
               {usageError ? <span style={{ color: 'var(--t-text-muted)', fontSize: 10.5 }}>{usageError}</span> : null}
             </div>
-          </SmoothCorners>
-        </div>,
+        </FloatingSurface>,
         document.body,
       ) : null}
+      <button ref={updatesRef} type="button" aria-label="Updates" title="Updates" aria-haspopup="dialog"
+        aria-expanded={profileOpen && focusUpdates} aria-controls={profileOpen && focusUpdates ? 'o8-rail-quick-settings' : undefined}
+        onClick={event => openQuickSettings(event.currentTarget, true)} style={{ ...railButton, flexShrink: 0 }}>
+        <span aria-hidden="true" style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: '50%', color: 'var(--t-accent)', background: 'var(--t-hover)' }}><Download size={17} strokeWidth={1.7} /></span>
+      </button>
       <button
         ref={profileRef}
         id="o8-profile-menu-button"
         type="button"
         aria-label="Open quick settings"
         aria-haspopup="dialog"
-        aria-expanded={profileOpen}
-        aria-controls={profileOpen ? 'o8-rail-quick-settings' : undefined}
+        aria-expanded={profileOpen && !focusUpdates}
+        aria-controls={profileOpen && !focusUpdates ? 'o8-rail-quick-settings' : undefined}
         title="Quick settings"
-        onClick={() => {
-          setUsageOpen(false);
-          profileRef.current?.focus();
-          setProfileAnchor(profileRef.current?.getBoundingClientRect() ?? null);
-          setProfileOpen((open) => !open);
-        }}
+        onClick={event => openQuickSettings(event.currentTarget, false)}
         style={{ ...railButton, flexShrink: 0, color: auth.signedIn ? 'var(--t-text)' : 'var(--t-text-muted)' }}
       >{auth.signedIn && auth.user?.avatarUrl ? <Image src={auth.user.avatarUrl} alt="" width={27} height={27} unoptimized style={{ width: 27, height: 27, borderRadius: '50%', objectFit: 'cover' }} /> : <CircleUser size={22} strokeWidth={1.7} />}</button>
     </nav>
@@ -245,6 +242,7 @@ export function CompactNavigationRail({
       open={profileOpen}
       anchorRect={profileAnchor}
       onClose={closeProfile}
+      focusUpdates={focusUpdates}
       onOpenSettings={() => { closeProfile(); onOpenSettings(); }}
       onOpenShortcuts={onOpenShortcuts}
     />

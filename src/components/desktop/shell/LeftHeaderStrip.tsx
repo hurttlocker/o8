@@ -63,10 +63,10 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
               so the cluster doesn't jump when the sidebar collapses.
               See TrafficLights.tsx. */}
           {windowControls ? <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} leadInPx={6} /> : null}
+          {!windowControls ? <SidebarBrand /> : null}
           {onToggleSidebar ? <SidebarTogglePill
             sidebarVisible={sidebarVisible} onClick={onToggleSidebar} yNudge={0}
           /> : null}
-          {!windowControls ? <SidebarBrand /> : null}
         </>
       }
     />

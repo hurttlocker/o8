@@ -10,6 +10,7 @@ import { ProjectInstructions } from './customize/ProjectInstructions';
 import { emptyInventory, loadCustomizeInventory, type CustomizeInventory, type CustomizeRepo, type DirectiveSummary, type ExternalServer, type AgentEntry, type HookEntry } from './customize/inventory';
 import type { ProjectRecord } from './repo-registry/useProjects';
 import { CustomizeHeader, type CustomizeTab } from './customize/CustomizeHeader';
+import { useCustomizeTab } from './customize/navigation';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { insertPromptIntoActiveComposer, type PromptLibraryEntry } from '@/lib/prompt-library/client';
@@ -46,7 +47,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
   project?: ProjectRecord | null;
   registeredRepos?: CustomizeRepo[];
 }) {
-  const [tab, setTab] = useState<CustomizeTab>('rules');
+  const [tab, setTab] = useCustomizeTab();
   const [query, setQuery] = useState('');
   const [pluginRepo, setPluginRepo] = useState('');
   const [addingSkill, setAddingSkill] = useState(false);
