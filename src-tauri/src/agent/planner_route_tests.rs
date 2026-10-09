@@ -509,3 +509,19 @@ fn the_voice_pref_keys_are_the_ones_the_settings_panel_writes() {
     assert_eq!(BRAIN_TIER_PREF, "symon_brain_tier");
     assert_eq!(BRAIN_MODEL_PREF, "symon_brain_model");
 }
+
+#[test]
+fn new_text_default_is_61_high_while_pins_bound_sessions_and_voice_stay_fixed() {
+    let (routing, retry) = resolve_text_with(&auto(), codex(), all_installed);
+    let seat = selected(routing);
+    assert_eq!(seat.model_label(), crate::models::CODEX_GPT_6_1_SOL);
+    assert_eq!(seat.effort, "high");
+    assert!(retry);
+    assert_eq!(selected(resolve_with(&auto(), codex(), all_installed)).model_label(), crate::models::CODEX_GPT_5_6_SOL);
+    for model in [crate::models::CODEX_GPT_5_6_SOL, crate::models::CODEX_GPT_6_SOL, crate::models::CODEX_GPT_6_1_SOL] {
+        let (routing, retry) = resolve_text_with(&BrainSetting { model: Some(model.into()), ..auto() }, codex(), all_installed);
+        assert_eq!(selected(routing).model_label(), model);
+        assert!(!retry);
+        assert_eq!(selected(resolve_bound_with("codex", model, "high", all_installed)).model_label(), model);
+    }
+}

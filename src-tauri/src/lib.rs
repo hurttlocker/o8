@@ -5874,8 +5874,9 @@ async fn symon_text_run_turn(
     engine: String,
     model: String,
     effort: String,
+    allow_default_fallback: Option<bool>,
 ) -> Result<agent::SymonTextTurnResult, String> {
-    agent::run_symon_text_turn(app, session_id, turn_id, prompt, engine, model, effort).await
+    agent::run_symon_text_turn(app, session_id, turn_id, prompt, engine, model, effort, allow_default_fallback.unwrap_or(false)).await
 }
 
 #[cfg(target_os = "macos")]

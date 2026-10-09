@@ -140,6 +140,7 @@ impl SeatFixture {
             "O8_OPENCODE_BIN",
             "OPENCODE_BIN",
             "SEAT_CAPTURE",
+            "CODEX_HOME",
         ]
         .into_iter()
         .map(|key| (key, std::env::var_os(key)))
@@ -153,6 +154,7 @@ impl SeatFixture {
         std::env::set_var("O8_OPENCODE_BIN", &opencode_fixture);
         std::env::remove_var("OPENCODE_BIN");
         std::env::set_var("SEAT_CAPTURE", &capture);
+        std::env::set_var("CODEX_HOME", dir.join("codex-home"));
         Self {
             dir,
             capture,
@@ -474,6 +476,7 @@ async fn the_open_seat_binds_the_text_surface_and_the_next_turn_resumes_it() {
             "opencode".to_string(),
             planner_route::RUNTIME_CONFIGURED_MODEL.to_string(),
             planner_route::RUNTIME_CONFIGURED_EFFORT.to_string(),
+            false,
         )
         .await
         .unwrap_or_else(|error| panic!("{turn_id} must reach the open seat: {error}"));
@@ -506,15 +509,12 @@ async fn the_open_seat_binds_the_text_surface_and_the_next_turn_resumes_it() {
     bound_seat::reset();
 }
 
-/// With the Symon brain setting UNSET, the bound surface is told exactly what
-/// it was told before the marker existed — same engine, same model id, same
-/// effort — for both orchestrator backends. The default path never learns a
-/// new shape.
+/// New text sessions use the text default; re-presented bindings remain fixed.
 #[cfg(unix)]
 #[test]
-fn an_unset_brain_setting_projects_the_triple_it_always_did() {
+fn an_unset_text_brain_projects_the_new_default_and_bound_seats_stay_fixed() {
     for (backend, engine, model, effort) in [
-        ("codex", "codex", planner_route::DEFAULT_CODEX_PLANNER_MODEL, "high"),
+        ("codex", "codex", crate::models::CODEX_GPT_6_1_SOL, "high"),
         ("claude", "claude", crate::models::CLAUDE_SONNET_5, "medium"),
     ] {
         let _fixture = SeatFixture::new(backend);
@@ -552,6 +552,90 @@ fn the_bound_surface_names_the_seat_the_way_settings_does() {
     let rendered = serde_json::to_value(symon_text_planner_info(None, None, None)).unwrap();
     assert_eq!(
         rendered["seat"],
-        format!("Codex · {} · high", planner_route::DEFAULT_CODEX_PLANNER_MODEL)
+        format!("Codex · {} · high", crate::models::CODEX_GPT_6_1_SOL)
     );
+}
+
+/// Real bound entry and planner-info, with all disk/config access in the fixture.
+#[cfg(unix)]
+#[tokio::test]
+async fn text_default_reports_fallback_and_old_bindings_stay_fixed() {
+    let fixture = SeatFixture::new("codex");
+    std::fs::write(fixture.dir.join("codex-fixture"), r#"#!/bin/sh
+for arg in "$@"; do printf 'argv %s\n' "$arg" >> "$SEAT_CAPTURE"; done
+printf '%s\n' '__END__' >> "$SEAT_CAPTURE"
+if [ "$1" = app-server ]; then exit 1; fi
+for arg in "$@"; do
+  if [ "$arg" = model=gpt-6.1-sol ]; then
+    printf '%s\n' 'The '\''gpt-6.1-sol'\'' model is not supported when using Codex with a ChatGPT account.' >&2
+    exit 1
+  fi
+done
+printf '%s\n' '{"type":"thread.started","thread_id":"fixture-thread"}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"done\":true,\"say\":\"Ready.\"}"}}'
+"#).unwrap();
+    let info = symon_text_planner_info(None, None, None);
+    assert_eq!(info.model.as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(info.effort, Some("high"));
+    assert!(info.allow_default_fallback);
+    let result = run_symon_text_turn_with(None, "text-default".into(), "turn-1".into(),
+        "Hello".into(), "codex".into(), info.model.unwrap(), "high".into(), info.allow_default_fallback).await.unwrap();
+    let result = serde_json::to_value(result).unwrap();
+    assert_eq!(result["model"], "gpt-5.6-sol");
+    assert_eq!(result["effort"], "high");
+    assert_eq!(result["text"], "Ready.");
+    let old = symon_text_planner_info(Some("codex"), Some("gpt-5.6-sol"), Some("high"));
+    assert_eq!(old.model.as_deref(), Some("gpt-5.6-sol"));
+    assert!(!old.allow_default_fallback);
+    let pinned = run_symon_text_turn_with(None, "pinned".into(), "turn-1".into(),
+        "Hello".into(), "codex".into(), "gpt-6.1-sol".into(), "high".into(), false).await;
+    let pinned = pinned.unwrap();
+    assert_eq!(pinned.status, "error", "unavailable explicit pins must remain explicit");
+    assert_eq!(pinned.model, "gpt-6.1-sol");
+    assert!(pinned.detail.unwrap().contains("not supported"));
+}
+
+/// Tauri's bound entry retains the adapter's selection even if the retry fails
+/// or cancellation arrives while its blocking transport is still active.
+#[cfg(unix)]
+#[tokio::test]
+async fn bound_text_terminal_failure_and_interrupt_keep_fallback_selection() {
+    for interrupted in [false, true] {
+        let fixture = SeatFixture::new("codex");
+        let ready = fixture.dir.join("fallback-ready");
+        let release = fixture.dir.join("fallback-release");
+        let script = format!(r#"#!/bin/sh
+if [ "$1" = app-server ]; then exit 1; fi
+for arg in "$@"; do
+  if [ "$arg" = model=gpt-6.1-sol ]; then
+    printf '%s\n' 'The '\''gpt-6.1-sol'\'' model is not supported when using Codex with a ChatGPT account.' >&2
+    exit 1
+  fi
+done
+touch '{}'
+while [ ! -f '{}' ]; do sleep 0.01; done
+printf '%s\n' 'fixture failure mentions gpt-6.1-sol but does not define the effective model' >&2
+exit 1
+"#, ready.display(), release.display());
+        std::fs::write(fixture.dir.join("codex-fixture"), script).unwrap();
+        let turn = run_symon_text_turn_with(None, "terminal-fallback".into(), "turn-1".into(),
+            "Hello".into(), "codex".into(), "gpt-6.1-sol".into(), "high".into(), true);
+        let control = async {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !ready.exists() && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            if interrupted {
+                assert!(interrupt_symon_text_turn("terminal-fallback", "turn-1"));
+            }
+            std::fs::write(&release, "release").unwrap();
+            assert!(ready.exists(), "fixture must reach the compatibility transport");
+        };
+        let (result, ()) = tokio::join!(turn, control);
+        let wire = serde_json::to_value(result.unwrap()).unwrap();
+        assert_eq!(wire["status"], if interrupted { "interrupted" } else { "error" });
+        assert_eq!(wire["model"], "gpt-5.6-sol");
+        assert_eq!(wire["effort"], "high");
+        assert!(wire["detail"].as_str().unwrap().contains("fixture failure"));
+    }
 }
