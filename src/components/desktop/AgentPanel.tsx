@@ -247,7 +247,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         />
         <ConnectionPill />
         <FixedReportCard />
-        <UpdateCard />
+        <UpdateCard quiet={navigationRail} />
         {!navigationRail ? <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} /> : null}
       </div>
     );
@@ -441,7 +441,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       </div>
       <ConnectionPill />
       <FixedReportCard />
-      <UpdateCard />
+      <UpdateCard quiet={navigationRail} />
       {!navigationRail ? <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} /> : null}
     </div>
   );
@@ -500,7 +500,7 @@ function MiniAgentPanelHeader({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         {navigationRail ? <SymonSidebarRow /> : null}
-        <MiniAgentPanelAction
+        {!navigationRail ? <MiniAgentPanelAction
           icon={Play}
           label="New session"
           active={sessionMenuOpen}
@@ -509,8 +509,8 @@ function MiniAgentPanelHeader({
             onProjectsOpenChange(false);
             setSessionMenuOpen((open) => !open);
           }}
-        />
-        {sessionMenuOpen ? (
+        /> : null}
+        {!navigationRail && sessionMenuOpen ? (
           <MiniSessionMenu
             onCreateOrchestrator={() => runSessionAction(onCreateOrchestrator)}
             onCreateTerminal={() => runSessionAction(onCreateTerminal)}

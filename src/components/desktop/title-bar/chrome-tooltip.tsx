@@ -14,17 +14,19 @@ import { createPortal } from 'react-dom';
  * window's top edge — the operator saw "Open O…". This portals to document.body
  * and opens DOWNWARD, right-anchored, so the label is always fully readable.
  */
-export function useChromeTooltip({ label, keybind }: { label: string; keybind?: string }) {
+export function useChromeTooltip({ label, keybind, side = 'bottom' }: { label: string; keybind?: string; side?: 'bottom' | 'right' }) {
   const ref = useRef<HTMLButtonElement>(null);
   const showTimer = useRef<number | undefined>(undefined);
-  const [tip, setTip] = useState<{ top: number; right: number } | null>(null);
+  const [tip, setTip] = useState<{ top: number; right?: number; left?: number } | null>(null);
 
   const open = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setTip({ top: r.bottom + 6, right: Math.max(6, window.innerWidth - r.right) });
-  }, []);
+    setTip(side === 'right'
+      ? { top: Math.max(6, Math.min(r.top + (r.height - 24) / 2, window.innerHeight - 30)), left: r.right + 10 }
+      : { top: r.bottom + 6, right: Math.max(6, window.innerWidth - r.right) });
+  }, [side]);
 
   const close = useCallback(() => {
     window.clearTimeout(showTimer.current);
@@ -53,6 +55,7 @@ export function useChromeTooltip({ label, keybind }: { label: string; keybind?: 
             position: 'fixed',
             top: tip.top,
             right: tip.right,
+            left: tip.left,
             zIndex: 2147483000,
             pointerEvents: 'none',
             display: 'inline-flex',

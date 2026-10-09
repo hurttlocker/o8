@@ -1,6 +1,5 @@
 'use client';
 
-import { CodexCliUpdateNotice } from '../CodexCliUpdateNotice';
 import { useCallback, useEffect, useState } from 'react';
 import type { CliUpdateRecord } from '@/lib/setup/cli-updates';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
@@ -45,7 +44,6 @@ export function CliUpdatePrompt() {
 
   return (
     <section style={{ marginTop: 28 }}>
-      <CodexCliUpdateNotice settings />
       <SettingsGroup header="CLI updates" footnote="Checks each selected CLI against its own stable release. Antigravity (agy) and Gemini CLI (gemini) update separately. This does not install or replace tools while agents are running.">
         <SettingsRow
           label="Check runtime versions"

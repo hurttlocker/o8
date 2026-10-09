@@ -5234,9 +5234,7 @@ function DashboardInner() {
 
       {showCompactNavigationRail ? <CompactNavigationRail
         glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !isNonMacShell()))}
-        sidebarVisible={showSidebarColumn}
         activeDestination={activeNavSection}
-        onToggleSidebar={toggleSidebarFromChrome}
         onHome={leaveNavTakeover}
         onOpenSettings={() => handleOpenSettingsTab('general')}
         onOpenShortcuts={() => setShortcutsOpen(true)}

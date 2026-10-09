@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CompactNavigationRail } from './CompactNavigationRail';
 import { OPEN_KEYBOARD_SHORTCUTS_EVENT, OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { setCustomizeTab } from '../customize/navigation';
+import { refreshCliUpdateView } from '@/lib/app-update/update-hub-client';
 
 const auth = vi.hoisted(() => ({ signedIn: false, clerkEnabled: true, user: { name: 'Private account', email: 'private@example.test' }, signIn: vi.fn(), openManageAccount: vi.fn() }));
 const updateCheck = vi.hoisted(() => vi.fn(async () => null));
@@ -13,20 +14,29 @@ vi.mock('@/lib/theme/context', () => ({ useTheme: () => ({ paletteId: 'light', w
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.0.0' }));
 vi.mock('@/lib/app-update/check', () => ({ check: updateCheck }));
 vi.mock('@lisse/react', () => ({ SmoothCorners: ({ children, style }: HTMLAttributes<HTMLDivElement>) => createElement('div', { style }, children) }));
-beforeEach(() => setCustomizeTab('rules'));
+beforeEach(() => {
+  setCustomizeTab('rules');
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).startsWith('/api/setup/cli-updates')) return Response.json({ tools: [] });
+    if (String(input).startsWith('/api/panel/o8-update-summary')) return Response.json({ version: '0.1.1', summary: 'Published changes', entries: [{ text: 'Clearer navigation' }], source: 'release', releaseUrl: 'https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.1' });
+    throw new Error(`Unexpected request ${String(input)}`);
+  }));
+});
 afterEach(() => { auth.signedIn = false; vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 it('keeps navigation usable with the chat list open or closed and reads fresh usage', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const callbacks = {
     onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(),
-    onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(),
+    onOpenProjects: vi.fn(), onOpenSettings: vi.fn(),
     onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn(),
   };
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     if (String(input) === '/api/runtime/capacity') return Response.json({
       schema: 'o8/runtime-capacity-control/v1', capacities: [{ runtime: 'codex', status: 'available', confidence: 'exact', buckets: [{ id: 'weekly', label: 'Weekly', usedRatio: 0.4 }] }],
     });
+    if (String(input).startsWith('/api/setup/cli-updates')) return Response.json({ tools: [] });
+    if (String(input).startsWith('/api/panel/o8-update-summary')) return Response.json({ version: '0.1.1', summary: 'Published changes', entries: [{ text: 'Clearer navigation' }], source: 'release' });
     throw new Error(`Unexpected request ${String(input)}`);
   }));
   const host = document.createElement('div');
@@ -38,8 +48,8 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     return found!;
   };
   try {
-    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: true, activeDestination: 'projects', glassSurface: false })));
-    expect(fetch).not.toHaveBeenCalled();
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'projects', glassSurface: false })));
+    expect(fetch).not.toHaveBeenCalledWith('/api/runtime/capacity', expect.anything());
     expect(host.querySelector('[aria-label="Search"]')).toBeNull();
     expect(host.querySelector('[aria-label="Projects"]')).toBeNull();
     expect(host.querySelector('[aria-label="Customize"]')).toBeNull();
@@ -54,9 +64,9 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     expect(callbacks.onOpenProjects).toHaveBeenCalledOnce();
     expect(document.querySelector('[aria-label="More destinations"]')).toBeNull();
     expect(document.activeElement).toBe(button('More navigation'));
-    expect(button('Hide chats').getAttribute('aria-expanded')).toBe('true');
-    expect(button('Hide chats').getAttribute('aria-controls')).toBe('o8-chat-list');
-    for (const [label, callback] of [['Home', callbacks.onHome], ['New session', callbacks.onNewSession], ['Terminal', callbacks.onCreateTerminal], ['PRs', callbacks.onOpenPRs], ['Settings', callbacks.onOpenSettings], ['Hide chats', callbacks.onToggleSidebar]] as const) {
+    expect(host.querySelector('[aria-label="Hide chats"], [aria-label="Show chats"], [aria-label="Settings"]')).toBeNull();
+    expect(button('Canvas mode')).toBeDefined();
+    for (const [label, callback] of [['Home', callbacks.onHome], ['Run orchestrator', callbacks.onNewSession], ['Run terminal', callbacks.onCreateTerminal], ['PRs', callbacks.onOpenPRs]] as const) {
       await act(async () => button(label).click());
       expect(callback).toHaveBeenCalledOnce();
       expect(button(label).style.minWidth).toBe('44px');
@@ -75,11 +85,9 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     await act(async () => button('Runtime usage').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(document.getElementById('o8-rail-usage-tooltip')).toBeNull();
     const rail = host.querySelector('[aria-label="Workspace navigation"]');
-    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: false, activeDestination: 'agents', glassSurface: true })));
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
     expect(host.querySelector('[aria-label="Workspace navigation"]')).toBe(rail);
-    expect(button('Show chats').getAttribute('aria-expanded')).toBe('false');
-    await act(async () => button('Show chats').click());
-    expect(callbacks.onToggleSidebar).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[aria-label="Hide chats"], [aria-label="Show chats"]')).toBeNull();
     expect(button('Home').getAttribute('aria-current')).toBe('page');
     expect((rail as HTMLElement).style.background).toBe('transparent');
     expect((rail as HTMLElement).style.boxShadow).toBe('none');
@@ -95,7 +103,7 @@ it('reaches Plugins directly, keeps Automations, and navigates the secondary dra
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
   const customize = vi.fn();
   const automations = vi.fn();
   window.addEventListener('o8:open-customize', customize);
@@ -103,12 +111,12 @@ it('reaches Plugins directly, keeps Automations, and navigates the secondary dra
   const button = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
   const key = async (value: string) => act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })));
   try {
-    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: false, activeDestination: 'agents', glassSurface: true })));
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
     await act(async () => button('Automations').click());
     expect(automations).toHaveBeenCalledOnce();
     await act(async () => button('Plugins').click());
     expect(customize).toHaveBeenCalledOnce();
-    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: false, activeDestination: 'customize', glassSurface: true })));
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'customize', glassSurface: true })));
     expect(button('Plugins').getAttribute('aria-current')).toBe('page');
     await act(async () => button('More navigation').click());
     expect(document.activeElement).toBe(button('Projects'));
@@ -134,26 +142,32 @@ it('reaches Plugins directly, keeps Automations, and navigates the secondary dra
   }
 });
 
-it('opens the existing update controls from the bottom rail without starting an update check', async () => {
+it('opens cached release notes from the updater and restores focus on Escape without reopening', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const install = vi.fn();
+  window.addEventListener('o8:install-all-updates', install);
   try {
-    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: false, activeDestination: 'agents', glassSurface: false })));
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: false })));
     const updates = host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!;
     await act(async () => updates.click());
-    const drawer = document.querySelector<HTMLElement>('[aria-label="Quick settings"]')!;
-    const manualCheck = [...drawer.querySelectorAll('button')].find(button => button.textContent?.startsWith('Check for updates'))!;
-    expect(document.activeElement).toBe(manualCheck);
-    expect(drawer.id).toBe(updates.getAttribute('aria-controls'));
-    expect(updates.getAttribute('aria-expanded')).toBe('true');
-    expect(updateCheck).not.toHaveBeenCalled();
-    await act(async () => manualCheck.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    const popup = document.querySelector<HTMLElement>('[aria-label="Updates and release notes"]')!;
+    expect(popup.textContent).toContain('Clearer navigation');
+    expect(popup.id).toBe(updates.getAttribute('aria-controls'));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Refresh updates');
     expect(document.querySelector('[aria-label="Quick settings"]')).toBeNull();
+    expect(updateCheck).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(document.querySelector('[aria-label="Updates and release notes"]')).toBeNull();
     expect(document.activeElement).toBe(updates);
+    expect(updates.getAttribute('aria-expanded')).toBe('false');
   } finally {
+    window.removeEventListener('o8:install-all-updates', install);
     await act(async () => root.unmount());
     host.remove();
   }
@@ -165,7 +179,7 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onToggleSidebar: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
   const settings = vi.fn();
   const help = vi.fn();
   window.addEventListener(OPEN_SETTINGS_TAB_EVENT, settings);
@@ -173,13 +187,14 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
   const drawer = () => document.querySelector<HTMLElement>('[aria-label="Quick settings"]');
   const menuButton = (label: string) => [...drawer()!.querySelectorAll('button')].find((button) => button.textContent?.startsWith(label))!;
   try {
-    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, sidebarVisible: true, activeDestination: 'agents', glassSurface: false })));
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: false })));
     const avatar = host.querySelector<HTMLButtonElement>('[aria-label="Open quick settings"]')!;
     await act(async () => avatar.click());
     expect(drawer()?.id).toBe(avatar.getAttribute('aria-controls'));
     expect(document.activeElement).toBe(menuButton('Account'));
     expect(drawer()?.textContent).not.toMatch(/private@example|Private account|Sign out|Sign in/);
     expect(drawer()?.textContent).not.toContain('Runtime capacity');
+    expect(drawer()?.textContent).not.toContain('Check for updates');
     expect(auth.openManageAccount).not.toHaveBeenCalled();
     expect(auth.signIn).not.toHaveBeenCalled();
     const last = [...drawer()!.querySelectorAll('button')].at(-1)!;
@@ -210,4 +225,30 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
     await act(async () => root.unmount());
     host.remove();
   }
+});
+
+it('shows only installed supported CLIs and keeps legacy Gemini out of the update dot', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const tools = [{ runtimeId: 'codex', label: 'Codex CLI', status: 'not-installed' },
+    { runtimeId: 'claude-code', label: 'Claude Code', status: 'current' },
+    { runtimeId: 'grok', label: 'Grok Build', status: 'current' },
+    { runtimeId: 'gemini', label: 'Gemini CLI', status: 'update-available' }];
+  vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+    if (String(input).startsWith('/api/setup/cli-updates')) return Response.json({ tools });
+    return Response.json({ entries: [], summary: 'Published changes' });
+  });
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  try {
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
+    await act(async () => refreshCliUpdateView(true));
+    expect(host.querySelector('[data-update-dot]')).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!.click());
+    const popup = document.querySelector('[aria-label="Updates and release notes"]')!;
+    expect(popup.textContent).toContain('Grok Build'); expect(popup.textContent).toContain('Claude Code');
+    expect(popup.textContent).not.toContain('Codex CLI'); expect(popup.textContent).not.toContain('Gemini CLI');
+    tools[2]!.status = 'update-available';
+    await act(async () => refreshCliUpdateView(true));
+    expect(host.querySelector('[data-update-dot]')).not.toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); }
 });

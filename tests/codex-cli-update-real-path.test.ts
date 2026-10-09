@@ -93,7 +93,7 @@ describe('Codex update through the operator route', () => {
     expect(await response.json()).toMatchObject({ status: 'succeeded', installedVersion: '0.159.3' });
     expect(fixture.postProbes).toBe(2);
     expect(fixture.calls).toHaveLength(1);
-    expect(vi.mocked(invalidateCliCache).mock.calls.filter(([runtime]) => runtime === 'codex')).toHaveLength(3);
+    expect(vi.mocked(invalidateCliCache).mock.calls.filter(([runtime]) => runtime === 'codex')).toHaveLength(4);
     const receipt = JSON.parse(readFileSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'codex-cli-update.json'), 'utf8'));
     expect(receipt).toMatchObject({ status: 'succeeded', selectedPath: fixture.selected, targetVersion: '0.159.3' });
   });

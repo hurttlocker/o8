@@ -7,7 +7,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleUser,
-  Download,
   ExternalLink,
   Globe,
   MessageSquare,
@@ -39,7 +38,6 @@ interface SettingsQuickDrawerProps {
   onClose: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts?: () => void;
-  focusUpdates?: boolean;
 }
 
 function IconFrame({ children }: { children: ReactNode }) {
@@ -132,7 +130,6 @@ export function SettingsQuickDrawer({
   onClose,
   onOpenSettings,
   onOpenShortcuts,
-  focusUpdates = false,
 }: SettingsQuickDrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -142,52 +139,13 @@ export function SettingsQuickDrawer({
     onClose();
     window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab } }));
   };
-  const [version, setVersion] = useState<string | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'current' | 'available'>('idle');
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    import('@tauri-apps/api/app').then((m) => m.getVersion()).then(setVersion).catch(() => { /* not in Tauri */ });
-  }, []);
-
-  const checkForUpdates = useCallback(async () => {
-    setUpdateStatus('checking');
-    try {
-      const { check } = await import('@/lib/app-update/check');
-      const update = await check();
-      if (update) {
-        setUpdateStatus('available');
-        // Surface the IN-APP update card (version + release note + install
-        // button) instead of bouncing the operator to GitHub — the card is
-        // the product surface for updates (operator report 2026-07-10).
-        window.dispatchEvent(new CustomEvent('o8:update-found', {
-          detail: {
-            version: update.version,
-            notes: update.body ?? undefined,
-            date: update.date ?? undefined,
-          },
-        }));
-        // The card mounts BEHIND this drawer's overlay — leaving the drawer
-        // open made "Check for updates" feel like it did nothing (Q report
-        // 2026-07-31). Found an update → get out of its way.
-        window.setTimeout(onClose, 350);
-      } else {
-        setUpdateStatus('current');
-        window.setTimeout(() => setUpdateStatus('idle'), 2600);
-      }
-    } catch {
-      setUpdateStatus('idle');
-    }
-  }, [onClose]);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!open || !mounted) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusable = () => Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') ?? []);
-    const first = focusUpdates ? focusable().find(button => button.textContent?.startsWith('Check for updates')) : focusable()[0];
+    const first = focusable()[0];
     first?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -210,7 +168,7 @@ export function SettingsQuickDrawer({
       document.removeEventListener('keydown', handleKeyDown, true);
       if (previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus();
     };
-  }, [onClose, open, mounted, focusUpdates]);
+  }, [onClose, open, mounted]);
 
   const panelStyle = useMemo<CSSProperties>(() => {
     const viewportWidth = typeof window === 'undefined' ? 640 : window.innerWidth;
@@ -275,31 +233,6 @@ export function SettingsQuickDrawer({
           </RowButton>
 
           <div style={separatorStyle()} />
-
-          <RowButton onClick={() => { void checkForUpdates(); }}>
-            <IconFrame><Download size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Check for updates</span>
-            <span
-              style={{
-                color: updateStatus === 'available' ? 'var(--t-brand-orange, #f97316)' : MUTED,
-                fontFamily: MONO,
-                fontSize: 9.5,
-                fontWeight: 260,
-                letterSpacing: '-0.2px',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {updateStatus === 'checking'
-                ? 'Checking…'
-                : updateStatus === 'available'
-                  ? 'Update ready'
-                  : updateStatus === 'current'
-                    ? 'Up to date'
-                    : version
-                      ? `v${version}`
-                      : ''}
-            </span>
-          </RowButton>
 
           <RowButton
             ariaExpanded={helpOpen}

@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { ControlSlider, Delivery } from 'iconoir-react';
 import { FloatingSurface } from '../FloatingSurface';
+import { RailActionButton } from './RailActionButton';
 
 export function RailMoreMenu({ buttonStyle, selected, onProjects, onCustomize }: {
   buttonStyle: CSSProperties;
@@ -30,12 +31,12 @@ export function RailMoreMenu({ buttonStyle, selected, onProjects, onCustomize }:
   }, [open]);
   const close = () => { setOpen(false); triggerRef.current?.focus(); };
   return <>
-    <button ref={triggerRef} type="button" aria-label="More navigation" title="More" aria-haspopup="menu"
+    <RailActionButton ref={triggerRef} type="button" aria-label="More navigation" tooltipLabel="Projects and Customize" aria-haspopup="menu"
       aria-expanded={open} aria-controls={open ? id : undefined} aria-current={selected ? 'page' : undefined}
       onClick={() => { setAnchor(triggerRef.current?.getBoundingClientRect() ?? null); setOpen(!open); }}
       style={{ ...buttonStyle, flexShrink: 0, background: open || selected ? 'var(--t-hover)' : 'transparent' }}>
       <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></svg>
-    </button>
+    </RailActionButton>
     {open && anchor ? createPortal(<FloatingSurface ref={menuRef} id={id} role="menu" aria-label="More destinations" contentStyle={{ padding: 8 }}
       onKeyDown={event => {
         const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])];

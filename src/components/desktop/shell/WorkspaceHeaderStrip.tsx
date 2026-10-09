@@ -26,25 +26,13 @@ import { WorkspaceAddTabButton } from './WorkspaceAddTabButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
-import { CanvasModeButton } from '../title-bar/CanvasModeButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
 /** Right-edge inset that lands the header's rightmost control on the branch rail
  *  capsule's centre, one row below. Measured, not guessed.
  *
- *  This is ONE number only because CanvasModeButton and RightPanelMorphButton
- *  are both 30px wide — the margin sets the button's right edge, so its centre
- *  lands at `nudge + width/2` from the header's edge. If either button's width
- *  changes, this stops being a shared constant and both centres need
- *  re-measuring against the capsule. */
+ *  The panel toggle is 30px wide; the margin positions its centre. */
 const RAIL_COLUMN_ALIGN_NUDGE = 4;
-
-/** The header cluster's own flex gap. Cancelled between the canvas button and
- *  the panel toggle so the pair sits tight: each carries ~7px of internal
- *  padding, so the 4px box gap reads as 18px of ink-to-ink air (measured) and
- *  the two look unrelated. Closed, they read ~14.6px apart — the same rhythm
- *  the rail capsule's stacked glyphs already use (Q 2026-07-16). */
-const HEADER_CLUSTER_GAP = 4;
 
 export function WorkspaceHeaderStrip({
   leadingInset = false,
@@ -128,23 +116,6 @@ export function WorkspaceHeaderStrip({
                 yNudge={1.3}
               />
             ) : null}
-            {/* Sits immediately before the right-panel toggle — the header's
-                "leaves this view" slot (Q 2026-07-16, mirroring Cursor's
-                `IDE ↗`). Moved off the bottom-left status bar: these little
-                buttons carry weight and belong where they're reached for.
-
-                The nudge rides whichever control is RIGHTMOST, because that's
-                the one sitting over the rail capsule. When the right panel is
-                open, its toggle moves into the panel's own strip and the canvas
-                button inherits the column. */}
-            <div
-              style={{
-                display: 'inline-flex',
-                marginRight: showRightPanelFallbackToggle ? -HEADER_CLUSTER_GAP : RAIL_COLUMN_ALIGN_NUDGE,
-              }}
-            >
-              <CanvasModeButton onClick={() => { window.location.assign('/preview/canvas-glass'); }} />
-            </div>
             {showRightPanelFallbackToggle ? (
               <div style={{ display: 'inline-flex', marginRight: RAIL_COLUMN_ALIGN_NUDGE }}>
                 <RightPanelMorphButton
