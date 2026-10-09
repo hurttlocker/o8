@@ -1,11 +1,17 @@
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
+import { readBoundedMaintenanceFile, worktreeMetadataReadLimit } from '@/lib/worktree/maintenance-budget';
 
 // Session records include prompts and a bounded run history. Reject unsafe
 // nodes before reading and bound allocation even if a file grows after open.
 const MAX_SESSION_METADATA_BYTES = 16 * 1024 * 1024;
 
 export async function readOwnedSessionMetadata<T>(filePath: string): Promise<T> {
+  if (worktreeMetadataReadLimit() !== undefined) {
+    const file = await readBoundedMaintenanceFile(filePath);
+    if (!file) throw Object.assign(new Error('Owned session metadata is missing.'), { code: 'ENOENT' });
+    return JSON.parse(file.text) as T;
+  }
   const handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await handle.stat();

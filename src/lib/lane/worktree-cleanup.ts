@@ -129,7 +129,7 @@ export async function cleanupLaneWorktree(
 
   try {
     const manager = getWorktreeManager(lane.repoPath);
-    const worktree = (await manager.list()).find((candidate) => candidate.path === worktreePath);
+    const worktree = await manager.getDependencyMaterializationByPath(worktreePath);
     if (worktree) {
       // manager.cleanup already calls preserveUncommittedWork internally
       const removed = await manager.cleanup(worktree.id, {

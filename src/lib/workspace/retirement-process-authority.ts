@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { listLanes } from '@/lib/lane/registry';
+import { exactWorkspaceOwningLanes } from '@/lib/lane/workspace-ownership-query';
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
@@ -10,10 +10,9 @@ import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
 
-function owningLanes(repositoryPath: string, sourcePath: string) {
-  return listLanes().filter((lane) => lane.worktreePath
-    && path.resolve(lane.worktreePath) === path.resolve(sourcePath)
-    && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repositoryPath));
+async function owningLanes(repositoryPath: string, sourcePath: string) {
+  const metadata = (await readWorktreeMetaSnapshot(repositoryPath))[path.basename(sourcePath)];
+  return exactWorkspaceOwningLanes(repositoryPath, sourcePath, metadata);
 }
 
 /** Reuse only live scoped authority; a cold cleanup takes the same lease as spawn. */
@@ -22,7 +21,7 @@ export async function withManagedRetirementOwnership<T>(
   sourcePath: string,
   operation: () => Promise<T>,
 ): Promise<T> {
-  const lanes = owningLanes(repositoryPath, sourcePath);
+  const lanes = await owningLanes(repositoryPath, sourcePath);
   if (lanes.length > 1) throw new Error('Retirement has ambiguous durable lane ownership.');
   return withPacketLifecycleSpawnLock(lanes[0]?.packetId ?? null, operation);
 }
@@ -45,7 +44,7 @@ export async function assertManagedRetirementQuiescence(input: {
     || path.join(metadata.materializationParentIdentity.canonicalPath, input.worktreeId) !== sourcePath) {
     throw new Error('Retirement has no exact ready manager process authority.');
   }
-  const lanes = owningLanes(input.repositoryPath, sourcePath);
+  const lanes = await owningLanes(input.repositoryPath, sourcePath);
   if (lanes.length === 0 && !metadata.sessionKey) {
     if (!(await checkWorktreeRemoval(input.candidatePath, { logPrefix: 'standalone-retirement' })).allowed) {
       throw new Error('Standalone retirement process truth is live or unknown.');
