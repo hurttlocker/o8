@@ -26,6 +26,17 @@ export const SERVE_SUPERVISOR_BACKOFF_CAP_MS = 30_000;
 const SERVE_SUPERVISOR_BACKOFF_BASE_MS = 1_000;
 const SERVE_SUPERVISOR_READY_POLL_MS = 100;
 
+export function sourceServeApiLaunch(projectRoot: string): { command: string; args: string[] } {
+  return {
+    command: process.execPath,
+    args: [
+      '--import', join(projectRoot, 'scripts', 'register-server-only-stub.mjs'),
+      '--import', join(projectRoot, 'node_modules', 'tsx', 'dist', 'loader.mjs'),
+      join(projectRoot, 'scripts', 'generated-output-run.ts'), 'dev',
+    ],
+  };
+}
+
 export interface ServeLogRotationDecision {
   rotateCurrent: boolean;
   truncatePrevious: boolean;
