@@ -39,6 +39,20 @@ Source: `src/lib/symon/durable/`.
 whose streams call `createManagedPiTransport()`. The route and its credential
 headers are resolved by the host for each call and never enter the store.
 
+## o8 commands
+
+The brain has the three catalog tools the Pi orchestrator uses: `o8_commands`,
+`o8_command_help` and `o8_run` (`src/lib/symon/durable/o8-tools.ts`). They are
+backed by the `propose` tool profile, so the operator server, which dispatches
+and merges, is not opened and cortex runs read-only. The brain can report what
+is running, waiting for review or approval, and the state of projects, issues,
+pull requests and CI. It cannot start, approve, merge or change anything, and
+its prompt says so.
+
+The servers open on the first command and close after 15 idle minutes; the next
+command reopens them. A command a restart interrupts is reported to the model
+as interrupted and is not run again.
+
 ## Brain selection
 
 `<data dir>/symon/text-brain.json` holds the mode, read for each new turn and
@@ -100,8 +114,7 @@ store's last twelve turns as data on its first Pi turn.
 
 ## Current limits
 
-- The Pi brain has no tools yet. It cannot act on the computer or change o8, and
-  its prompt says so.
+- The Pi brain only reads o8. It cannot act on the computer or change o8.
 - Voice clients must send their lines to the record route; none does yet.
 - Limited-access shared group turns are not recorded.
 
@@ -117,3 +130,6 @@ store's last twelve turns as data on its first Pi turn.
   mismatch refused; repeated polls; Stop.
 - `tests/symon-conversations-api-real-path.test.ts`: list, transcript,
   continue, a repeated request id, refusals, and bounded failure text.
+- `tests/symon-brain-o8-commands-real-path.test.ts`: a command answered from
+  its result, the offered tools and prompt, the read-only projection, an
+  interrupted command after a restart, and idle close and reopen.
