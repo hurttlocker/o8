@@ -148,7 +148,7 @@ describe('completion notifications through the live sidebar components', () => {
     });
     expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Change chat view"]')!.click());
-    const scheduled = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+    const scheduled = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
       .find((button) => button.textContent?.trim() === 'Scheduled')!;
     await act(async () => scheduled.click());
     expect(document.querySelector('[role="tooltip"]')).toBeNull();

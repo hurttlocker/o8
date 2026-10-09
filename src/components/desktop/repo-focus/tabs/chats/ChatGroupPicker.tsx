@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { REPO_FOCUS_FONT } from '../../utils';
+import { FloatingSurface } from '../../../FloatingSurface';
 
 import { CHAT_VIEW_LABELS, type ChatGroupMode } from './sidebar-view';
 export type { ChatGroupMode } from './sidebar-view';
@@ -16,6 +18,7 @@ export function ChatGroupPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const menuId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -33,7 +36,7 @@ export function ChatGroupPicker({
     if (!open) return;
     const onDocDown = (event: globalThis.MouseEvent) => {
       if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
+      if (!wrapperRef.current.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -44,9 +47,14 @@ export function ChatGroupPicker({
     };
     window.addEventListener('mousedown', onDocDown);
     window.addEventListener('keydown', onKey);
+    const reposition = () => setAnchor(triggerRef.current?.getBoundingClientRect() ?? null);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
     return () => {
       window.removeEventListener('mousedown', onDocDown);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
     };
   }, [open]);
 
@@ -55,7 +63,7 @@ export function ChatGroupPicker({
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { setAnchor(triggerRef.current?.getBoundingClientRect() ?? null); setOpen((v) => !v); }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-haspopup="menu"
@@ -83,9 +91,8 @@ export function ChatGroupPicker({
         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg>
 
       </button>
-      {/* Always-mounted (display toggles) so agents can enumerate the
-          grouping options from the DOM without opening first. */}
-      <div
+      {/* Portal keeps the glass blur and menu outside the scrolling chat panel. */}
+      {typeof document !== 'undefined' ? createPortal(<FloatingSurface
         ref={menuRef}
         id={menuId}
         onKeyDown={(event) => {
@@ -99,22 +106,14 @@ export function ChatGroupPicker({
         }}
         role="menu"
         aria-label="Chat view options"
+        contentStyle={{ paddingTop: 8, paddingBottom: 8, maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', scrollbarWidth: 'none' }}
         style={{
             display: open ? 'block' : 'none',
-            position: 'absolute',
-            top: '100%',
-            right: 0,
-            marginTop: 4,
-            minWidth: 168,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            background: 'var(--t-popover-surface)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
-            paddingTop: 4,
-            paddingBottom: 4,
-            zIndex: 50,
+            position: 'fixed',
+            top: Math.max(12, Math.min((anchor?.bottom ?? 0) + 6, window.innerHeight - 216)),
+            left: Math.max(12, Math.min((anchor?.right ?? 0) - 168, window.innerWidth - 180)),
+            width: 168,
+            zIndex: 210,
             fontFamily: REPO_FOCUS_FONT,
             textTransform: 'none',
             letterSpacing: 0,
@@ -127,7 +126,7 @@ export function ChatGroupPicker({
           {(['repo', 'date'] as const).map((value) => (
             <ChatGroupPickerItem key={value} label={`Group ${CHAT_VIEW_LABELS[value].toLowerCase()}`} selected={mode === value} onClick={() => choose(value)} />
           ))}
-      </div>
+      </FloatingSurface>, document.body) : null}
     </div>
   );
 }

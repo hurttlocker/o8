@@ -1,13 +1,17 @@
-import type { ReactNode } from 'react';
+import { Children, type ReactNode } from 'react';
+import type { SidebarFixture } from '@/lib/ui/sidebar-fixtures';
 import type { RepoFocusRepo } from '../../types';
 import { canCreateOrchestratorForRepo } from '../../../agent-panel-repo-selection';
 import { ChatGroupPicker } from './ChatGroupPicker';
+import { ChatHistoryShelf } from './ChatHistoryShelf';
 import type { ChatGroupMode } from './sidebar-view';
 import { CONVERSATIONS_GROUP_KEY } from './helpers';
 import { MissingRepoRailNotice } from './MissingRepoRailNotice';
-import { RepoGroupLabel, SectionLabel } from './shared';
-import { REPO_FOCUS_FONT } from '../../utils';
-import type { ChatHistoryItem, RepoHistoryGroup } from './types';
+import { RepoGroupLabel } from './shared';
+import { SidebarDemoStates, sidebarFixtureAttention } from './SidebarDemoStates';
+import { attentionRank } from './sections';
+import { usePublishSidebarAttention } from './sidebar-view-store';
+import type { ChatHistoryItem, ChatsTabProps, RepoHistoryGroup } from './types';
 
 interface Props {
   chatGroupBy: ChatGroupMode;
@@ -24,97 +28,66 @@ interface Props {
   renderHistoryRow: (item: ChatHistoryItem) => ReactNode;
   hiddenChatCount: number;
   showMore: () => void;
-  leadingContent?: ReactNode;
-  leadingPriority?: boolean;
+  fixtures: SidebarFixture[];
+  activeSessionKey?: string | null;
+  onOpenHistoryChat: ChatsTabProps['onOpenHistoryChat'];
+  scheduledSessions?: ReactNode;
 }
 export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, remainder,
   flatHistoryItems, flatHistoryDateGroups, flatHistoryRepoGroups, collapsedRepoGroups,
   repoByGroupKey, toggleRepoGroup, onCreateOrchestratorForRepo, renderHistoryRow,
-  hiddenChatCount, showMore, leadingContent, leadingPriority = false }: Props) {
-  const normal = chatGroupBy === 'chronological';
-  const source = normal ? flatHistoryItems : remainder;
-  const heading = chatGroupBy === 'scheduled' ? 'Scheduled' : (chatGroupBy === 'flat' || chatGroupBy === 'working') && (priority.length > 0 || leadingPriority) ? 'Priority' : source.some((item) => item.pinned) ? 'Pinned' : 'Recents';
-  const pinned = source.filter((item) => item.pinned);
-  const conversations = source.filter((item) => !item.pinned);
-  return (
-    <>
-      <SectionLabel label={heading} compact action={
-        <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />
-      } />
-      {leadingContent}
-      {chatGroupBy === 'flat' || chatGroupBy === 'working' ? (
-        <>
-          {priority.map(renderHistoryRow)}
-          {pinned.length > 0 ? <>{heading !== 'Pinned' ? <RepoGroupLabel label="Pinned" noIcon /> : null}{pinned.map(renderHistoryRow)}</> : null}
-          {conversations.length > 0 && heading !== 'Recents' ? <RepoGroupLabel label={chatGroupBy === 'working' ? 'Working' : 'Recents'} noIcon /> : null}
-          {conversations.map(renderHistoryRow)}
-        </>
-      ) : chatGroupBy === 'scheduled' ? (
-        flatHistoryItems.map(renderHistoryRow)
-      ) : chatGroupBy === 'chronological' ? (
-        <>
-          {flatHistoryItems.filter((item) => item.pinned).map(renderHistoryRow)}
-          {pinned.length > 0 && conversations.length > 0 ? <RepoGroupLabel label="Recents" noIcon /> : null}
-          {flatHistoryItems.filter((item) => !item.pinned).map(renderHistoryRow)}
-        </>
-      ) : chatGroupBy === 'date' ? (
-        flatHistoryDateGroups.map((group) => (
-          <div key={group.key}>
-            <RepoGroupLabel
-              label={group.label}
-            />
-            {group.items.map((item) => renderHistoryRow(item))}
-          </div>
-        ))
-      ) : (
-        flatHistoryRepoGroups.map((group) => {
-          const isConversations = group.key === CONVERSATIONS_GROUP_KEY;
-          const groupCollapsed = collapsedRepoGroups.has(group.key);
-          const groupRepo = isConversations ? undefined : repoByGroupKey.get(group.key);
-          const groupRepoMissing = groupRepo?.readiness?.state === 'missing';
-          return (
-            <div key={group.key}>
-              <RepoGroupLabel
-                label={group.label}
-                noIcon={isConversations}
-                collapsed={groupCollapsed}
-                onToggle={() => toggleRepoGroup(group.key)}
-                onCreate={canCreateOrchestratorForRepo(groupRepo) && onCreateOrchestratorForRepo
-                  ? () => onCreateOrchestratorForRepo(groupRepo)
-                  : undefined}
-                createTitle={groupRepo ? `New session in ${groupRepo.name}` : undefined}
-              />
-              {groupRepoMissing ? <MissingRepoRailNotice summary={groupRepo.readiness?.summary ?? ''} /> : null}
-              {groupCollapsed ? null : group.items.map((item) => renderHistoryRow(item))}
-            </div>
-          );
-        })
-      )}
-      {hiddenChatCount > 0 ? (
-        <button
-          type="button"
-          onClick={showMore}
-          style={{
-            width: '100%',
-            minHeight: 25,
-            borderWidth: 0,
-            background: 'transparent',
-            color: 'var(--t-text-faint)',
-            cursor: 'pointer',
-            paddingTop: 4,
-            paddingRight: 12,
-            paddingBottom: 4,
-            paddingLeft: 37,
-            textAlign: 'left',
-            fontFamily: REPO_FOCUS_FONT,
-            fontSize: 9.5,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-          }}
-        >
-          Show {hiddenChatCount} more
-        </button>
-      ) : null}
-    </>
-  );
+  hiddenChatCount, showMore, fixtures, activeSessionKey, onOpenHistoryChat, scheduledSessions }: Props) {
+  const source = chatGroupBy === 'chronological' ? flatHistoryItems : remainder;
+  const pinned = source.filter(item => item.pinned);
+  const conversations = source.filter(item => !item.pinned);
+  const attentionCount = fixtures.filter(sample => attentionRank(sidebarFixtureAttention(sample)) > 0).length;
+  usePublishSidebarAttention(attentionCount);
+  const hasPriority = chatGroupBy === 'flat' && (priority.length > 0 || attentionCount > 0);
+  const picker = <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />;
+  const demos = <SidebarDemoStates mode={chatGroupBy} fixtures={fixtures} publishAttention={false}
+    activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />;
+  const more = hiddenChatCount > 0 ? <button type="button" onClick={showMore}
+    style={{ width: '100%', minHeight: 28, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)',
+      cursor: 'pointer', paddingTop: 5, paddingRight: 12, paddingBottom: 5, paddingLeft: 32, textAlign: 'left',
+      fontFamily: 'var(--font-sans-system)', fontSize: 10 }}>
+    Show {hiddenChatCount} more
+  </button> : null;
+  if (chatGroupBy === 'scheduled') return <ChatHistoryShelf label="Scheduled" action={picker}
+    count={flatHistoryItems.length + fixtures.filter(sample => sample.scheduled).length + Children.count(scheduledSessions)}>
+    {demos}{flatHistoryItems.map(renderHistoryRow)}{scheduledSessions}{more}
+  </ChatHistoryShelf>;
+  if (chatGroupBy === 'date' || chatGroupBy === 'repo') return <ChatHistoryShelf label="Recents" action={picker}
+    storageKey={`o8:chat-${chatGroupBy}-recents-collapsed`} count={flatHistoryItems.length + fixtures.length}>
+    {demos}
+    {chatGroupBy === 'date' ? flatHistoryDateGroups.map(group => <ChatHistoryShelf key={group.key}
+      label={group.label} count={group.items.length} storageKey={`o8:chat-date-${group.key}-collapsed`}>
+      {group.items.map(renderHistoryRow)}
+    </ChatHistoryShelf>) : flatHistoryRepoGroups.map(group => {
+      const groupCollapsed = collapsedRepoGroups.has(group.key);
+      const groupRepo = group.key === CONVERSATIONS_GROUP_KEY ? undefined : repoByGroupKey.get(group.key);
+      return <div key={group.key}>
+        <RepoGroupLabel label={group.label} noIcon={group.key === CONVERSATIONS_GROUP_KEY}
+          collapsed={groupCollapsed} onToggle={() => toggleRepoGroup(group.key)}
+          onCreate={canCreateOrchestratorForRepo(groupRepo) && onCreateOrchestratorForRepo
+            ? () => onCreateOrchestratorForRepo(groupRepo) : undefined}
+          createTitle={groupRepo ? `New session in ${groupRepo.name}` : undefined} />
+        {!groupCollapsed ? <>
+          {groupRepo?.readiness?.state === 'missing' ? <MissingRepoRailNotice summary={groupRepo.readiness.summary ?? ''} /> : null}
+          {group.items.map(renderHistoryRow)}
+        </> : null}
+      </div>;
+    })}{more}
+  </ChatHistoryShelf>;
+  return <>
+    {hasPriority ? <ChatHistoryShelf label="Priority" count={priority.length + fixtures.length} action={picker}>
+      {demos}{priority.map(renderHistoryRow)}
+    </ChatHistoryShelf> : null}
+    {pinned.length ? <ChatHistoryShelf label="Pinned" count={pinned.length} action={hasPriority ? undefined : picker}>
+      {pinned.map(renderHistoryRow)}
+    </ChatHistoryShelf> : null}
+    <ChatHistoryShelf label="Recents" count={conversations.length + (hasPriority ? 0 : fixtures.length)}
+      storageKey={`o8:chat-${chatGroupBy}-recents-collapsed`} action={hasPriority || pinned.length ? undefined : picker}>
+      {!hasPriority ? demos : null}{conversations.map(renderHistoryRow)}{more}
+    </ChatHistoryShelf>
+  </>;
 }

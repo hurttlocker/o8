@@ -73,6 +73,19 @@ describe('seeded states through the actual compact chat panel', () => {
     expect(stateNames()).toHaveLength(states.length);
     expect(container.querySelector('[data-o8-sidebar-demo]')?.textContent).toContain('Demo states');
   });
+  it('retains unread completed samples in Working until read, with notifications even when folded', async () => {
+    await render(); await act(async () => setSidebarView('working'));
+    expect(stateNames()).toContain('finished');
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="finished"] button')!.click());
+    expect(stateNames()).not.toContain('finished');
+    expect(container.querySelector('[aria-label="Settled conversations"]')?.textContent).toContain('Settled');
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Working conversations"] > div button')!.click());
+    expect(stateNames()).toEqual([]);
+    expect(container.querySelector('[aria-label="Priority chats"] [data-attention-dot]')).not.toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settled conversations"] > button')!.click());
+    expect(stateNames()).toEqual(expect.arrayContaining(['finished', 'idle']));
+    expect(stateNames()).not.toContain('running');
+  });
   it('does not request display fixtures in production', async () => {
     vi.stubEnv('NODE_ENV', 'production'); await render();
     expect(stateNames()).toEqual([]);

@@ -12,7 +12,7 @@ import {
 } from '../utils';
 import { SessionRow } from './AgentRows';
 import { CompactChatHistory } from './chats/CompactChatHistory';
-import { SidebarDemoStates } from './chats/SidebarDemoStates';
+import { WorkingChatHistory } from './chats/WorkingChatHistory';
 import { useSidebarFixtures } from './chats/use-sidebar-fixtures';
 import { staysInWorkingView, type ChatGroupMode } from './chats/sidebar-view';
 import { setSidebarView, usePublishSidebarAttention, useSidebarView } from './chats/sidebar-view-store';
@@ -398,12 +398,17 @@ export function ChatsTab({
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
   const sortedChatItems = useMemo(() => {
-    void readStateVersion;
     return (
     sweptThreads.chats.filter((item) => {
       if (compact && chatGroupBy === 'scheduled') return ideWorkspaceSessions.some((session) =>
         isOwnedAutomationSession(session) && sessionIdentity(session).includes(item.tabId));
-      if (!compact || chatGroupBy !== 'working') return true;
+      return true;
+    }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
+    );
+  }, [chatGroupBy, compact, effectiveModifiedAtMs, ideWorkspaceSessions, sweptThreads.chats]);
+  const workingHistoryIds = useMemo(() => {
+    void readStateVersion;
+    return new Set(sortedChatItems.filter(item => {
       const selected = activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`;
       const related = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])];
       return selected || related.some((packet) => packet && staysInWorkingView({
@@ -412,10 +417,8 @@ export function ChatsTab({
         unread: isCompletionUnread(packetTimestamp(packet), getLastVisited(`packet:${packet.id}`)),
       })) || ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId)
         && staysInWorkingView({ status: session.status }));
-    }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
-    );
-  }, [activeSessionKey, chatGroupBy, compact, effectiveModifiedAtMs, historyPacketsByTabId,
-    ideWorkspaceSessions, ownedPacketsByThread, readStateVersion, sweptThreads.chats]);
+    }).map(item => item.tabId));
+  }, [activeSessionKey, historyPacketsByTabId, ideWorkspaceSessions, ownedPacketsByThread, readStateVersion, sortedChatItems]);
   const chatCap = compact && !showAllChats ? 12 : Number.POSITIVE_INFINITY;
   const historyCap = Number.isFinite(remainingHistorySlots) ? remainingHistorySlots : Number.POSITIVE_INFINITY;
   const flatHistoryItems = sortedChatItems.slice(0, Math.max(0, Math.min(chatCap, historyCap)));
@@ -556,8 +559,8 @@ export function ChatsTab({
         tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(packet)}
         repoLabel={compact && chatGroupBy === 'repo' ? null : repoSuffix(item)}
         ownedCount={owned.length}
-        roomy={compact && chatGroupBy === 'flat'}
-        preview={compact && chatGroupBy === 'flat' ? item.preview : undefined}
+        roomy={compact && (chatGroupBy === 'flat' || (chatGroupBy === 'working' && workingHistoryIds.has(item.tabId) && !item.pinned))}
+        preview={compact && (chatGroupBy === 'flat' || (chatGroupBy === 'working' && workingHistoryIds.has(item.tabId) && !item.pinned)) ? item.preview : undefined}
         scheduled={ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId) && isOwnedAutomationSession(session))}
         onHoverChange={(rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)}
         onOpen={() => openHistoryItem(item)}
@@ -597,7 +600,11 @@ export function ChatsTab({
         <div>
           {compact ? (
             <>
-              <CompactChatHistory
+              {chatGroupBy === 'working' ? <WorkingChatHistory
+                items={sortedChatItems.slice(0, historyCap)} workingIds={workingHistoryIds} fixtures={demoFixtures}
+                activeSessionKey={activeSessionKey} renderHistoryRow={renderHistoryRow} onOpenHistoryChat={onOpenHistoryChat}
+                onChangeView={updateChatGroupBy} showAll={showAllChats} onShowMore={() => setShowAllChats(true)}
+              /> : <CompactChatHistory
                 chatGroupBy={chatGroupBy} updateChatGroupBy={updateChatGroupBy}
                 priority={flatPrioritySplit.priority} remainder={flatRemainderItems}
                 flatHistoryItems={flatHistoryItems} flatHistoryDateGroups={flatHistoryDateGroups}
@@ -605,13 +612,11 @@ export function ChatsTab({
                 repoByGroupKey={repoByGroupKey} toggleRepoGroup={toggleRepoGroup}
                 onCreateOrchestratorForRepo={onCreateOrchestratorForRepo} renderHistoryRow={renderHistoryRow}
                 hiddenChatCount={hiddenChatCount} showMore={() => setShowAllChats(true)}
-                leadingPriority={demoFixtures.some((sample) => !['running', 'idle'].includes(sample.state))}
-                leadingContent={<SidebarDemoStates key={chatGroupBy} mode={chatGroupBy} fixtures={demoFixtures}
-                  activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />}
-              />
-              {chatGroupBy === 'scheduled' ? visibleSessions.filter(isOwnedAutomationSession).map((session) => (
-                <CompactSessionRow key={session.sessionKey} session={session} onSelectSession={onSelectSession} />
-              )) : null}
+                fixtures={demoFixtures} activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat}
+                scheduledSessions={chatGroupBy === 'scheduled' ? visibleSessions.filter(isOwnedAutomationSession).map((session) => (
+                  <CompactSessionRow key={session.sessionKey} session={session} onSelectSession={onSelectSession} />
+                )) : null}
+              />}
             </>
           ) : (
             <>

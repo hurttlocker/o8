@@ -40,11 +40,11 @@ describe('compact sidebar view through the chat panel', () => {
       agentsSection: (workingOnly) => createElement('span', { 'data-workers': String(workingOnly) }, 'Workers'),
     }))));
   };
-  const rows = () => Array.from(container.querySelectorAll('[role="button"][title]')).map((row) => row.getAttribute('title')?.split(' · ')[0]);
+  const rows = () => Array.from(container.querySelectorAll('[role="button"][title]:not([aria-expanded])')).map((row) => row.getAttribute('title')?.split(' · ')[0]);
   const trigger = () => container.querySelector<HTMLButtonElement>('[aria-label="Change chat view"]')!;
   const choose = async (label: string) => {
     await act(async () => trigger().click());
-    const item = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((button) => button.textContent?.trim() === label)!;
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((button) => button.textContent?.trim() === label)!;
     await act(async () => item.click());
   };
   beforeEach(() => {
@@ -72,16 +72,35 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search chats"]')!.click());
     expect(onSearch).toHaveBeenCalledOnce();
   });
-  it('persists working view, keeps decisions and selected idle chat, and forwards the worker filter', async () => {
-    await render(); await choose('Working only');
+  it('persists working shelves, keeps pins and decisions, and forwards the worker filter', async () => {
+    await render(); await choose('Working');
     expect(rows()).toEqual(expect.arrayContaining(['Idle', 'Running', 'Decision']));
-    expect(rows()).not.toContain('Pinned');
+    expect(rows()).toContain('Pinned');
     expect(container.querySelector('[data-workers="true"]')).not.toBeNull();
     expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('working');
     await render('thoughts-Running'); expect(rows()).not.toContain('Idle');
     await act(async () => root.unmount()); root = createRoot(container); await render('thoughts-Running');
     expect(container.querySelector('[data-workers="true"]')).not.toBeNull();
     expect(rows()).not.toContain('Idle');
+  });
+  it('folds quiet history without removing pins or notifications and remembers the shelves', async () => {
+    await render('thoughts-Running'); await choose('Working');
+    const shelf = (label: string) => container.querySelector<HTMLElement>(`[aria-label="${label} conversations"]`)!;
+    expect(shelf('Pinned').textContent).toContain('Pinned');
+    expect(shelf('Working').textContent).toContain('Running');
+    expect(shelf('Settled').querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+    expect(rows()).not.toContain('Idle');
+    await act(async () => shelf('Settled').querySelector('button')!.click());
+    expect(shelf('Settled').textContent).toContain('Idle');
+    await act(async () => shelf('Working').querySelector('button')!.click());
+    expect(rows()).not.toContain('Running');
+    expect(rows()).toContain('Pinned');
+    expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
+    await act(async () => root.unmount()); root = createRoot(container); await render('thoughts-Running');
+    expect(shelf('Working').querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+    expect(shelf('Settled').querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
+    expect(rows()).not.toContain('Running'); expect(rows()).toContain('Idle');
+    await choose('Chronological'); expect(rows()).toEqual(expect.arrayContaining(['Idle', 'Running', 'Decision', 'Pinned']));
   });
   it('keeps chronological order and routing context on selection; preserves repo and date views', async () => {
     await render(); await choose('Chronological'); const before = rows();
@@ -91,6 +110,36 @@ describe('compact sidebar view through the chat panel', () => {
     await render('thoughts-Pinned'); expect(rows()).toEqual(before);
     await choose('Group by repo'); expect(container.textContent).toContain('project');
     await choose('Group by date'); expect(container.textContent).toContain('Today');
+  });
+  it('folds each chat section in every view and retains attention while a section is closed', async () => {
+    await render();
+    const shelfButton = (label: string) => container.querySelector<HTMLButtonElement>(`[aria-label="${label} conversations"] button[aria-expanded]`)!;
+    await act(async () => shelfButton('Pinned').click());
+    expect(rows()).not.toContain('Pinned');
+    expect(rows()).toContain('Idle');
+    await act(async () => shelfButton('Pinned').click());
+    await act(async () => shelfButton('Recents').click());
+    expect(rows()).toEqual(['Pinned']);
+    await act(async () => root.unmount()); root = createRoot(container); await render();
+    expect(shelfButton('Recents').getAttribute('aria-expanded')).toBe('false');
+    await act(async () => shelfButton('Recents').click());
+    await choose('Priority');
+    expect(rows()).toContain('Decision');
+    await act(async () => shelfButton('Priority').click());
+    expect(rows()).not.toContain('Decision');
+    expect(rows()).toContain('Pinned');
+    expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
+    await choose('Group by date');
+    await act(async () => shelfButton('Today').click());
+    expect(rows()).toEqual([]);
+    await act(async () => shelfButton('Today').click());
+    await choose('Group by repo');
+    const group = container.querySelector<HTMLElement>('[role="button"][aria-expanded]')!;
+    await act(async () => group.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    expect(rows()).toEqual([]);
+    expect(group.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => group.click());
+    expect(rows()).toContain('Idle');
   });
   it('shows only scheduled chats owned here, retains notifications and restores the selected view', async () => {
     const sessions = [
@@ -114,6 +163,12 @@ describe('compact sidebar view through the chat panel', () => {
     expect(container.querySelector<HTMLElement>('[data-sidebar-workers]')?.style.display).toBe('none');
     expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
     expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('scheduled');
+    const scheduled = container.querySelector<HTMLButtonElement>('[aria-label="Scheduled conversations"] button[aria-expanded]')!;
+    await act(async () => scheduled.click());
+    expect(rows()).toEqual([]);
+    expect(container.textContent).not.toContain('Owned scheduled run');
+    expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
+    await act(async () => scheduled.click());
     await act(async () => root.unmount()); root = createRoot(container); await show();
     expect(rows()).toContain('Pinned'); expect(rows()).not.toContain('Idle');
     await choose('Chronological'); expect(rows()).toContain('Idle');

@@ -31,10 +31,24 @@ function sampleRow(sample: SidebarFixture): ExtraAgentRow {
   };
 }
 
+export function sidebarFixtureAttention(sample: SidebarFixture) {
+  const row = sampleRow(sample);
+  return {
+    status: row.laneStatus, outcome: row.outcome, rejected: row.rejected,
+    unread: (getLastVisited(`ui-demo:${sample.tabId}`) ?? 0) < row.lastActivityAt,
+  };
+}
+
+export function isWorkingSidebarFixture(sample: SidebarFixture, activeSessionKey?: string | null) {
+  return staysInWorkingView(sidebarFixtureAttention(sample), activeSessionKey?.replace(/^llm-chat:/, '') === sample.tabId);
+}
+
 /** Saved sample transcripts rendered with the same row and motion as real workers. */
-export function SidebarDemoStates({ fixtures, mode, activeSessionKey, onOpenHistoryChat }: {
+export function SidebarDemoStates({ fixtures, mode, shelf, publishAttention = true, activeSessionKey, onOpenHistoryChat }: {
   fixtures: SidebarFixture[];
   mode: ChatGroupMode;
+  shelf?: 'working' | 'settled';
+  publishAttention?: boolean;
   activeSessionKey?: string | null;
   onOpenHistoryChat: ChatsTabProps['onOpenHistoryChat'];
 }) {
@@ -45,15 +59,12 @@ export function SidebarDemoStates({ fixtures, mode, activeSessionKey, onOpenHist
   useEffect(() => () => { if (hoverTimer.current) clearTimeout(hoverTimer.current); }, [mode]);
   const rows = fixtures.map((sample) => {
     const row = sampleRow(sample);
-    const subject = {
-      status: row.laneStatus, outcome: row.outcome, rejected: row.rejected,
-      unread: (getLastVisited(`ui-demo:${sample.tabId}`) ?? 0) < row.lastActivityAt,
-    };
+    const subject = sidebarFixtureAttention(sample);
     return { sample, row, subject, active: activeSessionKey?.replace(/^llm-chat:/, '') === sample.tabId };
   });
-  usePublishSidebarAttention(rows.filter(({ subject }) => attentionRank(subject) > 0).length);
+  usePublishSidebarAttention(rows.filter(({ subject }) => attentionRank(subject) > 0).length, publishAttention && shelf !== 'settled');
   const shown = rows.filter(({ sample, subject, active }) => mode === 'scheduled' ? sample.scheduled
-    : mode === 'working' ? staysInWorkingView(subject, active) : true);
+    : mode === 'working' ? shelf === 'settled' ? !staysInWorkingView(subject, active) : staysInWorkingView(subject, active) : true);
   if (mode === 'flat' || mode === 'working') shown.sort((a, b) => attentionRank(b.subject) - attentionRank(a.subject)
     || b.row.lastActivityAt - a.row.lastActivityAt);
   else shown.sort((a, b) => b.row.lastActivityAt - a.row.lastActivityAt);
@@ -72,7 +83,7 @@ export function SidebarDemoStates({ fixtures, mode, activeSessionKey, onOpenHist
         <motion.div key={sample.tabId} layout="position" transition={{ type: 'spring', stiffness: 400, damping: 30 }}
           data-o8-demo-state={sample.state} data-o8-demo-scheduled={sample.scheduled}>
           <ExtraAgentRowView row={row} active={active} busy={!onOpenHistoryChat} band={attentionBand(subject)}
-            roomy={mode === 'flat'} repoLabel={mode === 'repo' ? null : sample.repoName}
+            roomy={mode === 'flat' || (mode === 'working' && shelf !== 'settled')} repoLabel={mode === 'repo' ? null : sample.repoName}
             onFocusRow={() => {
               clearHoverTimer();
               markVisited(`ui-demo:${sample.tabId}`);

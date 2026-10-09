@@ -3,7 +3,7 @@ import { attentionRank, type AttentionSubject } from './sections';
 export type ChatGroupMode = 'repo' | 'date' | 'flat' | 'chronological' | 'working' | 'scheduled';
 export const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
 export const CHAT_VIEW_LABELS: Record<ChatGroupMode, string> = {
-  flat: 'Priority', chronological: 'Chronological', working: 'Working only', scheduled: 'Scheduled',
+  flat: 'Priority', chronological: 'Chronological', working: 'Working', scheduled: 'Scheduled',
   repo: 'By repo', date: 'By date',
 };
 export function isChatGroupMode(value: unknown): value is ChatGroupMode {
