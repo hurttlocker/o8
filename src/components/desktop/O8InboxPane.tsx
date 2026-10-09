@@ -42,6 +42,19 @@ const STATUS_LABELS: Record<SupervisorInboxItem['status'], string> = {
 
 const REFRESH_EVENT = 'o8:inbox-refresh';
 
+export function inboxEmptyStateCopy(
+  filter: 'active' | 'self_healed' | 'all',
+  selfHealedCount: number,
+): string {
+  if (filter === 'active') {
+    return selfHealedCount > 0
+      ? 'No active approvals or supervisor inbox items. See Self-healed for recorded recoveries.'
+      : 'No active approvals or supervisor inbox items.';
+  }
+  if (filter === 'self_healed') return 'No self-healed items yet. Heal-bot will log fixes here.';
+  return 'Supervisor inbox is empty.';
+}
+
 interface RuntimeTranscriptEntry {
   id: string;
   role: string;
@@ -464,11 +477,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
           <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12 }}>Loading…</div>
         ) : visibleItems.length === 0 && approvals.length === 0 ? (
           <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.5, overflowWrap: 'break-word' }}>
-            {filter === 'active'
-              ? 'No active approvals or supervisor inbox items. Heal-bot caught everything else.'
-              : filter === 'self_healed'
-                ? 'No self-healed items yet. Heal-bot will log fixes here.'
-                : 'Supervisor inbox is empty.'}
+            {inboxEmptyStateCopy(filter, selfHealed.length)}
           </div>
         ) : (
           visibleItems.map((item) => {
