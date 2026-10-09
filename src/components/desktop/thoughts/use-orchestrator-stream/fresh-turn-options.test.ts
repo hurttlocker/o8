@@ -119,8 +119,8 @@ function ComposerSubmissionHarness() {
   return createElement('output', { 'data-testid': 'displayed-model' }, displayedModel);
 }
 
-function RoutingThoughtsHarness({ panelRef }: { panelRef: RefObject<ThoughtsChatPanelHandle | null> }) {
-  const [collideEnabled, setCollideEnabled] = useState(false);
+function RoutingThoughtsHarness({ panelRef, initialComposerMode }: { panelRef: RefObject<ThoughtsChatPanelHandle | null>; initialComposerMode?: 'moa' | 'fusion' }) {
+  const [collideEnabled, setCollideEnabled] = useState(initialComposerMode === 'moa');
   const missionState: OrchestratorMissionState = {
     version: 2,
     prompt: '',
@@ -130,6 +130,7 @@ function RoutingThoughtsHarness({ panelRef }: { panelRef: RefObject<ThoughtsChat
   };
   return createElement(ThoughtsChatPanel, {
     ref: panelRef,
+    composerModeStorageId: initialComposerMode === 'fusion' ? 'routing-fusion-tab' : undefined,
     open: false,
     agents: [],
     missionState,
@@ -227,7 +228,7 @@ afterEach(async () => {
 });
 
 describe('composer fresh operator defaults at the send seam', () => {
-  it('keeps an existing thread on the selected repository through send and history reload', async () => {
+  it('keeps a new chat on its selected repository through the first send and history reload', async () => {
     const oldRepo = '/repo/old-thread-home';
     const newRepo = '/repo/new-turn-home';
     const tabId = `thoughts-existing-target-${Date.now()}`;
@@ -237,7 +238,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         tabId,
         repoPath: oldRepo,
         repoName: 'old-thread-home',
-        messages: [{ id: 'history-user', role: 'user', content: 'Previous turn', timestamp: 1 }],
+        messages: [],
       }),
     }));
     expect(saved.ok).toBe(true);
@@ -315,7 +316,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         panelRef.current!.loadThread(tabId);
         await new Promise((resolve) => setTimeout(resolve, 50));
       });
-      expect(host.querySelector('button[aria-label="Project target: new-turn-home"]')).toBeTruthy();
+      expect(host.querySelector('button[aria-label^="Project target"]')).toBeNull();
     } finally {
       releasePatch();
       historyPatchGate = null;
@@ -447,22 +448,8 @@ describe('composer fresh operator defaults at the send seam', () => {
       await persistDefaults('gpt-5.6-sol', 'codex');
       const panelRef = createRef<ThoughtsChatPanelHandle>();
       await act(async () => {
-        root.render(createElement(RoutingThoughtsHarness, { panelRef }));
+        root.render(createElement(RoutingThoughtsHarness, { panelRef, initialComposerMode: 'moa' }));
         await new Promise((resolve) => setTimeout(resolve, 50));
-      });
-
-      const modeTrigger = selectorEnabled
-        ? host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')
-        : host.querySelector<HTMLButtonElement>('button[aria-label^="Mode:"]');
-      await act(async () => {
-        modeTrigger!.click();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
-      const compareMode = [...document.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.includes('Compare plans'))!;
-      await act(async () => {
-        compareMode.click();
-        await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
       const modelTrigger = selectorEnabled
@@ -512,6 +499,7 @@ describe('composer fresh operator defaults at the send seam', () => {
 
   it('resets Fusion when a deferred backend handoff applies through the real panel', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
+    localStorage.setItem(composerModeStorageKey('routing-fusion-tab'), 'fusion');
     writeStoredOrchestratorModel(repoPath, 'gpt-5.6-sol');
     historyResponse = {
       backend: 'codex',
@@ -526,7 +514,7 @@ describe('composer fresh operator defaults at the send seam', () => {
     await persistDefaults('gpt-5.6-sol', 'codex');
     const panelRef = createRef<ThoughtsChatPanelHandle>();
     await act(async () => {
-      root.render(createElement(RoutingThoughtsHarness, { panelRef }));
+      root.render(createElement(RoutingThoughtsHarness, { panelRef, initialComposerMode: 'fusion' }));
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(panelRef.current).not.toBeNull();
@@ -536,9 +524,7 @@ describe('composer fresh operator defaults at the send seam', () => {
     });
 
     const modeTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
-    act(() => modeTrigger.click());
-    act(() => [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Fusion'))!.click());
+    expect(modeTrigger.textContent).toContain('Fusion');
     const leadTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
     act(() => leadTrigger.click());
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-house-claude"]')!.click());

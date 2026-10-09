@@ -27,6 +27,9 @@ import {
 } from '../composer-selector/state';
 import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
 import { ComposerContextRow } from './ComposerContextRow';
+import { ComposerPermissionChip } from './ComposerPermissionChip';
+import { ComposerFileTags } from './ComposerFileTags';
+import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
 interface ComposerAreaProps {
   activeComposer?: boolean;
@@ -156,6 +159,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
+  const fileReferences = useMemo(() => readComposerFileReferences(input), [input]);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
   const [composerSelectorV1Enabled, setComposerSelectorV1Enabled] = useState(true);
@@ -307,30 +311,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 
   const handleFileReferenceSelect = (filePath: string) => {
     const node = getInputNode();
-    const cursorPos = node?.selectionStart ?? input.length;
-    const textBeforeCursor = input.slice(0, cursorPos);
-    const textAfterCursor = input.slice(cursorPos);
-    const atMatch = textBeforeCursor.match(/@[\w./-]*$/);
-
-    let nextValue: string;
-    let nextCursorPos: number;
-    if (atMatch && typeof atMatch.index === 'number') {
-      const beforeMatch = textBeforeCursor.slice(0, atMatch.index);
-      nextValue = `${beforeMatch}@${filePath} ${textAfterCursor}`;
-      nextCursorPos = beforeMatch.length + filePath.length + 2;
-    } else {
-      const spacer = textBeforeCursor.length === 0 || /\s$/.test(textBeforeCursor) ? '' : ' ';
-      nextValue = `${textBeforeCursor}${spacer}@${filePath} ${textAfterCursor}`;
-      nextCursorPos = textBeforeCursor.length + spacer.length + filePath.length + 2;
-    }
-
-    updateInput(nextValue);
+    const next = addComposerFileReference(input, filePath, node?.selectionStart ?? fileReferences.body.length);
+    updateInput(next.input);
     requestAnimationFrame(() => {
       const nextNode = getInputNode();
       nextNode?.focus();
       if (!nextNode) return;
-      nextNode.selectionStart = nextCursorPos;
-      nextNode.selectionEnd = nextCursorPos;
+      nextNode.selectionStart = next.cursor;
+      nextNode.selectionEnd = next.cursor;
       nextNode.style.height = 'auto';
       nextNode.style.height = `${Math.min(nextNode.scrollHeight, 200)}px`;
     });
@@ -562,12 +550,16 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               ))}
             </div>
           ) : null}
+          <ComposerFileTags paths={fileReferences.paths} repoPath={selectedRepoPath ?? repoPath} onRemove={path => {
+            updateInput(writeComposerFileReferences(fileReferences.body, fileReferences.paths.filter(item => item !== path)));
+            getInputNode()?.focus();
+          }} />
           <textarea
             ref={inputRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
-            value={input}
+            value={fileReferences.body}
             onChange={(event) => {
-              updateInput(event.target.value);
+              updateInput(writeComposerFileReferences(event.target.value, fileReferences.paths));
               const el = event.target;
               el.style.height = 'auto';
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
@@ -760,6 +752,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
             inlineLeadingExtras={composerLeadingExtras}
+            permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
+              ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange} /> : null}
             inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
             voiceModeEnabled={voiceModeEnabled}
             onVoiceModeChange={onVoiceModeChange}
@@ -776,18 +770,15 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           />
         </div>
       </div>
-
       <ComposerContextRow
+        showRepoTarget={displayMessagesCount === 0 && !displayWaiting && !hasAssistantActivity}
         contextLocationSlot={contextLocationSlot}
         repoLabel={repoLabel}
         workspaceTargets={workspaceTargets}
         selectedRepoPath={selectedRepoPath}
         onSelectRepoPath={onSelectRepoPath}
         onAddProject={() => window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { mode: 'existing' } }))}
-        permissionMode={isOrchestratorMode ? permissionMode : undefined}
-        onPermissionModeChange={isOrchestratorMode ? onPermissionModeChange : undefined}
       />
-
       {footerLeadingSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>

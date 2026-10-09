@@ -25,6 +25,7 @@ export function ComposerSelectorFooterView({
   onWorkerStartModeChange,
   saving = false,
   leadingControls,
+  permissionControl,
   attachControl,
   meterControl,
   micControl,
@@ -46,6 +47,7 @@ export function ComposerSelectorFooterView({
   onWorkerStartModeChange: (mode: WorkerStartMode) => void;
   saving?: boolean;
   leadingControls?: ReactNode;
+  permissionControl?: ReactNode;
   attachControl?: ReactNode;
   meterControl?: ReactNode;
   micControl?: ReactNode;
@@ -71,6 +73,7 @@ export function ComposerSelectorFooterView({
       }}
     >
       <ModeChip state={state} onModeChange={onModeChange} />
+      {permissionControl}
       <span data-testid="composer-selector-attach" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{attachControl}</span>
       {leadingControls ? (
         <span data-testid="composer-selector-leading-controls" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>

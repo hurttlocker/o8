@@ -3,8 +3,10 @@
 import { useRef, useState } from 'react';
 import { ComposerPopover } from '../chat-panel/ComposerPopover';
 import { useComposerChipCompact } from '../composer-compact-context';
+import { FloatingSurface } from '../../FloatingSurface';
 import {
   COMPOSER_SELECTOR_MODES,
+  VISIBLE_COMPOSER_SELECTOR_MODES,
   composerSupportsFastMode,
   type ResolvedComposerSelectorState,
   type ComposerSelectorMode,
@@ -124,15 +126,10 @@ function ModeSelectorModeMenu({
   onSelect: (mode: ComposerSelectorMode) => void;
 }) {
   return (
-    <div style={{
+    <FloatingSurface role="menu" aria-label="Work mode" style={{
       width: 224,
       maxWidth: 'min(224px, calc(100vw - 32px))',
-      borderRadius: 14,
-      borderWidth: 1,
-      borderStyle: 'solid',
-      borderColor: 'var(--t-panel-border)',
-      background: 'var(--t-popover-surface)',
-      boxShadow: 'var(--t-panel-shadow)',
+    }} contentStyle={{
       paddingTop: 6,
       paddingRight: 5,
       paddingBottom: 5,
@@ -141,15 +138,17 @@ function ModeSelectorModeMenu({
       <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 2, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
         <span>Work mode</span><span style={{ textTransform: 'none', letterSpacing: '-0.05px' }}>Shift+Tab cycles</span>
       </div>
-      {COMPOSER_SELECTOR_MODES.map((spec) => {
+      {VISIBLE_COMPOSER_SELECTOR_MODES.map(id => COMPOSER_SELECTOR_MODES.find(spec => spec.id === id)!).map((spec) => {
         const selected = spec.id === mode;
         const unavailable = spec.id === 'fast' && !composerSupportsFastMode(leadBackend);
         return (
           <button
             key={spec.id}
             type="button"
+            role="menuitemradio"
+            aria-checked={selected}
             disabled={unavailable}
-            title={unavailable ? 'Fast requires a Codex, Claude, or Fable lead.' : undefined}
+            title={unavailable ? 'Shared requires a compatible lead runtime.' : undefined}
             onClick={() => onSelect(spec.id)}
             style={{
               display: 'flex',
@@ -173,11 +172,11 @@ function ModeSelectorModeMenu({
             <span style={{ width: 13, flexShrink: 0, color: spec.id === 'fusion' ? FUSION_ACCENT : 'var(--t-accent)', visibility: selected ? 'visible' : 'hidden' }}><CheckGlyph /></span>
             <span style={{ display: 'flex', flexDirection: 'column', gap: 1, lineHeight: 1.2 }}>
               <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{spec.long}</span>
-              <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)' }}>{unavailable ? 'Use a Codex, Claude, or Fable lead' : spec.sublabel}</span>
+              <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)' }}>{unavailable ? 'Use a compatible lead runtime' : spec.sublabel}</span>
             </span>
           </button>
         );
       })}
-    </div>
+    </FloatingSurface>
   );
 }

@@ -107,6 +107,7 @@ describe('composer selector real-path precedence', () => {
     }));
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
+      unobserve() {}
       disconnect() {}
     });
     container = document.createElement('div');

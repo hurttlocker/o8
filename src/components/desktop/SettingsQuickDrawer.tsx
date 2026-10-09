@@ -134,7 +134,8 @@ export function SettingsQuickDrawer({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const { paletteId, workspaceGlass } = useTheme();
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const { paletteId, workspaceGlass, setPalette, setWorkspaceGlass, setReduceTransparency } = useTheme();
   const openSettingsTab = (tab: string) => {
     onClose();
     window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab } }));
@@ -225,12 +226,28 @@ export function SettingsQuickDrawer({
             <span style={{ color: FAINT, fontFamily: MONO, fontSize: 10, fontWeight: 300, letterSpacing: '0.5px' }}>⌘,</span>
           </RowButton>
 
-          <RowButton onClick={() => openSettingsTab('appearance')}>
+          <RowButton ariaExpanded={appearanceOpen} onClick={() => setAppearanceOpen(value => !value)}>
             <IconFrame><ThemeContrastGlyph /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Appearance</span>
             <span style={{ color: MUTED, fontSize: 10 }}>{workspaceGlass ? 'All Glass' : paletteId === 'light' ? 'Light Solid' : 'Dark Solid'}</span>
-            <ChevronRight size={12} color={MUTED} />
+            {appearanceOpen ? <ChevronDown size={12} color={MUTED} /> : <ChevronRight size={12} color={MUTED} />}
           </RowButton>
+
+          {appearanceOpen ? <div role="group" aria-label="Quick appearance" style={{ display: 'grid', gap: 2, paddingLeft: 25, paddingRight: 4 }}>
+            {(['light', 'dark', 'glass'] as const).map(mode => {
+              const selected = mode === 'glass' ? workspaceGlass : !workspaceGlass && paletteId === mode;
+              return <button key={mode} type="button" aria-pressed={selected} onClick={() => {
+                if (mode === 'glass') setWorkspaceGlass(true);
+                else { setWorkspaceGlass(false); setPalette(mode); setReduceTransparency('on'); }
+                onClose();
+              }} style={{ minHeight: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                paddingLeft: 10, paddingRight: 8, border: 0, borderRadius: 8, background: selected ? ROW_HOVER_BG : 'transparent',
+                color: TEXT, cursor: 'pointer', textAlign: 'left', font: 'inherit', fontSize: 12 }}>
+                {mode === 'glass' ? 'All Glass' : mode === 'light' ? 'Light' : 'Dark'}
+                {selected ? <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--t-accent)" strokeWidth="2"><path d="m5 12 4 4L19 6" /></svg> : null}
+              </button>;
+            })}
+          </div> : null}
 
           <div style={separatorStyle()} />
 

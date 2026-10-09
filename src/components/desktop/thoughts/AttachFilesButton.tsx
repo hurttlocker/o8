@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
+import { FloatingSurface } from '../FloatingSurface';
 import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
 
 interface FileSuggestion {
@@ -241,15 +242,10 @@ export function AttachFilesButton({
       />
 
       <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => setOpen(false)} align="end">
-        <div
+        <FloatingSurface role="dialog" aria-label="Add attachments"
           style={{
             width: 240,
             maxWidth: 'min(240px, calc(100vw - 32px))',
-            borderRadius: 14,
-            border: '1px solid var(--t-panel-border)',
-            background: 'var(--t-popover-surface)',
-            boxShadow: 'var(--t-panel-shadow)',
-            overflow: 'hidden',
           }}
         >
           {mode && onModeChange ? (
@@ -485,7 +481,7 @@ export function AttachFilesButton({
               })}
             </div>
           </div>
-        </div>
+        </FloatingSurface>
       </ComposerPopover>
     </div>
   );

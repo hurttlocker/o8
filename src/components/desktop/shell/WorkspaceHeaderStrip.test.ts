@@ -80,7 +80,7 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
       expect(button('Forward').disabled).toBe(true);
     } finally { window.removeEventListener('o8:request-select-tab', select); }
   });
-  it('keeps collapsed logo, toggle and search ordered while restoring priority on reopen', async () => {
+  it('keeps toggle and search ordered without a duplicate logo, restoring priority on reopen', async () => {
     localStorage.clear();
     setSidebarView('scheduled');
     const search = vi.fn();
@@ -97,13 +97,13 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     const button = (name: string) => container.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!;
     const order = () => Array.from(container.querySelectorAll('[aria-label="Toggle sidebar"], [data-sidebar-brand], [aria-label="Priority chats"], [aria-label="Search chats"], [aria-label="Back"], [aria-label="Forward"], [role="tablist"]'))
       .map((el) => el.getAttribute('data-sidebar-brand') !== null ? 'Logo' : el.getAttribute('role') === 'tablist' ? 'Tabs' : el.getAttribute('aria-label'));
-    const expected = ['Logo', 'Toggle sidebar', 'Priority chats', 'Search chats', 'Back', 'Forward', 'Tabs'];
+    const expected = ['Toggle sidebar', 'Priority chats', 'Search chats', 'Back', 'Forward', 'Tabs'];
     expect(order()).toEqual(expected);
     expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
     await act(async () => button('Priority chats').click());
     expect(localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('flat');
     await act(async () => button('Toggle sidebar').click());
-    expect(order()).toEqual(['Logo', 'Toggle sidebar', 'Search chats', 'Back', 'Forward', 'Tabs']);
+    expect(order()).toEqual(['Toggle sidebar', 'Search chats', 'Back', 'Forward', 'Tabs']);
     expect(button('Priority chats')).toBeNull();
     expect(button('Toggle sidebar').querySelector('[data-attention-dot]')).not.toBeNull();
     expect(container.querySelectorAll('[data-attention-dot]')).toHaveLength(1);

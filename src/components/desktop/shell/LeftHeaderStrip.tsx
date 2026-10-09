@@ -5,7 +5,6 @@
  * Hosts the macOS traffic-light inset and the sidebar toggle. Part of epic #1089.
  */
 
-import { SidebarBrand } from './SidebarBrand';
 import { SidebarHeaderActions } from './SidebarHeaderActions';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
@@ -39,7 +38,7 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
     <ColumnHeaderStrip
       drag
       bottomHairline={!inCard}
-      style={{ ...(inCard ? { background: 'transparent' } : {}), ...(!windowControls ? { paddingLeft: 4.5 } : {}) }}
+      style={{ ...(inCard ? { background: 'transparent' } : {}), ...(!windowControls ? { paddingLeft: 2.5 } : {}) }}
       // Compact rail controls share the workspace header centerline. The traffic
       // lights center on the same line: tao's inset semantics are
       // center = (buttonHeight + y) / 2 (bitmap-verified 2026-07-15: y=15
@@ -63,7 +62,6 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
               so the cluster doesn't jump when the sidebar collapses.
               See TrafficLights.tsx. */}
           {windowControls ? <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} leadInPx={6} /> : null}
-          {!windowControls ? <SidebarBrand /> : null}
           {onToggleSidebar ? <SidebarTogglePill
             sidebarVisible={sidebarVisible} onClick={onToggleSidebar} yNudge={0}
           /> : null}

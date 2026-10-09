@@ -83,6 +83,26 @@ describe('compact sidebar view through the chat panel', () => {
     expect(container.querySelector('[data-workers="true"]')).not.toBeNull();
     expect(rows()).not.toContain('Idle');
   });
+  it('orders Priority, Pinned and dated history without duplicates and remembers date folds', async () => {
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(12, 0, 0, 0);
+    const older = new Date(); older.setDate(older.getDate() - 3); older.setHours(12, 0, 0, 0);
+    const dated = history.map(item => ({ ...item, messageCount: 2,
+      modifiedAt: item.title === 'Idle' ? yesterday.toISOString() : item.modifiedAt }));
+    dated.push({ ...history[0]!, tabId: 'thoughts-Today', title: 'Today work', messageCount: 2 });
+    dated.push({ ...history[0]!, tabId: 'thoughts-Older', title: 'Older work', messageCount: 2, modifiedAt: older.toISOString() });
+    vi.mocked(fetch).mockImplementation(async url => ({ ok: true, json: async () => String(url).includes('chat-history/list') ? { conversations: dated } : { lanes: [] } }) as Response);
+    await render('thoughts-Running'); await choose('Priority');
+    const shelves = [...container.querySelectorAll('[aria-label$=" conversations"]')].map(node => node.getAttribute('aria-label'));
+    expect(shelves.slice(0, 5)).toEqual(['Priority conversations', 'Pinned conversations', 'Today conversations', 'Yesterday conversations', 'Previous 7 days conversations']);
+    expect(container.querySelector('[aria-label="Recents conversations"]')).toBeNull();
+    expect(rows()).toEqual(expect.arrayContaining(['Idle', 'Running', 'Decision', 'Pinned', 'Older work']));
+    expect(new Set(rows()).size).toBe(rows().length);
+    const yesterdayToggle = () => container.querySelector<HTMLButtonElement>('[aria-label="Yesterday conversations"] button[aria-expanded]')!;
+    await act(async () => yesterdayToggle().click()); expect(rows()).not.toContain('Idle');
+    expect(rows()).toContain('Pinned'); expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
+    await act(async () => root.unmount()); root = createRoot(container); await render('thoughts-Running');
+    expect(yesterdayToggle().getAttribute('aria-expanded')).toBe('false'); expect(rows()).not.toContain('Idle');
+  });
   it('folds quiet history without removing pins or notifications and remembers the shelves', async () => {
     await render('thoughts-Running'); await choose('Working');
     const shelf = (label: string) => container.querySelector<HTMLElement>(`[aria-label="${label} conversations"]`)!;

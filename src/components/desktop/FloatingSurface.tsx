@@ -22,7 +22,7 @@ export const FloatingSurface = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDiv
     ...(isGlass && (workspaceGlass || paletteId === 'dark') ? { '--t-text': '#e8ecf2', '--t-text-secondary': '#bcc5d0', '--t-text-muted': '#8b95a3' } : {}),
     ...style,
   } as CSSProperties}>
-    <SmoothCorners corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
+    <SmoothCorners corners={{ radius: typeof style?.borderRadius === 'number' ? style.borderRadius : WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
       autoEffects={false} style={{ ...contentStyle, background: isGlass ? 'var(--t-bg)' : 'var(--t-panel-solid)',
         backdropFilter: isGlass ? 'blur(18px) saturate(1.15)' : undefined,
         WebkitBackdropFilter: isGlass ? 'blur(18px) saturate(1.15)' : undefined }}>

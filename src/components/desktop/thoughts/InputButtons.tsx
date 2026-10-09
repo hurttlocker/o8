@@ -440,6 +440,7 @@ export function InputButtons({
   selectedRepoPath,
   onSelectRepoPath,
   inlineLeadingExtras,
+  permissionControl,
   inlineMeterSlot,
   onBrowsePrompts,
   onSavePrompt,
@@ -490,6 +491,7 @@ export function InputButtons({
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
   inlineLeadingExtras?: ReactNode;
+  permissionControl?: ReactNode;
   inlineMeterSlot?: ReactNode;
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
@@ -542,6 +544,7 @@ export function InputButtons({
           onWorkerModelChange={selectorControls.onWorkerModelChange}
           onWorkerStartModeChange={selectorControls.onWorkerStartModeChange}
           saving={selectorControls.savingWorkerDefaults}
+          permissionControl={permissionControl}
           leadingControls={(
             <>
               {inlineLeadingExtras ? (
@@ -610,6 +613,7 @@ export function InputButtons({
           The right action cluster stays pinned, so Send/mic/attach are never
           pushed off the clipped right edge — the bug this fixes. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
+      {permissionControl}
       {inlineLeadingExtras ? (
         // overflow:hidden is load-bearing — without it a nowrap child that
         // can't shrink spills out of this minWidth:0 span and paints under
@@ -638,10 +642,6 @@ export function InputButtons({
           now auto-arms silently — standing doctrine covers materially
           ambiguous requests, and the system prompt arms it for a repo's
           first-ever mission. No transcript-visible directive, no chrome. */}
-
-      {/* Permission (shield) toggle removed 2026-07-11 (Q ruling): the
-          orchestrator + worker composers always run full access — a
-          read-only mode chip was chrome nobody used. */}
 
       {/* Session rules (#1329) — "Rules · N" chip. Lists the merged
           Session/Repo/Global rule set; session tier is editable inline.

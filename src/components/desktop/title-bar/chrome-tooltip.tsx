@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { FloatingSurface } from '../FloatingSurface';
 
 /**
  * The header chrome's tooltip — label + keybind, in o8's own vocabulary rather
@@ -49,7 +50,7 @@ export function useChromeTooltip({ label, keybind, side = 'bottom' }: { label: s
 
   const tooltip = tip && typeof document !== 'undefined'
     ? createPortal(
-        <div
+        <FloatingSurface
           role="tooltip"
           style={{
             position: 'fixed',
@@ -58,16 +59,13 @@ export function useChromeTooltip({ label, keybind, side = 'bottom' }: { label: s
             left: tip.left,
             zIndex: 2147483000,
             pointerEvents: 'none',
+            borderRadius: 9,
+          }}
+          contentStyle={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
             whiteSpace: 'nowrap',
-            background: 'var(--t-bg-card)',
-            color: 'var(--t-text)',
-            borderWidth: '0.5px',
-            borderStyle: 'solid',
-            borderColor: 'var(--t-border)',
-            borderRadius: 8,
             paddingTop: 4,
             paddingBottom: 4,
             paddingLeft: 8,
@@ -77,12 +75,11 @@ export function useChromeTooltip({ label, keybind, side = 'bottom' }: { label: s
             fontWeight: 400,
             lineHeight: 1.3,
             letterSpacing: '-0.1px',
-            boxShadow: 'var(--t-glass-shadow, 0 8px 20px rgba(15, 23, 42, 0.22))',
           }}
         >
           <span>{label}</span>
           {keybind ? <span style={{ color: 'var(--t-text-muted)' }}>{keybind}</span> : null}
-        </div>,
+        </FloatingSurface>,
         document.body,
       )
     : null;

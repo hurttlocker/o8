@@ -44,11 +44,12 @@ export function isWorkingSidebarFixture(sample: SidebarFixture, activeSessionKey
 }
 
 /** Saved sample transcripts rendered with the same row and motion as real workers. */
-export function SidebarDemoStates({ fixtures, mode, shelf, publishAttention = true, activeSessionKey, onOpenHistoryChat }: {
+export function SidebarDemoStates({ fixtures, mode, shelf, publishAttention = true, showLabel = true, activeSessionKey, onOpenHistoryChat }: {
   fixtures: SidebarFixture[];
   mode: ChatGroupMode;
   shelf?: 'working' | 'settled';
   publishAttention?: boolean;
+  showLabel?: boolean;
   activeSessionKey?: string | null;
   onOpenHistoryChat: ChatsTabProps['onOpenHistoryChat'];
 }) {
@@ -75,10 +76,10 @@ export function SidebarDemoStates({ fixtures, mode, shelf, publishAttention = tr
   };
   return (
     <section aria-label="Demo worker states" data-o8-sidebar-demo="true">
-      <div style={{ paddingTop: 3, paddingRight: 12, paddingBottom: 5, paddingLeft: 12,
+      {showLabel ? <div style={{ paddingTop: 3, paddingRight: 12, paddingBottom: 5, paddingLeft: 12,
         fontSize: 9.5, color: 'var(--t-text-faint)', fontFamily: 'var(--font-sans-system)' }}>
         Demo states{mode === 'repo' ? ` · ${[...new Set(shown.map(({ sample }) => sample.repoName))].join(', ')}` : ''}
-      </div>
+      </div> : null}
       {shown.map(({ sample, row, subject, active }) => (
         <motion.div key={sample.tabId} layout="position" transition={{ type: 'spring', stiffness: 400, damping: 30 }}
           data-o8-demo-state={sample.state} data-o8-demo-scheduled={sample.scheduled}>

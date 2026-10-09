@@ -132,8 +132,8 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
   },
   {
     id: 'fast',
-    long: 'Fast · shared checkout',
-    short: 'Fast',
+    long: 'Shared',
+    short: 'Shared',
     sublabel: 'Workers edit one checkout; orchestrator reviews and commits',
     placeholder: 'Parallel workers in this checkout…',
     directive: COMPOSER_MODE_DIRECTIVES.fast,
@@ -155,6 +155,9 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
     directive: COMPOSER_MODE_DIRECTIVES.fusion,
   },
 ];
+
+/** Visible choices; the advanced execution modes remain available internally. */
+export const VISIBLE_COMPOSER_SELECTOR_MODES = ['solo', 'fast', 'multitask'] as const;
 
 const BASE_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
 const EFFORT_RANK: Record<ThinkingEffort, number> = {
@@ -287,11 +290,12 @@ export function cycleComposerSelectorMode(
   direction = 1,
   backend?: OrchestratorBackendSetting,
 ): ComposerSelectorMode {
-  const index = Math.max(0, COMPOSER_SELECTOR_MODES.findIndex((entry) => entry.id === mode));
-  for (let step = 1; step <= COMPOSER_SELECTOR_MODES.length; step += 1) {
-    const candidate = COMPOSER_SELECTOR_MODES[
-      (index + direction * step + COMPOSER_SELECTOR_MODES.length * step) % COMPOSER_SELECTOR_MODES.length
-    ].id;
+  const index = VISIBLE_COMPOSER_SELECTOR_MODES.findIndex(entry => entry === mode);
+  if (index < 0) return 'solo';
+  for (let step = 1; step <= VISIBLE_COMPOSER_SELECTOR_MODES.length; step += 1) {
+    const candidate = VISIBLE_COMPOSER_SELECTOR_MODES[
+      (index + direction * step + VISIBLE_COMPOSER_SELECTOR_MODES.length * step) % VISIBLE_COMPOSER_SELECTOR_MODES.length
+    ];
     if (candidate !== 'fast' || !backend || composerSupportsFastMode(backend)) return candidate;
   }
   return mode;

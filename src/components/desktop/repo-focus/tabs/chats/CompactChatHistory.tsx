@@ -1,15 +1,15 @@
-import { Children, type ReactNode } from 'react';
+import { Children, Fragment, type ReactNode } from 'react';
 import type { SidebarFixture } from '@/lib/ui/sidebar-fixtures';
 import type { RepoFocusRepo } from '../../types';
 import { canCreateOrchestratorForRepo } from '../../../agent-panel-repo-selection';
 import { ChatGroupPicker } from './ChatGroupPicker';
 import { ChatHistoryShelf } from './ChatHistoryShelf';
-import type { ChatGroupMode } from './sidebar-view';
+import { staysInWorkingView, type ChatGroupMode } from './sidebar-view';
 import { CONVERSATIONS_GROUP_KEY } from './helpers';
 import { MissingRepoRailNotice } from './MissingRepoRailNotice';
 import { RepoGroupLabel } from './shared';
 import { SidebarDemoStates, sidebarFixtureAttention } from './SidebarDemoStates';
-import { attentionRank } from './sections';
+import { attentionRank, deriveHistoryDateGroups } from './sections';
 import { usePublishSidebarAttention } from './sidebar-view-store';
 import type { ChatHistoryItem, ChatsTabProps, RepoHistoryGroup } from './types';
 
@@ -42,7 +42,9 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   const conversations = source.filter(item => !item.pinned);
   const attentionCount = fixtures.filter(sample => attentionRank(sidebarFixtureAttention(sample)) > 0).length;
   usePublishSidebarAttention(attentionCount);
-  const hasPriority = chatGroupBy === 'flat' && (priority.length > 0 || attentionCount > 0);
+  const priorityFixtures = fixtures.filter(sample => staysInWorkingView(sidebarFixtureAttention(sample)));
+  const settledFixtures = fixtures.filter(sample => !priorityFixtures.includes(sample));
+  const hasPriority = chatGroupBy === 'flat' && (priority.length > 0 || priorityFixtures.length > 0);
   const picker = <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />;
   const demos = <SidebarDemoStates mode={chatGroupBy} fixtures={fixtures} publishAttention={false}
     activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />;
@@ -79,15 +81,29 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
     })}{more}
   </ChatHistoryShelf>;
   return <>
-    {hasPriority ? <ChatHistoryShelf label="Priority" count={priority.length + fixtures.length} action={picker}>
-      {demos}{priority.map(renderHistoryRow)}
+    {hasPriority ? <ChatHistoryShelf label="Priority" count={priority.length + priorityFixtures.length} action={picker}>
+      <SidebarDemoStates mode={chatGroupBy} fixtures={priorityFixtures} publishAttention={false}
+        activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />{priority.map(renderHistoryRow)}
     </ChatHistoryShelf> : null}
     {pinned.length ? <ChatHistoryShelf label="Pinned" count={pinned.length} action={hasPriority ? undefined : picker}>
       {pinned.map(renderHistoryRow)}
     </ChatHistoryShelf> : null}
-    <ChatHistoryShelf label="Recents" count={conversations.length + (hasPriority ? 0 : fixtures.length)}
+    {chatGroupBy === 'flat' ? <>
+      {deriveHistoryDateGroups<{ modifiedAt: string; item?: ChatHistoryItem; sample?: SidebarFixture }>([
+        ...conversations.map(item => ({ item, modifiedAt: item.modifiedAt })),
+        ...settledFixtures.map(sample => ({ sample, modifiedAt: sample.updatedAt })),
+      ].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))).map((group, index) => <ChatHistoryShelf key={group.key}
+        label={group.label} count={group.items.length} storageKey={`o8:chat-priority-${group.key}-collapsed`}
+        action={!hasPriority && !pinned.length && index === 0 ? picker : undefined}>
+        {group.items.map(entry => entry.item ? <Fragment key={entry.item.tabId}>{renderHistoryRow(entry.item)}</Fragment>
+          : <SidebarDemoStates key={entry.sample!.tabId} mode="flat" fixtures={[entry.sample!]} publishAttention={false}
+            showLabel={false} activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />)}
+      </ChatHistoryShelf>)}
+      {!hasPriority && !pinned.length && !conversations.length && !settledFixtures.length ? <ChatHistoryShelf label="Priority" count={0} action={picker}>{null}</ChatHistoryShelf> : null}
+      {more}
+    </> : <ChatHistoryShelf label="Recents" count={conversations.length + fixtures.length}
       storageKey={`o8:chat-${chatGroupBy}-recents-collapsed`} action={hasPriority || pinned.length ? undefined : picker}>
-      {!hasPriority ? demos : null}{conversations.map(renderHistoryRow)}{more}
-    </ChatHistoryShelf>
+      {demos}{conversations.map(renderHistoryRow)}{more}
+    </ChatHistoryShelf>}
   </>;
 }

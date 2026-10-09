@@ -82,6 +82,12 @@
       ]
     },
     {
+      "path": "src/app/api/panel/o8-update-summary/route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/panel/prs/[number]/checkout/route-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3438,6 +3444,14 @@
       ]
     },
     {
+      "path": "tests/release-summary-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/release-truth-entry-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3898,6 +3912,14 @@
       ]
     },
     {
+      "path": "tests/stable-cli-update-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/status-truth.test.ts",
       "reasons": [
         "child-process",
@@ -4211,6 +4233,12 @@
     },
     {
       "path": "tests/ui-loop-warm-lane-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/unified-update-client-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

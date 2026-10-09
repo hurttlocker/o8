@@ -14,6 +14,16 @@ beforeEach(() => { memory.__o8ReleaseNotesV1?.cache.clear(); vi.stubGlobal('fetc
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(directory, { recursive: true, force: true }); });
 
 describe('published release notes through the real route and persisted cache', () => {
+  it('reads the publisher overview and bullets without inference and persists the shared result', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tag_name: 'v0.1.904', body: '## What’s changed\n\nNavigate your work more clearly.\n\n- Clearer chat sections\n- One place for connected updates\n' }));
+    const notes = await (await route.GET(request('0.1.904'))).json();
+    expect(notes).toMatchObject({ source: 'release', overview: 'Navigate your work more clearly.', summary: 'Navigate your work more clearly.',
+      entries: [{ text: 'Clearer chat sections' }, { text: 'One place for connected updates' }] });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(String(vi.mocked(fetch).mock.calls[0]![0])).toBe('https://api.github.com/repos/hurttlocker/o8-releases/releases/tags/v0.1.904');
+    memory.__o8ReleaseNotesV1?.cache.clear(); vi.mocked(fetch).mockClear();
+    expect(await (await route.GET(request('0.1.904'))).json()).toEqual(notes); expect(fetch).not.toHaveBeenCalled();
+  });
   it('fetches once for concurrent hovers and reuses the disk receipt after memory is cleared', async () => {
     vi.mocked(fetch).mockResolvedValue(Response.json({ tag_name: 'v0.1.901', published_at: '2026-10-08T12:00:00Z', body: '- Faster sidebar\n- Clear update status' }));
     const [first, second] = await Promise.all([route.GET(request('0.1.901')), route.GET(request('0.1.901'))]);

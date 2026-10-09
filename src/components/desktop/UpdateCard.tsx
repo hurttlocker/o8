@@ -2,7 +2,7 @@
 
 /** App update controller, with a legacy card outside the compact rail. */
 
-import { publishAppUpdateView, refreshCliUpdateView } from '@/lib/app-update/update-hub-client';
+import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
@@ -248,7 +248,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   }, []);
 
   const checkForUpdate = useCallback(async () => {
-    if (!canUseTauriEvents()) return;
+    if (!canUseTauriEvents()) return { version: null, error: 'o8 update checking is available in the desktop app.' };
     try {
       const { check } = await import('@/lib/app-update/check');
       const result = await check();
@@ -259,12 +259,15 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           date: result.date ?? undefined,
         });
         setCheckReport(updateCheckReport('available'));
+        return { version: result.version };
       } else {
         setUpdate(null);
         setCheckReport(updateCheckReport('current'));
+        return { version: null };
       }
     } catch (error) {
       setCheckReport(updateCheckReport('failed', error));
+      return { version: null, error: error instanceof Error ? error.message : 'o8 update check failed.' };
     }
   }, []);
 
@@ -355,11 +358,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     }).catch(() => { /* route is best-effort state for CLI --if-update-pending */ });
   }, [checkReport, update]);
 
-  useEffect(() => {
-    const check = () => { void checkForUpdate(); };
-    window.addEventListener('o8:check-all-updates', check);
-    return () => window.removeEventListener('o8:check-all-updates', check);
-  }, [checkForUpdate]);
+  useEffect(() => registerAppUpdateCheck(checkForUpdate), [checkForUpdate]);
 
   // Fetch summary when the card is expanded and we have a version. Cache
   // by version in localStorage so repeated opens are instant.

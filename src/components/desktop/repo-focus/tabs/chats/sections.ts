@@ -200,11 +200,11 @@ export function deriveHistoryRepoGroups(
   });
 }
 
-export function deriveHistoryDateGroups(
-  items: ChatHistoryItem[],
+export function deriveHistoryDateGroups<T extends { modifiedAt: string }>(
+  items: T[],
   now = new Date(),
-): RepoHistoryGroup[] {
-  const buckets = new Map<string, RepoHistoryGroup>([
+): Array<{ key: string; label: string; items: T[] }> {
+  const buckets = new Map<string, { key: string; label: string; items: T[] }>([
     ['today', { key: 'today', label: 'Today', items: [] }],
     ['yesterday', { key: 'yesterday', label: 'Yesterday', items: [] }],
     ['prev-7', { key: 'prev-7', label: 'Previous 7 days', items: [] }],

@@ -5,12 +5,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CompactNavigationRail } from './CompactNavigationRail';
 import { OPEN_KEYBOARD_SHORTCUTS_EVENT, OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { setCustomizeTab } from '../customize/navigation';
-import { refreshCliUpdateView } from '@/lib/app-update/update-hub-client';
+import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
 
 const auth = vi.hoisted(() => ({ signedIn: false, clerkEnabled: true, user: { name: 'Private account', email: 'private@example.test' }, signIn: vi.fn(), openManageAccount: vi.fn() }));
-const updateCheck = vi.hoisted(() => vi.fn(async () => null));
+const updateCheck = vi.hoisted(() => vi.fn(async () => ({ version: null as string | null })));
+const theme = vi.hoisted(() => ({ paletteId: 'light', workspaceGlass: false, setPalette: vi.fn(), setWorkspaceGlass: vi.fn(), setReduceTransparency: vi.fn() }));
+const notify = vi.hoisted(() => vi.fn());
+vi.mock('@/components/shared/ConfirmToastHost', () => ({ toast: notify }));
 vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => auth }));
-vi.mock('@/lib/theme/context', () => ({ useTheme: () => ({ paletteId: 'light', workspaceGlass: false }) }));
+vi.mock('@/lib/theme/context', () => ({ useTheme: () => theme }));
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.0.0' }));
 vi.mock('@/lib/app-update/check', () => ({ check: updateCheck }));
 vi.mock('@lisse/react', () => ({ SmoothCorners: ({ children, style }: HTMLAttributes<HTMLDivElement>) => createElement('div', { style }, children) }));
@@ -66,6 +69,8 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     expect(document.activeElement).toBe(button('More navigation'));
     expect(host.querySelector('[aria-label="Hide chats"], [aria-label="Show chats"], [aria-label="Settings"]')).toBeNull();
     expect(button('Canvas mode')).toBeDefined();
+    expect(button('Home').querySelector('img')?.getAttribute('src')).toBe('/logos/o8-desktop.png');
+    expect(host.querySelectorAll('[data-sidebar-brand]')).toHaveLength(1);
     for (const [label, callback] of [['Home', callbacks.onHome], ['Run orchestrator', callbacks.onNewSession], ['Run terminal', callbacks.onCreateTerminal], ['PRs', callbacks.onOpenPRs]] as const) {
       await act(async () => button(label).click());
       expect(callback).toHaveBeenCalledOnce();
@@ -153,7 +158,7 @@ it('opens cached release notes from the updater and restores focus on Escape wit
   try {
     await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: false })));
     const updates = host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!;
-    await act(async () => updates.click());
+    await act(async () => updates.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
     const popup = document.querySelector<HTMLElement>('[aria-label="Updates and release notes"]')!;
     expect(popup.textContent).toContain('Clearer navigation');
     expect(popup.id).toBe(updates.getAttribute('aria-controls'));
@@ -170,6 +175,65 @@ it('opens cached release notes from the updater and restores focus on Escape wit
     window.removeEventListener('o8:install-all-updates', install);
     await act(async () => root.unmount());
     host.remove();
+  }
+});
+
+it('checks updates on click, reports through notifications, and waits for hover before showing details', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const unregister = registerAppUpdateCheck(updateCheck);
+  vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => String(input).startsWith('/api/setup/cli-updates')
+    ? Response.json({ tools: ['codex', 'claude-code', 'grok'].map(runtimeId => ({ runtimeId, label: runtimeId, status: 'not-installed' })) })
+    : Response.json({ entries: [], summary: 'Published changes' }));
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const install = vi.fn(); window.addEventListener('o8:install-all-updates', install);
+  try {
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!;
+    await act(async () => trigger.click());
+    expect(updateCheck).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith('Checking o8 and connected CLIs…', 'info');
+    expect(notify).toHaveBeenCalledWith('o8 and connected CLIs are up to date.', 'success');
+    expect(document.querySelector('[aria-label="Updates and release notes"]')).toBeNull();
+    expect(install).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
+    await act(async () => trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    expect(document.querySelector('[aria-label="Updates and release notes"]')).not.toBeNull();
+  } finally { unregister(); window.removeEventListener('o8:install-all-updates', install); await act(async () => root.unmount()); host.remove(); }
+});
+
+it('shows ready updates in blue, folds current CLIs, and offers one compact update action', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const install = vi.fn(); window.addEventListener('o8:install-all-updates', install);
+  const cli = (runtimeId: string, status: string) => ({ runtimeId, label: runtimeId, status, installedVersion: '1.0', latestVersion: '1.1' });
+  vi.mocked(fetch).mockImplementation(async input => String(input).startsWith('/api/setup/cli-updates')
+    ? Response.json({ tools: [cli('codex', 'update-available'), cli('claude-code', 'current'), cli('grok', 'not-installed'), cli('gemini', 'current')] })
+    : Response.json({ entries: [], summary: 'Published changes' }));
+  publishAppUpdateView({ version: '0.1.901', outcome: 'available', installing: false, message: null, error: 'Fetch is aborted', downloadOnly: false });
+  try {
+    await refreshCliUpdateView(true);
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!;
+    expect(trigger.querySelector('[data-update-ready]')).not.toBeNull();
+    expect(trigger.querySelector('[data-update-dot]')).toBeNull();
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
+    const popup = document.querySelector<HTMLElement>('[aria-label="Updates and release notes"]')!;
+    expect(popup.textContent).toContain('codex');
+    expect(popup.textContent).not.toMatch(/claude-code|grok|gemini|Fetch is aborted/);
+    expect(popup.textContent).toContain('Update checks couldn’t finish');
+    const current = [...popup.querySelectorAll('button')].find(button => button.textContent?.startsWith('Current CLIs'))!;
+    expect(current.getAttribute('aria-expanded')).toBe('false');
+    act(() => current.click());
+    expect(popup.textContent).toContain('claude-code');
+    expect(current.getAttribute('aria-expanded')).toBe('true');
+    const update = [...popup.querySelectorAll('button')].find(button => button.textContent === 'Update all')!;
+    expect(update.style.minHeight).toBe('30px');
+    act(() => update.click()); expect(install).toHaveBeenCalledOnce();
+  } finally {
+    publishAppUpdateView({ version: null, outcome: 'never', installing: false, message: null, error: null, downloadOnly: false });
+    window.removeEventListener('o8:install-all-updates', install); await act(async () => root.unmount()); host.remove();
   }
 });
 
@@ -217,7 +281,18 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
     expect(document.activeElement).toBe(avatar);
     await act(async () => avatar.click());
     await act(async () => menuButton('Appearance').click());
-    expect(settings.mock.calls[1][0].detail).toEqual({ tab: 'appearance' });
+    const choices = drawer()!.querySelector('[aria-label="Quick appearance"]')!;
+    expect([...choices.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Light', 'Dark', 'All Glass']);
+    expect(choices.querySelector('[aria-pressed="true"]')?.textContent).toBe('Light');
+    await act(async () => menuButton('Dark').click());
+    expect(theme.setPalette).toHaveBeenCalledWith('dark');
+    expect(theme.setWorkspaceGlass).toHaveBeenCalledWith(false);
+    expect(theme.setReduceTransparency).toHaveBeenCalledWith('on');
+    expect(drawer()).toBeNull();
+    await act(async () => avatar.click());
+    await act(async () => menuButton('All Glass').click());
+    expect(theme.setWorkspaceGlass).toHaveBeenLastCalledWith(true);
+    expect(settings).toHaveBeenCalledOnce();
     expect(drawer()).toBeNull();
   } finally {
     window.removeEventListener(OPEN_SETTINGS_TAB_EVENT, settings);
@@ -227,7 +302,7 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
   }
 });
 
-it('shows only installed supported CLIs and keeps legacy Gemini out of the update dot', async () => {
+it('shows only installed supported CLIs and keeps legacy Gemini out of the ready state', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const tools = [{ runtimeId: 'codex', label: 'Codex CLI', status: 'not-installed' },
     { runtimeId: 'claude-code', label: 'Claude Code', status: 'current' },
@@ -242,13 +317,14 @@ it('shows only installed supported CLIs and keeps legacy Gemini out of the updat
   try {
     await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
     await act(async () => refreshCliUpdateView(true));
-    expect(host.querySelector('[data-update-dot]')).toBeNull();
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!.click());
+    expect(host.querySelector('[data-update-ready]')).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
     const popup = document.querySelector('[aria-label="Updates and release notes"]')!;
+    await act(async () => [...popup.querySelectorAll('button')].find(button => button.textContent?.startsWith('Current CLIs'))!.click());
     expect(popup.textContent).toContain('Grok Build'); expect(popup.textContent).toContain('Claude Code');
     expect(popup.textContent).not.toContain('Codex CLI'); expect(popup.textContent).not.toContain('Gemini CLI');
     tools[2]!.status = 'update-available';
     await act(async () => refreshCliUpdateView(true));
-    expect(host.querySelector('[data-update-dot]')).not.toBeNull();
+    expect(host.querySelector('[data-update-ready]')).not.toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });

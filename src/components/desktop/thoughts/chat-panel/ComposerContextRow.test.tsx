@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 
-import { act, useState } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ComposerContextRow } from './ComposerContextRow';
-import type { ThoughtsChatPermissionMode } from './types';
 
 vi.mock('./ComposerPopover', async () => {
   const React = await import('react');
@@ -29,18 +28,14 @@ afterEach(() => {
 });
 
 describe('composer context row', () => {
-  it('switches the next-send permission and keeps project setup reachable without targets', () => {
-    const onPermissionModeChange = vi.fn();
+  it('keeps project setup reachable before a conversation starts', () => {
     const onAddProject = vi.fn();
     function Harness() {
-      const [mode, setMode] = useState<ThoughtsChatPermissionMode>('full');
       return (
         <ComposerContextRow
           selectedRepoPath="~"
           workspaceTargets={[]}
           onAddProject={onAddProject}
-          permissionMode={mode}
-          onPermissionModeChange={(next) => { setMode(next); onPermissionModeChange(next); }}
           contextLocationSlot={<span data-testid="context-location-slot" />}
         />
       );
@@ -58,10 +53,7 @@ describe('composer context row', () => {
     act(() => host?.querySelector<HTMLButtonElement>('[role="option"]')?.click());
     expect(onAddProject).toHaveBeenCalledOnce();
 
-    act(() => host?.querySelector<HTMLButtonElement>('button[aria-label="Permissions: Full access"]')?.click());
-    act(() => host?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="false"]')?.click());
-    expect(onPermissionModeChange).toHaveBeenCalledWith('plan');
-    expect(host.querySelector('[aria-label="Permissions: Plan only"]')).not.toBeNull();
+
   });
 
   it('names the selected repository as the project target', () => {
@@ -82,6 +74,15 @@ describe('composer context row', () => {
     expect(project?.getAttribute('aria-label')).toBe('Project target: o8');
   });
 
+  it('hides project selection after startup while retaining the context meter', () => {
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+    act(() => root?.render(<ComposerContextRow showRepoTarget={false} repoLabel="o8" contextLocationSlot={<span data-testid="context-meter" />} />));
+    expect(host.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+    expect(host.querySelector('[data-testid="context-meter"]')).not.toBeNull();
+    act(() => root?.render(<ComposerContextRow showRepoTarget={false} />));
+    expect(host.querySelector('[data-o8-composer-context-row]')).toBeNull();
+  });
+
   it('groups the left controls together and leaves the status slot on the row', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -90,8 +91,6 @@ describe('composer context row', () => {
       <ComposerContextRow
         selectedRepoPath="~"
         workspaceTargets={[]}
-        permissionMode="full"
-        onPermissionModeChange={() => {}}
         contextLocationSlot={<span data-testid="context-location-slot" />}
       />,
     ));
@@ -103,7 +102,7 @@ describe('composer context row', () => {
     expect(controls).not.toBeNull();
     expect(controls?.querySelector('button[aria-haspopup="listbox"]')).not.toBeNull();
     expect(controls?.querySelector('[data-testid="context-location-slot"]')).not.toBeNull();
-    expect(controls?.querySelector('button[aria-haspopup="menu"]')).not.toBeNull();
+    expect(controls?.querySelector('button[aria-haspopup="menu"]')).toBeNull();
 
     expect(statusSlot?.parentElement).toBe(row);
     expect(controls?.contains(statusSlot as Node)).toBe(false);

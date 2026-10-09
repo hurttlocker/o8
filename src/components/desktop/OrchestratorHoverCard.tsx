@@ -12,6 +12,7 @@
  */
 
 import { createPortal } from 'react-dom';
+import { FloatingSurface } from './FloatingSurface';
 import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
 import { MetaRow, resolveHoverPosition } from './SpawnedAgentHoverCard';
 import { AGENT_STATUS_ACCENT } from './AgentStatusDot';
@@ -73,7 +74,7 @@ export function OrchestratorHoverCard({
   const overflow = packets.length - shown.length;
 
   return createPortal(
-    <div
+    <FloatingSurface
       role="tooltip"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
@@ -83,19 +84,13 @@ export function OrchestratorHoverCard({
         top: position.top,
         zIndex: 10000,
         width: 348,
+        pointerEvents: 'auto',
+      }}
+      contentStyle={{
         paddingTop: 14,
         paddingRight: 16,
         paddingBottom: 13,
         paddingLeft: 16,
-        borderRadius: 12,
-        border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-popover-surface)',
-        backdropFilter: 'blur(24px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
-        boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
-        color: 'var(--t-text)',
-        pointerEvents: 'auto',
-        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div
@@ -207,7 +202,7 @@ export function OrchestratorHoverCard({
           </div>
         ) : null}
       </div> : null}
-    </div>,
+    </FloatingSurface>,
     document.body,
   );
 }

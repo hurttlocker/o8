@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY,
   COMPOSER_SELECTOR_MODES,
+  VISIBLE_COMPOSER_SELECTOR_MODES,
   resolveEffectiveComposerLeadModelId,
   supportedEffortsForLead,
   type ComposerSelectorMode,
@@ -46,15 +47,32 @@ function Harness({
   initialModel = 'gpt-5.6-sol',
   initialBackend = 'codex',
   initialEffort = 'high',
+  initialMode = 'solo',
+  messages = 0,
+  waiting = false,
+  permissions = false,
+  onSend,
+  initialInput = 'Build it',
+  onDraftSend,
+  repoPath,
   effortTestId,
 }: {
   initialModel?: string;
   initialBackend?: OrchestratorBackendSetting;
   initialEffort?: ThinkingEffort;
+  initialMode?: ComposerSelectorMode;
+  messages?: number;
+  waiting?: boolean;
+  permissions?: boolean;
+  onSend?: (permission: 'full' | 'plan') => void;
+  initialInput?: string;
+  onDraftSend?: (input: string) => void;
+  repoPath?: string;
   effortTestId?: string;
-} = {}) {
-  const [input, setInput] = useState('Build it');
-  const [mode, setMode] = useState<ComposerSelectorMode>('solo');
+}) {
+  const [input, setInput] = useState(initialInput);
+  const [permission, setPermission] = useState<'full' | 'plan'>('full');
+  const [mode, setMode] = useState<ComposerSelectorMode>(initialMode);
   const [effort, setEffort] = useState<ThinkingEffort>(initialEffort);
   const [model, setModel] = useState(initialModel);
   const [backend, setBackend] = useState<OrchestratorBackendSetting>(initialBackend);
@@ -66,7 +84,7 @@ function Harness({
         input={input}
         onInputChange={setInput}
         isOrchestratorMode
-        displayWaiting={false}
+        displayWaiting={waiting}
         chatMessages={[]}
         activeTargetLabel="Orchestrator"
         targetAgentExists
@@ -75,7 +93,7 @@ function Harness({
         preEnhanceInput={null}
         onEnhance={() => {}}
         onUndoEnhance={() => {}}
-        onSubmit={() => {}}
+        onSubmit={() => { onSend?.(permission); onDraftSend?.(input); }}
         onSlashCommand={() => {}}
         modelId={model}
         modelLabel={model === 'gpt-5.6-sol' ? 'Sol' : model}
@@ -86,11 +104,14 @@ function Harness({
         operatorDefaultEffort={initialEffort}
         onEffortChange={setEffort}
         adaptiveEnabled
-        displayMessagesCount={0}
+        displayMessagesCount={messages}
         hasAssistantActivity={false}
         composerMode={mode}
         onComposerModeChange={setMode}
         sessionRulesThreadId="harness-thread"
+        repoPath={repoPath}
+        permissionMode={permissions ? permission : undefined}
+        onPermissionModeChange={permissions ? setPermission : undefined}
       />
     </>
   );
@@ -211,6 +232,7 @@ describe('ComposerSelectorFooter', () => {
     }));
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
+      unobserve() {}
       disconnect() {}
     });
     container = document.createElement('div');
@@ -243,6 +265,71 @@ describe('ComposerSelectorFooter', () => {
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes(label))!.click());
   }
+
+  it('selects a file as a tag, opens its workspace path, keeps the reference on send, and removes it', async () => {
+    const draft = vi.fn(); const opened = vi.fn();
+    window.addEventListener('o8:open-file', opened);
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).startsWith('/api/v2/context/files')
+      ? Response.json({ files: [{ path: 'assets/choose-before-you-send.gif' }] }) : originalFetch(input, init));
+    const inputValue = (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+      Object.getOwnPropertyDescriptor(element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    try {
+      await act(async () => root.render(<Harness initialInput="Inspect this" repoPath="/repo" onDraftSend={draft} />));
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')!.click());
+      expect(container.querySelector('[aria-label="Add attachments"]')).not.toBeNull();
+      act(() => inputValue(container.querySelector<HTMLInputElement>('input[placeholder="Search repo files"]')!, 'choose'));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)); });
+      act(() => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('choose-before-you-send.gif'))!.click());
+      expect(container.querySelector('[aria-label="Add attachments"]')).toBeNull();
+      const tag = container.querySelector<HTMLButtonElement>('[aria-label="Open assets/choose-before-you-send.gif"]')!;
+      expect(tag.textContent).toContain('choose-before-you-send.gif');
+      expect(container.querySelector('textarea')!.value).toBe('Inspect this');
+      act(() => tag.click());
+      expect(opened.mock.calls[0]?.[0].detail).toEqual({ path: '/repo/assets/choose-before-you-send.gif' });
+      act(() => inputValue(container.querySelector('textarea')!, 'Review this file'));
+      act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-send"] button')!.click());
+      expect(draft).toHaveBeenLastCalledWith('@assets/choose-before-you-send.gif\nReview this file');
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Remove reference assets/choose-before-you-send.gif"]')!.click());
+      expect(container.querySelector('[aria-label="Referenced files"]')).toBeNull();
+      expect(container.querySelector('textarea')!.value).toBe('Review this file');
+      act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-send"] button')!.click());
+      expect(draft).toHaveBeenLastCalledWith('Review this file');
+    } finally { window.removeEventListener('o8:open-file', opened); }
+  });
+
+  it('keeps permissions inside the composer and removes project selection when the chat starts', async () => {
+    const observers = new Map<Element, ResizeObserverCallback>();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(element: Element) { observers.set(element, this.callback); }
+      unobserve(element: Element) { observers.delete(element); } disconnect() {}
+    });
+    const onSend = vi.fn();
+    await act(async () => root.render(createElement(Harness, { permissions: true, onSend })));
+    const footer = container.querySelector('[data-testid="composer-selector-footer"]')!;
+    const permission = footer.querySelector<HTMLButtonElement>('[aria-label="Permissions: Full access"]')!;
+    expect(permission.textContent).toContain('Full access');
+    expect(container.querySelector('[data-o8-composer-context-row] [aria-haspopup="listbox"]')).not.toBeNull();
+    act(() => permission.click());
+    act(() => container.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="false"]')!.click());
+    expect(footer.querySelector('[aria-label="Permissions: Plan only"]')).not.toBeNull();
+    act(() => footer.querySelector<HTMLButtonElement>('[data-testid="composer-selector-send"] button')!.click());
+    expect(onSend).toHaveBeenCalledWith('plan');
+    await act(async () => root.render(createElement(Harness, { permissions: true, messages: 1, onSend })));
+    expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+    expect(container.querySelector('[data-o8-composer-context-row]')).toBeNull();
+    const resize = [...observers].find(([element]) => element.contains(footer))?.[1];
+    expect(resize).toBeDefined();
+    act(() => resize?.([{ contentRect: { width: 360 } } as ResizeObserverEntry], {} as ResizeObserver));
+    expect(footer.querySelector('[aria-label="Permissions: Plan only"]')?.textContent).toBe('');
+    act(() => resize?.([{ contentRect: { width: 640 } } as ResizeObserverEntry], {} as ResizeObserver));
+    expect(footer.querySelector('[aria-label="Permissions: Plan only"]')?.textContent).toBe('Plan only');
+    await act(async () => root.render(createElement(Harness, { permissions: true, messages: 0, waiting: true })));
+    expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+  });
 
   it('orders mode, attach, lead, mic, and send with mic immediately before send', async () => {
     await act(async () => { root.render(createElement(Harness)); });
@@ -294,15 +381,17 @@ describe('ComposerSelectorFooter', () => {
 
     act(() => mode.click());
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Fusion'))!.click());
-    const fusionWorkers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(fusionWorkers.querySelectorAll('[data-provider-mark]')).toHaveLength(3);
-    expect(fusionWorkers.textContent).toContain(`${listDispatchableRuntimes().length} ready`);
-
-    act(() => mode.click());
-    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('Solo'))!.click());
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
+  });
+
+  it('restores advanced worker settings without adding them to the mode menu', async () => {
+    await act(async () => root.render(createElement(Harness, { initialMode: 'fusion' })));
+    const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
+    expect(workers.querySelectorAll('[data-provider-mark]')).toHaveLength(3);
+    expect(workers.textContent).toContain('Connected tools');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!.click());
+    expect(container.querySelector('[role="menu"]')?.textContent).not.toMatch(/Fusion|Compare plans/);
   });
 
   it('steps from provider to model to dedicated effort with Back navigation', async () => {
@@ -366,14 +455,14 @@ describe('ComposerSelectorFooter', () => {
     const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
     act(() => mode.click());
     const modeText = container.textContent ?? '';
-    for (const option of COMPOSER_SELECTOR_MODES) expect(modeText).toContain(option.long);
-    const comparePlans = COMPOSER_SELECTOR_MODES.find((option) => option.id === 'moa')!;
-    expect(modeText).toContain(comparePlans.long);
-    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes(comparePlans.long))!.click());
-    expect(mode.textContent).toContain(comparePlans.short);
-    expect(mode.getAttribute('aria-label')).toBe(`Mode: ${comparePlans.long}`);
-    expect(mode.title).toContain(comparePlans.long);
+    for (const id of VISIBLE_COMPOSER_SELECTOR_MODES) expect(modeText).toContain(COMPOSER_SELECTOR_MODES.find(option => option.id === id)!.long);
+    const shared = COMPOSER_SELECTOR_MODES.find(option => option.id === 'fast')!;
+    expect(modeText).not.toMatch(/Compare plans|Fusion/);
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+      .find(button => button.textContent?.includes(shared.long))!.click());
+    expect(mode.textContent).toContain(shared.short);
+    expect(mode.getAttribute('aria-label')).toBe(`Mode: ${shared.long}`);
+    expect(mode.title).toContain(shared.long);
   });
 
   it('persists Extra through the real flag-on composer path', async () => {
@@ -496,13 +585,13 @@ describe('ComposerSelectorFooter', () => {
     }
   });
 
-  it('cycles all five modes with Shift+Tab and keeps textarea focus', async () => {
+  it('cycles Solo, Shared and Multitask with Shift+Tab and keeps textarea focus', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const textarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
     textarea.focus();
-    for (const label of ['Multitask', 'Fast', 'MoA', 'Fusion', 'Solo']) {
+    for (const label of ['Shared', 'Multitask', 'Solo']) {
       await act(async () => {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, shiftKey: true, bubbles: true, cancelable: true }));
       });
@@ -540,13 +629,14 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('high');
   });
 
-  it('selecting Fusion leaves effort unchanged', async () => {
+  it('selecting Shared leaves effort unchanged and hides advanced choices', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
     act(() => mode.click());
-    const fusion = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Fusion'))!;
-    act(() => fusion.click());
+    const choices = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    expect(choices.map(button => button.textContent)).toEqual([expect.stringContaining('Solo'), expect.stringContaining('Shared'), expect.stringContaining('Multitask')]);
+    expect(choices.some(button => /Fusion|Compare plans/.test(button.textContent ?? ''))).toBe(false);
+    act(() => choices.find(button => button.textContent?.includes('Shared'))!.click());
     expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toContain('high');
   });
 
@@ -699,7 +789,7 @@ describe('ComposerSelectorFooter', () => {
       .some((button) => button.title.startsWith('5.6 Sol ·'))).toBe(true);
   });
 
-  it('keeps classic mode labels aligned when the top effort and Fusion are picked', async () => {
+  it('keeps classic mode labels aligned when the top effort and Shared are picked', async () => {
     localStorage.setItem('o8:composer-selector-v1', '0');
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
@@ -729,12 +819,12 @@ describe('ComposerSelectorFooter', () => {
 
     const topEffort = container.querySelector('[data-testid="real-composer-effort"]')?.textContent;
     act(() => modeTrigger.click());
-    const fusion = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Fusion')!;
-    act(() => fusion.click());
+    const choices = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    expect(choices.map(button => button.textContent)).toEqual(['Solo', 'Shared', 'Multitask']);
+    act(() => choices.find(button => button.textContent === 'Shared')!.click());
     expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe(topEffort);
-    expect(modelTrigger.title).toContain('Fusion');
-    expect(modeTrigger.getAttribute('aria-label')).toBe('Mode: Fusion');
+    expect(modelTrigger.title).toContain('Shared');
+    expect(modeTrigger.getAttribute('aria-label')).toBe('Mode: Shared');
   });
 
   it('uses the effective default lead for classic Codex Ultra capability', async () => {

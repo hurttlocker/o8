@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import { AutoFlash, HomeSimple } from 'iconoir-react';
+import { AutoFlash } from 'iconoir-react';
 import { CircleUser, Gauge, GitPullRequest, Play, Terminal } from '@/components/desktop/lucide-shims';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
@@ -15,6 +15,7 @@ import { TrafficLightsOrSpacer } from './TrafficLights';
 import { RailMoreMenu } from './RailMoreMenu';
 import { RailActionButton } from './RailActionButton';
 import { RailUpdateControl } from './RailUpdateControl';
+import { SidebarBrand } from './SidebarBrand';
 import { openCustomizeTab, useCustomizeTab } from '../customize/navigation';
 
 const railButton: CSSProperties = {
@@ -127,7 +128,7 @@ export function CompactNavigationRail({
       aria-label="Workspace navigation"
       style={{
         position: 'fixed',
-        top: 44,
+        top: 34.5,
         bottom: 8,
         left: 8,
         width: 56,
@@ -144,7 +145,7 @@ export function CompactNavigationRail({
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <RailActionButton type="button" aria-label="Home" aria-current={activeDestination === 'agents' ? 'page' : undefined} onClick={onHome} style={railButton}><HomeSimple width={20} height={20} strokeWidth={1.8} /></RailActionButton>
+      <RailActionButton type="button" aria-label="Home" tooltipLabel="o8 — Home" aria-current={activeDestination === 'agents' ? 'page' : undefined} onClick={onHome} style={railButton}><SidebarBrand /></RailActionButton>
       <RailActionButton type="button" aria-label="Run orchestrator" onClick={onNewSession} style={railButton}><Play size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Run terminal" onClick={onCreateTerminal} style={railButton}><Terminal size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Canvas mode" onClick={() => window.location.assign('/preview/canvas-glass')} style={railButton}>

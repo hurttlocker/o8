@@ -14,7 +14,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { WorkspaceHistoryControls } from './WorkspaceHistoryControls';
-import { SidebarBrand } from './SidebarBrand';
 import { SidebarHeaderActions } from './SidebarHeaderActions';
 import { useSidebarAttention } from '../repo-focus/tabs/chats/sidebar-view-store';
 import { SidebarTogglePill } from './SidebarTogglePill';
@@ -67,7 +66,7 @@ export function WorkspaceHeaderStrip({
       // columns' hairlines lined up into one faint line across the whole
       // app. The side strips keep theirs.
       bottomHairline={false}
-      style={!sidebarVisible && !leadingInset ? { paddingLeft: 5.5 } : undefined}
+      style={!sidebarVisible && !leadingInset ? { paddingLeft: 3.5 } : undefined}
       left={
         <>
           {/* When this strip is leftmost (sidebar collapsed) it carries the
@@ -78,7 +77,6 @@ export function WorkspaceHeaderStrip({
           {leadingInset ? <TrafficLightsOrSpacer yNudge={1.3} leadInPx={2} /> : null}
           {!sidebarVisible && onToggleSidebar ? (
             <>
-              <SidebarBrand />
               <SidebarTogglePill sidebarVisible={false} attention={sidebarAttention} onClick={onToggleSidebar}
                 onHoverEnter={onSidebarHoverEnter} onHoverLeave={onSidebarHoverLeave} yNudge={0} />
               <SidebarHeaderActions onSearch={onSearch} showPriority={false} />

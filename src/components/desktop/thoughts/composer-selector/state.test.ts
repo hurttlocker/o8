@@ -225,19 +225,22 @@ describe('composer selector state', () => {
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
       adaptiveEnabled: true, workerRuntimeLabel: runtime, workerModelLabel: workerModel,
     });
-    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', fast: 'Fast · shared checkout', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
+    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', fast: 'Shared', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
     expect(resolved.orchestrationMode).toBe(execution);
     expect(resolved.workerRuntimeLabel).toBe(runtime);
     expect(resolved.workerModelLabel).toBe(workerModel);
   });
 
-  it('offers Fast only for leads with the orchestrator delegation tool', () => {
+  it('offers Shared only for compatible leads and cycles the three visible modes', () => {
     expect(composerSupportsFastMode('codex')).toBe(true);
     expect(composerSupportsFastMode('claude')).toBe(true);
     expect(composerSupportsFastMode('fable')).toBe(true);
     expect(composerSupportsFastMode('openclaw')).toBe(false);
-    expect(cycleComposerSelectorMode('multitask', 1, 'openclaw')).toBe('moa');
-    expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('fast');
+    expect(cycleComposerSelectorMode('solo', 1, 'openclaw')).toBe('multitask');
+    expect(cycleComposerSelectorMode('solo', 1, 'codex')).toBe('fast');
+    expect(cycleComposerSelectorMode('fast', 1, 'codex')).toBe('multitask');
+    expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('solo');
+    expect(cycleComposerSelectorMode('fusion', 1, 'codex')).toBe('solo');
     const state = resolveComposerSelectorState({
       mode: 'fast', leadModelId: 'external', leadModelLabel: 'External', leadBackend: 'openclaw',
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'medium', adaptiveEnabled: false,

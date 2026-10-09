@@ -10,6 +10,7 @@ const MAX_BYTES = 512_000;
 export interface ReleaseNotes {
   version: string;
   summary: string;
+  overview?: string;
   entries: Array<{ text: string; date?: string }>;
   source: 'release' | 'changelog';
   publishedAt: string | null;
@@ -41,6 +42,11 @@ function releaseEntries(body: string): ReleaseNotes['entries'] {
   })).filter(entry => entry.text && !/^auto-update artifacts|^see https?:/i.test(entry.text)).slice(0, 20);
 }
 
+function releaseOverview(body: string): string | undefined {
+  const overview = body.match(/^## What’s changed\s*\n\s*\n([^\n]+)\n/m)?.[1]?.trim();
+  return overview && overview.length <= 320 && !/[<>\x00-\x1f]/.test(overview) ? overview : undefined;
+}
+
 function changelogEntries(text: string, publishedAt: string | null): ReleaseNotes['entries'] {
   const entries: ReleaseNotes['entries'] = [];
   const through = publishedAt?.slice(0, 10);
@@ -69,6 +75,7 @@ export async function getReleaseNotes(version: string): Promise<ReleaseNotes> {
       const saved = JSON.parse(await readFile(file, 'utf8')) as Memo;
       const tag = normalizeReleaseVersion(saved.notes?.version ?? '');
       if (tag && tag !== 'latest' && (key === 'latest' || tag === key) && typeof saved.notes.summary === 'string'
+        && (saved.notes.overview === undefined || (typeof saved.notes.overview === 'string' && saved.notes.overview.length <= 320))
         && Array.isArray(saved.notes.entries) && saved.notes.entries.length <= 20
         && saved.notes.entries.every(entry => typeof entry.text === 'string' && entry.text.length <= 600)
         && saved.notes.releaseUrl === `https://github.com/${REPO}/releases/tag/v${tag}`
@@ -82,7 +89,9 @@ export async function getReleaseNotes(version: string): Promise<ReleaseNotes> {
     const tag = normalizeReleaseVersion(release.tag_name ?? '');
     if (!tag || tag === 'latest' || (key !== 'latest' && tag !== key)) throw new Error('Release version could not be verified.');
     const publishedAt = typeof release.published_at === 'string' ? release.published_at : null;
-    let entries = releaseEntries(typeof release.body === 'string' ? release.body : '');
+    const body = typeof release.body === 'string' ? release.body : '';
+    const overview = releaseOverview(body);
+    let entries = releaseEntries(body);
     let source: ReleaseNotes['source'] = 'release';
     if (!entries.length) {
       const changelog = await publicText(`https://raw.githubusercontent.com/${REPO}/main/CHANGELOG.md`).catch(() => '');
@@ -90,7 +99,8 @@ export async function getReleaseNotes(version: string): Promise<ReleaseNotes> {
       source = 'changelog';
     }
     const notes: ReleaseNotes = { version: tag, entries, source, publishedAt,
-      summary: entries.slice(0, 3).map(entry => entry.text).join(' · ') || `o8 ${tag} is published. See the release for details.`,
+      ...(overview ? { overview } : {}),
+      summary: overview ?? (entries.slice(0, 3).map(entry => entry.text).join(' · ') || `o8 ${tag} is published. See the release for details.`),
       releaseUrl: `https://github.com/${REPO}/releases/tag/v${tag}`, cachedAt: new Date().toISOString() };
     const value = { notes, at: Date.now() };
     shared.cache.set(key, value);
