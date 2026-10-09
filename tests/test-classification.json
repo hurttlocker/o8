@@ -1857,6 +1857,12 @@
       ]
     },
     {
+      "path": "tests/contributor-credits.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/control-plane-lock-slow-holder-real-path.test.ts",
       "reasons": [
         "child-process",
