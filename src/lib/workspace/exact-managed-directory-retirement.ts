@@ -1,10 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstatSync, realpathSync } from 'node:fs';
+import { lstat, realpath, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { captureExactDirectoryManifest, purgeExactDirectory, type ExactDirectoryManifest } from './exact-directory-purge';
+import {
+  admitExactManagedFinalization,
+  assertExactManagedFinalizationClaim,
+  completeExactManagedFinalization,
+  readExactManagedFinalization,
+} from './exact-managed-finalization-state';
 import { renameExactChildDirectory } from './exact-parent-operation';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
 import { admitRetirementAuthority, verifyRetirementAuthority, withRetirementAuthorityLock, type ManagedRetirementReason } from './retirement-authority';
@@ -161,6 +168,26 @@ async function finishClaim(
   ));
 }
 
+async function verifyFinalRemovalAuthority(claim: ExactWorkspaceClaimRecord): Promise<void> {
+  const current = assertExactManagedFinalizationClaim(claim);
+  await assertWorktreeMaterializationIdentity(path.dirname(claim.sourcePath), claim.parentIdentity);
+  assertWorkspaceRetentionReleased(claim.sourcePath, sourceIdentity(claim));
+  await verifyRetirementAuthority({
+    authority: current.authority, sourcePath: claim.sourcePath, candidatePath: claim.claimPath,
+    identity: sourceIdentity(claim), verifyContents: false,
+  });
+  if (await directoryIdentity(claim.sourcePath)) {
+    throw new Error('Exact managed retirement source reappeared before final removal.');
+  }
+}
+
+async function assertFinalNamespacesAbsent(claim: ExactWorkspaceClaimRecord): Promise<void> {
+  await assertWorktreeMaterializationIdentity(path.dirname(claim.sourcePath), claim.parentIdentity);
+  if (await directoryIdentity(claim.sourcePath) || await directoryIdentity(claim.claimPath)) {
+    throw new Error('Exact managed retirement namespace reappeared after final removal.');
+  }
+}
+
 async function finishClaimUnlocked(
   initial: ExactWorkspaceClaimRecord,
   beforeRetirementRename?: () => Promise<void>,
@@ -251,7 +278,35 @@ async function finishClaimUnlocked(
     if (!manifest?.fingerprint || !Array.isArray(manifest.entries) || manifest.entries.length === 0) {
       throw new Error('Exact retirement has no durable pre-purge descendant manifest.');
     }
-    await purgeExactDirectory(claim.claimPath, expected, undefined, undefined, undefined, manifest.fingerprint, manifest.entries);
+    await purgeExactDirectory(claim.claimPath, expected, undefined, undefined, async (candidatePath) => {
+      await verifyFinalRemovalAuthority(claim);
+      const emptyClaim = await directoryIdentity(candidatePath);
+      if (!emptyClaim || !sameIdentity(emptyClaim, expected)) {
+        throw new Error('Exact managed retirement final-empty claim ownership changed.');
+      }
+      if ((await readdir(candidatePath)).length !== 0) {
+        throw new Error('Exact parent removal refused a non-empty directory.');
+      }
+      admitExactManagedFinalization(claim);
+    }, manifest.fingerprint, manifest.entries);
+    await verifyFinalRemovalAuthority(claim);
+    await assertFinalNamespacesAbsent(claim);
+    completeExactManagedFinalization(claim, 'removed');
+  } else {
+    const finalization = readExactManagedFinalization(claim);
+    if (!finalization) throw new Error('Exact retirement has no durable final-empty admission.');
+    if (finalization.state !== 'complete') {
+      await verifyFinalRemovalAuthority(claim);
+      await assertFinalNamespacesAbsent(claim);
+      completeExactManagedFinalization(claim, 'absent-after-admission');
+    } else {
+      // Metadata may already be gone after a recorded completion. This path
+      // performs no filesystem mutation, but still verifies the live claim,
+      // parent and hold before the caller can finalize its own metadata.
+      assertExactManagedFinalizationClaim(claim);
+      assertWorkspaceRetentionReleased(claim.sourcePath, expected);
+      await assertFinalNamespacesAbsent(claim);
+    }
   }
 }
 
@@ -273,6 +328,26 @@ export function completeExactManagedDirectoryRetirement(
   if (!claim) return;
   if (claim.state !== 'purging') {
     throw new Error('Exact managed retirement cannot complete before exact purge.');
+  }
+  if (readExactManagedFinalization(claim)?.state !== 'complete') {
+    throw new Error('Exact managed retirement cannot clear its claim without a completion receipt.');
+  }
+  assertWorkspaceRetentionReleased(claim.sourcePath, sourceIdentity(claim));
+  const parentPath = path.dirname(claim.sourcePath);
+  const parent = lstatSync(parentPath);
+  if (!parent.isDirectory() || parent.isSymbolicLink()
+    || parent.dev !== claim.parentIdentity.device || parent.ino !== claim.parentIdentity.inode
+    || realpathSync(parentPath) !== claim.parentIdentity.canonicalPath) {
+    throw new Error('Exact retirement completion parent ownership changed.');
+  }
+  for (const candidatePath of [claim.sourcePath, claim.claimPath]) {
+    try {
+      lstatSync(candidatePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    throw new Error('Exact retirement cannot complete while a retirement namespace exists.');
   }
   removeExactWorkspaceClaim('managed-retirement', repositoryPath, worktreeId, claim.operationId);
 }
