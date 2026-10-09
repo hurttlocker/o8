@@ -6,7 +6,7 @@
  * confinement is unavailable they still run, and the merge card says so.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +31,7 @@ vi.mock('@/lib/sandbox/confine', async (importOriginal) => {
 });
 
 const { runLaneRebaseVerify } = await import('@/lib/lane/rebase-verify');
+const { runConfinedProcess } = await import('@/lib/sandbox/run-confined');
 const { UNCONFINED_LINT_NOTE } = await import('@/lib/lane/rebase-lint');
 const { UNCONFINED_TESTS_NOTE } = await import('@/lib/lane/rebase-tests');
 
@@ -99,7 +100,7 @@ async function listenSocket(dir: string): Promise<{ server: Server; path: string
 
 const verify = (cwd: string) => runLaneRebaseVerify({ cwd, baseRef: 'main', actualBranch: 'packet/confined', logPrefix: 'test' });
 
-beforeAll(() => { if (process.platform === 'linux') buildPiWriteHelper(); }, 600_000);
+beforeAll(() => { if (confinable) buildPiWriteHelper(); }, 600_000);
 
 afterEach(() => {
   confinement.unavailable = false;
@@ -107,6 +108,43 @@ afterEach(() => {
 });
 
 describe('merge-gate lint and test replay confinement (#3414)', () => {
+  it.runIf(process.platform === 'darwin')('fails promptly when a lost supervisor leaves an output pipe open', async () => {
+    const lane = makeDir('lost-supervisor');
+    const run = runConfinedProcess(lane, '/usr/bin/perl', ['-e',
+      'open(my $f, q(>), q(lost.pid)); print $f $$; close $f; kill 9, getppid(); sleep 30'],
+    { cwd: lane, timeout: 10_000, maxBuffer: 50_000 }).catch(error => error as Error);
+    let pid = 0;
+    try {
+      await vi.waitFor(() => { pid = Number(readFileSync(join(lane, 'lost.pid'), 'utf8')); }, { timeout: 10_000 });
+      const outcome = await Promise.race([run, new Promise<null>(resolve => setTimeout(() => resolve(null), 2_500))]);
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as Error).message).toContain('could not be confirmed stopped');
+    } finally {
+      if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* Gone. */ } }
+      await run;
+    }
+  }, 20000);
+
+  it.runIf(process.platform === 'darwin')('ends escaped children from lane lint and test replay before returning', async () => {
+    const lane = makeLane(makeDir('outside'));
+    const orphan = (name: string) => `require('node:child_process').execFileSync('/usr/bin/perl', ['-MPOSIX', '-e', '$p=fork(); die unless defined $p; if ($p) { select undef, undef, undef, 0.15; exit; } $SIG{TERM}=q(IGNORE); POSIX::setsid(); open(my $f, q(>), q(${name}.pid)); print $f $$; close $f; sleep 30'], { stdio: 'ignore' });\n`;
+    writeFileSync(join(lane, 'eslint.config.cjs'), `${orphan('lint')}module.exports = [{ files: ['**/*.js'], rules: {} }];\n`);
+    writeFileSync(join(lane, 'replay.cjs'), orphan('tests'));
+    const pids: number[] = [];
+    try {
+      expect((await verify(lane)).ok).toBe(true);
+      for (const name of ['lint', 'tests']) {
+        const pid = Number(readFileSync(join(lane, `${name}.pid`), 'utf8')); pids.push(pid);
+        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' })), { timeout: 2_000 });
+      }
+    } finally {
+      for (const name of ['lint', 'tests']) {
+        if (existsSync(join(lane, `${name}.pid`))) pids.push(Number(readFileSync(join(lane, `${name}.pid`), 'utf8')));
+      }
+      for (const pid of new Set(pids)) { try { process.kill(pid, 'SIGKILL'); } catch { /* Gone. */ } }
+    }
+  }, 120_000);
+
   it.runIf(confinable)('runs the lane lint config and test script confined to the lane checkout', async () => {
     const outside = makeDir('outside');
     const host = await listenSocket(makeShortDir());
