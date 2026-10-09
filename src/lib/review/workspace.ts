@@ -8,10 +8,10 @@ import type {
   ReviewChangedFile,
   ReviewIssueSummary,
   ReviewPullRequestSummary,
-  ReviewWorktreeSummary,
   WorkflowReviewSnapshot,
 } from '@/lib/fleet/types';
 import { parseRecentCommits } from '@/lib/git/recent-commits';
+import { parseWorktrees } from './worktrees';
 import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
@@ -517,48 +517,6 @@ async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: 
   } satisfies MobileReviewFileDetail;
 }
 
-function parseWorktrees(raw: string, currentRoot = REVIEW_REPO_ROOT) {
-  const worktrees: ReviewWorktreeSummary[] = [];
-  const records = raw
-    .split(/\n\s*\n/g)
-    .map((block) => block.trim())
-    .filter(Boolean);
-
-  for (const record of records) {
-    let worktreePath = '';
-    let branch: string | undefined;
-    let head: string | undefined;
-    let isBare = false;
-    let isDetached = false;
-    let lockedReason: string | undefined;
-    let prunableReason: string | undefined;
-
-    for (const line of record.split('\n')) {
-      if (line.startsWith('worktree ')) worktreePath = line.replace('worktree ', '').trim();
-      if (line.startsWith('branch ')) branch = line.replace('branch refs/heads/', '').trim();
-      if (line.startsWith('HEAD ')) head = line.replace('HEAD ', '').trim().slice(0, 7);
-      if (line === 'bare') isBare = true;
-      if (line === 'detached') isDetached = true;
-      if (line.startsWith('locked')) lockedReason = line.replace(/^locked\s*/, '').trim() || 'locked';
-      if (line.startsWith('prunable')) prunableReason = line.replace(/^prunable\s*/, '').trim() || 'prunable';
-    }
-
-    if (!worktreePath) continue;
-
-    worktrees.push({
-      path: shortenPath(worktreePath),
-      branch,
-      head,
-      isCurrent: path.resolve(worktreePath) === path.resolve(currentRoot),
-      isBare,
-      isDetached,
-      lockedReason,
-      prunableReason,
-    });
-  }
-
-  return worktrees;
-}
 
 export async function getReviewFileDetail(reviewPath: string): Promise<MobileReviewFileDetail> {
   const changedFiles = await getCachedChangedFiles();

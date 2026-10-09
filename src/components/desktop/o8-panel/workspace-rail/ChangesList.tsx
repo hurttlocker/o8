@@ -13,7 +13,7 @@ import {
   FileTsx,
 } from '@phosphor-icons/react';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
-import type { ReviewChangedFile } from '@/lib/fleet/types';
+import type { ReviewChangedFile, ReviewWorktreeSummary } from '@/lib/fleet/types';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -22,6 +22,7 @@ interface WorkspaceReviewResponse {
   changedFiles?: ReviewChangedFile[];
   branch?: string;
   repoSlug?: string;
+  worktrees?: ReviewWorktreeSummary[];
 }
 
 export interface WorkspaceChangesState {
@@ -36,6 +37,7 @@ export interface WorkspaceChangesState {
   dirtyFileSet: Set<string>;
   branch: string | null;
   repoSlug: string | null;
+  worktrees?: ReviewWorktreeSummary[];
   repoPath?: string | null;
   source?: 'local' | 'lane';
   sourceLabel?: string | null;
@@ -85,6 +87,7 @@ interface WorkspaceChangesSnapshot {
   error: string | null;
   branch: string | null;
   repoSlug: string | null;
+  worktrees: ReviewWorktreeSummary[];
 }
 
 interface WorkspaceChangesController {
@@ -100,6 +103,7 @@ const EMPTY_WORKSPACE_CHANGES_SNAPSHOT: WorkspaceChangesSnapshot = {
   error: null,
   branch: null,
   repoSlug: null,
+  worktrees: [],
 };
 const workspaceChangesControllers = new Map<string, WorkspaceChangesController>();
 const activeWorkspaceChangesControllers = new Map<WorkspaceChangesController, number>();
@@ -187,6 +191,7 @@ function getWorkspaceChangesController(repoPath: string): WorkspaceChangesContro
             error: null,
             branch: typeof data.branch === 'string' ? data.branch : null,
             repoSlug: typeof data.repoSlug === 'string' ? data.repoSlug : null,
+            worktrees: Array.isArray(data.worktrees) ? data.worktrees : [],
           });
         } catch (err) {
           setSnapshot({
@@ -195,6 +200,7 @@ function getWorkspaceChangesController(repoPath: string): WorkspaceChangesContro
             error: err instanceof Error ? err.message : 'Unable to load workspace changes',
             branch: null,
             repoSlug: null,
+            worktrees: [],
           });
         } finally {
           inFlight = null;
@@ -253,6 +259,7 @@ export function useWorkspaceChanges(repoPath?: string | null, { active = true }:
     dirtyFileSet,
     branch: snapshot.branch,
     repoSlug: snapshot.repoSlug,
+    worktrees: snapshot.worktrees,
     repoPath: controller ? repoPath : null,
     source: 'local',
     sourceLabel: 'Local changes',
