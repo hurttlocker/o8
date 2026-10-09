@@ -4134,6 +4134,12 @@
       ]
     },
     {
+      "path": "tests/symon-brain-o8-commands-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-conversations-api-real-path.test.ts",
       "reasons": [
         "real-path"
