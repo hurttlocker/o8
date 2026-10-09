@@ -55,6 +55,14 @@ export async function POST(request: NextRequest) {
     if (result.state === 'done' || result.state === 'error') {
       bindSymonTextEffectiveModel(sessionId, result.result?.model, result.result?.effort);
     }
+    // A native answer is recorded into the brain's thread for the Symon tab. Best effort.
+    if (result.state === 'done' && result.result?.status === 'done' && typeof result.result.text === 'string'
+      && result.result.text.trim() && typeof body?.text === 'string' && body.text.trim()) {
+      const exchange = [{ role: 'user' as const, text: body.text }, { role: 'assistant' as const, text: result.result.text }];
+      void getSymonBrain()
+        .then((brain) => brain.record({ key: `phone:${sessionId}`, source: 'phone', title: 'Phone', requestId: `relay:phone:${turnId}`, entries: exchange }))
+        .catch(() => {});
+    }
     return NextResponse.json({ ok: result.state !== 'error', ...result });
   } catch (error) {
     return NextResponse.json({
