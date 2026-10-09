@@ -1,16 +1,14 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { laneGit, laneGitSync, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import { resolveLaneReviewTarget } from '@/lib/lane/review-target';
 import type { Lane } from '@/lib/lane/types';
 
-const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 32 * 1024 * 1024;
 
 export interface LaneDiffFacts {
@@ -141,22 +139,16 @@ export function parseNameStatus(output: string): LaneFileChange[] {
   return changes;
 }
 
-function readGitOutput(cwd: string, args: string[]): string {
-  return execFileSync('git', args, {
-    windowsHide: true,
-    cwd,
+function readGitOutput(cwd: string, repoPath: string, args: string[]): string {
+  return laneGitSync(cwd, repoPath, args, {
     timeout: 10_000,
-    encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
   }).trim();
 }
 
-async function readGitOutputAsync(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    windowsHide: true,
-    cwd,
+async function readGitOutputAsync(cwd: string, repoPath: string, args: string[]): Promise<string> {
+  const { stdout } = await laneGit(cwd, repoPath, args, {
     timeout: 10_000,
-    encoding: 'utf-8',
     maxBuffer: COMMAND_MAX_BUFFER,
   });
   return stdout;
@@ -169,41 +161,34 @@ function parseUntrackedFiles(output: string): LaneFileChange[] {
     .map((path) => ({ path, status: 'untracked' as const }));
 }
 
-async function hashUntrackedFiles(cwd: string, paths: string[]): Promise<string[]> {
+async function hashUntrackedFiles(cwd: string, repoPath: string, paths: string[]): Promise<string[]> {
   if (paths.length > 500) {
     throw new Error(`Spoken review refused ${paths.length} untracked files; clean or commit the worktree first.`);
   }
   const hashes: string[] = [];
   for (const path of paths) {
-    const hash = await readGitOutputAsync(cwd, ['hash-object', '--no-filters', '--', path]);
+    const hash = await readGitOutputAsync(cwd, repoPath, ['hash-object', '--no-filters', '--', path]);
     hashes.push(`${path}\0${hash.trim()}`);
   }
   return hashes;
 }
 
-async function readWorktreeTreeHash(cwd: string): Promise<string> {
+async function readWorktreeTreeHash(cwd: string, repoPath: string): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), 'o8-spoken-review-index-'));
   const indexPath = join(tempDir, 'index');
-  const env = { ...process.env, GIT_INDEX_FILE: indexPath };
   try {
-    await execFileAsync('git', ['read-tree', 'HEAD'], {
-      windowsHide: true,
-      cwd,
-      env,
+    await laneGit(cwd, repoPath, ['read-tree', 'HEAD'], {
+      indexFile: indexPath,
       timeout: 10_000,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
-    await execFileAsync('git', ['add', '-A', '--', '.'], {
-      windowsHide: true,
-      cwd,
-      env,
+    await laneGit(cwd, repoPath, ['add', '-A', '--', '.'], {
+      indexFile: indexPath,
       timeout: 10_000,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
-    const { stdout } = await execFileAsync('git', ['write-tree'], {
-      windowsHide: true,
-      cwd,
-      env,
+    const { stdout } = await laneGit(cwd, repoPath, ['write-tree'], {
+      indexFile: indexPath,
       timeout: 10_000,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
@@ -237,32 +222,33 @@ export function spokenReviewSnapshotFingerprint(
  */
 export async function getLaneSpokenDiffFacts(lane: Lane): Promise<LaneSpokenDiffFacts> {
   const cwd = resolveLaneReviewTarget(lane).cwd;
+  const repoPath = lane.repoPath;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const headSha = await readHeadSha(cwd);
-    const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha);
+    const headSha = await readHeadSha(cwd, repoPath);
+    const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha, (args) => laneGit(cwd, repoPath, args));
     const against = diffBase.mergeBase ?? diffBase.comparisonRef;
     const [stat, diff, nameStatus, dirtyNameOnly, untracked, snapshotTreeHash] = await Promise.all([
-      readGitOutputAsync(cwd, ['diff', '--stat', against]),
-      readGitOutputAsync(cwd, ['diff', against, '--no-color', '-U2']),
-      readGitOutputAsync(cwd, ['diff', '--name-status', '-z', '--find-renames', against]),
-      readGitOutputAsync(cwd, ['diff', '--name-only', '-z', 'HEAD']),
-      readGitOutputAsync(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
-      readWorktreeTreeHash(cwd),
+      readGitOutputAsync(cwd, repoPath, ['diff', '--stat', against]),
+      readGitOutputAsync(cwd, repoPath, ['diff', against, '--no-color', '-U2']),
+      readGitOutputAsync(cwd, repoPath, ['diff', '--name-status', '-z', '--find-renames', against]),
+      readGitOutputAsync(cwd, repoPath, ['diff', '--name-only', '-z', 'HEAD']),
+      readGitOutputAsync(cwd, repoPath, ['ls-files', '--others', '--exclude-standard', '-z']),
+      readWorktreeTreeHash(cwd, repoPath),
     ]);
     const untrackedFiles = untracked.split('\0').filter(Boolean);
-    const untrackedHashes = await hashUntrackedFiles(cwd, untrackedFiles);
-    const currentHeadSha = await readHeadSha(cwd);
+    const untrackedHashes = await hashUntrackedFiles(cwd, repoPath, untrackedFiles);
+    const currentHeadSha = await readHeadSha(cwd, repoPath);
     if (currentHeadSha !== headSha) continue;
 
     const [currentDiff, currentNameStatus, currentDirtyNameOnly, currentUntracked, currentSnapshotTreeHash] = await Promise.all([
-      readGitOutputAsync(cwd, ['diff', against, '--no-color', '-U2']),
-      readGitOutputAsync(cwd, ['diff', '--name-status', '-z', '--find-renames', against]),
-      readGitOutputAsync(cwd, ['diff', '--name-only', '-z', 'HEAD']),
-      readGitOutputAsync(cwd, ['ls-files', '--others', '--exclude-standard', '-z']),
-      readWorktreeTreeHash(cwd),
+      readGitOutputAsync(cwd, repoPath, ['diff', against, '--no-color', '-U2']),
+      readGitOutputAsync(cwd, repoPath, ['diff', '--name-status', '-z', '--find-renames', against]),
+      readGitOutputAsync(cwd, repoPath, ['diff', '--name-only', '-z', 'HEAD']),
+      readGitOutputAsync(cwd, repoPath, ['ls-files', '--others', '--exclude-standard', '-z']),
+      readWorktreeTreeHash(cwd, repoPath),
     ]);
     const currentUntrackedFiles = currentUntracked.split('\0').filter(Boolean);
-    const currentUntrackedHashes = await hashUntrackedFiles(cwd, currentUntrackedFiles);
+    const currentUntrackedHashes = await hashUntrackedFiles(cwd, repoPath, currentUntrackedFiles);
     if (
       currentDiff !== diff
       || currentNameStatus !== nameStatus
@@ -297,13 +283,15 @@ export async function getLaneSpokenDiffFacts(lane: Lane): Promise<LaneSpokenDiff
   throw new Error('Worktree HEAD moved while computing spoken review evidence. Retry the review.');
 }
 
-function readGitOutputWithFallback(cwd: string, primaryArgs: string[], fallbackArgs: string[]): string {
+function readGitOutputWithFallback(cwd: string, repoPath: string, primaryArgs: string[], fallbackArgs: string[]): string {
   try {
-    return readGitOutput(cwd, primaryArgs);
-  } catch {
+    return readGitOutput(cwd, repoPath, primaryArgs);
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     try {
-      return readGitOutput(cwd, fallbackArgs);
-    } catch {
+      return readGitOutput(cwd, repoPath, fallbackArgs);
+    } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
       return '';
     }
   }
@@ -314,6 +302,7 @@ export function getLaneDiffFacts(
   comparisonRef?: string,
 ): LaneDiffFacts {
   const cwd = lane.worktreePath || lane.repoPath;
+  const repoPath = lane.repoPath;
   if (!cwd) {
     throw new Error('Lane has no repository path for diff facts.');
   }
@@ -322,25 +311,29 @@ export function getLaneDiffFacts(
   if (!comparisonRef && !baseRef.startsWith('refs/')) {
     const localRef = `refs/heads/${baseRef}`;
     try {
-      readGitOutput(cwd, ['show-ref', '--verify', '--quiet', localRef]);
+      readGitOutput(cwd, repoPath, ['show-ref', '--verify', '--quiet', localRef]);
       baseRef = localRef;
-    } catch {
+    } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
       baseRef = `refs/remotes/origin/${baseRef}`;
     }
   }
   const baseRange = `${baseRef}...HEAD`;
   const stat = readGitOutputWithFallback(
     cwd,
+    repoPath,
     ['diff', '--stat', baseRange],
     ['diff', '--stat', 'HEAD~1'],
   );
   const diff = readGitOutputWithFallback(
     cwd,
+    repoPath,
     ['diff', baseRange, '--no-color', '-U2'],
     ['diff', 'HEAD~1', '--no-color', '-U2'],
   );
   const nameStatus = readGitOutputWithFallback(
     cwd,
+    repoPath,
     ['diff', '--name-status', '-z', baseRange],
     ['diff', '--name-status', '-z', 'HEAD~1'],
   );

@@ -51,6 +51,6 @@ export async function handleTargets(args: Record<string, unknown>): Promise<McpT
     if (optionalString(args, 'rationales') === 'heuristic') qs.set('rationales', 'heuristic');
     return jsonResult(await apiFetch(`/api/panel/targets?${qs.toString()}`));
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }

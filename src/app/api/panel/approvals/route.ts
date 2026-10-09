@@ -167,7 +167,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error('[approvals] Failed to create approval:', error);
       return NextResponse.json(
-        { ok: false, error: error instanceof Error ? error.message : 'Failed to create approval' },
+        { ok: false, error: 'Failed to create approval' },
         { status: 500 },
       );
     }
@@ -487,7 +487,8 @@ export async function POST(request: NextRequest) {
         decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
       } catch (error) {
         continuationOutcome = 'outcome_unknown';
-        decisionNote = `Plan dispatch failed: ${error instanceof Error ? error.message : 'unknown'}`;
+        console.error('[approvals] Plan dispatch failed:', error);
+        decisionNote = 'Plan dispatch failed.';
       }
     } else if (continuation?.kind === 'runtime' && action === 'approve') {
       // Runtime continuation — launch or resume the session
@@ -553,9 +554,10 @@ export async function POST(request: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
+    console.error('[api] panel/approvals failed:', error);
     return NextResponse.json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Unable to resolve approval',
+      error: 'Unable to resolve approval',
     }, {
       status: 500,
       headers: { 'Cache-Control': 'no-store, max-age=0' },

@@ -72,8 +72,11 @@ export async function runReviewChatContinuation(
       }
     }, { threadId: expected.threadId, model: expected.model, thinkingEffort: expected.effort,
       permissionMode: 'full', signal: controller.signal,
-      crashSurvival: { backend: expected.backend as 'codex' | 'claude', threadId: expected.threadId,
-        assistantMessageId, assistantStartedAtMs: startedAt, model: expected.model } }, expected.mode);
+      // Only the Codex and Claude subprocesses keep a crash record; Pi resumes from its own session file.
+      ...((expected.backend === 'codex' || expected.backend === 'claude') ? {
+        crashSurvival: { backend: expected.backend, threadId: expected.threadId,
+          assistantMessageId, assistantStartedAtMs: startedAt, model: expected.model },
+      } : {}) }, expected.mode);
   } catch (error) {
     hooks.publish(backend.peekSession(lane.repoPath, undefined, expected.threadId)?.sessionName ?? '', controller.signal.aborted ? 'status' : 'error', controller.signal.aborted
       ? { ...data, status: 'stopped' } : { ...data, error: 'The bound review continuation failed. Inspect the originating chat and packet before retrying.' });

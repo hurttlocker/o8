@@ -2,9 +2,9 @@
 
 This began as an opt-in server-side prototype under issue #3230. Since #3258 it
 backs the `pi` orchestrator backend (see "Orchestrator" below), offered in the
-composer under Customize leads as a preview. It is not the default, not a worker
-runtime yet, and not part of native first-run acceptance. Existing external Pi
-RPC behavior is unchanged.
+composer under Customize leads as a preview, and the `pi-builtin` packet worker
+runtime (see "Worker" below). Neither is the default, and neither is part of
+native first-run acceptance. The external Pi CLI runtime (`pi`) is unchanged.
 
 ## Entry point and ownership
 
@@ -67,14 +67,21 @@ Ending a command depends on the platform:
   seccomp policy that denies them). It writes a receipt on a separate descriptor that
   the command never sees. A missing or unconfirmed receipt fails the call and
   refuses later commands and writes until o8 restarts.
-- macOS has no subreaper. The host reads the process table every 250 ms while a
-  command runs and tracks the process group and every descendant by pid and
-  start time. Reads may overlap; a result older than the last one applied is
-  dropped. Once a read shows the group empty, its number is no longer used to
-  adopt processes, because it may have been reused. The timeout, the output
-  cap, Stop and a normal exit each send TERM, then KILL on a fixed schedule. If
-  the table cannot be read, the group still gets TERM and KILL, the call fails,
-  and later commands and writes are refused until o8 restarts.
+- macOS uses the same native supervisor (#3358), with kqueue `EVFILT_PROC`
+  watches for `NOTE_FORK`, `NOTE_EXEC` and `NOTE_EXIT`. A fork event triggers
+  `proc_listchildpids` and immediate recursive registration of new descendants.
+  The initial command waits behind a pipe until its watch is installed. The
+  supervisor also watches the host's exit and TERM, INT and HUP signals.
+  Teardown sends TERM to tracked processes, waits 1.5 seconds, then sends KILL
+  for up to 5 seconds. Exit events confirm teardown. A process that exits as it
+  is registered counts as ended when kqueue refuses it with ESRCH, when
+  `kill(pid, 0)` reports ESRCH, or when it is a zombie; it can no longer fork. Setup
+  failure refuses the command before launch with a receipt. A missing helper
+  fails closed, and missing or unconfirmed receipts refuse later commands and
+  writes until restart. Lane lint and test replay use this supervisor too;
+  the `sandbox-exec` confinement prefix runs inside it, after `supervise`. A
+  source checkout that has not built the helper keeps that prefix for lane lint
+  and test replay, without descendant teardown.
 
 Pi runs tool calls from one message in parallel by default. The host runs one
 tool call at a time per session, and one command or write commit at a time
@@ -83,12 +90,12 @@ while an approved write commits. Stop ends a call that is still waiting for its
 turn without running it.
 
 Known limits: approval is the boundary, not a sandbox. An approved command can
-read anything the user can, including files under `HOME`. On macOS, tracking
-comes from process-table snapshots, so a descendant that moves to a new process
-group and outlives its parent can be missed: when it leaves and is reparented
-between two reads, when a read that saw it is dropped as older than teardown's
-read, or when a scan taken around a fork shows the group empty. A missed process
-keeps running after the tool call. On Linux, a process stuck in uninterruptible
+read anything the user can, including files under `HOME`. macOS has no
+subreaper: a parent that forks and exits before its fork event is handled can
+leave an unregistered child reparented to launchd. That child can keep running
+after the tool call, even when the receipt confirms every tracked exit.
+Signals check process start times, but macOS has no pidfd to pin signal delivery
+against reuse between that check and `kill`. On either platform, a process stuck in uninterruptible
 sleep past the 5-second KILL deadline leaves the receipt unconfirmed, which
 refuses later commands and writes. Work handed over IPC to a service outside
 the tree (systemd, an already running daemon) is not ended. After exit, the host
@@ -99,11 +106,9 @@ processes writing the same workspace.
 `tests/pi-sdk-command-real-path.test.ts` covers inbox approval and rejection,
 denial, policy block and operator allow, the working directory, a swapped root,
 the environment, timeout, the output cap (including output that fills it
-exactly), Stop, a TERM-ignoring child in its own group, a late process-table read, a
-reused group number, an unreadable process table, ordering against approved
+exactly), Stop, a TERM-ignoring child in its own group, ordering against approved
 writes in the same and another session, and Stop while waiting for the lock.
-The process-table cases run on macOS only. On Linux, the supervisor cases cover
-an orphaned TERM-ignoring child in its own session at exit, timeout and Stop,
+The supervisor cases cover an orphaned TERM-ignoring child in its own session at exit, timeout and Stop on both platforms,
 the host's death, a host that is gone before launch, and a supervisor that ends
 without a receipt.
 
@@ -162,6 +167,73 @@ scripted model: command help, a real operator command, an unknown command, an
 approved write, resume in a new backend, the used-up allowance message, Stop
 followed by a new message, a read-only plan turn, an overlapping message, shutdown
 while Pi is starting, idle close, and a transport error that must not reach Pi.
+
+## Worker
+
+`src/lib/runtimes/pi-builtin.ts` registers bundled Pi as the `pi-builtin` worker
+runtime, labeled "Pi (built-in)" in the runtime catalog, so it appears in the
+dispatch runtime options. It is a separate runtime from the external `pi` CLI and
+is not the default dispatch runtime. Its owned-session store is
+`src/lib/pi-builtin/owned.ts`, with session keys `pi-builtin-owned:<id>`.
+
+A packet dispatched to it gets a managed worktree like any other worker. Each
+turn starts one Pi process with that worktree as its workspace, on the managed
+model route, and closes the process when the turn settles. A follow-up turn
+starts a new process on the newest session file, so the conversation continues.
+Session metadata, run logs and Pi's state live in
+`<data dir>/owned-pi-builtin/<id>/`, outside the workspace. The worker process
+gets no credential. The requested model does not change the route: the session
+records the one managed model.
+
+The orchestrator and the packet worker both run on `O8_MANAGED_PI_MODEL`
+(`openai/gpt-6-luna`, `src/lib/pi/sdk/live-contract.ts`). The hosted endpoint
+forwards it to OpenAI on paid plans and replaces it with its free model on the
+free plan. Its Chat Completions accepts tools only with reasoning effort `none`,
+which the endpoint sets, so Pi sends no reasoning field.
+
+Lane rules govern a packet worker (`src/lib/pi/sdk/lane-approval.ts`). Inside
+its lane worktree, `write_file` and `run_command` get no per-call inbox approval,
+as for every other worker. The command policy still runs first, so a blocked
+command never starts. A call is allowed only while the lane is open and still
+bound to the session's workspace, and a write path must resolve inside it. That
+lane authority is a separate, mandatory check: the host repeats it inside the
+host-wide lock immediately before a write commits or a command starts, whatever
+approval or an operator policy rule said, so a call approved or queued earlier
+cannot outlive its lane. Review and merge stay the gate. A launch without a lane
+keeps per-call inbox approval. A read-only packet is supported and gets
+`read_file` only. The orchestrator backend keeps inbox approval for its own
+writes and commands.
+
+A turn is owned from before its Pi process starts until it settles. Stop during
+startup marks the turn stopped; before sending the prompt, the turn checks that
+it is still the session's current run and was not stopped, and otherwise closes
+the process and settles once. Discovery during startup leaves the turn running.
+
+When a turn settles, the store records a `runtime_process_exit` lane event whose
+classification follows the turn outcome, and a clean finish posts the
+supervisor completion signal, as other owned workers do. The adapter advertises
+discovery, transcript, launch, resume, interrupt and review diffs. It does not
+advertise cost telemetry, because usage counts against the plan or the free
+allowance, or streaming, because the transcript is written per finished message
+and per tool call. Stop aborts the running turn and closes its process; the next
+message resumes the session. A turn cannot be steered while it runs. Per-turn
+limits are 40 model calls, 80 tool calls and 30 minutes.
+
+Readiness needs a supported platform, Node 22.19 or newer, the worker script and
+the approved-write helper. No install or sign-in is needed; entitlement is
+checked on each model call.
+
+`tests/pi-builtin-worker-real-path.test.ts` drives the real delegate route with
+a scripted model behind the managed transport: lane, managed worktree, Pi
+writing and committing in the worktree with no inbox approval, a policy-blocked
+command that never runs, the transcript, discovery, the completion receipt and
+supervisor push, review, merge preview and merge. It also covers Stop, resume on
+the same session file, inbox approval for a launch without a lane, lane rules
+ending with the lane, and an impossible workspace refused before any process
+starts. Regression cases cover an approved write that waited on the host lock
+while its lane was archived, a command on an archived lane whose approval an
+operator rule lifted, Stop and discovery while Pi is still starting, and a
+read-only packet through the delegate route.
 
 ## Managed inference boundary
 

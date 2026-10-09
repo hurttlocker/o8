@@ -73,6 +73,71 @@ afterEach(() => {
 });
 
 describe('packaging preflight through real filesystem and script entry points', () => {
+  it.each(['missing', 'existing', 'repo-denied', 'releases-denied', 'limited', 'ambiguous', 'wrong-tag', 'invalid-json'] as const)(
+    'checks release absence through the actual preflight with REST response %s', (scenario) => {
+      const f = fixture();
+      mkdirSync(join(f.root, '.tauri'));
+      writeFileSync(join(f.root, '.tauri/cortex-ide.key'), 'fixture-key');
+      writeFileSync(join(f.root, 'o8.release.json'), JSON.stringify({
+        clerkPublishableKey: 'pk_test_synthetic', githubOAuthClientId: 'synthetic',
+        sentryDsn: 'https://synthetic@example.invalid/1',
+      }));
+      const log = join(f.root, 'preflight-calls.jsonl');
+      const childProcess = `import { appendFileSync } from 'node:fs';
+export function spawnSync(command, args) {
+  appendFileSync(process.env.O8_PREFLIGHT_TEST_LOG, JSON.stringify({command, args}) + '\\n');
+  const ok = stdout => ({ status: 0, stdout, stderr: '' });
+  const fail = stderr => ({ status: 1, stdout: '', stderr });
+  const scenario = process.env.O8_PREFLIGHT_TEST_SCENARIO;
+  if (command === 'git') {
+    if (args[0] === 'rev-parse' || args[0] === 'rev-list') return ok('a'.repeat(40));
+    if (args[0] === 'ls-remote') return ok('a'.repeat(40) + '\\trefs/tags/v0.1.742');
+    if (args[0] === 'remote') return ok('https://github.com/example/release-repo.git');
+    return ok('');
+  }
+  if (command === 'gh') {
+    if (args[0] === '--version') return ok('fixture-version');
+    if (args[0] !== 'api') return fail('GraphQL: API rate limit already exceeded');
+    if (args[1] === 'repos/example/release-repo') {
+      return scenario === 'repo-denied' ? fail('gh: Not Found (HTTP 404)')
+        : ok(JSON.stringify({ full_name: 'example/release-repo' }));
+    }
+    if (args[1] === 'repos/example/release-repo/releases?per_page=1') {
+      return scenario === 'releases-denied' ? fail('gh: Not Found (HTTP 404)') : ok('[]');
+    }
+    if (args[1] !== 'repos/example/release-repo/releases/tags/v0.1.742') throw new Error('unexpected endpoint');
+    if (scenario === 'limited') return fail('gh: rate limit exceeded (HTTP 403)');
+    if (scenario === 'ambiguous') return fail('connection not found');
+    if (scenario === 'existing') return ok(JSON.stringify({ tag_name: 'v0.1.742' }));
+    if (scenario === 'wrong-tag') return ok(JSON.stringify({ tag_name: 'v0.1.741' }));
+    if (scenario === 'invalid-json') return ok('not-json');
+    return fail('gh: Not Found (HTTP 404)');
+  }
+  return ok(command === 'ps' ? '' : 'fixture-version');
+}`;
+      writeFileSync(join(f.root, 'preflight-loader.mjs'), `export async function load(url, context, nextLoad) {
+  return url === 'node:child_process' ? { format: 'module', shortCircuit: true, source: ${JSON.stringify(childProcess)} } : nextLoad(url, context);
+}`);
+      writeFileSync(join(f.root, 'preflight-register.mjs'), "import { register } from 'node:module'; register(new URL('./preflight-loader.mjs', import.meta.url));");
+      const result = spawnSync(process.execPath, ['--import', join(f.root, 'preflight-register.mjs'), join(sourceRoot, 'scripts/ship-preflight.mjs')], {
+        cwd: f.root, encoding: 'utf8', timeout: 10_000,
+        env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: f.root,
+          APPLE_SIGNING_IDENTITY: 'fixture', APPLE_ID: 'fixture', APPLE_PASSWORD: 'fixture', APPLE_TEAM_ID: 'fixture',
+          O8_RELEASE_MIN_FREE_GIB: '0.001', O8_PREFLIGHT_TEST_LOG: log, O8_PREFLIGHT_TEST_SCENARIO: scenario },
+      });
+      const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { command: string; args: string[] });
+      const github = calls.filter(call => call.command === 'gh' && call.args[0] !== '--version');
+      expect(github.every(call => call.args[0] === 'api'), result.stderr).toBe(true);
+      expect(github[0]?.args[1]).toBe('repos/example/release-repo');
+      expect(github.length).toBe(scenario === 'repo-denied' ? 1 : scenario === 'releases-denied' ? 2 : 3);
+      expect(result.status, result.stderr).toBe(scenario === 'missing' ? 0 : 1);
+      if (scenario === 'missing') expect(result.stdout).toContain('preflight passed for v0.1.742');
+      else expect(result.stderr).toMatch(/could not verify|already exists|invalid.*release/i);
+      expect(calls.some(call => ['npm', 'cargo', 'codesign', 'xcrun'].includes(call.command)
+        && !call.args.includes('--version'))).toBe(false);
+    },
+  );
+
   it('keeps development startup from rewriting repository-authored agent instructions', () => {
     expect(nextConfig.agentRules).toBe(false);
   });

@@ -9005,6 +9005,10 @@ pub fn run() {
         .build({ boot_trace("builder chain constructed (plugins registered, not yet init)"); context })
         .expect("error while building Cortex IDE")
         .run(move |_app_handle, event| match event {
+            // Auxiliary windows can keep has_visible_windows true while main
+            // is hidden. Every Dock reopen restores the existing main window.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_desktop_window(_app_handle),
             // Finder "Open With → o8" / dock drop (file:// URLs) AND the auth
             // deep-link handoff (o8://auth/callback?...). macOS delivers both
             // through Opened; we partition by scheme. Buffer for cold launch
