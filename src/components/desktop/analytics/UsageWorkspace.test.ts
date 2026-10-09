@@ -45,7 +45,7 @@ it('opens real workspace usage, renders both accounts, switches to recorded acti
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/panel/analytics'))).toBe(true);
     await act(async () => limits.click()); await settle();
     fail = true;
-    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh usage')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Refresh usage"]')!.click());
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/runtime/capacity?fresh=1');
     expect(host.textContent).toContain('Previous observations remain visible');
     expect(host.querySelector('[aria-label="Claude usage"]')?.textContent).toContain('15% used');

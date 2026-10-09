@@ -1,46 +1,75 @@
 'use client';
-
 import { lazy, Suspense, useState } from 'react';
 import { RuntimeUsageSummary } from './RuntimeUsageSummary';
 import { useRuntimeUsage } from './use-runtime-usage';
+import { useUsageHistory } from './use-usage-history';
+import { UsageControl } from './UsageControl';
+import { UsageHistoryPanel } from './UsageHistoryPanel';
+import { providers } from './history-view';
+import type { UsageProviderKind } from '@/lib/usage/history-types';
 
 const AnalyticsPage = lazy(() => import('../AnalyticsPage'));
-
+const views = ['cost', 'tokens', 'limits', 'activity'] as const;
 export function UsageWorkspace({ active = true }: { active?: boolean }) {
-  const [view, setView] = useState<'limits' | 'activity'>('limits');
-  const { snapshot, loading, error, refresh } = useRuntimeUsage(active && view === 'limits');
+  const [view, setView] = useState<typeof views[number]>('limits');
+  const [days, setDays] = useState<1 | 7 | 30 | 90>(30);
+  const [provider, setProvider] = useState<UsageProviderKind | 'all'>('all');
+  const capacity = useRuntimeUsage(active && view === 'limits');
+  const history = useUsageHistory(active && (view === 'cost' || view === 'tokens'), days);
+  const historyView = view === 'cost' || view === 'tokens';
+  const loading = view === 'limits' ? capacity.loading : history.loading;
+  const error = view === 'limits' ? capacity.error : historyView ? history.error : null;
   return <div data-mcp-scope="usage-workspace" style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none',
-    paddingTop: 28, paddingRight: 28, paddingBottom: 40, paddingLeft: 28, background: 'transparent',
+    paddingTop: 20, paddingRight: 28, paddingBottom: 40, paddingLeft: 28, background: 'transparent',
     fontFamily: 'var(--font-sans-system)', color: 'var(--t-text)', fontWeight: 300 }}>
-    <div style={{ maxWidth: 980, marginRight: 'auto', marginLeft: 'auto', display: 'grid', gap: 24 }}>
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 400, letterSpacing: '-0.2px' }}>Usage</h1>
-        <div role="tablist" aria-label="Usage views" style={{ display: 'flex', gap: 4 }}>
-          {(['limits', 'activity'] as const).map(item => <button key={item} type="button" role="tab" id={`usage-${item}-tab`}
-            tabIndex={view === item ? 0 : -1} aria-selected={view === item} aria-controls={`usage-${item}-panel`} onClick={() => setView(item)}
-            onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-              event.preventDefault(); const next = item === 'limits' ? 'activity' : 'limits'; setView(next);
-              document.getElementById(`usage-${next}-tab`)?.focus();
-            } }}
-            style={{ border: 0, borderRadius: 7, height: 26, paddingRight: 12, paddingLeft: 12, font: 'inherit', fontSize: 12,
-              background: view === item ? 'var(--t-input-bg)' : 'transparent', color: view === item ? 'var(--t-text)' : 'var(--t-text-muted)', cursor: 'pointer' }}>
-            {item === 'limits' ? 'Limits' : 'Activity'}
-          </button>)}
+    <div style={{ maxWidth: 1080, marginRight: 'auto', marginLeft: 'auto', display: 'grid', gap: 30 }}>
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h1 style={{ margin: 0, fontSize: 14, fontWeight: 400 }}>Usage</h1>
+          <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>/</span>
+          <span style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>This machine</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div role="tablist" aria-label="Usage views" style={{ display: 'flex', gap: 2 }}>
+            {views.map(item => <UsageControl key={item} role="tab" id={`usage-${item}-tab`} selected={view === item}
+              tabIndex={view === item ? 0 : -1} aria-selected={view === item} aria-controls={`usage-${item}-panel`} onClick={() => setView(item)}
+              onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault(); const index = event.key === 'Home' ? 0 : event.key === 'End' ? views.length - 1
+                  : (views.indexOf(item) + (event.key === 'ArrowRight' ? 1 : views.length - 1)) % views.length;
+                const next = views[index]; setView(next); document.getElementById(`usage-${next}-tab`)?.focus();
+              } }}>{item === 'activity' ? 'Outcomes' : item[0].toUpperCase() + item.slice(1)}</UsageControl>)}
+          </div>
+          {historyView ? <div aria-label="Usage date range" style={{ display: 'flex', gap: 2 }}>
+            {([1, 7, 30, 90] as const).map(value => <UsageControl key={value} selected={days === value} aria-pressed={days === value}
+              onClick={() => setDays(value)}>{value === 1 ? 'Past 24h' : `${value} days`}</UsageControl>)}
+          </div> : null}
+          {view !== 'activity' ? <UsageControl aria-label="Refresh usage" description={loading ? 'Reading usage…' : 'Refresh usage'}
+            disabled={loading} onClick={() => { void (view === 'limits' ? capacity.refresh(true) : history.refresh(true)); }} style={{ width: 28, paddingLeft: 0, paddingRight: 0 }}>
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 7v5h-5M4 17v-5h5M6.1 6.1a8 8 0 0 1 13.5 4.4M17.9 17.9A8 8 0 0 1 4.4 13.5" />
+            </svg>
+          </UsageControl> : null}
         </div>
       </header>
+      {error ? <p role="status" style={{ margin: 0, fontSize: 12, color: 'var(--t-text-muted)' }}>{error}</p> : null}
       {view === 'limits' ? <section role="tabpanel" id="usage-limits-panel" aria-labelledby="usage-limits-tab" style={{ display: 'grid', gap: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>Your connected accounts’ allowances and reset times.</p>
-          <button type="button" onClick={() => { void refresh(true); }} disabled={loading}
-            style={{ border: 0, borderRadius: 7, height: 28, paddingRight: 12, paddingLeft: 12, font: 'inherit', fontSize: 12,
-              background: 'var(--t-input-bg)', color: 'var(--t-text)', cursor: loading ? 'wait' : 'pointer' }}>{loading ? 'Refreshing…' : 'Refresh usage'}</button>
-        </div>
-        {!snapshot && loading ? <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Reading connected accounts…</span> : null}
-        <RuntimeUsageSummary snapshot={snapshot} />
-        {error ? <p role="status" style={{ margin: 0, fontSize: 12, color: 'var(--t-text-muted)' }}>{error}</p> : null}
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--t-text-secondary)' }}>Your connected accounts’ allowances and reset times.</p>
+        {!capacity.snapshot && loading ? <span role="status" style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Reading connected accounts…</span> : null}
+        <RuntimeUsageSummary snapshot={capacity.snapshot} />
         <p style={{ margin: 0, fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Allowances are shared across the account. Token activity is shown separately when an account does not report its limits.</p>
+      </section> : historyView ? <section role="tabpanel" id={`usage-${view}-panel`} aria-labelledby={`usage-${view}-tab`} style={{ display: 'grid', gap: 22 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--t-text-muted)' }}>
+          <select aria-label="CLI provider" value={provider} onChange={event => setProvider(event.target.value as typeof provider)}
+            style={{ border: '1px solid var(--t-border)', borderRadius: 7, height: 28, paddingLeft: 8, paddingRight: 8, font: 'inherit',
+              background: 'var(--t-bg-card)', color: 'var(--t-text-secondary)', outlineColor: 'var(--t-accent)' }}>
+            <option value="all">All local CLIs</option>{providers.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          {history.snapshot ? <span>{new Date(history.snapshot.since).toLocaleDateString([], { month: 'short', day: 'numeric' })} – {new Date(history.snapshot.until).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span> : null}
+          {history.loading ? <span role="status">Reading local CLI history…</span> : null}
+        </div>
+        {history.snapshot ? <UsageHistoryPanel snapshot={history.snapshot} mode={view} provider={provider} /> : null}
       </section> : <section role="tabpanel" id="usage-activity-panel" aria-labelledby="usage-activity-tab">
-        <Suspense fallback={<span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Loading activity…</span>}><AnalyticsPage embedded active={active} /></Suspense>
+        <Suspense fallback={<span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Loading outcomes…</span>}><AnalyticsPage embedded active={active} /></Suspense>
       </section>}
     </div>
   </div>;

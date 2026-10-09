@@ -256,3 +256,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Native CLI usage readers
+
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/t3tools/t3code>
+- Use in o8: adapted native transcript, SQLite, metadata, and pricing readers
+- License text: [usage readers](src/lib/usage/history-readers/LICENSE.txt)
