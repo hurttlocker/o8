@@ -3261,6 +3261,14 @@
       ]
     },
     {
+      "path": "tests/pi-user-setup-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/plugin-account-transition-real-path.test.ts",
       "reasons": [
         "child-process",

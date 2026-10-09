@@ -35,6 +35,7 @@ import {
 import { deepSeekHarnessInstallGuidance, resolveDeepSeekHarnessLaunch } from '@/lib/deepseek-harness/runtime-resolution';
 import { hermesReadiness } from './hermes-readiness';
 import { piBuiltinReadiness } from './pi-builtin-readiness';
+import { detectPiUserSetup, type PiUserSetup } from '@/lib/pi/user-setup';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
@@ -68,6 +69,7 @@ export interface RuntimeAuthStatus {
   fix: string;
   checkedAt: number;
   binaryPath?: string;
+  piSetup?: PiUserSetup;
 }
 
 export interface MachineAuthProfileSuggestion {
@@ -81,6 +83,7 @@ export interface RuntimeAuthSnapshot {
 }
 
 export interface DispatchableRuntimeAvailability {
+  piSetup?: PiUserSetup;
   installed?: boolean;
   id: OrchestratorRuntime;
   label: string;
@@ -480,30 +483,26 @@ async function detectGrok(): Promise<RuntimeAuthStatus> {
 }
 
 async function detectPi(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('pi') ?? process.env.O8_PI_BIN?.trim() ?? undefined;
-  if (!binaryPath) {
-    return nowStatus('pi', 'pi', {
-      installed: false,
-      authenticated: false,
-      detail: 'Pi CLI is not installed.',
-      fix: 'Install Pi, then configure a provider with `pi`.',
-    });
-  }
-
-  const authenticated = Boolean(
+  const piSetup = await detectPiUserSetup();
+  const binaryPath = piSetup.binaryPath;
+  const authenticated = Boolean(binaryPath && (
     process.env.ANTHROPIC_API_KEY
     || process.env.OPENAI_API_KEY
     || process.env.GEMINI_API_KEY
-    || process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-  ) || await fileExists(path.join(os.homedir(), '.pi', 'agent', 'auth.json'));
+    || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    || piSetup.credentialsPresent
+  ));
   return nowStatus('pi', 'pi', {
-    installed: true,
+    installed: Boolean(binaryPath),
     authenticated,
-    detail: authenticated
+    detail: !binaryPath
+      ? process.platform === 'win32' ? 'Existing Pi setup detection is not available on Windows yet.' : 'Pi CLI is not installed.'
+      : authenticated
       ? 'Pi CLI is installed and has provider credentials.'
       : 'Pi CLI is installed but no provider credentials were found.',
-    fix: 'Run `pi` and configure a provider before dispatching.',
+    fix: !binaryPath ? 'Install Pi, then configure a provider with `pi`.' : 'Run `pi` and configure a provider before dispatching.',
     binaryPath,
+    piSetup,
   });
 }
 
@@ -722,6 +721,7 @@ export async function getDispatchableRuntimeAvailability(
       unavailableReason: available ? null : status?.unavailableReason ?? 'adapter_unavailable',
       detail: status?.detail ?? `${ORCHESTRATOR_RUNTIMES[id].label} readiness could not be determined.`,
       fix: status?.fix ?? 'Check the runtime installation and credentials.',
+      ...(status?.piSetup ? { piSetup: status.piSetup } : {}),
     };
   });
 }

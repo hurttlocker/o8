@@ -2,6 +2,7 @@ import { MODEL_IDS } from '@/lib/models';
 import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { builtInAgentFromInventory } from './built-in-agent';
+import type { PiUserSetup } from '@/lib/pi/user-setup';
 
 export interface SetupRuntime {
   id: OrchestratorRuntime;
@@ -12,6 +13,7 @@ export interface SetupRuntime {
   detail: string;
   fix: string;
   builtIn?: { backend: Exclude<OrchestratorBackendSetting, 'auto'>; planDetail: string };
+  piSetup?: PiUserSetup;
 }
 
 export interface RuntimeActivity {

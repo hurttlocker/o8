@@ -61,6 +61,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
   updateField: <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => void;
 }) {
   const tools = useRuntimeInventory(!advanced);
+  const piSetup = tools.inventory?.find((item) => item.id === 'pi')?.piSetup;
   // Hermes (ACP backend) only appears in the backend picker when its binary is present.
   const [hermesAvailable, setHermesAvailable] = useState(false);
   const [opencodeAvailable, setOpencodeAvailable] = useState(false);
@@ -193,6 +194,10 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
             disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
             divider
           />
+          {piSetup?.detected ? <SettingsRow
+            label="Your Pi setup"
+            subtitle={<span style={{ overflowWrap: 'anywhere' }}>{`${piSetup.binaryPath ?? 'CLI not found'}${piSetup.version ? ` (v${piSetup.version})` : ''}. ${piSetup.provider ?? 'Provider not set'} / ${piSetup.model ?? 'Model not set'}. ${piSetup.extensions} extensions, ${piSetup.skills} skills, ${piSetup.sessions} sessions${piSetup.countsTruncated ? ' (scan limit reached)' : ''}. Credentials ${piSetup.credentialsPresent ? 'present' : 'not found'}. Choose Pi in Default worker to use this setup.`}</span>}
+          /> : null}
       </SettingsGroup>
     </section>
     <RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} />

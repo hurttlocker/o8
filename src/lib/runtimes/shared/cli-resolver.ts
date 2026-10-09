@@ -59,6 +59,7 @@ export interface CliResolverSpec {
   aliases?: string[];
   /** Args to pass when probing for the version, defaults to ['--version']. */
   versionArgs?: string[];
+  versionTimeoutMs?: number;
   /** Regex to extract a semver-like version from the version output. */
   versionPattern?: RegExp;
   /**
@@ -216,7 +217,8 @@ async function probeVersion(
     const probe = cliInvocation(binPath, args);
     const { stdout, stderr } = await execFileAsync(probe.command, probe.args, {
       windowsHide: true,
-      timeout: 5_000,
+      timeout: spec.versionTimeoutMs ?? 5_000,
+      maxBuffer: 64 * 1024,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
     });
     const combined = `${stdout}\n${stderr}`;
