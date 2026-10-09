@@ -33,6 +33,19 @@ import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
  *  The panel toggle is 30px wide; the margin positions its centre. */
 const RAIL_COLUMN_ALIGN_NUDGE = 4;
 
+/** Reveal a pill in this strip only, including when the shell uses CSS zoom. */
+function revealHeaderTab(scroller: HTMLDivElement, tab: Element) {
+  const viewport = scroller.getBoundingClientRect();
+  if (!viewport.width || !scroller.clientWidth) return;
+  const target = tab.getBoundingClientRect();
+  const scale = viewport.width / scroller.clientWidth;
+  const inset = Math.min(22, scroller.clientWidth / 4);
+  const left = (target.left - viewport.left) / scale;
+  const right = (target.right - viewport.left) / scale;
+  const delta = left < inset ? left - inset : right > scroller.clientWidth - inset ? right - scroller.clientWidth + inset : 0;
+  if (delta) scroller.scrollLeft = Math.max(0, Math.min(scroller.scrollWidth - scroller.clientWidth, scroller.scrollLeft + delta));
+}
+
 export function WorkspaceHeaderStrip({
   leadingInset = false,
   sidebarVisible = true,
@@ -158,6 +171,7 @@ export function HeaderPillStrip({
   ariaLabel?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
   // tabs each pill compacts to just its first significant word. Sibling
   // packets often share a verb ("Add …" × 3), so when the one-word form
@@ -176,22 +190,16 @@ export function HeaderPillStrip({
     return out;
   }, [tabs]);
 
-  // Overflow affordances. The strip hides its scrollbar (scrollbarWidth:none)
-  // to stay chrome-clean, so when many tabs are open the off-screen ones are
-  // invisible *and* unreachable with a normal mouse — only a horizontal
-  // trackpad swipe scrolls them. Two fixes: map vertical wheel → horizontal
-  // scroll (non-passive native listener so preventDefault sticks), and fade
-  // the overflowing edge(s) via a mask so you can SEE there's more. 2026-05-30.
+  // Hidden scrollbars keep the chrome quiet; arrows and edge fades reveal overflow.
   const [edges, setEdges] = useState({ left: false, right: false });
 
   const recomputeEdges = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const maxScroll = el.scrollWidth - el.clientWidth;
-    setEdges({
-      left: el.scrollLeft > 1,
-      right: el.scrollLeft < maxScroll - 1,
-    });
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft < maxScroll - 1;
+    setEdges(current => current.left === left && current.right === right ? current : { left, right });
   }, []);
 
   // Roving tabindex for the tablist (#2146). MANUAL activation: arrows move
@@ -209,13 +217,15 @@ export function HeaderPillStrip({
     setFocusedTabId(next.id);
     // Match on the stable data attribute rather than CSS.escape'ing an
     // arbitrary tab id into a selector.
-    Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-o8-workspace-tab]') ?? [])
-      .find((node) => node.dataset.o8WorkspaceTab === next.id)
-      ?.focus();
-  }, [tabs]);
+    const scroller = scrollRef.current;
+    const node = Array.from(scroller?.querySelectorAll<HTMLElement>('[data-o8-workspace-tab]') ?? [])
+      .find((node) => node.dataset.o8WorkspaceTab === next.id);
+    node?.focus({ preventScroll: true });
+    if (scroller && node) { revealHeaderTab(scroller, node); recomputeEdges(); }
+  }, [recomputeEdges, tabs]);
 
   const handleStripKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (tabs.length === 0) return;
+    if (tabs.length === 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     const current = tabs.findIndex((tab) => tab.id === rovingTabId);
     const from = current < 0 ? 0 : current;
     if (event.key === 'ArrowRight') focusTabAt(from + 1);
@@ -246,31 +256,42 @@ export function HeaderPillStrip({
   const scrollByStep = useCallback((dir: 1 | -1) => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollBy({ left: dir * Math.max(140, el.clientWidth * 0.7), behavior: 'smooth' });
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el.scrollBy({ left: dir * Math.max(140, el.clientWidth * 0.7), behavior: reducedMotion ? 'auto' : 'smooth' });
   }, []);
 
   // Native non-passive wheel listener: React's onWheel attaches passive in
   // some builds, which silently no-ops preventDefault. Attach our own so the
-  // vertical wheel reliably becomes horizontal scroll without scrolling the
-  // page. Only consume the event when there's actually overflow to move.
+  // vertical wheel becomes horizontal scroll. Listen on the wrapper so the
+  // edge arrows work too; leave horizontal trackpad gestures and zoom native.
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    const strip = stripRef.current;
+    if (!el || !strip) return;
     const onWheel = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth) return; // nothing to scroll
-      const dominant = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      if (dominant === 0) return;
+      if (e.defaultPrevented || !e.cancelable || e.ctrlKey || e.metaKey) return;
+      if (e.deltaX !== 0 && el.contains(e.target as Node)) return;
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const delta = e.deltaX || e.deltaY;
+      if (maxScroll <= 0 || delta === 0) return;
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1;
+      const next = Math.max(0, Math.min(maxScroll, el.scrollLeft + delta * unit));
+      if (next === el.scrollLeft) return;
       e.preventDefault();
-      el.scrollLeft += dominant * (e.deltaMode === 1 ? 16 : 1);
+      el.scrollLeft = next;
       recomputeEdges();
     };
-    el.addEventListener('wheel', onWheel, { passive: false });
+    strip.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('scroll', recomputeEdges, { passive: true });
-    const ro = new ResizeObserver(recomputeEdges);
+    const ro = new ResizeObserver(() => {
+      const target = el.querySelector('[role="tab"]:focus-within') ?? el.querySelector('[data-pill-active="true"]');
+      if (target) revealHeaderTab(el, target);
+      recomputeEdges();
+    });
     ro.observe(el);
     recomputeEdges();
     return () => {
-      el.removeEventListener('wheel', onWheel);
+      strip.removeEventListener('wheel', onWheel);
       el.removeEventListener('scroll', recomputeEdges);
       ro.disconnect();
     };
@@ -286,11 +307,9 @@ export function HeaderPillStrip({
     const el = scrollRef.current;
     if (!el) return;
     const active = el.querySelector('[data-pill-active="true"]');
-    if (active && typeof active.scrollIntoView === 'function') {
-      active.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
-    }
-    const id = window.setTimeout(recomputeEdges, 220);
-    return () => window.clearTimeout(id);
+    if (active) revealHeaderTab(el, active);
+    const frame = window.requestAnimationFrame(recomputeEdges);
+    return () => window.cancelAnimationFrame(frame);
   }, [activeTabId, tabs.length, recomputeEdges]);
 
   // Fade only the edge(s) that have more content behind them. Transparent-safe
@@ -309,6 +328,7 @@ export function HeaderPillStrip({
 
   return (
     <div
+      ref={stripRef}
       style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}
     >
       <div
@@ -325,6 +345,7 @@ export function HeaderPillStrip({
           gap: 2,
           overflowX: 'auto',
           overflowY: 'hidden',
+          overscrollBehaviorX: 'contain',
           scrollbarWidth: 'none',
           paddingLeft: 6,
           paddingRight: 6,
