@@ -8,6 +8,8 @@ Anything that fails, surprises, or stalls becomes an issue when it is found, not
 
 Issue text describes mechanics, never sources. No names of people or other products, no logs pasted without a scan for paths, tokens, or machine names. Issue bodies are never edited to remove something after the fact, because the edit history is public.
 
+One exception to the no-names rule: when an outside contributor's pull request ships, the release notes and the public changelog thank them by GitHub handle. The release script adds this from the pull request author (#3459). Maintainers and bots are not credited.
+
 ## Tracking issues own progress
 
 Each open arc on [ROADMAP.md](../../ROADMAP.md) links one tracking issue. A tracking issue has a "Done means" line, a `## Checklist` of child issues, and a "How to help" line. A box is checked only when the child is closed and its fix is in a shipped release. `node scripts/roadmap-status.mjs --check` fails when a checked child is still open, and CI runs it on every push to main. When reality changes, a measurement or a state, the roadmap row changes the same day.
