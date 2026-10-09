@@ -563,9 +563,9 @@ export function useWorkspaceTerminalController(
     if (!experimentalChat) return [createDefaultOrchestratorTab()];
     return [createDefaultOrchestratorTab(), createDefaultChatTab()];
   }, [createDefaultChatTab, createDefaultOrchestratorTab, experimentalChat]);
-  const createInitialChatTabs = useCallback((): TerminalTab[] => splitCreated
-    ? [experimentalChat ? createDefaultChatTab() : createDefaultOrchestratorTab({ fresh: true })]
-    : createDefaultChatTabSet(), [createDefaultChatTab, createDefaultChatTabSet, createDefaultOrchestratorTab, experimentalChat, splitCreated]);
+  const createInitialChatTabs = useCallback((): TerminalTab[] => defaultTab === 'orchestrator'
+    ? [createDefaultOrchestratorTab({ fresh: true, repoOverride: selectedRepoRef.current })] : splitCreated ? [experimentalChat ? createDefaultChatTab() : createDefaultOrchestratorTab({ fresh: true })]
+    : createDefaultChatTabSet(), [createDefaultChatTab, createDefaultChatTabSet, createDefaultOrchestratorTab, defaultTab, experimentalChat, splitCreated]);
 
   const spawnSingleRuntimeTab = useCallback((runtime: OrchestratorRuntime): string => {
     const newTab: TerminalTab = {
@@ -698,7 +698,7 @@ export function useWorkspaceTerminalController(
     const result = await computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
       defaultTab,
-      createDefaultChatTab,
+      createDefaultChatTab: defaultTab === 'orchestrator' ? () => createInitialChatTabs()[0] : createDefaultChatTab,
     }, cancelled, 'optimistic');
     if (!result) return false;
 
@@ -728,7 +728,7 @@ export function useWorkspaceTerminalController(
     void computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
       defaultTab,
-      createDefaultChatTab,
+      createDefaultChatTab: defaultTab === 'orchestrator' ? () => createInitialChatTabs()[0] : createDefaultChatTab,
     }, () => cancelled?.() || restoreGeneration !== restoreGenerationRef.current, 'validated').then((validated) => {
       if (!validated || cancelled?.() || restoreGeneration !== restoreGenerationRef.current) return;
       const currentById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
@@ -755,7 +755,7 @@ export function useWorkspaceTerminalController(
       }
     });
     return result.restoredAny;
-  }, [createDefaultChatTab, defaultTab, landTerminalTabs, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
+  }, [createDefaultChatTab, createInitialChatTabs, defaultTab, landTerminalTabs, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
 
   useEffect(() => {
     if (restoredRef.current) return;
@@ -791,7 +791,7 @@ export function useWorkspaceTerminalController(
           await applyPersistedState(saved, () => cancelled);
           if (cancelled) return;
         } else if (autoCreateDefaultTab) {
-          if (defaultTab === 'llm-chat') {
+          if (defaultTab !== 'terminal') {
             const defaultTabs = createInitialChatTabs();
             tabsRef.current = defaultTabs;
             setTabs(defaultTabs);
@@ -893,7 +893,7 @@ export function useWorkspaceTerminalController(
           setActiveTabIdFromRestore('', capturedNavVersion);
           return;
         }
-        if (defaultTab === 'llm-chat') {
+        if (defaultTab !== 'terminal') {
           const defaultTabs = createInitialChatTabs();
           tabsRef.current = defaultTabs;
           setTabs(defaultTabs);
@@ -913,7 +913,7 @@ export function useWorkspaceTerminalController(
   }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createInitialChatTabs, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, setActiveTabIdFromRestore, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
 
   useEffect(() => {
-    if (tabs.length > 0 || defaultTab !== 'llm-chat') return;
+    if (tabs.length > 0 || defaultTab === 'terminal') return;
     const timer = window.setTimeout(() => {
       if (tabsRef.current.length > 0) return;
       const fallbacks = createInitialChatTabs();

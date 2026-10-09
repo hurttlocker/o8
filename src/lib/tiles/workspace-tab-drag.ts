@@ -1,6 +1,6 @@
 export const WORKSPACE_TAB_DRAG_TYPE = 'application/x-o8-workspace-tab';
 
-export type WorkspaceTabDragKind = 'chat' | 'terminal';
+export type WorkspaceTabDragKind = 'orchestrator' | 'chat' | 'terminal';
 export type WorkspaceTabDropZone = 'center' | 'left' | 'right' | 'above' | 'below';
 
 export function workspaceTabDropZone(

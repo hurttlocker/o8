@@ -211,7 +211,7 @@ function WorkspaceTerminalPanelsBase({
           />
         ) : tab.kind === 'chatgpt-plan' ? (
           <div key={tab.id} style={{ display: tab.id === effectiveActiveTabId ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <Suspense fallback={<div role="status">Opening ChatGPT plan chat…</div>}><LazyChatGPTPlanChat tabId={tab.id} /></Suspense>
+            <Suspense fallback={<div role="status">Opening ChatGPT plan chat…</div>}><LazyChatGPTPlanChat tabId={tab.id} active={tab.id === effectiveActiveTabId} /></Suspense>
           </div>
         ) : tab.kind === 'chat' ? (
           <ChatResidentPanel

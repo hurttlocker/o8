@@ -17,6 +17,7 @@ import { RailActionButton } from './RailActionButton';
 import { RailUpdateControl } from './RailUpdateControl';
 import { SidebarBrand } from './SidebarBrand';
 import { openCustomizeTab, useCustomizeTab } from '../customize/navigation';
+import { WORKSPACE_TAB_DRAG_TYPE, type WorkspaceTabDragKind } from '@/lib/tiles/workspace-tab-drag';
 
 const railButton: CSSProperties = {
   position: 'relative',
@@ -66,6 +67,10 @@ export function CompactNavigationRail({
     return () => window.removeEventListener('resize', updateAnchor);
   }, [profileOpen]);
   const isGlass = glassSurface;
+  const startPaneDrag = (event: React.DragEvent<HTMLButtonElement>, kind: WorkspaceTabDragKind) => {
+    event.dataTransfer.setData(WORKSPACE_TAB_DRAG_TYPE, kind);
+    event.dataTransfer.effectAllowed = 'copy';
+  };
   const [usageOpen, setUsageOpen] = useState(false);
   const [usagePosition, setUsagePosition] = useState({ left: 0, bottom: 0 });
   const { snapshot: usageSnapshot, loading: usageLoading, error: usageError } = useRuntimeUsage(usageOpen);
@@ -146,8 +151,8 @@ export function CompactNavigationRail({
       }}
     >
       <RailActionButton type="button" aria-label="Home" tooltipLabel="o8 — Home" aria-current={activeDestination === 'agents' ? 'page' : undefined} onClick={onHome} style={railButton}><SidebarBrand /></RailActionButton>
-      <RailActionButton type="button" aria-label="Run orchestrator" onClick={onNewSession} style={railButton}><Play size={19} strokeWidth={1.8} /></RailActionButton>
-      <RailActionButton type="button" aria-label="Run terminal" onClick={onCreateTerminal} style={railButton}><Terminal size={19} strokeWidth={1.8} /></RailActionButton>
+      <RailActionButton type="button" aria-label="Run orchestrator" draggable onDragStart={event => startPaneDrag(event, 'orchestrator')} onClick={onNewSession} style={{ ...railButton, cursor: 'grab' }}><Play size={19} strokeWidth={1.8} /></RailActionButton>
+      <RailActionButton type="button" aria-label="Run terminal" draggable onDragStart={event => startPaneDrag(event, 'terminal')} onClick={onCreateTerminal} style={{ ...railButton, cursor: 'grab' }}><Terminal size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Canvas mode" onClick={() => window.location.assign('/preview/canvas-glass')} style={railButton}>
         <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="9" cy="9" r="0.5" /><circle cx="15" cy="9" r="0.5" /><circle cx="9" cy="15" r="0.5" /><circle cx="15" cy="15" r="0.5" /></svg>
       </RailActionButton>

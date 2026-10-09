@@ -1,8 +1,10 @@
 'use client';
 
 import { useComposerImageBridge } from './useComposerImageBridge';
+import Image from 'next/image';
+import { useComposerClock } from './useComposerClock';
 import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
@@ -31,8 +33,12 @@ import { ComposerPermissionChip } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
+const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
   activeComposer?: boolean;
+  inputLabel?: string;
+  literalInput?: boolean;
+  footerOverride?: React.ReactNode;
   input: string;
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
@@ -100,6 +106,9 @@ interface ComposerAreaProps {
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
   activeComposer = false,
+  inputLabel,
+  literalInput = false,
+  footerOverride,
   input,
   onInputChange,
   isOrchestratorMode,
@@ -159,13 +168,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
-  const fileReferences = useMemo(() => readComposerFileReferences(input), [input]);
+  const now = useComposerClock(activeComposer && isOrchestratorMode);
+  const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
-  const [composerSelectorV1Enabled, setComposerSelectorV1Enabled] = useState(true);
-  useEffect(() => {
-    setComposerSelectorV1Enabled(readComposerSelectorV1Flag());
-  }, []);
+  const composerSelectorV1Enabled = useSyncExternalStore(subscribeToComposerSelectorFlag, readComposerSelectorV1Flag, () => true);
   const selectorModelId = resolveEffectiveComposerLeadModelId(activeBackend, modelId, codexDefaultDispatchModel);
   const selectorControls = useComposerSelectorState({
     enabled: isOrchestratorMode,
@@ -209,14 +216,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         const STALE_TURN_MS = 30 * 60 * 1000;
         const stale = !displayWaiting
           && typeof msg.timestamp === 'number'
-          && Date.now() - msg.timestamp > STALE_TURN_MS;
+          && now - msg.timestamp > STALE_TURN_MS;
         return stale ? [] : running;
       }
       // Stop at the most recent assistant message — older tool calls are done.
       break;
     }
     return [];
-  }, [chatMessages, displayWaiting, isOrchestratorMode]);
+  }, [chatMessages, displayWaiting, isOrchestratorMode, now]);
   const latestUserEntry = useMemo(() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       if (chatMessages[i].role === 'user') return chatMessages[i];
@@ -241,14 +248,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     ];
   }, [dismissedSlashInput, input, isOrchestratorMode]);
 
-  // After the parent clears `input` (post-submit), force the textarea height
-  // back to its minHeight. The onSubmit keydown handler already sets
-  // height: 'auto' optimistically, but React's value-clear happens on the next
-  // render so the autosize effect inside onChange never re-fires to shrink the
-  // box — the result is a textarea that stays oversized with the "Queue for
-  // next turn" placeholder showing at the grown height. Watching `input` for
-  // the empty-string transition catches every clear path (submit, slash-route,
-  // programmatic resets) without having to touch each call site.
+  // Parent-driven clearing happens after keydown; reset the autosized height
+  // here as well so submit, slash routing and programmatic resets all shrink.
   useEffect(() => {
     if (input !== '') return;
     const node = inputRef && 'current' in inputRef ? inputRef.current : null;
@@ -404,7 +405,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             }}>
               {attachedImages.map((image, index) => (
                 <div key={`${image.name}-${index}`} style={{ position: 'relative', width: 66, flexShrink: 0 }}>
-                  <img
+                  <Image width={56} height={56} unoptimized
                     src={image.dataUri}
                     alt={image.name}
                     title={onAttachedImageAnnotate ? 'Click to annotate' : undefined}
@@ -557,6 +558,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           <textarea
             ref={inputRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
+            aria-label={inputLabel}
             value={fileReferences.body}
             onChange={(event) => {
               updateInput(writeComposerFileReferences(event.target.value, fileReferences.paths));
@@ -721,7 +723,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               overflowY: 'auto',
             }}
           />
-          <InputButtons
+          {footerOverride ?? <InputButtons
             input={input}
             hasAttachments={attachedImages.length > 0}
             enhancing={enhancing}
@@ -767,7 +769,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             } : undefined}
             composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
             onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
-          />
+          />}
         </div>
       </div>
       <ComposerContextRow

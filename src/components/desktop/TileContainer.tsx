@@ -84,12 +84,22 @@ export function TileContainer({
 }: TileContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
+  const [paneDragging, setPaneDragging] = useState(false);
   const [paneFocus, setPaneFocus] = useState<{ tileId: string; leaves: string } | null>(null);
 
   useEffect(() => {
-    const clearDropPreview = () => setTabDrop(null);
+    const startPaneDrag = (event: DragEvent) => {
+      if (Array.from(event.dataTransfer?.types ?? []).includes(WORKSPACE_TAB_DRAG_TYPE)) setPaneDragging(true);
+    };
+    const clearDropPreview = () => { setTabDrop(null); setPaneDragging(false); };
+    window.addEventListener('dragstart', startPaneDrag);
     window.addEventListener('dragend', clearDropPreview);
-    return () => window.removeEventListener('dragend', clearDropPreview);
+    window.addEventListener('drop', clearDropPreview, true);
+    return () => {
+      window.removeEventListener('dragstart', startPaneDrag);
+      window.removeEventListener('dragend', clearDropPreview);
+      window.removeEventListener('drop', clearDropPreview, true);
+    };
   }, []);
 
   const { leaves, leafRects, splitFrames } = useMemo(() => {
@@ -126,7 +136,7 @@ export function TileContainer({
 
   const handlePaneDrop = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
     const kind = event.dataTransfer.getData(WORKSPACE_TAB_DRAG_TYPE);
-    if (kind !== 'chat' && kind !== 'terminal') return;
+    if (kind !== 'orchestrator' && kind !== 'chat' && kind !== 'terminal') return;
     event.preventDefault();
     event.stopPropagation();
     setTabDrop(null);
@@ -316,6 +326,11 @@ export function TileContainer({
                   tileId: leaf.id,
                 }) : null}
               </div>
+              {/* Cover iframe content during internal drags so every pane receives the drop. */}
+              {paneDragging && leaf.content.kind === 'terminal' ? <div data-workspace-drop-target={leaf.id}
+                onDragOver={event => handlePaneDragOver(event, leaf.id)}
+                onDropCapture={event => handlePaneDrop(event, leaf.id)}
+                style={{ position: 'absolute', inset: 0, zIndex: 19 }} /> : null}
               {tabDrop?.tileId === leaf.id ? (
                 <div aria-hidden style={{
                   position: 'absolute',

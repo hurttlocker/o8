@@ -1,13 +1,18 @@
 'use client';
 
-import { useRef, type CSSProperties, type FormEvent } from 'react';
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { RamsButton } from '@/components/desktop/settings/shared';
+import { ChatMessageList } from '../thoughts/chat-panel/ChatMessageList';
+import { ComposerArea } from '../thoughts/chat-panel/ComposerArea';
+import { SendPill } from '../thoughts/ComposerSendControl';
+import { ChatGPTPlanModelChip } from './ChatGPTPlanModelChip';
 import type { LLMMessage } from '@/components/desktop/llm-chat/shared';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { PlanStatus } from '@/lib/chatgpt-plan/types';
 
-const columnStyle: CSSProperties = { width: '100%', maxWidth: 720, minWidth: 0 };
-const secondaryStyle: CSSProperties = { color: 'var(--t-chat-surface-text-secondary)', lineHeight: 1.5 };
-const labelStyle: CSSProperties = { fontSize: 11, fontWeight: 300, color: 'var(--t-chat-surface-text-muted)', lineHeight: 1.35 };
+const secondaryStyle: CSSProperties = { color: 'var(--t-text-secondary)', lineHeight: 1.5 };
+const labelStyle: CSSProperties = { fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)', lineHeight: 1.35 };
+const noop = () => {};
 const prompts = [
   { label: 'Make a plan', text: 'Help me turn this idea into a clear plan. Ask me what you need to know first.' },
   { label: 'Compare options', text: 'Help me compare my options. Ask me about the decision and what matters most.' },
@@ -15,6 +20,7 @@ const prompts = [
 ];
 
 interface Props {
+  active?: boolean;
   signedIn: boolean;
   loading: boolean;
   status: PlanStatus | null;
@@ -34,56 +40,45 @@ interface Props {
 
 export function ChatGPTPlanChatView(props: Props) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const followingRef = useRef(true);
+  const active = props.active ?? true;
   const enabled = Boolean(props.status?.planEnabled);
-  const empty = props.messages.length === 0 && !props.stream && !props.busy;
-  const submit = (event: FormEvent) => { event.preventDefault(); props.onSend(); };
+  const messages = useMemo<MobileTranscriptEntry[]>(() => [
+    ...props.messages.map(message => ({ id: message.id, role: message.role, text: message.content, timestamp: message.timestamp, model: message.model, tokens: message.tokens })),
+    ...(props.stream ? [{ id: 'chatgpt-live-response', role: 'assistant' as const, text: props.stream, model: props.modelId }] : []),
+  ], [props.messages, props.stream, props.modelId]);
+  useLayoutEffect(() => {
+    if (!active || !followingRef.current) return;
+    const scroller = chatEndRef.current?.closest<HTMLElement>('[role="log"]');
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  }, [active, props.messages.length, props.stream, props.busy]);
 
-  return <section aria-label="ChatGPT plan chat" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0, background: 'var(--t-chat-surface-bg)', color: 'var(--t-chat-surface-text)', fontFamily: 'var(--font-sans-system)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
-    <header style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 12, paddingBottom: 12, paddingLeft: 24, paddingRight: 24, borderBottom: '1px solid var(--t-border)' }}>
-      <span style={{ fontSize: 12 }}>ChatGPT plan</span>
-      <span role="status" style={{ ...labelStyle, marginRight: 'auto' }}>{props.loading ? 'Checking connection…' : enabled ? 'Connected' : 'Not connected'}</span>
-      {enabled ? <label style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, maxWidth: '100%', ...labelStyle }}>Model
-        <select aria-label="ChatGPT plan model" disabled={props.busy} value={props.modelId} onChange={(event) => props.onModelChange(event.target.value)} style={{ minWidth: 0, maxWidth: '100%', height: 32, border: '1px solid var(--t-border)', borderRadius: 8, paddingLeft: 8, paddingRight: 8, background: 'var(--t-input-bg)', color: 'var(--t-chat-surface-text)', fontFamily: 'inherit', fontSize: 12, fontWeight: 300 }}>
-          {props.status?.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-        </select>
-      </label> : null}
-      {enabled ? <RamsButton variant="ghost" onClick={props.onOpenConnection}>Connection</RamsButton> : null}
-    </header>
+  const emptyState = <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start', width: '100%', paddingTop: 24, paddingBottom: 24 }}>
+    <h1 style={{ fontSize: 18, fontWeight: 400, letterSpacing: '-0.2px', lineHeight: 1.25, marginTop: 0, marginBottom: 12 }}>{enabled ? 'Think it through with ChatGPT.' : 'Bring your ChatGPT plan into o8.'}</h1>
+    <p style={{ ...secondaryStyle, maxWidth: 440, marginTop: 0, marginBottom: 24 }}>{enabled ? 'Plan your next step, compare an approach, or work through a draft.' : 'Connect your account to plan, ask questions, and review text here.'}</p>
+    {enabled ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {prompts.map(prompt => <RamsButton key={prompt.label} variant="ghost" onClick={() => { props.onInputChange(prompt.text); inputRef.current?.focus(); }}>{prompt.label}</RamsButton>)}
+    </div> : <RamsButton disabled={props.loading} onClick={props.signedIn ? props.onOpenConnection : props.onSignIn}>{props.signedIn ? 'Connect ChatGPT' : 'Sign in to o8'}</RamsButton>}
+    <p style={{ ...labelStyle, marginTop: 24, marginBottom: 0 }}>{props.loading ? 'Checking connection…' : 'Text only · Uses your ChatGPT plan limits'}</p>
+  </div>;
 
-    <div role="log" aria-label="ChatGPT conversation" style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', paddingTop: 24, paddingBottom: 24, paddingLeft: 24, paddingRight: 24 }}>
-      {empty ? <div style={{ ...columnStyle, paddingTop: 'clamp(8px, 8vh, 72px)', paddingBottom: 24 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 400, letterSpacing: '-0.2px', lineHeight: 1.25, marginTop: 0, marginBottom: 12 }}>{enabled ? 'Think it through with ChatGPT.' : 'Bring your ChatGPT plan into o8.'}</h1>
-        <p style={{ ...secondaryStyle, maxWidth: 440, marginTop: 0, marginBottom: 24 }}>{enabled ? 'Plan your next step, compare an approach, or work through a draft.' : 'Connect your account to plan, ask questions, and review text here.'}</p>
-        {enabled ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {prompts.map((prompt) => <RamsButton key={prompt.label} variant="ghost" onClick={() => { props.onInputChange(prompt.text); inputRef.current?.focus(); }}>{prompt.label}</RamsButton>)}
-        </div> : <RamsButton disabled={props.loading} onClick={props.signedIn ? props.onOpenConnection : props.onSignIn}>{props.signedIn ? 'Connect ChatGPT' : 'Sign in to o8'}</RamsButton>}
-        <p style={{ ...labelStyle, marginTop: 24, marginBottom: 0 }}>Text only. Repository access and worker controls are separate.</p>
-      </div> : null}
-      <div style={columnStyle}>
-        {props.messages.map((message) => <article key={message.id} style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 24 }}>
-          <div style={{ ...labelStyle, marginBottom: 8 }}>{message.role === 'user' ? 'You' : 'ChatGPT'}</div>
-          <div style={{ maxWidth: message.role === 'user' ? '85%' : '100%', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.55, borderRadius: 14, background: message.role === 'user' ? 'var(--t-input-bg)' : 'transparent', paddingTop: message.role === 'user' ? 12 : 0, paddingBottom: message.role === 'user' ? 12 : 0, paddingLeft: message.role === 'user' ? 16 : 0, paddingRight: message.role === 'user' ? 16 : 0 }}>{message.content}</div>
-        </article>)}
-        {props.stream ? <article style={{ marginBottom: 24 }}>
-          <div style={{ ...labelStyle, marginBottom: 8 }}>ChatGPT{props.busy ? '' : ' · partial response'}</div>
-          <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.55 }}>{props.stream}</div>
-        </article> : null}
-        {props.busy ? <p role="status" style={{ ...labelStyle, marginTop: 8, marginBottom: 0 }}>{props.stream ? 'Receiving reply…' : 'Waiting for ChatGPT…'}</p> : null}
-      </div>
-    </div>
-
-    <footer style={{ paddingTop: 12, paddingBottom: 16, paddingLeft: 24, paddingRight: 24, borderTop: enabled ? '1px solid var(--t-border)' : undefined }}>
-      <div style={columnStyle}>
-        {props.notice ? <p role="status" style={{ ...secondaryStyle, fontSize: 12, marginTop: 0, marginBottom: 12 }}>{props.notice}</p> : null}
-        {enabled ? <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid var(--t-border)', borderRadius: 14, background: 'var(--t-input-bg)', paddingTop: 12, paddingBottom: 8, paddingLeft: 16, paddingRight: 8 }}>
-          <textarea ref={inputRef} aria-label="Message ChatGPT" rows={2} placeholder="Ask ChatGPT…" disabled={props.busy} value={props.input} onChange={(event) => props.onInputChange(event.target.value)} style={{ width: '100%', boxSizing: 'border-box', minHeight: 48, maxHeight: 160, resize: 'vertical', scrollbarWidth: 'none', border: 'none', background: 'transparent', color: 'inherit', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 8 }} />
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <span style={labelStyle}>Text only · Uses ChatGPT limits</span>
-            {props.busy ? <RamsButton variant="ghost" onClick={props.onStop}>Stop</RamsButton> : <RamsButton type="submit" disabled={!props.input.trim() || !props.modelId}>Send</RamsButton>}
-          </div>
-        </form> : <p style={{ ...labelStyle, marginTop: 0, marginBottom: 8 }}>Requests use your ChatGPT limits.</p>}
-        <p style={{ ...labelStyle, marginTop: 8, marginBottom: 0 }}>This conversation clears when you close the pane or change the connected account.</p>
-      </div>
-    </footer>
+  return <section aria-label="ChatGPT plan chat" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0, background: 'transparent', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
+    <ChatMessageList ref={chatEndRef} logLabel="ChatGPT conversation" active={active} displayMessages={messages} displayWaiting={props.busy}
+      activeTargetLabel="ChatGPT" activeTargetColor="var(--t-accent)" thoughtsMutedGlass="var(--t-hover)" thoughtsElevatedBorder="1px solid var(--t-border)" thoughtsElevatedShadow="none"
+      emptyStateOverride={emptyState} emptyStateFallback={null}
+      onScroll={event => { const node = event.currentTarget; followingRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}
+      bottomContent={props.stream && !props.busy ? <span role="status" style={labelStyle}>ChatGPT · partial response</span> : null} />
+    {props.notice ? <p role="status" style={{ ...secondaryStyle, fontSize: 12, marginTop: 0, marginBottom: 8, paddingLeft: 24, paddingRight: 24 }}>{props.notice}</p> : null}
+    {enabled ? <ComposerArea ref={inputRef} activeComposer={active} inputLabel="Message ChatGPT" literalInput
+      input={props.input} onInputChange={props.onInputChange} isOrchestratorMode={false} displayWaiting={props.busy} chatMessages={messages}
+      activeTargetLabel="ChatGPT" targetAgentExists thoughtsBodyBackground="transparent" enhancing={false} preEnhanceInput={null}
+      onEnhance={noop} onUndoEnhance={noop} onSubmit={props.onSend} onSteer={props.onSend} onStop={props.onStop} onSlashCommand={noop}
+      modelLabel={props.modelId} effort="medium" onEffortChange={noop} adaptiveEnabled={false} displayMessagesCount={props.messages.length} hasAssistantActivity={false}
+      footerOverride={<div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, paddingTop: 4, paddingRight: 12, paddingBottom: 8, paddingLeft: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}><ChatGPTPlanModelChip key={`${active}:${props.busy}`} models={props.status?.models ?? []} modelId={props.modelId} busy={props.busy} active={active} onChange={props.onModelChange} onOpenConnection={props.onOpenConnection} /></div>
+        <span style={{ ...labelStyle, flexShrink: 0 }}>Text only</span>
+        <SendPill canSubmit={Boolean(props.input.trim() && props.modelId)} working={props.busy} onSubmit={props.onSend} onStop={props.onStop} targetLabel="ChatGPT" />
+      </div>} /> : null}
   </section>;
 }

@@ -25,7 +25,7 @@ function emptyView(generation: number): ChatView {
 const noop = () => {};
 
 /** Explicit text-only plan requests; no repository, tools, fallback, or extra turns. */
-export function ChatGPTPlanChat({ tabId }: { tabId: string }) {
+export function ChatGPTPlanChat({ tabId, active = true }: { tabId: string; active?: boolean }) {
   const auth = useO8Auth();
   const owner = auth.isLoaded && auth.signedIn ? auth.user?.id ?? null : null;
   const identity = useRef({ owner, generation: 0 });
@@ -103,6 +103,7 @@ export function ChatGPTPlanChat({ tabId }: { tabId: string }) {
   };
 
   return <ChatGPTPlanChatView
+    active={active}
     signedIn={Boolean(owner)}
     loading={!auth.isLoaded || Boolean(owner && !view.status && !view.notice)}
     status={view.status}

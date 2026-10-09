@@ -2,16 +2,17 @@
 
 import { useState } from 'react';
 
-export function SendPill({ canSubmit, working, onSubmit, onStop }: {
+export function SendPill({ canSubmit, working, onSubmit, onStop, targetLabel = 'orchestrator' }: {
   canSubmit: boolean;
   working: boolean;
   onSubmit: () => void;
   onStop?: () => void;
+  targetLabel?: string;
 }) {
   const [pressed, setPressed] = useState(false);
   const canStop = working && Boolean(onStop);
   const interactive = canStop || (!working && canSubmit);
-  const title = working ? canStop ? 'Stop orchestrator' : 'Orchestrator working…' : canSubmit ? 'Send (Enter)' : 'Type to send';
+  const title = working ? canStop ? `Stop ${targetLabel}` : `${targetLabel} working…` : canSubmit ? 'Send (Enter)' : 'Type to send';
   return <button type="button" data-testid="composer-send-control" onClick={canStop ? onStop : onSubmit} disabled={!interactive} title={title} aria-label={title}
     onPointerDown={() => { if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) setPressed(true); }}
     onPointerUp={() => setPressed(false)} onPointerCancel={() => setPressed(false)} onPointerLeave={() => setPressed(false)} onBlur={() => setPressed(false)}

@@ -24,7 +24,7 @@ import {
 
 export interface ApplyPersistedStateOptions {
   preferredRepo: RegisteredRepo | null;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   createDefaultChatTab: () => TerminalTab;
 }
 
@@ -502,7 +502,7 @@ export async function computeRestoredTabs(
   let finalTabs: TerminalTab[];
   let nextActiveId: string;
 
-  if (options.defaultTab === 'llm-chat') {
+  if (options.defaultTab !== 'terminal') {
     const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
     if (restoredChat) {
       nextActiveId = effectiveRestoredActiveId ?? restoredChat.id;
@@ -541,7 +541,7 @@ export async function computeRestoredTabs(
 
 export interface LoadInitialTabStateOptions {
   stateScope: string;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   splitCreated: boolean;
   preferredRepoPath: string | null;
 }

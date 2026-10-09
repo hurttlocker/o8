@@ -43,11 +43,13 @@ vi.mock('./terminal-restore', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/operator/use-experimental-chat', () => ({ useExperimentalChatFlag: () => false }));
+const experimental = vi.hoisted(() => ({ chat: false }));
+vi.mock('@/lib/operator/use-experimental-chat', () => ({ useExperimentalChatFlag: () => experimental.chat }));
 vi.mock('@/lib/operator/use-experimental-canvas', () => ({ useExperimentalCanvasFlag: () => false }));
 vi.mock('./orchestrator-thread-restore', () => ({ readLastOrchestratorThreadTitle: vi.fn(async () => null) }));
 
 import { useWorkspaceTerminalController } from './useWorkspaceTerminalController';
+import { loadInitialTabState } from './terminal-restore';
 
 function ControllerHarness({
   controllerRef,
@@ -58,6 +60,7 @@ function ControllerHarness({
 }) {
   const controller = useWorkspaceTerminalController(props, controllerRef);
   return createElement('div', {
+    'data-tabs': JSON.stringify(controller.tabs),
     'data-sessions': JSON.stringify(controller.tabs.map((tab) => [tab.id, tab.tmuxSession])),
   });
 }
@@ -73,6 +76,7 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
   let root: Root;
 
   beforeEach(() => {
+    experimental.chat = false;
     restoreHarness.validatedPromise = new Promise((resolve) => {
       restoreHarness.resolveValidated = resolve;
     });
@@ -90,6 +94,21 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([false, true])('opens only a fresh orchestrator for a rail drop when experimental chat is %s', async (experimentalChat) => {
+    experimental.chat = experimentalChat;
+    vi.mocked(loadInitialTabState).mockResolvedValueOnce(null);
+    const selectedRepo = { name: 'Selected repo', localPath: '/tmp/selected-repo', branch: 'main' };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'fixture-rail-orchestrator-pane', defaultTab: 'orchestrator', splitCreated: true, selectedRepo,
+      termWsConnected: false, sendTerminalCreate: vi.fn(), sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(),
+      sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(), sendTerminalDetach: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { props })));
+    const tabs = JSON.parse(container.firstElementChild!.getAttribute('data-tabs')!);
+    expect(tabs).toEqual([expect.objectContaining({ kind: 'orchestrator', freshSpawn: true, mode: 'fleet', label: 'Orchestrator', repo: selectedRepo })]);
+    expect(props.sendTerminalCreate).not.toHaveBeenCalled();
   });
 
   it('keeps an ack that lands during validation without detaching or requesting the tab twice', async () => {

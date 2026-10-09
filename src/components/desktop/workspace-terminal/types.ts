@@ -279,7 +279,7 @@ export interface TerminalTabHandle {
 export interface WorkspaceTerminalProps {
   stateScope: string;
   activeWorkspaceSurface?: boolean;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   autoCreateDefaultTab?: boolean;
   preferredRepo?: RegisteredRepo | null;
   /** Current Projects/sidebar selection. New sessions inherit this before

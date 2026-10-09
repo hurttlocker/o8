@@ -70,6 +70,7 @@ export function buildMissionRenderItems(messages: MobileTranscriptEntry[]): Miss
 }
 
 interface ChatMessageListProps {
+  logLabel?: string;
   displayMessages: MobileTranscriptEntry[];
   threadId?: string | null;
   active?: boolean;
@@ -119,6 +120,7 @@ interface ChatMessageListProps {
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
   displayMessages: rawDisplayMessages,
+  logLabel,
   displayWaiting,
   threadId,
   active = false,
@@ -209,6 +211,8 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
 
   return (
     <div
+      role={logLabel ? 'log' : undefined}
+      aria-label={logLabel}
       data-o8-chat-thread={threadId || undefined}
       data-o8-active-chat={active && threadId ? 'true' : undefined}
       className="thoughts-scroll cortex-scroll-fade-y cortex-themed-scroll"
