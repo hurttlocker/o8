@@ -60,11 +60,25 @@ message. A Pi turn that a restart interrupted is finished on the next delivery
 instead of being answered with a request to send it again. Limited-access
 shared groups keep their tool-free path.
 
+## Conversations API
+
+Panel-authenticated routes over the same store, for the Symon tab:
+
+| Route | Returns |
+|---|---|
+| `GET /api/panel/symon/conversations?limit=` | Threads from every source, newest first: key, source, title, timestamps. |
+| `GET /api/panel/symon/conversations/transcript?key=&limit=` | One thread's user and assistant text, oldest first. `404` for an unknown key. |
+| `POST /api/panel/symon/conversations/continue` | Body `{ key, requestId, text }`. Continues a known thread, or starts one under an `app:` key. A repeated `requestId` returns the same turn. `202` while the turn runs. |
+
+An answer to a thread continued in o8 stays in o8; it is not sent back to the
+phone or the messaging thread.
+
 ## Current limits
 
 - The Pi brain has no tools yet. It cannot act on the computer or change o8, and
   its prompt says so.
 - The phone text session and voice transcripts do not use the store yet.
+- The conversations API lists only threads the Pi brain has answered.
 
 ## Tests
 
@@ -73,3 +87,5 @@ shared groups keep their tool-free path.
   managed request body.
 - `tests/symon-managed-messages-pi-brain-real-path.test.ts`: the inbound route
   on each mode, planner-to-Pi context, and a restart mid-turn.
+- `tests/symon-conversations-api-real-path.test.ts`: list, transcript,
+  continue, a repeated request id, refusals, and bounded failure text.
