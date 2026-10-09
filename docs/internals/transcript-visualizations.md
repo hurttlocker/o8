@@ -35,6 +35,48 @@ and natural content height. `--popover` provides a readable tooltip surface.
 ResizeObserver-driven SVG viewBoxes keep labels and strokes the same size as the
 container changes. Accessible values and units belong beside the graphic.
 
+## Shared toolkit
+
+Every visualization receives `d3` 7.9.0 and `o8Viz` version 3. The D3 application
+chunk loads when a visual mounts. Shared line and grouped bar charts handle axes,
+tick collisions, missing values, series legends, pointer-following cross-series
+details, touch pinning, keyboard exploration, and a semantic values table.
+Use D3 directly for other layouts or plots; keep data embedded in the document.
+
+```html
+<div id="activity"></div>
+<script>
+const chart = o8Viz.chart('#activity', {
+  type: 'line', xLabel: 'Day', yLabel: 'Tasks',
+  series: [{ id: 'tasks', label: 'Tasks', values: [{ x: 1, y: 4 }, { x: 2, y: 7 }] }]
+});
+</script>
+```
+
+`chart.update(options, { animate: true, keyboard: false })` updates an existing
+chart. Keyboard changes and reduced-motion preferences apply immediately.
+Interpolation is labeled approximate; null values do not create a connecting line.
+Shared `.viz-*` controls, tabs, tables and tooltip surfaces use the live o8 theme.
+`data-viz-tabs` groups emit `viz:change` and persist their `data-state-key` choice.
+`o8Viz.getState()` / `setState(object)` remember small presentation choices in the
+reader's local storage, scoped to the immutable visual. `onState(callback)` keeps
+inline and expanded views in sync. Snapshots are bounded to 16 KiB and are never
+sent to a provider. `o8Viz.ask(question)` offers a draft question through host UI;
+the reader adds it to the composer and sends it themselves.
+
+Preview checks narrow, medium, requested and wide widths in the same isolated
+browser and reports measured heights and horizontal overflow beside the PNG.
+
+## Optional libraries
+
+Pinned Chart.js 4.5.1 and ECharts 6.1.0 script URLs are listed in the MCP guide.
+They download only when a document explicitly requests one. The server refuses
+redirects, caps downloads, verifies the exact SHA-256 and caches the reviewed
+build. A saved document contains its inline copy, so viewing it needs no CDN.
+An unavailable library returns a clear retry or bundled-toolkit fallback message.
+Unknown URLs, versions and dynamic imports are refused. Adding a library requires
+a catalog change with its reviewed build, version, size, hash and license.
+
 ## Storage and isolation
 
 Documents are immutable SQLite records bound to a registered workspace and either
@@ -51,8 +93,8 @@ features are unaffected. The preview uses a separate unauthenticated browser,
 blocks network and downloads, and closes after each call.
 
 Bind controls with `addEventListener`; module scripts and inline event attributes
-are unsupported. External chart libraries and remote fonts are blocked. Inline
-SVG and canvas work without a chart dependency. Workspace `<img src>` files are
+are unsupported. Approved library requests are resolved before sandboxing;
+remote fonts and runtime network requests are blocked. Workspace `<img src>` files are
 opened through confined descriptors, verified as images, and inlined. References
 outside the caller's workspace are refused.
 

@@ -16,6 +16,7 @@ export interface VisualizationPreview {
   height: number;
   contentHeight: number;
   diagnostics: string[];
+  layouts: Array<{ width: number; height: number; overflow: number }>;
 }
 
 /** Dedicated unauthenticated browser, no network or downloads, closed after every preview. */
@@ -33,7 +34,10 @@ export async function previewVisualization(html: string, input: { width?: unknow
       const executablePath = process.platform === 'linux'
         ? ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync)
         : undefined;
-      browser = await chromium.launch({ ...(executablePath ? { executablePath } : { channel: 'chrome' }), headless: true, timeout: 8_000 });
+      // Prefer an already-installed matching headless shell. No browser download
+      // happens here; ordinary installations fall back to system Chrome.
+      try { browser = await chromium.launch({ headless: true, timeout: 8_000 }); }
+      catch { browser = await chromium.launch({ ...(executablePath ? { executablePath } : { channel: 'chrome' }), headless: true, timeout: 8_000 }); }
     } catch {
       throw new VisualizationError('preview_unavailable', 'Install Chrome or Chromium to enable screenshot previews. Saving and displaying visualizations still works.', 503);
     }
@@ -55,10 +59,14 @@ export async function previewVisualization(html: string, input: { width?: unknow
       await page.setContent(`<html><body style="margin:0;background:${background}"><iframe id="visual" sandbox="allow-scripts" style="border:0;width:100%;height:800px"></iframe></body></html>`);
       await page.evaluate(({ doc, key }) => {
         const frame = document.querySelector<HTMLIFrameElement>('#visual')!;
-        (window as unknown as { visualHeight: number }).visualHeight = 0;
+        const preview = window as unknown as { visualHeight: number; visualLayout: { width: number; height: number; overflow: number } };
+        preview.visualHeight = 0;
         addEventListener('message', event => {
           if (event.source !== frame.contentWindow || event.data?.nonce !== key || event.data.type !== 'o8-visualization:height') return;
-          (window as unknown as { visualHeight: number }).visualHeight = Math.min(4000, Math.max(80, event.data.height));
+          preview.visualHeight = Math.min(4000, Math.max(80, event.data.height));
+          if (Number.isFinite(event.data.width) && Number.isFinite(event.data.overflow)) preview.visualLayout = {
+            width: event.data.width, height: event.data.height, overflow: event.data.overflow,
+          };
         });
         frame.srcdoc = doc;
       }, { doc: await visualizationSrcdoc(html, nonce, defaultVisualizationTheme(input.appearance === 'light' ? 'light' : 'dark')), key: nonce });
@@ -71,7 +79,18 @@ export async function previewVisualization(html: string, input: { width?: unknow
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       const bytes = await page.screenshot({ type: 'png', omitBackground: true, timeout: 8_000 });
       if (bytes.length > 4 * 1024 * 1024) throw new VisualizationError('preview_too_large', 'Preview image exceeds 4 MiB.', 413);
-      return { image: bytes.toString('base64'), mimeType: 'image/png' as const, width, height, contentHeight, diagnostics };
+      const layouts: VisualizationPreview['layouts'] = [];
+      for (const checkWidth of [...new Set([320, 480, width, 1024])].sort((a, b) => a - b)) {
+        await page.setViewportSize({ width: checkWidth, height });
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        // Use the existing scoped bridge rather than browser-specific frame inspection.
+        // Some Chrome versions expose opaque srcdoc frames as a separate CDP target.
+        await page.waitForFunction(expected => (window as unknown as { visualLayout?: { width: number } }).visualLayout?.width === expected, checkWidth);
+        const measured = await page.evaluate(() => (window as unknown as { visualLayout: { width: number; height: number; overflow: number } }).visualLayout);
+        layouts.push(measured);
+        if (measured.overflow > 1) note(`Horizontal overflow at ${checkWidth}px: ${measured.overflow}px. Reflow the chart, labels or controls.`);
+      }
+      return { image: bytes.toString('base64'), mimeType: 'image/png' as const, width, height, contentHeight, diagnostics, layouts };
     };
     return await Promise.race([work(), new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new VisualizationError('preview_timeout', 'Preview timed out. Simplify the page and try again.', 408)), 15_000);

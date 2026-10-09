@@ -1,9 +1,12 @@
 import { apiFetch, errorText, textResult, type McpTool, type McpToolResult } from './shared';
 import { isVisualizationReference } from '@/lib/visualizations/types';
 import { VISUALIZATION_DESIGN_GUIDE } from '@/lib/visualizations/design';
+import { VISUALIZATION_LIBRARIES } from '@/lib/visualizations/library-catalog';
 
 const GUIDE = 'Build self-contained interactive HTML for this reply: charts, diagrams, tables, UI alternatives or explorable explanations. '
-  + 'Inline CSS and classic JavaScript; bind controls with addEventListener, not onclick attributes or module scripts. Use inline SVG/canvas and data or workspace <img src> images. External scripts, fonts, fetch, links and other network access are blocked. '
+  + 'Inline CSS and classic JavaScript; bind controls with addEventListener, not onclick attributes or module scripts. Use inline SVG/canvas and data or workspace <img src> images. d3 is bundled. Optional library script src URLs are downloaded once, checksum verified, cached and inlined by o8: '
+  + VISUALIZATION_LIBRARIES.filter(library => !library.bundled).map(library => `${library.name} ${library.version}: ${library.url}`).join('; ')
+  + '. Use exactly these pinned URLs for variety. Other external scripts, fonts, fetch, links and network access remain blocked. '
   + 'Live theme variables: --background (transparent), --foreground, --muted-foreground, --card, --popover, --border, --accent, --chart-1 through --chart-6, --font-sans and --font-mono. '
   + 'Start at the reply left edge with no outer padding, title banner, border or card. Use fluid width and natural content height; avoid body min-height:100vh and viewport-height charts. '
   + `${VISUALIZATION_DESIGN_GUIDE} Preview first, inspect the screenshot and diagnostics, revise, then render before your final reply. `

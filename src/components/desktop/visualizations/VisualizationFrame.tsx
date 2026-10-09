@@ -6,6 +6,8 @@ import { visualizationSrcdoc, type VisualizationTheme } from '@/lib/visualizatio
 import { VISUALIZATION_LIMITS, type VisualizationDocument, type VisualizationReference } from '@/lib/visualizations/types';
 import { cachedVisualization, loadVisualization } from './document-cache';
 import { readVisualizationTheme } from './theme';
+import { VISUALIZATION_STATE_EVENT, readVisualizationState, writeVisualizationState } from './view-state';
+import { VisualizationQuestion } from './VisualizationQuestion';
 
 export function VisualizationFrame({ reference, expanded = false }: { reference: VisualizationReference; expanded?: boolean }) {
   const nonce = useId();
@@ -20,6 +22,7 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
   const [controls, setControls] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [srcdoc, setSrcdoc] = useState('');
+  const [question, setQuestion] = useState<string | null>(null);
 
   useEffect(() => {
     const theme = readVisualizationTheme();
@@ -31,11 +34,24 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
   useEffect(() => {
     if (!doc) return;
     let stopped = false;
-    void visualizationSrcdoc(doc.html, nonce, themeRef.current ?? readVisualizationTheme()).then(source => {
+    void visualizationSrcdoc(doc.html, nonce, themeRef.current ?? readVisualizationTheme(), readVisualizationState(reference.id)).then(source => {
       if (!stopped) setSrcdoc(source);
     }).catch(() => { if (!stopped) setError('This browser could not prepare the visualization.'); });
     return () => { stopped = true; };
-  }, [doc, nonce]);
+  }, [doc, nonce, reference.id]);
+
+  useEffect(() => {
+    const sync = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string; state: Record<string, unknown> }>).detail;
+      if (detail?.id === reference.id) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: detail.state }, '*');
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key === `o8:visualization-view:v1:${reference.id}`) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: readVisualizationState(reference.id) }, '*');
+    };
+    window.addEventListener(VISUALIZATION_STATE_EVENT, sync);
+    window.addEventListener('storage', storage);
+    return () => { window.removeEventListener(VISUALIZATION_STATE_EVENT, sync); window.removeEventListener('storage', storage); };
+  }, [nonce, reference.id]);
 
   useEffect(() => {
     let stopped = false;
@@ -56,15 +72,24 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
 
   useEffect(() => {
     const receive = (event: MessageEvent) => {
-      if (event.source !== frameRef.current?.contentWindow || event.origin !== 'null' || event.data?.nonce !== nonce
-        || event.data.type !== 'o8-visualization:height' || typeof event.data.height !== 'number' || !Number.isFinite(event.data.height)) return;
+      if (event.source !== frameRef.current?.contentWindow || event.origin !== 'null' || event.data?.nonce !== nonce) return;
+      if (event.data.type === 'o8-visualization:state') { writeVisualizationState(reference.id, event.data.value); return; }
+      if (event.data.type === 'o8-visualization:question') {
+        if (typeof event.data.value === 'string' && event.data.value.trim() && event.data.value.length <= 4000
+          // WebKit does not carry transient activation across both opaque frames.
+          // Focus limits proposals; the host's Add to chat action owns draft changes.
+          && document.activeElement === frameRef.current) setQuestion(event.data.value.trim());
+        return;
+      }
+      if (event.data.type !== 'o8-visualization:height' || typeof event.data.height !== 'number' || !Number.isFinite(event.data.height)) return;
       setHeight(Math.min(expanded ? 4000 : VISUALIZATION_LIMITS.maxHeight, Math.max(VISUALIZATION_LIMITS.minHeight, Math.ceil(event.data.height))));
       setReady(true);
       if (themeRef.current) frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:theme', nonce, theme: themeRef.current }, '*');
+      frameRef.current?.contentWindow?.postMessage({ type: 'o8-visualization:state', nonce, value: readVisualizationState(reference.id) }, '*');
     };
     window.addEventListener('message', receive);
     return () => window.removeEventListener('message', receive);
-  }, [nonce, expanded]);
+  }, [nonce, expanded, reference.id]);
 
   useEffect(() => {
     if (!doc || ready) return;
@@ -96,6 +121,7 @@ export function VisualizationFrame({ reference, expanded = false }: { reference:
           Open in workspace
         </button>
       </div> : null}
+      {question ? <VisualizationQuestion title={reference.title} question={question} onClose={() => setQuestion(null)} /> : null}
     </>}
   </div>;
 }

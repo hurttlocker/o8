@@ -106,4 +106,14 @@ describe('transcript visualizations through authenticated routes and persisted S
     await expect(prepareVisualizationHtml('<img src="escape.png">', repo)).rejects.toMatchObject({ status: 403 });
     await expect(prepareVisualizationHtml('<img src="../secret.png">', repo)).rejects.toMatchObject({ status: 403 });
   });
+
+  it('counts repeated image expansion before allocating the final document', async () => {
+    const image = Buffer.alloc(2 * 1024 * 1024);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(image);
+    writeFileSync(join(repo, 'large.png'), image);
+    await expect(prepareVisualizationHtml('<img src="large.png">'.repeat(10), repo)).rejects.toMatchObject({ code: 'document_too_large', status: 413 });
+    const small = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+    writeFileSync(join(repo, 'small.png'), small);
+    expect((await prepareVisualizationHtml('<img src="small.png">'.repeat(2), repo)).html.match(/data:image\/png/g)).toHaveLength(2);
+  });
 });

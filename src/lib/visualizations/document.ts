@@ -1,5 +1,10 @@
 import { VISUALIZATION_LIMITS } from './types';
 import { sealVisualizationScripts } from './scripts';
+import { VISUALIZATION_STYLES } from './runtime-styles';
+import { VISUALIZATION_CONTROLS } from './runtime-controls';
+import { VISUALIZATION_CHARTS } from './runtime-charts';
+import { visualizationState } from './view-state';
+import { D3_LICENSE } from './vendor/license-notices';
 
 export interface VisualizationTheme {
   colorScheme: 'light' | 'dark';
@@ -32,10 +37,16 @@ const INNER_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'un
 /** Escape HTML parser delimiters, not just JavaScript quotes. */
 function scriptJson(value: unknown): string { return JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'); }
 
-async function innerDocument(html: string, nonce: string, theme: VisualizationTheme): Promise<string> {
+async function innerDocument(html: string, nonce: string, theme: VisualizationTheme, state: Record<string, unknown>): Promise<string> {
+  // A separate application chunk loads only when an actual visualization mounts.
+  const { D3_SOURCE } = await import('./vendor/d3');
   const bootstrap = `(() => {
     const nonce = ${scriptJson(nonce)};
     const names = ${scriptJson(VISUALIZATION_THEME_VARIABLES)};
+    window.__o8Visualization = {
+      initialState: ${scriptJson(state)},
+      post(type, value) { parent.postMessage({ type: 'o8-visualization:' + type, nonce, value }, '*'); }
+    };
     function apply(theme) {
       if (!theme || !['light', 'dark'].includes(theme.colorScheme)) return;
       const root = document.documentElement;
@@ -46,22 +57,31 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
         const value = theme.variables && theme.variables[name];
         if (typeof value === 'string' && value.length <= 300) root.style.setProperty(name, value);
       }
+      dispatchEvent(new CustomEvent('o8:visualization-theme'));
     }
     apply(${scriptJson(theme)});
     addEventListener('message', event => {
-      if (event.source === parent && event.data?.nonce === nonce && event.data.type === 'o8-visualization:theme') apply(event.data.theme);
+      if (event.source !== parent || event.data?.nonce !== nonce) return;
+      if (event.data.type === 'o8-visualization:theme') apply(event.data.theme);
+      if (event.data.type === 'o8-visualization:state') dispatchEvent(new CustomEvent('o8:visualization-state', { detail: event.data.value }));
     });
     let queued = false;
     let last = 0;
+    let lastWidth = 0;
+    let lastOverflow = 0;
     function measure() {
       queued = false;
       if (!document.body) return;
       const body = document.body.getBoundingClientRect();
       const overflow = document.documentElement.scrollHeight > innerHeight + 1 ? document.documentElement.scrollHeight : 0;
       const height = Math.max(${VISUALIZATION_LIMITS.minHeight}, Math.ceil(body.bottom + scrollY), overflow);
-      if (height === last) return;
+      const width = document.documentElement.clientWidth;
+      const horizontalOverflow = Math.max(0, document.documentElement.scrollWidth - width);
+      if (height === last && width === lastWidth && horizontalOverflow === lastOverflow) return;
       last = height;
-      parent.postMessage({ type: 'o8-visualization:height', nonce, height }, '*');
+      lastWidth = width;
+      lastOverflow = horizontalOverflow;
+      parent.postMessage({ type: 'o8-visualization:height', nonce, height, width, overflow: horizontalOverflow }, '*');
     }
     function queue() { if (!queued) { queued = true; requestAnimationFrame(measure); } }
     addEventListener('DOMContentLoaded', () => {
@@ -80,7 +100,7 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
   })();`;
   const page = `<style>
     html { background: transparent; scrollbar-width: none; }
-    body { margin: 0; color: var(--foreground); background: transparent; font: 300 13px/1.55 var(--font-sans); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
+    body { display: flow-root; margin: 0; color: var(--foreground); background: transparent; font: 300 13px/1.55 var(--font-sans); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
     *, *::before, *::after { box-sizing: border-box; }
     ::-webkit-scrollbar { display: none; }
     img, svg, canvas { max-width: 100%; }
@@ -91,7 +111,9 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
     :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     button { touch-action: manipulation; }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }
-  </style><script>${bootstrap}</script></head><body>${html.replace(/^\s*<!doctype[^>]*>/i, '')}</body></html>`;
+  </style><style>${VISUALIZATION_STYLES}</style><script>${bootstrap}</script>
+  <script data-o8-toolkit="d3">/* ${D3_LICENSE} */\n${D3_SOURCE}</script><script>${VISUALIZATION_CONTROLS}</script><script>${VISUALIZATION_CHARTS}</script>
+  </head><body>${html.replace(/^\s*<!doctype[^>]*>/i, '')}</body></html>`;
   const sealed = await sealVisualizationScripts(page);
   // Both policies apply: hashes seal inline scripts; the base policy separately
   // denies external scripts even when an attacker supplies a matching SRI hash.
@@ -103,8 +125,8 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
  * restriction also blocks the document's self-navigation, which a CSP on a
  * single srcdoc frame cannot prevent. Neither frame has app/network authority.
  */
-export async function visualizationSrcdoc(html: string, nonce: string, theme: VisualizationTheme): Promise<string> {
-  const document = await innerDocument(html, nonce, theme);
+export async function visualizationSrcdoc(html: string, nonce: string, theme: VisualizationTheme, initialState: unknown = {}): Promise<string> {
+  const document = await innerDocument(html, nonce, theme, visualizationState(initialState) ?? {});
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${INNER_CSP}"><style>
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
     iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
@@ -115,9 +137,11 @@ export async function visualizationSrcdoc(html: string, nonce: string, theme: Vi
     addEventListener('message', event => {
       const data = event.data;
       if (!data || data.nonce !== nonce) return;
-      if (event.source === frame.contentWindow && data.type === 'o8-visualization:height' && Number.isFinite(data.height)) {
-        parent.postMessage({ type: data.type, nonce, height: data.height }, '*');
-      } else if (event.source === parent && data.type === 'o8-visualization:theme') {
+      if (event.source === frame.contentWindow) {
+        if (data.type === 'o8-visualization:height' && Number.isFinite(data.height)) parent.postMessage({ type: data.type, nonce, height: data.height,
+          width: Number.isFinite(data.width) ? data.width : undefined, overflow: Number.isFinite(data.overflow) ? data.overflow : undefined }, '*');
+        if (data.type === 'o8-visualization:state' || data.type === 'o8-visualization:question') parent.postMessage({ type: data.type, nonce, value: data.value }, '*');
+      } else if (event.source === parent && ['o8-visualization:theme', 'o8-visualization:state'].includes(data.type)) {
         frame.contentWindow.postMessage(data, '*');
       }
     });

@@ -28,7 +28,7 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
   });
   afterAll(async () => { await browser?.close(); if (server) await new Promise<void>(resolve => server.close(() => resolve())); });
 
-  async function mount(html: string) {
+  async function mount(html: string, state: Record<string, unknown> = {}) {
     await page.goto(base);
     probes = [];
     await page.evaluate(srcdoc => {
@@ -38,7 +38,7 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
       addEventListener('message', event => {
         if (event.source === frame.contentWindow && event.data?.type === 'o8-visualization:height') (window as unknown as { heights: number[] }).heights.push(event.data.height);
       });
-    }, await visualizationSrcdoc(html, 'fixture', defaultVisualizationTheme()));
+    }, await visualizationSrcdoc(html, 'fixture', defaultVisualizationTheme(), state));
     await page.waitForFunction(() => (window as unknown as { heights: number[] }).heights.length > 0);
     const frame = page.frames().find(frame => frame.parentFrame()?.parentFrame() === page.mainFrame());
     if (!frame) throw new Error(`No content frame: ${JSON.stringify(page.frames().map(item => ({ url: item.url(), parent: item.parentFrame()?.url(), grandparent: item.parentFrame()?.parentFrame()?.url() })))}`);
@@ -70,6 +70,22 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
     expect(probes.filter(path => path !== '/favicon.ico')).toEqual([]);
     expect(await page.locator('#private').textContent()).toBe('host secret');
     expect(browser.contexts().flatMap(context => context.pages())).toHaveLength(1);
+  });
+
+  it('keeps natural height stable when a final paragraph has a collapsing margin', async () => {
+    await mount('<section style="height:240px"></section><p style="margin:0 0 20px">A final note</p>');
+    await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('#visual')!;
+      addEventListener('message', event => {
+        if (event.source === frame.contentWindow && event.data?.type === 'o8-visualization:height') frame.style.height = `${event.data.height}px`;
+      });
+      frame.style.height = `${(window as unknown as { heights: number[] }).heights.at(-1)}px`;
+    });
+    await page.waitForTimeout(200);
+    const before = await page.evaluate(() => (window as unknown as { heights: number[] }).heights.length);
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => (window as unknown as { heights: number[] }).heights.length)).toBe(before);
+    expect(await page.evaluate(() => (window as unknown as { heights: number[] }).heights.at(-1))).toBeGreaterThan(280);
   });
 
   it('does not let HTML parser delimiters escape into the trusted outer frame', async () => {
@@ -142,5 +158,59 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
     expect(await frame.locator('#state').textContent()).toBe('undefined');
     expect(await frame.locator('body').getAttribute('data-unsealed')).toBeNull();
     expect(probes.filter(path => path !== '/favicon.ico')).toEqual([]);
+  });
+
+  it('explores shared chart values with a moving bounded tooltip, keyboard and touch-style pinning', async () => {
+    const frame = await mount(`<div id="chart"></div><script>window.chart=o8Viz.chart('#chart',{xLabel:'Day',yLabel:'Tasks',series:[
+      {id:'build',label:'Build',values:[{x:1,y:2},{x:2,y:9},{x:3,y:5}]},
+      {id:'review',label:'Review',values:[{x:1,y:4},{x:2,y:null},{x:3,y:6}]}]});</script>`);
+    const hit = frame.locator('[data-chart-hit]'), bounds = (await hit.boundingBox())!;
+    await page.mouse.move(bounds.x + bounds.width * .35, bounds.y + 45);
+    const first = (await frame.locator('.viz-tooltip').boundingBox())!;
+    expect(await frame.locator('.viz-tooltip').textContent()).toContain('≈');
+    expect(await frame.locator('.viz-tooltip').textContent()).toContain('—');
+    await page.mouse.move(bounds.x + bounds.width * .55, bounds.y + 45);
+    expect((await frame.locator('.viz-tooltip').boundingBox())!.x).not.toBe(first.x);
+    await hit.focus(); await hit.press('Home'); await hit.press('ArrowRight');
+    expect(await frame.locator('.viz-sr-only').textContent()).toContain('Build: 9');
+    expect(await frame.evaluate(() => (window as unknown as { chart: { selected(): unknown } }).chart.selected())).toMatchObject({ x: 2, series: [{ id: 'build', value: 9 }, { id: 'review', value: null }] });
+    await hit.press('Escape'); expect(await frame.locator('.viz-tooltip').isVisible()).toBe(false);
+    await hit.dispatchEvent('pointerdown', { pointerType: 'touch', clientX: bounds.x + bounds.width / 2, clientY: bounds.y + 45 });
+    await hit.dispatchEvent('pointerleave'); expect(await frame.locator('.viz-tooltip').isVisible()).toBe(true);
+    await frame.locator('summary').click();
+    expect(await frame.locator('tbody tr').count()).toBe(3);
+    expect(await frame.locator('tbody tr').nth(1).textContent()).toContain('9—');
+  });
+
+  it('restores saved tabs and series choices, forwards questions, and reflows axes without horizontal overflow', async () => {
+    const frame = await mount(`<div id="measure" class="viz-tabs" data-viz-tabs data-state-key="measure" aria-label="Measure"><button data-value="tasks">Tasks</button><button data-value="minutes">Minutes</button></div>
+      <div id="chart"></div><button id="ask" class="viz-button">Investigate</button><script>
+        o8Viz.chart('#chart',{xLabel:'Day',yLabel:'Tasks',series:[{id:'build',label:'Build',values:[{x:1,y:2},{x:2,y:9}]},{id:'review',label:'Review',values:[{x:1,y:4},{x:2,y:6}]}]});
+        document.querySelector('#ask').addEventListener('click',()=>o8Viz.ask('Explain the selected result'));</script>`, { measure: 'minutes', charts: { chart: { hidden: ['review'] } } });
+    expect(await frame.locator('[data-value="minutes"]').getAttribute('aria-selected')).toBe('true');
+    expect(await frame.locator('[data-series="review"]').getAttribute('aria-pressed')).toBe('false');
+    await frame.locator('[data-value="minutes"]').press('ArrowLeft');
+    expect(await frame.locator('[data-value="tasks"]').getAttribute('aria-selected')).toBe('true');
+    await page.evaluate(() => { (window as unknown as { questions: string[] }).questions = []; addEventListener('message', e => { if (e.data?.type === 'o8-visualization:question') (window as unknown as { questions: string[] }).questions.push(e.data.value); }); });
+    await frame.locator('#ask').click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { questions: string[] }).questions)).toEqual(['Explain the selected result']);
+    for (const width of [320, 480, 1024]) {
+      await page.locator('#visual').evaluate((node, width) => { (node as HTMLElement).style.width = width + 'px'; }, width);
+      await frame.waitForFunction(expected => document.querySelector('svg')?.getAttribute('viewBox')?.split(' ')[2] === String(expected), width);
+      expect(await frame.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+    }
+  });
+
+  it('keeps empty and single-value charts visible and handles negative grouped bars', async () => {
+    const frame = await mount(`<div id="empty"></div><div id="single"></div><div id="bars"></div><script>
+      o8Viz.chart('#empty',{series:[]});
+      o8Viz.chart('#single',{series:[{id:'one',values:[{x:1,y:3}]}]});
+      o8Viz.chart('#bars',{type:'bar',series:[{id:'change',label:'Change',values:[{x:1,y:-2},{x:2,y:3}]}]});</script>`);
+    expect(await frame.locator('#empty').textContent()).toContain('No data to display');
+    expect(await frame.locator('#single svg circle').count()).toBe(1);
+    const heights = await frame.locator('#bars svg rect').evaluateAll(nodes => nodes.map(node => Number(node.getAttribute('height'))));
+    expect(heights).toHaveLength(2); expect(heights.every(value => value > 0)).toBe(true);
+    const hit = frame.locator('#bars [data-chart-hit]'); await hit.focus(); await hit.press('Home');
+    expect(await frame.locator('#bars .viz-sr-only').textContent()).toContain('Change: −2');
   });
 });
