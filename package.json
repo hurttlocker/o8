@@ -141,6 +141,7 @@
     "adm-zip": "^0.6.1",
     "ai": "^6.0.278",
     "better-sqlite3": "^12.8.0",
+    "d3-shape": "3.2.0",
     "dompurify": "^3.4.13",
     "drizzle-orm": "^0.45.2",
     "framer-motion": "^12.36.0",
@@ -179,6 +180,7 @@
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/d3-shape": "3.1.8",
     "@types/node": "22.13.10",
     "@types/qrcode": "^1.5.6",
     "@types/react": "19.0.10",

@@ -42,7 +42,10 @@ it('opens real workspace usage, renders both accounts, switches to recorded acti
     await settle();
     expect(host.querySelector('#usage-activity-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement?.id).toBe('usage-activity-tab');
-    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/panel/analytics'))).toBe(true);
+    await vi.waitFor(async () => {
+      await settle();
+      expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/panel/analytics'))).toBe(true);
+    }, { timeout: 10_000, interval: 100 });
     await act(async () => limits.click()); await settle();
     fail = true;
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Refresh usage"]')!.click());

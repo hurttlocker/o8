@@ -4,7 +4,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeSqlite from "node:sqlite";
+import type * as NodeSqlite from "node:sqlite";
+import { openUsageDatabaseSnapshot } from "./readonlyDatabase";
 import * as NodeTimersPromises from "node:timers/promises";
 
 import { totalTokens, type UsageRecord } from "./usageTranscripts";
@@ -109,8 +110,10 @@ export async function readOpenCodeUsage(
     const file = { path: NodePath.join(root, name), records: [] as UsageRecord[] };
     files.push(file);
     let database: NodeSqlite.DatabaseSync | undefined;
+    let snapshot: Awaited<ReturnType<typeof openUsageDatabaseSnapshot>> | undefined;
     try {
-      database = new NodeSqlite.DatabaseSync(NodePath.join(root, name), { readOnly: true });
+      snapshot = await openUsageDatabaseSnapshot(NodePath.join(root, name));
+      database = snapshot.database;
       // A busy live provider should fail this source promptly rather than
       // stalling the server while SQLite waits for its writer.
       database.exec("PRAGMA busy_timeout = 100");
@@ -153,7 +156,7 @@ export async function readOpenCodeUsage(
     } catch {
       error = true;
     } finally {
-      database?.close();
+      await snapshot?.close();
     }
   }
 

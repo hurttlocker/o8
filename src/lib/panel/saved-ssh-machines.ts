@@ -14,6 +14,7 @@ export interface SavedSshMachine {
   remoteCli: string;
   sshConfig: string | null;
   enabled: boolean;
+  usageOnly?: boolean;
 }
 
 export interface RemoteTerminalSession {
@@ -40,7 +41,8 @@ function validMachine(value: unknown): value is SavedSshMachine {
     && (machine.remoteCli === 'o8' || (machine.remoteCli.startsWith('/') && !/[\r\n\0]/.test(machine.remoteCli)))
     && (machine.sshConfig === null || (typeof machine.sshConfig === 'string'
       && machine.sshConfig.startsWith('/') && !/[\r\n\0]/.test(machine.sshConfig)))
-    && typeof machine.enabled === 'boolean';
+    && typeof machine.enabled === 'boolean'
+    && (machine.usageOnly === undefined || typeof machine.usageOnly === 'boolean');
 }
 
 export function listSavedSshMachines(dataDir = getDataDir()): SavedSshMachine[] {
@@ -88,6 +90,7 @@ export function remoteControlCommand(machineId: string, sessionId: string, cwd =
 }
 
 export async function listRemoteTerminalSessions(machine: SavedSshMachine): Promise<RemoteTerminalSession[]> {
+  if (machine.usageOnly) throw new SavedMachineError('machine_usage_only', 'This machine is connected for usage history only.', 409);
   if (!machine.enabled) throw new SavedMachineError('machine_disabled', 'This machine is disabled.', 409);
   const remoteCommand = [machine.remoteCli, 'terminal', 'list'].map(shellQuote).join(' ');
   const args = [

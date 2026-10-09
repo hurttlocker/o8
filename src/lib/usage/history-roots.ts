@@ -6,14 +6,14 @@ import { listRuntimeIdentitiesForServer } from '@/lib/runtime/identity-catalog';
 import type { UsageProviderKind } from './history-types';
 
 export interface HistoryRoot { provider: UsageProviderKind; path: string; format: 'jsonl' | 'opencode' | 'antigravity' }
-export async function resolveHistoryRoots(): Promise<HistoryRoot[]> {
+export async function resolveHistoryRoots(options: { identities?: (runtime: string) => Promise<{ configHomeRef: string }[]> } = {}): Promise<HistoryRoot[]> {
   const home = homedir();
   const roots: HistoryRoot[] = [];
   for (const [runtime, provider, defaultHome, leaf] of [
     ['codex', 'codex', process.env.CODEX_HOME?.trim() || join(home, '.codex'), 'sessions'],
     ['claude-code', 'claude', process.env.CLAUDE_CONFIG_DIR?.trim() || join(home, '.claude'), 'projects'],
   ] as const) {
-    const homes = new Set([defaultHome, ...(await listRuntimeIdentitiesForServer(runtime)).map(identity => identity.configHomeRef)]);
+    const homes = new Set([defaultHome, ...(await (options.identities ?? listRuntimeIdentitiesForServer)(runtime)).map(identity => identity.configHomeRef)]);
     for (const configHome of homes) {
       roots.push({ provider, path: join(configHome, leaf), format: 'jsonl' });
       if (provider === 'codex') roots.push({ provider, path: join(configHome, 'archived_sessions'), format: 'jsonl' });

@@ -5,7 +5,7 @@ export const providers: { id: UsageProviderKind; name: string; color: string }[]
   { id: 'claude', name: 'Claude Code', color: 'var(--t-brand-orange)' },
   { id: 'grok', name: 'Grok Build', color: 'var(--t-text-secondary)' },
   { id: 'opencode', name: 'OpenCode', color: 'var(--t-accent)' },
-  { id: 'antigravity', name: 'Antigravity', color: 'var(--t-brand-purple, var(--t-accent))' },
+  { id: 'antigravity', name: 'Antigravity', color: 'var(--t-terminal-ansi-magenta)' },
 ];
 export const money = (value: number) => value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 export const count = (value: number) => value.toLocaleString(undefined, { notation: value >= 100_000 ? 'compact' : 'standard', maximumFractionDigits: 2 });

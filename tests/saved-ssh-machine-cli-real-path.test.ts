@@ -65,6 +65,19 @@ esac
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('saved SSH machine CLI through the bundled process and persisted catalog', () => {
+  it('saves a usage-only host after a Node check, without requiring or routing a remote terminal', () => {
+    expect(run(['machine', 'add', 'emptyhost', '--label', 'Empty usage', '--usage-only']).status).toBe(5);
+    expect(existsSync(join(dir, 'ssh-machines.json'))).toBe(false);
+    const added = run(['machine', 'add', 'goodhost', '--label', 'Usage', '--usage-only']);
+    expect(added.status, added.stderr).toBe(0);
+    const catalog = JSON.parse(readFileSync(join(dir, 'ssh-machines.json'), 'utf8'));
+    expect(catalog.machines).toMatchObject([{ label: 'Usage', usageOnly: true }]);
+    expect(run(['machine', 'check', 'Usage']).status).toBe(0);
+    const terminal = run(['terminal', 'list', '--machine', 'Usage']);
+    expect(terminal.status).toBe(5); expect(JSON.parse(terminal.stderr).error.code).toBe('machine_usage_only');
+    expect(run(['machine', 'remove', 'Usage']).status).toBe(0);
+    rmSync(join(dir, 'ssh-machines.json'));
+  });
   it('verifies before saving, targets the remote terminal, and never falls back to Local', () => {
     expect(run(['machine', 'list'], undefined, { O8_API_TOKEN: 'invented' }).status).toBe(3);
     expect(run(['machine', 'list'], undefined, { O8_WORKER_TOKEN: 'worker-token' }).status).toBe(3);

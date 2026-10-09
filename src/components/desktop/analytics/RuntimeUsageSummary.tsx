@@ -3,7 +3,7 @@
 import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
 import type { RuntimeCapacityBucket, RuntimeCapacitySnapshot } from '@/lib/runtimes/types';
 import { formatTokens } from '@/lib/util/format-tokens';
-import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
+import { UsageProviderMark } from './UsageProviderMark';
 
 function runtimeName(runtime: string): string {
   return runtime === 'codex' ? 'Codex' : runtime === 'claude-code' ? 'Claude' : runtime;
@@ -38,7 +38,7 @@ export function RuntimeUsageSummary({ snapshot, compact = false }: {
       return <section key={`${capacity.runtime}:${capacity.identityId ?? index}`} aria-label={`${runtimeName(capacity.runtime)} usage`}
         style={{ display: 'grid', alignContent: 'start', gap: 12, paddingTop: 14, borderTop: '1px solid var(--t-divider-subtle)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13.5 }}>
-          {capacity.runtime === 'codex' ? <CodexIcon size={14} /> : capacity.runtime === 'claude-code' ? <ClaudeIcon size={14} /> : null}
+          {capacity.runtime === 'codex' || capacity.runtime === 'claude-code' ? <UsageProviderMark provider={capacity.runtime === 'codex' ? 'codex' : 'claude'} size={14} /> : null}
           <span>{runtimeName(capacity.runtime)}{identity ? ` · ${identity.label}` : ''}</span>
         </div>
         <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{stateLabel(capacity)}</span>

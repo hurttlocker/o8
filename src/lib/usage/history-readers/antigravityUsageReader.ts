@@ -4,7 +4,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeSqlite from "node:sqlite";
+import { openUsageDatabaseSnapshot } from "./readonlyDatabase";
 import * as NodeTimersPromises from "node:timers/promises";
 
 import type { UsageRecord } from "./usageTranscripts";
@@ -161,7 +161,8 @@ interface UsageCandidate {
 }
 
 async function readDatabase(path: string, fallbackTimestamp: number): Promise<UsageCandidate[]> {
-  const db = new NodeSqlite.DatabaseSync(path, { readOnly: true });
+  const snapshot = await openUsageDatabaseSnapshot(path);
+  const db = snapshot.database;
   try {
     db.exec("PRAGMA busy_timeout = 100; BEGIN");
     const tables = new Set(
@@ -257,7 +258,7 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
     }
     return records;
   } finally {
-    db.close();
+    await snapshot.close();
   }
 }
 
