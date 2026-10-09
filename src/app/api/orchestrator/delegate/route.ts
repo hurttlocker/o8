@@ -383,10 +383,10 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       note: launchResult.note,
     });
   } catch (err) {
-    console.error('[orchestrator-delegate]', err instanceof Error ? err.message : err);
+    console.error('[orchestrator-delegate]', err);
     return NextResponse.json({
       ok: false,
-      error: err instanceof Error ? err.message : 'Delegation failed',
+      error: 'Delegation failed',
     }, { status: checkoutMode === 'shared' ? 422 : 500 });
   }
 }

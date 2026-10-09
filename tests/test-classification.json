@@ -1773,6 +1773,12 @@
       ]
     },
     {
+      "path": "tests/codex-transcript-retention-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cold-start-runtime-spawn-routes.test.ts",
       "reasons": [
         "child-process",
@@ -2366,6 +2372,7 @@
         "child-process",
         "git-cli",
         "network-listener",
+        "process-signal",
         "real-path"
       ]
     },
@@ -2662,6 +2669,14 @@
       "reasons": [
         "child-process",
         "worktree"
+      ]
+    },
+    {
+      "path": "tests/mcp-error-results-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
       ]
     },
     {

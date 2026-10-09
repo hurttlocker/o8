@@ -229,7 +229,8 @@ function routeError(error: unknown) {
     return errorResponse('invalid_lease_input', error.message, 400);
   }
   if (error instanceof ResourceLeaseSafetyError) {
-    return errorResponse(error.code, error.message, 503);
+    console.error('[resource-lease] Safety check failed:', error);
+    return errorResponse(error.code, 'Resource lease state is unavailable and no ownership change was asserted.', 503);
   }
   console.error('[resource-lease] Route mutation failed:', error);
   return errorResponse(

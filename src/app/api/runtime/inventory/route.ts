@@ -1,5 +1,4 @@
 import { NextResponse, NextRequest } from 'next/server';
-import { buildErrorPayload } from '@/lib/api/error-format';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 
 export const runtime = 'nodejs';
@@ -18,7 +17,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('[runtime/inventory] Failed to load snapshot', error);
     return NextResponse.json(
-      buildErrorPayload('Failed to load runtime inventory.', error),
+      { error: 'Failed to load runtime inventory.' },
       {
         status: 500,
         headers: {

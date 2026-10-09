@@ -110,8 +110,8 @@ export async function handleApprove(args: Record<string, unknown>): Promise<McpT
     }
     return textResult(`Approve failed: ${result.error ?? 'unknown error'}`, true);
   } catch (err) {
-    console.error(`[o8-operator] o8_approve failed: ${err}`);
-    return textResult(`Failed to approve: ${err}`, true);
+    console.error(`[o8-operator] o8_approve failed: `, err);
+    return textResult(`Failed to approve: ${errorText(err)}`, true);
   }
 }
 
@@ -136,8 +136,8 @@ export async function handleReject(args: Record<string, unknown>): Promise<McpTo
     }
     return textResult(`Reject failed: ${result.error ?? 'unknown error'}`, true);
   } catch (err) {
-    console.error(`[o8-operator] o8_reject failed: ${err}`);
-    return textResult(`Failed to reject: ${err}`, true);
+    console.error(`[o8-operator] o8_reject failed: `, err);
+    return textResult(`Failed to reject: ${errorText(err)}`, true);
   }
 }
 

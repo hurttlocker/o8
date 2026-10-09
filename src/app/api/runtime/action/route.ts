@@ -14,6 +14,8 @@ import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const OUTCOME_UNKNOWN_MESSAGE = 'The action outcome is unknown; inspect the session before using a new mutation id.';
+
 type RuntimeActionResult = Awaited<ReturnType<typeof performLegacyRuntimeActionViaAgentControl>>;
 type RuntimeActionReceipt =
   | { kind: 'result'; result: RuntimeActionResult }
@@ -95,10 +97,10 @@ export async function POST(request: NextRequest) {
             }),
           };
         } catch (error) {
-          const detail = error instanceof Error ? error.message : 'Unable to perform runtime action';
+          console.error('[runtime-action] control failed:', error);
           return {
             kind: 'outcome_unknown',
-            message: `${detail} The action outcome is unknown; inspect the session before using a new mutation id.`,
+            message: OUTCOME_UNKNOWN_MESSAGE,
           };
         }
       },
@@ -142,7 +144,7 @@ export async function POST(request: NextRequest) {
             surfaceId,
             sessionKey: surfaceId,
             status: 'failed',
-            note: receipt.message,
+            note: OUTCOME_UNKNOWN_MESSAGE,
             createdAt: new Date().toISOString(),
             settledAt: new Date().toISOString(),
           },
@@ -153,14 +155,14 @@ export async function POST(request: NextRequest) {
       }
       return NextResponse.json({
         ok: false,
-        error: receipt.message,
+        error: OUTCOME_UNKNOWN_MESSAGE,
         action,
         surfaceId,
         sessionKey: surfaceId,
         runtime: runtimeIdFromSessionKey(surfaceId) ?? 'unknown',
         clientMutationId,
         status: 'unavailable',
-        note: receipt.message,
+        note: OUTCOME_UNKNOWN_MESSAGE,
         outcomeUnknown: true,
         retryable: false,
         replayed: outcome.replayed || undefined,
@@ -207,6 +209,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    console.error('[api] runtime/action failed:', error);
     await publishRealtimeMutation({
       mutation: {
         mutationId: clientMutationId,
@@ -215,7 +218,7 @@ export async function POST(request: NextRequest) {
         surfaceId,
         sessionKey: surfaceId,
         status: 'failed',
-        note: error instanceof Error ? error.message : 'Unable to perform runtime action',
+        note: 'Unable to perform runtime action',
         createdAt: new Date().toISOString(),
         settledAt: new Date().toISOString(),
       },
@@ -224,7 +227,7 @@ export async function POST(request: NextRequest) {
     }).catch((publishError) => console.error('[runtime-action] failure publish failed', publishError));
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Unable to perform runtime action',
+        error: 'Unable to perform runtime action',
       },
       {
         status: 500,

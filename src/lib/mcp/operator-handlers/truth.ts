@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import {
   apiFetch,
   errorText,
@@ -33,7 +34,7 @@ export const TRUTH_TOOLS: McpTool[] = [{
 function truthKind(args: Record<string, unknown>): TruthKind {
   const kind = requiredString(args, 'kind');
   if (!TRUTH_KINDS.includes(kind as TruthKind)) {
-    throw new Error('kind must be merged-since, packet, or approvals');
+    throw new McpInputError('kind must be merged-since, packet, or approvals');
   }
   return kind as TruthKind;
 }
@@ -42,7 +43,7 @@ function optionalPositiveInteger(args: Record<string, unknown>, key: string, max
   const value = args[key];
   if (value === undefined || value === null) return null;
   if (!Number.isInteger(value) || Number(value) < 1 || (maximum !== undefined && Number(value) > maximum)) {
-    throw new Error(`${key} must be an integer between 1 and ${maximum ?? Number.MAX_SAFE_INTEGER}`);
+    throw new McpInputError(`${key} must be an integer between 1 and ${maximum ?? Number.MAX_SAFE_INTEGER}`);
   }
   return Number(value);
 }
@@ -62,14 +63,14 @@ function truthSearchParams(args: Record<string, unknown>): URLSearchParams {
   const issueNumber = optionalPositiveInteger(args, 'issueNumber');
   if (kind === 'packet') {
     if ((!packetId && issueNumber === null) || (packetId && issueNumber !== null)) {
-      throw new Error('packet queries require exactly one of packetId or issueNumber');
+      throw new McpInputError('packet queries require exactly one of packetId or issueNumber');
     }
     if (packetId) params.set('packetId', packetId);
     else params.set('issueNumber', String(issueNumber));
     return params;
   }
-  if (!packetId) throw new Error('packetId is required for approvals');
-  if (issueNumber !== null) throw new Error('issueNumber is valid only for packet queries');
+  if (!packetId) throw new McpInputError('packetId is required for approvals');
+  if (issueNumber !== null) throw new McpInputError('issueNumber is valid only for packet queries');
   params.set('packetId', packetId);
   return params;
 }

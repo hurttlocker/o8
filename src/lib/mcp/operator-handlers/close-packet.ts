@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import {
   type McpTool,
   type McpToolResult,
@@ -45,11 +46,11 @@ export async function handleClosePacketUnmerged(args: Record<string, unknown>): 
   try {
     const disposition = requiredString(args, 'disposition');
     if (!(CLOSE_UNMERGED_DISPOSITIONS as readonly string[]).includes(disposition)) {
-      throw new Error(`disposition must be one of: ${CLOSE_UNMERGED_DISPOSITIONS.join(', ')}.`);
+      throw new McpInputError(`disposition must be one of: ${CLOSE_UNMERGED_DISPOSITIONS.join(', ')}.`);
     }
     if (args.acknowledgeMissingWorktree !== undefined
       && typeof args.acknowledgeMissingWorktree !== 'boolean') {
-      throw new Error('acknowledgeMissingWorktree must be a boolean.');
+      throw new McpInputError('acknowledgeMissingWorktree must be a boolean.');
     }
     const result = await apiFetchCorrelatedMutation(
       '/api/orchestrator/discard-packet',

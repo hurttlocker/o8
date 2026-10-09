@@ -18,6 +18,11 @@
 //! when pidfds are unavailable (kernels before 5.3, or a seccomp policy that
 //! denies them), since teardown could not signal anything.
 //!
+//! macOS tracks forks, execs and exits with kqueue and registers descendants
+//! recursively through libproc. It watches the host's exit too. A parent that
+//! forks and exits before its fork event is handled can still leave a child
+//! untracked, since macOS has no subreaper. Setup failure refuses before launch.
+//!
 //! With `--write <path>` options before the host pid (#3385), the supervisor
 //! applies Landlock before it starts the command, so the command and everything
 //! it starts can create, change, remove or rename files only beneath those
@@ -34,14 +39,14 @@
 //! service (systemd, an already running daemon) over IPC.
 
 use std::ffi::OsString;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::ffi::OsStrExt;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::time::{Duration, Instant};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 const RECEIPT: libc::c_int = 3;
 /// Reaps per pass, so a stream of exiting orphans cannot hold teardown past its deadlines.
 #[cfg(target_os = "linux")]
@@ -252,7 +257,7 @@ fn confine_writes(paths: &[OsString]) -> bool {
     confined
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn write_receipt(status: Option<libc::c_int>, confirmed: bool) {
     let (code, signal) = match status {
         Some(raw) if libc::WIFEXITED(raw) => (Some(libc::WEXITSTATUS(raw)), None),
@@ -263,12 +268,14 @@ fn write_receipt(status: Option<libc::c_int>, confirmed: bool) {
     unsafe { libc::write(RECEIPT, line.as_ptr().cast(), line.len()) };
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn run(_argv: &[OsString]) -> i32 {
-    // No subreaper on this platform; the host uses its own best-effort tracker.
-    eprintln!("The command supervisor is available on Linux only.");
+    eprintln!("The command supervisor is available on Linux and macOS only.");
     125
 }
+
+#[cfg(target_os = "macos")]
+pub use macos::run;
 
 #[cfg(target_os = "linux")]
 pub fn run(argv: &[OsString]) -> i32 {
@@ -358,5 +365,266 @@ pub fn run(argv: &[OsString]) -> i32 {
         Some(raw) if libc::WIFEXITED(raw) => libc::WEXITSTATUS(raw),
         Some(raw) if libc::WIFSIGNALED(raw) => 128 + libc::WTERMSIG(raw),
         _ => 125,
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use super::*;
+    use std::collections::HashMap;
+
+    struct Process {
+        started: Option<(u64, u64)>,
+        registered: bool,
+    }
+
+    struct Tree {
+        queue: libc::c_int,
+        host: libc::pid_t,
+        tracked: HashMap<libc::pid_t, Process>,
+        complete: bool,
+    }
+
+    /// `SZOMB` in sys/proc.h.
+    const ZOMBIE: u32 = 5;
+
+    // A zombie has exited and cannot run. kqueue refuses to watch it and
+    // `kill(pid, 0)` still succeeds, so it is recognised by its status. Its pid
+    // cannot be reused until it is reaped.
+    fn gone(pid: libc::pid_t) -> bool {
+        ((unsafe { libc::kill(pid, 0) }) < 0
+            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH))
+            || process_info(pid).is_some_and(|info| info.pbi_status == ZOMBIE)
+    }
+
+    fn process_info(pid: libc::pid_t) -> Option<libc::proc_bsdinfo> {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of_val(&info) as libc::c_int;
+        let read = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&mut info as *mut libc::proc_bsdinfo).cast(), size) };
+        (read == size).then_some(info)
+    }
+
+    fn started(pid: libc::pid_t) -> Option<(u64, u64)> {
+        process_info(pid).map(|info| (info.pbi_start_tvsec, info.pbi_start_tvusec))
+    }
+
+    fn watch(queue: libc::c_int, ident: usize, filter: i16, fflags: u32) -> bool {
+        watch_errno(queue, ident, filter, fflags).is_none()
+    }
+
+    /// The registration error, if any. `ESRCH` on a process means it has exited
+    /// or is exiting, and an exiting process can no longer fork.
+    fn watch_errno(queue: libc::c_int, ident: usize, filter: i16, fflags: u32) -> Option<i32> {
+        let event = libc::kevent { ident, filter, flags: libc::EV_ADD | libc::EV_CLEAR, fflags, data: 0, udata: std::ptr::null_mut() };
+        if (unsafe { libc::kevent(queue, &event, 1, std::ptr::null_mut(), 0, std::ptr::null()) }) == 0 { return None; }
+        Some(std::io::Error::last_os_error().raw_os_error().unwrap_or(0))
+    }
+
+    fn children(parent: libc::pid_t) -> Option<Vec<libc::pid_t>> {
+        let mut pids = vec![0; 64];
+        loop {
+            let bytes = pids.len().checked_mul(std::mem::size_of::<libc::pid_t>())?;
+            let bytes = libc::c_int::try_from(bytes).ok()?;
+            unsafe { *libc::__error() = 0 };
+            // libproc returns a count of pids, not bytes. A full buffer is retried.
+            let count = unsafe { libc::proc_listchildpids(parent, pids.as_mut_ptr().cast(), bytes) };
+            if count < 0 || (count == 0 && std::io::Error::last_os_error().raw_os_error() != Some(0)) {
+                return None;
+            }
+            if (count as usize) < pids.len() {
+                pids.truncate(count as usize);
+                pids.retain(|pid| *pid > 0);
+                return Some(pids);
+            }
+            pids.resize(pids.len().checked_mul(2)?, 0);
+        }
+    }
+
+    impl Tree {
+        fn track(&mut self, pid: libc::pid_t, expected: Option<(u64, u64)>) -> bool {
+            if self.tracked.contains_key(&pid) { return true; }
+            // A process in exit has no readable info while `kill(pid, 0)` still
+            // succeeds, so only two readable, different start times mean reuse.
+            let identity = started(pid);
+            if expected.is_some() && identity.is_some() && identity != expected {
+                if gone(pid) { return true; }
+                self.complete = false;
+                return false;
+            }
+            let identity = identity.or(expected);
+            let error = watch_errno(self.queue, pid as usize, libc::EVFILT_PROC, libc::NOTE_FORK | libc::NOTE_EXEC | libc::NOTE_EXIT);
+            // kqueue refuses a process in exit with ESRCH; it can no longer fork.
+            if error == Some(libc::ESRCH) { return true; }
+            let registered = error.is_none();
+            if !registered && gone(pid) { return true; }
+            // Unreadable after registration: it exited since, and NOTE_EXIT will report it.
+            let same = identity.is_some() && started(pid).is_none_or(|now| Some(now) == identity);
+            if !registered || !same { self.complete = false; }
+            self.tracked.insert(pid, Process { started: identity, registered });
+            registered && same
+        }
+
+        fn discover(&mut self, parent: libc::pid_t) {
+            let mut pending = vec![parent];
+            while let Some(parent) = pending.pop() {
+                let identity = self.tracked.get(&parent).and_then(|process| process.started);
+                // A queued event belongs to the original process, even if its
+                // numeric pid has since been reused. Never adopt that new tree.
+                if identity.is_none() || started(parent) != identity { continue; }
+                let Some(pids) = children(parent) else {
+                    // A parent can exit before its fork event is handled.
+                    if !gone(parent) { self.complete = false; }
+                    continue;
+                };
+                for pid in pids {
+                    if self.tracked.contains_key(&pid) { continue; }
+                    if started(parent) != identity { break; }
+                    let Some(info) = process_info(pid).filter(|info| info.pbi_ppid == parent as u32) else { continue; };
+                    self.track(pid, Some((info.pbi_start_tvsec, info.pbi_start_tvusec)));
+                    if self.tracked.contains_key(&pid) { pending.push(pid); }
+                }
+            }
+        }
+
+        // Only NOTE_EXIT confirms a registered process ended. Failed registrations
+        // can be confirmed by ESRCH, never by an unreadable process table.
+        fn events(&mut self, timeout: Duration) -> bool {
+            let mut events: [libc::kevent; 64] = unsafe { std::mem::zeroed() };
+            let spec = libc::timespec { tv_sec: timeout.as_secs() as libc::time_t, tv_nsec: timeout.subsec_nanos() as libc::c_long };
+            let count = unsafe { libc::kevent(self.queue, std::ptr::null(), 0, events.as_mut_ptr(), events.len() as libc::c_int, &spec) };
+            if count < 0 {
+                if std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) { self.complete = false; }
+                return !self.complete;
+            }
+            let mut stop = false;
+            for event in &events[..count as usize] {
+                if event.flags & libc::EV_ERROR != 0 { self.complete = false; stop = true; continue; }
+                if event.filter == libc::EVFILT_SIGNAL { stop = true; continue; }
+                let pid = event.ident as libc::pid_t;
+                if pid == self.host {
+                    if event.fflags & libc::NOTE_EXIT != 0 { stop = true; }
+                    continue;
+                }
+                if event.fflags & (libc::NOTE_FORK | libc::NOTE_EXEC) != 0 { self.discover(pid); }
+                if event.fflags & libc::NOTE_EXIT != 0 { self.tracked.remove(&pid); }
+            }
+            self.tracked.retain(|pid, process| process.registered || !gone(*pid));
+            stop || !self.complete
+        }
+
+        fn signal_all(&self, signal: libc::c_int) {
+            for (pid, process) in &self.tracked {
+                // Drain exit events before signalling and check the start time,
+                // so an observed pid reuse never receives a signal.
+                if process.started.is_some() && started(*pid) == process.started {
+                    unsafe { libc::kill(*pid, signal) };
+                }
+            }
+        }
+
+        fn teardown(&mut self, command: libc::pid_t, status: &mut Option<libc::c_int>) -> bool {
+            self.events(Duration::ZERO);
+            self.signal_all(libc::SIGTERM);
+            let grace = Instant::now() + Duration::from_millis(1_500);
+            let deadline = grace + Duration::from_secs(5);
+            loop {
+                self.events(Duration::from_millis(20));
+                reap(command, status);
+                if self.tracked.is_empty() && status.is_some() { return self.complete; }
+                if Instant::now() >= deadline { return false; }
+                // Children discovered during teardown get TERM too, then KILL.
+                self.signal_all(if Instant::now() < grace { libc::SIGTERM } else { libc::SIGKILL });
+            }
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) { unsafe { libc::close(self.queue) }; }
+    }
+
+    fn reap(command: libc::pid_t, status: &mut Option<libc::c_int>) {
+        if status.is_some() { return; }
+        let mut raw = 0;
+        if unsafe { libc::waitpid(command, &mut raw, libc::WNOHANG) } == command { *status = Some(raw); }
+    }
+
+    pub fn run(argv: &[OsString]) -> i32 {
+        if unsafe { libc::fcntl(RECEIPT, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 { return 125; }
+        let Some(host) = argv.first().and_then(|arg| arg.to_str()).and_then(|arg| arg.parse::<libc::pid_t>().ok()).filter(|pid| *pid > 0) else {
+            write_receipt(None, false);
+            return 125;
+        };
+        if argv.len() < 2 { write_receipt(None, false); return 125; }
+        let Ok(program) = argv[1..].iter().map(|arg| CString::new(arg.as_bytes())).collect::<Result<Vec<_>, _>>() else {
+            write_receipt(None, false);
+            return 125;
+        };
+        let queue = unsafe { libc::kqueue() };
+        if queue < 0 { write_receipt(None, true); return 125; }
+        let mut tree = Tree { queue, host, tracked: HashMap::new(), complete: true };
+        let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+        let mut previous: libc::sigset_t = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::sigemptyset(&mut set);
+            // A closed launch or receipt pipe must not interrupt teardown.
+            for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGPIPE] { libc::sigaddset(&mut set, signal); }
+        }
+        // All watches must work before the command is allowed to execute.
+        let ready = unsafe { libc::fcntl(queue, libc::F_SETFD, libc::FD_CLOEXEC) } == 0
+            && unsafe { libc::sigprocmask(libc::SIG_BLOCK, &set, &mut previous) } == 0
+            && unsafe { libc::getppid() } == host
+            && watch(queue, host as usize, libc::EVFILT_PROC, libc::NOTE_EXIT)
+            && [libc::SIGTERM, libc::SIGINT, libc::SIGHUP].iter().all(|signal| watch(queue, *signal as usize, libc::EVFILT_SIGNAL, 0))
+            && unsafe { libc::getppid() } == host;
+        let mut gate = [0; 2];
+        if !ready || unsafe { libc::pipe(gate.as_mut_ptr()) } != 0 {
+            write_receipt(None, true);
+            return 125;
+        }
+        let mut pointers: Vec<*const libc::c_char> = program.iter().map(|arg| arg.as_ptr()).collect();
+        pointers.push(std::ptr::null());
+        let command = unsafe { libc::fork() };
+        if command == 0 {
+            unsafe {
+                libc::close(gate[1]);
+                let mut byte = 0u8;
+                let released = libc::read(gate[0], (&mut byte as *mut u8).cast(), 1) == 1;
+                libc::close(gate[0]);
+                if !released { libc::_exit(125); }
+                libc::setpgid(0, 0);
+                libc::sigprocmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
+                libc::execv(pointers[0], pointers.as_ptr());
+                libc::_exit(127);
+            }
+        }
+        unsafe { libc::close(gate[0]) };
+        if command < 0 {
+            unsafe { libc::close(gate[1]) };
+            write_receipt(None, true);
+            return 125;
+        }
+        if !tree.track(command, started(command)) {
+            // Closing the gate makes the child exit without executing anything.
+            unsafe { libc::close(gate[1]); libc::waitpid(command, std::ptr::null_mut(), 0); }
+            write_receipt(None, true);
+            return 125;
+        }
+        let released = unsafe { libc::write(gate[1], b"1".as_ptr().cast(), 1) } == 1;
+        unsafe { libc::close(gate[1]) };
+        let mut status = None;
+        if released {
+            loop {
+                let stop = tree.events(Duration::from_millis(250));
+                reap(command, &mut status);
+                if stop || status.is_some() { break; }
+            }
+        }
+        let confirmed = tree.teardown(command, &mut status);
+        write_receipt(status, confirmed);
+        match status {
+            Some(raw) if libc::WIFEXITED(raw) => libc::WEXITSTATUS(raw),
+            Some(raw) if libc::WIFSIGNALED(raw) => 128 + libc::WTERMSIG(raw),
+            _ => 125,
+        }
     }
 }

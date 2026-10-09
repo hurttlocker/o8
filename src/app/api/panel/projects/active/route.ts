@@ -16,7 +16,8 @@ export async function POST(request: NextRequest) {
     const ledger = await setActiveProject(projectId);
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to switch project.';
+    console.error('[api] panel/projects/active failed:', error);
+    const message = 'Failed to switch project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }

@@ -134,11 +134,12 @@ export async function POST(request: NextRequest) {
       ...(result.classifier ? { classifier: result.classifier, classificationReceiptId: result.classificationReceiptId ?? null } : {}),
     }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (err) {
+    console.error('[cortex-ask] answer failed:', err);
     const managedUnavailable = err instanceof ManagedBrainUnavailableError;
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: 'Unable to answer cortex question.',
         ...(managedUnavailable ? { code: err.code } : {}),
       },
       { status: 500, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },

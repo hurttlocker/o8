@@ -102,8 +102,8 @@ export async function GET(request: NextRequest) {
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to read packet transcript.';
-    console.error(`[packet-transcript] read failed: ${message}`);
+    const message = 'Unable to read packet transcript.';
+    console.error('[packet-transcript] read failed:', error);
     return NextResponse.json(
       {
         ok: false,

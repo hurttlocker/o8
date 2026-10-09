@@ -53,8 +53,9 @@ export async function GET() {
     }));
     return NextResponse.json({ servers });
   } catch (error) {
+    console.error('[mcp-servers] load failed:', error);
     return NextResponse.json(
-      { error: 'Failed to load MCP servers', detail: error instanceof Error ? error.message : String(error) },
+      { error: 'Failed to load MCP servers' },
       { status: 500 },
     );
   }
@@ -99,8 +100,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, server });
   } catch (error) {
+    console.error('[api] setup/mcp-servers failed:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to create MCP server' },
+      { error: 'Failed to create MCP server' },
       { status: 400 },
     );
   }
@@ -138,8 +140,9 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ ok: true, server });
   } catch (error) {
+    console.error('[api] setup/mcp-servers failed:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to update MCP server' },
+      { error: 'Failed to update MCP server' },
       { status: 400 },
     );
   }
@@ -159,8 +162,9 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    console.error('[api] setup/mcp-servers failed:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to remove MCP server' },
+      { error: 'Failed to remove MCP server' },
       { status: 400 },
     );
   }

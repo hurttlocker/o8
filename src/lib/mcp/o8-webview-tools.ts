@@ -1,3 +1,4 @@
+import { McpInputError, safeErrorText } from '@/lib/mcp/api-error';
 import { THREAD_NAVIGATION_TOOLS, createThreadNavigationHandlers } from './o8-thread-navigation-tools';
 import { SAVED_IMAGE_TOOLS, createSavedImageHandlers } from '@/lib/mcp/o8-saved-image-tools';
 import { COMPOSER_IMAGE_TOOLS, createComposerImageHandlers } from '@/lib/mcp/o8-composer-image-tools';
@@ -343,7 +344,7 @@ function persistScreenshot(base64: string, mimeType: string): string | null {
 }
 
 function structuredErrorResult(error: unknown): McpToolResult {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = safeErrorText(error);
   const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
     ? error.code
     : undefined;
@@ -375,7 +376,7 @@ function parseOptionalNumber(value: unknown): number | undefined {
 function requiredString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${key} is required`);
+    throw new McpInputError(`${key} is required`);
   }
   return value.trim();
 }
@@ -563,10 +564,13 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
 
     o8_view_type: async (args) => withStructuredErrors(async () => {
       const text = args.text;
-      if (typeof text !== 'string' || !text.trim()) throw new Error('text is required');
+      if (typeof text !== 'string' || !text.trim()) throw new McpInputError('text is required');
       const client = getClient();
       const prepared = JSON.parse((await client.evalJs(buildPrepareComposerTargetScript())).result) as { ok?: boolean; error?: string };
-      if (prepared.ok !== true) throw new Error(prepared.error ?? 'No visible editable target is available.');
+      if (prepared.ok !== true) {
+        console.error('[mcp] Composer target unavailable:', prepared);
+        throw new McpInputError('No visible active composer. Focus an input or open an active chat composer, then retry.');
+      }
       const result = await client.type(text);
       return jsonResult(result);
     }),
@@ -644,7 +648,7 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
       // deliberately not offered here: `close` on `main` quits the app, and
       // geometry belongs to the user, not to an agent poking at focus.
       if (!AGENT_WINDOW_OPERATIONS.includes(operation as O8WindowOperation)) {
-        throw new Error(`Unsupported window operation "${operation}". Use one of: ${AGENT_WINDOW_OPERATIONS.join(', ')}.`);
+        throw new McpInputError(`Unsupported window operation "${operation}". Use one of: ${AGENT_WINDOW_OPERATIONS.join(', ')}.`);
       }
       const windowLabel = typeof args.windowLabel === 'string' && args.windowLabel.trim()
         ? args.windowLabel.trim()

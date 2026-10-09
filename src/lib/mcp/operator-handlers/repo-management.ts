@@ -1,3 +1,5 @@
+import { McpInputError } from '@/lib/mcp/api-error';
+import { errorText } from '@/lib/mcp/operator-handlers/shared';
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { parse, resolve } from 'node:path';
@@ -238,7 +240,7 @@ function requiredPath(args: Record<string, unknown>, primary: 'path' | 'repoPath
       ? fallback
       : '';
   if (!value) {
-    throw new Error(`${primary} is required`);
+    throw new McpInputError(`${primary} is required`);
   }
   return value.trim();
 }
@@ -354,7 +356,7 @@ export async function handleRegisterRepo(args: Record<string, unknown>): Promise
       projectId,
     });
   } catch (error) {
-    return textResult(`Failed to register repo: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to register repo: ${errorText(error)}`, true);
   }
 }
 
@@ -363,7 +365,7 @@ export async function handleListRepos(): Promise<McpToolResult> {
     const repos = await listRegisteredRepos();
     return jsonResult({ count: repos.length, repos: repos.map(repoSummary) });
   } catch (error) {
-    return textResult(`Failed to list repos: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to list repos: ${errorText(error)}`, true);
   }
 }
 
@@ -394,7 +396,7 @@ export async function handleRemoveRepo(args: Record<string, unknown>): Promise<M
       runtimeCleanup: data.stoppedSessions ?? null,
     });
   } catch (error) {
-    return textResult(`Failed to remove repo: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to remove repo: ${errorText(error)}`, true);
   }
 }
 
@@ -417,7 +419,7 @@ export async function handleInitRepo(args: Record<string, unknown>): Promise<Mcp
       initialCommit: data.initialCommit === true,
     });
   } catch (error) {
-    return textResult(`Failed to initialize repo: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to initialize repo: ${errorText(error)}`, true);
   }
 }
 
@@ -463,7 +465,7 @@ export async function handleCreateProject(args: Record<string, unknown>): Promis
       repoPaths: updated.repoPaths ?? [],
     });
   } catch (error) {
-    return textResult(`Failed to create project: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to create project: ${errorText(error)}`, true);
   }
 }
 
@@ -481,7 +483,7 @@ export async function handleListProjects(): Promise<McpToolResult> {
       })),
     });
   } catch (error) {
-    return textResult(`Failed to list projects: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to list projects: ${errorText(error)}`, true);
   }
 }
 
@@ -497,7 +499,7 @@ export async function handleSetActiveProject(args: Record<string, unknown>): Pro
     }) as ProjectLedger;
     return jsonResult({ activeProjectId: updated.activeProjectId ?? projectId, project });
   } catch (error) {
-    return textResult(`Failed to switch project: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to switch project: ${errorText(error)}`, true);
   }
 }
 
@@ -536,7 +538,7 @@ export async function handleSetProjectRepos(args: Record<string, unknown>): Prom
       localFoldersPreserved: true,
     });
   } catch (error) {
-    return textResult(`Failed to set project repos: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to set project repos: ${errorText(error)}`, true);
   }
 }
 
@@ -564,7 +566,7 @@ export async function handleDeleteProject(args: Record<string, unknown>): Promis
       activeProjectId: updated.activeProjectId ?? null,
     });
   } catch (error) {
-    return textResult(`Failed to delete project: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to delete project: ${errorText(error)}`, true);
   }
 }
 
@@ -594,6 +596,6 @@ export async function handleScaffold(args: Record<string, unknown>): Promise<Mcp
       committed: data.committed === true,
     });
   } catch (error) {
-    return textResult(`Failed to scaffold repo: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to scaffold repo: ${errorText(error)}`, true);
   }
 }
