@@ -4186,6 +4186,12 @@
       ]
     },
     {
+      "path": "tests/symon-voice-record-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-watch-real-path.test.ts",
       "reasons": [
         "child-process",
