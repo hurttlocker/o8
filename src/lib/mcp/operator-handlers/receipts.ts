@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import { resolveReceiptPublicKey } from '@/lib/receipts/public-key';
 import { verifyPacketReceiptFile } from '@/lib/receipts/verify-receipt';
 import {
@@ -55,7 +56,7 @@ export async function handlePacketReceipt(args: Record<string, unknown>): Promis
 export async function handleVerifyReceipt(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const key = resolveReceiptPublicKey(optionalString(args, 'key'));
-    if (!key) throw new Error('No receipt public key was found. Supply key or publish receipt-public.key.');
+    if (!key) throw new McpInputError('No receipt public key was found. Supply key or publish receipt-public.key.');
     const verdict = await verifyPacketReceiptFile({
       receiptPath: requiredString(args, 'receiptPath'),
       publicKeyB64: key,

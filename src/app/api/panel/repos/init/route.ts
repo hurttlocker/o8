@@ -41,7 +41,8 @@ export async function POST(request: NextRequest) {
       projectId: result.projectId,
     }, { status: 201, headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to initialize repository.';
+    console.error('[api] panel/repos/init failed:', error);
+    const message = 'Failed to initialize repository.';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE });
   }
 }

@@ -1,3 +1,4 @@
+import { McpInputError, safeErrorText } from '@/lib/mcp/api-error';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
@@ -48,7 +49,7 @@ function capText(raw: string): McpToolResult {
 function requiredString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${key} is required`);
+    throw new McpInputError(`${key} is required`);
   }
   return value.trim();
 }
@@ -70,7 +71,7 @@ async function withStructuredErrors(action: () => Promise<McpToolResult>): Promi
   try {
     return await action();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = safeErrorText(error);
     const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
       ? error.code
       : undefined;

@@ -44,13 +44,14 @@ export async function GET(request: NextRequest) {
     const preview = await previewPacketMerge(packetId);
     return NextResponse.json(preview);
   } catch (error) {
+    console.error('[api] orchestrator/merge-preview failed:', error);
     if (error instanceof LaneBranchUnresolvedError) {
       return NextResponse.json(branchUnresolvedPayload(error), { status: 409 });
     }
     if (error instanceof ImmutableReviewUnavailableError) {
       return NextResponse.json(immutableReviewUnavailablePayload(error), { status: 409 });
     }
-    const message = error instanceof Error ? error.message : 'merge preview failed';
+    const message = 'merge preview failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

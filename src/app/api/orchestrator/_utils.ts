@@ -21,7 +21,7 @@ export function operatorError(code: string, message: string, status = 500, detai
     ok: false,
     error: {
       code,
-      message,
+      message: status >= 500 ? `o8 API error (${status})` : message,
     },
   }, {
     status,

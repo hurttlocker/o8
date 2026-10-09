@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 import {
@@ -72,7 +73,7 @@ function optionalTtl(args: Record<string, unknown>): number | undefined {
   const value = args.ttlMs;
   if (value === undefined) return undefined;
   if (!Number.isSafeInteger(value) || Number(value) < 1_000 || Number(value) > 86_400_000) {
-    throw new Error('ttlMs must be an integer from 1000 through 86400000.');
+    throw new McpInputError('ttlMs must be an integer from 1000 through 86400000.');
   }
   return Number(value);
 }

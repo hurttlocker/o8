@@ -1,4 +1,7 @@
-export { parseReviewFindings, parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
+import { apiError, McpInputError, O8ApiError, safeErrorText, unreachableApiError } from '@/lib/mcp/api-error';
+export { McpInputError } from '@/lib/mcp/api-error';
+export { parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
+import { parseReviewFindings as readReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
@@ -148,7 +151,7 @@ async function apiFetchResponse(
   init?: ApiFetchOptions,
   returnHttpErrors = false,
 ): Promise<Response> {
-  let lastError: Error | undefined;
+  let lastError: O8ApiError | undefined;
   const timeoutMs = init?.timeoutMs ?? FETCH_TIMEOUT_MS;
   // Strip timeoutMs from the RequestInit so fetch doesn't see it.
   const { timeoutMs: _omit, acceptedErrorStatuses = [], ...fetchInit } = init ?? {};
@@ -180,55 +183,40 @@ async function apiFetchResponse(
       } finally {
         clearTimeout(timer);
       }
-      if (!res.ok && !returnHttpErrors && !acceptedErrorStatuses.includes(res.status)) {
-        const bodyText = await res.text().catch(() => '');
-        const snippet = bodyText.slice(0, 300).replace(/\s+/g, ' ').trim();
-        const httpError = new Error(
-          `o8 API ${res.status} for ${path}${snippet ? `: ${snippet}` : ''}`,
-        ) as Error & { noRetry?: boolean };
-        if (res.status < 500) httpError.noRetry = true;
-        throw httpError;
+      if (!res.ok) {
+        const bodyText = await res.clone().text().catch(() => '');
+        const httpError = apiError(path, res.status, bodyText);
+        const accepted = res.status >= 400 && res.status < 500 && acceptedErrorStatuses.includes(res.status);
+        if (!returnHttpErrors && !accepted) throw httpError;
       }
       _apiHealthy = true;
       return res;
     } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      if ((lastError as Error & { noRetry?: boolean }).noRetry) {
+      lastError = err instanceof O8ApiError ? err : apiError(path, null, '', err);
+      if (lastError.noRetry) {
         _apiHealthy = true; // backend responded; the request itself was rejected
         throw lastError;
       }
       _apiHealthy = false;
-      if (lastError.name === 'AbortError') {
-        lastError = new Error(`Request to ${path} timed out after ${timeoutMs}ms`);
-      }
     }
   }
 
-  throw new Error(
-    `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
-    `Expected the o8 backend at ${resolveApiBaseLive()}. ` +
-    `Open the o8 desktop app (it launches the backend automatically) or run \`npm run desktop:dev\` from the o8 repo.`,
-  );
+  // A network failure after every retry usually means the backend is not running.
+  throw !lastError || lastError.status === null ? unreachableApiError() : lastError;
 }
 
 export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<unknown> {
   const acceptedErrorStatuses = init?.acceptedErrorStatuses ?? [];
   const res = await apiFetchResponse(path, init);
-  if (!res.ok) {
-    // Surface HTTP errors instead of returning the error body as if it were a
-    // successful payload. Accepted read statuses retain their structured body.
-    const bodyText = await res.text().catch(() => '');
-    if (acceptedErrorStatuses.includes(res.status)) {
-      try {
-        return JSON.parse(bodyText) as unknown;
-      } catch {
-        // Fall through when the accepted status did not carry JSON.
-      }
-    }
-    const snippet = bodyText.slice(0, 300).replace(/\s+/g, ' ').trim();
-    throw new Error(`o8 API ${res.status} for ${path}${snippet ? `: ${snippet}` : ''}`);
+  const bodyText = await res.text().catch((error) => { throw apiError(path, res.status, '', error); });
+  if (!res.ok && !(res.status < 500 && acceptedErrorStatuses.includes(res.status))) {
+    throw apiError(path, res.status, bodyText);
   }
-  return res.json();
+  try {
+    return JSON.parse(bodyText) as unknown;
+  } catch (error) {
+    throw apiError(path, res.status, bodyText, error);
+  }
 }
 
 /** MCP mutation transport with one body-bound correlation id through 202s and retries. */
@@ -242,6 +230,7 @@ export function apiFetchCorrelatedMutation<
   return pollCorrelatedMcpMutation<TPayload>({
     body,
     correlationField,
+    parseError: (response, payload) => apiError(path, response.status, JSON.stringify(payload)),
     send: (requestBody) => apiFetchResponse(path, {
       method: 'POST',
       body: requestBody,
@@ -253,18 +242,18 @@ export function textResult(text: string, isError = false): McpToolResult {
   return { content: [{ type: 'text', text }], isError };
 }
 
-export function jsonResult(data: unknown): McpToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+export function jsonResult(data: unknown, isError = false): McpToolResult {
+  return { isError, content: [{ type: 'text', text: JSON.stringify(data) }] };
 }
 
 export function errorText(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  return safeErrorText(error);
 }
 
 export function requiredString(args: Record<string, unknown>, key: string) {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${key} is required`);
+    throw new McpInputError(`${key} is required`);
   }
   return value.trim();
 }
@@ -285,12 +274,12 @@ export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
     }
   }
   if (isDispatchableRuntime(value)) return value;
-  throw new Error(`runtime must be one of ${formatDispatchableRuntimeChoices()}`);
+  throw new McpInputError(`runtime must be one of ${formatDispatchableRuntimeChoices()}`);
 }
 
 export function parseIssueList(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error('issues must be a non-empty array');
+    throw new McpInputError('issues must be a non-empty array');
   }
 
   const issues = value
@@ -302,8 +291,16 @@ export function parseIssueList(value: unknown) {
     .filter(Boolean);
 
   if (issues.length === 0) {
-    throw new Error('issues must contain at least one issue reference');
+    throw new McpInputError('issues must contain at least one issue reference');
   }
 
   return issues;
+}
+
+export function parseReviewFindings(value: unknown) {
+  try {
+    return readReviewFindings(value);
+  } catch (error) {
+    throw new McpInputError(error instanceof Error ? error.message : 'Invalid review findings');
+  }
 }

@@ -1,3 +1,4 @@
+import { safeErrorText } from '@/lib/mcp/api-error';
 import { SETUP_TOOLS, handleSetup } from '@/lib/mcp/operator-handlers/setup';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
@@ -246,7 +247,7 @@ async function handleConsoleErrors(): Promise<McpToolResult> {
     const data = await invokeTauriCommandFromWebview('o8_view_console_errors');
     return textResult(JSON.stringify(data));
   } catch (error) {
-    return textResult(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }), true);
+    return textResult(JSON.stringify({ ok: false, error: safeErrorText(error) }), true);
   }
 }
 
@@ -255,7 +256,7 @@ async function handleActiveRoute(): Promise<McpToolResult> {
     const data = await invokeTauriCommandFromWebview('o8_view_active_route');
     return textResult(JSON.stringify(data));
   } catch (error) {
-    return textResult(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }), true);
+    return textResult(JSON.stringify({ ok: false, error: safeErrorText(error) }), true);
   }
 }
 
@@ -478,7 +479,7 @@ export async function handleOperatorMcpMessage(message: OperatorMcpRequest): Pro
     try {
       return { jsonrpc: '2.0', id, result: await handler(toolArgs) };
     } catch (error) {
-      return { jsonrpc: '2.0', id, result: textResult(`Tool error: ${error}`, true) };
+      return { jsonrpc: '2.0', id, result: textResult(`Tool error: ${safeErrorText(error)}`, true) };
     }
   }
   return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
