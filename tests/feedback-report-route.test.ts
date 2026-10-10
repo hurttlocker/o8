@@ -17,6 +17,7 @@ const relay = vi.hoisted(() => ({
   planToken: 'signed-plan-token' as string | null,
 }));
 const dataSharing = vi.hoisted(() => ({ enabled: true }));
+const bootstrap = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock('@/lib/telemetry/crash-store', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/telemetry/crash-store')>()),
@@ -33,7 +34,7 @@ vi.mock('@/lib/auth/jwt', () => ({
 }));
 // Pinned, so the suite can never depend on (or post to) the real hosted relay.
 vi.mock('@/lib/entitlement/bootstrap', () => ({
-  ensureFreeEntitlement: async () => {},
+  ensureFreeEntitlement: bootstrap,
 }));
 vi.mock('@/lib/entitlement/license', () => ({
   configuredLicenseServerBaseUrl: () => relay.baseUrl,
@@ -94,6 +95,8 @@ async function embedOf(form: FormData): Promise<{ fields: DiscordEmbedField[] }>
 }
 
 beforeEach(() => {
+  bootstrap.mockReset();
+  bootstrap.mockResolvedValue(undefined);
   crashRecords.current = [];
   ledger.written = [];
   auth.ghUser = null;
@@ -130,6 +133,90 @@ function crash(overrides: Partial<CrashRecord> = {}): CrashRecord {
     ...overrides,
   };
 }
+
+describe('text-only feedback through POST /api/feedback/report', () => {
+  it.each([undefined, 'o8-token=valid-token'])('sends only user-selected content, without account attribution (%s)', async (cookie) => {
+    auth.ghUser = 'connected-account';
+    crashRecords.current = [crash({ message: 'private-crash' })];
+    const res = await postReport({
+      kind: 'feedback',
+      message: '  Getting started was confusing.  ',
+      includeMetadata: false,
+      route: 'private-route',
+      userAgent: 'private-agent',
+      prompt: 'private-prompt',
+      client: { workspace: { path: 'private-repo' } },
+      includeDiagnostics: true,
+      image: { dataUrl: 'data:image/png;base64,c2VjcmV0', name: 'private-image.png' },
+    }, cookie);
+
+    expect(res.status).toBe(200);
+    expect(captured.url).toBe('https://api.test/v1/feedback');
+    expect(captured.headers.get('authorization')).toBe('Bearer signed-plan-token');
+    expect(captured.form).toBeNull();
+    const payload = captured.json as { username: string; embeds: Array<Record<string, unknown>> };
+    expect(Object.keys(payload).sort()).toEqual(['embeds', 'username']);
+    expect(payload.embeds).toHaveLength(1);
+    expect(payload.embeds[0]).toMatchObject({ description: 'Getting started was confusing.', fields: [] });
+    expect(Object.keys(payload.embeds[0]).sort()).toEqual(['description', 'fields', 'footer', 'title']);
+    expect(JSON.stringify(payload)).not.toMatch(/private-|connected-account|signed-plan-token/);
+    expect(ledger.written).toEqual([expect.objectContaining({ reporter: null, version: 'unknown', category: 'request' })]);
+  });
+
+  it('includes optional email and server-derived version/OS only when selected', async () => {
+    const res = await postReport({
+      kind: 'feedback', message: 'Please improve setup.', email: ' reader@example.test ',
+      includeMetadata: true, version: 'injected-version', os: 'injected-os',
+    });
+    expect(res.status).toBe(200);
+    const payload = captured.json as { embeds: Array<{ fields: DiscordEmbedField[] }> };
+    expect(payload.embeds[0].fields.map((field) => field.name)).toEqual(['Email', 'Version', 'OS']);
+    expect(payload.embeds[0].fields[0].value).toBe('reader@example.test');
+    expect(payload.embeds[0].fields[1].value).toMatch(/^\d+\.\d+\.\d+/);
+    expect(payload.embeds[0].fields[2].value).toBeTruthy();
+    expect(JSON.stringify(payload)).not.toContain('injected-');
+    expect(ledger.written[0]).toMatchObject({ reporter: null });
+    expect(JSON.stringify(ledger.written)).not.toContain('reader@example.test');
+  });
+
+  it('omits empty email and unselected metadata', async () => {
+    const res = await postReport({ kind: 'feedback', message: 'A suggestion.', email: '  ' });
+    expect(res.status).toBe(200);
+    expect(captured.json).toMatchObject({ embeds: [{ fields: [] }] });
+  });
+
+  it.each([
+    { message: '  ' }, { message: 'x'.repeat(4001) }, { message: 'hello', email: 'bad-address' },
+    { message: 'hello', email: 123 }, { message: 'hello', includeMetadata: 'yes' },
+  ])('rejects invalid feedback without sending: %j', async (body) => {
+    const res = await postReport({ kind: 'feedback', ...body });
+    expect(res.status).toBe(400);
+    expect(captured.calls).toBe(0);
+    expect(ledger.written).toHaveLength(0);
+  });
+
+  it('preserves the existing data-sharing opt-out for feedback', async () => {
+    dataSharing.enabled = false;
+    const res = await postReport({ kind: 'feedback', message: 'Keep this local.' });
+    expect(res.status).toBe(403);
+    expect(captured.calls).toBe(0);
+    expect(ledger.written).toHaveLength(0);
+  });
+
+  it.each(['disabled', 'missing-token', 'rate-limit', 'invalid-receipt', 'timeout', 'bootstrap-failure'])('never records a success for %s', async (failure) => {
+    if (failure === 'disabled') relay.baseUrl = null;
+    if (failure === 'missing-token') relay.planToken = null;
+    if (failure === 'rate-limit') vi.stubGlobal('fetch', async () => new Response(null, { status: 429 }));
+    if (failure === 'invalid-receipt') vi.stubGlobal('fetch', async () => Response.json({ ok: true, reportId: 'WRONG' }));
+    if (failure === 'timeout') vi.stubGlobal('fetch', async () => { throw new Error('request timed out'); });
+    if (failure === 'bootstrap-failure') bootstrap.mockRejectedValueOnce(new Error('bootstrap failed'));
+    const res = await postReport({ kind: 'feedback', message: 'Please improve setup.' });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(ledger.written).toHaveLength(0);
+    if (failure === 'disabled' || failure === 'missing-token') expect(captured.calls).toBe(0);
+  });
+});
 
 describe('POST /api/feedback/report', () => {
   it('returns a structured 403 without posting when data sharing is off', async () => {
