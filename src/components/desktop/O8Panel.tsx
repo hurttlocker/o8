@@ -28,8 +28,7 @@ import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { TargetsPanel } from './o8-panel/TargetsPanel';
 import { ProjectChangesOverview } from './o8-panel/ProjectChangesOverview';
 import { WorkspaceBrowserPreview } from './o8-panel/WorkspaceBrowserPreview';
-import { AllFilesTree } from './o8-panel/workspace-rail/AllFilesTree';
-import { FileViewer } from './o8-panel/workspace-rail/FileViewer';
+import { WorkspaceFilesPane } from './o8-panel/workspace-rail/WorkspaceFilesPane';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from './ContextualPanel';
 import { isRightUtilityTab, type O8Tab } from './o8-panel/types';
 import { O8PanelSplitDivider, panelPaneStyle, panelPaneVisible } from './o8-panel/O8PanelSplit';
@@ -258,20 +257,8 @@ export function O8Panel({
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'files') {
-      // Cursor arrangement (Q ruling 2026-07-12, vid2 3:10-4:10): the file
-      // CONTENT reads in the center-left, the tree hugs the far-right edge.
       return (
-        <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(210px, 34%)', background: 'var(--t-bg)' }}>
-          <FileViewer repoPath={repoPath} selectedFile={selectedUtilityFile} />
-          <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderLeft: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
-            <AllFilesTree
-              repoPath={repoPath}
-              selectedFile={selectedUtilityFile}
-              dirtyFiles={dirtyFiles}
-              onSelectFile={handleSelectUtilityFile}
-            />
-          </div>
-        </div>
+        <WorkspaceFilesPane repoPath={repoPath} selectedFile={selectedUtilityFile} dirtyFiles={dirtyFiles} onSelectFile={handleSelectUtilityFile} />
       );
     }
 

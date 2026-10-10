@@ -245,6 +245,7 @@ export function TileContainer({
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
             onMouseDown={() => onActivateTile(leaf.id)}
+            onFocusCapture={() => onActivateTile(leaf.id)}
             onDragOver={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDragOver(event, leaf.id) : undefined}
             onDropCapture={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDrop(event, leaf.id) : undefined}
             style={{
@@ -361,6 +362,7 @@ export function TileContainer({
           aria-hidden={!primaryRect}
           inert={!primaryRect}
           onMouseDown={primaryRect ? () => onActivateTile('tile-root') : undefined}
+          onFocusCapture={primaryRect ? () => onActivateTile('tile-root') : undefined}
           onDragOver={primaryRect ? (event) => handlePaneDragOver(event, 'tile-root') : undefined}
           onDropCapture={primaryRect ? (event) => handlePaneDrop(event, 'tile-root') : undefined}
           style={primaryRect ? {

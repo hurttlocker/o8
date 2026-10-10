@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- local repo assets need raw media tags */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MarkdownRender } from '../markdown-render';
 
 const UI_FONT = 'var(--font-sans-system)';
@@ -164,9 +164,11 @@ function MediaPreview({
 export function FileViewer({
   repoPath,
   selectedFile,
+  headerAction,
 }: {
   repoPath?: string | null;
   selectedFile: string | null;
+  headerAction?: ReactNode;
 }) {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -315,18 +317,24 @@ export function FileViewer({
 
   if (!selectedFile) {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT }}>
-        <FileIcon size={32} />
-        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Select a file to view</span>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', color: 'var(--t-text-muted)', fontFamily: UI_FONT }}>
+        {headerAction ? <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 9, paddingRight: 12 }}>{headerAction}</div> : null}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+          <FileIcon size={32} />
+          <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Select a file to view</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div title={selectedFile} style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, fontFamily: UI_FONT }}>
-        <span style={{ fontSize: 13.5, fontWeight: 300, color: 'var(--t-text)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{fileName}</span>
-        {selectedFile.includes('/') ? <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-muted)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{selectedFile.slice(0, selectedFile.lastIndexOf('/')) || '/'}</span> : null}
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, fontFamily: UI_FONT }}>
+        <div title={selectedFile} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 300, color: 'var(--t-text)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{fileName}</span>
+          {selectedFile.includes('/') ? <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-muted)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{selectedFile.slice(0, selectedFile.lastIndexOf('/')) || '/'}</span> : null}
+        </div>
+        {headerAction}
       </div>
       {dirty || error || canTogglePreview ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>

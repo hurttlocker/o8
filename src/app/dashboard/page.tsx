@@ -2203,8 +2203,8 @@ function DashboardInner() {
   });
 
   const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {
-    if (repoPath) setO8RepoPathOverride(repoPath);
-    closeRightPanelFromUser();
+    setO8RepoPathOverride(repoPath ?? null);
+    if (surface === 'browser') closeRightPanelFromUser();
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent(
       surface === 'browser' ? BROWSER_PIP_EVENT : O8_SPEC_PIP_EVENT,
@@ -5382,7 +5382,8 @@ function DashboardInner() {
         onOpenBrowser={() => handleOpenO8Panel({ tab: 'browser' })}
       />
       <O8SpecPipCard
-        active={!showRightPanelColumn}
+        active={!showRightPanelColumn || rightPanelKind !== 'o8' || o8ActiveTab !== 'spec'}
+        contextKey={`${workspaceHeaderActive.workspaceId ?? 'home'}:${workspaceHeaderActive.tabId ?? 'none'}`}
         repoPath={currentO8RepoPath}
         onOpenSpec={() => handleOpenO8Panel({ tab: 'spec' })}
       />

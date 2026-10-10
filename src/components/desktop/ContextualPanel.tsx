@@ -18,8 +18,7 @@ import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/de
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
 import { O8BrowserPane } from '@/components/desktop/O8BrowserPane';
-import { AllFilesTree } from '@/components/desktop/o8-panel/workspace-rail/AllFilesTree';
-import { FileViewer } from '@/components/desktop/o8-panel/workspace-rail/FileViewer';
+import { WorkspaceFilesPane } from '@/components/desktop/o8-panel/workspace-rail/WorkspaceFilesPane';
 import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -271,20 +270,8 @@ function BottomUtilitySurface({
   onRepoPathChange?: (repoPath: string) => void;
 }) {
   if (kind === 'files') {
-    // Cursor arrangement (Q ruling 2026-07-12): content center-left, tree on
-    // the far-right edge — mirrors the O8Panel files utility surface.
     return (
-      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(210px, 30%)', background: 'var(--t-bg)' }}>
-        <FileViewer repoPath={repoPath} selectedFile={selectedFile} />
-        <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderLeft: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
-          <AllFilesTree
-            repoPath={repoPath}
-            selectedFile={selectedFile}
-            dirtyFiles={dirtyFiles}
-            onSelectFile={onSelectFile}
-          />
-        </div>
-      </div>
+      <WorkspaceFilesPane repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
     );
   }
 

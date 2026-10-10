@@ -12,6 +12,7 @@ export function useFloatingSurfaceMaterial(glass?: boolean) {
   const { workspaceGlass, surface, paletteId } = useTheme();
   const isGlass = glass ?? (!isWebMachineBrowserSurface() && !isNonMacShell() && (workspaceGlass || surface === 'glass'));
   return {
+    isGlass,
     borderColor: isGlass ? 'var(--t-border)' : 'var(--t-divider-subtle)',
     shadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
     textStyle: {

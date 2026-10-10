@@ -52,7 +52,9 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
   };
   try {
     await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'projects', glassSurface: false })));
-    expect(fetch).not.toHaveBeenCalledWith('/api/runtime/capacity', expect.anything());
+    expect(fetch).toHaveBeenCalledWith('/api/runtime/capacity', expect.objectContaining({ cache: 'no-store' }));
+    expect(host.querySelector('[data-runtime-weekly-meter="codex"]')?.getAttribute('aria-valuenow')).toBe('40');
+    expect(host.querySelector('[data-runtime-weekly-meter="claude-code"]')?.getAttribute('aria-valuetext')).toBe('Not reported');
     expect(host.querySelector('[aria-label="Search"]')).toBeNull();
     expect(host.querySelector('[aria-label="Projects"]')).toBeNull();
     expect(host.querySelector('[aria-label="Customize"]')).toBeNull();
@@ -326,5 +328,33 @@ it('shows only installed supported CLIs and keeps legacy Gemini out of the ready
     tools[2]!.status = 'update-available';
     await act(async () => refreshCliUpdateView(true));
     expect(host.querySelector('[data-update-ready]')).not.toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+
+it('keeps weekly house meters separate from short windows, model caps and unselected accounts', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const capacities = [
+    { runtime: 'codex', identityId: 'selected-codex', status: 'available', confidence: 'exact', buckets: [{ label: '5-hour', usedRatio: 0.98 }, { label: 'Weekly', usedRatio: 0.41 }] },
+    { runtime: 'codex', identityId: 'other-codex', status: 'available', confidence: 'exact', buckets: [{ label: 'Weekly', usedRatio: 0.99 }] },
+    { runtime: 'claude-code', status: 'available', confidence: 'exact', buckets: [{ label: '5-hour', usedRatio: 0.87 }, { label: 'Weekly', usedRatio: 0.62 }, { label: 'Weekly · Opus', usedRatio: 0.95 }] },
+  ];
+  vi.mocked(fetch).mockImplementation(async input => String(input) === '/api/runtime/capacity'
+    ? Response.json({ schema: 'o8/runtime-capacity-control/v1', identities: [{ id: 'selected-codex', runtime: 'codex', selected: true }], capacities })
+    : Response.json({ tools: [] }));
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
+    const codex = host.querySelector<HTMLElement>('[data-runtime-weekly-meter="codex"]')!;
+    const claude = host.querySelector<HTMLElement>('[data-runtime-weekly-meter="claude-code"]')!;
+    expect(codex.getAttribute('aria-valuenow')).toBe('41');
+    expect(claude.getAttribute('aria-valuenow')).toBe('62');
+    expect(codex.firstElementChild?.getAttribute('style')).toContain('var(--t-accent)');
+    expect(claude.firstElementChild?.getAttribute('style')).toContain('var(--t-brand-orange)');
+    expect(codex.style.left).toBe(claude.style.left);
+    expect(codex.style.width).toBe(claude.style.width);
+    expect(Number.parseFloat(codex.style.bottom)).toBeGreaterThan(Number.parseFloat(claude.style.bottom));
+    expect(document.querySelector('[data-mcp-scope="rail-usage-preview"]')).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });

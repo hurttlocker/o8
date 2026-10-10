@@ -124,6 +124,24 @@ describe('multiple terminal panes', () => {
     expect(onCloseTile).toHaveBeenCalledExactlyOnceWith(fourth.newTileId);
   });
 
+  it.each([false, true])('activates the pane reached by keyboard focus, with a resident primary host: %s', async keepPrimarySessionAlive => {
+    const initial = createDefaultTileLayout();
+    const second = insertBalancedTerminalTile(initial.root, 'tile-root', 'vertical', terminal);
+    const onActivateTile = vi.fn();
+    const focusRegistry: TileContentRegistry = { ...registry, terminal: { ...terminalDefinition,
+      render: ({ tileId }) => createElement('button', { type: 'button', 'data-pane-focus': tileId }, tileId) } };
+    container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+    await act(async () => root.render(createElement(TileContainer, {
+      activeTileId: second.newTileId, layout: { ...initial, root: second.root }, registry: focusRegistry,
+      keepPrimarySessionAlive, onActivateTile, onCloseTile: vi.fn(), onResizeSplit: vi.fn(), onSplitTile: vi.fn(),
+    })));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-pane-focus="tile-root"]')!.focus());
+    expect(onActivateTile).toHaveBeenLastCalledWith('tile-root');
+    await act(async () => container.querySelector<HTMLButtonElement>(`[data-pane-focus="${second.newTileId}"]`)!.focus());
+    expect(onActivateTile).toHaveBeenLastCalledWith(second.newTileId);
+    expect(container.querySelectorAll('[data-pane-focus]')).toHaveLength(2);
+  });
+
   it('focuses a narrow terminal without unmounting its neighbors, then restores the split', async () => {
     const initial = createDefaultTileLayout();
     const second = insertBalancedTerminalTile(initial.root, 'tile-root', 'vertical', terminal);

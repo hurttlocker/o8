@@ -3,6 +3,7 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { FloatingSurface } from './FloatingSurface';
 
 const FONT = 'var(--font-sans-system)';
 const OPEN_DWELL_MS = 240;
@@ -79,6 +80,7 @@ export function HoverPipCard({
   titleTooltip,
   onOpen,
   openLabel = 'Open preview',
+  contextKey,
   children,
 }: {
   active: boolean;
@@ -89,6 +91,8 @@ export function HoverPipCard({
   titleTooltip?: string;
   onOpen?: () => void;
   openLabel?: string;
+  /** Changing the focused workspace closes a preview owned by its previous context. */
+  contextKey?: string;
   children: (context: {
     orientation: HoverPipOrientation;
     shape: HoverPipShape;
@@ -98,6 +102,7 @@ export function HoverPipCard({
   const positionKey = `${storageKey}:position`;
   const [hoverVisible, setHoverVisible] = useState(false);
   const [manualVisible, setManualVisible] = useState(false);
+  const [visibleContext, setVisibleContext] = useState(contextKey);
   const hoverVisibleRef = useRef(false);
   const manualVisibleRef = useRef(false);
   const [orientation, setOrientation] = useState<HoverPipOrientation>(() => {
@@ -122,6 +127,7 @@ export function HoverPipCard({
   } | null>(null);
   const shape = SHAPES[orientation];
   const reduceMotion = useReducedMotion();
+  const contextRef = useRef(contextKey);
 
   const persistPosition = useCallback((next: PipPosition) => {
     try {
@@ -158,13 +164,24 @@ export function HoverPipCard({
     close();
   }, [clearTimers, close]);
 
+  useEffect(() => {
+    if (contextRef.current === contextKey) return;
+    contextRef.current = contextKey;
+    cardHoverRef.current = false;
+    dragRef.current = null;
+    let current = true;
+    queueMicrotask(() => { if (current) closeImmediately(); });
+    return () => { current = false; };
+  }, [contextKey, closeImmediately]);
+
   const requestClose = useCallback(() => {
     window.dispatchEvent(new CustomEvent(eventName, { detail: { open: false } }));
   }, [eventName]);
 
   const announceActivation = useCallback(() => {
+    setVisibleContext(contextKey);
     window.dispatchEvent(new CustomEvent(PIP_ACTIVATED_EVENT, { detail: { eventName } }));
-  }, [eventName]);
+  }, [contextKey, eventName]);
 
   const scheduleClose = useCallback(() => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -260,7 +277,7 @@ export function HoverPipCard({
 
   const onDragStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || (event.target as Element).closest('button')) return;
-    const card = event.currentTarget.parentElement;
+    const card = event.currentTarget.closest('[data-hover-pip]');
     if (!card) return;
     const bounds = card.getBoundingClientRect();
     dragRef.current = {
@@ -292,13 +309,16 @@ export function HoverPipCard({
     if (positionRef.current) persistPosition(positionRef.current);
   }, [persistPosition]);
 
-  const show = active && available && (hoverVisible || manualVisible);
+  const show = active && available && visibleContext === contextKey && (hoverVisible || manualVisible);
 
   return (
     <AnimatePresence>
       {show ? (
         <motion.div
           key={eventName}
+          data-hover-pip=""
+          role="region"
+          aria-label={`${title} preview`}
           initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
@@ -320,19 +340,11 @@ export function HoverPipCard({
             zIndex: 1000,
             display: 'flex',
             flexDirection: 'column',
-            borderRadius: 14,
-            overflow: 'hidden',
-            background: 'var(--t-popover-surface)',
-            backdropFilter: 'blur(24px) saturate(1.4)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-panel-border)',
-            boxShadow: 'var(--t-panel-shadow, 0 12px 32px rgba(0, 0, 0, 0.25))',
             fontFamily: FONT,
             transformOrigin: 'top right',
           }}
         >
+          <FloatingSurface contentStyle={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div
             onPointerDown={onDragStart}
             onPointerMove={onDragMove}
@@ -403,6 +415,7 @@ export function HoverPipCard({
             </button>
           </div>
           {children({ orientation, shape, close: requestClose })}
+          </FloatingSurface>
         </motion.div>
       ) : null}
     </AnimatePresence>

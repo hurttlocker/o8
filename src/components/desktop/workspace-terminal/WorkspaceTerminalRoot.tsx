@@ -468,7 +468,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onConsumeChatDraftInjection={controller.handleConsumeChatDraftInjection}
           onSaveCheckpoint={controller.handleSaveCheckpoint}
           onRestoreLatestCheckpoint={controller.handleRestoreLatestCheckpoint}
-          projectContextRailVisible={projectContextRailVisible}
+          projectContextRailVisible={projectContextRailVisible && props.activeWorkspaceSurface !== false}
           sendTerminalAttach={props.sendTerminalAttach}
           sendTerminalInput={props.sendTerminalInput}
           sendTerminalResize={props.sendTerminalResize}

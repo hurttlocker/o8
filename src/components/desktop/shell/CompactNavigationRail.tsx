@@ -10,6 +10,7 @@ import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
 import { FloatingSurface } from '@/components/desktop/FloatingSurface';
 import { RuntimeUsageSummary } from '@/components/desktop/analytics/RuntimeUsageSummary';
 import { useRuntimeUsage } from '@/components/desktop/analytics/use-runtime-usage';
+import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
 import type { NavSection } from '@/app/dashboard/types';
 import { TrafficLightsOrSpacer } from './TrafficLights';
 import { RailMoreMenu } from './RailMoreMenu';
@@ -38,6 +39,15 @@ const railButton: CSSProperties = {
 };
 
 type RailNavAction = 'automations' | 'customize' | 'projects' | 'plugins';
+
+function weeklyUsage(snapshot: RuntimeCapacityControlSnapshot | null, runtime: string): number | null {
+  const identity = snapshot?.identities?.find(candidate => candidate.runtime === runtime && candidate.selected);
+  const ratios = snapshot?.capacities.filter(capacity => capacity.runtime === runtime && capacity.status === 'available'
+    && capacity.confidence === 'exact' && (!identity || capacity.identityId === identity.id))
+    .flatMap(capacity => capacity.buckets.filter(bucket => bucket.label === 'Weekly')
+      .flatMap(bucket => typeof bucket.usedRatio === 'number' && Number.isFinite(bucket.usedRatio) ? [bucket.usedRatio] : [])) ?? [];
+  return ratios.length ? Math.max(0, Math.min(1, Math.max(...ratios))) : null;
+}
 
 export function CompactNavigationRail({
   activeDestination, glassSurface,
@@ -73,7 +83,7 @@ export function CompactNavigationRail({
   };
   const [usageOpen, setUsageOpen] = useState(false);
   const [usagePosition, setUsagePosition] = useState({ left: 0, bottom: 0 });
-  const { snapshot: usageSnapshot, loading: usageLoading, error: usageError } = useRuntimeUsage(usageOpen);
+  const { snapshot: usageSnapshot, loading: usageLoading, error: usageError } = useRuntimeUsage(true);
   const usageCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const knownUsageRatios = usageSnapshot?.capacities.flatMap((capacity) =>
     capacity.status === 'available'
@@ -81,9 +91,10 @@ export function CompactNavigationRail({
       : [],
   ) ?? [];
   const highestKnownUsage = knownUsageRatios.length > 0 ? Math.max(...knownUsageRatios) : null;
-  const usageMeterColor = highestKnownUsage !== null && highestKnownUsage >= 0.8
-    ? 'var(--t-brand-orange)'
-    : 'var(--t-accent)';
+  const weeklyMeters = [
+    { runtime: 'codex', label: 'Codex', ratio: weeklyUsage(usageSnapshot, 'codex'), color: 'var(--t-accent)', bottom: 6 },
+    { runtime: 'claude-code', label: 'Claude', ratio: weeklyUsage(usageSnapshot, 'claude-code'), color: 'var(--t-brand-orange)', bottom: 2 },
+  ];
   const cancelUsageClose = useCallback(() => {
     if (usageCloseTimerRef.current) clearTimeout(usageCloseTimerRef.current);
     usageCloseTimerRef.current = null;
@@ -185,9 +196,13 @@ export function CompactNavigationRail({
         style={{ ...railButton, flexShrink: 0, color: highestKnownUsage !== null && highestKnownUsage >= 0.8 ? 'var(--t-brand-orange)' : 'var(--t-text-muted)' }}
       >
         <Gauge size={18} strokeWidth={1.7} />
-        <span aria-hidden="true" style={{ position: 'absolute', bottom: 4, left: 14, width: 12, height: 2, borderRadius: 2, background: 'var(--t-divider-subtle)', overflow: 'hidden' }}>
-          {highestKnownUsage !== null ? <span style={{ display: 'block', width: `${Math.max(0, Math.min(1, highestKnownUsage)) * 100}%`, height: '100%', background: usageMeterColor }} /> : null}
-        </span>
+        {weeklyMeters.map(meter => <span key={meter.runtime} data-runtime-weekly-meter={meter.runtime}
+          role="progressbar" aria-label={`${meter.label} weekly usage`} aria-valuemin={0} aria-valuemax={100}
+          aria-valuenow={meter.ratio === null ? undefined : Math.round(meter.ratio * 100)}
+          aria-valuetext={meter.ratio === null ? 'Not reported' : `${Math.round(meter.ratio * 100)}% used`}
+          style={{ position: 'absolute', bottom: meter.bottom, left: 16, width: 12, height: 2, borderRadius: 2, background: 'var(--t-divider-subtle)', overflow: 'hidden' }}>
+          {meter.ratio !== null ? <span style={{ display: 'block', width: `${meter.ratio * 100}%`, height: '100%', background: meter.color }} /> : null}
+        </span>)}
       </RailActionButton>
       {usageOpen && typeof document !== 'undefined' ? createPortal(
         <FloatingSurface
