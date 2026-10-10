@@ -226,10 +226,17 @@ export class DeviceManager {
   dispose(): void { this.abort?.abort(); this.child?.kill('SIGTERM'); this.installer?.kill('SIGTERM'); }
 }
 
-const globalState = globalThis as typeof globalThis & { __o8DeviceManager?: DeviceManager };
+const globalState = globalThis as typeof globalThis & {
+  __o8DeviceManager?: DeviceManager;
+  __o8DeviceManagerClass?: typeof DeviceManager;
+};
+// Register only when a module is evaluated. A retained older route/getter must
+// not restore obsolete methods after HMR; owned processes and fields stay intact.
+globalState.__o8DeviceManagerClass = DeviceManager;
+if (globalState.__o8DeviceManager) Object.setPrototypeOf(globalState.__o8DeviceManager, DeviceManager.prototype);
 export function getDeviceManager(): DeviceManager {
   if (!globalState.__o8DeviceManager) {
-    const manager = new DeviceManager(join(getDataDir(), 'devices'));
+    const manager = new (globalState.__o8DeviceManagerClass ?? DeviceManager)(join(getDataDir(), 'devices'));
     globalState.__o8DeviceManager = manager;
     process.once('exit', () => manager.dispose());
   }

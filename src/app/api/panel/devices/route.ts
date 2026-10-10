@@ -16,10 +16,18 @@ function authorize(request: Request): string {
   if (!headersIndicateLoopback((name) => request.headers.get(name)) || !isLoopbackHostname(url.hostname) || !['http:', 'https:'].includes(url.protocol)) {
     throw new DeviceError('device_local_required', 'Device controls are available only on this computer.', 403);
   }
+  // Next may normalize request.url to localhost while the browser uses 127.0.0.1.
+  // Bind the page origin to the actual Host, retaining the server port and loopback gate.
+  const host = request.headers.get('host') ?? url.host;
+  let page: URL;
+  try { page = new URL(`${url.protocol}//${host}`); } catch { throw new DeviceError('device_origin_refused', 'Open device controls from this app.', 403); }
+  if (!isLoopbackHostname(page.hostname) || page.host !== host || page.port !== url.port || page.username || page.password || page.pathname !== '/' || page.search || page.hash) {
+    throw new DeviceError('device_origin_refused', 'Open device controls from this app.', 403);
+  }
   const origin = request.headers.get('origin');
-  if (origin && origin !== url.origin && !isTauriShellOrigin(origin)) throw new DeviceError('device_origin_refused', 'Open device controls from this app.', 403);
+  if (origin && origin !== page.origin && !isTauriShellOrigin(origin)) throw new DeviceError('device_origin_refused', 'Open device controls from this app.', 403);
   if (request.headers.get('sec-fetch-site') === 'cross-site' && !isTauriShellOrigin(origin)) throw new DeviceError('device_origin_refused', 'Open device controls from this app.', 403);
-  return origin ?? url.origin;
+  return origin ?? page.origin;
 }
 
 function failure(error: unknown): Response {

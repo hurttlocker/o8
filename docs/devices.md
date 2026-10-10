@@ -12,6 +12,8 @@ Opening the panel checks prerequisites. Choose **Set up device viewer** to insta
 
 The embedded dashboard provides the installed viewer's device selection, live screens, interaction and capture controls. Available devices and controls depend on the installed platform tools. Closing or hiding the panel releases the embedded viewer; **Stop viewer** terminates o8's viewer helper and leaves simulators running.
 
+The pinned viewer's packaged iOS native module targets Apple Silicon. Intel Macs need an x86_64 build of that module and its matching WebRTC framework; installing the JavaScript helper alone does not supply Intel streaming support. Keep any local native replacement tied to the pinned helper version. Updating or reinstalling the helper can replace it.
+
 ## Coding-agent controls
 
 Choose **Set up agent controls** for the optional pinned `agent-device` CLI. **Copy agent command** provides the exact local invocation with `--help`; give it to the coding agent in your workspace to inspect the available commands. The helper lives in o8's data directory and does not replace your global CLI installation. Agent commands still run through that workspace's existing terminal permissions.
@@ -22,4 +24,4 @@ The viewer binds to this computer's loopback interface and requires a session to
 
 ## Acceptance boundary
 
-The route and process fixtures cover setup, startup, authentication, cancellation, cleanup and the token-to-cookie flow. The UI covers missing tools and hidden-panel cleanup. Live iOS/Android streaming, touch/keyboard input and an actual mobile build require installed devices and a separate native acceptance pass.
+The route and process fixtures cover setup, startup, authentication, cancellation, cleanup, development hot reload and the token-to-cookie flow. The UI covers missing tools and hidden-panel cleanup. Native acceptance must separately verify streaming, input and the target mobile app on each supported host architecture. A live viewer does not establish push-notification, signing, physical-device or Android acceptance.

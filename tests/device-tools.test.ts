@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceState } from '@/lib/devices/types';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-device-tools-'));
@@ -133,6 +133,22 @@ describe.sequential('local device helper route and processes', () => {
     expect(records()).toEqual([]);
   });
 
+  it('accepts the browser Host when Next normalizes the request URL, without accepting other hosts or ports', async () => {
+    const normalized = (host: string, origin: string) => new Request('http://localhost:3001/api/panel/devices', {
+      method: 'POST', headers: { authorization: `Bearer ${process.env.WS_TOKEN}`, host, origin, 'x-o8-client-addr': '127.0.0.1', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ action: 'refresh' }),
+    });
+    expect((await route.POST(normalized('127.0.0.1:3001', 'http://127.0.0.1:3001'))).status).toBe(200);
+    for (const [host, origin] of [
+      ['127.0.0.1:3001', 'http://localhost:3001'],
+      ['127.0.0.1:3002', 'http://127.0.0.1:3002'],
+      ['evil.localhost:3001', 'http://evil.localhost:3001'],
+      ['127.0.0.1:3001/path', 'http://127.0.0.1:3001'],
+      ['user@127.0.0.1:3001', 'http://127.0.0.1:3001'],
+    ]) expect((await route.POST(normalized(host, origin))).status).toBe(403);
+    expect(records()).toEqual([]);
+  });
+
   it('GET reports missing tools without installing, launching or exposing an embed link', async () => {
     const state = await (await route.GET(request())).json();
     expect(state).toMatchObject({ phase: 'idle', tools: { hub: { installed: false, version: null, requiredVersion: '0.15.3' }, agent: { installed: false } } });
@@ -237,4 +253,21 @@ describe.sequential('local device helper route and processes', () => {
     expect(records().filter((record) => record.kind === 'start').at(-1)?.args).toContain('http://localhost:3001');
     expect((await route.POST(request({ action: 'start' }))).status).toBe(409);
   });
+
+  it('keeps ownership while refreshing singleton methods after a module reload', async () => {
+    await route.POST(request({ action: 'start' }));
+    const before = await waitState('running');
+    vi.resetModules();
+    const reloaded = await import('@/lib/devices/service');
+    const current = reloaded.getDeviceManager();
+    expect(current).toBe(manager);
+    // An older route can survive the module reload too. It must not downgrade methods.
+    expect((await route.GET(request())).status).toBe(200);
+    expect(Object.getPrototypeOf(current)).toBe(reloaded.DeviceManager.prototype);
+    expect((await current.state()).embedUrl).toBe(before.embedUrl);
+    await current.stop();
+    expect((await current.state()).phase).toBe('idle');
+    expect(external.exitCode).toBeNull();
+  });
+
 });
