@@ -4,6 +4,7 @@ import { act, createElement, forwardRef, type ForwardedRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from './types';
+import { subscribeTerminalCloseConfirm, type TerminalCloseRequest } from './terminal-close-confirm';
 
 const restoreHarness = vi.hoisted(() => ({
   resolveValidated: null as null | ((value: unknown) => void),
@@ -247,7 +248,14 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
       body: JSON.stringify({ sessionName: 'remote-live-session', command: 'o8 machine attach fixture' }),
     }));
     await act(async () => Promise.resolve());
+    let closeRequest: TerminalCloseRequest | undefined;
+    const stopConfirm = subscribeTerminalCloseConfirm((request) => { closeRequest = request; });
     await act(async () => expect(controllerRef.current?.closeActiveTab()).toBe(true));
+    expect(sendTerminalInput).not.toHaveBeenCalled();
+    expect(sendTerminalDetach).not.toHaveBeenCalled();
+    expect(closeRequest?.tab.id).toBe(tabId);
+    await act(async () => closeRequest?.resolve(true));
+    stopConfirm();
     expect(sendTerminalInput).toHaveBeenCalledWith('remote-live-session', '\x1d');
     expect(sendTerminalDetach).toHaveBeenCalledWith('remote-live-session');
     expect(sendTerminalInput.mock.invocationCallOrder[0]).toBeLessThan(sendTerminalDetach.mock.invocationCallOrder[0]);

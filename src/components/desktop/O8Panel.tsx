@@ -148,6 +148,7 @@ export function O8Panel({
   const { readyGroups: compareReadyGroups } = useComparisonGroups(orchestratorData?.missionState);
   const compareGroup = compareReadyGroups[0] ?? null;
   const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
+  const rightContextualPanelRef = useRef<ContextualPanelHandle | null>(null);
   const [localSelectedFile, setLocalSelectedFile] = useState<{ repoPath: string | null; path: string } | null>(null);
   // #1169 — orchestrator-driven browser open. The o8:open-browser window event
   // (fired by the o8_view_open_browser MCP tool) sets this; it overrides the
@@ -194,13 +195,15 @@ export function O8Panel({
     onActiveTabChange?.(tab);
   }, [onActiveTabChange]);
 
-  const closeRightUtilityTab = useCallback((tab: RightUtilityTab) => {
+  const closeRightUtilityTab = useCallback(async (tab: RightUtilityTab) => {
+    if (tab === 'terminal' && rightContextualPanelRef.current?.confirmClose && !await rightContextualPanelRef.current.confirmClose()) return false;
     const remaining = utilityTabs.filter((entry) => entry !== tab);
     setUtilityTabs(remaining);
     if (activeTab === tab) {
       const currentIndex = utilityTabs.indexOf(tab);
       onActiveTabChange?.(remaining[Math.min(currentIndex, remaining.length - 1)] ?? 'launcher');
     }
+    return true;
   }, [activeTab, onActiveTabChange, utilityTabs]);
 
   const handleSelectUtilityFile = useCallback((path: string) => {
@@ -209,6 +212,7 @@ export function O8Panel({
   }, [onSelectedFileChange, repoPath]);
 
   const handleRightContextualPanelRef = useCallback((handle: ContextualPanelHandle | null) => {
+    rightContextualPanelRef.current = handle;
     registerContextualPanelHandle?.('right-utility-panel', handle);
   }, [registerContextualPanelHandle]);
 

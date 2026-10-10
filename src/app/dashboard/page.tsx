@@ -50,6 +50,7 @@ import { RightPrTabs } from '@/components/desktop/pr-panel/RightPrTabs';
 import { rightPrTabId, useRightPrTabs, type RightPrTab } from '@/components/desktop/pr-panel/useRightPrTabs';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
+import { TerminalCloseDialog } from '@/components/desktop/workspace-terminal/TerminalCloseDialog';
 import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
 import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
 import { resolveThreadProject } from '@/components/desktop/o8-panel/threads-model';
@@ -4732,6 +4733,7 @@ function DashboardInner() {
       />
       <ConfirmToastHost />
       <DesktopCloseCoordinator />
+      <TerminalCloseDialog />
 
       {/* ── Main Layout (horizontal) ── */}
       <div data-mcp-scope="main-layout" aria-hidden={settingsTakeoverActive} inert={settingsTakeoverActive} style={{
@@ -5157,6 +5159,14 @@ function DashboardInner() {
                           onClosePR={handleCloseRightPr}
                           onSelectIssue={handleSelectIssue}
                           onOpenFile={handleOpenFileInWorkspace}
+                          registerContextualPanelHandle={registerContextualPanelHandle}
+                          sendTerminalCreate={sendTerminalCreate}
+                          sendTerminalAttach={sendTerminalAttach}
+                          sendTerminalInput={sendTerminalInput}
+                          sendTerminalResize={sendTerminalResize}
+                          sendTerminalDetach={sendTerminalDetach}
+                          sendAgentKill={sendAgentKill}
+                          termWsConnected={termWsConnected}
                         />
                       </OrchestratorDataProvider>
                     </Suspense>
@@ -5352,8 +5362,11 @@ function DashboardInner() {
           Scope key MUST match the O8Panel browserStateKey above. */}
       <BrowserPipCard
         active={!showRightPanelColumn}
+        panelVisible={showRightPanelColumn}
+        browserVisible={showRightPanelColumn && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+        boundsRef={workspaceSurfaceRef}
         scopeKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
-        onOpenBrowser={() => handleOpenO8Panel({ tab: 'browser' })}
+        onOpenBrowser={(url) => { if (url) setO8BrowserUrl(url); handleOpenO8Panel({ tab: 'browser' }); }}
       />
       <O8SpecPipCard
         active={!showRightPanelColumn || rightPanelKind !== 'o8' || o8ActiveTab !== 'spec'}

@@ -94,7 +94,7 @@ export function RightUtilityTabStrip({
   inHeader?: boolean;
   onOpenLauncher: () => void;
   onSelect: (tab: RightUtilityTab) => void;
-  onClose: (tab: RightUtilityTab) => void;
+  onClose: (tab: RightUtilityTab) => void | boolean | Promise<void | boolean>;
 }) {
   const stripRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -115,13 +115,13 @@ export function RightUtilityTabStrip({
     const active = scroller?.querySelector('[aria-selected="true"]');
     if (scroller && active) revealUtilityTab(scroller, active);
   }, [activeTab, tabs.length]);
-  const closeTab = (tab: RightUtilityTab) => {
+  const closeTab = async (tab: RightUtilityTab) => {
     const list = stripRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     const index = tabs.indexOf(tab);
     const next = activeTab === tab ? list?.[index + 1] ?? list?.[index - 1] : stripRef.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
-    next?.focus();
-    if (!next) stripRef.current?.querySelector<HTMLButtonElement>('[aria-label="Open right panel tab picker"]')?.focus();
-    onClose(tab);
+    if (await onClose(tab) === false) return;
+    if (next?.isConnected) next.focus();
+    else stripRef.current?.querySelector<HTMLButtonElement>('[aria-label="Open right panel tab picker"]')?.focus();
   };
   return (
     <div ref={stripRef} data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1, minHeight: inHeader ? 28 : 34, paddingTop: inHeader ? 0 : 4, paddingRight: inHeader ? 0 : 8, paddingBottom: inHeader ? 0 : 4, paddingLeft: inHeader ? 0 : 8, borderBottom: inHeader ? 'none' : '1px solid var(--t-divider)', background: inHeader ? 'transparent' : 'var(--t-bg)' }}>

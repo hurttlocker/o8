@@ -20,6 +20,7 @@ import {
   supportedEffortsForLead,
 } from './composer-selector/state';
 import { useUltraEffortPreference } from './composer-selector/UltraEffortPreference';
+import { ServiceTierPicker } from './composer-selector/ServiceTierPicker';
 
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
@@ -730,6 +731,7 @@ export function ModelThinkingChip({
           {onEffortChange && !hideEffortUi ? (
             <EffortSlider stops={effortStops} index={currentEffortIndex} onPick={handleEffortPick} />
           ) : null}
+          {onEffortChange && !hideEffortUi ? <ServiceTierPicker backend={activeBackend ?? 'claude'} model={modelId ?? ''} disabled={false} /> : null}
 
           {/* Mode section removed (Q 2026-07-17): Solo / Multitask /
               Mixture of Agents live in the composer's "+" switcher now —

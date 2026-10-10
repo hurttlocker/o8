@@ -21,6 +21,7 @@ export const O8_AUTH_CALLBACK = 'o8://auth/callback';
 
 /** sessionStorage key holding the CSRF state nonce between launch and callback. */
 export const O8_AUTH_STATE_KEY = 'o8:auth-state';
+let pendingHandoff: { generation: number; promise: Promise<void> } | null = null;
 
 function openHandoff(state: string): void {
   try { sessionStorage.setItem(O8_AUTH_STATE_KEY, state); } catch { /* native server validation remains mandatory */ }
@@ -28,8 +29,8 @@ function openHandoff(state: string): void {
   openExternalUrl(url);
 }
 
-export function startDesktopSignIn(): void {
-  if (typeof window === 'undefined') return;
+export function startDesktopSignIn(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
   clearDesktopAuthError();
   if (!isTauri()) {
     let state: string;
@@ -37,10 +38,11 @@ export function startDesktopSignIn(): void {
       state = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
     }
     openHandoff(state);
-    return;
+    return Promise.resolve();
   }
   const generation = desktopAuthHandoffGeneration();
-  void (async () => {
+  if (pendingHandoff?.generation === generation) return pendingHandoff.promise;
+  const promise = (async () => {
     const response = await fetch('/api/panel/auth/handoff?action=begin', { method: 'POST' });
     const data = await response.json();
     if (generation !== desktopAuthHandoffGeneration()) return;
@@ -48,5 +50,9 @@ export function startDesktopSignIn(): void {
     openHandoff(data.state);
   })().catch(() => {
     if (generation === desktopAuthHandoffGeneration()) reportDesktopAuthError('Sign-in could not be started. Try again.');
+  }).finally(() => {
+    if (pendingHandoff?.promise === promise) pendingHandoff = null;
   });
+  pendingHandoff = { generation, promise };
+  return promise;
 }

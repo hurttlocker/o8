@@ -44,6 +44,8 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import { prepareSingleOrchestratorLaunch } from './single-orchestrator-policy';
 import { codexComposerImagePaths, type ComposerImageAttachment } from '@/lib/mobile/orchestrator-image-media';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
+import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -94,6 +96,7 @@ export interface SendToCodexOrchestratorOptions {
    */
   toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
+  serviceTier?: OrchestratorServiceTier;
   model?: string;
   attachments?: ComposerImageAttachment[];
   signal?: AbortSignal;
@@ -327,7 +330,7 @@ export async function sendToCodexOrchestrator(
   if (!streamed && unsupported && !options.signal?.aborted) {
     session.status = 'ready';
     onEvent({ type: 'turn_retry', attempt: 2, reason: 'codex-model-unsupported', notice: CODEX_SOL_UPDATE_NOTICE });
-    return sendToCodexOrchestratorAttempt(session, message, onEvent, { ...options, model: CODEX_SOL_FALLBACK_MODEL });
+    return sendToCodexOrchestratorAttempt(session, message, onEvent, { ...options, model: CODEX_SOL_FALLBACK_MODEL, serviceTier: options.serviceTier === undefined ? undefined : 'default' });
   }
   const terminalError = deferredTerminalEvents.find((event) => event.type === 'error');
   const missingRollout = terminalError?.type === 'error'
@@ -469,6 +472,21 @@ async function sendToCodexOrchestratorAttempt(
 
   onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort });
 
+  const serviceTier = serviceTierForTurn(options.serviceTier, 'codex', resolveOrchestratorModelSync(options.model), 'codex', model);
+  if (serviceTier && serviceTier !== 'default') {
+    try {
+      const catalogue = await getCodexSpeedCatalogue(codexHome);
+      if (!catalogue.models[model]?.some((tier) => tier.id === serviceTier)) throw new Error();
+    } catch {
+      session.status = 'ready';
+      onEvent({ type: 'error', error: 'This service tier is not available for the selected Codex model and account. Choose Standard or check the CLI.' });
+      onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+      return;
+    }
+    if (settleBeforeSpawnIfAborted()) return;
+  }
+  const serviceTierArgs = serviceTier ? ['-c', `service_tier="${serviceTier}"`] : [];
+
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);
   const args: string[] = isResume
@@ -480,6 +498,7 @@ async function sendToCodexOrchestratorAttempt(
         ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
         ...codexOrchestrationModeFlags(options.orchestrationMode),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
+        ...serviceTierArgs,
         // Disable the hosted image_generation tool (defaults to nonexistent
         // gpt-image-2 in Codex CLI 0.130.0 → 400s every turn at spawn).
         '-c',
@@ -494,6 +513,7 @@ async function sendToCodexOrchestratorAttempt(
         ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
         ...codexOrchestrationModeFlags(options.orchestrationMode),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
+        ...serviceTierArgs,
         '-c',
         'tools.image_generation=false',
         '-C',

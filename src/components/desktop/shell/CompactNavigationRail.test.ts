@@ -7,7 +7,7 @@ import { OPEN_KEYBOARD_SHORTCUTS_EVENT, OPEN_SETTINGS_TAB_EVENT } from '@/lib/de
 import { setCustomizeTab } from '../customize/navigation';
 import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
 
-const auth = vi.hoisted(() => ({ signedIn: false, clerkEnabled: true, user: { name: 'Private account', email: 'private@example.test' }, signIn: vi.fn(), openManageAccount: vi.fn() }));
+const auth = vi.hoisted(() => ({ isLoaded: true, signedIn: false, clerkEnabled: true, user: { name: 'Private account', email: 'private@example.test' }, signIn: vi.fn(), openManageAccount: vi.fn() }));
 const updateCheck = vi.hoisted(() => vi.fn(async () => ({ version: null as string | null })));
 const theme = vi.hoisted(() => ({ paletteId: 'light', workspaceGlass: false, setPalette: vi.fn(), setWorkspaceGlass: vi.fn(), setReduceTransparency: vi.fn() }));
 const notify = vi.hoisted(() => vi.fn());

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   BookOpen,
@@ -17,6 +17,7 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 import { OPEN_KEYBOARD_SHORTCUTS_EVENT, OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { ThemeContrastGlyph } from './settings-quick-drawer/theme-rows';
 import { FloatingSurface } from './FloatingSurface';
+import { useO8Auth } from '@/components/auth/O8AuthProvider';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -136,6 +137,7 @@ export function SettingsQuickDrawer({
   const [helpOpen, setHelpOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const { paletteId, workspaceGlass, setPalette, setWorkspaceGlass, setReduceTransparency } = useTheme();
+  const auth = useO8Auth();
   const openSettingsTab = (tab: string) => {
     onClose();
     window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab } }));
@@ -212,7 +214,10 @@ export function SettingsQuickDrawer({
             gap: 4,
           }}
         >
-          <RowButton onClick={() => openSettingsTab('account')}>
+          <RowButton disabled={!auth.isLoaded} onClick={() => {
+            if (!auth.signedIn && auth.clerkEnabled) { onClose(); auth.signIn(); }
+            else openSettingsTab('account');
+          }}>
             <IconFrame><CircleUser size={13} /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Account</span>
             <ChevronRight size={12} color={MUTED} />

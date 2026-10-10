@@ -63,6 +63,7 @@ export interface OrchestratorTurnOptions {
    */
   toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
+  serviceTier?: import('@/lib/orchestrator/service-tier').OrchestratorServiceTier;
   model?: string;
   /** For a Collide turn, the composer backend selected before routing to `collide`. */
   collideBaseBackend?: OrchestratorBackendId;

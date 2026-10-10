@@ -155,6 +155,7 @@ import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
+import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrator/service-tier';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
@@ -5379,6 +5380,7 @@ async function handleOrchestratorSendMsgOnce(
   const thinkingEffort: ManualThinkingEffort | undefined = isManualThinkingEffort(msg.thinkingEffort)
     ? msg.thinkingEffort
     : undefined;
+  const serviceTier = isOrchestratorServiceTier(msg.serviceTier) ? msg.serviceTier : undefined;
   const model = typeof msg.model === 'string' && msg.model.trim()
     ? msg.model.trim()
     : undefined;
@@ -5645,6 +5647,7 @@ async function handleOrchestratorSendMsgOnce(
       return sendOrchestratorBackendTurn(turnBackend, repoPath, overrideMessage ?? turnMessage, onEvent, {
         permissionMode,
         thinkingEffort,
+        serviceTier: serviceTierForTurn(serviceTier, requestedBackend.id, model, turnBackend.id, effectiveModel),
         model: effectiveModel,
         collideBaseBackend: turnBackend.id === 'collide' ? collideBaseBackend : undefined,
         agent: turnAgentTag,

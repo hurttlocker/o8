@@ -24,6 +24,7 @@ import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { attachLiveAgentTerminalTab } from '@/components/desktop/contextual-panel/live-agent-terminal';
+import { useContextualTabClose } from '@/components/desktop/contextual-panel/use-tab-close';
 
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
@@ -51,6 +52,7 @@ function AgentGlyph({ agentId, size = 14 }: { agentId: string; size?: number }) 
 // ── Types ──
 
 export interface ContextualPanelHandle {
+  confirmClose?: () => Promise<boolean>;
   onSessionCreated: (sessionName: string, requestId?: string) => boolean;
   writeToTerminal: (sessionName: string, data: string) => void;
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
@@ -69,7 +71,7 @@ export interface ContextualPanelHandle {
 export type BottomPanelSurfaceKind = 'files' | 'side-chat' | 'browser' | 'review' | 'terminal';
 
 export interface ContextualPanelProps {
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -190,7 +192,7 @@ const SURFACE_LABELS = Object.fromEntries(
   BOTTOM_PANEL_SURFACES.map((surface) => [surface.id, surface.label]),
 ) as Record<BottomPanelSurfaceKind, string>;
 
-interface ContextualPanelTab {
+export interface ContextualPanelTab {
   id: string;
   label: string;
   kind: BottomPanelSurfaceKind;
@@ -392,8 +394,11 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       }
       setTabs((prev) => [...prev, nextTab]);
       setActiveTabId(nextTab.id);
-      sendTerminalCreate(120, 30, requestId);
-    }, [sendTerminalCreate]);
+      sendTerminalCreate(120, 30, requestId, repoPath ?? undefined);
+    }, [repoPath, sendTerminalCreate]);
+
+    const createShell = useCallback(() => createBottomTab(CLI_AGENTS[0]), [createBottomTab]);
+    const { closeTab: handleCloseTab, confirmPanelClose } = useContextualTabClose({ tabsRef, activeTabId, setTabs, setActiveTabId, sendTerminalDetach, xtermRefs, pendingTabIdsRef, pendingAgentsRef, pendingCommandsRef, pendingRequestRef, createShell, termWsConnected });
 
     const createSurfaceTab = useCallback((surface: Exclude<BottomPanelSurfaceKind, 'terminal'>) => {
       const existing = tabsRef.current.find((tab) => tab.kind === surface);
@@ -451,6 +456,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
 
     // Imperative handle for dashboard event routing
     useImperativeHandle(ref, () => ({
+      confirmClose: confirmPanelClose,
       onSessionCreated: (sessionName: string, requestId?: string) => {
         const matchedTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;
         const nextTabId = matchedTabId ?? pendingTabIdsRef.current.shift();
@@ -537,7 +543,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         setTabs(result.tabs);
         setActiveTabId(result.activeTabId);
       },
-    }), [activeTabId, createBottomTab, openSurface, sendTerminalInput]);
+    }), [activeTabId, confirmPanelClose, createBottomTab, openSurface, sendTerminalInput]);
 
     const handleCreateTab = useCallback((agent: CliAgent) => {
       setAddMenuOpen(false);
@@ -547,40 +553,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
     const handleCreateSurface = useCallback((surface: BottomPanelSurfaceKind) => {
       openSurface(surface);
     }, [openSurface]);
-
-    const handleCloseTab = useCallback((tabId: string) => {
-      const tab = tabsRef.current.find((entry) => entry.id === tabId);
-      if (!tab) return;
-
-      if (tab.kind === 'terminal' && tab.tmuxSession) {
-        sendTerminalDetach(tab.tmuxSession);
-        xtermRefs.current.delete(tab.tmuxSession);
-      } else if (tab.kind === 'terminal') {
-        pendingTabIdsRef.current = pendingTabIdsRef.current.filter((entry) => entry !== tabId);
-        pendingAgentsRef.current.delete(tabId);
-        pendingCommandsRef.current.delete(tabId);
-        for (const [requestId, pendingTabId] of pendingRequestRef.current) {
-          if (pendingTabId === tabId) pendingRequestRef.current.delete(requestId);
-        }
-      }
-
-      const remaining = tabsRef.current.filter((entry) => entry.id !== tabId);
-      setTabs(remaining);
-
-      if (remaining.length === 0) {
-        setActiveTabId('');
-        if (termWsConnected) {
-          createBottomTab(CLI_AGENTS[0]);
-        }
-        return;
-      }
-
-      if (activeTabId === tabId) {
-        const idx = tabsRef.current.findIndex((entry) => entry.id === tabId);
-        const nextIdx = Math.min(idx, remaining.length - 1);
-        setActiveTabId(remaining[nextIdx].id);
-      }
-    }, [activeTabId, createBottomTab, sendTerminalDetach, termWsConnected]);
 
     return (
       <div style={{

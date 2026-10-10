@@ -546,7 +546,7 @@ export function RamsButton({
   type?: 'button' | 'submit';
   busy?: boolean;
   icon?: React.ReactNode;
-  width?: number;
+  width?: number | string;
 }) {
   const tone = variant === 'danger' ? '#d94f3a' : variant === 'ghost' ? 'var(--t-text-secondary)' : RAMS_ACCENT;
   const border = variant === 'ghost'

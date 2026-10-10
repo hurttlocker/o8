@@ -318,6 +318,13 @@
       ]
     },
     {
+      "path": "src/lib/codex/service-tier-catalogue.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/codex/session-transforms.test.ts",
       "reasons": [
         "executable-fixture"

@@ -1,9 +1,10 @@
 'use client';
 
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FloatingSurface } from './FloatingSurface';
+import { fitPipLayout, type PipRect } from './pip-layout';
 
 const FONT = 'var(--font-sans-system)';
 const OPEN_DWELL_MS = 240;
@@ -18,7 +19,7 @@ const SHAPES = {
 } as const;
 
 export type HoverPipOrientation = keyof typeof SHAPES;
-export type HoverPipShape = (typeof SHAPES)[HoverPipOrientation];
+export type HoverPipShape = { width: number; frameHeight: number; viewport: number };
 
 export type HoverPipEventDetail = {
   hovering?: boolean;
@@ -81,6 +82,8 @@ export function HoverPipCard({
   onOpen,
   openLabel = 'Open preview',
   contextKey,
+  boundsRef,
+  headerContent,
   children,
 }: {
   active: boolean;
@@ -93,6 +96,8 @@ export function HoverPipCard({
   openLabel?: string;
   /** Changing the focused workspace closes a preview owned by its previous context. */
   contextKey?: string;
+  boundsRef?: RefObject<HTMLElement | null>;
+  headerContent?: ReactNode;
   children: (context: {
     orientation: HoverPipOrientation;
     shape: HoverPipShape;
@@ -125,7 +130,14 @@ export function HoverPipCard({
     cardX: number;
     cardY: number;
   } | null>(null);
-  const shape = SHAPES[orientation];
+  const [layout, setLayout] = useState<{ bounds: PipRect | null; composer: PipRect | null; viewportWidth: number; viewportHeight: number }>({ bounds: null, composer: null, viewportWidth: 0, viewportHeight: 0 });
+  const preferredShape = SHAPES[orientation];
+  const fit = useCallback((next: PipPosition | null) => {
+    if (!layout.bounds) return { shape: preferredShape, position: next ? clampPosition(next, preferredShape) : null };
+    return fitPipLayout(layout.bounds, preferredShape, next, layout.composer);
+  }, [layout, preferredShape]);
+  const fitted = fit(position);
+  const shape = fitted.shape;
   const reduceMotion = useReducedMotion();
   const contextRef = useRef(contextKey);
 
@@ -250,18 +262,38 @@ export function HoverPipCard({
 
   useEffect(() => {
     if (!positionRef.current) return;
-    const next = clampPosition(positionRef.current, shape);
-    updatePosition(next, true);
-  }, [shape, updatePosition]);
+    const next = fit(positionRef.current).position;
+    if (next) updatePosition(next);
+  }, [fit, updatePosition]);
 
   useEffect(() => {
-    const onResize = () => {
-      if (!positionRef.current) return;
-      updatePosition(clampPosition(positionRef.current, shape), true);
+    if (!active || !available || !(hoverVisible || manualVisible)) return;
+    let frame = 0;
+    let composer: Element | null = null;
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => schedule());
+    const rect = (node: Element | null): PipRect | null => {
+      if (!node) return null;
+      const { left, top, width, height } = node.getBoundingClientRect();
+      return { left, top, width, height };
     };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [shape, updatePosition]);
+    const measure = () => {
+      frame = 0;
+      const container = boundsRef?.current ?? null;
+      const activePane = container?.querySelector('[data-o8-workspace-active="true"]') ?? container;
+      const nextComposer = Array.from(activePane?.querySelectorAll('textarea') ?? []).find((node) => node.getBoundingClientRect().height > 0) ?? null;
+      if (nextComposer !== composer) { if (composer) observer?.unobserve(composer); composer = nextComposer; if (composer) observer?.observe(composer); }
+      const next = { bounds: rect(container), composer: rect(composer), viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
+      setLayout((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    const container = boundsRef?.current;
+    if (container) observer?.observe(container);
+    const mutations = container && typeof MutationObserver !== 'undefined' ? new MutationObserver(schedule) : null;
+    if (container) mutations?.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-o8-workspace-active'] });
+    window.addEventListener('resize', schedule);
+    schedule();
+    return () => { observer?.disconnect(); mutations?.disconnect(); if (frame) cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); };
+  }, [boundsRef, active, available, contextKey, hoverVisible, manualVisible]);
 
   const toggleOrientation = useCallback(() => {
     setOrientation((current) => {
@@ -294,11 +326,12 @@ export function HoverPipCard({
   const onDragMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    updatePosition(clampPosition({
+    const next = fit({
       x: drag.cardX + event.clientX - drag.pointerX,
       y: drag.cardY + event.clientY - drag.pointerY,
-    }, shape));
-  }, [shape, updatePosition]);
+    }).position;
+    if (next) updatePosition(next);
+  }, [fit, updatePosition]);
 
   const onDragEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragRef.current?.pointerId !== event.pointerId) return;
@@ -333,11 +366,11 @@ export function HoverPipCard({
           }}
           style={{
             position: 'fixed',
-            top: position?.y ?? 52,
-            right: position ? undefined : 16,
-            left: position?.x,
+            top: fitted.position?.y ?? 52,
+            right: fitted.position ? undefined : 16,
+            left: fitted.position?.x,
             width: shape.width,
-            zIndex: 1000,
+            zIndex: 190,
             display: 'flex',
             flexDirection: 'column',
             fontFamily: FONT,
@@ -378,6 +411,7 @@ export function HoverPipCard({
             >
               {title}
             </span>
+            {headerContent}
             <button
               type="button"
               aria-label={orientation === 'tall' ? 'Switch to desktop-style view' : 'Switch to mobile-style view'}

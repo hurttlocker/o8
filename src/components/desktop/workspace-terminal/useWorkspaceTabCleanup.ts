@@ -12,6 +12,7 @@ import {
   isTabFinishedForCleanup,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import { clearSessionTileStorage } from '@/components/desktop/workspace-terminal/use-session-tiles';
+import { confirmTerminalClose } from './terminal-close-confirm';
 
 export interface TabCleanupResult {
   closedCount: number;
@@ -56,7 +57,7 @@ export function useWorkspaceTabCleanup({
     [effectiveActiveTabId, tabs],
   );
 
-  const handleCloseTab = useCallback((tabId: string) => {
+  const closeTabImmediately = useCallback((tabId: string) => {
     const closingTab = tabsRef.current.find((tab) => tab.id === tabId);
     const result = computeCloseTab(tabsRef.current, tabId, activeTabId);
     if (!result) return;
@@ -100,10 +101,19 @@ export function useWorkspaceTabCleanup({
     tabsRef,
   ]);
 
+  const handleCloseTab = useCallback((tabId: string) => {
+    const tab = tabsRef.current.find((entry) => entry.id === tabId);
+    if (tab?.kind === 'terminal' && !tab.readOnly) {
+      void confirmTerminalClose(tab).then((confirmed) => {
+        if (confirmed && tabsRef.current.find((entry) => entry.id === tabId)?.tmuxSession === tab.tmuxSession) closeTabImmediately(tabId);
+      });
+    } else closeTabImmediately(tabId);
+  }, [closeTabImmediately, tabsRef]);
+
   const archiveWorkspaceTab = useCallback((tabId: string, packetId?: string | null) => {
-    handleCloseTab(tabId);
+    closeTabImmediately(tabId);
     archivePacket(packetId);
-  }, [handleCloseTab]);
+  }, [closeTabImmediately]);
 
   const cleanupFinishedTabs = useCallback((): TabCleanupResult => {
     const closedTabs = tabsRef.current.filter((tab) => (

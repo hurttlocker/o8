@@ -7,6 +7,7 @@ import { ComposerPopover } from '../chat-panel/ComposerPopover';
 import { useComposerChipCompact } from '../composer-compact-context';
 import { EffortSlider } from './EffortSlider';
 import { isHotComposerEffort, type ResolvedComposerSelectorState } from './state';
+import { ServiceTierPicker } from './ServiceTierPicker';
 
 export function ThinkingChip({ state, saving, onPick, open, onOpenChange }: {
   state: ResolvedComposerSelectorState;
@@ -35,6 +36,7 @@ export function ThinkingChip({ state, saving, onPick, open, onOpenChange }: {
       <FloatingSurface data-testid="composer-thinking-popover" role="dialog" aria-label="Orchestrator thinking" style={{ width: 300, maxWidth: 'calc(100vw * var(--zoom-inverse, 1) - 32px)', borderRadius: 18 }} contentStyle={{ paddingTop: 10, paddingRight: 6, paddingBottom: 10, paddingLeft: 6 }}>
         <div style={{ paddingRight: 10, paddingBottom: 6, paddingLeft: 10, fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)' }}>Thinking · {state.leadModelLabel}</div>
         <EffortSlider state={state} onPick={onPick} disabled={saving} />
+        <ServiceTierPicker backend={state.leadBackend} model={state.leadModelId} disabled={saving} />
         {state.leadBackend === 'codex' && /gpt-6(?:\.|-).*astra/i.test(state.leadModelId) ? <div data-testid="astra-effort-note" style={{ paddingTop: 5, paddingRight: 10, paddingBottom: 2, paddingLeft: 10, fontSize: 10.5, lineHeight: '15px', color: 'var(--t-text-muted)' }}>Effort applies to your next turn. Cache reuse depends on keeping the earlier prompt and configuration stable.</div> : null}
       </FloatingSurface>
     </ComposerPopover>
