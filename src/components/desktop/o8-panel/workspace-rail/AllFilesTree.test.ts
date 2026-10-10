@@ -39,7 +39,7 @@ async function settled(check: () => boolean) {
   expect(check()).toBe(true);
 }
 async function click(text: string) {
-  const button = Array.from(host.querySelectorAll('button')).find(node => node.textContent?.trim() === text);
+  const button = Array.from(host.querySelectorAll('button')).find(node => (node.getAttribute('title')?.split('/').pop() ?? node.textContent?.trim()) === text);
   expect(button, `Button ${text}`).toBeDefined();
   await act(async () => button!.click());
 }

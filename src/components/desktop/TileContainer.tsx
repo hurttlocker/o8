@@ -2,6 +2,7 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ResizeEdge } from './shell/ResizeEdge';
 import { TileHeader } from '@/components/desktop/TileHeader';
 import { SplitPaneCloseButton } from '@/components/desktop/shell/SplitPaneCloseButton';
 import {
@@ -432,10 +433,9 @@ function ResizeHandle({
       };
 
   return (
-    <div
-      role="separator"
+    <ResizeEdge
+      orientation={isVertical ? 'vertical' : 'horizontal'}
       aria-label="Resize terminal panes"
-      aria-orientation={isVertical ? 'vertical' : 'horizontal'}
       aria-valuemin={20}
       aria-valuemax={80}
       aria-valuenow={Math.round(ratio * 100)}
@@ -449,34 +449,7 @@ function ResizeHandle({
         event.preventDefault();
         onResize(ratio + step);
       }}
-      onMouseEnter={(e) => {
-        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '1';
-      }}
-      onMouseLeave={(e) => {
-        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '0.65';
-      }}
-      style={{
-        ...style,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-        zIndex: 10,
-      }}
-    >
-      <div aria-hidden style={{ position: 'absolute', width: isVertical ? 1 : '100%', height: isVertical ? '100%' : 1, backgroundColor: 'var(--t-divider-subtle)', pointerEvents: 'none' }} />
-      <div
-        style={{
-          width: isVertical ? 3 : 42,
-          height: isVertical ? 42 : 3,
-          borderRadius: 999,
-          backgroundColor: 'var(--t-drag-handle)',
-          opacity: 0.65,
-          transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      />
-    </div>
+      style={style}
+    />
   );
 }

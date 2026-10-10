@@ -20,6 +20,13 @@ describe('workspace resident tab retention', () => {
     expect(resident).toEqual(['one', 'three']);
   });
 
+  it('retains recently opened pages when the workspace prepends new tabs', () => {
+    const visible = ['customize', 'plugins', 'automations', 'old-a', 'old-b', 'old-c'];
+    const next = updateResidentTabIds(['old-c', 'automations', 'plugins'], visible, 'customize');
+    expect(next).toEqual(['automations', 'plugins', 'customize']);
+    expect(updateResidentTabIds(next, visible, 'plugins')).toEqual(['automations', 'customize', 'plugins']);
+  });
+
   it('stays bounded across a long tab-switching session', () => {
     const visible = Array.from({ length: 50 }, (_, index) => `tab-${index}`);
     let resident: string[] = [];

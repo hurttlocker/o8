@@ -63,24 +63,30 @@ describe('CustomizePage skills', () => {
     }));
   });
 
-  it('lands on Plugins from navigation before the page mounts and switches an already mounted view', async () => {
-    openCustomizeTab('plugins');
-    await act(async () => root.render(createElement(CustomizePage, {
+  it('keeps the dedicated Plugins page separate from customization navigation', async () => {
+    const props = {
       project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8'], createdAt: '' },
       registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }],
-    })));
-    const tab = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('[aria-pressed]')].find(button => button.textContent?.startsWith(label))!;
-    expect(tab('Plugins').getAttribute('aria-pressed')).toBe('true');
-    await vi.waitFor(async () => {
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-      expect(host.querySelector('[aria-label="Choose action repository"]')).not.toBeNull();
-    });
-    await act(async () => openCustomizeTab('rules'));
-    expect(tab('Instructions').getAttribute('aria-pressed')).toBe('true');
-    expect(host.querySelector('[aria-label="Search Instructions"]')).not.toBeNull();
-    await act(async () => openCustomizeTab('plugins'));
-    expect(tab('Plugins').getAttribute('aria-pressed')).toBe('true');
-    expect(host.querySelector('[aria-label="Search Instructions"]')).toBeNull();
+    };
+    const event = vi.fn();
+    window.addEventListener('o8:open-customize', event);
+    try {
+      openCustomizeTab('plugins');
+      expect((event.mock.calls[0][0] as CustomEvent).detail).toEqual({ tab: 'plugins' });
+      await act(async () => root.render(createElement(CustomizePage, { ...props, fixedTab: 'plugins' })));
+      expect(host.querySelector('h1')?.textContent).toBe('Plugins');
+      expect(host.querySelector('[aria-label="Customization sections"]')).toBeNull();
+      await vi.waitFor(async () => {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+        expect(host.querySelector('[aria-label="Choose action repository"]')).not.toBeNull();
+      });
+      await act(async () => openCustomizeTab('rules'));
+      expect(host.querySelector('h1')?.textContent).toBe('Plugins');
+      await act(async () => root.render(createElement(CustomizePage, props)));
+      expect(host.querySelector('[aria-label="Search Instructions"]')).not.toBeNull();
+      await act(async () => openCustomizeTab('plugins'));
+      expect(host.querySelector('[aria-label="Search Instructions"]')).not.toBeNull();
+    } finally { window.removeEventListener('o8:open-customize', event); }
   });
 
   afterEach(() => {

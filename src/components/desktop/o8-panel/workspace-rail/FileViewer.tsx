@@ -3,6 +3,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MarkdownRender } from '../markdown-render';
+import { SyntaxFileView } from './SyntaxFileView';
+import { FileTypeIcon } from './FileTypeIcon';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -177,11 +179,14 @@ export function FileViewer({
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [viewModeByFile, setViewModeByFile] = useState<Record<string, SourceViewMode>>({});
+  const [editingFile, setEditingFile] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumberRef = useRef<HTMLDivElement>(null);
   const fileKind = selectedFile ? fileKindForPath(selectedFile) : 'text';
   const viewMode = selectedFile ? viewModeByFile[selectedFile] ?? defaultViewMode(fileKind) : 'source';
   const canTogglePreview = fileKind === 'markdown' || fileKind === 'svg';
+  const editing = selectedFile === editingFile;
+  const showEditControl = canReadAsText(fileKind) && viewMode === 'source';
   const assetUrl = selectedFile && repoPath && (fileKind === 'image' || fileKind === 'pdf' || fileKind === 'svg')
     ? assetUrlFor(repoPath, selectedFile)
     : null;
@@ -330,18 +335,21 @@ export function FileViewer({
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, fontFamily: UI_FONT }}>
+        <FileTypeIcon name={selectedFile} size={18} />
         <div title={selectedFile} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span style={{ fontSize: 13.5, fontWeight: 300, color: 'var(--t-text)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{fileName}</span>
           {selectedFile.includes('/') ? <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-muted)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{selectedFile.slice(0, selectedFile.lastIndexOf('/')) || '/'}</span> : null}
         </div>
         {headerAction}
       </div>
-      {dirty || error || canTogglePreview ? (
+      {dirty || error || canTogglePreview || showEditControl ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>
           <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {error ?? (dirty ? 'Modified' : '')}
           </span>
           {canTogglePreview ? <PreviewToggle mode={viewMode} onModeChange={handleViewModeChange} /> : null}
+          {showEditControl && fileContent !== null ? <button type="button" aria-label={editing ? 'Read file' : 'Edit file'} aria-pressed={editing} onClick={() => setEditingFile(editing ? null : selectedFile)}
+            style={{ minHeight: 24, border: '1px solid var(--t-divider-subtle)', borderRadius: 7, background: 'var(--t-hover)', color: 'var(--t-text-secondary)', cursor: 'pointer', fontFamily: UI_FONT, fontSize: 11, fontWeight: 300, paddingLeft: 9, paddingRight: 9 }}>{editing ? 'Read' : 'Edit'}</button> : null}
           {dirty ? (
             <button
               type="button"
@@ -385,6 +393,8 @@ export function FileViewer({
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none', paddingTop: 18, paddingRight: 22, paddingBottom: 22, paddingLeft: 22 }}>
             <MarkdownRender content={editContent} />
           </div>
+        ) : fileContent !== null && !editing ? (
+          <SyntaxFileView path={selectedFile} content={editContent} />
         ) : fileContent !== null ? (
           <>
             <div

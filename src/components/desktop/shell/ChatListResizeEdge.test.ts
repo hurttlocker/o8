@@ -16,8 +16,8 @@ it('keeps a full-height drag target, lights only the straight edge, and preserve
   try {
     await act(async () => root.render(createElement(Harness, { glass: true })));
     const handle = host.querySelector<HTMLElement>('[role="separator"]')!;
-    const edge = host.querySelector<HTMLElement>('[data-o8-chat-resize-edge]')!;
-    const glow = edge.firstElementChild as HTMLElement;
+    const edge = host.querySelector<HTMLElement>('[data-resize-glow]')!;
+    const glow = edge;
     expect(edge.style.top).toBe('53px'); expect(edge.style.bottom).toBe('0px');
     expect(glow.style.opacity).toBe('0'); expect(glow.style.borderRadius).toBe('');
     expect(handle.style.width).toBe('6px');
@@ -26,6 +26,8 @@ it('keeps a full-height drag target, lights only the straight edge, and preserve
     await act(async () => edge.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
     expect(drag).toHaveBeenCalledOnce();
     await act(async () => edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+    expect(glow.style.opacity).toBe('0.85');
+    await act(async () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
     expect(glow.style.opacity).toBe('0');
     await act(async () => handle.focus()); expect(glow.style.opacity).toBe('0.85');
     await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
@@ -33,8 +35,8 @@ it('keeps a full-height drag target, lights only the straight edge, and preserve
     await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
     expect(handle.getAttribute('aria-valuenow')).toBe('484');
     await act(async () => root.render(createElement(Harness, { glass: false })));
-    expect(host.querySelector<HTMLElement>('[data-o8-chat-resize-edge]')?.style.top).toBe('18px');
-    expect(host.querySelector<HTMLElement>('[data-o8-chat-resize-edge]')?.style.bottom).toBe('18px');
+    expect(host.querySelector<HTMLElement>('[data-resize-glow]')?.style.top).toBe('18px');
+    expect(host.querySelector<HTMLElement>('[data-resize-glow]')?.style.bottom).toBe('18px');
   } finally {
     await act(async () => root.unmount()); host.remove();
   }

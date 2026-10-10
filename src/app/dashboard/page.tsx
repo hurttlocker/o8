@@ -20,9 +20,11 @@ import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { CompactNavigationRail } from '@/components/desktop/shell/CompactNavigationRail';
 import { ChatListColumn, NAVIGATION_RAIL_WIDTH } from '@/components/desktop/shell/ChatListColumn';
+import { ResizeEdge } from '@/components/desktop/shell/ResizeEdge';
 import { ChatListResizeEdge } from '@/components/desktop/shell/ChatListResizeEdge';
 import { ProjectsPage } from '@/components/desktop/ProjectsPage';
-import { RetainedCustomizeView } from '@/components/desktop/customize/RetainedCustomizeView';
+import { WorkspaceUtilityProvider } from '@/components/desktop/canvas/WorkspaceUtilityContext';
+import { isWorkspaceUtilityKind, workspaceUtilityTab, type WorkspaceUtilityKind } from '@/components/desktop/canvas/workspace-utility-navigation';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
 import {
@@ -200,8 +202,6 @@ markDashboardScriptStart();
 const LazySettingsPage = retryingLazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })), { label: 'Settings' });
 // LazyAnalyticsPage full-page mount retired — Settings → Analytics tab is
 // the live entry point. AnalyticsPage is still consumed via that tab.
-const LazyAutomationsPage = retryingLazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })), { label: 'Automations' });
-const LazyCustomizePage = retryingLazy(() => import('@/components/desktop/CustomizePage').then(m => ({ default: m.CustomizePage })), { label: 'Customize' });
 const LazyOnboarding = retryingLazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })), { label: 'Onboarding' });
 const LazyTelemetryConsentCard = retryingLazy(() => import('@/components/desktop/TelemetryConsentCard').then(m => ({ default: m.TelemetryConsentCard })), { label: 'Telemetry consent' });
 const LazyCommandPalette = retryingLazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })), { label: 'Command palette' });
@@ -1714,21 +1714,25 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:open-handoffs', handleOpenHandoffs);
   }, [handleOpenHandoffs]);
 
-  // Automations nav entry (lives in AgentPanel's MiniAgentPanelHeader) dispatches
-  // o8:open-automations when clicked. Flip the activeNavSection so the
-  // AutomationsPage takes the workspace center. Full page-takeover.
+  const openWorkspaceUtility = useCallback((kind: WorkspaceUtilityKind) => {
+    setActiveNavSection('agents');
+    openCanvasTab(workspaceUtilityTab(kind, (leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id));
+  }, [setActiveNavSection, openCanvasTab, leftPanelFocus.view?.project, dashboardProjects.activeProject]);
   useEffect(() => {
-    const handler = () => setActiveNavSection('automations');
-    window.addEventListener('o8:open-automations', handler);
-    return () => window.removeEventListener('o8:open-automations', handler);
-  }, [setActiveNavSection]);
+    const automations = () => openWorkspaceUtility('automations');
+    const customize = (event: Event) => openWorkspaceUtility((event as CustomEvent<{ tab?: string }>).detail?.tab === 'plugins' ? 'plugins' : 'customize');
+    window.addEventListener('o8:open-automations', automations);
+    window.addEventListener('o8:open-customize', customize);
+    return () => {
+      window.removeEventListener('o8:open-automations', automations);
+      window.removeEventListener('o8:open-customize', customize);
+    };
+  }, [openWorkspaceUtility]);
+  // Migrate older saved navigation destinations into resident workspace tabs.
+  useEffect(() => {
+    if (activeNavSection === 'automations' || activeNavSection === 'customize') openWorkspaceUtility(activeNavSection);
+  }, [activeNavSection, openWorkspaceUtility]);
 
-  // Customize — same page-takeover pattern as Automations (vid3 Cursor study).
-  useEffect(() => {
-    const handler = () => setActiveNavSection('customize');
-    window.addEventListener('o8:open-customize', handler);
-    return () => window.removeEventListener('o8:open-customize', handler);
-  }, [setActiveNavSection]);
 
   const handleRepoRemoved = useCallback((removedRepo: RepoRegistryEntry) => {
     const removedRepoPath = removedRepo.localPath;
@@ -2364,6 +2368,17 @@ function DashboardInner() {
     window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
   }, []);
 
+  const handleOpenPluginTerminal = useCallback(async (terminal: { sessionName: string; label: string; workspaceRoot: string | null }) => {
+    const target = await waitForWorkspaceTerminalTarget({ preferredTileId: activeTileId, fallbackToAnyExisting: true, activate: false });
+    const repo = globalRepoEntries.find((entry) => entry.localPath === terminal.workspaceRoot) ?? null;
+    const tabId = target.handle.openAttachedTerminalSession({ sessionKey: terminal.sessionName, tmuxSession: terminal.sessionName, label: terminal.label, readOnly: false }, repo ? { ...repo, remoteUrl: repo.remoteUrl ?? undefined } : null);
+    if (!tabId) throw new Error('Workspace terminal view unavailable.');
+    setActiveTileId(target.tileId);
+    setActiveNavSection('agents');
+    flashWorkspaceTab(tabId);
+  }, [waitForWorkspaceTerminalTarget, activeTileId, globalRepoEntries, setActiveTileId, setActiveNavSection, flashWorkspaceTab]);
+  const workspaceUtilityContext = useMemo(() => ({ projects: dashboardProjects.ledger?.projects ?? [], registeredRepos: globalRepoEntries, onOpenPluginTerminal: handleOpenPluginTerminal }), [dashboardProjects.ledger, globalRepoEntries, handleOpenPluginTerminal]);
+
   // Failed spawns must be VISIBLE, not ring-buffer-only — a swallowed failure
   // IS "the New session button does nothing" (report D3YPBP rounds 1-3, still
   // undiagnosable on the reporter's machine because the error text never left
@@ -2539,8 +2554,8 @@ function DashboardInner() {
   }, [focusOrchestrationPacketLane, handleSelectSession]);
 
   const handlePaletteSelectDirective = useCallback((_directiveId: string) => {
-    setActiveNavSection('customize');
-  }, [setActiveNavSection]);
+    openWorkspaceUtility('customize');
+  }, [openWorkspaceUtility]);
 
   // Opens a file path. Shared by (a) agent-chat file clicks routed through
   // O8Panel's `o8:open-file` → onOpenFile, and (b) Finder "Open With → o8"
@@ -4084,7 +4099,7 @@ function DashboardInner() {
   });
 
   const settingsTakeoverActive = activeNavSection === 'settings';
-  const workspaceSurfaceHidden = settingsTakeoverActive || activeNavSection === 'automations' || activeNavSection === 'customize' || activeNavSection === 'projects';
+  const workspaceSurfaceHidden = settingsTakeoverActive || activeNavSection === 'projects';
   useEffect(() => {
     if (!settingsTakeoverActive) {
       if (settingsWasOpenRef.current) {
@@ -4948,36 +4963,7 @@ function DashboardInner() {
           ] : []}
         />
 
-        {activeNavSection === 'automations' && (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading automations…</div>}>
-              <LazyAutomationsPage currentOwner="operator" onClose={() => setActiveNavSection('agents')} />
-            </Suspense>
-          </div>
-        )}
-
         {activeNavSection === 'projects' ? <ProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /> : null}
-        <RetainedCustomizeView active={activeNavSection === 'customize'}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading customize…</div>}>
-              <LazyCustomizePage
-                key={(leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id ?? 'personal'}
-                project={leftPanelFocus.view?.project ?? dashboardProjects.activeProject}
-                registeredRepos={globalRepoEntries}
-                onOpenPluginTerminal={async (terminal) => {
-                  const target = await waitForWorkspaceTerminalTarget({ preferredTileId: activeTileId, fallbackToAnyExisting: true, activate: false });
-                  const repo = globalRepoEntries.find((entry) => entry.localPath === terminal.workspaceRoot) ?? null;
-                  const tabId = target.handle.openAttachedTerminalSession({ sessionKey: terminal.sessionName, tmuxSession: terminal.sessionName, label: terminal.label, readOnly: false }, repo ? { ...repo, remoteUrl: repo.remoteUrl ?? undefined } : null);
-                  if (!tabId) throw new Error('Workspace terminal view unavailable.');
-                  setActiveTileId(target.tileId);
-                  setActiveNavSection('agents');
-                  flashWorkspaceTab(tabId);
-                }}
-                onClose={() => setActiveNavSection('agents')}
-              />
-            </Suspense>
-        </RetainedCustomizeView>
-
-        {activeNavSection !== 'automations' && (
           <div
             ref={workspaceSurfaceRef}
             aria-hidden={workspaceSurfaceHidden}
@@ -5007,6 +4993,7 @@ function DashboardInner() {
             onToggleWorkspacePip={handleToggleWorkspacePip}
             o8PanelVisible={showRightPanelColumn && rightPanelKind === 'o8'}
           >
+            <WorkspaceUtilityProvider value={workspaceUtilityContext}>
             <TileContainer
               layout={tileLayout}
               paneLabels={workspacePaneLabels}
@@ -5019,11 +5006,10 @@ function DashboardInner() {
               onResizeSplit={handleResizeSplit}
               onSplitTile={handleSplitTile}
             />
+            </WorkspaceUtilityProvider>
             <DashboardHydrationMarker />
           </OrchestratorDataProvider>
           </div>
-        )}
-
         </SmoothCorners>
       </div>
 
@@ -5052,34 +5038,21 @@ function DashboardInner() {
               overflow: 'hidden',
             }}
           >
-            <div
+            <ResizeEdge aria-label="Right panel width"
+              aria-valuemin={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
+              aria-valuemax={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
+              aria-valuenow={rightPanelKind === 'o8' ? o8Width : rightWidth}
               onMouseDown={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
-              onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle-hover, var(--t-text-faint))'; }}
-              onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
-              style={{
-                width: 6,
-                cursor: 'col-resize',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                zIndex: 10,
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                const delta = event.key === 'ArrowLeft' ? 16 : -16;
+                if (rightPanelKind === 'o8') setO8Width((width) => Math.max(MIN_O8_PANEL_WIDTH, Math.min(MAX_O8_PANEL_WIDTH, width + delta)));
+                else setRightWidth((width) => Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, width + delta)));
               }}
-            >
-              {/* Always-visible divider pill, color-glow on hover — same
-                  Q ruling as the left handle above. The translateX mirrors
-                  the left handle: the workspace card's marginRight
-                  (workspaceInset) extends the visible gap LEFTWARD past this
-                  gutter, so center the pill in the full gap. */}
-              <div style={{
-                width: 3,
-                height: 40,
-                borderRadius: 2,
-                backgroundColor: 'var(--t-drag-handle)',
-                transition: 'background-color 150ms',
-                transform: `translateX(-${workspaceInset / 2}px)`,
-              }} />
-            </div>
+              style={{ width: 6 }}
+              glowStyle={{ top: 22, bottom: 22, left: 6, transform: 'none' }}
+            />
 
             <motion.div
               data-mcp-scope="chat-panel"
@@ -5235,6 +5208,7 @@ function DashboardInner() {
 
       {showCompactNavigationRail ? <CompactNavigationRail
         glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !isNonMacShell()))}
+        workspacePage={isWorkspaceUtilityKind(focusedWorkspaceTab?.canvasKind) ? focusedWorkspaceTab.canvasKind : undefined}
         activeDestination={activeNavSection}
         onHome={leaveNavTakeover}
         onOpenSettings={() => handleOpenSettingsTab('general')}

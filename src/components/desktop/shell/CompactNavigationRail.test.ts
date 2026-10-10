@@ -123,7 +123,8 @@ it('reaches Plugins directly, keeps Automations, and navigates the secondary dra
     expect(automations).toHaveBeenCalledOnce();
     await act(async () => button('Plugins').click());
     expect(customize).toHaveBeenCalledOnce();
-    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'customize', glassSurface: true })));
+    expect((customize.mock.calls[0][0] as CustomEvent).detail).toEqual({ tab: 'plugins' });
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', workspacePage: 'plugins', glassSurface: true })));
     expect(button('Plugins').getAttribute('aria-current')).toBe('page');
     await act(async () => button('More navigation').click());
     expect(document.activeElement).toBe(button('Projects'));

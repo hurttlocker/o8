@@ -60,6 +60,7 @@ import {
 } from './canvas/index';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { CanvasRepoTaskLaunchRequest } from './canvas-utils';
+import { WorkspaceUtilityPage } from './canvas/WorkspaceUtilityPage';
 
 export { type CanvasRepoTaskLaunchRequest } from './canvas-utils';
 
@@ -72,6 +73,9 @@ export type CanvasTabKind =
   | 'pr'
   | 'pull-requests'
   | 'usage'
+  | 'automations'
+  | 'plugins'
+  | 'customize'
   | 'visualization'
   | 'readme'
   | 'ci'
@@ -330,6 +334,7 @@ export const Canvas = memo(function Canvas({
             >
               <TabContent
                 tab={activeTab}
+                onClose={() => onCloseTab(activeTab.id)}
                 active={active}
                 selectedRepo={selectedRepo}
                 onSelectCommit={onSelectCommit}
@@ -373,6 +378,11 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
       return <GitPullRequest size={size} />;
     case 'usage':
       return <Gauge size={size} />;
+    case 'automations':
+      return <Clock size={size} />;
+    case 'plugins':
+    case 'customize':
+      return <Hexagon size={size} />;
     case 'visualization':
       return <FileText size={size} />;
     case 'readme':
@@ -404,6 +414,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
 
 const TabContent = memo(function TabContent({
   tab,
+  onClose,
   active,
   selectedRepo,
   onSelectCommit,
@@ -411,6 +422,7 @@ const TabContent = memo(function TabContent({
   onLaunchWorkspaceTask,
 }: {
   tab: CanvasTab;
+  onClose: () => void;
   active: boolean;
   selectedRepo?: string | null;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
@@ -473,6 +485,10 @@ const TabContent = memo(function TabContent({
             return <RepositoryPullRequests active={active} repoPath={tab.meta?.workspace || tab.resourceId || null} />;
           case 'usage':
             return <UsageWorkspace active={active} />;
+          case 'automations':
+          case 'plugins':
+          case 'customize':
+            return <WorkspaceUtilityPage kind={tab.kind} projectId={tab.meta?.projectId} onClose={onClose} />;
           case 'visualization':
             return <VisualizationWorkspace id={tab.resourceId} />;
           case 'readme':

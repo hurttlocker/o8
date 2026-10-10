@@ -41,13 +41,15 @@ function openSettingsMcpTab() {
   window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
 }
 
-export function CustomizePage({ onClose, project = null, registeredRepos = [], onOpenPluginTerminal }: {
+export function CustomizePage({ onClose, project = null, registeredRepos = [], onOpenPluginTerminal, fixedTab }: {
   onClose?: () => void;
   onOpenPluginTerminal?: (terminal: { sessionName: string; label: string; workspaceRoot: string | null }) => Promise<void>;
   project?: ProjectRecord | null;
   registeredRepos?: CustomizeRepo[];
+  fixedTab?: 'plugins';
 }) {
-  const [tab, setTab] = useCustomizeTab();
+  const [navigationTab, setTab] = useCustomizeTab();
+  const tab = fixedTab ?? navigationTab;
   const [query, setQuery] = useState('');
   const [pluginRepo, setPluginRepo] = useState('');
   const [addingSkill, setAddingSkill] = useState(false);
@@ -157,6 +159,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
         gap: 28,
       }}>
         <CustomizeHeader
+          pluginsOnly={fixedTab === 'plugins'}
           tab={tab} onTab={(next) => { setTab(next); setExpandedRow(null); }}
           query={query} onQuery={setQuery} repos={repos} scope={scope}
           onScope={(value) => { setSelection({ projectId: project?.id, value }); setExpandedRow(null); }} project={project}

@@ -23,7 +23,7 @@ const fieldStyle: CSSProperties = {
   paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,
 };
 
-export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onScope, project, counts, onClose }: {
+export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onScope, project, counts, onClose, pluginsOnly = false }: {
   tab: CustomizeTab;
   onTab: (tab: CustomizeTab) => void;
   query: string;
@@ -34,6 +34,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
   project?: ProjectRecord | null;
   counts: Partial<Record<CustomizeTab, number>>;
   onClose?: () => void;
+  pluginsOnly?: boolean;
 }) {
   const tabs = TABS;
   const label = tabs.find((item) => item.id === tab)?.label ?? 'customizations';
@@ -52,11 +53,11 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <WorkspacePageHeader
-        title="Customize"
+        title={pluginsOnly ? 'Plugins' : 'Customize'}
         subtitle={project ? `${project.name} · ${project.repoPaths.length} ${project.repoPaths.length === 1 ? 'repository' : 'repositories'}` : 'Personal customizations'}
         onClose={onClose}
       />
-      <nav aria-label="Customization sections" style={{ display: 'flex', flexWrap: 'wrap', columnGap: 22, rowGap: 4, marginBottom: 24, borderBottom: '1px solid var(--t-divider-subtle)' }}>
+      {!pluginsOnly ? <nav aria-label="Customization sections" style={{ display: 'flex', flexWrap: 'wrap', columnGap: 22, rowGap: 4, marginBottom: 24, borderBottom: '1px solid var(--t-divider-subtle)' }}>
         {tabs.map((item) => (
           <button key={item.id} type="button" aria-pressed={tab === item.id} onClick={() => onTab(item.id)} style={{
             minHeight: 44, display: 'inline-flex', alignItems: 'center', gap: 6, paddingTop: 10, paddingBottom: 10,
@@ -68,7 +69,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
             {counts[item.id] ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{counts[item.id]}</span> : null}
           </button>
         ))}
-      </nav>
+      </nav> : null}
       {tab !== 'plugins' ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <input aria-label={`Search ${label}`} placeholder={`Search ${label} for ${repoName}…`} value={query} onChange={(event) => onQuery(event.target.value)}

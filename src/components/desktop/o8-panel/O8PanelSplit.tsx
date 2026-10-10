@@ -2,6 +2,7 @@
 
 import { useRef } from 'react';
 import type React from 'react';
+import { ResizeEdge } from '../shell/ResizeEdge';
 import { O8HeaderTabs } from './O8HeaderTabs';
 import type { O8Tab } from './types';
 
@@ -54,10 +55,9 @@ export function O8PanelSplitDivider({
 
   return (
     <div style={{ order: 1, height: DIVIDER_HEIGHT, flexShrink: 0, borderTop: '1px solid var(--t-divider)', background: 'var(--t-chrome)' }}>
-      <div
-        role="separator"
+      <ResizeEdge
+        orientation="horizontal"
         aria-label="Resize right panel views"
-        aria-orientation="horizontal"
         aria-valuemin={25}
         aria-valuemax={75}
         aria-valuenow={ratio}
@@ -83,10 +83,8 @@ export function O8PanelSplitDivider({
           if (event.key === 'Home') { event.preventDefault(); onRatioChange(25); }
           if (event.key === 'End') { event.preventDefault(); onRatioChange(75); }
         }}
-        style={{ height: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'row-resize', touchAction: 'none' }}
-      >
-        <span aria-hidden style={{ width: 30, height: 2, borderRadius: 2, background: 'var(--t-drag-handle)' }} />
-      </div>
+        style={{ height: 7 }}
+      />
       <div style={{ height: 28, display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 8, paddingRight: 8 }}>
         <O8HeaderTabs activeTab={secondary} onTabChange={onSecondaryChange} ariaLabelPrefix="Lower panel view" />
       </div>

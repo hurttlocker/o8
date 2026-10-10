@@ -1,5 +1,6 @@
 'use client';
 
+import { FloatingSurface, useFloatingSurfaceMaterial } from '../../FloatingSurface';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -18,32 +19,13 @@ import { useOrchestratorData } from '../../orchestrator-data-context';
 import { track } from '@/lib/analytics/track';
 import { readPanelContext, type ScratchSurface } from './scratch-panel-context';
 import { useScratchDialog } from './useScratchDialog';
+import { scratchSurfaceTokens } from './o8-scratch-surface';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const O8_ICON_ACTIVE = 'var(--t-text)';
 const O8_ICON_INACTIVE = 'var(--t-text-muted)';
-const SCRATCH_LOCAL_TOKENS: CSSProperties = {
-  ['--o8-scratch-surface' as string]: 'var(--t-chat-surface-bg, #f4f2ed)',
-  ['--o8-scratch-card' as string]: 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))',
-  ['--o8-scratch-input' as string]: 'var(--t-chat-surface-input-bg, #f4f2ed)',
-  ['--o8-scratch-border' as string]: 'var(--t-chat-surface-border, rgba(15, 23, 42, 0.1))',
-  ['--o8-scratch-input-border' as string]: 'var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))',
-  ['--o8-scratch-text' as string]: 'var(--t-chat-surface-text, #0f172a)',
-  ['--o8-scratch-muted' as string]: 'var(--t-chat-surface-text-secondary, #64748b)',
-  ['--o8-scratch-faint' as string]: 'var(--t-chat-surface-text-muted, #94a3b8)',
-  ['--o8-scratch-action' as string]: 'var(--t-chat-surface-text-secondary, #475569)',
-  ['--t-panel' as string]: 'var(--o8-scratch-surface)',
-  ['--t-panel-solid' as string]: 'var(--o8-scratch-surface)',
-  ['--t-bg-subtle' as string]: 'var(--o8-scratch-card)',
-  ['--t-input-bg' as string]: 'var(--o8-scratch-input)',
-  ['--t-input-border' as string]: 'var(--o8-scratch-input-border)',
-  ['--t-panel-border' as string]: 'var(--o8-scratch-border)',
-  ['--t-divider-subtle' as string]: 'var(--o8-scratch-border)',
-  ['--t-text' as string]: 'var(--o8-scratch-text)',
-  ['--t-text-muted' as string]: 'var(--o8-scratch-muted)',
-  ['--t-text-faint' as string]: 'var(--o8-scratch-faint)',
-};
+
 type ScratchRole = 'user' | 'assistant';
 type ScratchTriggerPlacement = 'floating' | 'review-toolbar';
 
@@ -241,6 +223,8 @@ export function O8ScratchChat({
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const material = useFloatingSurfaceMaterial();
+
   const [open, setOpen] = useState(false);
   const closePanel = useCallback(() => setOpen(false), []);
   useScratchDialog(open, dialogRef, buttonRef, closePanel);
@@ -614,27 +598,20 @@ export function O8ScratchChat({
       </div>
       {/* Portal escapes transformed ancestors so viewport coordinates are real. */}
       {open ? createPortal(
-        <div
+        <FloatingSurface
           ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label={surfaceLabel ? `Ask o8 — ${surfaceLabel}` : 'Ask o8'}
+          contentStyle={{ display: 'flex', flexDirection: 'column', minHeight: 0, maxHeight: expanded ? 'min(780px, calc(100vh - 72px))' : 'min(590px, calc(100vh - 96px))', overflow: 'hidden' }}
           style={{
-            ...SCRATCH_LOCAL_TOKENS,
+            ...scratchSurfaceTokens(material.isGlass),
             position: 'fixed',
             top: panelPosition.top,
             right: panelPosition.right,
             width: expanded ? 'min(760px, calc(100vw - 32px))' : 'min(420px, calc(100vw - 24px))',
             maxHeight: expanded ? 'min(780px, calc(100vh - 72px))' : 'min(590px, calc(100vh - 96px))',
-            borderRadius: 18,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--o8-scratch-border)',
-            background: 'var(--t-popover-surface)',
-            backdropFilter: 'blur(18px) saturate(1.15)',
-            WebkitBackdropFilter: 'blur(18px) saturate(1.15)',
             color: 'var(--o8-scratch-text)',
-            boxShadow: 'var(--t-panel-shadow), 0 22px 70px rgba(15, 23, 42, 0.18)',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -1022,7 +999,7 @@ export function O8ScratchChat({
               </button>
             </div>
           </div>
-        </div>,
+        </FloatingSurface>,
         document.body,
       ) : null}
     </>

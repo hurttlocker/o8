@@ -17,6 +17,7 @@ import { RailMoreMenu } from './RailMoreMenu';
 import { RailActionButton } from './RailActionButton';
 import { RailUpdateControl } from './RailUpdateControl';
 import { SidebarBrand } from './SidebarBrand';
+import type { WorkspaceUtilityKind } from '../canvas/workspace-utility-navigation';
 import { openCustomizeTab, useCustomizeTab } from '../customize/navigation';
 import { WORKSPACE_TAB_DRAG_TYPE, type WorkspaceTabDragKind } from '@/lib/tiles/workspace-tab-drag';
 
@@ -50,10 +51,11 @@ function weeklyUsage(snapshot: RuntimeCapacityControlSnapshot | null, runtime: s
 }
 
 export function CompactNavigationRail({
-  activeDestination, glassSurface,
+  activeDestination, glassSurface, workspacePage,
   onHome, onNewSession, onCreateTerminal, onOpenProjects, onOpenSettings, onOpenShortcuts, onOpenPRs, onOpenUsage,
 }: {
   activeDestination: NavSection;
+  workspacePage?: WorkspaceUtilityKind;
   glassSurface: boolean;
   onHome: () => void;
   onNewSession: () => void;
@@ -161,7 +163,7 @@ export function CompactNavigationRail({
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <RailActionButton type="button" aria-label="Home" tooltipLabel="o8 — Home" aria-current={activeDestination === 'agents' ? 'page' : undefined} onClick={onHome} style={railButton}><SidebarBrand /></RailActionButton>
+      <RailActionButton type="button" aria-label="Home" tooltipLabel="o8 — Home" aria-current={activeDestination === 'agents' && !workspacePage ? 'page' : undefined} onClick={onHome} style={railButton}><SidebarBrand /></RailActionButton>
       <RailActionButton type="button" aria-label="Run orchestrator" draggable onDragStart={event => startPaneDrag(event, 'orchestrator')} onClick={onNewSession} style={{ ...railButton, cursor: 'grab' }}><Play size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Run terminal" draggable onDragStart={event => startPaneDrag(event, 'terminal')} onClick={onCreateTerminal} style={{ ...railButton, cursor: 'grab' }}><Terminal size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Canvas mode" onClick={() => window.location.assign('/preview/canvas-glass')} style={railButton}>
@@ -169,14 +171,14 @@ export function CompactNavigationRail({
       </RailActionButton>
       <div style={{ width: 27, height: 1, marginTop: 6, marginBottom: 6, flexShrink: 0, background: 'var(--t-divider-subtle)' }} />
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 0, flexShrink: 1, overflowY: 'auto', scrollbarWidth: 'none' }}>
-        <RailActionButton type="button" aria-label="Automations" aria-current={activeDestination === 'automations' ? 'page' : undefined}
-          onClick={() => openNav('automations')} style={{ ...railButton, flexShrink: 0, background: activeDestination === 'automations' ? 'var(--t-hover)' : 'transparent' }}><AutoFlash width={19} height={19} strokeWidth={1.8} /></RailActionButton>
-        <RailActionButton type="button" aria-label="Plugins" aria-current={activeDestination === 'customize' && customizeTab === 'plugins' ? 'page' : undefined}
-          onClick={() => openNav('plugins')} style={{ ...railButton, flexShrink: 0, background: activeDestination === 'customize' && customizeTab === 'plugins' ? 'var(--t-hover)' : 'transparent' }}>
+        <RailActionButton type="button" aria-label="Automations" aria-current={(workspacePage === 'automations' || activeDestination === 'automations') ? 'page' : undefined}
+          onClick={() => openNav('automations')} style={{ ...railButton, flexShrink: 0, background: (workspacePage === 'automations' || activeDestination === 'automations') ? 'var(--t-hover)' : 'transparent' }}><AutoFlash width={19} height={19} strokeWidth={1.8} /></RailActionButton>
+        <RailActionButton type="button" aria-label="Plugins" aria-current={(workspacePage === 'plugins' || activeDestination === 'customize' && customizeTab === 'plugins') ? 'page' : undefined}
+          onClick={() => openNav('plugins')} style={{ ...railButton, flexShrink: 0, background: (workspacePage === 'plugins' || activeDestination === 'customize' && customizeTab === 'plugins') ? 'var(--t-hover)' : 'transparent' }}>
           <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3a3 3 0 1 1 0 6v3a2 2 0 0 0 2 2h3a3 3 0 1 1 6 0h3a2 2 0 0 0 2-2v-3a3 3 0 1 0 0-6V5a2 2 0 0 0-2-2h-3a3 3 0 1 0-6 0Z" /></svg>
         </RailActionButton>
         <RailMoreMenu buttonStyle={railButton} selected={activeDestination === 'projects' ? 'projects'
-          : activeDestination === 'customize' && customizeTab !== 'plugins' ? 'customize' : null}
+          : (workspacePage === 'customize' || activeDestination === 'customize' && customizeTab !== 'plugins') ? 'customize' : null}
           onProjects={() => openNav('projects')} onCustomize={() => openNav('customize')} />
         <RailActionButton type="button" aria-label="PRs" onClick={onOpenPRs} style={{ ...railButton, flexShrink: 0 }}><GitPullRequest size={19} strokeWidth={1.8} /></RailActionButton>
       </div>

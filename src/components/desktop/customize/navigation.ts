@@ -15,6 +15,7 @@ export function useCustomizeTab() {
   return [useSyncExternalStore(subscribe, () => currentTab, () => 'rules' as CustomizeTab), setCustomizeTab] as const;
 }
 export function openCustomizeTab(tab?: CustomizeTab) {
-  if (tab) setCustomizeTab(tab);
-  window.dispatchEvent(new CustomEvent('o8:open-customize'));
+  if (tab && tab !== 'plugins') setCustomizeTab(tab);
+  if (!tab && currentTab === 'plugins') setCustomizeTab('rules');
+  window.dispatchEvent(new CustomEvent('o8:open-customize', { detail: { tab: tab ?? currentTab } }));
 }

@@ -123,6 +123,7 @@ describe('right Files Markdown Preview', () => {
 
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await selectView('Source');
+      if (!container.querySelector('textarea')) await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
       // HTML textarea value normalizes CRLF, while its text child retains the supplied source.
       expect(container.querySelector('textarea')?.textContent).toBe(source);
       await selectView('Preview');
@@ -138,6 +139,7 @@ describe('right Files Markdown Preview', () => {
     await open();
     expect(listNumbers(topLists()[0])).toEqual([7, 8, 9]);
     await selectView('Source');
+    if (!container.querySelector('textarea')) await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
     expect(container.querySelector('textarea')?.textContent).toBe(source);
     expect(container.textContent).not.toContain('Modified');
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Save')).toBe(false);

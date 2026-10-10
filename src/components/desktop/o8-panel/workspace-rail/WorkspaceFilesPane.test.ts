@@ -27,6 +27,8 @@ function Harness() {
 
 it('gives a file the full pane without losing edits or expanded folders', async () => {
   await act(async () => root.render(createElement(Harness)));
+  expect(host.querySelector('[data-file-code-view]')).not.toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
   const editor = host.querySelector<HTMLTextAreaElement>('textarea')!;
   expect(editor.value).toBe('const value = 1;');
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;

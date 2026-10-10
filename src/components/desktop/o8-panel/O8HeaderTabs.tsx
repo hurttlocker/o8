@@ -1,5 +1,6 @@
 'use client';
 
+import { FloatingSurface } from '../FloatingSurface';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { PageEdit } from 'iconoir-react';
@@ -244,11 +245,12 @@ export function O8HeaderTabs({
         </>}
       </button>
       {open && typeof document !== 'undefined' ? createPortal(
-        <div
+        <FloatingSurface
           ref={menuRef}
           role="menu"
           aria-label="Panel views"
           onKeyDown={onMenuKeyDown}
+          contentStyle={{ paddingTop: 4, paddingBottom: 4, maxHeight: 'calc(100vh - 16px)', overflowY: 'auto', scrollbarWidth: 'none' }}
           style={{
             position: 'fixed',
             top: coords?.top ?? 0,
@@ -256,14 +258,6 @@ export function O8HeaderTabs({
             opacity: coords ? 1 : 0,
             width: 340,
             maxWidth: 'calc(100vw - 16px)',
-            background: 'var(--t-popover-surface)',
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider, var(--t-divider-subtle))',
-            borderRadius: 10,
-            boxShadow: '0 12px 32px rgba(15, 23, 42, 0.22)',
-            paddingTop: 4,
-            paddingBottom: 4,
             zIndex: 1200,
             fontFamily: 'var(--font-sans-system)',
           }}
@@ -288,7 +282,7 @@ export function O8HeaderTabs({
               </div>
             ))}
           </div>
-        </div>,
+        </FloatingSurface>,
         document.body,
       ) : null}
     </div>

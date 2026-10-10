@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FileNode } from '@/app/dashboard/types';
 import { QuickDocs } from './QuickDocs';
+import { FileTypeIcon } from './FileTypeIcon';
 import { RamsButton } from '../../settings/shared';
 import { useWorkspaceFiles, type DirectoryState } from './useWorkspaceFiles';
 
@@ -18,15 +19,6 @@ function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number }) {
   );
 }
 
-function FileIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
-
 function FolderIcon({ open, size = 14 }: { open: boolean; size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -34,41 +26,6 @@ function FolderIcon({ open, size = 14 }: { open: boolean; size?: number }) {
       {open ? <line x1="2" y1="10" x2="22" y2="10" /> : null}
     </svg>
   );
-}
-
-function extensionColor(name: string): string {
-  const ext = name.split('.').pop()?.toLowerCase() ?? '';
-  switch (ext) {
-    case 'ts':
-    case 'tsx':
-      return 'var(--t-accent, #2563eb)';
-    case 'js':
-    case 'jsx':
-      return 'var(--t-brand-orange, #f59e0b)';
-    case 'json':
-      return 'var(--t-brand-orange, #f97316)';
-    case 'md':
-    case 'mdx':
-      return 'var(--t-text-secondary)';
-    case 'css':
-    case 'scss':
-      return 'var(--t-brand-red, #ef4444)';
-    case 'html':
-      return 'var(--t-brand-red, #ef4444)';
-    case 'rs':
-      return 'var(--t-brand-orange, #f97316)';
-    case 'toml':
-    case 'yaml':
-    case 'yml':
-      return 'var(--t-text-muted)';
-    case 'svg':
-    case 'png':
-    case 'jpg':
-    case 'ico':
-      return 'var(--t-terminal-ansi-bright-green, #22c55e)';
-    default:
-      return 'var(--t-text-secondary)';
-  }
 }
 
 function relativeSelection(repoPath: string | null | undefined, selectedFile: string | null): string | null {
@@ -150,9 +107,7 @@ function TreeNode({
         ) : (
           <>
             <span style={{ width: 10, flexShrink: 0 }} />
-            <span style={{ display: 'inline-flex', color: extensionColor(node.name) }}>
-              <FileIcon size={13} />
-            </span>
+            <FileTypeIcon name={node.name} size={14} />
           </>
         )}
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
