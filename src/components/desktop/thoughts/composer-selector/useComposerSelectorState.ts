@@ -63,6 +63,7 @@ function sessionEffortKey(threadId: string | null): string {
 
 export function useComposerSelectorState(input: {
   enabled: boolean;
+  isolated?: boolean;
   mode: ComposerSelectorMode | undefined;
   modeStorageId?: string;
   modelId: string | undefined;
@@ -82,6 +83,7 @@ export function useComposerSelectorState(input: {
 }) {
   const {
     enabled,
+    isolated = false,
     mode,
     modeStorageId,
     modelId,
@@ -108,7 +110,7 @@ export function useComposerSelectorState(input: {
     key: string;
     efforts: ComposerEffortMap;
   }>(() => {
-    const maps = modelId ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
+    const maps = modelId && !isolated ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
     return {
       key: `${threadId ?? ''}:${modelId ?? ''}`,
       efforts: { ...maps.global, ...maps.thread },
@@ -212,23 +214,23 @@ export function useComposerSelectorState(input: {
   }, [restoreModel]);
 
   useEffect(() => {
-    if (!enabled || !repoPath) return;
+    if (!enabled || !repoPath || isolated) return;
     const storedModel = readStoredOrchestratorModel(repoPath);
     if (storedModel && storedModel !== modelIdRef.current) restoreModelRef.current?.(storedModel);
-  }, [enabled, repoPath, threadId]);
+  }, [enabled, isolated, repoPath, threadId]);
 
   const storedEffortKey = `${threadId ?? ''}:${modelId ?? ''}`;
   useEffect(() => {
-    const maps = modelId ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
+    const maps = modelId && !isolated ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
     setStoredEffortSnapshot({
       key: storedEffortKey,
       efforts: { ...maps.global, ...maps.thread },
     });
-  }, [modelId, storedEffortKey, threadId]);
+  }, [isolated, modelId, storedEffortKey, threadId]);
   const storedEfforts = storedEffortSnapshot.key === storedEffortKey
     ? storedEffortSnapshot.efforts
     : EMPTY_COMPOSER_EFFORTS;
-  const effortKey = sessionEffortKey(threadId);
+  const effortKey = sessionEffortKey(isolated ? null : threadId);
   const currentSessionEfforts = inSessionEffortsRef.current[effortKey] ?? EMPTY_COMPOSER_EFFORTS;
   const resolvedModelLabel = backend && modelId
     ? resolveComposerLeadCatalogueLabel(
@@ -311,7 +313,7 @@ export function useComposerSelectorState(input: {
     const resolutionKey = `${threadId ?? ''}:${backend}:${modelId}:${adaptiveEnabled}:${ultraEnabled}:${isFreePlan}`;
     if (lastResolvedModelRef.current === resolutionKey) return;
     lastResolvedModelRef.current = resolutionKey;
-    const effortKey = sessionEffortKey(threadId);
+    const effortKey = sessionEffortKey(isolated ? null : threadId);
     inSessionEffortsRef.current[effortKey] = setModelEffort(
       inSessionEffortsRef.current[effortKey] ?? {},
       modelId,
@@ -322,12 +324,12 @@ export function useComposerSelectorState(input: {
       if (cancelled) return;
       setClampNotice(resolved.effortClampedFrom ? { modelId, from: resolved.effortClampedFrom } : null);
     });
-    if (resolved.effortClampedFrom) {
+    if (resolved.effortClampedFrom && !isolated) {
       writeComposerModelEffort(modelId, resolved.effort, threadId);
     }
     if (resolved.effort !== effort) changeEffort(resolved.effort);
     return () => { cancelled = true; };
-  }, [adaptiveEnabled, backend, changeEffort, effort, enabled, isFreePlan, modelId, resolved.effort, resolved.effortClampedFrom, threadId, ultraEnabled]);
+  }, [adaptiveEnabled, backend, changeEffort, effort, enabled, isolated, isFreePlan, modelId, resolved.effort, resolved.effortClampedFrom, threadId, ultraEnabled]);
 
   const onModeChange = useCallback((nextMode: ComposerSelectorMode) => {
     requestedModeRef.current = nextMode;
@@ -347,46 +349,46 @@ export function useComposerSelectorState(input: {
       return;
     }
     if (change.effort === effort) {
-      if (modelId) writeComposerModelEffort(modelId, change.effort, threadId);
+      if (modelId && !isolated) writeComposerModelEffort(modelId, change.effort, threadId);
       return;
     }
     if (!modelId) return changeEffort(change.effort);
-    const effortKey = sessionEffortKey(threadId);
+    const effortKey = sessionEffortKey(isolated ? null : threadId);
     inSessionEffortsRef.current[effortKey] = setModelEffort(
       inSessionEffortsRef.current[effortKey] ?? {},
       modelId,
       change.effort,
     );
-    writeComposerModelEffort(modelId, change.effort, threadId);
+    if (!isolated) writeComposerModelEffort(modelId, change.effort, threadId);
     changeEffort(change.effort);
-  }, [adaptiveEnabled, backend, changeEffort, effort, isFreePlan, modelId, threadId, ultraEnabled]);
+  }, [adaptiveEnabled, backend, changeEffort, effort, isolated, isFreePlan, modelId, threadId, ultraEnabled]);
 
   const onModelChange = useCallback((nextModel: string) => {
     if (modelId) {
-      const effortKey = sessionEffortKey(threadId);
+      const effortKey = sessionEffortKey(isolated ? null : threadId);
       inSessionEffortsRef.current[effortKey] = setModelEffort(
         inSessionEffortsRef.current[effortKey] ?? {},
         modelId,
         effort,
       );
-      writeComposerModelEffort(modelId, effort, threadId);
+      if (!isolated) writeComposerModelEffort(modelId, effort, threadId);
     }
-    writeStoredOrchestratorModel(repoPath, nextModel);
+    if (!isolated) writeStoredOrchestratorModel(repoPath, nextModel);
     changeModel?.(nextModel);
-  }, [changeModel, effort, modelId, repoPath, threadId]);
+  }, [changeModel, effort, isolated, modelId, repoPath, threadId]);
 
   const onBackendChange = useCallback((nextBackend: OrchestratorBackendSetting, nextModel?: string) => {
     if (modelId) {
-      const effortKey = sessionEffortKey(threadId);
+      const effortKey = sessionEffortKey(isolated ? null : threadId);
       inSessionEffortsRef.current[effortKey] = setModelEffort(
         inSessionEffortsRef.current[effortKey] ?? {},
         modelId,
         effort,
       );
-      writeComposerModelEffort(modelId, effort, threadId);
+      if (!isolated) writeComposerModelEffort(modelId, effort, threadId);
     }
     changeBackend?.(nextBackend, nextModel);
-  }, [changeBackend, effort, modelId, threadId]);
+  }, [changeBackend, effort, isolated, modelId, threadId]);
 
   const persistWorkerDefaults = useCallback(async (patch: WorkerDefaultsPatch) => {
     setWorkerOverrides((current) => ({ ...current, ...patch }));

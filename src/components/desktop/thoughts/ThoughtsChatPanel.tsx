@@ -7,12 +7,9 @@ import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
 import { fetchRuntimeLaunchReceipt, fetchRuntimeSteerReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
-import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
-  readAdaptiveThinkingEnabled,
-  readStoredOrchestratorThinkingOverride,
   resolveInitialOrchestratorThinkingPreferences,
-  subscribeOrchestratorThinkingPreferences,
   writeStoredOrchestratorThinkingOverride,
 } from '@/lib/orchestrator/thinking-preferences';
 import {
@@ -97,7 +94,8 @@ import {
 } from './chat-panel/thread-history-window';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
-import { contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
+import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
+import { contextualOperatorDefaults, contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
 import { useComposerDraftLifecycle } from './chat-panel/useComposerDraftLifecycle';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
@@ -372,9 +370,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return () => window.removeEventListener('o8:set-orchestration-mode', onSetMode as EventListener);
   }, [handleSelectOrchestrationMode, open]);
 
-  const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
+  const contextModelDefaults = contextualConversation?.modelDefaults;
+  const [operatorDefaults, setOperatorDefaults] = useState(() => contextualOperatorDefaults(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, contextModelDefaults));
   const [orchestratorBackend, setOrchestratorBackend] = useState<OrchestratorBackendSetting>(
-    () => resolveActiveComposerBackend(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK),
+    () => resolveActiveComposerBackend(contextualOperatorDefaults(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, contextModelDefaults)),
   );
   // Who chose the composer's backend: 'default' (operator default seeded it),
   // 'thread' (adopted from a loaded thread's stored backend), 'user' (picked
@@ -383,12 +382,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // operator default ("they all say o8", 2026-07-16): a thread-bound tab
   // continues on ITS backend; the default is for new sessions.
   const backendSourceRef = useRef<'default' | 'thread' | 'user'>('default');
-  const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
-    () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
-  );
-  const [thinkingOverride, setThinkingOverride] = useState<ManualThinkingEffort | null>(
-    () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).thinkingOverride,
-  );
+  const { adaptiveThinkingEnabled, setAdaptiveThinkingEnabled, thinkingOverride, setThinkingOverride } = useContextThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort, contextualConversation);
   const [chatMessages, setChatMessages] = useReducer(retainedTranscriptReducer, []);
   const {
     entries: threadHistoryEntries,
@@ -443,7 +437,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     model: orchestratorModel,
     restoreModel: restoreOrchestratorModel,
     setModel: setOrchestratorModel,
-  } = useOrchestratorModelState({ operatorDefaultModel: operatorDefaults.orchestratorModel, repoPath: resolvedRepoPath });
+  } = useOrchestratorModelState({ operatorDefaultModel: operatorDefaults.orchestratorModel, repoPath: resolvedRepoPath, isolated: Boolean(contextualConversation) });
   const resetComposerModeForLeadChange = useCallback(() => {
     if (composerModeRef.current === 'moa' || composerModeRef.current === 'fusion') {
       handleComposerModeChange('solo');
@@ -461,6 +455,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setModel: acceptOrchestratorModel,
     setOperatorDefaults,
     onBeforeApply: resetComposerModeForLeadChange,
+    persistSelection: !contextualConversation,
   });
   const [threadProjectId, setThreadProjectId] = useState<string | null>(projectIdProp ?? null);
   useEffect(() => {
@@ -531,7 +526,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setOperatorDefaults((current) => ({ ...current, readyRuntimeCount }));
     });
     void (async () => {
-      const defaults = await fetchThoughtsOperatorDefaults(controller.signal);
+      const defaults = contextualOperatorDefaults(await fetchThoughtsOperatorDefaults(controller.signal), contextModelDefaults);
       if (controller.signal.aborted) return;
       setOperatorDefaults(defaults);
       // Late-landing defaults must not clobber a backend the thread (or the
@@ -540,18 +535,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setOrchestratorBackend(resolveActiveComposerBackend(defaults));
       }
       if (thinkingPreferenceTouchedRef.current) return;
-      const nextThinkingPreferences = resolveInitialOrchestratorThinkingPreferences(defaults.thinkingEffort);
+      const nextThinkingPreferences = contextModelDefaults ? { adaptiveThinkingEnabled: false, thinkingOverride: contextModelDefaults.effort } : resolveInitialOrchestratorThinkingPreferences(defaults.thinkingEffort);
       setAdaptiveThinkingEnabled(nextThinkingPreferences.adaptiveThinkingEnabled);
       setThinkingOverride(nextThinkingPreferences.thinkingOverride);
     })();
 
     return () => { controller.abort(); cancelRuntimeReadiness(); };
-  }, []);
+  }, [contextModelDefaults, setAdaptiveThinkingEnabled, setThinkingOverride]);
 
-  useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
-    setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
-    setThinkingOverride(readStoredOrchestratorThinkingOverride());
-  }), []);
+
 
   useEffect(() => {
     if (!isOrchestratorMode) return;
@@ -1536,11 +1528,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
         repoPath: resolvedRepoPath,
         backend: orchestratorBackend,
+        localModel: contextualConversation ? orchestratorModel : undefined,
         backendSourceRef, setBackend: setOrchestratorBackend,
         setModel: setOrchestratorModel, setOperatorDefaults,
       }, signal),
     });
-  }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, resolvedRepoPath, setOrchestratorModel, contextualConversation?.requestContext]);
+  }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, orchestratorModel, resolvedRepoPath, setOrchestratorModel, contextualConversation]);
 
   const slashAttachments = useMemo(() => attachedImages.length
     ? attachedImages.map(image => ({ dataUri: image.dataUri, name: image.name })) : undefined, [attachedImages]);
@@ -1564,7 +1557,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       missionState,
       runningTotal: orchStream.runningTotal,
       currentModel: orchestratorModel,
-      setCurrentModel: (model) => { writeStoredOrchestratorModel(resolvedRepoPath, model); acceptOrchestratorModel(model); },
+      setCurrentModel: (model) => { if (!contextualConversation) writeStoredOrchestratorModel(resolvedRepoPath, model); acceptOrchestratorModel(model); },
       replaceTranscript: (entries) => { if (isCurrentThread()) orchStream.replaceTranscript(entries); },
       compactNow: orchStream.compactNow,
       isCurrentThread,
@@ -1605,6 +1598,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
     return true;
   }, [
+    contextualConversation,
     displayMessages,
     clearAttachments,
     handleClearCommand,
@@ -2062,8 +2056,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     thinkingPreferenceTouchedRef.current = true;
     const nextOverride = next === 'adaptive' ? null : next;
     setThinkingOverride(nextOverride);
-    writeStoredOrchestratorThinkingOverride(nextOverride);
-  }, []);
+    if (!contextualConversation) writeStoredOrchestratorThinkingOverride(nextOverride);
+  }, [contextualConversation, setThinkingOverride]);
 
   const handleBackendStartFresh = useCallback(() => {
     if (!backendSwitch.pending) return;
@@ -2284,6 +2278,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}
+        isolatedModelSelection={Boolean(contextualConversation)}
         onModelRestore={isOrchestratorMode ? restoreOrchestratorModel : undefined}
         onModelChange={isOrchestratorMode ? backendSwitch.selectModel : undefined}
         activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}

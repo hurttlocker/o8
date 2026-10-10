@@ -13,7 +13,7 @@ import { useBackendSwitchChoice } from './useBackendSwitchChoice';
 let currentSwitch: ReturnType<typeof useBackendSwitchChoice> | null = null;
 const REPO_PATH = '/repo/backend-switch';
 
-function Harness({ onBeforeApply }: { onBeforeApply: () => void }) {
+function Harness({ onBeforeApply, persistSelection = true }: { onBeforeApply: () => void; persistSelection?: boolean }) {
   const backendSourceRef = useRef<'default' | 'thread' | 'user'>('default');
   const latestAssistantBackendRef = useRef<'codex' | null>('codex');
   const [, setBackend] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend);
@@ -33,6 +33,7 @@ function Harness({ onBeforeApply }: { onBeforeApply: () => void }) {
     setModel,
     setOperatorDefaults,
     onBeforeApply,
+    persistSelection,
   });
   useEffect(() => {
     currentSwitch = backendSwitch;
@@ -88,6 +89,17 @@ describe('useBackendSwitchChoice', () => {
     expect(onBeforeApply).toHaveBeenCalledTimes(3);
     expect(host.querySelector('[data-testid="backend-switch-model"]')?.textContent).toBe('gpt-6-astra');
     expect(readStoredOrchestratorModel(REPO_PATH)).toBe('gpt-6-astra');
+  });
+
+  it('keeps reply model choices local without writing workspace defaults', async () => {
+    writeStoredOrchestratorModel(REPO_PATH, 'gpt-6-astra');
+    await act(async () => { root.render(createElement(Harness, { onBeforeApply: vi.fn(), persistSelection: false })); });
+    await act(async () => { currentSwitch!.apply('o8', 'o8-free'); });
+    expect(host.querySelector('[data-testid="backend-switch-model"]')?.textContent).toBe('o8-free');
+    await act(async () => { currentSwitch!.selectModel('gpt-6-luna'); });
+    expect(host.querySelector('[data-testid="backend-switch-model"]')?.textContent).toBe('gpt-6-luna');
+    expect(readStoredOrchestratorModel(REPO_PATH)).toBe('gpt-6-astra');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('rolls the session model back without changing storage when backend persistence fails', async () => {

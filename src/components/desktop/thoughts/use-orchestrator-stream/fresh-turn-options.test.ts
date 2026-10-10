@@ -16,6 +16,7 @@ import { DELETE as DELETE_CHAT, GET as GET_CHAT, PATCH as PATCH_CHAT, POST as PO
 import { NextRequest } from 'next/server';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { REPLY_MODEL_DEFAULTS } from '../chat-panel/contextual-turn';
 import { ThoughtsChatPanel, type ThoughtsChatPanelHandle } from '../ThoughtsChatPanel';
 import { composerModeStorageKey, legacySwarmStorageKey } from '../composer-mode-storage';
 import { THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, type OrchestratorBackendSetting } from '../operator-defaults';
@@ -438,6 +439,36 @@ describe('composer fresh operator defaults at the send seam', () => {
     expect(payload.message).toContain('[Mode: Fusion]');
     expect(localStorage.getItem(composerModeStorageKey(composerModeStorageId))).toBe('fusion');
     expect(localStorage.getItem(legacySwarmStorageKey(composerModeStorageId))).toBe('0');
+  });
+
+  it('sends a new reply through managed inference without inheriting or overwriting the workspace model', async () => {
+    await act(async () => root.unmount()); root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('gpt-6-astra', 'codex');
+    writeStoredOrchestratorModel(repoPath, 'gpt-6-astra');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    await act(async () => {
+      root.render(createElement(ThoughtsChatPanel, {
+        ref: panelRef, open: true, agents: [],
+        missionState: { version: 2, prompt: '', summary: '', packets: [], updatedAt: new Date(0).toISOString() },
+        preferredRuntime: 'codex', sessionTargets: [], workspaceTargets: [], repoPath,
+        initialMode: 'fleet', lockedMode: 'fleet', suppressAutoRestore: true, suppressRuntimePrewarm: true,
+        contextualConversation: { requestContext: 'Issue context for a private draft', modelDefaults: REPLY_MODEL_DEFAULTS },
+        thoughtsBodyBackground: 'transparent', thoughtsElevatedSurface: 'transparent', thoughtsElevatedBorder: 'none',
+        thoughtsElevatedShadow: 'none', thoughtsMutedGlass: 'transparent', onMissionStateChange: () => {}, onChromeChange: () => {},
+      }));
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    let payload: Record<string, unknown> = {};
+    await act(async () => {
+      expect(panelRef.current?.sendNow('Help me draft a reply.')).toBe(true);
+      payload = await waitForPayload(1);
+    });
+    expect(payload).toMatchObject({ backend: 'o8', model: 'o8-free', displayMessage: 'Help me draft a reply.' });
+    expect(payload.message).toContain('Issue context for a private draft');
+    expect(readStoredOrchestratorModel(repoPath)).toBe('gpt-6-astra');
+    const defaults = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
+    expect((await defaults.json()).values).toMatchObject({ orchestratorBackend: 'codex', orchestratorModel: 'gpt-6-astra' });
   });
 
   for (const selectorEnabled of [true, false]) {

@@ -10,6 +10,7 @@ import type { ThoughtsChatPanelChromeState, ThoughtsChatPanelHandle } from '../t
 import { buildAgentTargets } from '../thoughts/utils';
 import { FloatingSurface } from '../FloatingSurface';
 import { ExternalLink, X } from '../lucide-shims';
+import { REPLY_MODEL_DEFAULTS } from '../thoughts/chat-panel/contextual-turn';
 
 const ChatPanel = lazy(() => import('../thoughts/ThoughtsChatPanel').then((module) => ({ default: module.ThoughtsChatPanel })));
 interface ReplyMemory { draft: string; threadId: string | null }
@@ -67,7 +68,7 @@ function ReplySession({ context, memory, visible, onClose, onDraftChange, onChro
   const [preferredRuntime, setPreferredRuntime] = useState(readOrchestratorRuntimePreference);
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
   const [initialMemory] = useState(memory);
-  const contextualConversation = useMemo(() => ({ requestContext: context.requestContext, initialDraft: initialMemory.draft, onDraftChange, onBusyChange, placeholder: 'Ask for a draft, or refine your reply…' }), [context.requestContext, initialMemory.draft, onDraftChange, onBusyChange]);
+  const contextualConversation = useMemo(() => ({ requestContext: context.requestContext, modelDefaults: REPLY_MODEL_DEFAULTS, initialDraft: initialMemory.draft, onDraftChange, onBusyChange, placeholder: 'Ask for a draft, or refine your reply…' }), [context.requestContext, initialMemory.draft, onDraftChange, onBusyChange]);
   const focusWanted = useRef(visible);
   const attachPanel = useCallback((handle: ThoughtsChatPanelHandle | null) => {
     panel.current = handle;
