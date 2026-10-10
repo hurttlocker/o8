@@ -156,21 +156,58 @@ pub fn config_replacements() -> Vec<crate::stt::commands::ReplacementRule> {
         .unwrap_or_default()
 }
 
-/// The prefs object with secret keys stripped — what the settings UI reads back,
-/// so the panel never round-trips API keys.
-pub fn config_public() -> serde_json::Value {
-    let mut value = config();
+/// Test stored-key presence without decrypting values or prompting for access.
+#[cfg(target_os = "macos")]
+fn keychain_secret_present(key: &str) -> bool {
+    use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
+
+    ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .service(KEYCHAIN_SERVICE)
+        .account(key)
+        .load_attributes(true)
+        .load_data(false)
+        .skip_authenticated_items(true)
+        .limit(Limit::Max(1))
+        .search()
+        .map(|items| !items.is_empty())
+        .unwrap_or(false)
+}
+
+fn redact_config(
+    mut value: serde_json::Value,
+    stored_presence: impl Fn(&str) -> bool,
+) -> serde_json::Value {
     if let Some(obj) = value.as_object_mut() {
         for secret in SECRET_PREF_KEYS {
-            // Redacted presence flag: the settings UI shows "you have a key
-            // saved" without ever receiving the value. `stored_secret` also
-            // migrates a legacy plaintext value into Keychain on macOS.
-            let is_set = stored_secret(secret).is_some();
-            obj.insert(format!("{secret}_set"), serde_json::Value::Bool(is_set));
+            let legacy_present = obj
+                .get(secret)
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty());
+            obj.insert(
+                format!("{secret}_set"),
+                serde_json::Value::Bool(legacy_present || stored_presence(secret)),
+            );
             obj.remove(secret);
         }
     }
     value
+}
+
+/// Read public preferences without retrieving or migrating secret values.
+/// Secret migration remains in the explicit provider-use path.
+pub fn config_public() -> serde_json::Value {
+    redact_config(config(), |key| {
+        #[cfg(target_os = "macos")]
+        {
+            keychain_secret_present(key)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = key;
+            false
+        }
+    })
 }
 
 /// Write a single key into `~/.o8/dictation.json` (read-modify-write, preserving
@@ -349,7 +386,25 @@ pub fn get_google_tts_key() -> Option<String> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{keychain_delete_error_is_ignorable, ERR_SEC_ITEM_NOT_FOUND};
+    use super::{keychain_delete_error_is_ignorable, redact_config, ERR_SEC_ITEM_NOT_FOUND};
+
+    #[test]
+    fn public_prefs_redact_legacy_keys_without_mutating_or_migrating_them() {
+        let input = serde_json::json!({
+            "gemini_api_key": " legacy-test-secret ",
+            "groq_api_key": "  ",
+            "tts_provider": "google",
+        });
+        let public = redact_config(input.clone(), |key| key == "elevenlabs_api_key");
+        assert_eq!(public["gemini_api_key_set"], true);
+        assert_eq!(public["groq_api_key_set"], false);
+        assert_eq!(public["elevenlabs_api_key_set"], true);
+        assert_eq!(public["tts_provider"], "google");
+        assert!(public.get("gemini_api_key").is_none());
+        assert!(public.get("groq_api_key").is_none());
+        assert!(!public.to_string().contains("legacy-test-secret"));
+        assert_eq!(input["gemini_api_key"], " legacy-test-secret ");
+    }
 
     #[test]
     fn only_missing_keychain_items_are_ignored_on_delete() {

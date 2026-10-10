@@ -5681,8 +5681,11 @@ fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
 /// macOS only — the pref store lives in the macOS-gated stt module (#1673).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn voice_prefs_get() -> serde_json::Value {
-    crate::stt::keys::config_public()
+async fn voice_prefs_get() -> Result<serde_json::Value, String> {
+    // Even metadata-only Keychain I/O must not hold the native event loop.
+    tauri::async_runtime::spawn_blocking(crate::stt::keys::config_public)
+        .await
+        .map_err(|error| format!("read public voice preferences: {error}"))
 }
 
 /// Write one voice preference into `~/.o8/dictation.json` (read-modify-write).
