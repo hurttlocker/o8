@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { bulkDismissInboxItems, dismissInboxItem, escalateInboxItem, listInboxItems, summarizeInboxItems } from '@/lib/supervisor/inbox';
+import { readMaintainerFeed } from '@/lib/inbox/maintainer-feed';
+import type { MaintainerFeed } from '@/lib/inbox/maintainer-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,8 +14,14 @@ export async function GET(request: Request) {
   const includeAllProjects = searchParams.get('scope') === 'all';
   const projectId = searchParams.get('projectId');
   const items = listInboxItems({ includeDismissed, includeAllProjects, projectId });
+  let maintainer: MaintainerFeed | null = null;
+  let maintainerError: string | null = null;
+  if (searchParams.get('includeMaintainer') === '1') {
+    try { maintainer = await readMaintainerFeed(searchParams.has('maintainerRepoPath') ? searchParams.getAll('maintainerRepoPath') : undefined); }
+    catch { maintainerError = 'Connected GitHub data is unavailable. Try refreshing the inbox.'; }
+  }
   return NextResponse.json(
-    { items, summary: summarizeInboxItems(items) },
+    { items, summary: summarizeInboxItems(items), ...(searchParams.get('includeMaintainer') === '1' ? { maintainer, maintainerError } : {}) },
     { headers: serverTimingHeaders(startedAt) },
   );
 }

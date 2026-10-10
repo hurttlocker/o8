@@ -7,9 +7,14 @@ import { composeSupervisorInboxCardCopy } from '@/lib/inbox/card-copy';
 import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 import { fireInvalidation } from '@/lib/query/use-reactive-query';
-import { openExternalUrl } from '@/lib/desktop/open-external';
+import { MaintainerThreadCard } from './o8-panel/MaintainerThreadCard';
+import { MaintainerInboxHeader } from './o8-panel/MaintainerInboxHeader';
+import { useMaintainerReplyChat } from './o8-panel/MaintainerReplyChat';
+import { matchesInboxScope, type InboxLane, type InboxScope, type MaintainerFeed } from '@/lib/inbox/maintainer-types';
+import { maintainerReplyQueue } from '@/lib/inbox/maintainer-replies';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { O8ApprovalCards } from './o8-panel/O8ApprovalCards';
-import { ArchiveGlyph, ChatGlyph, ExternalLinkGlyph, FileTextGlyph, FolderGlyph, RetryGlyph, StopGlyph } from './o8-inbox-glyphs';
+import { ArchiveGlyph, ChatGlyph, FileTextGlyph, FolderGlyph, RetryGlyph, StopGlyph } from './o8-inbox-glyphs';
 
 const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   verification_failed: 'Verification Failed',
@@ -68,12 +73,19 @@ function shortPath(pathValue: string | null) {
   return parts.length > 3 ? `…/${parts.slice(-3).join('/')}` : pathValue;
 }
 
-export function O8InboxPane({ active = true }: { active?: boolean }) {
+export function O8InboxPane({ active = true, repoPath = null, repos = [] }: { active?: boolean; repoPath?: string | null; repos?: RepoRegistryEntry[] }) {
+  const replyChat = useMaintainerReplyChat(active);
   const [items, setItems] = useState<SupervisorInboxItem[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [approvalLoading, setApprovalLoading] = useState(true);
-  const [filter, setFilter] = useState<'active' | 'self_healed' | 'all'>('active');
+  const [lane, setLane] = useState<InboxLane>('replies');
+  const [scope, setScope] = useState<InboxScope>(repos.length ? 'project' : 'all');
+  const [maintainer, setMaintainer] = useState<MaintainerFeed | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [maintainerError, setMaintainerError] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const [expandedTranscriptById, setExpandedTranscriptById] = useState<Record<string, RuntimeTranscriptEntry[]>>({});
   const [actionNoteById, setActionNoteById] = useState<Record<string, string>>({});
   const [approvalNoteById, setApprovalNoteById] = useState<Record<string, string>>({});
@@ -81,21 +93,28 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
   const { busy: busyIncidentId, begin: beginIncidentAction, settle: settleIncidentAction } = useCorrelatedActionLatch<string>();
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshTrailingRef = useRef(false);
+  const effectiveScope = scope === 'repo' && !repoPath || scope === 'project' && !repos.length ? 'all' : scope;
+  const scopedPaths = effectiveScope === 'repo' ? [repoPath!] : effectiveScope === 'project' ? repos.map((repo) => repo.localPath) : [];
+  const queryString = new URLSearchParams([['includeDismissed', '1'], ['scope', 'all'], ['includeMaintainer', '1'], ...scopedPaths.map((path): [string, string] => ['maintainerRepoPath', path])]).toString();
+  const queryRef = useRef(queryString); queryRef.current = queryString;
+  const activeRef = useRef(active); activeRef.current = active;
 
   const refresh = useCallback(async () => {
     if (refreshInFlightRef.current) {
       refreshTrailingRef.current = true;
       return refreshInFlightRef.current;
     }
+    setRefreshing(true);
     const request = (async () => {
       do {
         refreshTrailingRef.current = false;
+        const requestedQuery = queryRef.current;
         const [inboxResult, approvalsResult] = await Promise.allSettled([
-          fetch('/api/panel/supervisor-inbox?includeDismissed=1&scope=all', { cache: 'no-store' })
+          fetch(`/api/panel/supervisor-inbox?${requestedQuery}`, { cache: 'no-store' })
             .then(async (response) => {
               if (!response.ok) return null;
               const body = await response.json();
-              return Array.isArray(body?.items) ? body.items as SupervisorInboxItem[] : null;
+              return Array.isArray(body?.items) ? { items: body.items as SupervisorInboxItem[], maintainer: body.maintainer as MaintainerFeed | undefined, maintainerError: body.maintainerError as string | null } : null;
             }),
           fetch('/api/panel/approvals?status=pending', { cache: 'no-store' })
             .then(async (response) => {
@@ -105,17 +124,24 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
             }),
         ]);
 
-        if (inboxResult.status === 'fulfilled' && inboxResult.value) setItems(inboxResult.value);
-        if (approvalsResult.status === 'fulfilled' && approvalsResult.value) setApprovals(approvalsResult.value);
+        if (requestedQuery !== queryRef.current) { refreshTrailingRef.current = true; continue; }
+        if (inboxResult.status === 'fulfilled' && inboxResult.value) {
+          setItems(inboxResult.value.items);
+          if (inboxResult.value.maintainer) setMaintainer(inboxResult.value.maintainer);
+          setMaintainerError(inboxResult.value.maintainerError ?? null); setRefreshError(null);
+        } else setRefreshError('Inbox could not be refreshed. Previous items are still shown.');
+        if (approvalsResult.status === 'fulfilled' && approvalsResult.value) { setApprovals(approvalsResult.value); setApprovalError(null); }
+        else setApprovalError('Approvals could not be refreshed. Any previous approvals are still shown.');
         setLoading(false);
         setApprovalLoading(false);
-      } while (refreshTrailingRef.current);
+      } while (refreshTrailingRef.current && activeRef.current);
     })();
     refreshInFlightRef.current = request;
     try {
       await request;
     } finally {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null;
+      setRefreshing(false);
     }
   }, []);
 
@@ -145,7 +171,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
       window.removeEventListener('o8:invalidate', handleEvent);
       window.clearInterval(interval);
     };
-  }, [active, refresh]);
+  }, [active, refresh, queryString]);
 
   const setActionNote = useCallback((id: string, note: string) => {
     setActionNoteById((current) => ({ ...current, [id]: note }));
@@ -194,11 +220,12 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
   }, [refresh, setApprovalNote]);
 
   const dismiss = useCallback(async (id: string) => {
-    await fetch('/api/panel/supervisor-inbox', {
+    const response = await fetch('/api/panel/supervisor-inbox', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'dismiss', id }),
     });
+    if (!response.ok) throw new Error('The item could not be dismissed.');
     window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
     refresh();
   }, [refresh]);
@@ -374,18 +401,23 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
   // Once multiple incidents become one dossier, Activity owns the operator
   // decision. Keep the immutable source rows available through the API and
   // dossier history without presenting conflicting active cards here.
-  const incidentItems = items.filter((item) => !item.problemDossierId);
-  const humanRequired = incidentItems.filter((item) => item.status === 'human_required');
-  const escalated = incidentItems.filter((item) => item.status === 'escalated');
-  const selfHealed = incidentItems.filter((item) => item.status === 'self_healed');
-  const pending = incidentItems.filter((item) => item.status === 'pending');
-  const healing = incidentItems.filter((item) => item.status === 'healing');
-
-  const visibleItems = filter === 'active'
-    ? [...humanRequired, ...escalated, ...pending]
-    : filter === 'self_healed'
-      ? selfHealed
-      : incidentItems;
+  const projectPaths = repos.map((repo) => repo.localPath);
+  const scoped = (paths: string[]) => matchesInboxScope(paths, effectiveScope, repoPath, projectPaths);
+  const incidentItems = items.filter((item) => !item.problemDossierId && scoped(item.kind === 'outside_human_waiting'
+    ? maintainer?.sources.find((source) => source.repo === String(item.payload.threadRepo ?? '').toLowerCase())?.repoPaths ?? [item.repoPath]
+    : [item.repoPath]));
+  const activeItems = incidentItems.filter((item) => ['human_required', 'escalated', 'pending', 'healing'].includes(item.status));
+  const replies = maintainerReplyQueue(incidentItems, maintainer?.replies?.filter((item) => scoped(item.repoPaths)) ?? []);
+  const agentItems = activeItems.filter((item) => item.kind !== 'outside_human_waiting');
+  const history = incidentItems.filter((item) => !activeItems.includes(item));
+  // Unscoped approvals remain reachable: the lane names their global count.
+  const visibleApprovals = approvals;
+  const contributions = maintainer?.contributions.filter((item) => scoped(item.repoPaths)) ?? [];
+  const visibleItems = lane === 'replies' ? replies : lane === 'agents' ? agentItems : lane === 'history' ? history : [];
+  const sources = maintainer?.sources.filter((source) => scoped(source.repoPaths)) ?? [];
+  const timestamps = sources.flatMap((source) => source.lastSuccessfulAt ? [source.lastSuccessfulAt] : []);
+  const lastSynced = timestamps.length === sources.length && timestamps.length ? timestamps.sort()[0] : null;
+  const freshness = !sources.length ? 'GitHub replies appear after a connected repository syncs.' : !lastSynced ? 'Some repositories have not synced yet.' : `${sources.some((source) => source.stale) ? 'Cached GitHub data' : 'GitHub synced'} · ${formatTimestamp(lastSynced)}`;
 
   return (
     <div
@@ -393,85 +425,39 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
+        minHeight: 0,
+        position: 'relative',
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <div
-        style={{
-          paddingTop: 12,
-          paddingBottom: 12,
-          paddingLeft: 16,
-          paddingRight: 16,
-          borderBottom: '1px solid var(--t-border)',
-        }}
-      >
-        <div
-          style={{
-            fontSize: 9,
-            fontWeight: 300,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            color: 'var(--t-text-faint)',
-            marginBottom: 4,
-          }}
-        >
-          Governance
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)', marginBottom: 3 }}>
-          Needs Attention
-        </div>
-        <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 6 }}>
-          Approvals, follow-ups, and agent failures that need your attention.
-        </div>
-        {(approvals.length + humanRequired.length + escalated.length + pending.length + healing.length) > 0 ? (
-          <div style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.02em', color: 'var(--t-text-faint)', marginBottom: 10 }}>
-            {approvals.length} approval{approvals.length === 1 ? '' : 's'} · {escalated.length} escalated · {humanRequired.length} awaiting you · {pending.length + healing.length} open
-          </div>
-        ) : null}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <FilterChip
-            label={`Active · ${humanRequired.length + escalated.length + pending.length}`}
-            active={filter === 'active'}
-            onClick={() => setFilter('active')}
-            tone="warning"
-          />
-          <FilterChip
-            label={`Self-healed · ${selfHealed.length}`}
-            active={filter === 'self_healed'}
-            onClick={() => setFilter('self_healed')}
-            tone="accent"
-          />
-          <FilterChip
-            label="All"
-            active={filter === 'all'}
-            onClick={() => setFilter('all')}
-            tone="neutral"
-          />
-        </div>
-      </div>
+      <MaintainerInboxHeader active={active} lane={lane} onLaneChange={setLane} scope={effectiveScope} onScopeChange={setScope} counts={{ replies: replies.length, contributions: contributions.length, approvals: visibleApprovals.length, agents: agentItems.length, history: history.length }} repoLabel={repoPath ? repoLabel(repoPath) : null} projectAvailable={repos.length > 0} freshness={freshness} onRefresh={() => { void refresh(); }} refreshing={refreshing} />
 
-      <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingTop: 8, paddingBottom: 12, paddingLeft: 12, paddingRight: 12 }}>
-        {approvalLoading && approvals.length === 0 ? (
+      <div style={{ flex: 1, minHeight: 0, marginBottom: replyChat.occlusion, scrollbarWidth: 'none', overflowY: 'auto', overscrollBehavior: 'contain', paddingTop: 8, paddingBottom: 12, paddingLeft: 12, paddingRight: 12 }}>
+        {lane === 'approvals' && approvalLoading && approvals.length === 0 ? (
           <div style={{ paddingTop: 8, paddingRight: 4, paddingBottom: 8, paddingLeft: 4, color: 'var(--t-text-secondary)', fontSize: 12 }}>Loading approvals...</div>
         ) : null}
-        <O8ApprovalCards
-          approvals={approvals}
+        {refreshError ? <div role="alert" style={{ padding: 8, fontSize: 11, lineHeight: 1.4, color: 'var(--t-warning)' }}>{refreshError}</div> : null}
+        {maintainerError && (lane === 'replies' || lane === 'contributions') ? <div role="alert" style={{ padding: 8, fontSize: 11, lineHeight: 1.4, color: 'var(--t-warning)' }}>{maintainerError}</div> : null}
+        {approvalError && lane === 'approvals' ? <div role="alert" style={{ padding: 8, fontSize: 11, lineHeight: 1.4, color: 'var(--t-warning)' }}>{approvalError}</div> : null}
+        {lane === 'approvals' ? <div style={{ marginBottom: 8, color: 'var(--t-text-faint)', fontSize: 11 }}>Approvals across all workspaces</div> : null}
+        {lane === 'approvals' ? <O8ApprovalCards
+          approvals={visibleApprovals}
           busyApproval={busyApproval}
           noteById={approvalNoteById}
           onResolve={resolveApproval}
-        />
-        {loading && incidentItems.length === 0 && approvals.length === 0 ? (
-          <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12 }}>Loading…</div>
-        ) : visibleItems.length === 0 && approvals.length === 0 ? (
-          <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.5, overflowWrap: 'break-word' }}>
-            {filter === 'active'
-              ? 'No active approvals or supervisor inbox items. Heal-bot caught everything else.'
-              : filter === 'self_healed'
-                ? 'No self-healed items yet. Heal-bot will log fixes here.'
-                : 'Supervisor inbox is empty.'}
+        /> : null}
+        {lane === 'contributions' ? <>
+          {maintainer?.truncated ? <div style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>Showing the 200 most recently updated contributions.</div> : null}
+          {contributions.map((item) => <MaintainerThreadCard key={item.id} source={item} onPrepareReply={replyChat.prepare} />)}
+        </> : null}
+        {lane === 'replies' && maintainer?.repliesTruncated ? <div style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>Showing the 200 oldest unanswered conversations.</div> : null}
+        {loading ? <div role="status" style={{ padding: 16, color: 'var(--t-text-muted)', fontSize: 12 }}>Loading inbox…</div> : !refreshError && !(maintainerError && ['replies', 'contributions'].includes(lane)) && !(approvalError && lane === 'approvals') && visibleItems.length === 0 && (lane !== 'approvals' || !visibleApprovals.length) && (lane !== 'contributions' || !contributions.length) ? (
+          <div style={{ padding: 16, color: 'var(--t-text-muted)', fontSize: 12, lineHeight: 1.5 }}>
+            {lane === 'replies' ? sources.length ? 'No unanswered threads in the cached GitHub conversations.' : 'Connect a GitHub repository to see conversations here.' : lane === 'contributions' ? 'No open contributions or claimed issues in this scope.' : lane === 'approvals' ? 'No pending approvals across your workspaces.' : lane === 'agents' ? 'No active agent issues in this scope.' : 'No resolved or dismissed items yet.'}
           </div>
         ) : (
           visibleItems.map((item) => {
+            if (!('payload' in item) || item.kind === 'outside_human_waiting') return <MaintainerThreadCard key={item.id} source={item} onPrepareReply={replyChat.prepare} onDismiss={'payload' in item ? () => dismiss(item.id) : undefined} />;
             const verificationKind = typeof item.payload.verificationKind === 'string'
               ? item.payload.verificationKind
               : null;
@@ -483,9 +469,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
             const isEscalated = item.status === 'escalated';
             const isSelfHealed = item.status === 'self_healed';
             const isResolved = item.status === 'resolved';
-            const isOutsideHumanWaiting = item.kind === 'outside_human_waiting';
             const acknowledgeMissing = item.payload.recoveryAction === 'acknowledge_missing_worktree';
-            const threadUrl = typeof item.payload.url === 'string' ? item.payload.url : null;
             const transcriptPreview = expandedTranscriptById[item.id] ?? null;
             const actionNote = actionNoteById[item.id] ?? null;
             const copy = composeSupervisorInboxCardCopy(item);
@@ -591,16 +575,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                   <div style={{ minWidth: 0, flex: 1, fontSize: 10, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {actionNote}
                   </div>
-                  {isOutsideHumanWaiting ? (
-                    <InboxActionButton
-                      title="Open GitHub thread"
-                      onClick={() => openExternalUrl(threadUrl)}
-                      disabled={!threadUrl}
-                    >
-                      <ExternalLinkGlyph />
-                    </InboxActionButton>
-                  ) : null}
-                  {!isOutsideHumanWaiting && isHumanRequired && item.packetId ? (
+                  {isHumanRequired && item.packetId ? (
                     <>
                       <InboxActionButton
                         title="Retry packet (fresh worker)"
@@ -618,8 +593,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                       </InboxActionButton>
                     </>
                   ) : null}
-                  {!isOutsideHumanWaiting ? (
-                    <>
+                  <>
                       <InboxActionButton
                         title={transcriptPreview ? 'Hide transcript' : 'Preview transcript'}
                         onClick={() => { void openTranscript(item); }}
@@ -639,12 +613,11 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                       >
                         <ChatGlyph />
                       </InboxActionButton>
-                    </>
-                  ) : null}
+                  </>
                   {!isSelfHealed && !isResolved ? (
                     <InboxActionButton
                       title="Dismiss incident"
-                      onClick={() => dismiss(item.id)}
+                      onClick={() => { void dismiss(item.id).catch(() => setActionNote(item.id, 'The item could not be dismissed.')); }}
                     >
                       <ArchiveGlyph />
                     </InboxActionButton>
@@ -655,6 +628,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
           })
         )}
       </div>
+      {replyChat.conversation}
     </div>
   );
 }
@@ -709,76 +683,6 @@ function InboxActionButton({
       }}
     >
       {children}
-    </button>
-  );
-}
-
-function FilterChip({
-  label,
-  active,
-  onClick,
-  tone,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  tone: 'warning' | 'accent' | 'neutral';
-}) {
-  const activeBackground = active
-    ? tone === 'warning'
-      ? 'var(--t-warning-soft)'
-      : tone === 'accent'
-        ? 'var(--t-accent-soft)'
-        : 'var(--t-panel-active, var(--t-input-bg))'
-    : 'var(--t-bg-card)';
-  const color = active
-    ? tone === 'warning'
-      ? '#f29b62'
-      : tone === 'accent'
-        ? 'var(--t-accent)'
-        : 'var(--t-text)'
-    : 'var(--t-text-secondary)';
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        // Flat filter chip — drops always-on border for clean transparent
-        // rest. Active state uses tone-tinted soft fill; inactive is fully
-        // transparent and crossfades to var(--t-hover) on hover.
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: 26,
-        paddingLeft: 11,
-        paddingRight: 11,
-        borderRadius: 7,
-        border: 'none',
-        background: active ? activeBackground : 'transparent',
-        color,
-        fontSize: 11,
-        fontWeight: 300,
-        letterSpacing: '-0.1px',
-        cursor: 'pointer',
-        lineHeight: 1.25,
-        whiteSpace: 'nowrap',
-        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-      onMouseEnter={(event) => {
-        if (!active) {
-          event.currentTarget.style.background = 'var(--t-hover)';
-          event.currentTarget.style.color = 'var(--t-text)';
-        }
-      }}
-      onMouseLeave={(event) => {
-        if (!active) {
-          event.currentTarget.style.background = 'transparent';
-          event.currentTarget.style.color = 'var(--t-text-secondary)';
-        }
-      }}
-    >
-      {label}
     </button>
   );
 }

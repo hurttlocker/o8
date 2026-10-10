@@ -97,6 +97,8 @@ import {
 } from './chat-panel/thread-history-window';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
+import { contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
+import { useComposerDraftLifecycle } from './chat-panel/useComposerDraftLifecycle';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
 import type {
@@ -130,6 +132,8 @@ export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsCha
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
   draftInjection?: { id: string; text: string } | null;
+  /** An isolated contextual chat keeps its draft and attaches context on send. */
+  contextualConversation?: ContextualConversation;
   imageInjection?: { id: string; dataUri: string; name: string; mimeType: string } | null;
   onImageInjectionConsumed?: () => void;
   agents: FleetAgent[];
@@ -213,6 +217,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 }>(function ThoughtsChatPanel({
   open,
   draftInjection,
+  contextualConversation,
   imageInjection,
   onImageInjectionConsumed,
   agents,
@@ -254,7 +259,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   suppressAutoRestore = false, suppressRuntimePrewarm = false,
   expectsThreadLoad = false,
 }, ref) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(() => contextualConversation?.initialDraft ?? '');
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(initialPermissionMode);
   useEffect(() => setPermissionMode(initialPermissionMode), [initialPermissionMode]);
   // The mode ref keeps sends in sync with the selected composer mode.
@@ -755,13 +760,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     openRef.current = open;
   }, [open]);
 
-  useEffect(() => {
-    if (!open || !draftInjection?.id) return;
-    setInput((prev) => prev.trim()
-      ? `${prev.trimEnd()}\n\n${draftInjection.text}\n\n`
-      : `${draftInjection.text}\n\n`);
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }, [draftInjection?.id, draftInjection?.text, open]);
+  const showDraftClearedToast = useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, setInput, setPreEnhanceInput, inputRef });
 
   // Right-click "Add to chat" on an inline o8.md image relays here (via the
   // dashboard, so only the VISIBLE tab consumes it). Apply once per id (ref
@@ -775,48 +774,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     addAttachedImage({ name: imageInjection.name, dataUri: imageInjection.dataUri, mimeType: imageInjection.mimeType });
     onImageInjectionConsumed?.();
   }, [open, imageInjection?.id, imageInjection?.name, imageInjection?.dataUri, imageInjection?.mimeType, addAttachedImage, onImageInjectionConsumed]);
-
-  // Clear stale composer drafts on tab refocus unless a fresh draft injection
-  // arrived while hidden. Tabs are display:none, so composer state persists.
-  const previousOpenRef = useRef(open);
-  const inputAtBlurRef = useRef<string>('');
-  const lastSeenDraftIdRef = useRef<string | null>(draftInjection?.id ?? null);
-  const [showDraftClearedToast, setShowDraftClearedToast] = useState(false);
-  const draftClearedToastTimerRef = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (draftClearedToastTimerRef.current !== null) {
-        window.clearTimeout(draftClearedToastTimerRef.current);
-      }
-    };
-  }, []);
-  useEffect(() => {
-    const wasOpen = previousOpenRef.current;
-    previousOpenRef.current = open;
-    if (wasOpen && !open) {
-      inputAtBlurRef.current = input;
-      lastSeenDraftIdRef.current = draftInjection?.id ?? null;
-      return;
-    }
-    if (open && !wasOpen) {
-      const staleDraft = inputAtBlurRef.current.trim();
-      const newDraftArrived = (draftInjection?.id ?? null) !== lastSeenDraftIdRef.current;
-      if (staleDraft && !newDraftArrived) {
-        setInput('');
-        setPreEnhanceInput(null);
-        setShowDraftClearedToast(true);
-        if (draftClearedToastTimerRef.current !== null) {
-          window.clearTimeout(draftClearedToastTimerRef.current);
-        }
-        draftClearedToastTimerRef.current = window.setTimeout(() => {
-          setShowDraftClearedToast(false);
-          draftClearedToastTimerRef.current = null;
-        }, 1800);
-      }
-      inputAtBlurRef.current = '';
-      lastSeenDraftIdRef.current = draftInjection?.id ?? null;
-    }
-  }, [open, input, draftInjection?.id]);
 
   useEffect(() => {
     if (suppressNextTranscriptAutoScrollRef.current) {
@@ -1563,6 +1520,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const sendingThreadId = threadIdRef.current;
     return orchStream.send(message, {
       ...options, pickedMode: composerModeRef.current,
+      wireMessage: contextualTurnMessage(options.wireMessage ?? message, contextualConversation?.requestContext),
       ...(handoffMode ? { handoffMode } : {}),
       beforeSend: async (signal) => {
         const ready = await ensureSelectedRepoPersisted(signal);
@@ -1582,7 +1540,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setModel: setOrchestratorModel, setOperatorDefaults,
       }, signal),
     });
-  }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, resolvedRepoPath, setOrchestratorModel]);
+  }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, resolvedRepoPath, setOrchestratorModel, contextualConversation?.requestContext]);
 
   const slashAttachments = useMemo(() => attachedImages.length
     ? attachedImages.map(image => ({ dataUri: image.dataUri, name: image.name })) : undefined, [attachedImages]);
@@ -2028,6 +1986,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     shouldBypass: (text) => Boolean(parseOrchestratorSlashCommand(text) || parseModeRoutingPrefix(text)),
     sendUnbuffered: (text) => { void handleTaskSend(text); },
   });
+  const onContextBusyChange = contextualConversation?.onBusyChange;
+  useEffect(() => { onContextBusyChange?.(displayWaiting || sendBuffer.undoArmed || sendBuffer.queued.length > 0); }, [displayWaiting, onContextBusyChange, sendBuffer.undoArmed, sendBuffer.queued.length]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -2168,7 +2128,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return { id: tool.id ?? `scout-${index}`, label, status };
     });
   })();
-  const composeFirst = displayMessages.length === 0 && !displayWaiting;
+  const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
   return (
     <div
       style={{
@@ -2285,6 +2245,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ) : null}
       <ComposerArea
         ref={inputRef} activeComposer={open}
+        inputLabel={contextualConversation ? 'Reply preparation message' : undefined}
+        placeholder={contextualConversation?.placeholder}
         input={input}
         onInputChange={setInput}
         isOrchestratorMode={isOrchestratorMode}

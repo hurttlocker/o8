@@ -39,3 +39,20 @@ it('reads with colors by default, preserves an edit through reading, and saves t
   expect(vi.mocked(fetch).mock.calls.at(-1)).toEqual(['/api/v2/files', expect.objectContaining({ method: 'POST', body: JSON.stringify({ path: 'src/example.ts', content: 'const value = 2;', workspace: '/workspace' }) })]);
   expect(host.textContent).not.toContain('Modified');
 });
+
+it('shows media controls without reading video bytes as editable text or loading them automatically', async () => {
+  await act(async () => root.render(createElement(FileViewer, { repoPath: '/workspace', selectedFile: 'public/demo.mp4' })));
+  const player = host.querySelector('video')!;
+  expect(player.getAttribute('preload')).toBe('none'); expect(player.controls).toBe(true);
+  expect(player.getAttribute('src')).toContain('/api/panel/file-asset?');
+  expect(fetch).not.toHaveBeenCalled(); expect(host.querySelector('textarea')).toBeNull(); expect(host.querySelector('[aria-label="Edit file"]')).toBeNull();
+});
+
+it('keeps truncated source previews read-only so a partial file can never overwrite the original', async () => {
+  vi.mocked(fetch).mockResolvedValue(Response.json({ content: 'Beginning of a large file', truncated: true }));
+  await act(async () => root.render(createElement(FileViewer, { repoPath: '/workspace', selectedFile: 'large.txt' })));
+  expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('preview=1');
+  expect(host.textContent).toContain('Read-only preview'); expect(host.querySelector('[aria-label="Edit file"]')).toBeNull();
+  await act(async () => host.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true })));
+  expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
+});

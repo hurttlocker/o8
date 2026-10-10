@@ -281,7 +281,7 @@ describe('O8HandoffsPane', () => {
     root = createRoot(host);
     await act(async () => root.render(createElement(O8HandoffsPane, props)));
     await vi.waitFor(() => expect(document.body.querySelector('[data-agent-conversation-detail="conversation-restore"]')).not.toBeNull());
-    await act(async () => Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Back to Handoffs')?.click());
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Back to Exchanges')?.click());
     expect(document.body.querySelector('[data-agent-conversation-detail="conversation-restore"]')).toBeNull();
     await act(async () => root.render(createElement(O8HandoffsPane, {
       ...props, selection: { id: 'conversation-restore', request: 1, repoPath: repo.localPath },

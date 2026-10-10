@@ -1,23 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
+import { CircleSpark, DoubleCheck } from 'iconoir-react';
 import { Terminal as TablerTerminal } from '@/components/desktop/tabler-shims';
 import type { O8Tab, RightUtilityTab } from './types';
+import { PANEL_TOOLS, PANEL_TOOL_BY_ID } from './panel-tools';
+const RIGHT_UTILITY_TABS = PANEL_TOOLS;
+const RIGHT_UTILITY_BY_ID = PANEL_TOOL_BY_ID;
 import { revealHeaderTab, scrollTabStripFromWheel } from '../shell/tab-scroll';
 export type { RightUtilityTab } from './types';
 
-function FilesIcon({ size = 18 }: { size?: number }) {
-  return <Folder width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
-}
 
 export function ChatIcon({ size = 18 }: { size?: number }) {
   return <CircleSpark width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
-function BrowserIcon({ size = 18 }: { size?: number }) {
-  return <Internet width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
-}
 
 export function ReviewIcon({ size = 18 }: { size?: number }) {
   return <DoubleCheck width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
@@ -27,14 +24,6 @@ export function TerminalIcon({ size = 18 }: { size?: number }) {
   return <TablerTerminal size={size} strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
-function InboxIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
-      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-    </svg>
-  );
-}
 
 function PlusIcon({ size = 16 }: { size?: number }) {
   return (
@@ -54,26 +43,6 @@ function XIcon({ size = 12 }: { size?: number }) {
   );
 }
 
-
-interface RightUtilityDefinition {
-  id: RightUtilityTab;
-  label: string;
-  description: string;
-  icon: (props: { size?: number }) => React.ReactNode;
-}
-
-const RIGHT_UTILITY_TABS: RightUtilityDefinition[] = [
-  { id: 'files', label: 'Files', description: 'Browse project files', icon: FilesIcon },
-  { id: 'side-chat', label: 'Side chat', description: 'Start a side conversation', icon: ChatIcon },
-  { id: 'browser', label: 'Browser', description: 'Open a website', icon: BrowserIcon },
-  { id: 'review', label: 'Review', description: 'View code changes', icon: ReviewIcon },
-  { id: 'terminal', label: 'Terminal', description: 'Start an interactive shell', icon: TerminalIcon },
-  { id: 'inbox', label: 'Needs Attention', description: 'Approvals, follow-ups, and agent failures', icon: InboxIcon },
-];
-
-const RIGHT_UTILITY_BY_ID = Object.fromEntries(
-  RIGHT_UTILITY_TABS.map((tab) => [tab.id, tab]),
-) as Record<RightUtilityTab, RightUtilityDefinition>;
 
 function revealUtilityTab(scroller: HTMLDivElement, tab: Element) {
   // Include the close control beside the label. The landing tab has no wrapper.
@@ -190,10 +159,12 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
   // Available height per card after subtracting padding + gaps. Targets a
   // taller card on big screens; compact rows when the panel is short
   // (e.g. split layouts). Short panels scroll to keep every destination reachable.
+  const launcherTools = RIGHT_UTILITY_TABS.filter((tool) => tool.group === 'Tools');
+  const [moreOpen, setMoreOpen] = useState(false);
   const padding = 28; // 14 top + 14 bottom
-  const gapsTotal = 6 * (RIGHT_UTILITY_TABS.length - 1); // N cards = N−1 gaps × 6px
+  const gapsTotal = 6 * (launcherTools.length - 1); // N cards = N−1 gaps × 6px
   const usable = Math.max(0, (panelHeight ?? 600) - padding - gapsTotal);
-  const fairShare = usable / RIGHT_UTILITY_TABS.length;
+  const fairShare = usable / launcherTools.length;
   const cardHeight = Math.max(52, Math.min(64, fairShare));
   const compact = cardHeight < 64;
   const iconSize = compact ? 14 : 16;
@@ -217,7 +188,7 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
         paddingLeft: 14,
       }}
     >
-      <div style={{
+      <div id="right-panel-more-tools" style={{
         width: '100%',
         minHeight: '100%',
         maxWidth: 460,
@@ -228,7 +199,7 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
         justifyContent: 'center',
         gap: 6,
       }}>
-        {RIGHT_UTILITY_TABS.map((tab) => {
+        {(moreOpen ? RIGHT_UTILITY_TABS : launcherTools).map((tab) => {
           const Icon = tab.icon;
           return (
             <button
@@ -286,6 +257,7 @@ export function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab
             </button>
           );
         })}
+        <button type="button" aria-expanded={moreOpen} aria-controls="right-panel-more-tools" onClick={() => setMoreOpen((open) => !open)} style={{ border: 0, background: 'transparent', color: 'var(--t-text-muted)', paddingTop: 8, paddingBottom: 8, fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer' }}>{moreOpen ? 'Show everyday tools' : 'More tools and diagnostics'}</button>
       </div>
     </div>
   );

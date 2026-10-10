@@ -15,13 +15,15 @@ describe('panel opener', () => {
     await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
     const menu = document.querySelector<HTMLDivElement>('[aria-label="Panel views"]')!;
     const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
-    expect(items).toHaveLength(14);
+    expect(items).toHaveLength(12);
+    expect(items.map((item) => item.textContent)).not.toContain('Workspace');
+    expect(items.map((item) => item.textContent)).not.toContain('Handoffs');
     expect(items.map((item) => item.textContent)).toContain('Activity');
     expect(document.activeElement).toBe(items[0]);
     await act(async () => items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
-    expect(document.activeElement?.textContent).toBe('Terminal');
+    expect(document.activeElement?.textContent).toBe('Targeting');
     await act(async () => (document.activeElement as HTMLButtonElement).click());
-    expect(onTabChange).toHaveBeenCalledWith('terminal');
+    expect(onTabChange).toHaveBeenCalledWith('targets');
     expect(document.querySelector('[aria-label="Panel views"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
     await act(async () => trigger.click());

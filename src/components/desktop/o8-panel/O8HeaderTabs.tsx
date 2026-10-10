@@ -3,111 +3,11 @@
 import { FloatingSurface } from '../FloatingSurface';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { PageEdit } from 'iconoir-react';
-import type { O8Tab } from './types';
+import { canonicalPanelTab, type O8Tab } from './types';
+import { PANEL_TOOLS, type PanelToolDefinition } from './panel-tools';
 
-// ── Inline SVG icons (Tauri webview doesn't reliably render React icon components) ──
-
-function IconWorkspace({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
-      <path d="M8 13h8" />
-      <path d="M12 9v8" />
-    </svg>
-  );
-}
-
-function IconActivity({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-    </svg>
-  );
-}
-
-function IconHandoffs({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <path d="M3 5h12a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H8l-4 3v-4.2A3 3 0 0 1 3 14z" />
-      <path d="m8 11 2.5 2.5L15 9" />
-    </svg>
-  );
-}
-
-// Gauge — the Resources tab (per-session CPU/RAM Activity Monitor).
-function IconGauge({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <path d="M4 15a8 8 0 0 1 16 0" />
-      <path d="M12 15l4-4" />
-      <circle cx="12" cy="15" r="1" />
-    </svg>
-  );
-}
-
-// Crosshair — "aim your agents here". The v1 wedge; a prominent main tab.
-function IconTargets({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="8" />
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-    </svg>
-  );
-}
-
-function IconUtility({ kind, color }: { kind: 'review' | 'inbox' | 'files' | 'side-chat' | 'terminal'; color: string }) {
-  const paths: Record<typeof kind, React.ReactNode> = {
-    review: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="m8 12 2 2 5-5" /></>,
-    inbox: <><path d="M4 5h16l2 12H2L4 5Z" /><path d="M2 13h6l2 3h4l2-3h6" /></>,
-    files: <><path d="M3 7h7l2 2h9v11H3V7Z" /><path d="M3 7V4h7" /></>,
-    'side-chat': <path d="M4 4h16v13H9l-5 4V4Z" />,
-    terminal: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M12 16h5" /></>,
-  };
-  return <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>{paths[kind]}</svg>;
-}
-
-// Icon colors track the palette text color (dark on paper, light on graphite).
 const O8_ICON_ACTIVE = 'var(--t-text)';
 const O8_ICON_INACTIVE = 'var(--t-text-muted)';
-
-interface O8TabDef {
-  id: O8Tab;
-  label: string;
-  icon: (color: string) => React.ReactNode;
-}
-
-function IconGlobe({ size = 15, color = 'currentColor' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" />
-      <line x1="2" y1="12" x2="22" y2="12" />
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-    </svg>
-  );
-}
-
-// The state drawer's entries — one panel state at a time; Browser sits under
-// Activity (Q ruling 2026-07-12: browser lives in the drawer, its page tabs
-// live in the header rail).
-const O8_TABS: O8TabDef[] = [
-  { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
-  { id: 'threads', label: 'Threads', icon: (c) => <IconHandoffs size={15} color={c} /> },
-  { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
-  { id: 'handoffs', label: 'Handoffs', icon: (c) => <IconHandoffs size={15} color={c} /> },
-  { id: 'resources', label: 'Resources', icon: (c) => <IconGauge size={15} color={c} /> },
-  { id: 'browser', label: 'Browser', icon: (c) => <IconGlobe size={15} color={c} /> },
-  { id: 'targets', label: 'Targeting', icon: (c) => <IconTargets size={15} color={c} /> },
-  // Iconoir PageEdit — operator-locked for the o8.md spec tab. Document
-  // with a pencil reads as "the spec the agent is annotating."
-  { id: 'spec', label: 'o8.md', icon: (c) => <PageEdit width={15} height={15} color={c} strokeWidth={2} /> },
-  { id: 'review', label: 'Review', icon: (c) => <IconUtility kind="review" color={c} /> },
-  { id: 'inbox', label: 'Inbox', icon: (c) => <IconUtility kind="inbox" color={c} /> },
-  { id: 'files', label: 'Files', icon: (c) => <IconUtility kind="files" color={c} /> },
-  { id: 'side-chat', label: 'Agent chat', icon: (c) => <IconUtility kind="side-chat" color={c} /> },
-  { id: 'terminal', label: 'Terminal', icon: (c) => <IconUtility kind="terminal" color={c} /> },
-];
 
 /**
  * O8HeaderTabs — ONE current-state pill + a dropdown drawer (Cursor browser
@@ -139,8 +39,8 @@ export function O8HeaderTabs({
 
   // prs + compare are contextual surfaces without their own drawer row — show
   // Activity as current while they're active so the trigger never looks empty.
-  const visualActiveTab = activeTab === 'prs' || activeTab === 'compare' ? 'activity' : activeTab;
-  const activeDef = O8_TABS.find((def) => def.id === visualActiveTab) ?? O8_TABS[0];
+  const visualActiveTab = activeTab === 'prs' || activeTab === 'compare' ? 'activity' : canonicalPanelTab(activeTab);
+  const activeDef = PANEL_TOOLS.find((def) => def.id === visualActiveTab) ?? PANEL_TOOLS[0];
 
   // Portal-fixed drawer under the trigger (the top strip clips absolute
   // children) — same pattern as the composer chip popovers.
@@ -226,7 +126,7 @@ export function O8HeaderTabs({
         {opener ? more ? <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg> : <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg> : <>
         {/* Browser keeps its brand-orange globe when selected (Q ruling
             2026-07-12) — same accent the TitleBar globe button carries. */}
-        {activeDef.icon(activeDef.id === 'browser' ? 'var(--t-brand-orange, #FF5A1F)' : O8_ICON_ACTIVE)}
+        <span style={{ color: activeDef.id === 'browser' ? 'var(--t-brand-orange)' : O8_ICON_ACTIVE }}>{activeDef.icon({ size: 15 })}</span>
         <span
           style={{
             fontSize: 12,
@@ -262,12 +162,14 @@ export function O8HeaderTabs({
             fontFamily: 'var(--font-sans-system)',
           }}
         >
-          {onNewPage ? <button type="button" role="menuitem" tabIndex={-1} onClick={() => { onNewPage(); setOpen(false); triggerRef.current?.focus(); }} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 0, background: 'transparent', color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 12.5, paddingTop: 7, paddingRight: 11, paddingBottom: 7, paddingLeft: 11, cursor: 'pointer', textAlign: 'left' }}><IconGlobe size={15} />New browser page</button> : null}
+          {onNewPage ? <button type="button" role="menuitem" tabIndex={-1} onClick={() => { onNewPage(); setOpen(false); triggerRef.current?.focus(); }} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', border: 0, background: 'transparent', color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 12.5, paddingTop: 7, paddingRight: 11, paddingBottom: 7, paddingLeft: 11, cursor: 'pointer', textAlign: 'left' }}>{PANEL_TOOLS[1].icon({ size: 15 })}New browser page</button> : null}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-            {[O8_TABS.slice(0, 7), O8_TABS.slice(7)].map((group, index) => (
-              <div key={index} style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)', paddingTop: 5, paddingBottom: 3, paddingLeft: 11, paddingRight: 11 }}>{index === 0 ? 'Views' : 'Tools'}</div>
-                {group.map((def) => (
+            {['Tools', 'More'].map((name) => (
+              <div key={name} style={{ minWidth: 0 }}>
+                {(name === 'Tools' ? ['Tools'] : ['More', 'Diagnostics']).map((section) => (
+                <div key={section}>
+                <div style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)', paddingTop: 5, paddingBottom: 3, paddingLeft: 11, paddingRight: 11 }}>{section}</div>
+                {PANEL_TOOLS.filter((tool) => tool.group === section).map((def) => (
                   <O8DrawerItem
                     key={def.id}
                     def={def}
@@ -279,6 +181,7 @@ export function O8HeaderTabs({
                     }}
                   />
                 ))}
+                </div>))}
               </div>
             ))}
           </div>
@@ -294,7 +197,7 @@ function O8DrawerItem({
   selected,
   onClick,
 }: {
-  def: O8TabDef;
+  def: PanelToolDefinition;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -324,12 +227,12 @@ function O8DrawerItem({
         cursor: 'pointer',
         textAlign: 'left',
         fontSize: 12.5,
-        fontWeight: 400,
+        fontWeight: 300,
         letterSpacing: '-0.005em',
         fontFamily: 'inherit',
       }}
     >
-      <span style={{ display: 'inline-flex', flexShrink: 0 }}>{def.icon(color)}</span>
+      <span style={{ display: 'inline-flex', flexShrink: 0 }}>{def.icon({ size: 15 })}</span>
       <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap' }}>{def.label}</span>
       {selected ? (
         <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

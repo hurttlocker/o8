@@ -4,7 +4,8 @@ import { useComposerImageBridge } from './useComposerImageBridge';
 import Image from 'next/image';
 import { useComposerClock } from './useComposerClock';
 import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
-import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useComposerAutosize } from './useComposerAutosize';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
@@ -37,6 +38,7 @@ const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
   activeComposer?: boolean;
   inputLabel?: string;
+  placeholder?: string;
   literalInput?: boolean;
   footerOverride?: React.ReactNode;
   input: string;
@@ -107,6 +109,7 @@ interface ComposerAreaProps {
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
   activeComposer = false,
   inputLabel,
+  placeholder,
   literalInput = false,
   footerOverride,
   input,
@@ -168,8 +171,15 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const setTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node;
+    if (typeof inputRef === 'function') inputRef(node);
+    else if (inputRef) inputRef.current = node;
+  }, [inputRef]);
   const now = useComposerClock(activeComposer && isOrchestratorMode);
   const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
+  useComposerAutosize(textareaRef, fileReferences.body, activeComposer);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
   const composerSelectorV1Enabled = useSyncExternalStore(subscribeToComposerSelectorFlag, readComposerSelectorV1Flag, () => true);
@@ -248,14 +258,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     ];
   }, [dismissedSlashInput, input, isOrchestratorMode]);
 
-  // Parent-driven clearing happens after keydown; reset the autosized height
-  // here as well so submit, slash routing and programmatic resets all shrink.
-  useEffect(() => {
-    if (input !== '') return;
-    const node = inputRef && 'current' in inputRef ? inputRef.current : null;
-    if (!node) return;
-    node.style.height = 'auto';
-  }, [input, inputRef]);
   useEffect(() => {
     const composerCenter = composerCenterRef.current;
     if (!composerCenter || !activeComposer) return;
@@ -556,15 +558,12 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             getInputNode()?.focus();
           }} />
           <textarea
-            ref={inputRef}
+            ref={setTextareaRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
             aria-label={inputLabel}
             value={fileReferences.body}
             onChange={(event) => {
               updateInput(writeComposerFileReferences(event.target.value, fileReferences.paths));
-              const el = event.target;
-              el.style.height = 'auto';
-              el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
             }}
             onKeyDown={(event) => {
               if (
@@ -694,13 +693,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
             }}
             onPaste={handleTextareaPaste}
-            placeholder={composerPlaceholder}
+            placeholder={placeholder ?? composerPlaceholder}
             disabled={isDisabled}
             rows={2}
             style={{
               width: '100%',
               minHeight: 52,
-              maxHeight: 200,
+              maxHeight: 'max(52px, min(200px, 28vh, calc(100cqh - 120px)))',
+              display: 'block',
               paddingTop: 11,
               paddingRight: 14,
               paddingBottom: 4,
@@ -721,6 +721,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               // 2026-07-15, 80% zoom) that also ate clicks along its band.
               overflowX: 'hidden',
               overflowY: 'auto',
+              overscrollBehavior: 'contain',
+              overflowWrap: 'anywhere',
             }}
           />
           {footerOverride ?? <InputButtons

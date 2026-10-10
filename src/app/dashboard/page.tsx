@@ -86,7 +86,7 @@ import {
 // ApprovalQueuePanel retired — was only consumed by the dead workspace-side-panel ReviewTab.
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo } from './types';
-import type { O8Tab } from '@/components/desktop/o8-panel/types';
+import { canonicalPanelTab, type O8Tab } from '@/components/desktop/o8-panel/types';
 import {
   logDashboardBootTiming,
   markDashboardScriptStart,
@@ -251,10 +251,6 @@ import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/type
 
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
-const O8_SPEC_PANEL_TARGET_WIDTH = 600;
-// The N-up compare matrix needs width — two candidate columns fit comfortably at
-// ~960px; 3+ horizontally scroll (see ComparisonMatrix).
-const O8_COMPARE_PANEL_TARGET_WIDTH = 960;
 const RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH = 1180;
 // Fold to the existing rail before a four-worker split loses readable width.
 const RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH = 1280;
@@ -282,11 +278,10 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
   // now the Workspace tab. 'files' used to be the same, but is now a
   // distinct surface in the launcher (see O8Panel RIGHT_UTILITY_TABS),
   // so we let it pass through to the new kind instead of remapping.
-  if (raw === 'diff' || raw === 'changes') return 'workspace';
+  if (raw === 'diff' || raw === 'changes' || raw === 'workspace') return 'review';
   if (raw === 'prs') return 'activity';
   if (
-    raw === 'workspace'
-    || raw === 'browser'
+    raw === 'browser'
     || raw === 'activity'
     || raw === 'threads'
     || raw === 'resources'
@@ -839,8 +834,6 @@ function DashboardInner() {
     const autoCollapsed = viewportBands.belowLeftCollapse && !responsiveManualOpenRef.current.left;
     setResponsiveAutoCollapsed((current) => current.left === autoCollapsed ? current : { left: autoCollapsed });
   }, [chatVisible, viewportBands]);
-  const { rightWidth, setRightWidth, o8Width, setO8Width } = useRightPanelWidths();
-  const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } = useRightPanelMaximize(chatVisible && !compactShell && !viewportBands?.belowRightCollapse);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const [o8ActiveTabHydrated, setO8ActiveTabHydrated] = useState(false);
   const { tabs: rightPrTabs, open: rememberRightPr, close: forgetRightPr } = useRightPrTabs();
@@ -863,31 +856,15 @@ function DashboardInner() {
     } catch { /* ignore */ }
   }, [o8SplitEnabled, o8SecondaryTab, o8SplitPrefsHydrated]);
   const visibleSecondaryTab = o8SplitEnabled
-    ? (o8SecondaryTab === o8ActiveTab ? (o8ActiveTab === 'browser' ? 'spec' : 'browser') : o8SecondaryTab)
+    ? (canonicalPanelTab(o8SecondaryTab) === canonicalPanelTab(o8ActiveTab) ? (o8ActiveTab === 'browser' ? 'spec' : 'browser') : o8SecondaryTab)
     : null;
+  const { rightWidth, setRightWidth, o8Width, setO8Width } = useRightPanelWidths(o8ActiveTab, visibleSecondaryTab);
+  const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } = useRightPanelMaximize(chatVisible && !compactShell && !viewportBands?.belowRightCollapse);
   const [o8ReviewLaneId, setO8ReviewLaneId] = useState<string | null>(null);
-  const o8SpecAutoWidenedRef = useRef(false);
-  const o8CompareAutoWidenedRef = useRef(false);
   const handleO8TabChange = useCallback((tab: O8Tab) => {
-    if (tab === 'spec' && !o8SpecAutoWidenedRef.current) {
-      o8SpecAutoWidenedRef.current = true;
-      setO8Width((current) => (
-        current < O8_SPEC_PANEL_TARGET_WIDTH
-          ? O8_SPEC_PANEL_TARGET_WIDTH
-          : current
-      ));
-    }
-    if (tab === 'compare' && !o8CompareAutoWidenedRef.current) {
-      o8CompareAutoWidenedRef.current = true;
-      setO8Width((current) => (
-        current < O8_COMPARE_PANEL_TARGET_WIDTH
-          ? O8_COMPARE_PANEL_TARGET_WIDTH
-          : current
-      ));
-    }
     if (tab !== 'review') setO8ReviewLaneId(null);
     setO8ActiveTab(tab);
-  }, [setO8Width]);
+  }, []);
   const handlePrimaryPanelTabChange = useCallback((tab: O8Tab) => {
     if (o8SplitEnabled && tab === visibleSecondaryTab) setO8SecondaryTab(o8ActiveTab);
     handleO8TabChange(tab);
@@ -898,10 +875,8 @@ function DashboardInner() {
       handleO8TabChange(visibleSecondaryTab ?? (o8ActiveTab === 'browser' ? 'spec' : 'browser'));
       return;
     }
-    if (tab === 'spec') setO8Width((width) => Math.max(width, O8_SPEC_PANEL_TARGET_WIDTH));
-    if (tab === 'compare') setO8Width((width) => Math.max(width, O8_COMPARE_PANEL_TARGET_WIDTH));
     setO8SecondaryTab(tab);
-  }, [handleO8TabChange, o8ActiveTab, setO8Width, visibleSecondaryTab]);
+  }, [handleO8TabChange, o8ActiveTab, visibleSecondaryTab]);
   const toggleO8PanelSplit = useCallback(() => {
     if (!o8SplitEnabled && o8SecondaryTab === o8ActiveTab) {
       setO8SecondaryTab(o8ActiveTab === 'browser' ? 'spec' : 'browser');
@@ -2169,14 +2144,10 @@ function DashboardInner() {
     if (options.repoPath) setO8RepoPathOverride(options.repoPath);
     const nextTab = normalizeO8ActiveTab(options.tab) ?? DEFAULT_O8_ACTIVE_TAB;
     setO8ReviewLaneId(nextTab === 'review' ? options.reviewLaneId ?? null : null);
-    if (nextTab === 'compare' && !o8CompareAutoWidenedRef.current) {
-      o8CompareAutoWidenedRef.current = true;
-      setO8Width((current) => (current < O8_COMPARE_PANEL_TARGET_WIDTH ? O8_COMPARE_PANEL_TARGET_WIDTH : current));
-    }
     setO8ActiveTab(nextTab);
     setRightPanelKind('o8');
     openRightPanelFromUser();
-  }, [openRightPanelFromUser, setO8Width]);
+  }, [openRightPanelFromUser]);
 
   useThreadWorkspaceNavigation({
     availability: () => threadPanelAvailability(
@@ -5139,12 +5110,20 @@ function DashboardInner() {
                           active={showRightPanelColumn && rightPanelKind === 'o8'}
                           repoPath={currentO8RepoPath}
                           registeredRepos={activeProjectRepoEntries}
+                          linkableRepos={globalRepoEntries}
+                          prContextTabId={workspaceHeaderActive.kind === 'orchestrator' ? workspaceHeaderActive.tabId : null}
+                          prContextId={workspaceHeaderActive.kind === 'orchestrator' && workspaceHeaderActive.tabId
+                            ? (() => {
+                              const threadId = workspaceHeaderActive.tabs.find((tab) => tab.id === workspaceHeaderActive.tabId)?.orchestratorThreadId;
+                              return threadId ? `thread:${threadId}` : `tab:${workspaceHeaderActive.tabId}`;
+                            })()
+                            : `worktree:${currentO8RepoPath ?? 'unbound'}`}
                           onRepoPathChange={handleSelectO8RepoPath}
                           allRepos={o8AllRepos}
                           onSelectAllRepos={handleSelectO8AllRepos}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
-                          onActiveTabChange={handlePrimaryPanelTabChange}
+                          onActiveTabChange={handleHeaderPanelTabChange}
                           secondaryTab={visibleSecondaryTab}
                           onSecondaryTabChange={handleSecondaryPanelTabChange}
                           selectedFile={scopedO8SelectedFile}

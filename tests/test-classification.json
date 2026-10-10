@@ -3852,6 +3852,13 @@
       ]
     },
     {
+      "path": "tests/review-file-previews.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/review-head-integrity.test.ts",
       "reasons": [
         "child-process",

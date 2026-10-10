@@ -11,7 +11,7 @@ interface GitHubListPull {
   state: 'open' | 'closed';
   merged_at: string | null;
   draft?: boolean;
-  head: { ref: string };
+  head: { ref: string; repo?: { full_name: string } | null };
   base: { ref: string };
   updated_at: string;
   created_at: string;
@@ -82,6 +82,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
       requestedReviewers: summary ? (summary.reviewRequests?.nodes ?? []).flatMap((request) => request?.requestedReviewer?.login ? [request.requestedReviewer.login] : []) : null,
       state: pull.merged_at ? 'merged' : pull.state, draft: pull.draft ?? false,
       headRefName: pull.head.ref, baseRefName: pull.base.ref, updatedAt: pull.updated_at,
+      headRepoFullName: pull.head.repo?.full_name ?? null,
       url: pull.html_url, labels: pull.labels.map((label) => label.name),
       createdAt: pull.created_at,
     }; }),

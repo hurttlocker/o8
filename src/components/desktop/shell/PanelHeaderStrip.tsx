@@ -9,7 +9,7 @@
 import type { ReactNode } from 'react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { O8HeaderTabs } from '../o8-panel/O8HeaderTabs';
-import { isRightUtilityTab, type O8Tab } from '../o8-panel/types';
+import { canonicalPanelTab, isRightUtilityTab, type O8Tab } from '../o8-panel/types';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { HeaderIconPill } from './HeaderIconPill';
@@ -48,7 +48,7 @@ export function PanelHeaderStrip({
   maximized = false,
   onToggleMaximized,
 }: PanelHeaderStripProps) {
-  const showUtilityTabs = !splitEnabled && (o8ActiveTab === 'launcher' || (isRightUtilityTab(o8ActiveTab) && o8ActiveTab !== 'browser'));
+  const showUtilityTabs = !splitEnabled && (o8ActiveTab === 'launcher' || (isRightUtilityTab(canonicalPanelTab(o8ActiveTab)) && o8ActiveTab !== 'browser'));
   const showTabs = panelTabsSlotRef !== undefined && (showBrowserTabs || showUtilityTabs);
   return (
     <ColumnHeaderStrip

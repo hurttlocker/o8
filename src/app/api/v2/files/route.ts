@@ -14,6 +14,7 @@ import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/rep
 import {
   isWorkspaceFileError,
   readWorkspaceFile,
+  openWorkspaceFile,
   writeWorkspaceFile,
 } from '@/lib/fs/workspace-file';
 import {
@@ -88,6 +89,21 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    if (request.nextUrl.searchParams.get('preview') === '1') {
+      const opened = await openWorkspaceFile(target.root, target.relativePath, 'read');
+      try {
+        const size = Number(opened.stat.size);
+        const buffer = Buffer.alloc(Math.min(size, 1024 * 1024));
+        let offset = 0;
+        while (offset < buffer.length) {
+          const { bytesRead } = await opened.handle.read(buffer, offset, buffer.length - offset, offset);
+          if (!bytesRead) break;
+          offset += bytesRead;
+        }
+        const content = buffer.subarray(0, offset).toString('utf-8');
+        return NextResponse.json({ content, path, exists: true, size, truncated: size > buffer.length });
+      } finally { await opened.handle.close(); }
+    }
     const opened = await readWorkspaceFile(target.root, target.relativePath);
     const content = opened.bytes.toString('utf-8');
     return NextResponse.json({ content, contentHash: await contentHash(content), path, exists: true });

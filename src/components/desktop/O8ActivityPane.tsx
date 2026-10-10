@@ -458,6 +458,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         {/* Repo selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <O8RepoSelector
+            active={active}
             repos={registeredRepoEntries}
             allRepos={allRepos}
             selectedRepoPath={repoPath ?? null}

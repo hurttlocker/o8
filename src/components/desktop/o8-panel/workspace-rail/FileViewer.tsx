@@ -5,16 +5,18 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { MarkdownRender } from '../markdown-render';
 import { SyntaxFileView } from './SyntaxFileView';
 import { FileTypeIcon } from './FileTypeIcon';
+import { reviewFileKind } from '@/lib/review/file-presentation';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
-type FileKind = 'image' | 'markdown' | 'pdf' | 'svg' | 'text';
+type FileKind = 'image' | 'markdown' | 'pdf' | 'svg' | 'text' | 'video' | 'audio' | 'binary';
 type SourceViewMode = 'preview' | 'source';
 
 interface FileResponse {
   content?: string;
   error?: string;
+  truncated?: boolean;
 }
 
 const IMAGE_EXTENSIONS = new Set(['avif', 'bmp', 'gif', 'ico', 'jpg', 'jpeg', 'png', 'webp']);
@@ -29,7 +31,8 @@ function fileKindForPath(path: string): FileKind {
   if (extension === 'svg') return 'svg';
   if (extension === 'md' || extension === 'mdx') return 'markdown';
   if (IMAGE_EXTENSIONS.has(extension)) return 'image';
-  return 'text';
+  const kind = reviewFileKind(path);
+  return kind === 'video' || kind === 'audio' || kind === 'binary' ? kind : 'text';
 }
 
 function canReadAsText(kind: FileKind) {
@@ -124,6 +127,12 @@ function MediaPreview({
       />
     );
   }
+  if (kind === 'video' || kind === 'audio') {
+    return <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 20, fontFamily: UI_FONT }}>
+      {kind === 'video' ? <video aria-label={fileName} src={assetUrl} controls preload="none" playsInline onError={onError} style={{ display: 'block', width: '100%', maxHeight: 'calc(100vh - 200px)', borderRadius: 10, background: 'var(--t-bg-subtle)' }} /> : <audio aria-label={fileName} src={assetUrl} controls preload="none" onError={onError} style={{ width: '100%' }} />}
+      <span style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.4 }}>Play to load this {kind === 'video' ? 'video' : 'audio file'}.</span>
+    </div>;
+  }
 
   const imageSrc = kind === 'svg' && svgSource
     ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgSource)}`
@@ -175,6 +184,7 @@ export function FileViewer({
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [truncated, setTruncated] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -186,15 +196,16 @@ export function FileViewer({
   const fileKind = selectedFile ? fileKindForPath(selectedFile) : 'text';
   const viewMode = selectedFile ? viewModeByFile[selectedFile] ?? defaultViewMode(fileKind) : 'source';
   const canTogglePreview = fileKind === 'markdown' || fileKind === 'svg';
-  const editing = selectedFile === editingFile;
-  const showEditControl = canReadAsText(fileKind);
-  const assetUrl = selectedFile && repoPath && (fileKind === 'image' || fileKind === 'pdf' || fileKind === 'svg')
+  const editing = selectedFile === editingFile && !truncated;
+  const showEditControl = canReadAsText(fileKind) && !truncated;
+  const assetUrl = selectedFile && repoPath && ['image', 'pdf', 'svg', 'video', 'audio'].includes(fileKind)
     ? assetUrlFor(repoPath, selectedFile)
     : null;
   const fileName = selectedFile?.split('/').pop() ?? selectedFile ?? 'file';
   const isAbsolutePath = selectedFile?.startsWith('/') ?? false;
 
   useEffect(() => {
+    setTruncated(false);
     if (!selectedFile) {
       setFileContent(null);
       setEditContent('');
@@ -234,7 +245,7 @@ export function FileViewer({
     const url = isAbsolutePath
       ? `/api/panel/file-io?path=${encodeURIComponent(selectedFile)}`
       : (() => {
-          const params = new URLSearchParams({ path: selectedFile });
+          const params = new URLSearchParams({ path: selectedFile, preview: '1' });
           if (repoPath) params.set('workspace', repoPath);
           return `/api/v2/files?${params.toString()}`;
         })();
@@ -249,6 +260,8 @@ export function FileViewer({
           return;
         }
         const content = data.content ?? '';
+        if (content.includes('\0')) { setError('This binary file has no text preview.'); return; }
+        setTruncated(data.truncated === true);
         setFileContent(content);
         setEditContent(content);
       })
@@ -266,7 +279,7 @@ export function FileViewer({
   }, [fileKind, isAbsolutePath, repoPath, selectedFile]);
 
   const handleSave = useCallback(async () => {
-    if (!selectedFile || (!repoPath && !isAbsolutePath) || !dirty) return;
+    if (!selectedFile || (!repoPath && !isAbsolutePath) || !dirty || truncated) return;
     setSaving(true);
     setError(null);
     try {
@@ -297,7 +310,7 @@ export function FileViewer({
     } finally {
       setSaving(false);
     }
-  }, [dirty, editContent, isAbsolutePath, repoPath, selectedFile]);
+  }, [dirty, editContent, isAbsolutePath, repoPath, selectedFile, truncated]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -349,6 +362,7 @@ export function FileViewer({
           style={{ width: 26, height: 26, flexShrink: 0, border: 0, borderRadius: 6, padding: 0, background: wrapLines ? 'var(--t-hover)' : 'transparent', color: wrapLines ? 'var(--t-text-secondary)' : 'var(--t-text-muted)', cursor: 'pointer' }}><svg aria-hidden width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16M4 10h12a4 4 0 0 1 0 8h-5m3-3-3 3 3 3M4 15h3M4 20h3" /></svg></button> : null}
         {headerAction}
       </div>
+      {truncated ? <div role="status" style={{ flexShrink: 0, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 11, lineHeight: 1.5, borderBottom: '1px solid var(--t-divider-subtle)' }}>Read-only preview · first 1 MB. Use an editor to change the full file.</div> : null}
       {dirty || error ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>
           <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -385,7 +399,8 @@ export function FileViewer({
       <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         {loading ? (
           <div style={{ paddingTop: 14, paddingRight: 16, paddingBottom: 14, paddingLeft: 16, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>Loading file...</div>
-        ) : assetUrl && (fileKind === 'image' || fileKind === 'pdf' || (fileKind === 'svg' && viewMode === 'preview')) ? (
+        ) : fileKind === 'binary' ? <div style={{ padding: 20, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12, lineHeight: 1.6 }}>This binary file has no text preview.</div>
+        : assetUrl && (['image', 'pdf', 'video', 'audio'].includes(fileKind) || (fileKind === 'svg' && viewMode === 'preview')) ? (
           <MediaPreview
             kind={fileKind}
             assetUrl={assetUrl}

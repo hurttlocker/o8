@@ -16,6 +16,8 @@ export const sharedVitestConfig = {
       'src/components/desktop/agent-panel/project-dialog-surface.test.tsx',
       'src/components/desktop/thoughts/composer-selector/ComposerSelectorFooter.test.tsx',
       'src/components/desktop/thoughts/chat-panel/ComposerContextRow.test.tsx',
+      'src/components/desktop/thoughts/chat-panel/useComposerAutosize.test.tsx',
+      'src/components/desktop/thoughts/chat-panel/useComposerDraftLifecycle.test.tsx',
       'src/components/desktop/file-viewer/RichMarkdownEditor.test.tsx',
       'src/components/desktop/settings/SymonIMessageAccessSection.test.tsx',
       'tests/**/*.test.ts',

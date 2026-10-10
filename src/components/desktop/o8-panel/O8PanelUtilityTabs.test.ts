@@ -29,7 +29,7 @@ describe('right panel header tabs', () => {
     expect(wheel.defaultPrevented).toBe(true); expect(strip.scrollLeft).toBe(80);
     const files = strip.querySelector<HTMLButtonElement>('[aria-label="Files"]')!;
     await act(async () => { files.focus(); files.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); });
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Needs Attention');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Inbox');
     const selected = document.activeElement!;
     expect(selected.getBoundingClientRect().left).toBeGreaterThanOrEqual(0);
     expect(selected.getBoundingClientRect().right).toBeLessThanOrEqual(strip.clientWidth);

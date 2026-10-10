@@ -15,7 +15,7 @@ const rows = () => Array.from(host.querySelectorAll<HTMLButtonElement>('button[a
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   fetchMock = vi.fn(async (input: string) => input === '/api/panel/github-status'
     ? Response.json({ authenticated: true, username: 'operator' })
@@ -25,6 +25,20 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 describe('workspace PR list', () => {
+  it('shows branch dependencies through the layout control and preserves selection when returning', async () => {
+    fetchMock.mockImplementation(async (url: string) => url === '/api/panel/github-status'
+      ? Response.json({ authenticated: true, username: 'operator' })
+      : Response.json({ repo: 'example/repo', prs: [{ ...sample(2), headRefName: 'follow-up', baseRefName: 'foundation', headRepoFullName: 'example/repo' }, { ...sample(1), headRefName: 'foundation', headRepoFullName: 'example/repo' }], nextPage: null }));
+    await render();
+    await act(async () => button('Pull request layout').click());
+    await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((item) => item.textContent === 'Branch stacks')!.click());
+    expect(rows().map((row) => row.dataset.prNumber)).toEqual(['1', '2']);
+    expect(host.textContent).toContain('Depends on #1');
+    await act(async () => rows()[1].click());
+    await act(async () => button('Pull request layout').click());
+    await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((item) => item.textContent === 'By author')!.click());
+    expect(host.querySelector('[aria-current="true"]')?.getAttribute('data-pr-number')).toBe('2');
+  });
   it('refreshes only the matching repository after a write while keeping filters, selection and scroll', async () => {
     await render();
     await act(async () => button('Pull request involvement').click());
