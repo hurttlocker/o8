@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { initRepo } from '@/lib/repos/bootstrap';
+import { initRepo, RepoInitError } from '@/lib/repos/bootstrap';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
       projectId: result.projectId,
     }, { status: 201, headers: NO_STORE });
   } catch (error) {
+    if (error instanceof RepoInitError) return NextResponse.json({ error: error.message }, { status: error.statusCode, headers: NO_STORE });
     console.error('[api] panel/repos/init failed:', error);
     const message = 'Failed to initialize repository.';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE });

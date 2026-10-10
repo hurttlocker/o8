@@ -28,6 +28,8 @@ interface PanelHeaderStripProps {
   panelTabsSlotRef?: (node: HTMLElement | null) => void;
   showBrowserTabs?: boolean;
   prTabsSlot?: ReactNode;
+  maximized?: boolean;
+  onToggleMaximized?: () => void;
 }
 
 export function PanelHeaderStrip({
@@ -43,6 +45,8 @@ export function PanelHeaderStrip({
   panelTabsSlotRef,
   showBrowserTabs = false,
   prTabsSlot,
+  maximized = false,
+  onToggleMaximized,
 }: PanelHeaderStripProps) {
   const showUtilityTabs = !splitEnabled && (o8ActiveTab === 'launcher' || (isRightUtilityTab(o8ActiveTab) && o8ActiveTab !== 'browser'));
   const showTabs = panelTabsSlotRef !== undefined && (showBrowserTabs || showUtilityTabs);
@@ -62,6 +66,14 @@ export function PanelHeaderStrip({
           {onOpenInbox ? (
             <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
           ) : null}
+          {onToggleMaximized ? <HeaderIconPill
+            onClick={onToggleMaximized}
+            label={maximized ? 'Restore panel size' : 'Maximize panel'}
+            title={maximized ? 'Restore panel size · Esc' : 'Maximize panel'}
+            pressed={maximized}
+            yNudge={-3}
+            icon={<svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{maximized ? <><path d="M14 3v7h7M3 14h7v7M21 3l-7 7M3 21l7-7" /></> : <><path d="M14 3h7v7M3 14v7h7M21 3l-7 7M3 21l7-7" /></>}</svg>}
+          /> : null}
           {onToggleSplit ? (
             <HeaderIconPill
               onClick={onToggleSplit}

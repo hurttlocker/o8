@@ -46,6 +46,7 @@ import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { requestTerminalModeToggle } from '@/components/desktop/shell/TerminalModePill';
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
+import { useRightPanelMaximize } from '@/components/desktop/shell/useRightPanelMaximize';
 import { RightPrTabs } from '@/components/desktop/pr-panel/RightPrTabs';
 import { rightPrTabId, useRightPrTabs, type RightPrTab } from '@/components/desktop/pr-panel/useRightPrTabs';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
@@ -839,6 +840,7 @@ function DashboardInner() {
     setResponsiveAutoCollapsed((current) => current.left === autoCollapsed ? current : { left: autoCollapsed });
   }, [chatVisible, viewportBands]);
   const { rightWidth, setRightWidth, o8Width, setO8Width } = useRightPanelWidths();
+  const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } = useRightPanelMaximize(chatVisible && !compactShell && !viewportBands?.belowRightCollapse);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const [o8ActiveTabHydrated, setO8ActiveTabHydrated] = useState(false);
   const { tabs: rightPrTabs, open: rememberRightPr, close: forgetRightPr } = useRightPrTabs();
@@ -4443,7 +4445,7 @@ function DashboardInner() {
       lifecycleEvents={lifecycleEvents}
       orchestratorPackets={activePackets}
       orchestratorMissionState={thoughtsMissionState}
-      registeredRepos={activeProjectRepoEntries}
+      registeredRepos={globalRepoEntries}
       ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
       leftPanelFocus={leftPanelFocus}
     />
@@ -4896,9 +4898,9 @@ function DashboardInner() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden', containerType: 'inline-size' }}>
 
       {/* ── Center: Workspace Surface ── */}
-      <div data-mcp-scope="workspace" style={{
+      <div data-mcp-scope="workspace" aria-hidden={rightPanelMaximized} inert={rightPanelMaximized} style={{
         flex: 1,
-        display: 'flex',
+        display: rightPanelMaximized ? 'none' : 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
         position: 'relative',
@@ -5016,6 +5018,7 @@ function DashboardInner() {
       </div>
 
       <motion.div
+            data-right-panel-maximized={rightPanelMaximized}
             aria-hidden={!showRightPanelColumn}
             inert={!showRightPanelColumn}
             // Animate the LAYOUT WIDTH (not just opacity/x) so the center
@@ -5027,7 +5030,7 @@ function DashboardInner() {
             // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
             // + the inner's 4px right margin so nothing clips when open.
             initial={false}
-            animate={{ width: showRightPanelColumn ? 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
+            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
             // per-mousemove target makes the panel rubber-band behind the
             // cursor. The 260ms ease stays for open/close mount/unmount.
@@ -5036,11 +5039,11 @@ function DashboardInner() {
               display: 'flex',
               height: '100%',
               flexShrink: 0,
-              maxWidth: 'max(0px, calc(100cqw - 420px))',
+              maxWidth: rightPanelMaximized ? '100%' : 'max(0px, calc(100cqw - 420px))',
               overflow: 'hidden',
             }}
           >
-            <ResizeEdge aria-label="Right panel width"
+            {!rightPanelMaximized ? <ResizeEdge aria-label="Right panel width"
               aria-valuemin={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
               aria-valuemax={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
               aria-valuenow={rightPanelKind === 'o8' ? o8Width : rightWidth}
@@ -5054,17 +5057,17 @@ function DashboardInner() {
               }}
               style={{ width: 6 }}
               glowStyle={{ top: 22, bottom: 22, left: 6, transform: 'none' }}
-            />
+            /> : null}
 
             <motion.div
               data-mcp-scope="chat-panel"
               initial={false}
-              animate={{ width: rightPanelKind === 'o8' ? o8Width : rightWidth }}
+              animate={{ width: rightPanelMaximized ? '100%' : rightPanelKind === 'o8' ? o8Width : rightWidth }}
               transition={panelDragActive ? { type: false } : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               style={{
                 flexShrink: 0,
                 alignSelf: 'stretch',
-                maxWidth: 'max(0px, calc(100cqw - 430px))',
+                maxWidth: rightPanelMaximized ? '100%' : 'max(0px, calc(100cqw - 430px))',
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
@@ -5086,6 +5089,8 @@ function DashboardInner() {
                   squircle. */}
               <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <PanelHeaderStrip
+                maximized={rightPanelMaximized}
+                onToggleMaximized={toggleRightPanelMaximized}
                 o8PanelVisible={rightPanelKind === 'o8'}
                 workspacePanelVisible={rightPanelKind === 'review'}
                 onToggleO8Panel={handleToggleO8Panel}

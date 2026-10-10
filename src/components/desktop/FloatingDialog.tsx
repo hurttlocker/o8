@@ -6,11 +6,13 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { FloatingSurface } from './FloatingSurface';
 
 /** Centered glass dialog. Focus stays inside and returns to its launcher. */
-export function FloatingDialog({ title, children, onClose, glass }: {
+export function FloatingDialog({ title, children, onClose, glass, overlay, width = 400 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   glass?: boolean;
+  overlay?: boolean;
+  width?: number;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -18,7 +20,7 @@ export function FloatingDialog({ title, children, onClose, glass }: {
   useEffect(() => { closeRef.current = onClose; }, [onClose]);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const focusable = () => Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') ?? []).filter((node) => !node.closest('[hidden], [inert]'));
+    const focusable = () => Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? []).filter((node) => !node.closest('[hidden], [inert]'));
     (root.current?.querySelector<HTMLElement>('[data-dialog-initial-focus]') ?? focusable()[0] ?? root.current)?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeRef.current(); }
@@ -33,9 +35,9 @@ export function FloatingDialog({ title, children, onClose, glass }: {
     return () => { window.removeEventListener('keydown', keydown, true); if (previous?.isConnected && !previous.closest('[inert]')) previous.focus({ preventScroll: true }); };
   }, []);
   if (typeof document === 'undefined') return null;
-  return createPortal(<div onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }} style={{ position: 'fixed', inset: 0, zIndex: 10020, display: 'grid', placeItems: 'center', padding: 16, background: 'color-mix(in srgb, var(--t-canvas-bg) 28%, transparent)' }}>
-    <motion.div initial={reduceMotion ? false : { opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }} style={{ width: 'min(400px, 100%)', maxHeight: 'calc(100vh - 32px)' }}>
-      <FloatingSurface ref={root} glass={glass} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} style={{ borderRadius: 22 }} contentStyle={{ padding: 24, maxHeight: 'calc(100vh - 32px)', boxSizing: 'border-box', overflowY: 'auto', scrollbarWidth: 'none' }}>{children}</FloatingSurface>
+  return createPortal(<div onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }} style={{ position: 'fixed', inset: 0, zIndex: 10020, display: 'grid', placeItems: 'center', padding: 16, background: overlay ? 'rgba(0, 0, 0, 0.05)' : 'color-mix(in srgb, var(--t-canvas-bg) 28%, transparent)', ...(overlay ? { backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } : {}) }}>
+    <motion.div initial={reduceMotion ? false : { opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }} style={{ width: `min(${width}px, 100%)`, maxHeight: 'calc(100vh - 32px)' }}>
+      <FloatingSurface ref={root} glass={glass} overlay={overlay} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} style={{ borderRadius: 22 }} contentStyle={{ padding: 24, maxHeight: 'calc(100vh - 32px)', boxSizing: 'border-box', overflowY: 'auto', scrollbarWidth: 'none' }}>{children}</FloatingSurface>
     </motion.div>
   </div>, document.body);
 }

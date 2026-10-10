@@ -31,7 +31,9 @@ export function useFloatingSurfaceMaterial(glass?: boolean) {
 export const FloatingSurface = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement> & {
   glass?: boolean;
   contentStyle?: CSSProperties;
-}>(function FloatingSurface({ glass, style, contentStyle, children, ...props }, ref) {
+  /** Stacked overlays screen underlying workspace text when native backdrop blur is unavailable. */
+  overlay?: boolean;
+}>(function FloatingSurface({ glass, overlay = false, style, contentStyle, children, ...props }, ref) {
   const material = useFloatingSurfaceMaterial(glass);
   return <div {...props} ref={ref} style={{
     border: `1px solid ${material.borderColor}`,
@@ -41,7 +43,7 @@ export const FloatingSurface = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDiv
     ...style,
   } as CSSProperties}>
     <SmoothCorners corners={{ radius: typeof style?.borderRadius === 'number' ? style.borderRadius : WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
-      autoEffects={false} style={{ ...contentStyle, ...material.surfaceStyle }}>
+      autoEffects={false} style={{ ...contentStyle, ...material.surfaceStyle, ...(overlay ? { background: 'var(--t-popover-surface)', backdropFilter: 'blur(24px) saturate(1.4)', WebkitBackdropFilter: 'blur(24px) saturate(1.4)' } : {}) }}>
       {children}
     </SmoothCorners>
   </div>;

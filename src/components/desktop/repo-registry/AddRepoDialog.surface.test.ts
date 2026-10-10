@@ -89,12 +89,12 @@ const appearances: Array<[PaletteId, SurfaceMode, boolean]> = [
 it.each(appearances)('uses the protected overlay surface in %s/%s (All Glass: %s)', async (palette, surface, allGlass) => {
   await render(palette, surface, allGlass);
   const modal = panel();
-  // The real portal must escape glass chrome, where --t-panel-solid is transparent.
+  // The real portal must escape glass chrome and screen the workspace text.
   expect(host.querySelector('#add-repo-path')).toBeNull();
   expect(modal.parentElement).toBe(document.body);
-  expect(modal.style.background).toBe('var(--t-panel-solid)');
-  const fill = document.documentElement.style.getPropertyValue('--t-panel-solid');
-  expect(fill).toBe(resolveTheme(getPalette(palette), surface).cssVars['--t-panel-solid']);
+  expect(modal.style.background).toBe('var(--t-popover-surface)');
+  const fill = document.documentElement.style.getPropertyValue('--t-popover-surface');
+  expect(fill).toBe(resolveTheme(getPalette(palette), surface).cssVars['--t-popover-surface']);
   if (surface === 'solid') {
     expect(fill).toMatch(/^#[\da-f]{6}$/i);
   } else {
@@ -136,7 +136,7 @@ it.each(['Cancel', 'Close', 'Escape', 'backdrop'])('clears the form on %s and re
   await act(async () => button('Open repository dialog').click());
   expect(input().value).toBe('');
   expect(button('Add').disabled).toBe(true);
-  expect(panel().style.background).toBe('var(--t-panel-solid)');
+  expect(panel().style.background).toBe('var(--t-popover-surface)');
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
@@ -149,7 +149,7 @@ it('keeps the shared surface through validation, error recovery, and the busy ad
   expect(button('Scan').disabled).toBe(true);
   expect(button('Browse').disabled).toBe(true);
   expect(button('Add').disabled).toBe(true);
-  expect(panel().style.background).toBe('var(--t-panel-solid)');
+  expect(panel().style.background).toBe('var(--t-popover-surface)');
   await act(async () => finishValidation(Response.json({ error: 'Folder is unavailable' }, { status: 400 })));
   expect(panel().textContent).toContain('Folder is unavailable');
   expect(button('Add').disabled).toBe(true);
@@ -163,7 +163,7 @@ it('keeps the shared surface through validation, error recovery, and the busy ad
   expect(button('Adding…').disabled).toBe(true);
   expect(button('Cancel').disabled).toBe(true);
   expect(input().disabled).toBe(true);
-  expect(panel().style.background).toBe('var(--t-panel-solid)');
+  expect(panel().style.background).toBe('var(--t-popover-surface)');
   await act(async () => finishAdd(Response.json({ error: 'Folder is unavailable' }, { status: 400 })));
   expect(button('Cancel').disabled).toBe(false);
   expect(input().disabled).toBe(false);

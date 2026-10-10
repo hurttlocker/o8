@@ -3445,6 +3445,12 @@
       ]
     },
     {
+      "path": "tests/projects-switcher-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/prompt-library-api-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -3685,6 +3691,15 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/repository-sources-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
         "real-path"
       ]
     },

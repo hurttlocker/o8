@@ -70,6 +70,18 @@ function pathChanges(previous: readonly string[], next: readonly string[]): File
   return changes;
 }
 
+function treePaths(entries: readonly FileNode[]) {
+  const paths = new Set<string>();
+  for (const entry of entries) {
+    const segments = entry.path.split('/');
+    // Search matches include files only. Track their folders too so returning
+    // to browsing does not re-add ancestors retained by the tree engine.
+    for (let index = 1; index < segments.length; index++) paths.add(`${segments.slice(0, index).join('/')}/`);
+    paths.add(entry.type === 'dir' ? `${entry.path}/` : entry.path);
+  }
+  return [...paths];
+}
+
 function ToolButton({ label, disabled = false, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: ReactNode }) {
   return <button type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick}
     style={{ width: 26, height: 26, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 0, borderRadius: 6, padding: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? .45 : 1 }}
@@ -95,7 +107,7 @@ export default function WorkspaceFileTree({ repoPath, selectedFile, dirtyFiles, 
   const searching = Boolean(query.trim());
   const matchingResult = searchResult?.query === query.trim() ? searchResult : null;
   const entries = searching ? matchingResult?.entries ?? EMPTY_ENTRIES : browsingEntries;
-  const paths = useMemo(() => entries.map(entry => entry.type === 'dir' ? `${entry.path}/` : entry.path), [entries]);
+  const paths = useMemo(() => treePaths(entries), [entries]);
   const directoryPaths = useMemo(() => browsingEntries.filter(entry => entry.type === 'dir').map(entry => `${entry.path}/`), [browsingEntries]);
   const { model } = useFileTree({
     paths: [], density: 'compact', initialExpansion: 'closed', flattenEmptyDirectories: true,

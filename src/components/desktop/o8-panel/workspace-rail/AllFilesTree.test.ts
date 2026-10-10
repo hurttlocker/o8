@@ -193,4 +193,25 @@ describe('workspace file navigation through the directory route', () => {
     expect(input.value).toBe('');
     await settled(() => Boolean(item('README.md')));
   });
+
+  it('returns from repeated searches with shared folder ancestors to the full tree', async () => {
+    for (const folder of ['cli', 'apps/web']) {
+      await mkdir(join(workspace, folder), { recursive: true });
+      await writeFile(join(workspace, folder, 'package.json'), '{}');
+    }
+    await writeFile(join(workspace, 'package.json'), '{}');
+    await writeFile(join(workspace, 'README.md'), '# Root');
+    await render();
+    const input = host.querySelector<HTMLInputElement>('[aria-label="Search files"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    for (let pass = 0; pass < 2; pass++) {
+      await act(async () => { setter.call(input, 'package.json'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+      await settled(() => Boolean(item('cli/package.json') && item('apps/web/package.json') && item('package.json')));
+      await click('package.json');
+      await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      await settled(() => Boolean(item('README.md') && item('cli')));
+      expect(treeText()).toContain('apps');
+      expect(treeText()).not.toContain("Couldn't load the file explorer.");
+    }
+  });
 });
