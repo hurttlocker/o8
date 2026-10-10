@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import type { DeviceState } from '@/lib/devices/types';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { PanelToolIcon } from '../panel-tools';
+import { DeviceAgentControls } from './DeviceAgentControls';
 
 const button: CSSProperties = { border: '1px solid var(--t-border)', borderRadius: 8, background: 'var(--t-glass-muted)', color: 'var(--t-text)', paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, fontSize: 11.5, fontWeight: 300, cursor: 'pointer' };
 const muted: CSSProperties = { color: 'var(--t-text-muted)', fontSize: 11.5, lineHeight: 1.6, margin: 0 };
@@ -13,21 +14,31 @@ export function DevicePanel({ active }: { active: boolean }) {
   const [state, setState] = useState<DeviceState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [mutating, setMutating] = useState(false);
   const request = useRef<AbortController | null>(null);
   const live = useRef(active);
   const read = useCallback(async (action?: 'start' | 'stop' | 'refresh' | 'install', tool?: 'hub' | 'agent') => {
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
-    setPending(true); setError(null);
+    setPending(true);
+    setMutating(Boolean(action));
+    if (action) setError(null);
+    const deadline = window.setTimeout(() => {
+      controller.abort();
+      if (request.current === controller && live.current) {
+        setError('Device tools took too long to respond. Refresh to try again.');
+        setPending(false);
+        setMutating(false);
+      }
+    }, 15_000);
     try {
       const response = await fetch('/api/panel/devices', action ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...(tool ? { tool } : {}) }), signal: controller.signal } : { signal: controller.signal });
       const value = await response.json();
       if (!response.ok) throw new Error(value.error?.message ?? 'Device tools could not be reached.');
-      if (!controller.signal.aborted && live.current) setState(value as DeviceState);
+      if (!controller.signal.aborted && live.current) { setState(value as DeviceState); setError(null); }
     } catch (failure) {
       if (!controller.signal.aborted && live.current) setError(failure instanceof Error ? failure.message : 'Device tools could not be reached.');
-    } finally { if (!controller.signal.aborted && live.current) setPending(false); }
+    } finally { if (request.current === controller) request.current = null; window.clearTimeout(deadline); if (!controller.signal.aborted && live.current) { setPending(false); setMutating(false); } }
   }, []);
   useEffect(() => {
     live.current = active;
@@ -35,11 +46,18 @@ export function DevicePanel({ active }: { active: boolean }) {
     return () => { live.current = false; request.current?.abort(); };
   }, [active, read]);
   useEffect(() => {
-    if (!active || pending || (state?.phase !== 'installing' && state?.phase !== 'starting')) return;
-    const timer = window.setTimeout(() => { void read(); }, 1500);
+    if (!active || pending || !['installing', 'starting', 'running'].includes(state?.phase ?? '')) return;
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState !== 'hidden') void read();
+    }, error ? 30_000 : state?.phase === 'running' ? 5_000 : 1_500);
     return () => window.clearTimeout(timer);
-  }, [active, pending, read, state]);
-  const busy = pending || state?.phase === 'installing' || state?.phase === 'starting';
+  }, [active, error, pending, read, state]);
+  useEffect(() => {
+    const resume = () => { if (active && document.visibilityState === 'visible' && !request.current) void read(); };
+    document.addEventListener('visibilitychange', resume);
+    return () => document.removeEventListener('visibilitychange', resume);
+  }, [active, read]);
+  const busy = mutating || (pending && !state) || state?.phase === 'installing' || state?.phase === 'starting';
   const running = state?.phase === 'running' && state.embedUrl;
   return <section aria-label="Device workspace" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
     <header style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, paddingRight: 16, paddingBottom: 12, paddingLeft: 16, borderBottom: '1px solid var(--t-divider-subtle)', flexShrink: 0 }}>
@@ -48,8 +66,9 @@ export function DevicePanel({ active }: { active: boolean }) {
       <button type="button" disabled={busy} onClick={() => { void read('refresh'); }} style={button}>Refresh</button>
       {running ? <button type="button" disabled={busy} title="Stop the viewer helper. Your simulators stay open." onClick={() => { void read('stop'); }} style={button}>Stop viewer</button> : null}
     </header>
-    {error || state?.error ? <div role="alert" style={{ ...muted, paddingTop: 10, paddingRight: 16, paddingBottom: 10, paddingLeft: 16, color: 'var(--t-text)' }}>{error ?? state?.error}</div> : null}
-    {running && active ? <iframe title="Live device controls" src={state.embedUrl} referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" style={{ flex: 1, minHeight: 320, width: '100%', border: 0, background: 'var(--t-bg)' }} /> : <div style={{ overflowY: 'auto', scrollbarWidth: 'none', padding: 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    {!running && (error || state?.error) ? <div role="alert" style={{ ...muted, paddingTop: 10, paddingRight: 16, paddingBottom: 10, paddingLeft: 16, color: 'var(--t-text)' }}>{error ?? state?.error}</div> : null}
+    {running && state ? <DeviceAgentControls state={state} statusMessage={error ?? state.error} disabled={busy} onInstall={() => { void read('install', 'agent'); }} compact /> : null}
+    {running && active ? <iframe title="Live device controls" src={state.embedUrl} referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" style={{ flex: 1, minHeight: 0, width: '100%', border: 0, background: 'var(--t-bg)' }} /> : <div style={{ overflowY: 'auto', scrollbarWidth: 'none', padding: 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ paddingTop: 12 }}>
         <div style={{ width: 48, height: 48, display: 'grid', placeItems: 'center', borderRadius: 14, background: 'var(--t-glass-muted)', color: 'var(--t-accent)', marginBottom: 18 }}><PanelToolIcon tool="device" size={25} /></div>
         <h2 style={{ fontSize: 20, fontWeight: 300, marginTop: 0, marginRight: 0, marginBottom: 8, marginLeft: 0, color: 'var(--t-text)' }}>Build for the screen in your hand.</h2>
@@ -69,15 +88,7 @@ export function DevicePanel({ active }: { active: boolean }) {
           </button>
           <p role="status" style={muted}>{state.stage ?? (state.tools.hub.installed ? 'Use the panel maximize button for more room.' : 'Downloads the device viewer helper only. SDKs and simulator images are installed separately.')}</p>
         </div>
-        <div style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
-          <div style={{ fontSize: 12 }}>Agent controls</div>
-          <p style={muted}>Let your coding agent inspect screens, tap controls, and test mobile flows with agent-device.</p>
-          {state.tools.agent.installed && state.agentCommand ? <button type="button" style={button} onClick={() => {
-            const command = [...state.agentCommand!, '--help'].map((part) => `'${part.replaceAll("'", "'\\''")}'`).join(' ');
-            void navigator.clipboard.writeText(command).then(() => setCopied(true), () => setError('The command could not be copied. Check clipboard access.'));
-          }}>{copied ? 'Command copied' : 'Copy agent command'}</button> : <button type="button" disabled={busy} style={button} onClick={() => { void read('install', 'agent'); }}>Set up agent controls</button>}
-          <span style={{ ...muted, fontSize: 10 }}>Viewer {state.tools.hub.version ?? state.tools.hub.requiredVersion} · Agent {state.tools.agent.version ?? state.tools.agent.requiredVersion}</span>
-        </div>
+        <DeviceAgentControls state={state} disabled={busy} onInstall={() => { void read('install', 'agent'); }} />
       </>}
     </div>}
   </section>;

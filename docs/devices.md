@@ -16,7 +16,11 @@ The pinned viewer's packaged iOS native module targets Apple Silicon. Intel Macs
 
 ## Coding-agent controls
 
-Choose **Set up agent controls** for the optional pinned `agent-device` CLI. **Copy agent command** provides the exact local invocation with `--help`; give it to the coding agent in your workspace to inspect the available commands. The helper lives in o8's data directory and does not replace your global CLI installation. Agent commands still run through that workspace's existing terminal permissions.
+Choose **Set up agent controls** for the optional pinned `agent-device` CLI. **Copy agent instructions** provides the exact local invocation, a session inspection command, and guidance for coordinating workers. These instructions remain available under **Shared device · Agent controls** while the viewer is open. The helper lives in o8's data directory and does not replace your global CLI installation. Agent commands still run through that workspace's existing terminal permissions.
+
+The simulator is shared. Opening a new conversation or worker does not clone it or assign an exclusive controller. Manual input through the viewer also reaches that same phone. Give each worker a distinct `--session` and select the intended iOS simulator explicitly with `--udid` when opening it. Keep the session name on subsequent commands. The helper rejects a second session on an occupied device, but reusing the owner's session or using a different daemon state directory bypasses that separation. Inspect `session list`, coordinate a handoff, and do not close another worker's session. Automatic per-worker assignment and an in-panel controller roster are not implemented yet.
+
+While visible, the panel checks its helper state every five seconds and offers recovery if the process stops. Requests time out after fifteen seconds so Refresh remains usable. Hiding the panel stops these checks; restoring it reads the current state without stopping the simulator.
 
 ## Local access
 

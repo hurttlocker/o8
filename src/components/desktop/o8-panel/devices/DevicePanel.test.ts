@@ -12,7 +12,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json(base)));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 function findButton(label: string) { return [...host.querySelectorAll('button')].find(b => b.textContent === label)!; }
 it('only inspects on entry, with explicit separate helper installation actions', async () => {
   await act(async () => root.render(createElement(DevicePanel, { active: true })));
@@ -41,4 +41,66 @@ it('shows API failures without starting another action automatically', async () 
   await act(async () => root.render(createElement(DevicePanel, { active: true })));
   expect(host.querySelector('[role="alert"]')?.textContent).toBe('Local operator required.');
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+it('detects a stopped helper without refreshing manually and stops polling when hidden', async () => {
+  vi.useFakeTimers();
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ ...base, phase: 'running', embedUrl: 'http://127.0.0.1:3333/' }))
+    .mockImplementation(async () => Response.json({ ...base, phase: 'error', error: 'The device dashboard stopped. Reopen it to reconnect.' }));
+  await act(async () => root.render(createElement(DevicePanel, { active: true })));
+  expect(host.querySelector('iframe')).not.toBeNull();
+  await act(async () => vi.advanceTimersByTimeAsync(5_000));
+  expect(host.querySelector('iframe')).toBeNull();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Reopen it');
+  await act(async () => root.render(createElement(DevicePanel, { active: false })));
+  const calls = vi.mocked(fetch).mock.calls.length;
+  await act(async () => vi.advanceTimersByTimeAsync(30_000));
+  expect(fetch).toHaveBeenCalledTimes(calls);
+});
+it('releases a hung request after a deadline and allows a manual retry', async () => {
+  vi.useFakeTimers();
+  vi.mocked(fetch).mockImplementationOnce((_url, options) => new Promise((_resolve, reject) => {
+    options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+  }));
+  await act(async () => root.render(createElement(DevicePanel, { active: true })));
+  expect(findButton('Refresh').disabled).toBe(true);
+  await act(async () => vi.advanceTimersByTimeAsync(15_000));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('took too long');
+  expect(findButton('Refresh').disabled).toBe(false);
+  await act(async () => findButton('Refresh').click());
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+it('keeps shared-device instructions available while the viewer is live', async () => {
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ ...base, phase: 'running', embedUrl: 'http://127.0.0.1:3333/', tools: { ...base.tools, agent: { ...base.tools.agent, installed: true } }, agentCommand: ['/node path', "/agent's cli"] }));
+  await act(async () => root.render(createElement(DevicePanel, { active: true })));
+  expect(host.querySelector('summary')?.textContent).toContain('Shared device');
+  await act(async () => findButton('Copy agent instructions').click());
+  const instructions = writeText.mock.calls[0] as unknown as [string];
+  expect(instructions[0]).toContain('session list');
+  expect(instructions[0]).toContain('distinct --session');
+  expect(instructions[0]).toContain('Do not override AGENT_DEVICE_STATE_DIR');
+  expect(instructions[0]).toContain("'/agent'\\''s cli'");
+  expect(host.querySelector('iframe')).not.toBeNull();
+});
+it('backs off after a live status timeout and recovers without remounting the viewer', async () => {
+  vi.useFakeTimers();
+  const running = { ...base, phase: 'running', embedUrl: 'http://127.0.0.1:3333/' };
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json(running))
+    .mockImplementationOnce((_url, options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    })).mockImplementation(async () => Response.json(running));
+  await act(async () => root.render(createElement(DevicePanel, { active: true })));
+  const frame = host.querySelector('iframe');
+  await act(async () => vi.advanceTimersByTimeAsync(5_000));
+  expect(findButton('Refresh').disabled).toBe(false);
+  expect(findButton('Stop viewer').disabled).toBe(false);
+  await act(async () => vi.advanceTimersByTimeAsync(15_000));
+  expect(host.querySelector('summary')?.textContent).toContain('Connection delayed');
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => vi.advanceTimersByTimeAsync(29_999));
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(host.querySelector('summary')?.textContent).toContain('Shared device');
+  expect(host.querySelector('iframe')).toBe(frame);
 });
