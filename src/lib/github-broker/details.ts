@@ -2,6 +2,7 @@ import 'server-only';
 
 import { githubInstallationFetch } from './auth';
 import { readPullRequestFiles } from './pull-request-files';
+import { readPullRequestChecks } from './pull-request-checks';
 
 async function parseGithubJson<T>(response: Response) {
   const text = await response.text();
@@ -74,14 +75,7 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
   const filesPromise = readPullRequestFiles(repoFullName, prNumber, installation?.id, pr.head?.sha, pr.base?.sha);
 
   const checksPromise = pr.head?.sha
-    ? githubInstallationFetch(repoFullName, `/repos/${repoFullName}/commits/${pr.head.sha}/check-runs?per_page=100`, { signal: AbortSignal.timeout(18_000) })
-      .then(({ response: checksResponse }) => parseGithubJson<{
-        check_runs?: Array<{ name?: string | null; status?: string | null; conclusion?: string | null; html_url?: string | null }>;
-      }>(checksResponse))
-      .then((checksPayload) => (checksPayload.check_runs ?? [])
-        .filter((check) => Boolean(check.name))
-        .map((check) => ({ name: check.name!, status: check.status ?? null, conclusion: check.conclusion ?? null, url: check.html_url ?? null })))
-      .catch(() => [])
+    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id).catch(() => [])
     : Promise.resolve([]);
 
   const reviewsPromise = suppliedReviewDecision ?? githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) })
