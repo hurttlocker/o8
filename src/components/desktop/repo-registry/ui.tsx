@@ -2,6 +2,7 @@
 
 import { useEffect, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useFloatingSurfaceMaterial } from '../FloatingSurface';
 
 export function GlassModal({
   open,
@@ -22,6 +23,7 @@ export function GlassModal({
   width?: number;
   popoverSurface?: boolean;
 }) {
+  const material = useFloatingSurfaceMaterial();
   useEffect(() => {
     if (!open) return undefined;
     const handleKey = (event: KeyboardEvent) => {
@@ -44,8 +46,7 @@ export function GlassModal({
           inset: 0,
           zIndex: 9998,
           background: 'rgba(0, 0, 0, 0.05)',
-          backdropFilter: 'blur(6px)',
-          WebkitBackdropFilter: 'blur(6px)',
+          ...(material.isAllGlass ? {} : { backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }),
         } as CSSProperties}
       />
       <div
@@ -61,9 +62,12 @@ export function GlassModal({
           width: `min(${width}px, calc(100vw - 28px))`,
           maxHeight: 'calc(100vh - 28px)',
           zIndex: 9999,
-          background: popoverSurface ? 'var(--t-popover-surface)' : 'var(--t-panel-solid)',
-          backdropFilter: 'blur(80px) saturate(2.2)',
-          WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
+          ...(popoverSurface ? material.overlayStyle : {
+            background: 'var(--t-panel-solid)',
+            backdropFilter: 'blur(80px) saturate(2.2)',
+            WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
+          }),
+          ...material.textStyle,
           border: '1px solid var(--t-panel-border)',
           borderRadius: 16,
           boxShadow: '0 24px 80px rgba(0, 0, 0, 0.08), 0 8px 32px rgba(0, 0, 0, 0.04), inset 0 0.5px 0 var(--t-panel-border)',
@@ -116,6 +120,7 @@ export function GlassModal({
             style={{
               width: 28,
               height: 28,
+              padding: 0,
               borderRadius: 14,
               border: 'none',
               background: 'var(--t-btn-secondary-bg)',
@@ -127,7 +132,7 @@ export function GlassModal({
               flexShrink: 0,
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}><path d="m6 6 12 12M6 18 18 6" /></svg>
           </button>
         </div>
 

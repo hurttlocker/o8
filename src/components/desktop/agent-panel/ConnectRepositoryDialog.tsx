@@ -57,7 +57,7 @@ export function ConnectRepositoryDialog({ source, projects, activeProjectId, onC
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <span style={{ color: 'var(--t-text-secondary)' }}>{source === 'github' ? <GitHubIcon size={21} /> : <ProjectGlyph kind={source === 'new' ? 'add' : 'link'} size={21} />}</span>
       <h2 style={{ margin: 0, flex: 1, fontSize: 18, fontWeight: 300, letterSpacing: '-0.2px' }}>{title}</h2>
-      <button type="button" disabled={busy} aria-label="Close repository dialog" onClick={close} style={{ width: 28, height: 28, display: 'grid', placeItems: 'center', border: 0, borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}><ProjectGlyph kind="close" size={15} /></button>
+      <button type="button" disabled={busy} aria-label="Close repository dialog" onClick={close} style={{ width: 28, height: 28, padding: 0, flexShrink: 0, display: 'grid', placeItems: 'center', border: 0, borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}><ProjectGlyph kind="close" size={15} /></button>
     </div>
     <p style={{ fontSize: 12, lineHeight: 1.5, fontWeight: 300, color: 'var(--t-text-secondary)', marginTop: 12, marginBottom: 18 }}>{source === 'new' ? 'Start a Git repository in a new folder.' : source === 'github' ? 'Choose a repository or paste its GitHub URL.' : 'Clone from GitHub, GitLab, Bitbucket, Azure DevOps, or another Git host.'}</p>
     <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>

@@ -92,10 +92,12 @@ it.each(appearances)('uses the protected overlay surface in %s/%s (All Glass: %s
   // The real portal must escape glass chrome and screen the workspace text.
   expect(host.querySelector('#add-repo-path')).toBeNull();
   expect(modal.parentElement).toBe(document.body);
-  expect(modal.style.background).toBe('var(--t-popover-surface)');
+  expect(modal.style.background).toBe(allGlass ? 'var(--t-glass-elevated)' : 'var(--t-popover-surface)');
   const fill = document.documentElement.style.getPropertyValue('--t-popover-surface');
   expect(fill).toBe(resolveTheme(getPalette(palette), surface).cssVars['--t-popover-surface']);
-  if (surface === 'solid') {
+  if (allGlass) {
+    expect(modal.style.backdropFilter).toBe('blur(24px) saturate(1.4)');
+  } else if (surface === 'solid') {
     expect(fill).toMatch(/^#[\da-f]{6}$/i);
   } else {
     // Inspect the production gradient stops, not a copied test palette. The

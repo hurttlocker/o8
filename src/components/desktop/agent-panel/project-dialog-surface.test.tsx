@@ -34,10 +34,16 @@ it.each([
   const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
   expect(dialog).not.toBeNull(); expect(host.contains(dialog)).toBe(false);
   const material = dialog.firstElementChild as HTMLElement;
-  expect(material.style.background).toBe('var(--t-popover-surface)');
+  expect(material.style.background).toBe(allGlass ? 'var(--t-glass-elevated)' : 'var(--t-popover-surface)');
+  expect(material.style.backdropFilter).toBe('none');
+  if (allGlass) {
+    expect(dialog.style.backdropFilter).toBe('blur(24px) saturate(1.4)');
+    expect(dialog.style.getPropertyValue('--t-text-secondary')).toBe('var(--t-chat-surface-text-secondary)');
+  }
   expect(document.documentElement.style.getPropertyValue('--t-popover-surface')).toBe(resolveTheme(getPalette(allGlass ? 'dark' : palette), surface).cssVars['--t-popover-surface']);
   expect(material.style.overflowY).toBe('auto');
-  expect(dialog.parentElement?.parentElement?.style.backdropFilter).toBe('blur(6px)');
+  expect(dialog.parentElement?.parentElement?.style.backdropFilter).toBe('');
+  expect((dialog.parentElement?.previousElementSibling as HTMLElement).style.backdropFilter).toBe(allGlass ? '' : 'blur(6px)');
   const buttons = [...dialog.querySelectorAll<HTMLButtonElement>('button')];
   const cancel = buttons.find((button) => button.textContent === 'Cancel')!; const add = buttons.find((button) => button.textContent === 'Add repository')!;
   expect(cancel.style.height).toBe(add.style.height); expect(cancel.style.borderRadius).toBe(add.style.borderRadius);

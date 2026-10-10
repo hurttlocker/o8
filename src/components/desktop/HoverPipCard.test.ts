@@ -105,7 +105,7 @@ describe('HoverPipCard', () => {
     act(() => window.dispatchEvent(new CustomEvent('test:context', { detail: { toggle: true } })));
     const card = container.querySelector<HTMLElement>('[data-hover-pip]')!;
     expect(card.style.left).toBe('100px');
-    expect(card.querySelector('[style*="var(--t-bg)"]')).not.toBeNull();
+    expect(card.querySelector('[style*="var(--t-glass-elevated)"]')).not.toBeNull();
     expect(card.querySelector('[style*="var(--t-popover-surface)"]')).toBeNull();
     await render('workspace-b');
     expect(container.textContent).not.toContain('Notes body');

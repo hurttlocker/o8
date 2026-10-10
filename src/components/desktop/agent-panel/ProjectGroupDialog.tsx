@@ -42,7 +42,7 @@ export function ProjectGroupDialog({ repos, project, onClose, onSaved, onAddRepo
     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <ProjectIdentity name={name || 'Project'} size={32} />
       <h2 style={{ margin: 0, flex: 1, fontSize: 18, fontWeight: 300, letterSpacing: '-0.2px' }}>{title}</h2>
-      <button type="button" aria-label="Close project dialog" onClick={close} disabled={busy} style={{ width: 28, height: 28, display: 'grid', placeItems: 'center', borderRadius: 8, background: 'transparent', border: 0, color: 'var(--t-text-muted)', cursor: 'pointer' }}><ProjectGlyph kind="close" size={15} /></button>
+      <button type="button" aria-label="Close project dialog" onClick={close} disabled={busy} style={{ width: 28, height: 28, padding: 0, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: 8, background: 'transparent', border: 0, color: 'var(--t-text-muted)', cursor: 'pointer' }}><ProjectGlyph kind="close" size={15} /></button>
     </div>
     <p style={{ marginTop: 12, marginBottom: 20, fontSize: 12, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>Group the repositories you work on together.</p>
     <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
@@ -65,7 +65,7 @@ export function ProjectGroupDialog({ repos, project, onClose, onSaved, onAddRepo
               if (saving.current) return;
               saving.current = true; setBusy(true); setError('');
               void removeProjectRepo(project.id, repo.id).then(() => setSelected((current) => { const next = new Set(current); next.delete(repo.id); return next; })).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not remove this repo.')).finally(() => { saving.current = false; setBusy(false); });
-            }} style={{ width: 26, height: 26, border: 0, borderRadius: 6, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 17 }}>×</button> : null}
+            }} style={{ width: 28, height: 28, padding: 0, flexShrink: 0, display: 'grid', placeItems: 'center', border: 0, borderRadius: 6, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}><ProjectGlyph kind="close" size={15} /></button> : project ? <span aria-hidden style={{ width: 28, flexShrink: 0 }} /> : null}
           </div>;
         })}
         {filtered.length === 0 ? <p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>{repos.length ? 'No matching repositories.' : 'Add a repository, then group it here.'}</p> : null}
