@@ -2074,6 +2074,15 @@
       ]
     },
     {
+      "path": "tests/device-tools.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/direct-merge-canonical-repo-real-path.test.ts",
       "reasons": [
         "apfs-tool",

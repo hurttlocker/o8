@@ -1,6 +1,7 @@
 export type O8Tab =
   | 'workspace'
   | 'browser'
+  | 'device'
   | 'prs'
   | 'activity'
   | 'threads'
@@ -18,7 +19,7 @@ export type O8Tab =
 
 export type RightUtilityTab = Exclude<O8Tab, 'workspace' | 'prs' | 'handoffs' | 'launcher' | 'compare'>;
 
-const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'browser', 'terminal', 'review', 'inbox', 'spec', 'threads', 'activity', 'side-chat', 'resources', 'targets'];
+const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'browser', 'device', 'terminal', 'review', 'inbox', 'spec', 'threads', 'activity', 'side-chat', 'resources', 'targets'];
 
 /** Legacy destinations keep working without a second discovery entry. */
 export function canonicalPanelTab(tab: O8Tab): O8Tab {

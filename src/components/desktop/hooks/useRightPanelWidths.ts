@@ -13,7 +13,7 @@ const DEFAULT_O8_PANEL_WIDTH = 440;
 const RIGHT_PANEL_WIDTH_CHAT_KEY = 'o8:right-panel:width-chat';
 const RIGHT_PANEL_WIDTH_O8_KEY = 'o8:right-panel:width-o8';
 const TOOL_WIDTHS_KEY = 'o8:right-panel:tool-widths';
-const WIDE_TOOL_DEFAULTS = { spec: 600, compare: 960 } as const;
+const WIDE_TOOL_DEFAULTS = { spec: 600, device: 600, compare: 960 } as const;
 type WideTool = keyof typeof WIDE_TOOL_DEFAULTS;
 
 function readStoredWidth(key: string, min: number, max: number): number | null {
@@ -32,7 +32,7 @@ export function useRightPanelWidths(tab?: O8Tab, secondaryTab?: O8Tab | null) {
   const [preferredO8Width, setPreferredO8Width] = useState(DEFAULT_O8_PANEL_WIDTH);
   const [toolWidths, setToolWidths] = useState<Partial<Record<WideTool, number>>>({});
   const [hydrated, setHydrated] = useState(false);
-  const wideTool: WideTool | null = tab === 'compare' || secondaryTab === 'compare' ? 'compare' : tab === 'spec' || secondaryTab === 'spec' ? 'spec' : null;
+  const wideTool: WideTool | null = tab === 'compare' || secondaryTab === 'compare' ? 'compare' : tab === 'spec' || secondaryTab === 'spec' ? 'spec' : tab === 'device' || secondaryTab === 'device' ? 'device' : null;
   const o8Width = wideTool ? toolWidths[wideTool] ?? Math.max(preferredO8Width, WIDE_TOOL_DEFAULTS[wideTool]) : preferredO8Width;
   const setO8Width: Dispatch<SetStateAction<number>> = useCallback((value) => {
     if (wideTool) setToolWidths((current) => ({ ...current, [wideTool]: typeof value === 'function' ? value(current[wideTool] ?? Math.max(preferredO8Width, WIDE_TOOL_DEFAULTS[wideTool])) : value }));
@@ -58,7 +58,7 @@ export function useRightPanelWidths(tab?: O8Tab, secondaryTab?: O8Tab | null) {
     try {
       const parsed = JSON.parse(window.localStorage.getItem(TOOL_WIDTHS_KEY) ?? '{}');
       const saved: Partial<Record<WideTool, number>> = {};
-      for (const key of ['spec', 'compare'] as const) {
+      for (const key of ['spec', 'device', 'compare'] as const) {
         const width = parsed?.[key];
         if (typeof width === 'number' && Number.isFinite(width) && width >= MIN_O8_PANEL_WIDTH && width <= MAX_O8_PANEL_WIDTH) saved[key] = width;
       }

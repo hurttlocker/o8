@@ -15,7 +15,7 @@ describe('panel opener', () => {
     await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
     const menu = document.querySelector<HTMLDivElement>('[aria-label="Panel views"]')!;
     const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
-    expect(items).toHaveLength(12);
+    expect(items).toHaveLength(13);
     expect(items.map((item) => item.textContent)).not.toContain('Workspace');
     expect(items.map((item) => item.textContent)).not.toContain('Handoffs');
     expect(items.map((item) => item.textContent)).toContain('Activity');
@@ -33,5 +33,9 @@ describe('panel opener', () => {
     await act(async () => trigger.click());
     await act(async () => document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click());
     expect(onNewPage).toHaveBeenCalledOnce();
+    await act(async () => trigger.click());
+    const devices = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Devices')!;
+    await act(async () => devices.click());
+    expect(onTabChange).toHaveBeenLastCalledWith('device');
   });
 });

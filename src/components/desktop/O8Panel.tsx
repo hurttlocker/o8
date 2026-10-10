@@ -16,6 +16,7 @@ import { useHandoffSelection } from './o8-panel/useHandoffSelection';
 import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
+import { DevicePanel } from './o8-panel/devices/DevicePanel';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
@@ -282,6 +283,7 @@ export function O8Panel({
   }, [browserUrl, onActiveTabChange]);
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
+    if (tab === 'device') return <DevicePanel active={active} />;
     if (tab === 'files') {
       return (
         <WorkspaceFilesPane repoPath={repoPath} selectedFile={selectedUtilityFile} dirtyFiles={dirtyFiles} onSelectFile={handleSelectUtilityFile} />
@@ -417,7 +419,7 @@ export function O8Panel({
           (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
       {/* No Brain chat on the browser — it's a real browser now (Q ruling
           2026-07-12); its header/toolbar carry browser tools instead. */}
-      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'threads' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' && activeTab !== 'inbox' && activeTab !== 'review' ? (
+      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'threads' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' && activeTab !== 'inbox' && activeTab !== 'device' && activeTab !== 'review' ? (
         <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
           <O8ScratchChat
             repoPath={repoPath}

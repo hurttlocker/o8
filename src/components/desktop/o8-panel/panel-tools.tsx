@@ -15,6 +15,7 @@ export function PanelToolIcon({ tool, size = 16 }: { tool: RightUtilityTab; size
   const paths: Record<Exclude<RightUtilityTab, 'spec'>, React.ReactNode> = {
     files: <path d="M3 7V4h7l2 3h9v13H3V7h7" />,
     browser: <><circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2c5 5 5 15 0 20-5-5-5-15 0-20Z" /></>,
+    device: <><rect x="6" y="2" width="12" height="20" rx="3" /><path d="M10 5h4M11 19h2" /></>,
     terminal: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M12 16h5" /></>,
     review: <><path d="m3 12 4 4L17 6M12 15l3 3 7-8" /></>,
     inbox: <><path d="M5 4h14l3 9v7H2v-7l3-9ZM2 13h6l2 3h4l2-3h6" /></>,
@@ -35,6 +36,7 @@ function tool(id: RightUtilityTab, label: string, description: string, group: Pa
 export const PANEL_TOOLS: PanelToolDefinition[] = [
   tool('files', 'Files', 'Browse and read repository files', 'Tools'),
   tool('browser', 'Browser', 'Open websites and local previews', 'Tools'),
+  tool('device', 'Devices', 'iOS simulators and Android emulators', 'Tools'),
   tool('terminal', 'Terminal', 'Run commands in an interactive shell', 'Tools'),
   tool('review', 'Review', 'Working changes across your project', 'Tools'),
   tool('inbox', 'Inbox', 'GitHub replies, approvals, and agent issues', 'Tools'),
