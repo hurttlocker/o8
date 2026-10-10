@@ -31,7 +31,7 @@ export function useWorkspaceFiles(repoPath?: string | null) {
   const loadDirectory = useCallback(async (directory: string, retry = false) => {
     const session = sessionRef.current;
     if (!session?.repoPath || session.requests.has(directory)) return;
-    if (!retry && session.directories[directory] && !session.directories[directory].error) return;
+    if (!retry && session.directories[directory]) return;
     const controller = new AbortController();
     session.requests.set(directory, controller);
     const publish = (state: DirectoryState) => {
@@ -39,14 +39,14 @@ export function useWorkspaceFiles(repoPath?: string | null) {
       session.directories[directory] = state;
       setSnapshot({ repoPath: session.repoPath, directories: Object.assign(emptyDirectories(), session.directories) });
     };
-    publish({ entries: [], loading: true, error: false });
+    publish({ entries: session.directories[directory]?.entries ?? [], loading: true, error: false });
     try {
       const params = new URLSearchParams({ workspace: session.repoPath, directory });
       const response = await fetch(`/api/panel/files?${params}`, { signal: controller.signal });
       if (!response.ok) throw new Error('Directory read failed');
       const data = await response.json() as { entries?: DirectoryEntry[] };
       if (!Array.isArray(data.entries)) throw new Error('Directory listing missing');
-      const entries = data.entries.filter(entry => !entry.ignored).map(entry => ({ name: entry.name, path: entry.path, type: entry.kind === 'directory' ? 'dir' as const : 'file' as const }));
+      const entries = data.entries.map(entry => ({ name: entry.name, path: entry.path, type: entry.kind === 'directory' ? 'dir' as const : 'file' as const, ignored: entry.ignored }));
       publish({ entries, loading: false, error: false });
     } catch {
       publish({ entries: [], loading: false, error: true });

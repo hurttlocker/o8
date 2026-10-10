@@ -30,6 +30,7 @@ export interface FileNode {
   name: string;
   path: string;
   type: 'file' | 'dir';
+  ignored?: boolean;
   children?: FileNode[];
 }
 

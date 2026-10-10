@@ -55,6 +55,23 @@ describe('right Files Markdown Preview', () => {
     return [...list.querySelectorAll(':scope > li')].map((_, index) => list.start + index);
   }
 
+  it('opens the editor directly from Preview and returns to formatted reading without a save', async () => {
+    const source = '# Procedure\r\n\r\n1. First\r\n1. Second\r\n';
+    files['procedure.md'] = source;
+    await open();
+    expect(container.querySelector('h1')?.textContent).toBe('Procedure');
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
+    expect(container.querySelector('textarea')?.textContent).toBe(source);
+    expect(container.querySelector('textarea')?.getAttribute('wrap')).toBe('off');
+    expect(container.querySelector('[aria-label="Read file"]')?.getAttribute('aria-pressed')).toBe('true');
+    await selectView('Preview');
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(listNumbers(topLists()[0])).toEqual([1, 2]);
+    expect(container.querySelector('[aria-label="Edit file"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(reads.mock.calls.every((call) => call.length === 1)).toBe(true);
+    expect(files['procedure.md']).toBe(source);
+  });
+
   it.each([
     ['sequential markers', '1. First\n2. Second\n3. Third', [1, 2, 3]],
     ['repeated markers', '1. First\n1. Second\n1. Third', [1, 2, 3]],

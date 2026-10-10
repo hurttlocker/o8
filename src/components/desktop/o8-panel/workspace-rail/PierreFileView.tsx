@@ -14,7 +14,7 @@ const css = `
 [data-line] { overflow-wrap: anywhere; }
 `;
 
-export default function PierreFileView({ path, content, fallback }: { path: string; content: string; fallback: React.ReactNode }) {
+export default function PierreFileView({ path, content, fallback, wrap = true }: { path: string; content: string; fallback: React.ReactNode; wrap?: boolean }) {
   const { workspaceGlass, paletteId } = useTheme();
   const themeType = workspaceGlass ? 'dark' : getPalette(paletteId).colorScheme;
   const file = useMemo(() => ({ name: path, contents: content }), [path, content]);
@@ -29,7 +29,7 @@ export default function PierreFileView({ path, content, fallback }: { path: stri
     });
     return () => { current = false; window.clearTimeout(timeout); };
   }, [file, path]);
-  const options = useMemo<FileOptions<undefined, undefined>>(() => ({ theme: 'o8-pr-code', themeType, overflow: 'wrap', disableFileHeader: true, disableErrorHandling: true, unsafeCSS: css }), [themeType]);
+  const options = useMemo<FileOptions<undefined, undefined>>(() => ({ theme: 'o8-pr-code', themeType, overflow: wrap ? 'wrap' : 'scroll', disableFileHeader: true, disableErrorHandling: true, unsafeCSS: `${css}\n[data-line] { overflow-wrap: ${wrap ? 'anywhere' : 'normal'}; }` }), [themeType, wrap]);
   if (prepared?.file === file && prepared.failed) throw new Error('Syntax colors could not load.');
   if (prepared?.file !== file) return fallback;
   return <File file={file} options={options} />;

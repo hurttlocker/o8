@@ -32,14 +32,17 @@ afterEach(async () => {
 });
 async function render(repoPath = workspace, selectedFile: string | null = null) {
   await act(async () => root.render(createElement(AllFilesTree, { repoPath, selectedFile, dirtyFiles: new Set<string>(), onSelectFile: selectFile })));
-  await settled(() => !host.textContent?.includes('Loading files...'));
+  await settled(() => Boolean(treeRoot()) && !treeText().includes('Loading files...'));
 }
+function treeRoot() { return host.querySelector('file-tree-container')?.shadowRoot; }
+function treeText() { return `${host.textContent ?? ''}${[...treeRoot()?.querySelectorAll('[role=treeitem]') ?? []].map(node => node.getAttribute('aria-label')).join(' ')}`; }
+function item(path: string) { return [...treeRoot()?.querySelectorAll<HTMLButtonElement>('[role=treeitem]') ?? []].find(node => node.dataset.itemPath?.replace(/^f::/, '').replace(/\/$/, '') === path); }
 async function settled(check: () => boolean) {
   for (let i = 0; i < 100 && !check(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
   expect(check()).toBe(true);
 }
 async function click(text: string) {
-  const button = Array.from(host.querySelectorAll('button')).find(node => (node.getAttribute('title')?.split('/').pop() ?? node.textContent?.trim()) === text);
+  const button = [...host.querySelectorAll('button'), ...treeRoot()?.querySelectorAll<HTMLButtonElement>('button') ?? []].find(node => (node.getAttribute('data-item-path')?.replace(/\/$/, '').split('/').pop() ?? node.textContent?.trim()) === text);
   expect(button, `Button ${text}`).toBeDefined();
   await act(async () => button!.click());
 }
@@ -52,13 +55,13 @@ describe('workspace file navigation through the directory route', () => {
     await writeFile(join(workspace, deep, 'page.tsx'), 'export {};');
     const composer = document.createElement('textarea'); document.body.append(composer); composer.focus();
     await render(workspace, join(workspace, deep, 'page.tsx'));
-    await settled(() => host.querySelector('[aria-current="page"]')?.getAttribute('title') === `${deep}/page.tsx`);
+    await settled(() => treeRoot()?.querySelector('[aria-selected="true"]')?.getAttribute('data-item-path') === `${deep}/page.tsx`);
     expect(requests.map(request => request.url.searchParams.get('directory'))).toEqual(['.', 'src', 'src/app', deep]);
     expect(document.activeElement).toBe(composer);
-    await click('src');
-    expect(host.querySelector('[title="src"]')?.getAttribute('aria-expanded')).toBe('false');
+    await click('dashboard');
+    expect(item(deep)?.getAttribute('aria-expanded')).toBe('false');
     await render(workspace, join(workspace, deep, 'page.tsx'));
-    expect(host.querySelector('[title="src"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(item(deep)?.getAttribute('aria-expanded')).toBe('false');
     composer.remove();
   });
 
@@ -82,10 +85,10 @@ describe('workspace file navigation through the directory route', () => {
       return realRead(input, init);
     });
     await render(workspace, 'src/file.ts');
-    await settled(() => Boolean(host.textContent?.includes("Couldn't load this folder.")));
+    await settled(() => Boolean(treeText().includes("Couldn't load this folder.")));
     expect(attempts).toBe(1);
     await click('Retry');
-    await settled(() => host.querySelector('[aria-current="page"]')?.getAttribute('title') === 'src/file.ts');
+    await settled(() => treeRoot()?.querySelector('[aria-selected="true"]')?.getAttribute('data-item-path') === 'src/file.ts');
     expect(attempts).toBe(2);
   });
 
@@ -98,18 +101,18 @@ describe('workspace file navigation through the directory route', () => {
     await writeFile(join(workspace, 'README.md'), '# Root');
     await render();
     expect(requests.map(request => request.url.searchParams.get('directory'))).toEqual(['.']);
-    expect(host.textContent).toContain('README.md');
+    expect(treeText()).toContain('README.md');
     for (const [index, name] of deep.split('/').entries()) {
       await click(name);
       const expected = index === 4 ? 'leaf.ts' : deep.split('/')[index + 1];
-      await settled(() => Boolean(host.textContent?.includes(expected)));
+      await settled(() => Boolean(treeText().includes(expected)));
     }
     await click('leaf.ts');
     expect(selectFile).toHaveBeenCalledWith(`${deep}/leaf.ts`);
     expect(requests).toHaveLength(6);
     await click('five'); await click('five');
     expect(requests).toHaveLength(6);
-    await click('constructor'); await settled(() => Boolean(host.textContent?.includes('nested.ts')));
+    await click('constructor'); await settled(() => Boolean(treeText().includes('nested.ts')));
     await click('nested.ts');
     expect(selectFile).toHaveBeenLastCalledWith('constructor/nested.ts');
     expect(requests.every(request => request.url.searchParams.get('workspace') === workspace)).toBe(true);
@@ -125,20 +128,20 @@ describe('workspace file navigation through the directory route', () => {
       if ((directory === '.' && rootFails) || (directory === 'src' && folderFails)) return new Response(null, { status: 503 });
       return realRead(input, init);
     });
-    await render(); expect(host.textContent).toContain("Couldn't load workspace files.");
-    rootFails = false; await click('Retry'); await settled(() => Boolean(host.textContent?.includes('src')));
-    await click('src'); await settled(() => Boolean(host.textContent?.includes("Couldn't load this folder.")));
-    folderFails = false; await click('Retry'); await settled(() => Boolean(host.textContent?.includes('file.ts')));
+    await render(); expect(treeText()).toContain("Couldn't load workspace files.");
+    rootFails = false; await click('Retry'); await settled(() => Boolean(treeText().includes('src')));
+    await click('src'); await settled(() => Boolean(treeText().includes("Couldn't load this folder.")));
+    folderFails = false; await click('Retry'); await settled(() => Boolean(treeText().includes('file.ts')));
     await click('file.ts'); expect(selectFile).toHaveBeenCalledWith('src/file.ts');
   });
 
   it('refreshes the root and opened folders after files are created', async () => {
     await mkdir(join(workspace, 'src')); await writeFile(join(workspace, 'src', 'before.ts'), 'export {};');
-    await render(); await click('src'); await settled(() => Boolean(host.textContent?.includes('before.ts')));
+    await render(); await click('src'); await settled(() => Boolean(treeText().includes('before.ts')));
     await writeFile(join(workspace, 'new.md'), '# New'); await writeFile(join(workspace, 'src', 'after.ts'), 'export {};');
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Refresh file tree"]')!.click());
-    await settled(() => Boolean(host.textContent?.includes('new.md') && host.textContent?.includes('after.ts')));
-    expect(host.querySelector('[title="src"]')?.getAttribute('aria-expanded')).toBe('true');
+    await settled(() => Boolean(treeText().includes('new.md') && treeText().includes('after.ts')));
+    expect(item('src')?.getAttribute('aria-expanded')).toBe('true');
     await click('after.ts'); expect(selectFile).toHaveBeenCalledWith('src/after.ts');
   });
 
@@ -158,7 +161,36 @@ describe('workspace file navigation through the directory route', () => {
     await act(async () => root.render(createElement(AllFilesTree, { repoPath: workspace, selectedFile: null, dirtyFiles: new Set<string>(), onSelectFile: selectFile })));
     await render(nextRepo); expect(oldSignal?.aborted).toBe(true);
     await act(async () => finishOld?.(Response.json({ entries: [{ name: 'stale.ts', path: 'stale.ts', kind: 'file' }] })));
-    expect(host.textContent).toContain('current.ts'); expect(host.textContent).not.toContain('stale.ts');
+    expect(treeText()).toContain('current.ts'); expect(treeText()).not.toContain('stale.ts');
     await click('current.ts'); expect(selectFile).toHaveBeenCalledWith('current.ts');
+  });
+
+  it('shows ignored folders dimmed and lets the user expand them with the keyboard', async () => {
+    await mkdir(join(workspace, '.next')); await writeFile(join(workspace, '.next', 'cache.json'), '{}');
+    await writeFile(join(workspace, 'README.md'), '# Readme');
+    await render();
+    expect(item('.next')?.getAttribute('data-item-git-status')).toBe('ignored');
+    const directory = item('.next')!;
+    await act(async () => { directory.focus(); directory.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, composed: true })); });
+    await settled(() => Boolean(item('.next/cache.json')));
+    await click('cache.json');
+    expect(selectFile).toHaveBeenLastCalledWith('.next/cache.json');
+  });
+
+  it('searches unopened folders, opens the match, and restores browsing on Escape', async () => {
+    await mkdir(join(workspace, 'src/deep'), { recursive: true });
+    await writeFile(join(workspace, 'src/deep/needle.ts'), 'export {};');
+    await writeFile(join(workspace, 'README.md'), '# Readme');
+    await render();
+    const input = host.querySelector<HTMLInputElement>('[aria-label="Search files"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'needle'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await settled(() => Boolean(item('src/deep/needle.ts')));
+    expect(requests.some(request => request.url.searchParams.get('search') === 'needle')).toBe(true);
+    expect(requests.filter(request => request.url.searchParams.has('directory'))).toHaveLength(1);
+    await click('needle.ts'); expect(selectFile).toHaveBeenLastCalledWith('src/deep/needle.ts');
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(input.value).toBe('');
+    await settled(() => Boolean(item('README.md')));
   });
 });

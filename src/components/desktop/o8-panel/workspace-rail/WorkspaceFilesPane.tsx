@@ -14,6 +14,7 @@ export function WorkspaceFilesPane({ repoPath, selectedFile, dirtyFiles, onSelec
   const [treeVisible, setTreeVisible] = useState(true);
   const treeId = useId();
   const label = treeVisible ? 'Hide file tree' : 'Show file tree';
+  const split = treeVisible && Boolean(selectedFile);
   const toggle = <button type="button" aria-label={label} title={label} aria-expanded={treeVisible} aria-controls={treeId}
     onClick={() => setTreeVisible(current => !current)}
     onMouseEnter={event => { event.currentTarget.style.background = 'var(--t-hover)'; }}
@@ -27,10 +28,10 @@ export function WorkspaceFilesPane({ repoPath, selectedFile, dirtyFiles, onSelec
   </button>;
 
   return <div data-workspace-files="" style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'grid',
-    gridTemplateColumns: treeVisible ? 'minmax(0, 1fr) minmax(min(210px, 48%), 34%)' : 'minmax(0, 1fr)', background: 'var(--t-bg)' }}>
-    <FileViewer repoPath={repoPath} selectedFile={selectedFile} headerAction={toggle} />
-    <div id={treeId} hidden={!treeVisible} style={{ minWidth: 0, minHeight: 0, display: treeVisible ? 'flex' : 'none',
-      borderLeft: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
+    gridTemplateColumns: split ? 'minmax(0, 1fr) minmax(min(210px, 48%), 34%)' : 'minmax(0, 1fr)', background: 'var(--t-bg)' }}>
+    {selectedFile ? <FileViewer repoPath={repoPath} selectedFile={selectedFile} headerAction={toggle} /> : null}
+    <div id={treeId} hidden={!treeVisible && Boolean(selectedFile)} style={{ minWidth: 0, minHeight: 0, display: treeVisible || !selectedFile ? 'flex' : 'none',
+      borderLeft: split ? '1px solid var(--t-divider-subtle)' : undefined, background: 'transparent' }}>
       <AllFilesTree repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
     </div>
   </div>;

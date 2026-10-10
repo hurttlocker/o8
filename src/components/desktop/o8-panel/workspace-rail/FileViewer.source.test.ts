@@ -18,9 +18,14 @@ it('reads with colors by default, preserves an edit through reading, and saves t
   await act(async () => root.render(createElement(FileViewer, { repoPath: '/workspace', selectedFile: 'src/example.ts' })));
   expect(host.querySelector('[data-code-reader]')?.textContent).toBe('const value = 1;');
   expect(host.querySelector('textarea')).toBeNull();
+  const wrap = host.querySelector<HTMLButtonElement>('[aria-label="Word wrap"]')!;
+  expect(wrap.getAttribute('aria-pressed')).toBe('true');
+  await click('Word wrap');
+  expect(wrap.getAttribute('aria-pressed')).toBe('false');
   expect(host.querySelector('[data-file-type]')?.getAttribute('data-file-type')).toBe('ts');
   await click('Edit file');
   const editor = host.querySelector('textarea')!;
+  expect(editor.getAttribute('wrap')).toBe('off');
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, 'const value = 2;');
     editor.dispatchEvent(new Event('input', { bubbles: true }));

@@ -39,7 +39,7 @@ it('gives a file the full pane without losing edits or expanded folders', async 
   expect(host.textContent).toContain('Modified');
   const hide = host.querySelector<HTMLButtonElement>('[aria-label="Hide file tree"]')!;
   const tree = document.getElementById(hide.getAttribute('aria-controls')!)!;
-  const directory = tree.querySelector('[title="src"]');
+  const directory = tree.querySelector('file-tree-container')?.shadowRoot?.querySelector('[data-item-path="src/"]');
   expect(directory?.getAttribute('aria-expanded')).toBe('true');
   await act(async () => { hide.focus(); hide.click(); });
   expect(tree.hidden).toBe(true);
@@ -48,7 +48,7 @@ it('gives a file the full pane without losing edits or expanded folders', async 
   expect(document.activeElement?.getAttribute('aria-label')).toBe('Show file tree');
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Show file tree"]')!.click());
   expect(tree.hidden).toBe(false);
-  expect(tree.querySelector('[title="src"]')).toBe(directory);
+  expect(tree.querySelector('file-tree-container')?.shadowRoot?.querySelector('[data-item-path="src/"]')).toBe(directory);
   expect(directory?.getAttribute('aria-expanded')).toBe('true');
   expect(host.querySelector('textarea')).toBe(editor);
   expect(editor.value).toBe('const value = 2;');

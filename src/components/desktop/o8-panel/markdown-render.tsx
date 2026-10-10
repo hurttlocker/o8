@@ -143,7 +143,7 @@ function renderMarkdownList(list: MarkdownList, text: string, key: string): Reac
 
 function renderMarkdownLines(text: string, keyPrefix: string): ReactNode[] {
   const blocks: ReactNode[] = [];
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/);
   // Reuse the editor's Markdown parser for list boundaries, starts and nesting.
   // Only list ranges use its tree; other prose and the isolated HTML/SVG/iframe
   // segments retain their existing rendering and security boundaries.

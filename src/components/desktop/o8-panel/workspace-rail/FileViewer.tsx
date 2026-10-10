@@ -180,13 +180,14 @@ export function FileViewer({
   const [dirty, setDirty] = useState(false);
   const [viewModeByFile, setViewModeByFile] = useState<Record<string, SourceViewMode>>({});
   const [editingFile, setEditingFile] = useState<string | null>(null);
+  const [wrapLines, setWrapLines] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumberRef = useRef<HTMLDivElement>(null);
   const fileKind = selectedFile ? fileKindForPath(selectedFile) : 'text';
   const viewMode = selectedFile ? viewModeByFile[selectedFile] ?? defaultViewMode(fileKind) : 'source';
   const canTogglePreview = fileKind === 'markdown' || fileKind === 'svg';
   const editing = selectedFile === editingFile;
-  const showEditControl = canReadAsText(fileKind) && viewMode === 'source';
+  const showEditControl = canReadAsText(fileKind);
   const assetUrl = selectedFile && repoPath && (fileKind === 'image' || fileKind === 'pdf' || fileKind === 'svg')
     ? assetUrlFor(repoPath, selectedFile)
     : null;
@@ -317,6 +318,7 @@ export function FileViewer({
 
   const handleViewModeChange = useCallback((nextMode: SourceViewMode) => {
     if (!selectedFile) return;
+    if (nextMode === 'preview') setEditingFile(null);
     setViewModeByFile((current) => ({ ...current, [selectedFile]: nextMode }));
   }, [selectedFile]);
 
@@ -334,22 +336,24 @@ export function FileViewer({
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, fontFamily: UI_FONT }}>
-        <FileTypeIcon name={selectedFile} size={18} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', paddingTop: 5, paddingRight: 8, paddingBottom: 5, paddingLeft: 12, fontFamily: UI_FONT }}>
+        <FileTypeIcon name={selectedFile} size={14} />
         <div title={selectedFile} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span style={{ fontSize: 13.5, fontWeight: 300, color: 'var(--t-text)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{fileName}</span>
           {selectedFile.includes('/') ? <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-muted)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{selectedFile.slice(0, selectedFile.lastIndexOf('/')) || '/'}</span> : null}
         </div>
+        {canTogglePreview ? <PreviewToggle mode={viewMode} onModeChange={handleViewModeChange} /> : null}
+        {showEditControl && fileContent !== null ? <button type="button" aria-label={editing ? 'Read file' : 'Edit file'} aria-pressed={editing} onClick={() => { if (!editing) handleViewModeChange('source'); setEditingFile(editing ? null : selectedFile); }}
+          style={{ minHeight: 26, border: 0, borderRadius: 6, background: editing ? 'var(--t-accent-soft)' : 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', fontFamily: UI_FONT, fontSize: 11, fontWeight: 300, paddingLeft: 7, paddingRight: 7 }}>{editing ? 'Read' : 'Edit'}</button> : null}
+        {showEditControl && viewMode === 'source' && !editing ? <button type="button" aria-label="Word wrap" title={wrapLines ? 'Turn word wrap off' : 'Turn word wrap on'} aria-pressed={wrapLines} onClick={() => setWrapLines(value => !value)}
+          style={{ width: 26, height: 26, flexShrink: 0, border: 0, borderRadius: 6, padding: 0, background: wrapLines ? 'var(--t-hover)' : 'transparent', color: wrapLines ? 'var(--t-text-secondary)' : 'var(--t-text-muted)', cursor: 'pointer' }}><svg aria-hidden width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16M4 10h12a4 4 0 0 1 0 8h-5m3-3-3 3 3 3M4 15h3M4 20h3" /></svg></button> : null}
         {headerAction}
       </div>
-      {dirty || error || canTogglePreview || showEditControl ? (
+      {dirty || error ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>
           <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {error ?? (dirty ? 'Modified' : '')}
           </span>
-          {canTogglePreview ? <PreviewToggle mode={viewMode} onModeChange={handleViewModeChange} /> : null}
-          {showEditControl && fileContent !== null ? <button type="button" aria-label={editing ? 'Read file' : 'Edit file'} aria-pressed={editing} onClick={() => setEditingFile(editing ? null : selectedFile)}
-            style={{ minHeight: 24, border: '1px solid var(--t-divider-subtle)', borderRadius: 7, background: 'var(--t-hover)', color: 'var(--t-text-secondary)', cursor: 'pointer', fontFamily: UI_FONT, fontSize: 11, fontWeight: 300, paddingLeft: 9, paddingRight: 9 }}>{editing ? 'Read' : 'Edit'}</button> : null}
           {dirty ? (
             <button
               type="button"
@@ -394,7 +398,7 @@ export function FileViewer({
             <MarkdownRender content={editContent} />
           </div>
         ) : fileContent !== null && !editing ? (
-          <SyntaxFileView path={selectedFile} content={editContent} />
+          <SyntaxFileView path={selectedFile} content={editContent} wrap={wrapLines} />
         ) : fileContent !== null ? (
           <>
             <div
@@ -438,6 +442,7 @@ export function FileViewer({
               }}
               onScroll={handleEditorScroll}
               spellCheck={false}
+              wrap="off"
               style={{
                 flex: 1,
                 minWidth: 0,

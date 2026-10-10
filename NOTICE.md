@@ -18,6 +18,24 @@ license does not replace or narrow those terms.
 - The theme's [upstream notice](licenses/pierre-theme-NOTICE.md), including
   the original Primer MIT attribution, is retained with these distributions.
 
+## Workspace file explorer
+
+- Packages and versions: `@pierre/trees` 1.0.0-beta.6 and
+  `@pierre/theming` 1.0.0
+- Copyright: Copyright 2025 Pierre Computer Company
+- License: Apache License 2.0
+- Upstream: <https://github.com/pierrecomputer/pierre>
+- Use in o8: the compact workspace file tree and its file-type icons
+- Unmodified license texts: [trees](licenses/trees-Apache-2.0.txt) and
+  [theming](licenses/theming-Apache-2.0.txt)
+- The trees package's [upstream notice](licenses/pierre-trees-NOTICE.md),
+  including its original headless-tree MIT attribution, is retained.
+
+The explorer also uses `preact` 11.0.0-beta.0 and `preact-render-to-string`
+6.6.5 under the MIT license. Their unmodified copyright and permission notices
+are retained in [Preact](licenses/preact-MIT.txt) and
+[Preact render-to-string](licenses/preact-render-to-string-MIT.txt).
+
 ## Algorithms and techniques
 
 ### FLIP/PIC fluid simulation

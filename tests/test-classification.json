@@ -82,6 +82,14 @@
       ]
     },
     {
+      "path": "src/app/api/panel/files/route-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/panel/o8-update-summary/route-real-path.test.ts",
       "reasons": [
         "real-path"

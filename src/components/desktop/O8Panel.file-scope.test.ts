@@ -20,7 +20,7 @@ vi.mock('./o8-panel/TargetsPanel', () => ({ TargetsPanel: () => null }));
 vi.mock('./o8-panel/ProjectChangesOverview', () => ({ ProjectChangesOverview: () => null }));
 vi.mock('./o8-panel/WorkspaceBrowserPreview', () => ({ WorkspaceBrowserPreview: () => null }));
 vi.mock('./ContextualPanel', () => ({ ContextualPanel: () => null }));
-vi.mock('./o8-panel/workspace-rail/AllFilesTree', () => ({ AllFilesTree: ({ onSelectFile }: { onSelectFile: (path: string) => void }) => createElement('button', { onClick: () => onSelectFile('src/file.ts') }, 'Select file') }));
+vi.mock('./o8-panel/workspace-rail/AllFilesTree', () => ({ AllFilesTree: ({ repoPath, onSelectFile }: { repoPath: string; onSelectFile: (path: string) => void }) => createElement('button', { 'data-tree-repo': repoPath, onClick: () => onSelectFile('src/file.ts') }, 'Select file') }));
 vi.mock('./o8-panel/workspace-rail/FileViewer', () => ({ FileViewer: ({ repoPath, selectedFile }: { repoPath: string; selectedFile: string | null }) => createElement('output', { 'data-repo': repoPath }, selectedFile ?? 'No selection') }));
 
 let host: HTMLDivElement; let root: Root;
@@ -35,7 +35,10 @@ describe('panel file scope', () => {
     await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files' })));
     expect(host.querySelector('output')?.textContent).toBe('src/file.ts');
     await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files', selectedFile: null })));
-    expect(host.querySelector('output')?.textContent).toBe('No selection');
+    expect(host.querySelector('output')).toBeNull();
+    expect(host.querySelector('[data-tree-repo]')?.getAttribute('data-tree-repo')).toBe('/workspace/two');
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-tree-repo]')!.click());
+    expect(host.querySelector('output')?.textContent).toBe('src/file.ts');
     expect(host.querySelector('output')?.getAttribute('data-repo')).toBe('/workspace/two');
   });
 
@@ -49,6 +52,7 @@ describe('panel file scope', () => {
     await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files' })));
     expect(host.querySelector('output')?.textContent).toBe('src/review.ts');
     await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/three', activeTab: 'files' })));
-    expect(host.querySelector('output')?.textContent).toBe('No selection');
+    expect(host.querySelector('output')).toBeNull();
+    expect(host.querySelector('[data-tree-repo]')?.getAttribute('data-tree-repo')).toBe('/workspace/three');
   });
 });
