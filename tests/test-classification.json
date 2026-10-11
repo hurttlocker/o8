@@ -2303,6 +2303,14 @@
       ]
     },
     {
+      "path": "tests/handoff-workspace-git-hardening-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/harness-cli-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3045,6 +3053,17 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-handoff-transport-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
       ]
     },
     {
