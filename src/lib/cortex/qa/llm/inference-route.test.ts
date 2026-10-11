@@ -39,6 +39,8 @@ import {
   resolveLocalInferenceBaseUrlSync,
 } from '@/lib/operator/defaults';
 
+const FREE_TOKEN = 'eyJhbGciOiJFZERTQSJ9.eyJwbGFuIjoiZnJlZSJ9.fixture';
+
 const mockKey = vi.mocked(resolveOpenRouterKey);
 const mockEnt = vi.mocked(readCachedEntitlement);
 const mockEnsureFreeEntitlement = vi.mocked(ensureFreeEntitlement);
@@ -250,14 +252,14 @@ describe('inference-route', () => {
       mockKey.mockResolvedValue(null);
       setEnt(null);
       mockEnsureFreeEntitlement.mockImplementationOnce(async () => {
-        setEnt({ plan: 'free', licenseKey: 'fresh.install.token' });
+        setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       });
 
       const route = await resolveOpenRouterRoute({ provisionInstallAllowance: true });
 
       expect(mockEnsureFreeEntitlement).toHaveBeenCalledOnce();
       expect(route?.via).toBe('proxy');
-      expect(route?.headers.Authorization).toBe('Bearer fresh.install.token');
+      expect(route?.headers.Authorization).toBe(`Bearer ${FREE_TOKEN}`);
     });
 
     it('routes plan-token users to PROXY before a local OpenRouter key', async () => {
@@ -340,16 +342,16 @@ describe('inference-route', () => {
       // — the /issue-free token rides the relay (which enforces the free-chain
       // model policy + daily cap server-side).
       mockKey.mockResolvedValue(null);
-      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       const route = await resolveOpenRouterRoute();
       expect(route?.via).toBe('proxy');
       expect(route?.url).toBe(`${DEFAULT_O8_API_BASE_URL}/v1/inference`);
-      expect(route?.headers.Authorization).toBe('Bearer fff.eee.ttt');
+      expect(route?.headers.Authorization).toBe(`Bearer ${FREE_TOKEN}`);
     });
 
     it('free allowance is the LAST resort — a live local endpoint still wins', async () => {
       mockKey.mockResolvedValue(null);
-      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       mockLocalBaseUrl.mockReturnValue('http://localhost:11434');
       mockLocalChatModel.mockReturnValue('qwen2.5-coder:7b');
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, {
@@ -362,7 +364,7 @@ describe('inference-route', () => {
 
     it('free allowance is the LAST resort — a BYO OpenRouter key still wins', async () => {
       mockKey.mockResolvedValue('sk-local-key');
-      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       const route = await resolveOpenRouterRoute();
       expect(route?.via).toBe('direct');
       expect(route?.headers.Authorization).toBe('Bearer sk-local-key');
