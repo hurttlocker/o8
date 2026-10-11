@@ -7,9 +7,9 @@ import type { O8Tab } from './types';
 
 const DIVIDER_HEIGHT = 36;
 
-export function panelPaneVisible(tab: O8Tab, primary: O8Tab, secondary: O8Tab | null): boolean {
+export function panelPaneVisible(tab: O8Tab, primary: O8Tab, secondary: O8Tab | null, active = true): boolean {
   const matches = (selected: O8Tab | null) => selected === tab || (tab === 'activity' && selected === 'prs');
-  return matches(primary) || matches(secondary);
+  return active && (matches(primary) || matches(secondary));
 }
 
 export function panelPaneStyle(tab: O8Tab, primary: O8Tab, secondary: O8Tab | null, ratio: number): React.CSSProperties {

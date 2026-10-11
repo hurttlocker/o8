@@ -24,6 +24,13 @@ export interface OnboardingRuntimeSelection {
 
 type OnboardingFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+export async function loadOnboardingBuiltInAgent(request: OnboardingFetch = fetch): Promise<SetupRuntime | null> {
+  const response = await request('/api/panel/operator-defaults?include=setup-built-in', { cache: 'no-store' });
+  if (!response.ok) return null;
+  const payload = await response.json().catch(() => null) as { builtInAgent?: SetupRuntime | null } | null;
+  return payload?.builtInAgent ?? null;
+}
+
 export function orchestratorBackendForRuntime(
   runtime: OnboardingOrchestratorRuntime,
 ): OrchestratorBackendSetting {
@@ -93,7 +100,7 @@ export async function persistOnboardingRuntimeSelection(
 
 export function onboardingSetupIsReady(setup: OnboardingRuntimeSelection): boolean {
   const backend = setup.recommendation.backend;
-  const runtime = runtimeForLead(backend);
+  const runtime = runtimeForLead(backend, setup.inventory);
   const leadReady = runtime ? canSelectOnboardingRuntime(setup.inventory, runtime)
     : backend === 'o8' || Boolean(backend && setup.recommendation.preserved);
   return leadReady && setup.workerRuntimes.length > 0

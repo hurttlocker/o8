@@ -142,6 +142,9 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     contractArmed && input.taskContract?.processConstraints?.length
       ? 'PROCESS checklist - assess every process constraint ID from transcript, lane events, or command observations. Mark unavailable evidence as unverified and request changes; never cite a changed file as proof of an unrelated process action.'
       : null,
+    contractArmed && input.taskContract?.processConstraints?.length && input.lane.packetId
+      ? `Retrieve the packet's persisted worker evidence with o8_packet_transcript(${JSON.stringify({ packetId: input.lane.packetId, tail: true, limit: 50 })}). Paginate with cursor and limit when the required evidence is outside that tail. Cite concrete event sequences for process constraints. If the tool or evidence is unavailable, mark it unverified and request changes; do not guess transcript paths or assume the previous reviewer session's context is available.`
+      : null,
     contractArmed ? '' : null,
     contractArmed ? 'MINIMALITY trace - map every changed file or bounded change unit to task-contract requirement IDs:' : null,
     contractArmed ? '`MINIMALITY: <file|change-unit> -> <R1,R2|DEVIATION> necessary=<yes|no> evidence=<reason|implementation-notes entry>`' : null,

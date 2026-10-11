@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use connected o8"
+  short_description: "Check tasks and run consented bounded workers"
+  default_prompt: "Use $connected-o8 to check my connected computer and tell me what needs attention."

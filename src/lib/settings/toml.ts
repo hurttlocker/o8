@@ -20,6 +20,7 @@ import {
   isBrainRoutingMode,
   isCollideAggregator,
   isDispatchRuntime,
+  isParallelCap,
   isOrchestratorBackendSetting,
   isPrLinkDestination,
   isReviewerBackendSetting,
@@ -253,7 +254,7 @@ function targetingTierField(section: string, key: string): TomlField<OperatorDef
  */
 export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   subscriptionProfile: enumField('operator', 'subscription_profile', 'one of "both", "claude-only", or "codex-only"', isSubscriptionProfile),
-  parallelCap: numberField('operator', 'parallel_cap', 'an integer between 1 and 32', (value) => Number.isInteger(value) && value >= 1 && value <= 32),
+  parallelCap: numberField('operator', 'parallel_cap', 'a positive safe integer', isParallelCap),
   meteredPacketCostCapUsd: numberField('operator', 'metered_packet_cost_cap_usd', 'a number greater than 0', (value) => value > 0),
   meteredPacketInputTokenCap: numberField('operator', 'metered_packet_input_token_cap', 'an integer greater than 0', (value) => Number.isInteger(value) && value > 0),
   uiLoopMaxIterations: numberField('uiLoop', 'max_iterations', 'an integer greater than 0', (value) => Number.isSafeInteger(value) && value > 0),
@@ -343,7 +344,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   prLinkDestination: enumField('git', 'pr_link_destination', '"in-app" or "browser"', isPrLinkDestination),
   worktreeMaxCount: numberField('git', 'worktree_max_count', 'an integer between 0 and 1000', (value) => Number.isInteger(value) && value >= 0 && value <= 1000),
   worktreeMaxTotalGb: numberField('git', 'worktree_max_total_gb', 'a number between 0 and 10000', (value) => value >= 0 && value <= 10000),
-  storageReserveRatio: numberField('git', 'storage_reserve_ratio', 'a number greater than 0 and no more than 1', (value) => value > 0 && value <= 1),
+  storageReserveRatio: numberField('git', 'storage_reserve_ratio', 'a number between 0 and 1', (value) => value >= 0 && value <= 1),
   storageReserveFloorGb: numberField('git', 'storage_reserve_floor_gb', 'a number greater than 0 and no more than 10000', (value) => value > 0 && value <= 10000),
   workspaceParkingMode: enumField('git', 'workspace_parking_mode', '"manual" or "pressure"', (value): value is OperatorDefaults['workspaceParkingMode'] => value === 'manual' || value === 'pressure'),
 } satisfies { [K in keyof OperatorDefaults]: TomlField<OperatorDefaults[K]> };

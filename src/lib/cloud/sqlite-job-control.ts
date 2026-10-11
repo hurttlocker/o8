@@ -168,9 +168,9 @@ export function promoteSteerControls(
 
 export function cancelCloudJob(
   sqlite: Database.Database,
-  row: SqliteCloudJobRow,
+  row: Pick<SqliteCloudJobRow, 'id'>,
   nowMs: number,
-  detail: { controlId?: string; workerId?: string } = {},
+  detail: { controlId?: string; workerId?: string; reason?: string } = {},
 ): boolean {
   const now = iso(nowMs);
   const changed = sqlite.prepare(`
@@ -184,7 +184,7 @@ export function cancelCloudJob(
   sqlite.prepare(`
     INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)
     VALUES (?, 'cancelled', ?, ?, ?)
-  `).run(row.id, JSON.stringify({ controlId: detail.controlId ?? null }), detail.workerId ?? null, now);
+  `).run(row.id, JSON.stringify({ controlId: detail.controlId ?? null, ...(detail.reason ? { reason: detail.reason } : {}) }), detail.workerId ?? null, now);
   return true;
 }
 

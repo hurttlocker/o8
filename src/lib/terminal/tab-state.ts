@@ -24,7 +24,7 @@ export interface PersistedChatCheckpoint {
 export interface PersistedTab {
   id: string;
   label: string;
-  kind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas'; // defaults to 'terminal' for backward compat
+  kind?: 'terminal' | 'chat' | 'llm-chat' | 'chatgpt-plan' | 'canvas' | 'orchestrator' | 'fleet-canvas'; // defaults to 'terminal' for backward compat
   cliAgent: string; // 'shell' | 'claude' | 'codex' | etc
   repoName?: string;
   repoPath?: string;
@@ -92,6 +92,7 @@ export interface PersistedTabState {
 }
 
 export type PersistedRuntimeSessionKey =
+  | `cloud:${string}`
   | `codex:${string}`
   | `codex-owned:${string}`
   | `codex-discovered:${string}`
@@ -302,6 +303,8 @@ export function formatPersistedRuntimeSessionKey(
 ): PersistedRuntimeSessionKey | null {
   const trimmed = sessionKey?.trim();
   if (!trimmed || !runtime) return null;
+  if (trimmed.startsWith('cloud:')) return trimmed as PersistedRuntimeSessionKey;
+  if (runtime === 'cloud') return `cloud:${trimmed}`;
   if (isOwnedOrchestratorSessionKey(trimmed)) return trimmed as PersistedRuntimeSessionKey;
   if (runtime === 'codex' && (
     trimmed.startsWith('codex:')
@@ -328,6 +331,7 @@ export function stripPersistedRuntimeSessionKey(
   const trimmed = sessionKey?.trim();
   if (!trimmed) return undefined;
   if (!runtime) return trimmed;
+  if (trimmed.startsWith('cloud:')) return trimmed;
   if (isOwnedOrchestratorSessionKey(trimmed)) return trimmed;
   if (runtime === 'codex' && (
     trimmed.startsWith('codex-owned:')

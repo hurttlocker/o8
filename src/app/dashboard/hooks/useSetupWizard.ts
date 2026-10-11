@@ -35,7 +35,7 @@ export function useSetupWizard() {
     })();
   }, []);
 
-  const handleSetupComplete = useCallback(async () => {
+  const handleSetupComplete = useCallback(async (repoPath?: string) => {
     setSetupCompleteError(null);
     try {
       const res = await fetch('/api/setup/config', {
@@ -47,6 +47,7 @@ export function useSetupWizard() {
         // gated on the canonical flag think onboarding never finished.
         body: JSON.stringify({
           setupComplete: true,
+          ...(repoPath ? { repoPath } : {}),
           completedAt: new Date().toISOString(),
         }),
       });

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, mergeUserSpawnedTabs, needsRuntimeSessionLivenessCheck, reconcileValidatedTabs, resetControllerRefs } from './terminal-restore';
+import { computeCliChatSession } from './terminal-session-ops';
+import { buildPersistedState } from './terminal-tab-handlers';
 import type { TerminalTab } from './types';
 
 function tab(overrides: Partial<TerminalTab>): TerminalTab {
@@ -270,5 +272,25 @@ describe('computeRestoredTabs — optimistic crash recovery', () => {
         chatSessionKey: sessionKey,
       }),
     ]));
+  });
+});
+
+describe('persisted cloud task navigation', () => {
+  it.each(['codex:cloud:worker', 'cloud-owned:cloud:worker'])('repairs a persisted wrapped cloud key: %s', async (key) => {
+    const saved = buildPersistedState([tab({ id: 'chat-cloud', kind: 'chat', chatRuntime: 'codex', chatSessionKey: key })], 'chat-cloud');
+    const restored = await computeRestoredTabs(saved, { preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => tab({ kind: 'llm-chat' }) }, undefined, 'optimistic');
+    expect(restored?.tabs[0]).toMatchObject({ chatRuntime: 'cloud', chatSessionKey: 'cloud:worker' });
+    expect(restored?.tabs[0].chatModel).toBeUndefined();
+  });
+
+  it.each(['optimistic', 'validated'] as const)('preserves cloud identity through %s restore without a live local session', async (mode) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ agents: [] }), { status: 200 })));
+    const opened = computeCliChatSession({ runtime: 'cloud', targetSessionKey: 'cloud:worker', label: 'Review worker', repo: { name: 'Repo', localPath: '/repo' } }, [], '');
+    const saved = JSON.parse(JSON.stringify(buildPersistedState(opened.tabs, opened.activeTabId)));
+    const restored = await computeRestoredTabs(saved, { preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => tab({ kind: 'llm-chat' }) }, undefined, mode);
+    expect(restored?.tabs[0]).toMatchObject({ chatRuntime: 'cloud', chatSessionKey: 'cloud:worker', label: 'Review worker' });
+    const reopened = computeCliChatSession({ runtime: 'codex', targetSessionKey: 'cloud:worker' }, restored!.tabs, restored!.activeTabId);
+    expect(reopened.tabs).toHaveLength(1);
+    expect(reopened.activeTabId).toBe(opened.activeTabId);
   });
 });

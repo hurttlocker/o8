@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
             body: JSON.stringify({
               repoPath,
               task,
-              count: typeof args.count === 'number' ? args.count : 1,
+              count: args.count,
               clientMutationId,
               ...(origin === 'symon' ? { origin } : {}),
             }),
@@ -205,9 +205,10 @@ export async function POST(request: NextRequest) {
       ...(navigated ? { navigated: true } : {}),
     });
   } catch (error) {
+    console.error('[canvas-intent] bridge failed:', error);
     return NextResponse.json({
       ok: false,
-      error: error instanceof Error ? error.message : 'canvas intent bridge failed',
+      error: 'canvas intent bridge failed',
       hint: 'The o8 app window must be running — the bridge rides the Tauri webview socket.',
     });
   }

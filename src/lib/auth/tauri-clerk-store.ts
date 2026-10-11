@@ -25,7 +25,7 @@ export async function purgeTauriClerkStore(): Promise<void> {
     await store.clear();
     await store.save();
     await store.close();
-  } catch (error) {
-    console.error('[auth] failed to purge native Clerk store:', error);
+  } catch {
+    console.error('[auth] failed to purge native Clerk store');
   }
 }

@@ -13,7 +13,7 @@ vi.mock('@/lib/tauri/ipc-fetch', () => ({
   ipcFetch: (...args: unknown[]) => mockIpcFetch(...args),
 }));
 
-import { fetchOnce } from './fetch-cache';
+import { fetchOnce, invalidateFetchOnce } from './fetch-cache';
 
 beforeEach(() => {
   mockIpcFetch.mockReset();
@@ -82,6 +82,33 @@ describe('fetchOnce dedup window', () => {
       expect(mockIpcFetch).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps a replacement read shared when an invalidated older request settles', async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseOld!: (response: Response) => void;
+      let releaseFresh!: (response: Response) => void;
+      mockIpcFetch
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => { releaseOld = resolve; }))
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => { releaseFresh = resolve; }));
+      const url = '/api/panel/projects?replacement-read';
+      const oldRead = fetchOnce(url);
+      invalidateFetchOnce(url);
+      const freshRead = fetchOnce(url);
+      releaseOld(Response.json({ revision: 'old' }));
+      await oldRead;
+      await vi.advanceTimersByTimeAsync(151);
+      const joiningRead = fetchOnce(url);
+      expect(mockIpcFetch).toHaveBeenCalledTimes(2);
+      releaseFresh(Response.json({ revision: 'fresh' }));
+      const responses = await Promise.all([freshRead, joiningRead]);
+      expect(await Promise.all(responses.map((response) => response.json())))
+        .toEqual([{ revision: 'fresh' }, { revision: 'fresh' }]);
+      await vi.advanceTimersByTimeAsync(151);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { MarkdownBody } from '@/components/desktop/MarkdownBody';
 
 interface CollapsiblePlanCardProps {
@@ -35,6 +35,7 @@ function ChevronIcon({ open }: { open: boolean }) {
 export function CollapsiblePlanCard({ text, compact = false }: CollapsiblePlanCardProps) {
   const normalizedText = text.trim();
   const [open, setOpen] = useState(false);
+  const panelId = useId();
 
   if (!normalizedText) {
     return null;
@@ -61,6 +62,7 @@ export function CollapsiblePlanCard({ text, compact = false }: CollapsiblePlanCa
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -110,6 +112,7 @@ export function CollapsiblePlanCard({ text, compact = false }: CollapsiblePlanCa
 
       {open ? (
         <div
+          id={panelId}
           style={{
             paddingTop: 0,
             paddingRight: compact ? 12 : 14,

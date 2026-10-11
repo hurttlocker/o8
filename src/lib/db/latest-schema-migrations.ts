@@ -30,6 +30,8 @@ import { ensureV63JudgmentReceiptsSchema } from '@/lib/db/v63-judgment-receipts-
 import { ensureV64SymonFuzzyWatchSchema } from '@/lib/db/v64-symon-fuzzy-watch-migration';
 import { ensureV65OrchestratorLeadSchema } from '@/lib/db/v65-orchestrator-lead-migration';
 import { ensureV66CloudWorkerPresenceSchema } from '@/lib/db/v66-cloud-worker-presence-migration';
+import { ensureV67WorkspacePreservationSchema } from '@/lib/db/v67-workspace-preservation-migration';
+import { ensureV68ExactFinalizationSchema } from '@/lib/db/v68-exact-finalization-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -71,4 +73,6 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV64SymonFuzzyWatchSchema(sqlite);
   ensureV65OrchestratorLeadSchema(sqlite);
   ensureV66CloudWorkerPresenceSchema(sqlite);
+  ensureV67WorkspacePreservationSchema(sqlite);
+  ensureV68ExactFinalizationSchema(sqlite);
 }

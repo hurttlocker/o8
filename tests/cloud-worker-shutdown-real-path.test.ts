@@ -14,7 +14,7 @@ process.env.O8_DATA_DIR = root;
 process.env.CORTEX_IDE_DATA_DIR = root;
 process.env.O8_CLOUD_JOB_LEASE_MS = '3000';
 const { createCloudWorkerKey } = await import('@/lib/cloud/worker-auth');
-const { enqueueCloudJob, getJob, readJobEvents } = await import('@/lib/cloud/job-queue');
+const { cancelJob, enqueueCloudJob, getJob, readJobEvents } = await import('@/lib/cloud/job-queue');
 const { closeDb } = await import('@/lib/db');
 const { listConnectedCloudWorkers } = await import('@/lib/cloud/worker-presence');
 const poll = await import('@/app/api/cloud/worker-poll/route');
@@ -37,7 +37,7 @@ function isAlive(pid: number) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-async function bridge(immediateEmpty = false) {
+async function bridge(immediateEmpty = false, holdHeartbeat = false) {
   let polls = 0;
   let emptyResponses = 0;
   const waits: Array<number | null> = [];
@@ -63,6 +63,15 @@ async function bridge(immediateEmpty = false) {
         : route === '/api/cloud/worker-stream' ? await stream.POST(request)
           : route === '/api/cloud/worker-control' ? await control.GET(request)
             : new Response(null, { status: 404 });
+      if (holdHeartbeat && route === '/api/cloud/worker-stream'
+        && chunks.length && JSON.parse(Buffer.concat(chunks).toString()).type === 'heartbeat') {
+        // Persist the renewal, but lose its acknowledgement until this request
+        // disconnects. The worker must report its watchdog cause before expiry.
+        await new Promise<void>((resolve) => {
+          if (disconnect.signal.aborted) resolve();
+          else disconnect.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
       if (!outgoing.destroyed) {
         if (route === '/api/cloud/worker-poll' && response.status === 204) emptyResponses += 1;
         outgoing.writeHead(response.status, Object.fromEntries(response.headers));
@@ -110,6 +119,34 @@ async function forceCleanup(child: ChildProcess) {
 }
 
 describe.skipIf(process.platform === 'win32')('built durable worker shutdown', () => {
+  it('persists the lease watchdog cause when a heartbeat acknowledgement is lost', async () => {
+    process.env.O8_CLOUD_JOB_LEASE_MS = '6000';
+    const jobId = 'lost-heartbeat-acknowledgement';
+    enqueueCloudJob('team_default', jobId, {
+      cwd: '', prompt: 'Do not start an agent before lease confirmation.',
+      remoteSource: { repoUrl: 'https://example.invalid/never-cloned.git', baseSha: 'a'.repeat(40), branch: 'o8/watchdog' },
+    });
+    const http = await bridge(false, true);
+    const workspace = join(root, 'watchdog-cause');
+    const worker = runner(http.url, workspace);
+    try {
+      await until(() => readJobEvents('team_default', jobId).some((event) => event.type === 'errored'));
+      closeDb();
+      const event = readJobEvents('team_default', jobId).find((entry) => entry.type === 'errored')!;
+      expect(event.payload).toMatchObject({ message: '[worker] lease renewal was not confirmed before expiry' });
+      expect(worker.output()).toContain('lease renewal was not confirmed before expiry');
+      expect(worker.output()).not.toContain(key.plaintext);
+      expect(readdirSync(workspace).some((name) => name.startsWith(jobId + '-'))).toBe(false);
+      worker.child.kill('SIGTERM');
+      await until(() => worker.child.exitCode !== null, 2500);
+    } finally {
+      cancelJob('team_default', jobId);
+      await forceCleanup(worker.child);
+      await http.close();
+      process.env.O8_CLOUD_JOB_LEASE_MS = '3000';
+    }
+  }, 20_000);
+
   it('finishes an authenticated empty poll below its request deadline without a false timeout', async () => {
     const http = await bridge();
     const workspace = join(root, 'healthy-idle');

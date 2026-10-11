@@ -63,6 +63,8 @@ The numbers above are not starting suggestions. They are the result of visual co
 
 Lists are **text-first**. Chat-history rows, agent rows, and spawned-agent rows omit decorative leading icons such as runtime glyphs and chat stars.
 
+Setup and connection choosers may show provider marks where identity is the decision. Use the existing asset in a fixed slot beside the tool name; readiness remains a separate text state. This exception does not add runtime glyphs to dense history or change the locked fonts and Settings buttons.
+
 What's left: a single **6 px colored status dot** in `ExtraAgentRowView` (green=running, orange=reviewing/waiting, gray=idle, red=failed). That's the only leading affordance. Everything else is just text.
 
 Hover reveals delete, archive, and context-menu actions; they are never default-visible. Progressive disclosure keeps the list dense without hiding the primary label.
@@ -127,6 +129,12 @@ Expected deltas (bbox, producing ink alignment): `dFilter 3, dNewSession 3, dPro
 ---
 
 ## Layout primitives
+
+These primitives govern dense navigation and list chrome. Full-window setup,
+Settings, connection flows, and workspace composition use the screen structure
+rules in [`STYLEGUIDE.md` §4](./STYLEGUIDE.md#4--screen-structure-and-layout).
+Keep the locked fonts, buttons, and sidebar geometry while adapting content
+width, grouping, and disclosure to the task.
 
 | Token | Value | Where |
 |---|---|---|

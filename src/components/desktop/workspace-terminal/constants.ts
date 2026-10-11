@@ -61,6 +61,7 @@ export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
 
 export const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: MODEL_IDS.raw.openAiGpt6Astra, label: 'GPT-6 Astra', color: '#10b981' },
+  { id: MODEL_IDS.raw.openAiGpt61Sol, label: 'GPT-6.1 Sol', color: '#10b981' },
   { id: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', color: '#10b981' },
   { id: MODEL_IDS.raw.openAiGpt6Luna, label: 'GPT-6 Luna', color: '#10b981' },
   { id: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', color: '#10b981' },

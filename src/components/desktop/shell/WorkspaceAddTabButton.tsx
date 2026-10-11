@@ -15,6 +15,7 @@ export function WorkspaceAddTabButton({ workspaceId, ariaSuffix }: { workspaceId
     <>
     <HeaderPlayButton
       onSpawnChat={() => addPane('chat')}
+      onSpawnChatGPTPlan={() => window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind: 'chatgpt-plan', workspaceId } }))}
       onSpawnTerminal={() => addPane('terminal')}
       onOpenSavedMachines={() => setMachinePickerOpen(true)}
       ariaSuffix={ariaSuffix}

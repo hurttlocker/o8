@@ -74,6 +74,7 @@ For maintainers who build, verify, release, recover, or harden o8.
 | Document | What you will learn |
 |---|---|
 | [GitHub operating standard](operations/github-operating-standard.md) | How issues, tracking checklists, pull requests, and merges run here, and what a contributor can expect from us. |
+| [Plugin package and submission](operations/openai-plugin-submission.md) | The local workflow package, its execution limits, and the checks before directory submission. |
 | [Pre-ship gate](operations/PRE-SHIP-GATE-CHECKLIST.md) | The clean-profile checks required before a public build is considered releasable. |
 | [Desktop build and deployment](operations/deployment.md) | How the native shell, sidecars, packaging, signing, and runtime prerequisites fit together. |
 | [Smoke-test prompt](operations/smoke-test-prompt.md) | The repeatable end-to-end product checks for a candidate build. |
@@ -83,6 +84,7 @@ For maintainers who build, verify, release, recover, or harden o8.
 | [Substrate evaluation gate](operations/substrate-eval-gate.md) | The thresholds and sustainment checks for memory and retrieval quality. |
 | [Governed task evaluation](operations/governed-task-evaluation.md) | The sealed paired protocol for final task outcomes, operator effort, recovery evidence, and overhead. |
 | [Dependency cache retention](operations/dependency-cache-retention.md) | Download-cache bounds, active-installer protection, legacy preservation, and maintenance receipts. |
+| [Sustained work and retirement](operations/sustained-work-retirement.md) | The twenty-check acceptance program for native execution, preservation, automatic retirement and verified restore on macOS and Linux. |
 
 Questions or problems? [Open an issue](https://github.com/hurttlocker/o8/issues) — the bug template asks for the details that make reports actionable.
 

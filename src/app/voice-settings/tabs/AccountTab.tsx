@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from 'react';
 import { isPaidPlan } from '@/lib/entitlement/flags';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import type { Plan } from '@/lib/entitlement/types';
 import { ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, OK_GREEN, SECTION_BG, SECTION_BORDER } from '../tokens';
 import { SectionCard, SectionTitle, ControlRow, GhostButton, AccentButton, PageHeader } from '../primitives';
@@ -25,7 +26,7 @@ export default function AccountTab() {
   }, []);
 
   const isPro = isPaidPlan(plan ?? 'free');
-  const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : '—';
+  const planLabel = plan ? PLAN_LABELS[plan] : '—';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>

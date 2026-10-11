@@ -37,6 +37,7 @@ import {
 } from '@/lib/tauri/bridge';
 import { primeQuietMode, setQuietMode, syncReviewNotificationSetting } from '@/lib/presentation/quiet-mode-client';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   ENV_LOCKED_REASON,
@@ -125,13 +126,13 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
   const { plan, founder, actualPlan, actualFounder } = useEntitlement();
   const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
   const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
-  // Founders present as Pro (Q ruling 2026-07-27): the ladder reads Free/Pro/
-  // Team; the founding serial lives on the settings-drawer account row only.
   const planLabel = plan === 'team' || actualPlan === 'team'
-    ? 'Team'
-    : isFounder || isPaid
-      ? 'Pro'
-      : 'Free Plan';
+    ? PLAN_LABELS.team
+    : isFounder
+      ? PLAN_LABELS.founder
+      : isPaid
+        ? PLAN_LABELS.pro
+        : 'Free Plan';
 
   // ── Launch at login (native autostart via the Tauri bridge) ──
   const [autostart, setAutostart] = useState(false);
@@ -295,7 +296,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
           <SettingsRow
             icon={<StarIcon />}
             label="Plan"
-            accessory={<ValuePill tone={isFounder ? 'success' : 'default'} style={{ ...RAMS_BUTTON_GEOMETRY, width: PLAN_CONTROL_WIDTH, borderColor: RAMS_CONTROL_BORDER }}>{planLabel}</ValuePill>}
+            accessory={<ValuePill tone={isFounder ? 'success' : 'default'} style={{ ...RAMS_BUTTON_GEOMETRY, minWidth: PLAN_CONTROL_WIDTH, borderColor: RAMS_CONTROL_BORDER }}>{planLabel}</ValuePill>}
             divider={!isFounder && !isPaid}
           />
           {!isFounder && !isPaid ? (

@@ -240,6 +240,7 @@ export const CLAUDE_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label:
 
 export const BRAIN_CODEX_MODEL_OPTIONS: Array<{ value: string; label: string; detail: string }> = [
   { value: MODEL_IDS.raw.openAiGpt6Astra, label: 'Astra', detail: 'Most capable model for complex, demanding work.' },
+  { value: MODEL_IDS.raw.openAiGpt61Sol, label: 'GPT-6.1 Sol', detail: 'Balanced model for everyday work.' },
   { value: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', detail: 'Balanced model for everyday work.' },
   { value: MODEL_IDS.raw.openAiGpt6Luna, label: 'GPT-6 Luna', detail: 'Fast model for easier tasks.' },
   { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'Terra', detail: 'Balanced Brain answers and repo reasoning.' },

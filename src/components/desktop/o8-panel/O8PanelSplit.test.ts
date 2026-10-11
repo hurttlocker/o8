@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { panelPaneStyle, panelPaneVisible } from './O8PanelSplit';
 
 describe('right panel view placement', () => {
+  it.each(['threads', 'browser'] as const)('does not keep %s active when its mounted outer panel is closed', (primary) => {
+    expect(panelPaneVisible('threads', primary, primary === 'threads' ? null : 'threads', false)).toBe(false);
+    expect(panelPaneVisible('threads', primary, primary === 'threads' ? null : 'threads', true)).toBe(true);
+  });
+
   it('keeps two distinct views visible without moving either into a second panel instance', () => {
     const browser = panelPaneStyle('browser', 'browser', 'spec', 60);
     const notes = panelPaneStyle('spec', 'browser', 'spec', 60);

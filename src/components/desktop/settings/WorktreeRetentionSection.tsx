@@ -133,13 +133,14 @@ function GaugeIcon() {
 
 // ── Stepper ──
 
-function Stepper({ value, onChange, step, min, max, unit, disabled }: {
+function Stepper({ value, onChange, step, min, max, unit, zeroLabel = '∞', disabled }: {
   value: number;
   onChange: (next: number) => void;
   step: number;
   min: number;
   max: number;
   unit?: string;
+  zeroLabel?: string;
   disabled?: boolean;
 }) {
   const btn = (label: string, delta: number, ariaLabel: string) => {
@@ -177,7 +178,7 @@ function Stepper({ value, onChange, step, min, max, unit, disabled }: {
     );
   };
 
-  const display = value <= 0 ? '∞' : `${value}${unit ? ` ${unit}` : ''}`;
+  const display = value <= 0 ? zeroLabel : `${value}${unit ? ` ${unit}` : ''}`;
 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -720,20 +721,21 @@ export function WorktreeRetentionSection() {
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Minimum free space"
-          footnote="Before o8 creates a packet workspace, it reserves the estimated growth and keeps the larger of these two free-space limits. A reservation is accounting only; it is not physical disk usage. Unknown accounting holds dispatch and does not delete anything."
+          footnote="New tasks reserve their estimated growth plus critical free space. The default keeps 2 GB free, independent of drive size. Set the optional volume reserve to 0% to disable it. Reservations are accounting, not physical disk usage."
         >
           <SettingsRow
             icon={<GaugeIcon />}
             label="Volume reserve"
-            subtitle={lockedSub('storageReserveRatio', 'Share of total volume capacity that must remain available')}
+            subtitle={lockedSub('storageReserveRatio', 'Optional share of total capacity to keep free; 0% disables it')}
             accessory={
               <Stepper
                 value={Math.round(values.storageReserveRatio * 100)}
                 onChange={(next) => { updateField('storageReserveRatio', next / 100); }}
                 step={1}
-                min={1}
+                min={0}
                 max={50}
                 unit="%"
+                zeroLabel="0 %"
                 disabled={envLocked('storageReserveRatio') || busyKey !== null}
               />
             }

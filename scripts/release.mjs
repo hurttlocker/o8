@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildManifest, readPublished, releaseRange, resolveNewFixes } from './lib/fixed-reports.mjs';
+import { contributorCreditLine, creditsForSubjects, ghCreditLookups } from './lib/contributor-credits.mjs';
 import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
@@ -291,9 +292,10 @@ const gateReleaseNote = existsSync(gateReleaseNotePath)
 const warnStamp = gateWarnFailed
   ? '\n\ngate:warn-failed — pre-ship boot gate did not pass; shipped warn-only per #1163.'
   : '';
+const creditLine = contributorCreditLine(releaseCredits());
 const releaseNotes = (gateReleaseNote
   ? `o8 ${tag} — see installer assets.\n\n${gateReleaseNote}`
-  : `o8 ${tag} — see installer assets.`) + warnStamp;
+  : `o8 ${tag} — see installer assets.`) + (creditLine ? `\n\n${creditLine}` : '') + warnStamp;
 const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 ${tag}`;
 
 // Both Darwin entries intentionally share the one updater archive. The
@@ -568,6 +570,29 @@ function optionValue(name) {
   return index === -1 ? null : process.argv[index + 1] || null;
 }
 
+// #3459: outside contributors in this release, by pull request number.
+// Resolved once (cached on the function: it runs before a module-level `let`
+// below this point would be initialized); any GitHub failure yields no
+// credits, never a failed ship.
+function releaseCredits() {
+  if (releaseCredits.cached) return releaseCredits.cached;
+  try {
+    const commits = releaseCommits();
+    const oldest = commits.at(-1)?.sha;
+    const since = oldest
+      ? execFileSync('git', ['show', '-s', '--format=%as', oldest], { cwd: root, encoding: 'utf8' }).trim()
+      : undefined;
+    releaseCredits.cached = creditsForSubjects(
+      commits.map((commit) => commit.subject),
+      ghCreditLookups(REPO, { since }),
+    );
+  } catch (error) {
+    console.warn(`[release] contributor credits skipped: ${error?.message ?? error}`);
+    releaseCredits.cached = {};
+  }
+  return releaseCredits.cached;
+}
+
 function releaseCommits() {
   return execFileSync('git', [
     'log',
@@ -608,6 +633,7 @@ function publishPublicRelease({ publishedAt, dryRun: preview = false, outDir = n
     releaseUrl: `https://github.com/${REPO}/releases/tag/${tag}`,
     commits: releaseCommits(),
     notesMarkdown,
+    credits: releaseCredits(),
   });
   const stagingDir = mkdtempSync(join(tmpdir(), 'o8-latest-ship-'));
   const latestShipPath = join(stagingDir, 'latest-ship.json');

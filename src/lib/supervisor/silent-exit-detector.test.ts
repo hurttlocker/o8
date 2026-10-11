@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetPacketDiffBaseFetchMemoForTest } from '@/lib/diff/base-resolution';
 import { resetCodexProcessCwdIndexForTesting, setCodexProcessReaderForTesting } from '@/lib/runtimes/shared/codex-process-cwd';
 import { resetOwnedSessionIndex } from '@/lib/runtimes/shared/owned-session-index';
+import { claimNextJob, enqueueCloudJob, getJob } from '@/lib/cloud/job-queue';
 import { listInboxItems } from '@/lib/supervisor/inbox';
 import {
   DEAD_LANE_EVENT_LABELS,
@@ -145,6 +146,29 @@ describe('silent-exit detector policy (wave-1B burial incident)', () => {
     expect(DEAD_LANE_EVENT_LABELS.has('silent_exit_work_present')).toBe(false);
     expect(DEAD_LANE_EVENT_LABELS.has('silent_exit_no_work')).toBe(true);
     expect(DEAD_LANE_EVENT_LABELS.has('zombie_reap')).toBe(true);
+  });
+
+  it.each(['pending', 'leased'] as const)('leaves a quiet %s cloud job with its durable lifecycle owner', async (status) => {
+    const { clone } = makePacketClone('o8-silent-exit-cloud', false);
+    const packetId = `pkt-silent-cloud-${status}-${Date.now()}`;
+    const jobId = `job-${packetId}`;
+    const teamId = `team-${packetId}`;
+    enqueueCloudJob(teamId, jobId, {
+      cwd: clone, prompt: 'Cloud lifecycle fixture.', packetId,
+      remoteSource: { repoUrl: 'https://example.invalid/fixture.git', baseSha: 'a'.repeat(40), branch: 'packet' },
+    });
+    if (status === 'leased') expect(claimNextJob(teamId, 0, 'fixture-worker')).toMatchObject({ id: jobId, status });
+    const lane = createLane({ repoPath: clone, worktreePath: clone, branch: 'packet', baseBranch: 'main', runtime: 'cloud', sessionKey: `cloud:${jobId}`, packetId });
+    testLaneIds.push(lane.id);
+    updateLane(lane.id, { status: 'running', lastEventAt: new Date(Date.now() - 600_000).toISOString(), lastEventLabel: 'cloud_job_enqueued' });
+    const eventsBefore = getLaneEvents(lane.id);
+
+    await runSilentExitTickForTesting();
+
+    expect(getLane(lane.id)).toMatchObject({ status: 'running', lastEventLabel: 'cloud_job_enqueued' });
+    expect(getLaneEvents(lane.id)).toEqual(eventsBefore);
+    expect(listInboxItems({ includeAllProjects: true }).some((item) => item.packetId === packetId)).toBe(false);
+    expect(getJob(teamId, jobId)).toMatchObject({ status, claimCount: status === 'leased' ? 1 : 0 });
   });
 
   it('does not salvage a quiet owned Codex lane when a live codex process is still in its worktree', async () => {

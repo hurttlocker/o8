@@ -56,8 +56,10 @@ import { opencodeRuntime } from './opencode';
 import { cursorRuntime } from './cursor';
 import { grokRuntime } from './grok';
 import { piRuntime } from './pi';
+import { piBuiltinRuntime } from './pi-builtin';
 import { primeAgentRuntime } from './prime-agent';
 import { deepSeekHarnessRuntime } from './deepseek-harness';
+import { hermesRuntime } from './hermes';
 import { declarativeWorkerRuntimes, invalidateDeclarativeWorkerFleets } from './declarative-workers';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
@@ -68,12 +70,15 @@ import { invalidateOwnedGrokFleetCache } from '@/lib/grok/owned';
 import { invalidateOwnedPiFleetCache } from '@/lib/pi/owned';
 import { invalidateOwnedPrimeAgentFleetCache } from '@/lib/prime-agent/owned';
 import { invalidateOwnedDeepSeekHarnessFleetCache } from '@/lib/deepseek-harness/owned';
+import { invalidateOwnedHermesFleetCache } from '@/lib/hermes/owned';
 import './opencode-cost-parser';
 import './cursor-cost-parser';
 import './grok-cost-parser';
 import './pi-cost-parser';
+import './pi-builtin-cost-parser';
 import './prime-agent-cost-parser';
 import './deepseek-harness-cost-parser';
+import './hermes-cost-parser';
 
 /**
  * Flush the fleet cache across all owned-session stores. Callers (e.g. the
@@ -90,6 +95,7 @@ export function invalidateAllOwnedFleets(): void {
   invalidateOwnedPiFleetCache();
   invalidateOwnedPrimeAgentFleetCache();
   invalidateOwnedDeepSeekHarnessFleetCache();
+  invalidateOwnedHermesFleetCache();
   invalidateDeclarativeWorkerFleets();
 }
 
@@ -112,6 +118,9 @@ registerRuntime(grokRuntime);
 // Runtime expansion P3: Pi (earendil-works/pi) — `pi --mode rpc` bidirectional
 // JSONL with native steer. Sessions 'pi-owned:'. See src/lib/pi/owned.ts.
 registerRuntime(piRuntime);
+// The Pi SDK bundled with o8 as a packet worker on the managed model route.
+// Sessions 'pi-builtin-owned:'. See src/lib/pi-builtin/owned.ts.
+registerRuntime(piBuiltinRuntime);
 // prime-agent — built on the same pi-mono foundation as Pi. v1 launches
 // `prime-agent --mode json` (one process per turn, resumed via `-r
 // <sessionId>`); its `--mode rpc` steer verb is the native-steer upgrade
@@ -122,6 +131,7 @@ registerRuntime(primeAgentRuntime);
 // Provider/model routing remains a Harness concern rather than a new o8
 // provider branch; o8 owns only the normalized worker lifecycle around it.
 registerRuntime(deepSeekHarnessRuntime);
+registerRuntime(hermesRuntime);
 for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 // #514 — Cloud runtime adapter (self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires

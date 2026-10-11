@@ -38,7 +38,6 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
 const {
   createPacketStorageAdmissionCoordinator,
-  observeRepoStorageEstimate,
 } = await import('@/lib/orchestrator/storage-admission');
 const { createStoragePressureAdmissionCoordinator } = await import(
   '@/lib/orchestrator/storage-pressure-policy'
@@ -53,7 +52,7 @@ beforeAll(() => {
   mkdirSync(repoPath);
   mkdirSync(worktreeRoot);
   execFileSync('git', ['init', '--initial-branch=main'], { cwd: repoPath });
-  writeFileSync(join(repoPath, 'README.md'), 'storage admission real path\n');
+  writeFileSync(join(repoPath, 'README.md'), Buffer.alloc(1024 * 1024, 's'));
   execFileSync('git', ['add', 'README.md'], { cwd: repoPath });
   execFileSync('git', ['-c', 'user.email=test@o8.local', '-c', 'user.name=o8-test', 'commit', '-m', 'init'], {
     cwd: repoPath,
@@ -79,7 +78,7 @@ function packet(id = 'packet-storage-retry'): OrchestratorPacket {
     title: 'storage retry',
     summary: 'storage retry',
     workspaceTargetPath: repoPath,
-    branchTarget: 'issue/storage-retry-real-path',
+    branchTarget: `issue/${id}`,
     runtime: 'codex',
     dependencyLabels: [],
     dependencyPacketIds: [],
@@ -151,13 +150,63 @@ async function readStatusPacket(missionId: string): Promise<OrchestratorPacket> 
 }
 
 describe('storage admission dispatch real path', () => {
-  it('uses timeout fallback, surfaces a capacity hold, and retries it from persisted state', async () => {
+  it.each([
+    { totalGiB: 466, availableGiB: 15, count: 1, launches: 1 },
+    { totalGiB: 2048, availableGiB: 15, count: 1, launches: 1 },
+    { totalGiB: 466, availableGiB: 30, count: 3, launches: 3 },
+    { totalGiB: 466, availableGiB: 2 + 100 / 1024, count: 3, launches: 1 },
+    { totalGiB: 466, availableGiB: 1, count: 1, launches: 0 },
+  ])('uses measured first-launch growth with $availableGiB GiB free on a $totalGiB GiB volume', async ({
+    totalGiB, availableGiB, count, launches,
+  }) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const identity = `${totalGiB}-${availableGiB}-${count}`.replaceAll('.', '-');
+    const observeVolume = async (targetPath: string) => ({
+      status: 'observed' as const, targetPath, probePath: worktreeRoot,
+      volumeId: `device:small-${identity}`,
+      availableBytes: availableGiB * 1024 ** 3,
+      freeBytes: availableGiB * 1024 ** 3,
+      totalBytes: totalGiB * 1024 ** 3,
+      observedAt: Date.now(), error: null,
+    });
+    const store = new StorageAdmissionStore(getSqlite(), { observeVolume });
+    // The estimator and operator policy are production defaults. Only physical
+    // capacity and the final provider launch are substituted in this test.
+    const admission = createPacketStorageAdmissionCoordinator({
+      sqlite: getSqlite(), store, observeReservationVolume: observeVolume,
+    });
+    const state = await runDispatchTick({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-small-${identity}`, repoPath, runtime: 'codex',
+      packets: Array.from({ length: count }, (_, index) => packet(`small-${identity}-${index}`)),
+    }, { launchBudget: { maxLaunches: count }, storageAdmission: admission });
+
+    expect(launchCalls, JSON.stringify(state.packets.map((entry) => ({ status: entry.status, reason: entry.blockedReason })))).toHaveLength(launches);
+    for (const candidate of state.packets) {
+      expect(candidate.storageAdmission?.estimateBytes).toBeLessThan(256 * 1024 ** 2);
+      expect(candidate.storageAdmission?.estimateBytes).toBeGreaterThan(1024 ** 2);
+      const mutation = getSqlite().prepare('SELECT result_json FROM storage_admission_mutations WHERE mutation_id = ?')
+        .get(`packet-storage-reserve:${candidate.id}:1`) as { result_json: string };
+      expect(JSON.parse(mutation.result_json).requiredReserveBytes).toBe(2 * 1024 ** 3);
+      if (candidate.status === 'queued') {
+        expect(candidate.blockedReason).toContain('Storage policy keeps 2.0 GB of critical free space.');
+        expect(candidate.storageAdmission?.state).toBe('held');
+        expect(candidate.blockedReason).not.toContain('Free 0.0 GB more');
+      } else {
+        expect(candidate.storageAdmission?.state).toBe('committed');
+      }
+    }
+    writeOrchestratorControlPlaneState(state);
+    expect((await readStatusPacket(`mission-small-${identity}`)).storageAdmission)
+      .toEqual(state.packets[0]!.storageAdmission);
+  }, 30_000);
+
+  it('surfaces a genuine capacity hold and retries it from persisted state', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-08-22T12:00:00.000Z'));
     vi.stubEnv('O8_WORKSPACE_PARKING_MODE', 'manual');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     let availableBytes = 12 * 1024 * 1024 * 1024;
-    let refreshCalls = 0;
     const observeVolume = async (targetPath: string) => ({
       status: 'observed' as const,
       targetPath,
@@ -174,13 +223,9 @@ describe('storage admission dispatch real path', () => {
       sqlite: getSqlite(),
       store,
       now: Date.now,
-      observeEstimate: (targetPath) => observeRepoStorageEstimate(targetPath, {
-        readCachedMeasurement: () => null,
-        refreshMeasurement: async () => {
-          refreshCalls += 1;
-          throw Object.assign(new Error('du timed out'), { code: 'ETIMEDOUT' });
-        },
-        defer: (task) => task(),
+      observeEstimate: async () => ({
+        status: 'observed', exactBytes: 8 * 1024 ** 3, source: 'source-size-fallback',
+        historySamples: 0, workspacePaths: [], error: null,
       }),
       observeReservationVolume: observeVolume,
       resolvePolicy: () => ({
@@ -209,7 +254,6 @@ describe('storage admission dispatch real path', () => {
       launchBudget: { maxLaunches: 1 },
       storageAdmission: pressureAdmission,
     });
-    expect(refreshCalls).toBeGreaterThan(0);
     expect(launchCalls).toEqual([]);
     expect(held.packets[0]).toMatchObject({
       status: 'queued',
@@ -304,12 +348,9 @@ describe('storage admission dispatch real path', () => {
       sqlite: getSqlite(),
       store,
       now: Date.now,
-      observeEstimate: (targetPath) => observeRepoStorageEstimate(targetPath, {
-        readCachedMeasurement: () => null,
-        refreshMeasurement: async () => {
-          throw Object.assign(new Error('du timed out'), { code: 'ETIMEDOUT' });
-        },
-        defer: (task) => task(),
+      observeEstimate: async () => ({
+        status: 'observed', exactBytes: 8 * 1024 ** 3, source: 'source-size-fallback',
+        historySamples: 0, workspacePaths: [], error: null,
       }),
       observeReservationVolume: observeVolume,
       resolvePolicy: () => ({

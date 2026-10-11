@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolveManagedWorkspaceSafetyHookRuntime } from '@/lib/worktree/safety-hooks';
 
 interface ClaudeSettingsHook {
   type: 'command';
@@ -33,15 +34,12 @@ function readSettings(settingsPath: string): ClaudeSettingsFile {
   }
 }
 
-export function installClaudeCodePreToolHook(projectRoot: string) {
+export async function installClaudeCodePreToolHook(projectRoot: string) {
   const claudeDir = join(projectRoot, '.claude');
   const settingsPath = join(claudeDir, 'settings.json');
-  const distScriptPath = join(projectRoot, 'dist', 'hooks', 'claude-code-pretool-hook.js');
-  const sourceScriptPath = join(projectRoot, 'src', 'lib', 'hooks', 'claude-code-pretool-hook.ts');
-  const scriptPath = existsSync(distScriptPath) ? distScriptPath : sourceScriptPath;
-  const command = existsSync(distScriptPath)
-    ? `${process.execPath} ${quoteShellArg(scriptPath)}`
-    : `npx tsx ${quoteShellArg(scriptPath)}`;
+  const runtime = await resolveManagedWorkspaceSafetyHookRuntime();
+  const scriptPath = runtime.hookPaths['claude-code-pretool-hook.js'];
+  const command = `${quoteShellArg(runtime.nodePath)} ${quoteShellArg(scriptPath)}`;
 
   mkdirSync(claudeDir, { recursive: true });
 

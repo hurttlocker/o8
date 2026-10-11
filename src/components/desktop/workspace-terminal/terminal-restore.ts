@@ -39,11 +39,12 @@ export interface ApplyPersistedStateResult {
 export type RestoreValidationMode = 'optimistic' | 'validated';
 
 function unwrapRuntimeSessionKey(rawSessionKey: string): string {
-  for (const stalePrefix of ['codex:', 'claude-code:']) {
+  for (const stalePrefix of ['codex:', 'claude-code:', 'cloud-owned:']) {
     if (!rawSessionKey.startsWith(stalePrefix)) continue;
     const inner = rawSessionKey.slice(stalePrefix.length);
     if (
-      isOwnedOrchestratorSessionKey(inner)
+      inner.startsWith('cloud:')
+      || isOwnedOrchestratorSessionKey(inner)
       || inner.startsWith('codex-discovered:')
       || inner.startsWith('codex-live:')
     ) {
@@ -290,6 +291,13 @@ export async function computeRestoredTabs(
       continue;
     }
 
+    if (tabKind === 'chatgpt-plan') {
+      const tabId = claimWorkspaceTabId('chatgpt-plan', seenTabIds, savedTab.id);
+      restoredTabs.push({ id: tabId, label: savedTab.label || 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null, createdAt: now, lastActivity: now });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
+
     if (tabKind === 'llm-chat') {
       const tabId = claimWorkspaceTabId('llm-chat', seenTabIds, savedTab.id);
       restoredTabs.push({
@@ -346,7 +354,10 @@ export async function computeRestoredTabs(
       if (ownedRuntime && effectiveRuntime !== ownedRuntime) {
         effectiveRuntime = ownedRuntime;
       }
-      if (ownedRuntime === 'gemini') {
+      if (unwrappedSessionKey.startsWith('cloud:')) {
+        effectiveRuntime = 'cloud';
+        effectiveModel = undefined;
+      } else if (ownedRuntime === 'gemini') {
         effectiveModel = 'gemini-3.1-pro-preview';
       } else if (ownedRuntime === 'opencode') {
         effectiveModel = 'opencode/deepseek-v4-flash-free';
@@ -378,7 +389,8 @@ export async function computeRestoredTabs(
       if (prefixedSessionKey) {
         seenRuntimeChats.add(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`);
       }
-      const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
+      const liveSessionKey = effectiveSessionKey.startsWith('cloud:') ? effectiveSessionKey
+        : prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
         ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey)
         : isOwnedOrchestratorSessionKey(effectiveSessionKey)
           ? effectiveSessionKey
@@ -663,7 +675,7 @@ export function canPreserveScopedTabs(
   // reconstruction (the badge "doesn't survive" per WorkspaceChatPane). Without
   // this, a scope oscillation cleared the tab and the transcript vanished into
   // the empty picker.
-  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat');
+  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat' || tab.kind === 'chatgpt-plan');
   if (hasChatSessionTabs) return true;
   // Same doctrine for the operator's OWN conversations (GQXEZD, 2026-07-16):
   // an orchestrator tab bound to a thread — or one the user JUST spawned

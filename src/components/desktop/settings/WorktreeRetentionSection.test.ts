@@ -205,6 +205,30 @@ describe('WorktreeRetentionSection storage accounting', () => {
     expect(pressure?.getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('saves zero volume reserve and displays it as zero rather than unlimited', async () => {
+    fetchOperatorDefaultsMock.mockReset()
+      .mockResolvedValueOnce(Response.json({
+        ...defaults, values: { ...defaults.values, storageReserveRatio: 0.01 },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        ...defaults, values: { ...defaults.values, storageReserveRatio: 0 },
+      }));
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(observedUsage)));
+    await act(async () => { root.render(createElement(WorktreeRetentionSection)); await settle(); });
+
+    const heading = container.querySelector('[data-settings-section="Minimum free space"]');
+    const section = heading!.parentElement!;
+    const decrease = section.querySelector<HTMLButtonElement>('button[aria-label="Decrease"]')!;
+    expect(section.textContent).toContain('1 %');
+    await act(async () => { decrease.click(); await settle(); });
+    expect(fetchOperatorDefaultsMock.mock.calls[1]?.[0]).toMatchObject({
+      method: 'POST', body: JSON.stringify({ storageReserveRatio: 0 }),
+    });
+    expect(section.textContent).toContain('0 %');
+    expect(section.textContent).not.toContain('∞');
+    expect(decrease.disabled).toBe(true);
+  });
+
   it('serializes settings writes and exposes the durable repository opt-out', async () => {
     let resolveSave: ((response: Response) => void) | null = null;
     fetchOperatorDefaultsMock

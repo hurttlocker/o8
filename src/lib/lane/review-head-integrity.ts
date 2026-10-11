@@ -55,7 +55,7 @@ export function latestRecordedReviewedHeadSha(
 }
 
 export async function checkReviewedHeadIntegrity(
-  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'repoPath'>,
   cwd: string,
 ): Promise<ReviewedHeadIntegrityResult> {
   const reviewedHeadSha = latestRecordedReviewedHeadSha(lane);
@@ -63,7 +63,7 @@ export async function checkReviewedHeadIntegrity(
     return { ok: true };
   }
 
-  const result = await checkExpectedHeadSha(cwd, reviewedHeadSha);
+  const result = await checkExpectedHeadSha(cwd, reviewedHeadSha, lane.repoPath);
   if (result.ok) {
     return {
       ok: true,

@@ -1,22 +1,24 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
+import {
+  managedTextModelOptions,
+  O8_MANAGED_TEXT_MODEL,
+  O8_MANAGED_ZERO_COST_MODEL,
+  resolveOpenRouterRoute,
+} from '@/lib/cortex/qa/llm/inference-route';
 import {
   buildPolishSystemPrompt,
+  straightenQuotes,
   type DictationPolishContext,
   type DictationSurface,
 } from '@/lib/dictation/polish-prompt';
 import { processVoiceCommands } from '@/lib/dictation/voice-commands';
 
-// Polish runs on Gemini Flash Lite. NOTE (2026-06-22): the former primary
-// `google/gemini-flash-lite-latest` is NO LONGER a valid OpenRouter model id
-// ("is not a valid model ID") — it failed EVERY call and forced a wasted
-// round-trip before the fallback, a major source of polish slowness. Lead with
-// the verified-working `gemini-2.5-flash-lite` (0.37s, ~$0.00005/polish in the
-// founder-polish-sweep); deepseek-chat is a working fallback. Both keep meaning
-// (OUTPUT COVERAGE guard) — re-verify any new id with scripts/founder-polish-sweep.mjs.
-const POLISH_MODELS = ['google/gemini-2.5-flash-lite', 'deepseek/deepseek-chat'];
+// Polish runs on the managed text model with reasoning off; the $0 model is the
+// fallback. Re-verify any new id with scripts/founder-polish-sweep.mjs, which
+// checks that polish keeps the transcript's meaning.
+const POLISH_MODELS = [O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL];
 
 interface PolishRequestBody {
   transcript?: string;
@@ -27,8 +29,8 @@ interface PolishRequestBody {
 /**
  * POST /api/dictation/polish
  *
- * Cleans up a raw Whisper transcript using a Gemini Flash Lite call
- * with the dev-aware adaptive-punctuation prompt from polish-prompt.ts.
+ * Cleans up a raw Whisper transcript with one model call using the
+ * dev-aware adaptive-punctuation prompt from polish-prompt.ts.
  * Voice commands ("cancel", "scratch that", "remove that", "new line")
  * are processed deterministically before polish — saves an LLM call on
  * the most common cancellation phrases.
@@ -85,6 +87,7 @@ export async function POST(request: Request) {
           // explicit cap. 16k matches Symon's mitigation.
           max_tokens: 16_384,
           temperature: 0.2,
+          ...managedTextModelOptions(model),
         }),
         // Bound each upstream call (polish loops over 2 models → 60s worst
         // case). Polish is best-effort and falls back to the raw transcript,
@@ -100,7 +103,8 @@ export async function POST(request: Request) {
         choices?: Array<{ message?: { content?: string } }>;
         error?: { message?: string };
       };
-      const polished = parsed.choices?.[0]?.message?.content?.trim() ?? '';
+      // Typographic quotes break text dictated into a terminal or code.
+      const polished = straightenQuotes(parsed.choices?.[0]?.message?.content?.trim() ?? '');
       if (!polished && parsed.error?.message) {
         failures.push(`${model}: ${parsed.error.message.slice(0, 160)}`);
         continue;

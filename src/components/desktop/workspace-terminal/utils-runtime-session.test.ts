@@ -6,6 +6,12 @@ import {
 } from './utils';
 
 describe('workspace owned runtime session routing', () => {
+  it('preserves a cloud key even with a stale local runtime hint', () => {
+    expect(normalizeWorkspaceChatSessionKey('codex', 'cloud:worker')).toBe('cloud:worker');
+    expect(normalizeWorkspaceChatSessionKey('cloud', 'worker')).toBe('cloud:worker');
+    expect(isOwnedCliRuntimeSession('cloud:worker')).toBe(false);
+  });
+
   it.each([
     ['pi', 'pi-owned:abc'],
     ['prime-agent', 'prime-agent-owned:abc'],

@@ -147,11 +147,13 @@ export function createShipBroadcast(version) {
   };
 }
 
-export function defaultShipPlan(root) {
+export function defaultShipPlan(root, env = process.env) {
   return {
     preflight: { command: process.execPath, args: [join(root, 'scripts/ship-preflight.mjs')] },
     prepare: [{ command: process.execPath, args: [join(root, 'scripts/detach-stale-dmg.mjs')] }],
-    build: { command: 'npm', args: ['run', 'tauri:build:stable-macos'] },
+    build: env.O8_RELEASE_APP_HANDOFF?.trim()
+      ? { command: process.execPath, args: [join(root, 'scripts/import-release-app.mjs')] }
+      : { command: 'npm', args: ['run', 'tauri:build:stable-macos'] },
     notarize: { command: 'npm', args: ['run', 'sign-and-notarize'] },
     publish: { command: process.execPath, args: [join(root, 'scripts/release.mjs')] },
     alwaysCleanup: [

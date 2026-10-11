@@ -12,6 +12,7 @@ const {
   removeIncompatibleMacPrebuilds,
   removePackagedNativeBuildOutputs,
   resolveAppleSigningIdentity,
+  resolveNativeBundleCacheRoot,
   signMachOBinaries,
 } = nativeBundle;
 
@@ -147,5 +148,32 @@ describe('packaged native addon immutability', () => {
   it('uses APPLE_SIGNING_IDENTITY when set and otherwise uses the documented default', () => {
     expect(resolveAppleSigningIdentity({ APPLE_SIGNING_IDENTITY: ' Custom Identity ' })).toBe('Custom Identity');
     expect(resolveAppleSigningIdentity({})).toBe(DEFAULT_APPLE_SIGNING_IDENTITY);
+  });
+
+  it('uses ad-hoc signing without a timestamp service and still verifies the binary', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-native-adhoc-'));
+    try {
+      const addon = join(root, 'addon.node');
+      writeMachO(addon);
+      const calls: string[][] = [];
+      signMachOBinaries(root, {
+        identity: '-',
+        run: (_command: string, args: string[]) => { calls.push(args); return Buffer.alloc(0); },
+        log: () => {},
+      });
+      expect(calls).toEqual([
+        ['--force', '--timestamp=none', '--options', 'runtime', '--sign', '-', addon],
+        ['--verify', '--strict', '--verbose=2', addon],
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the native cache in the configured builder root with explicit options taking precedence', () => {
+    const configured = join(tmpdir(), 'owned-builder', 'cache');
+    const explicit = join(tmpdir(), 'owned-job', 'cache');
+    expect(resolveNativeBundleCacheRoot(undefined, { O8_NATIVE_BUNDLE_CACHE_DIR: configured })).toBe(configured);
+    expect(resolveNativeBundleCacheRoot(explicit, { O8_NATIVE_BUNDLE_CACHE_DIR: configured })).toBe(explicit);
   });
 });

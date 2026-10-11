@@ -590,10 +590,8 @@ export function useTileLayout({
 
     const workspacePath = tab.meta?.workspace ?? (tab.kind === 'readme' || tab.kind === 'git-log' ? tab.resourceId : null);
     if (workspacePath) {
-      const matchedRepo = globalRepoEntries.find((repo) => (
-        workspacePath === repo.localPath
-        || workspacePath.startsWith(`${repo.localPath}/`)
-      ));
+      const matchedRepo = globalRepoEntries.find((repo) => workspacePath === repo.localPath)
+        ?? globalRepoEntries.find((repo) => workspacePath.startsWith(`${repo.localPath}/`));
       if (matchedRepo) {
         return matchedRepo.localPath;
       }

@@ -85,6 +85,11 @@ if (typeof window !== 'undefined') {
   });
 }
 
+/** Start a new shared read after a mutation without cancelling existing callers. */
+export function invalidateFetchOnce(url: string): void {
+  inflight.delete(url);
+}
+
 export async function fetchOnce(url: string, init?: RequestInit): Promise<Response> {
   const method = init?.method || 'GET';
   if (method !== 'GET') return fetch(url, init);
@@ -109,7 +114,9 @@ export async function fetchOnce(url: string, init?: RequestInit): Promise<Respon
   const promise = ipcFetch(url, init);
   inflight.set(url, { promise, timestamp: Date.now() });
   promise.finally(() => {
-    setTimeout(() => inflight.delete(url), DEDUP_WINDOW_MS);
+    setTimeout(() => {
+      if (inflight.get(url)?.promise === promise) inflight.delete(url);
+    }, DEDUP_WINDOW_MS);
   });
   // EVERY caller gets a clone — the cached original is never read. Handing
   // the first caller the original meant its res.json() disturbed the body,

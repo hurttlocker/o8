@@ -12,18 +12,22 @@
  */
 
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, rmdirSync } from 'node:fs';
 import { listCortexTmuxSessions } from '@/lib/terminal/tmux';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type {
   ManagedRunRecord,
   ManagedRunStatus,
   ManagedRunTerminationReceipt,
+  ManagedRunSettlementReceipt,
 } from './types';
+import { externalSettlementQuiet, validProviderSessionId } from './settlement';
+import { inspectOwnedManagedRun } from './termination';
 
 /** keep at most this many records (running always kept; oldest terminal dropped) */
 const RETENTION = 50;
-const VALID_STATUS: ReadonlySet<string> = new Set<ManagedRunStatus>(['running', 'finished', 'gone', 'killed']);
+const VALID_STATUS: ReadonlySet<string> = new Set<ManagedRunStatus>(['running', 'settling', 'finished', 'gone', 'killed']);
 
 const store = globalThis as typeof globalThis & {
   __o8ManagedRuns?: Map<string, ManagedRunRecord>;
@@ -59,8 +63,8 @@ function runsFile(): string {
 /** Cap the persisted set: always keep running runs, then the newest terminals. */
 function capForPersist(list: ManagedRunRecord[]): ManagedRunRecord[] {
   if (list.length <= RETENTION) return list;
-  const running = list.filter((r) => r.status === 'running');
-  const terminal = list.filter((r) => r.status !== 'running').sort(byStartedDesc);
+  const running = list.filter((r) => r.status === 'running' || r.status === 'settling' || r.settlement);
+  const terminal = list.filter((r) => !running.includes(r)).sort(byStartedDesc);
   return [...running, ...terminal.slice(0, Math.max(0, RETENTION - running.length))];
 }
 
@@ -70,10 +74,16 @@ function capForPersist(list: ManagedRunRecord[]): ManagedRunRecord[] {
  * process never saw), in-memory winning per session, so no process clobbers
  * another's runs. Never blocks the registry.
  */
-function persist(): void {
+function persist(required = false, expected?: { session: string; record: ManagedRunRecord | null }): void {
+  let locked = false;
+  const lock = `${runsFile()}.lock`;
   try {
     const file = runsFile();
     mkdirSync(getDataDir(), { recursive: true });
+    // Bounded fail-closed CAS across server processes. Never break a lock whose
+    // owner may still be writing; a stale lock needs operator reconciliation.
+    mkdirSync(lock);
+    locked = true;
     const merged = new Map<string, ManagedRunRecord>();
     try {
       if (existsSync(file)) {
@@ -82,12 +92,29 @@ function persist(): void {
           if (isValidRecord(rec)) merged.set(rec.session, rec);
         }
       }
-    } catch { /* corrupt on-disk snapshot — our view replaces it */ }
-    for (const [session, rec] of runs) merged.set(session, rec);
-    const tmp = `${file}.tmp`;
+    } catch (error) { if (required) throw error; }
+    if (expected && JSON.stringify(merged.get(expected.session) ?? null) !== JSON.stringify(expected.record)) {
+      throw new Error('managed_run_persistence_conflict');
+    }
+    if (expected?.record === null) {
+      const proposed = runs.get(expected.session)?.settlement?.binding;
+      if (proposed && [...merged.values()].some((r) => (
+        r.settlement?.binding.executionKey === proposed.executionKey
+        && r.settlement?.binding.generation === proposed.generation
+      ))) throw new Error('managed_run_execution_conflict');
+    }
+    for (const [session, rec] of runs) {
+      // Ordinary run reconciliation must not overwrite a newer host receipt.
+      if (!merged.get(session)?.settlement || expected?.session === session) merged.set(session, rec);
+    }
+    const tmp = `${file}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify({ runs: capForPersist([...merged.values()]) }), 'utf8');
     renameSync(tmp, file);
-  } catch { /* disk unavailable — keep running in-memory */ }
+  } catch (error) {
+    if (required) throw new Error('managed_run_persistence_unavailable', { cause: error });
+  } finally {
+    if (locked) rmdirSync(lock);
+  }
 }
 
 /**
@@ -138,13 +165,34 @@ hydrate();
 // ── Mutations ──
 
 export function registerManagedRun(rec: ManagedRunRecord): ManagedRunRecord {
+  const existing = findManagedRun(rec.id) ?? findManagedRun(rec.session);
+  if (existing) {
+    const identity = (r: ManagedRunRecord) => JSON.stringify([
+      r.id, r.session, r.command, r.title ?? null, r.cwd, r.repo ?? null,
+      r.packetId ?? null, r.laneId ?? null, r.panePid ?? null,
+      r.processGroupId ?? null, r.processMarker ?? null, r.mode,
+      r.settlement?.binding ?? null,
+    ]);
+    if (identity(existing) !== identity(rec)) throw new Error('managed_run_registration_conflict');
+    return existing;
+  }
+  if (rec.settlement && [...runs.values()].some((r) => (
+    r.settlement?.binding.executionKey === rec.settlement?.binding.executionKey
+    && r.settlement?.binding.generation === rec.settlement?.binding.generation
+  ))) throw new Error('managed_run_execution_conflict');
   runs.set(rec.session, rec);
   prune();
-  persist();
+  try { persist(Boolean(rec.settlement), rec.settlement ? { session: rec.session, record: null } : undefined); }
+  catch (error) { runs.delete(rec.session); throw error; }
   return rec;
 }
 
 export function findManagedRun(idOrSession: string): ManagedRunRecord | null {
+  // Host callbacks and a second server can advance settlement between probes.
+  try {
+    const parsed = JSON.parse(readFileSync(runsFile(), 'utf8')) as { runs?: unknown[] };
+    for (const rec of parsed.runs ?? []) if (isValidRecord(rec) && rec.settlement) runs.set(rec.session, rec);
+  } catch { /* a durable mutation still fails closed if storage cannot be read */ }
   return runs.get(idOrSession) ?? [...runs.values()].find((run) => run.id === idOrSession) ?? null;
 }
 
@@ -157,9 +205,24 @@ export function findManagedRun(idOrSession: string): ManagedRunRecord | null {
 export function finishManagedRun(
   idOrSession: string,
   exitCode: number | null,
+  ownedQuiet = false,
 ): ManagedRunRecord | null {
-  const rec = runs.get(idOrSession) ?? [...runs.values()].find((r) => r.id === idOrSession) ?? null;
+  const rec = findManagedRun(idOrSession);
   if (!rec) return null;
+  if (rec.settlement && rec.status !== 'running' && rec.status !== 'settling') return rec;
+  if (rec.settlement && (rec.status === 'running' || rec.status === 'settling')) {
+    return updateBoundRun(rec, (next) => {
+      next.settlement!.wrapperFinished = true;
+      if (exitCode !== null) next.exitCode = exitCode;
+      if (externalSettlementQuiet(next) && ownedQuiet && !next.settlement!.stopRequestId) {
+        next.status = 'finished';
+        next.finishedAt = new Date().toISOString();
+      } else {
+        next.status = 'settling';
+        next.finishedAt = null;
+      }
+    });
+  }
   if (rec.status !== 'running') {
     if (exitCode !== null && rec.exitCode === null) {
       rec.exitCode = exitCode;
@@ -181,17 +244,83 @@ export function killManagedRun(
   exitCode: number | null,
   termination: ManagedRunTerminationReceipt,
 ): ManagedRunRecord | null {
-  const rec = runs.get(session) ?? null;
+  const rec = findManagedRun(session);
   if (!rec) return null;
-  if (!termination.confirmedDead) return rec;
-  if (rec.status === 'running' || rec.status === 'gone') {
+  if (!termination.confirmedDead || !externalSettlementQuiet(rec)) return rec;
+  if (rec.settlement && (rec.status === 'running' || rec.status === 'settling' || rec.status === 'gone')) {
+    return updateBoundRun(rec, (next) => {
+      next.status = 'killed'; next.finishedAt = new Date().toISOString();
+      next.exitCode = exitCode; next.termination = termination;
+    });
+  }
+  if (rec.status === 'running' || rec.status === 'settling' || rec.status === 'gone') {
     rec.status = 'killed';
     rec.finishedAt = new Date().toISOString();
     rec.exitCode = exitCode;
     rec.termination = termination;
-    persist();
+    persist(Boolean(rec.settlement));
   }
   return rec;
+}
+
+/** Bound state changes persist or roll back; an in-memory receipt is insufficient. */
+function updateBoundRun(rec: ManagedRunRecord, mutate: (next: ManagedRunRecord) => void): ManagedRunRecord {
+  const next = structuredClone(rec);
+  mutate(next);
+  runs.set(next.session, next);
+  try { persist(true, { session: rec.session, record: rec }); }
+  catch (error) { runs.set(rec.session, rec); throw error; }
+  return next;
+}
+
+export function requestManagedRunStop(id: string): ManagedRunRecord | null {
+  const rec = findManagedRun(id);
+  if (!rec?.settlement) return rec;
+  if ((rec.status === 'finished' || rec.status === 'killed') && externalSettlementQuiet(rec)) return rec;
+  if (rec.settlement.stopRequestId) return rec;
+  return updateBoundRun(rec, (next) => {
+    next.settlement!.stopRequestId = randomUUID();
+    next.settlement!.stopRequestedAt = new Date().toISOString();
+    next.status = 'settling';
+    next.finishedAt = null;
+  });
+}
+
+export function bindManagedRunProvider(id: string, digest: string, session: unknown): ManagedRunRecord {
+  const rec = findManagedRun(id);
+  if (!rec?.settlement || rec.settlement.bindingDigest !== digest) throw new Error('settlement_binding_conflict');
+  if (!validProviderSessionId(session)) throw new Error('invalid_provider_session');
+  if (rec.settlement.providerSessionId === session) return rec;
+  if (rec.settlement.providerSessionId || rec.settlement.receipt?.state === 'quiet') {
+    throw new Error('provider_session_conflict');
+  }
+  return updateBoundRun(rec, (next) => { next.settlement!.providerSessionId = session; });
+}
+
+export function recordManagedRunSettlement(id: string, input: Omit<ManagedRunSettlementReceipt, 'receivedAt'>): ManagedRunRecord {
+  const rec = findManagedRun(id);
+  const s = rec?.settlement;
+  if (!rec || !s || s.bindingDigest !== input.bindingDigest || s.binding.receiptId !== input.receiptId
+    || s.providerSessionId !== input.providerSessionId || (input.state === 'active' && !s.providerSessionId)
+    || (input.state === 'quiet' && !s.providerSessionId && !input.cancelledBeforeLaunch)
+    || (input.cancelledBeforeLaunch && s.providerSessionId)
+    || (input.state === 'quiet' && s.stopRequestId !== input.stopRequestId)) {
+    throw new Error('settlement_binding_conflict');
+  }
+  const previous = s.receipt;
+  if (previous) {
+    const { receivedAt: _receivedAt, ...oldInput } = previous;
+    if (JSON.stringify(oldInput) === JSON.stringify(input)) return rec;
+    if (input.sequence <= previous.sequence || (previous.state === 'quiet' && input.state !== 'quiet')) {
+      throw new Error('settlement_receipt_conflict');
+    }
+  }
+  return updateBoundRun(rec, (next) => { next.settlement!.receipt = { ...input, receivedAt: new Date().toISOString() }; });
+}
+
+export function retainManagedRunTermination(id: string, termination: ManagedRunTerminationReceipt): void {
+  const rec = findManagedRun(id);
+  if (rec?.settlement) updateBoundRun(rec, (next) => { next.termination = termination; });
 }
 
 /**
@@ -203,12 +332,25 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
   try {
     alive = new Set((await listCortexTmuxSessions()).filter((n) => n.startsWith('cortex-run-')));
   } catch {
-    alive = new Set<string>();
+    return [...runs.values()].sort(byStartedDesc);
   }
   const now = new Date().toISOString();
   let changed = false;
   const reconciled: ManagedRunRecord[] = [];
   for (const rec of runs.values()) {
+    if (rec.settlement && (rec.status === 'running' || rec.status === 'settling') && !alive.has(rec.session)) {
+      const code = rec.exitCode ?? readExitCode(rec.id);
+      const quiet = await inspectOwnedManagedRun(rec);
+      const next = finishManagedRun(rec.session, code, quiet);
+      if (next?.status === 'finished') reconciled.push(next);
+      if (next?.settlement?.stopRequestId && rec.termination && quiet && externalSettlementQuiet(next)) {
+        const killed = killManagedRun(rec.session, rec.termination.exitCode, {
+          ...rec.termination, confirmedDead: true, confirmedAt: now, externalSettlement: 'quiet',
+        });
+        if (killed) reconciled.push(killed);
+      }
+      continue;
+    }
     if (rec.status === 'running' && !alive.has(rec.session)) {
       // Only detached runs need exit-file recovery here — streaming runs POST
       // their own finish, and reading the file under them would race the CLI's
@@ -229,15 +371,14 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
     try {
       const { recordAutomationSourceEvent } = await import('@/lib/automations/source-events');
       for (const rec of reconciled) {
-        const eventType = rec.status === 'gone'
-          ? 'lost'
+        const eventType = rec.status === 'killed' ? 'killed' : rec.status === 'gone' ? 'lost'
           : rec.exitCode === 0 ? 'exit_clean' : 'exit_failed';
         recordAutomationSourceEvent({
           sourceKind: 'managed_run',
           sourceId: rec.id,
           repoPath: rec.cwd,
           eventType,
-          fingerprint: rec.status === 'gone'
+          fingerprint: rec.status === 'killed' ? `managed-run:${rec.id}:killed:${rec.finishedAt ?? 'unknown'}` : rec.status === 'gone'
             ? `managed-run:${rec.id}:lost:${rec.finishedAt ?? 'unknown'}`
             : `managed-run:${rec.id}:finished:${rec.exitCode ?? 'unknown'}`,
           occurredAt: Date.parse(rec.finishedAt ?? now) || Date.now(),
@@ -253,13 +394,13 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
 
 /** All still-running runs, newest-first (used by the ports route for pane-pid attribution). */
 export function listRunningRuns(): ManagedRunRecord[] {
-  return [...runs.values()].filter((r) => r.status === 'running').sort(byStartedDesc);
+  return [...runs.values()].filter((r) => r.status === 'running' || r.status === 'settling').sort(byStartedDesc);
 }
 
 /** Drop oldest terminal records beyond RETENTION. Returns true if anything was removed. */
 function prune(): boolean {
   if (runs.size <= RETENTION) return false;
-  const terminal = [...runs.values()].filter((r) => r.status !== 'running');
+  const terminal = [...runs.values()].filter((r) => r.status !== 'running' && r.status !== 'settling' && !r.settlement);
   terminal.sort((a, b) => (a.finishedAt ?? a.startedAt ?? '').localeCompare(b.finishedAt ?? b.startedAt ?? ''));
   let excess = runs.size - RETENTION;
   let removed = false;

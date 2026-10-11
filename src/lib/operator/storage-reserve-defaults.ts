@@ -8,8 +8,8 @@ export interface StorageReserveDefaults {
 }
 
 export const STORAGE_RESERVE_FALLBACK: StorageReserveDefaults = {
-  storageReserveRatio: 0.1,
-  storageReserveFloorGb: 10,
+  storageReserveRatio: 0,
+  storageReserveFloorGb: 2,
 };
 
 export function resolveStoredStorageReserve(
@@ -19,7 +19,7 @@ export function resolveStoredStorageReserve(
   if (
     typeof stored.storageReserveRatio === 'number'
     && Number.isFinite(stored.storageReserveRatio)
-    && stored.storageReserveRatio > 0
+    && stored.storageReserveRatio >= 0
     && stored.storageReserveRatio <= 1
   ) resolved.storageReserveRatio = stored.storageReserveRatio;
   if (
@@ -51,8 +51,8 @@ export function applyStorageReserveUpdate(
   update: Partial<StorageReserveDefaults>,
 ): void {
   if (update.storageReserveRatio !== undefined) {
-    if (!Number.isFinite(update.storageReserveRatio) || update.storageReserveRatio <= 0 || update.storageReserveRatio > 1) {
-      throw new Error('storageReserveRatio must be greater than 0 and no more than 1.');
+    if (!Number.isFinite(update.storageReserveRatio) || update.storageReserveRatio < 0 || update.storageReserveRatio > 1) {
+      throw new Error('storageReserveRatio must be between 0 and 1.');
     }
     stored.storageReserveRatio = update.storageReserveRatio;
   }

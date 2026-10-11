@@ -72,7 +72,9 @@ async function latestVersion(release: CliUpdateSpec['release'], refresh: boolean
     if (!response.ok) return null;
     const body = await response.json() as { version?: unknown; tag_name?: unknown };
     const rawVersion = release.kind === 'npm' ? body.version : body.tag_name;
-    const version = typeof rawVersion === 'string' ? parseVersion(rawVersion) : null;
+    const version = typeof rawVersion === 'string'
+      && (release.kind !== 'npm' || /^\d+\.\d+\.\d+$/.test(rawVersion))
+      ? parseVersion(rawVersion) : null;
     if (version) latestCache.set(cacheKey, { version, checkedAt: Date.now() });
     return version;
   } catch {
@@ -80,8 +82,8 @@ async function latestVersion(release: CliUpdateSpec['release'], refresh: boolean
   }
 }
 
-export async function checkCliUpdates(refresh = false): Promise<CliUpdateRecord[]> {
-  return Promise.all(UPDATE_SPECS.map(async (spec): Promise<CliUpdateRecord> => {
+export async function checkCliUpdates(refresh = false, runtimeId?: string): Promise<CliUpdateRecord[]> {
+  return Promise.all(UPDATE_SPECS.filter((spec) => !runtimeId || spec.runtimeId === runtimeId).map(async (spec): Promise<CliUpdateRecord> => {
     let installedVersion: string | null = null;
     let selectedPath: string | null = null;
     try {

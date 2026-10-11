@@ -165,6 +165,12 @@ export function buildNewLlmChatTab(
 /*  handleUpdateChatMessages                                           */
 /* ------------------------------------------------------------------ */
 
+/** A plan text chat never inherits a repository, runtime, or worker defaults. */
+export function buildNewChatGPTPlanTab(): TerminalTab {
+  const now = Date.now();
+  return { id: createWorkspaceTabId('chatgpt-plan'), label: 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null, createdAt: now, lastActivity: now };
+}
+
 export function computeUpdatedChatMessages(
   tab: TerminalTab,
   messages: MobileTranscriptEntry[],

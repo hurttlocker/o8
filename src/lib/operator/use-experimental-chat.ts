@@ -1,6 +1,6 @@
 'use client';
 
-import { useFounderStatus } from '@/lib/entitlement/use-founder-status';
+import { useEarlyAccess } from '@/lib/entitlement/use-early-access';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { useRetryingRemoteFlag, type FlagCache } from '@/lib/operator/use-remote-flag';
 
@@ -23,7 +23,7 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 }
 
 export function useExperimentalChatFlag(): boolean {
-  const isFounder = useFounderStatus();
+  const earlyAccess = useEarlyAccess();
   // RETIRED (Q ruling 2026-07-14): the separate casual "Chat" surface is
   // gone — the o8 model merged into the Orchestrator chat, which is now the
   // one conversation surface for every tier. This hook pins FALSE so the
@@ -32,6 +32,6 @@ export function useExperimentalChatFlag(): boolean {
   // The remote-flag plumbing stays readable as a re-entry seam, but it can
   // no longer turn the surface back on.
   void useRetryingRemoteFlag(fetchFlag, cache);
-  void isFounder;
+  void earlyAccess;
   return false;
 }

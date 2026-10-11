@@ -3,6 +3,7 @@ import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import {
   findMissionRegistryEntryByPacketId,
+  readMissionRegistryEntry,
   withMissionRegistryState,
 } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -14,6 +15,8 @@ export interface PacketLifecycleGuard {
   repoPath: string;
   previousPacket: OrchestratorPacket;
   heldPacket: OrchestratorPacket;
+  /** Close captures each store's lifecycle under the admission locks. */
+  previousRegistryPacket?: OrchestratorPacket | null;
 }
 
 export interface PacketLifecycleMutationResult<T> {
@@ -87,6 +90,10 @@ export function holdPacketLifecycleMutation(input: {
       }
       if (!currentMissionId) return null;
       const previousPacket = structuredClone(packet);
+      const previousRegistryPacket = input.kind === 'close'
+        ? readMissionRegistryEntry(currentMissionId, { includeArchived: true })?.mission.packets
+          .find((candidate) => candidate.id === input.packetId) ?? null
+        : null;
       markPacketLifecycleHeld(packet, source, blockedReason);
       return {
         packetId: input.packetId,
@@ -95,6 +102,7 @@ export function holdPacketLifecycleMutation(input: {
         repoPath: state.repoPath?.trim() || packet.lane?.repoPath?.trim() || '',
         previousPacket,
         heldPacket: structuredClone(packet),
+        ...(input.kind === 'close' ? { previousRegistryPacket: structuredClone(previousRegistryPacket) } : {}),
       } satisfies PacketLifecycleGuard;
     });
     if (activeResult === OPERATOR_STOP_REFUSAL) {

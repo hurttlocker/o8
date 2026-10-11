@@ -10,6 +10,26 @@ describe('CustomizePage skills', () => {
   let host: HTMLDivElement;
   let root: Root;
 
+  it('offers this project repositories inside Plugins without another section roundtrip', async () => {
+    const fetcher = vi.mocked(fetch);
+    const previous = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation((input, init) => String(input) === '/api/customize/actions'
+      ? Promise.resolve(Response.json({ installed: [], damaged: [], receipts: [] })) : previous(input, init));
+    await act(async () => root.render(createElement(CustomizePage, {
+      project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8', '/repo/web'], createdAt: '' },
+      registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }, { name: 'Web repo', localPath: '/repo/web' }],
+    })));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Plugins')!.click());
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(host.querySelector('[aria-label="Choose action repository"]')).not.toBeNull();
+    });
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Choose action repository"]')!.click());
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Web repo'))!.click());
+    expect(host.textContent).toContain('Selected repository: /repo/web');
+    expect(host.querySelector('[aria-label="Search Instructions"]')).toBeNull();
+  });
+
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement('div');

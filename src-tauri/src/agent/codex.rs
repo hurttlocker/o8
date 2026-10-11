@@ -36,6 +36,7 @@
 //! of failing the task.
 
 use super::{claude::TextPlannerSession, ConfirmCorrelation, LoopResult, TaskCtx};
+use super::text_turn::EffectiveTextSelection;
 use base64::Engine;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -56,6 +57,9 @@ pub(crate) struct CodexSession {
     resident_attempted: bool,
     /// `codex exec` fallback thread id, used by `exec resume`.
     thread_id: Option<String>,
+    allow_default_fallback: bool,
+    progressed: bool,
+    effective_selection: Option<EffectiveTextSelection>,
 }
 
 impl CodexSession {
@@ -67,7 +71,20 @@ impl CodexSession {
             resident: None,
             resident_attempted: false,
             thread_id: None,
+            allow_default_fallback: false,
+            progressed: false,
+            effective_selection: None,
         }
+    }
+
+    pub(crate) fn with_default_fallback(mut self, allowed: bool) -> Self {
+        self.allow_default_fallback = allowed;
+        self
+    }
+
+    pub(crate) fn observe_selection(mut self, selection: EffectiveTextSelection) -> Self {
+        self.effective_selection = Some(selection);
+        self
     }
 
     fn image_path(image_b64: Option<&str>) -> Result<Option<PathBuf>, String> {
@@ -135,6 +152,33 @@ impl CodexSession {
     }
 
     fn send_turn(&mut self, prompt: &str, image_b64: Option<&str>) -> Result<String, String> {
+        // Eligibility is consumed before the first attempt. A later tool-result turn
+        // or a pinned/bound session must never switch models or replay execution.
+        let allowed = std::mem::take(&mut self.allow_default_fallback);
+        let result = self.send_turn_once(prompt, image_b64);
+        if allowed
+            && !self.progressed
+            && result
+                .as_ref()
+                .err()
+                .is_some_and(|error| is_sol_unsupported(&self.model, error))
+        {
+            self.resident = None;
+            self.resident_attempted = false;
+            self.thread_id = None;
+            self.model = crate::models::CODEX_GPT_5_6_SOL.to_string();
+            // Publish before entering the retry: even its error or timeout must
+            // leave the bound surface on the effective selection.
+            if let Some(selection) = &self.effective_selection {
+                selection.bind(&self.model, &self.effort);
+            }
+            let prompt = format!("{prompt}\n\n[SYSTEM] Your effective model is {} at {} effort. The automatic GPT-6.1 Sol default was rejected before execution; this session uses GPT-5.6 Sol. Report this accurately if asked.", self.model, self.effort);
+            return self.send_turn_once(&prompt, image_b64);
+        }
+        result
+    }
+
+    fn send_turn_once(&mut self, prompt: &str, image_b64: Option<&str>) -> Result<String, String> {
         if !self.resident_attempted {
             self.resident_attempted = true;
             match AppServerSession::start(&self.binary, &self.model, &self.effort) {
@@ -146,6 +190,7 @@ impl CodexSession {
                     );
                     self.resident = Some(session);
                 }
+                Err(error) if is_sol_unsupported(&self.model, &error) => return Err(error),
                 Err(error) => log::warn!(
                     "[symon-agent] codex app-server unavailable ({error}) — falling back to per-turn exec"
                 ),
@@ -155,6 +200,7 @@ impl CodexSession {
         let result = match self.resident.as_mut() {
             Some(session) => {
                 let turn = session.send_turn(prompt, image_path.as_deref());
+                self.progressed |= session.progressed;
                 if turn.is_err() {
                     // A broken child is dropped (its Drop kills the proc) so a
                     // later turn re-boots or falls back instead of writing into
@@ -212,16 +258,58 @@ impl CodexSession {
             .env("O8_MANAGED_SESSION", "1")
             .output()
             .map_err(|error| format!("codex planner spawn failed: {error}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Thread/turn receipts and terminal errors alone are not execution.
+        // Every item (including reasoning/tools) or unrecognized output closes retry.
+        let mut diagnostics = String::new();
+        for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+            let event = serde_json::from_str::<Value>(line).unwrap_or(Value::Null);
+            if matches!(
+                event.get("type").and_then(Value::as_str),
+                Some("error" | "turn.failed")
+            ) {
+                if let Some(message) = event
+                    .get("message")
+                    .or_else(|| event.pointer("/error/message"))
+                    .and_then(Value::as_str)
+                {
+                    diagnostics.push_str(message);
+                }
+            }
+            if !matches!(
+                event.get("type").and_then(Value::as_str),
+                Some("thread.started" | "turn.started" | "error" | "turn.failed")
+            ) {
+                self.progressed = true;
+            }
+        }
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!(
                 "codex planner exited {}: {}",
                 output.status.code().unwrap_or(-1),
-                stderr.trim().chars().take(500).collect::<String>()
+                format!("{} {}", stderr.trim(), diagnostics)
+                    .chars()
+                    .take(1000)
+                    .collect::<String>()
             ));
         }
-        self.parse_output(&String::from_utf8_lossy(&output.stdout))
+        self.parse_output(&stdout)
     }
+}
+
+// Same narrow rejection contract as src/lib/codex/model-compatibility.ts.
+fn is_sol_unsupported(model: &str, diagnostic: &str) -> bool {
+    if model != crate::models::CODEX_GPT_6_1_SOL {
+        return false;
+    }
+    let diagnostic = diagnostic
+        .to_lowercase()
+        .replace("\\\"", "'")
+        .replace('"', "'");
+    diagnostic.contains(
+        "the 'gpt-6.1-sol' model is not supported when using codex with a chatgpt account.",
+    )
 }
 
 /// Names of the MCP servers the operator's `config.toml` declares, read from
@@ -275,6 +363,7 @@ struct AppServerSession {
     reader: std::io::BufReader<std::process::ChildStdout>,
     thread_id: String,
     next_id: u64,
+    progressed: bool,
 }
 
 impl AppServerSession {
@@ -327,7 +416,10 @@ impl AppServerSession {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|error| format!("codex app-server spawn failed: {error}"))?;
-        let stdin = child.stdin.take().ok_or("codex app-server: no stdin handle")?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or("codex app-server: no stdin handle")?;
         let stdout = child
             .stdout
             .take()
@@ -338,6 +430,7 @@ impl AppServerSession {
             reader: std::io::BufReader::new(stdout),
             thread_id: String::new(),
             next_id: 1,
+            progressed: false,
         };
         session.request(
             "initialize",
@@ -394,6 +487,7 @@ impl AppServerSession {
                 continue;
             }
             let Ok(message) = serde_json::from_str::<Value>(trimmed) else {
+                self.progressed = true;
                 continue;
             };
             if let Some(outcome) = visit(&message) {
@@ -445,7 +539,19 @@ impl AppServerSession {
             "params": { "threadId": self.thread_id, "input": input },
         }))?;
         let mut answer = String::new();
-        self.pump(|message| {
+        let mut progressed = self.progressed;
+        let result = self.pump(|message| {
+            if message
+                .get("method")
+                .and_then(Value::as_str)
+                .is_some_and(|method| {
+                    method.starts_with("item/")
+                        || method.starts_with("codex/event/")
+                        || message.get("id").is_some()
+                })
+            {
+                progressed = true;
+            }
             if message.get("id").and_then(Value::as_u64) == Some(id) {
                 if let Some(error) = message.get("error") {
                     return Some(Err(format!("codex app-server turn/start: {error}")));
@@ -462,17 +568,25 @@ impl AppServerSession {
                     }
                     None
                 }
-                Some("turn/completed") => Some(Ok(())),
+                Some("turn/completed") => {
+                    if let Some(error) = message
+                        .pointer("/params/turn/error")
+                        .filter(|v| !v.is_null())
+                    {
+                        Some(Err(format!("codex app-server turn failed: {error}")))
+                    } else {
+                        Some(Ok(()))
+                    }
+                }
                 Some("error") => Some(Err(format!(
                     "codex app-server error: {}",
-                    message
-                        .pointer("/params/message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown")
+                    message.get("params").unwrap_or(&Value::Null)
                 ))),
                 _ => None,
             }
-        })?;
+        });
+        self.progressed |= progressed;
+        result?;
         if answer.trim().is_empty() {
             return Err("codex planner produced no answer".to_string());
         }
@@ -488,6 +602,9 @@ impl Drop for AppServerSession {
 }
 
 impl TextPlannerSession for CodexSession {
+    fn effective_model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
     fn send_planner_turn(
         &mut self,
         prompt: &str,
@@ -521,9 +638,13 @@ pub async fn run_phone_text_loop(
     intent: &str,
     ctx: &TaskCtx,
     correlation: ConfirmCorrelation,
+    allow_default_fallback: bool,
+    effective_selection: EffectiveTextSelection,
 ) -> Result<LoopResult, String> {
     super::claude::run_text_planner_loop_correlated(
-        CodexSession::new(binary, model, effort),
+        CodexSession::new(binary, model, effort)
+            .with_default_fallback(allow_default_fallback)
+            .observe_selection(effective_selection),
         model,
         intent,
         ctx,
@@ -535,4 +656,4 @@ pub async fn run_phone_text_loop(
 
 #[cfg(test)]
 #[path = "codex_tests.rs"]
-mod tests;
+pub(crate) mod tests;

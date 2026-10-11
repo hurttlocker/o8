@@ -359,6 +359,10 @@ jobs:
         shell: pwsh
       - run: cargo check --locked
         working-directory: src-tauri
+      - name: Native update ping contract
+        run: node scripts/test-update-ping-native.mjs
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 
   rust-check-linux:
     name: Rust Compile Gate (Linux)
@@ -381,6 +385,10 @@ jobs:
       - run: mkdir -p out/frontend out/server
       - run: cargo check --locked
         working-directory: src-tauri
+      - name: Native update ping contract
+        run: node scripts/test-update-ping-native.mjs
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 
   roadmap-check:
     name: Roadmap Drift Check

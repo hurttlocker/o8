@@ -7,6 +7,8 @@ import {
   CheckCircle2,
   MessageSquare,
 } from '../lucide-shims';
+import { runtimeFromSessionKeyId } from '@/lib/orchestrator/runtime-capabilities';
+import { O8ThreadsPane } from '@/components/desktop/o8-panel/O8ThreadsPane';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
@@ -723,4 +725,16 @@ function WorkspaceChatPaneBase({
   );
 }
 
-export const WorkspaceChatPane = memo(WorkspaceChatPaneBase);
+export const WorkspaceChatPane = memo(function WorkspaceChatPane(props: WorkspaceChatPaneProps) {
+  const runtime = runtimeFromSessionKeyId(props.tab.chatSessionKey) ?? props.tab.chatRuntime;
+  // Remote attempts already have an authoritative task/evidence surface. They
+  // must never enter the local CLI composer or inherit its default model.
+  if (runtime === 'cloud') return <O8ThreadsPane
+    key={props.tab.chatSessionKey}
+    active={props.active}
+    repoPath={props.tab.repo?.localPath ?? null}
+    repos={[]}
+    boundSessionKey={props.tab.chatSessionKey}
+  />;
+  return <WorkspaceChatPaneBase {...props} />;
+});

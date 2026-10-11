@@ -1,3 +1,4 @@
+import { expireInvalidServiceSessions, serviceSessionDeadline } from './review-service-authority';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
@@ -262,6 +263,7 @@ export class SqliteCloudJobStore implements CloudJobStore {
     const nowMs = input.nowMs ?? Date.now();
     const now = iso(nowMs);
     const append = sqlite.transaction((): AppendCloudJobEventResult => {
+      expireInvalidServiceSessions(sqlite, input.teamId, nowMs);
       const row = sqlite.prepare(
         'SELECT * FROM cloud_jobs WHERE team_id = ? AND id = ?',
       ).get(input.teamId, input.jobId) as CloudJobRow | undefined;
@@ -312,7 +314,7 @@ export class SqliteCloudJobStore implements CloudJobStore {
         );
         if (parked) promoteSteerControls(sqlite, row, nowMs);
       } else {
-        const leaseExpiresAt = nowMs + Math.max(1, Math.floor(input.leaseMs));
+        const leaseExpiresAt = Math.min(nowMs + Math.max(1, Math.floor(input.leaseMs)), serviceSessionDeadline(row.launch_json));
         sqlite.prepare(`
           UPDATE cloud_jobs
           SET lease_expires_at = ?, updated_at = ?
@@ -349,6 +351,9 @@ export class SqliteCloudJobStore implements CloudJobStore {
         LIMIT 1
       `).get(input.teamId, input.sessionId, input.sessionId) as CloudJobRow | undefined;
       if (!row) return undefined;
+      if (input.type === 'steer' && JSON.parse(row.launch_json).remoteServiceSession) {
+        throw new Error('Cannot steer a service-only session.');
+      }
 
       const next = sqlite.prepare(
         'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM cloud_job_controls WHERE job_id = ?',
@@ -698,6 +703,7 @@ export class SqliteCloudJobStore implements CloudJobStore {
     teamId: string,
     nowMs: number,
   ): number {
+    expireInvalidServiceSessions(sqlite, teamId, nowMs);
     const rows = sqlite.prepare(`
       SELECT * FROM cloud_jobs
       WHERE team_id = ? AND status = 'leased' AND lease_expires_at <= ?

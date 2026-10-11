@@ -1,3 +1,5 @@
+import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
+import { captureMissionProject, resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import { aggregateMissionCost, laneSessionHistoryForMission } from '@/lib/orchestrator/cost-aggregator';
 import { projectMissionFunnel } from '@/lib/orchestrator/mission-funnel';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
@@ -26,7 +28,7 @@ import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation
 import { assertExecutionCarrierCompatible, isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
-import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
+import { prepareMissionBranches } from './branch-cleanup';
 import {
   cancelSupersededMissionPackets,
   cancelSupersededRegistryMissions,
@@ -37,8 +39,9 @@ import {
   readTranscriptActivityBySession,
 } from './mission-status-transcript';
 import { recordOutgoingMissionSnapshot } from './mission-handoff';
-import { logDispatchRoutingRecommendations } from './mission-routing-log';
+import { logBranchPreparation, logDispatchRoutingRecommendations } from './mission-routing-log';
 import { preparePacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-runtime-override';
+import { captureCurrentDispatchRegistry, publishCurrentDispatchRegistry } from './dispatch-registry-publication';
 import { resolveRuntimePresetModel } from './runtime-preset-routing';
 import {
   buildMissionId,
@@ -91,7 +94,9 @@ export function resolveMissionDispatchTarget(missionId?: string): string {
 }
 
 export async function createMission(input: CreateMissionInput) {
+  const sealedContract = resolveSealedMissionContract(input, input.issues?.length === 1 && isInlineIssue(input.issues[0])) ?? input.qualitySearch?.taskContract;
   const repoPath = ensureRepoPath(input.repoPath);
+  const projectContext = await captureMissionProject(repoPath, input.projectId);
   if (!Array.isArray(input.issues) || input.issues.length === 0) {
     throw new Error('At least one loaded issue is required.');
   }
@@ -225,6 +230,7 @@ export async function createMission(input: CreateMissionInput) {
         ? { origin: input.origin, uiLoopIterations: 0, uiLoopStartedAt: new Date().toISOString() }
         : {}),
       workspaceTargetPath: repoPath,
+      ...(projectContext ? { projectId: projectContext.id } : {}),
       branchTarget,
       runtime: packetRouting.selectedRuntime,
       dependencyLabels: dependencyNumbers.map((dependency) => referenceLabelByIssueNumber.get(dependency) ?? `#${dependency}`),
@@ -254,15 +260,11 @@ export async function createMission(input: CreateMissionInput) {
       taskContractRequired: resolveTaskContractRequired({
         runtime: packetRouting.selectedRuntime,
         missionOptOut: input.taskContract === 'off',
-        explicit: Boolean(input.qualitySearch),
+        explicit: Boolean(sealedContract),
       }),
-      taskContractSource: input.qualitySearch ? 'explicit' : 'default',
-      ...(input.qualitySearch
-        ? {
-            taskContract: input.qualitySearch.taskContract,
-            qualitySearch: { version: 1 as const, role: null, repairAttempts: 0 },
-          }
-        : {}),
+      taskContractSource: sealedContract ? 'explicit' : 'default',
+      ...(sealedContract ? { taskContract: sealedContract } : {}),
+      ...(input.qualitySearch ? { qualitySearch: { version: 1 as const, role: null, repairAttempts: 0 } } : {}),
       // #1329 — carry the dispatching orchestrator thread id so the worker
       // inherits that thread's session rules via `buildPacketPrompt`.
       ...(typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()
@@ -399,26 +401,19 @@ export async function createMission(input: CreateMissionInput) {
   return persisted.creationReceipt ?? creationReceipt;
 }
 
-function logBranchPreparation(decisions: MissionBranchDecision[], missionId: string) {
-  const prepared = decisions.filter((decision) => decision.action !== 'none');
-  if (prepared.length === 0) return;
-  log(`Prepared ${prepared.length} existing branch${prepared.length === 1 ? '' : 'es'} for mission ${missionId}.`, {
-    branches: prepared.map((decision) => ({
-      issue: decision.issueNumber,
-      branch: decision.branchTarget,
-      action: decision.action,
-      reason: decision.reason,
-      lanesArchived: decision.lanesArchived,
-      worktreePruned: decision.worktreePruned,
-      branchDeleted: decision.branchDeleted,
-    })),
-  });
-}
-
 export async function dispatchMission(input: DispatchMissionInput) {
   const before = currentMissionState();
   const requestedMissionId = resolveMissionDispatchTarget(input.missionId);
   const currentMissionId = before.missionId?.trim() ?? '';
+  const target = requestedMissionId && requestedMissionId !== currentMissionId
+    ? readMissionRegistryEntry(requestedMissionId, { includeArchived: true })?.mission
+    : before;
+  for (const packet of target?.packets ?? []) {
+    if (packet.projectId && !packet.lane && !packet.archivedAt && !packet.operatorStopped
+      && packet.releaseState !== 'released' && ['queued', 'held'].includes(packet.queueState)) {
+      await resolveCapturedMissionProject(packet.workspaceTargetPath!, packet.projectId);
+    }
+  }
 
   if (requestedMissionId && requestedMissionId !== currentMissionId) {
     const { result: beforeDispatch } = await withMissionRegistryState(requestedMissionId, async (stored) => {
@@ -449,6 +444,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
   // Use locked state to prevent race with headless loop tick
   const { result, state: finalState } = await withLockedState(async (current) => {
     assertOrchestratorRepoPath(current.repoPath);
+    const registryBaseline = captureCurrentDispatchRegistry(current);
     const beforeDispatch = structuredClone(current);
     // #23 — an EXPLICIT dispatch re-arms any packet a prior reset_packet left in
     // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
@@ -470,7 +466,8 @@ export async function dispatchMission(input: DispatchMissionInput) {
     Object.assign(current, afterDispatch);
     writeOrchestratorControlPlaneState(afterDispatch);
 
-    return summarizeDispatchMission(beforeDispatch, afterDispatch);
+    return { ...summarizeDispatchMission(beforeDispatch, afterDispatch),
+      registryPublication: await publishCurrentDispatchRegistry(afterDispatch, registryBaseline) };
   });
 
   const packetIds = new Set(finalState.packets.map((packet) => packet.id));

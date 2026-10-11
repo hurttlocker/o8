@@ -6,8 +6,9 @@ import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
 import { measureHostVolume, resolveStorageVolumeId } from '@/lib/worktree/storage-telemetry';
 
-export const DEFAULT_STORAGE_RESERVE_RATIO = 0.1;
-export const DEFAULT_STORAGE_RESERVE_FLOOR_BYTES = 10 * 1024 * 1024 * 1024;
+// Keep a bounded critical margin; requested growth is reserved separately.
+export const DEFAULT_STORAGE_RESERVE_RATIO = 0;
+export const DEFAULT_STORAGE_RESERVE_FLOOR_BYTES = 2 * 1024 * 1024 * 1024;
 export const DEFAULT_STORAGE_OBSERVATION_MAX_AGE_MS = 30_000;
 
 export type StorageReservationState = 'reserved' | 'committed' | 'released' | 'reconciled';

@@ -43,3 +43,6 @@ tauri-plugin = { version = "2.5", features = ["build"] }
 
 [profile.dev.package."*"]
 opt-level = 0  # Force dependencies to compile with minimal optimization
+
+[dev-dependencies]
+tauri = { version = "2.10", features = ["test"] }

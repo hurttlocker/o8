@@ -28,6 +28,11 @@ function nowMs(): number {
   return Date.now();
 }
 
+/** Recognize the persisted primary-key format emitted by this store, not a panel alias. */
+export function isGeneratedProjectId(value: string): boolean {
+  return /^proj-[0-9a-f]{8}-[0-9a-f]{3}$/.test(value);
+}
+
 function generateProjectId(): string {
   return `proj-${randomUUID().slice(0, 12)}`;
 }

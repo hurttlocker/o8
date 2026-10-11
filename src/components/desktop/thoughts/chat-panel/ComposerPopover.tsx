@@ -29,6 +29,8 @@ interface ComposerPopoverProps {
   anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
+  /** Called once per open after the portal is positioned and visible. */
+  onOpenReady?: () => void;
   /** Horizontal anchoring: 'end' right-aligns to the trigger, 'start' left-aligns. */
   align?: 'start' | 'end';
   children: ReactNode;
@@ -40,15 +42,21 @@ const COMPOSER_OVERLAY_Z = 1000;
 const GAP = 8;
 const EDGE = 12;
 
-export function ComposerPopover({ anchorRef, open, onClose, align = 'end', children }: ComposerPopoverProps) {
+export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align = 'end', children }: ComposerPopoverProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Keep onClose out of the effect deps so an inline arrow from the consumer
   // doesn't re-run the whole listener setup on every render.
   const onCloseRef = useRef(onClose);
+  const onOpenReadyRef = useRef(onOpenReady);
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
-  }, [onClose]);
+    onOpenReadyRef.current = onOpenReady;
+  }, [onClose, onOpenReady]);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const ready = open && pos !== null;
+  useLayoutEffect(() => {
+    if (ready) onOpenReadyRef.current?.();
+  }, [ready]);
 
   useLayoutEffect(() => {
     if (!open) return;

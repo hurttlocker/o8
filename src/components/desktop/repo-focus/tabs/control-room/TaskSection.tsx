@@ -8,6 +8,7 @@ import { FIELD_SURFACE, FLOATING_GLASS_SURFACE, GROUP_LABELS } from './constants
 import { baseName, runtimeLabel, taskSessionKey } from './helpers';
 import { ActionButton, MenuActionRow, SectionLabel } from './shared';
 import { TaskRow } from './TaskRow';
+import { RemoteTaskPreview } from './RemoteTaskPreview';
 
 interface RemoteEvidencePayload {
   packetId: string;
@@ -240,7 +241,7 @@ export function TaskActionMenu({
   onSelectSession?: (sessionKey: string) => void;
   onAction: (task: TaskPoolTask, action: TaskAction, body?: Record<string, unknown>) => void;
 }) {
-  const [mode, setMode] = useState<'menu' | 'block' | 'report' | 'evidence'>('menu');
+  const [mode, setMode] = useState<'menu' | 'block' | 'report' | 'evidence' | 'preview'>('menu');
   const [detail, setDetail] = useState('');
   const [evidence, setEvidence] = useState<RemoteEvidencePayload | null>(null);
   const [evidenceError, setEvidenceError] = useState<{ key: string; message: string } | null>(null);
@@ -282,7 +283,7 @@ export function TaskActionMenu({
   const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
   const canUnqueue = state.task.group === 'ready' || state.task.group === 'blocked';
-  const menuHeight = mode === 'evidence' ? 480 : mode === 'menu' ? (canUnqueue ? 299 : 266) : 214;
+  const menuHeight = mode === 'preview' ? 540 : mode === 'evidence' ? 480 : mode === 'menu' ? (canUnqueue ? 331 : 298) : 214;
   const panelRect = boundaryElement?.getBoundingClientRect();
   let boundaryLeft = Math.max(0, panelRect?.left ?? 0);
   let boundaryRight = Math.min(viewportWidth, panelRect?.right ?? viewportWidth);
@@ -303,7 +304,7 @@ export function TaskActionMenu({
       boundaryBottom = Math.min(boundaryBottom, rect.bottom);
     }
   }
-  const menuWidth = Math.min(mode === 'evidence' ? 480 : 248, Math.max(180, boundaryRight - boundaryLeft - 16));
+  const menuWidth = Math.min(mode === 'preview' ? 780 : mode === 'evidence' ? 480 : 248, Math.max(180, boundaryRight - boundaryLeft - 16));
   const minLeft = boundaryLeft + 8;
   const maxLeft = Math.max(minLeft, boundaryRight - menuWidth - 8);
   const desiredLeft = state.x + menuWidth > boundaryRight - 8 ? state.x - menuWidth + 18 : state.x;
@@ -379,6 +380,7 @@ export function TaskActionMenu({
                 setMode('evidence');
               }} />
             ) : null}
+            {task.execution ? <MenuActionRow label="Remote preview" disabled={task.execution.previewAccess !== 'requestable'} onClick={() => setMode('preview')} /> : null}
             <MenuActionRow
               label="Claim"
               disabled={busy}
@@ -438,7 +440,7 @@ export function TaskActionMenu({
                 {currentEvidence.logs.length ? currentEvidence.logs.map((entry) => (
                   <div key={entry.id} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'monospace', fontSize: 10.5, lineHeight: '15px', marginBottom: 5 }}>{entry.text}</div>
                 )) : <div>No log receipt for this attempt yet.</div>}
-                <div style={{ borderTop: '1px solid var(--t-divider-subtle)', marginTop: 10, paddingTop: 8 }}>Remote editor and preview are unavailable.</div>
+                <div style={{ borderTop: '1px solid var(--t-divider-subtle)', marginTop: 10, paddingTop: 8 }}>Remote editor is unavailable. {task.execution?.previewAccess === 'requestable' ? 'Open Remote preview from the task menu.' : 'Preview is unavailable for this attempt.'}</div>
               </>
             ) : null}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
@@ -451,6 +453,8 @@ export function TaskActionMenu({
               }} />
             </div>
           </div>
+        ) : mode === 'preview' && evidenceJobId && evidenceAttempt !== undefined ? (
+          <RemoteTaskPreview key={evidenceKey} taskId={task.id} jobId={evidenceJobId} attempt={evidenceAttempt} onBack={() => setMode('menu')} />
         ) : (
           <div style={{ padding: '2px 4px 4px' }}>
             <textarea

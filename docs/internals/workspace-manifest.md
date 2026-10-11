@@ -14,6 +14,14 @@ The approval card lists the manifest commands verbatim and uses the existing ope
 
 Skipped launches record `workspace_manifest_skipped` with the policy and manifest hash. A pending or rejected one-approval decision also carries the approval ID. Policy evaluation completes before port leases, setup commands, service receipts, health probes, or preview resolution.
 
+## Remote task previews
+
+A cloud task can request its manifest-declared preview from the task menu in the macOS coordinator desktop app. The URL must resolve to one healthy, declared HTTP service on the worker's loopback interface. The current job, claim, active worker key, reviewed manifest hash, service command, and Linux process-group socket ownership are checked before serving project bytes. The task cannot supply an arbitrary destination.
+
+Project content opens in a separate native webview on a dedicated loopback origin. It receives neither coordinator credentials nor the regular Browser pane's agent controls. Closing the view destroys its native page and access listener; Reconnect requests fresh access for the current attempt. Revocation, worker loss, expired or replaced claims, and stopped services invalidate access.
+
+This first transport supports bounded HTTP GET/HEAD responses only. It does not support WebSockets, streamed responses, write requests, remote editing, or services retained after execution. Linux owns the service; the coordinator must run the supported macOS native shell. Other desktop platforms and access from another coordinator device remain separate acceptance work.
+
 ## Version 1 schema
 
 ```ts

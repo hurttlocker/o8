@@ -114,6 +114,7 @@ export interface ClaimCloudJobInput {
   nowMs?: number;
   jobId?: string;
   maxConcurrent?: number;
+  workerKeyId?: string;
 }
 
 export interface AppendCloudJobEventInput {

@@ -2,6 +2,7 @@ import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt'
 
 interface SpawnPromptPayload {
   ok?: unknown;
+  error?: { message?: unknown };
   result?: {
     ok?: unknown;
     outcomeUnknown?: unknown;
@@ -15,7 +16,7 @@ interface SpawnPromptPayload {
 export async function spawnCanvasAgents(input: {
   repoPath: string;
   task: string;
-  count: number;
+  count: unknown;
   origin?: string | null;
 }) {
   const requestBody = JSON.stringify({
@@ -29,7 +30,9 @@ export async function spawnCanvasAgents(input: {
   );
   const result = payload?.result;
   if (payload?.ok !== true || result?.ok === false || result?.outcomeUnknown === true) {
-    throw new Error('The agent spawn did not reach a confirmed launch receipt.');
+    throw new Error(typeof payload?.error?.message === 'string'
+      ? payload.error.message
+      : 'The agent spawn did not reach a confirmed launch receipt.');
   }
   const ids = Array.isArray(result?.packetIds)
     ? result.packetIds

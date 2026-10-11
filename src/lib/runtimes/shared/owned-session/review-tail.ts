@@ -68,6 +68,10 @@ export function createReviewTailController({
 
     for (const run of runs) {
       const { parsed, stderrRaw } = await runController.readRunArtifacts(run);
+      const parsedEntries = run.modelFallback ? [...parsed.entries, {
+        id: `${run.id}:model-fallback`, kind: 'event', label: 'Codex CLI update',
+        text: run.modelFallback.notice, timestamp: run.finishedAt,
+      } satisfies OwnedTailEntry] : parsed.entries;
       // Discover the thread id before the empty-transcript skip below: a run
       // can legitimately produce no visible entries (a quiet/tool-only turn)
       // while its adapter still reports the runtime's session/thread id in
@@ -76,10 +80,10 @@ export function createReviewTailController({
       // cold-resume permanently unavailable for that session — resume()
       // fails "session was not found" even though the run finished cleanly.
       discoveredThreadId = discoveredThreadId ?? parsed.threadId;
-      if (!parsed.entries.length) continue;
+      if (!parsedEntries.length) continue;
 
       const outcome = deriveRunOutcome(run, parsed, stderrRaw, stderrNoise);
-      entries.push(...parsed.entries);
+      entries.push(...parsedEntries);
       groups.push({
         id: run.id,
         title: `${run.mode === 'launch' ? launchGroupLabel : resumeGroupLabel} • ${outcome}`,
@@ -97,7 +101,7 @@ export function createReviewTailController({
             : outcome === 'running'
               ? 'Run is still in flight.'
               : 'Run completed and the session can continue from here.',
-        entries: parsed.entries,
+        entries: parsedEntries,
       });
     }
 
@@ -197,7 +201,7 @@ export function createReviewTailController({
       throw new Error(`Owned ${adapter.squadShortName} review packet was not found.`);
     }
 
-    await runController.refreshSession(session);
+    await runController.refreshSession(session, true);
     const repoReview = await getRuntimeRepoReview(session.repoPath);
     const lastRun = latestRun(session);
     const lastRunArtifacts = lastRun ? await runController.readRunArtifacts(lastRun) : null;

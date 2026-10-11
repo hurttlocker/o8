@@ -66,7 +66,7 @@ export interface AgentCompletionDecision {
 export interface SupervisorCallbacks {
   fetchFleetStatus(): Promise<AgentStatusEntry[]>;
   fetchTranscript(sessionKey: string, limit: number): Promise<TranscriptEntry[]>;
-  steerAgent(surfaceId: string, message: string): Promise<void>;
+  steerAgent(surfaceId: string, message: string, automaticRecoveryRunId?: string): Promise<void>;
   interruptAgent(surfaceId: string): Promise<void>;
   relaunchAgent(prompt: string, repoPath: string, taskName: string, retryOfSurfaceId?: string): Promise<SupervisorRelaunchResult>;
   broadcastAgentUpdate(update: AgentUpdateEvent): void;

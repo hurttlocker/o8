@@ -1,4 +1,4 @@
-import { resolveRate } from '@/lib/cost/rate-table';
+import { codexUsageCostUsd, resolveRate } from '@/lib/cost/rate-table';
 import type { OrchestratorEvent, OrchestratorTurnUsage } from './orchestrator-stream-events';
 import { planFromCodexTodoList, planFromToolInput, type OrchestratorPlanSnapshot } from './orchestrator-plan';
 
@@ -41,16 +41,14 @@ function emitPlanOnce(
   onEvent({ type: 'plan', explanation: plan.explanation, steps: plan.steps });
 }
 
-function computeUsdCost(usage: ParsedCodexLine['usage']): number | null {
+function computeUsdCost(usage: ParsedCodexLine['usage'], model?: string): number | null {
   if (!usage) return null;
-  const rate = resolveRate('codex', 'gpt-5.5')!;
-  const inputTokens = Math.max(0, (usage.input_tokens ?? 0) - (usage.cached_input_tokens ?? 0));
-  const cachedTokens = usage.cached_input_tokens ?? 0;
-  const outputTokens = usage.output_tokens ?? 0;
-  const total =
-    (inputTokens / 1_000_000) * rate.inputUsdPerMillion
-    + (cachedTokens / 1_000_000) * (rate.cacheReadUsdPerMillion ?? 0)
-    + (outputTokens / 1_000_000) * rate.outputUsdPerMillion;
+  const rate = resolveRate('codex', model) ?? resolveRate('codex', 'gpt-5.5')!;
+  const total = codexUsageCostUsd(rate, {
+    inputTokens: Math.max(0, usage.input_tokens ?? 0),
+    cachedInputTokens: Math.max(0, usage.cached_input_tokens ?? 0),
+    outputTokens: Math.max(0, usage.output_tokens ?? 0),
+  });
   return Number.isFinite(total) && total > 0 ? total : null;
 }
 
@@ -68,7 +66,7 @@ export function handleCodexJsonLine(
   line: string,
   state: CodexLineHandlerState,
   onEvent: (event: OrchestratorEvent) => void,
-  options: { isLocalModel: boolean },
+  options: { isLocalModel: boolean; model?: string; onActivity?: () => void },
 ): boolean {
   if (!line.trim()) return false;
   try {
@@ -124,6 +122,9 @@ export function handleCodexJsonLine(
     }
 
     const item = safeObject(parsed.item);
+    if (item && (type === 'item.started' || type === 'item.updated' || type === 'item.completed')) {
+      options.onActivity?.();
+    }
 
     // todo_list rides item.started / item.updated / item.completed and is a
     // FULL list every time — normalize each into a complete plan snapshot.
@@ -226,7 +227,7 @@ export function handleCodexJsonLine(
     }
 
     if (type === 'turn.completed' && parsed.usage) {
-      state.cost = options.isLocalModel ? null : computeUsdCost(parsed.usage);
+      state.cost = options.isLocalModel ? null : computeUsdCost(parsed.usage, options.model);
       state.usage = normalizeUsage(parsed.usage);
     }
     return true;

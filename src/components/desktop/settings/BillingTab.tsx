@@ -14,7 +14,9 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import type { Plan } from '@/lib/entitlement/types';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 import {
   APP_FONT_STACK,
@@ -33,6 +35,7 @@ import {
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
 const UPGRADE_URL = 'https://o8.run/pricing';
+const ACCOUNT_URL = 'https://o8.run/account';
 
 type EntitlementSource = 'env' | 'file' | 'default';
 
@@ -46,21 +49,11 @@ interface PostError {
   reason: string;
 }
 
-// The founder plan presents as Pro (Q ruling 2026-07-27): plan ids stay
-// frozen, but the ladder reads Free/Pro/Team everywhere. Founding identity is
-// the serial chip on the settings-drawer account row, not a plan name.
-const PLAN_LABELS: Record<Plan, string> = {
-  free: 'Free',
-  pro: 'Pro',
-  team: 'Team',
-  founder: 'Pro',
-};
-
 const PLAN_TAGLINES: Record<Plan, string> = {
   free: 'Use the local workspace with your own connected AI tools. Your providers may charge for usage.',
   pro: 'Adds hosted o8 High and Engineering Brain assistance, subject to your plan limits. Hosted mobile and cloud execution are planned.',
   team: 'Your team plan and active license determine hosted access and limits. Planned services are listed separately below.',
-  founder: 'Your founding license provides Pro access and its included benefits. Hosted usage remains subject to plan limits.',
+  founder: 'Your one-time Pro · Lifetime license keeps its included benefits for life. Hosted usage remains subject to plan limits.',
 };
 
 const INCLUDED_ROWS: Array<{ label: string; detail: string }> = [
@@ -203,7 +196,7 @@ export function BillingTab() {
     || plan === 'founder' || entitlement.plan === 'founder' || entitlement.actualPlan === 'founder';
   const isTeam = plan === 'team' || entitlement.plan === 'team' || entitlement.actualPlan === 'team';
   const isPaid = isFounder || isTeam || plan === 'pro' || entitlement.plan === 'pro' || entitlement.actualPlan === 'pro';
-  // Founders present as Pro via PLAN_LABELS, but keep the founder tagline.
+  // Keep lifetime copy distinct from the monthly plan without changing plan ids.
   const displayPlan: Plan = isTeam ? 'team' : isFounder ? 'founder' : isPaid ? 'pro' : 'free';
 
   // License controls stay on the LOCAL copy — clearing is only meaningful for a
@@ -303,6 +296,11 @@ export function BillingTab() {
               ) : null}
             </div>
             <div style={{ flexShrink: 0 }}>
+              {displayPlan === 'pro' ? (
+                <RamsButton variant="ghost" onClick={() => openExternalUrl(ACCOUNT_URL)}>
+                  Manage subscription
+                </RamsButton>
+              ) : null}
               {!isPaid ? (
                 <RamsButton
                   variant="ghost"
@@ -362,13 +360,13 @@ export function BillingTab() {
         <SettingsGroup
           footnote={licenseOpen
             ? <>Verified offline, stored locally in{' '}
-              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>~/.o8/entitlement.json</span>. Signing in with a founding account activates automatically — this is the manual path.</>
+              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>~/.o8/entitlement.json</span>. Signing in with a Pro · Lifetime account activates automatically — this is the manual path.</>
             : undefined}
         >
           <SettingsRow
             icon={<KeyIcon />}
             label="Have a license key?"
-            subtitle={hasFileLicense ? 'A license is active on this machine' : 'Founding passes activate here — or just sign in'}
+            subtitle={hasFileLicense ? 'A license is active on this machine' : 'Pro · Lifetime licenses activate here, or just sign in'}
             accessory={hasFileLicense ? <ValuePill tone="success">Active</ValuePill> : undefined}
             onPress={() => setLicenseOpen((v) => !v)}
             chevron

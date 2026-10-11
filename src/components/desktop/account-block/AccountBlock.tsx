@@ -4,10 +4,12 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { ChromeButton, SIDEBAR_FOOTER_HIT_SIZE } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
 import { SymonMachineControl, SymonOrbStatusLine, useSymonOrbMinimized } from '../dictation/SymonMachineControl';
+import { SymonMark } from '../dictation/SymonVisuals';
 
 interface AccountBlockProps {
   onOpenSettings?: () => void;
@@ -73,15 +75,7 @@ function SymonVoiceEntry() {
           background: active ? 'var(--t-hover)' : 'transparent',
         }}
       >
-        <span
-          style={{
-            width: 17,
-            height: 17,
-            borderRadius: '50%',
-            background: 'radial-gradient(circle at 64% 28%, color-mix(in srgb, var(--t-text) 90%, transparent), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
-            boxShadow: active ? '0 0 0 2px var(--t-accent), 0 0 9px rgba(136, 209, 241, 0.45)' : '0 0 9px rgba(136, 209, 241, 0.45)',
-          }}
-        />
+        <SymonMark active={active} />
       </span>
     </button>
   );
@@ -114,10 +108,7 @@ export function AccountBlock({
   const initial = Array.from(displayName)[0]?.toUpperCase() ?? '';
   const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
   const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
-  // Founders present as Pro (Q ruling 2026-07-27): the ladder reads Free/Pro/
-  // Team everywhere; founding identity is the serial chip in the settings
-  // drawer, not a plan name.
-  const planLabel = isFounder || isPaid ? 'Pro' : 'Free Plan';
+  const planLabel = isFounder ? PLAN_LABELS.founder : isPaid ? PLAN_LABELS.pro : 'Free Plan';
   // Signed out while a paid/founder entitlement is still cached = the Clerk
   // session expired underneath the account (server-side lifetime, #1623) —
   // an explicit sign-out clears the cached entitlement, so this state can

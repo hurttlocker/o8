@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -110,17 +110,18 @@ afterEach(() => {
 
 describe('worktree reaper terminal sweep — non-git packet directories (#2474)', () => {
   it.each<FixtureKind>(['dangling-gitfile', 'no-git-entry'])(
-    'removes a %s directory of an archived lane once and logs one line for it',
+    'retains unique scratch in a %s directory and suppresses repeated failed warnings',
     async (kind) => {
       const packetId = `pkt-non-git-${kind}`;
       const fixture = createRepoFixture(packetId, kind);
       const lines = captureLogs();
 
       const first = await tick(fixture.repoPath, lines);
-      expect(existsSync(fixture.worktreePath)).toBe(false);
-      expect(first.filter((line) => line.includes(fixture.worktreePath))).toHaveLength(1);
-      expect(first.some((line) => /terminal sweep .*removed=1 .*failed=0/.test(line))).toBe(true);
-      // Nothing was banked: the parent checkout's HEAD is not the packet's head.
+      expect(existsSync(fixture.worktreePath)).toBe(true);
+      expect(readFileSync(join(fixture.worktreePath, 'scratch', 'notes.md'), 'utf8')).toBe('agent scratch\n');
+      expect(first.some((line) => line.includes('preservation authority is unavailable'))).toBe(true);
+      expect(first.some((line) => /terminal sweep .*removed=0 .*failed=1/.test(line))).toBe(true);
+      // The parent checkout cannot identify or preserve these unique bytes.
       expect(git(fixture.repoPath, ['branch', '--list', `preserved/packet-${packetId}`])).toBe('');
 
       const second = await tick(fixture.repoPath, lines);
@@ -143,7 +144,7 @@ describe('worktree reaper terminal sweep — non-git packet directories (#2474)'
     expect(existsSync(fixture.worktreePath)).toBe(true);
   }, 30_000);
 
-  it('keeps retrying a valid clone refused by the live-process guard until the worker exits', async () => {
+  it('retains an unmanaged clone after its live-process refusal clears', async () => {
     const fixture = createRepoFixture('pkt-live-guard-refused', 'clone');
     allowRemoval = false;
     const lines = captureLogs();
@@ -158,7 +159,8 @@ describe('worktree reaper terminal sweep — non-git packet directories (#2474)'
 
     allowRemoval = true;
     const third = await tick(fixture.repoPath, lines);
-    expect(existsSync(fixture.worktreePath)).toBe(false);
-    expect(third.some((line) => /terminal sweep .*removed=1 .*failed=0/.test(line))).toBe(true);
+    expect(existsSync(fixture.worktreePath)).toBe(true);
+    expect(readFileSync(join(fixture.worktreePath, 'packet.txt'), 'utf8')).toBe('packet work\n');
+    expect(third.some((line) => /terminal sweep .*removed=0 .*failed=1/.test(line))).toBe(true);
   }, 30_000);
 });

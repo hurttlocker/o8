@@ -216,24 +216,28 @@ export function useCanvasSpawners({
    *  the governed create+dispatch seam (/api/orchestrator/spawn-prompt); the new
    *  lanes go live and bloom as cards via the watcher above. Returns an ack note
    *  on a synchronous validation failure, else null (ok). */
-  const spawnAgents = useCallback((task: string, count: number, repoOverride?: string | null, origin?: string | null): string | null => {
+  const spawnAgents = useCallback((task: string, count: unknown, repoOverride?: string | null, origin?: string | null): string | null => {
     const repoPath = repoOverride ?? activeRepoPath;
     if (!task.trim()) return 'spawn-agents needs args.task';
     if (!repoPath) return 'no repo scoped — pick a repo first';
-    const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
-    if (origin === 'symon') symonSpawnWindowUntilRef.current = Date.now() + 20_000;
-    if (n > 1 && !reducedMotion()) {
-      const spawnOrigin = viewportSpawnOrigin();
-      const expiresAt = Date.now() + SPAWN_CHOREOGRAPHY_TTL_MS;
-      spawnChoreographyRef.current.push(...Array.from({ length: n }, (_, index) => ({
-        repoPath,
-        origin: spawnOrigin,
-        delayMs: index * CARD_ENTRANCE.staggerMs,
-        expiresAt,
-      })));
+    if (count !== undefined && (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1)) {
+      return 'count must be a positive safe integer';
     }
-    spawnCanvasAgents({ repoPath, task: task.trim(), count: n, origin })
+    if (origin === 'symon') symonSpawnWindowUntilRef.current = Date.now() + 20_000;
+    spawnCanvasAgents({ repoPath, task: task.trim(), count, origin })
       .then((ids) => {
+        // Allocate animation entries only after server batch admission, never
+        // from an unvalidated count that could exhaust the webview heap.
+        if (ids.length > 1 && !reducedMotion()) {
+          const spawnOrigin = viewportSpawnOrigin();
+          const expiresAt = Date.now() + SPAWN_CHOREOGRAPHY_TTL_MS;
+          ids.forEach((_id, index) => spawnChoreographyRef.current.push({
+            repoPath,
+            origin: spawnOrigin,
+            delayMs: index * CARD_ENTRANCE.staggerMs,
+            expiresAt,
+          }));
+        }
         if (origin === 'symon') {
           for (const id of ids) {
             symonSpawnPacketIdsRef.current.add(id);
@@ -245,11 +249,12 @@ export function useCanvasSpawners({
         timersRef.current.push(setTimeout(refreshLanes, 1200));
         timersRef.current.push(setTimeout(refreshLanes, 3000));
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (origin === 'symon') symonSpawnWindowUntilRef.current = 0;
+        showCanvasToast(error instanceof Error ? error.message : 'Unable to spawn agents', 'error');
       });
     return null;
-  }, [activeRepoPath, reducedMotion, refreshLanes, viewportSpawnOrigin]);
+  }, [activeRepoPath, reducedMotion, refreshLanes, viewportSpawnOrigin, showCanvasToast]);
 
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */

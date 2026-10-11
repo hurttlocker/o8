@@ -371,6 +371,38 @@ async function dispatchPacketMerge(
     throw new HeadShaMismatchError(packet.id, result.expectedHeadSha, result.currentHeadSha);
   }
 
+  // Persist canonical release evidence before lane reconciliation projects the
+  // retired workspace as archived. Evidence-backed release then survives sync.
+  const [
+    { readOrchestratorControlPlaneState, syncOrchestratorControlPlaneState, withLockedState },
+    { runDispatchTick },
+  ] = await Promise.all([
+    loadControlPlane(),
+    loadDispatch(),
+  ]);
+  if (result.ok) {
+    await withLockedState(async (fresh) => {
+      const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
+      if (!packetState || !packetReleaseIdentityIsCurrent(packetState, lane.id, releaseGeneration)) return;
+      markPacketReleased(packetState, {
+        source: 'approve_and_merge',
+        mergeCommit: result.mergeSha ?? null,
+        headSha: result.reviewedHeadSha ?? result.mergeSha ?? null,
+        evidenceKind: 'merge_command',
+      });
+      packetState.lastEventAt = packetState.releaseStatePayload!.releasedAt!;
+      packetState.lastEventLabel = 'merged';
+      if (packetState.lane) {
+        packetState.lane.lastEventAt = packetState.lastEventAt;
+        packetState.lane.lastEventLabel = 'merged';
+      }
+      const { persistReleasedPacketToMission } = await import('@/lib/orchestrator/mission-registry');
+      if (!(await persistReleasedPacketToMission(packetState, lane.id, releaseGeneration))) {
+        throw new Error('Durable packet ownership changed before merge release could be persisted.');
+      }
+    });
+  }
+
   // #622 — Synchronous worktree cleanup guarantee.
   if (result.ok) {
     // #1110 follow-up — stamp mergedClean on the session_outcomes row so the
@@ -433,30 +465,6 @@ async function dispatchPacketMerge(
     }
   }
 
-  // Persist canonical release evidence before lane reconciliation projects the
-  // retired workspace as archived. Evidence-backed release then survives sync.
-  const [
-    { readOrchestratorControlPlaneState, syncOrchestratorControlPlaneState, withLockedState },
-    { runDispatchTick },
-  ] = await Promise.all([
-    loadControlPlane(),
-    loadDispatch(),
-  ]);
-  if (result.ok) {
-    await withLockedState((fresh) => {
-      const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
-      if (!packetState || !packetReleaseIdentityIsCurrent(packetState, lane.id, releaseGeneration)) return;
-      markPacketReleased(packetState, {
-        source: 'approve_and_merge',
-        mergeCommit: result.mergeSha ?? null,
-        headSha: result.reviewedHeadSha ?? result.mergeSha ?? null,
-        evidenceKind: 'merge_command',
-      });
-      if (packetState.lane) {
-        packetState.lane.lastEventLabel = 'merged';
-      }
-    });
-  }
   const synced = await syncOrchestratorControlPlaneState();
 
   const releasedAfterDispatch = await alreadyReleasedResultForPacketId(input.packetId, synced.packets);

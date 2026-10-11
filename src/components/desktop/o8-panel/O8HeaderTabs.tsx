@@ -92,6 +92,7 @@ function IconGlobe({ size = 15, color = 'currentColor' }: { size?: number; color
 // live in the header rail).
 const O8_TABS: O8TabDef[] = [
   { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
+  { id: 'threads', label: 'Threads', icon: (c) => <IconHandoffs size={15} color={c} /> },
   { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
   { id: 'handoffs', label: 'Handoffs', icon: (c) => <IconHandoffs size={15} color={c} /> },
   { id: 'resources', label: 'Resources', icon: (c) => <IconGauge size={15} color={c} /> },

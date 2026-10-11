@@ -18,11 +18,11 @@ async function unusedPort() {
   return port;
 }
 
-function stopChild(child) {
+function stopChild(child, supervised, signal = 'SIGTERM') {
   if (!child.pid) return;
   try {
-    if (process.platform === 'win32') child.kill('SIGTERM');
-    else process.kill(-child.pid, 'SIGTERM');
+    if (supervised || process.platform === 'win32') child.kill(signal);
+    else process.kill(-child.pid, signal);
   } catch { /* already exited */ }
 }
 
@@ -50,7 +50,7 @@ export async function smokePackagedServer(serverRoot, options = {}) {
   const child = spawn(process.execPath, ['server.js'], {
     cwd: serverRoot,
     env,
-    detached: process.platform !== 'win32',
+    detached: !options.supervised && process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -84,13 +84,14 @@ export async function smokePackagedServer(serverRoot, options = {}) {
     }
     throw new Error(`packaged server did not serve its identity within the deadline: ${output}`);
   } finally {
-    stopChild(child);
+    stopChild(child, options.supervised);
     await Promise.race([exited, delay(3000)]);
     if (child.exitCode === null && child.signalCode === null) {
-      try {
-        if (process.platform === 'win32') child.kill('SIGKILL');
-        else process.kill(-child.pid, 'SIGKILL');
-      } catch { /* already exited */ }
+      stopChild(child, options.supervised, 'SIGKILL');
+      await Promise.race([exited, delay(3000)]);
+    }
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      throw new Error('packaged server did not exit after termination; smoke profile retained');
     }
     rmSync(profile, { recursive: true, force: true });
   }

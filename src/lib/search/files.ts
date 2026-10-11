@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import os from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { listRepos } from '@/lib/repos/registry';
 import type { SearchResult } from '@/lib/search/types';
@@ -80,7 +80,7 @@ async function searchFilesInRoot(query: string, root: FileSearchRoot): Promise<S
           id: `file:${root.localPath}:${cleaned}`,
           title: filename,
           detail,
-          target: { filePath: root.repoName ? join(root.localPath, cleaned) : cleaned },
+          target: { filePath: cleaned, workspace: root.localPath },
           score: 50 + exact + starts + directoryMatch + exactDirectoryMatch
             - (pathParts.length / 10) - (index / 10_000),
         };

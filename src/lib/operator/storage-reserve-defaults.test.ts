@@ -21,7 +21,7 @@ describe('storage reserve operator defaults', () => {
     delete process.env.O8_STORAGE_RESERVE_RATIO;
     delete process.env.O8_STORAGE_RESERVE_FLOOR_GB;
     expect(resolveStorageReserveSettings({})).toEqual({
-      values: { storageReserveRatio: 0.1, storageReserveFloorGb: 10 },
+      values: { storageReserveRatio: 0, storageReserveFloorGb: 2 },
       sources: { storageReserveRatio: 'default', storageReserveFloorGb: 'default' },
     });
     expect(resolveStorageReserveSettings({ storageReserveRatio: 0.2, storageReserveFloorGb: 24 })).toEqual({
@@ -42,10 +42,26 @@ describe('storage reserve operator defaults', () => {
     process.env.O8_STORAGE_RESERVE_RATIO = '2';
     process.env.O8_STORAGE_RESERVE_FLOOR_GB = '10001';
     expect(resolveStorageReserveSettings({})).toEqual({
-      values: { storageReserveRatio: 0.1, storageReserveFloorGb: 10 },
+      values: { storageReserveRatio: 0, storageReserveFloorGb: 2 },
       sources: { storageReserveRatio: 'default', storageReserveFloorGb: 'default' },
     });
-    expect(() => applyStorageReserveUpdate({}, { storageReserveRatio: 0 })).toThrow(/greater than 0/);
+    expect(() => applyStorageReserveUpdate({}, { storageReserveRatio: -0.1 })).toThrow(/between 0 and 1/);
     expect(() => applyStorageReserveUpdate({}, { storageReserveFloorGb: 10001 })).toThrow(/no more than 10000/);
+  });
+
+  it('persists an explicitly disabled percentage reserve through every source', () => {
+    delete process.env.O8_STORAGE_RESERVE_RATIO;
+    delete process.env.O8_STORAGE_RESERVE_FLOOR_GB;
+    const stored = { storageReserveRatio: 0.1, storageReserveFloorGb: 4 };
+    applyStorageReserveUpdate(stored, { storageReserveRatio: 0 });
+    expect(resolveStoredStorageReserve(stored)).toEqual({ storageReserveRatio: 0, storageReserveFloorGb: 4 });
+    expect(resolveStorageReserveSettings(stored)).toMatchObject({
+      values: { storageReserveRatio: 0, storageReserveFloorGb: 4 },
+      sources: { storageReserveRatio: 'file', storageReserveFloorGb: 'file' },
+    });
+    process.env.O8_STORAGE_RESERVE_RATIO = '0';
+    expect(resolveStorageReserveSettings({ storageReserveRatio: 0.5 })).toMatchObject({
+      values: { storageReserveRatio: 0 }, sources: { storageReserveRatio: 'env' },
+    });
   });
 });

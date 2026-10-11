@@ -28,6 +28,7 @@ import {
 } from './shared';
 import { SettingsGroup } from './grouped';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
+import { PluginTaskReview } from './mcp/PluginTaskReview';
 import { ExternalMcpServersSection } from './mcp/ExternalMcpServersSection';
 import { AccessPointDiagnostics, type AccessPointDiagnosticsData } from './mcp/AccessPointDiagnostics';
 import {
@@ -254,6 +255,7 @@ export function MCPTab() {
         fontSize: 13,
         fontFamily: APP_FONT_STACK,
       }}>
+        <PluginTaskReview />
         Failed to load MCP config: {error}
       </div>
     );
@@ -267,6 +269,7 @@ export function MCPTab() {
         fontSize: 13,
         fontFamily: APP_FONT_STACK,
       }}>
+        <PluginTaskReview />
         Loading MCP config...
       </div>
     );
@@ -290,6 +293,8 @@ export function MCPTab() {
         title="MCP"
         subtitle="Connect compatible apps to o8, or add MCP servers that give your orchestrator more tools and context."
       />
+
+      <PluginTaskReview />
 
       {!ready ? (
         <div style={{

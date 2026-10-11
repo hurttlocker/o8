@@ -37,7 +37,7 @@ export function resolveAdapterEffort(
   model: string | null,
   effort: ConcreteThinkingEffort,
 ): string {
-  if (runtime === 'codex') return resolveCodexReasoningEffort(effort, model);
+  if (runtime === 'codex' || runtime === 'cloud') return resolveCodexReasoningEffort(effort, model);
   if (runtime === 'claude-code') return claudeEffortFlagValue(effort);
   return effort;
 }

@@ -12,7 +12,7 @@ import {
   type RepoRegistryEntry,
   type ValidatedRepoCandidate,
 } from './shared';
-import type { ProjectRecord } from './useProjects';
+import { broadcastProjectsUpdated, type ProjectRecord } from './useProjects';
 
 const ROLE_OPTIONS: Array<{ value: ProjectRole; label: string }> = [
   { value: 'fullstack', label: 'Fullstack' },
@@ -354,6 +354,7 @@ export function AddRepoDialog({
       }
 
       try {
+        broadcastProjectsUpdated();
         await onProjectsChanged?.();
         await onRepoAdded?.(repo);
       } catch (error) {
@@ -415,6 +416,7 @@ export function AddRepoDialog({
         >
           <input
             id="add-repo-path"
+            autoFocus
             value={repoPathInput}
             onChange={(event) => {
               setRepoPathInput(event.currentTarget.value);

@@ -166,7 +166,7 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
     })),
     cloudJobs,
     managedRuns: managedRuns
-      .filter((run) => run.status === 'running')
+      .filter((run) => run.status === 'running' || run.status === 'settling')
       .map((run) => ({ id: run.id, session: run.session, command: run.command, cwd: run.cwd })),
   });
 }

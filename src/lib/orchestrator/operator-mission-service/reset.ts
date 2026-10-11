@@ -60,7 +60,7 @@ function withinScope(input: ResetPacketInput, laneId: string): boolean {
   return !input.scope || input.scope.laneIds.includes(laneId);
 }
 
-function markPacketResetHeld(packet: OrchestratorPacket) {
+function markPacketResetHeld(packet: OrchestratorPacket, preserveOperatorStopped = false) {
   // Reset packet to a CLEAN, NON-auto-dispatchable state.
   // #23 — queueState is 'held' (NOT 'queued') so the supervisor's headless
   // dispatch tick does NOT relaunch it on its own. reset is a CLEANUP, not a
@@ -91,7 +91,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   packet.typecheckAutoRetries = 0;
   packet.leaseWaitAutoRetries = 0;
   // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
-  // a reset gives a fresh stall budget and re-enables dispatch.
+  // Explicit Reset re-enables dispatch; Stop cleanup retains its stop barrier.
   packet.stallRetries = 0;
   // #2141 — and the zero-diff runtime-fault budget.
   packet.zeroDiffRuntimeRetries = 0;
@@ -100,7 +100,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   // #2195 — "Manual reset required" is only true if the reset actually refreshes
   // the dispatch-preflight refusal budget.
   packet.preflightRefusals = 0;
-  packet.operatorStopped = false;
+  packet.operatorStopped = preserveOperatorStopped;
   packet.tierEscalated = undefined;
   // #2045 — reset CONSUMES a still-armed alignment (stamps `alignmentResolvedAt`)
   // rather than clearing `huddle`: the operator's reset IS the alignment
@@ -211,26 +211,52 @@ async function mutateResetPacketGeneration(
   input: ResetPacketInput,
   missionId: string,
   mutate: (packet: OrchestratorPacket) => void,
+  expectedPacket?: OrchestratorPacket,
 ): Promise<{ referenceLabel: string; stateChanged: boolean } | null> {
-  return withMissionHandoffBarrier(() => mutateResetPacketGenerationUnlocked(input, missionId, mutate));
+  return withMissionHandoffBarrier(() => mutateResetPacketGenerationUnlocked(input, missionId, mutate, expectedPacket));
 }
 
 async function mutateResetPacketGenerationUnlocked(
   input: ResetPacketInput,
   missionId: string,
   mutate: (packet: OrchestratorPacket) => void,
+  expectedPacket?: OrchestratorPacket,
 ): Promise<{ referenceLabel: string; stateChanged: boolean } | null> {
+  const generationMoved = (packet: OrchestratorPacket) => {
+    if (!expectedPacket) return false;
+    const order = (packet.storageAdmissionEpoch ?? 0) - (expectedPacket.storageAdmissionEpoch ?? 0)
+      || (packet.attemptCount ?? 0) - (expectedPacket.attemptCount ?? 0);
+    return order > 0 || (order === 0 && Boolean(packet.lane?.laneId && packet.lane.laneId !== expectedPacket.lane?.laneId));
+  };
   const apply = (packet: OrchestratorPacket) => {
-    if (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input)) {
+    if (generationMoved(packet) || (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input))) {
       return { referenceLabel: packet.referenceLabel, stateChanged: true };
     }
     mutate(packet);
     return { referenceLabel: packet.referenceLabel, stateChanged: false };
   };
   const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-  const { result } = await withLockedState((fresh) => {
+  const { result } = await withLockedState(async (fresh) => {
     if (fresh.missionId !== missionId) return null;
     const packet = fresh.packets.find((candidate) => candidate.id === input.packetId);
+    if (packet && expectedPacket && !generationMoved(packet)
+      && (!input.scope?.skipHoldIfStateMoved || scopedPacketGenerationMatches(packet, input))
+      && readMissionRegistryEntry(missionId, { includeArchived: true })) {
+      // Cleanup has retired the captured lane/worktree. Finalize only this
+      // packet in the registry's fresh state before acknowledging the reset.
+      // A failed registry write leaves the current packet's stop hold intact.
+      const { result: mirrored } = await withMissionRegistryState(missionId, (state) => {
+        const target = state.packets.find((candidate) => candidate.id === input.packetId);
+        if (!target || generationMoved(target)) {
+          return { state, result: { referenceLabel: packet.referenceLabel, stateChanged: true } };
+        }
+        target.storageAdmissionEpoch = packet.storageAdmissionEpoch;
+        target.attemptCount = packet.attemptCount;
+        mutate(target);
+        return { state, result: { referenceLabel: target.referenceLabel, stateChanged: false } };
+      });
+      if (mirrored.stateChanged) return mirrored;
+    }
     return packet ? apply(packet) : null;
   });
   if (result) return result;
@@ -320,7 +346,7 @@ async function resetRegistryPacket(
         },
       };
     }
-    markPacketResetHeld(packet);
+    markPacketResetHeld(packet, input.scope?.preserveOperatorStopped);
     log(`Reset registry packet ${packet.referenceLabel} (${input.packetId}). Reason: ${input.reason ?? 'operator reset'}`);
     return {
       state,
@@ -639,7 +665,8 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
   const heldPacket = await mutateResetPacketGeneration(
     retryScopedInput,
     missionId,
-    markPacketResetHeld,
+    (target) => markPacketResetHeld(target, input.scope?.preserveOperatorStopped),
+    packet,
   );
   if (!heldPacket) {
     log(`Reset packet ${packet.referenceLabel} (${input.packetId}) — packet left mission state during cleanup; lanes cleaned, no hold to record.`);

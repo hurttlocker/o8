@@ -24,6 +24,12 @@ import { resolveReleaseConfig } from './lib/release-config.mjs';
 
 const require = createRequire(import.meta.url);
 const root = process.cwd();
+const heapMiB = process.env.O8_BUILD_HEAP_MIB === undefined
+  ? 24576
+  : Number(process.env.O8_BUILD_HEAP_MIB);
+if (!Number.isSafeInteger(heapMiB) || heapMiB < 1024 || heapMiB > 24576) {
+  throw new Error('O8_BUILD_HEAP_MIB must be an integer from 1024 through 24576.');
+}
 
 // Next's persistent webpack cache treats node_modules as immutable, so a fresh
 // patch-package edit has to invalidate it explicitly. See the script's header.
@@ -51,7 +57,7 @@ for (const key of [
   delete env[key];
 }
 env.NODE_ENV = 'production';
-env.NODE_OPTIONS = '--max-old-space-size=24576';
+env.NODE_OPTIONS = `--max-old-space-size=${heapMiB}`;
 
 const build = spawnSync(
   process.execPath,

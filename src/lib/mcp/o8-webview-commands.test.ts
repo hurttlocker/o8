@@ -70,6 +70,12 @@ describe('reconnect retry safety', () => {
     }
   });
 
+  it('classifies native directory dialog routing without mutation retries', () => {
+    expect(RECONNECT_RETRY_SAFE_COMMANDS.has('inspect_directory_dialog')).toBe(true);
+    expect(O8_WEBVIEW_SOCKET_COMMANDS.some((entry) => entry.command === 'resolve_directory_dialog')).toBe(true);
+    expect(RECONNECT_RETRY_SAFE_COMMANDS.has('resolve_directory_dialog')).toBe(false);
+  });
+
   it('treats the new read-only commands as retry-safe', () => {
     expect(RECONNECT_RETRY_SAFE_COMMANDS.has('list_windows')).toBe(true);
     expect(RECONNECT_RETRY_SAFE_COMMANDS.has('get_app_info')).toBe(true);

@@ -276,13 +276,12 @@ pub fn show(app: &tauri::AppHandle) {
     }
 }
 
-/// Position + size the child window over the panel content rect, in physical
-/// screen coordinates. Anchors at the main window's content origin
-/// (`inner_position()`, physical px, screen-space) and scales the CSS rect by the
-/// main window's `scale_factor()` (Retina: physical = CSS × scale).
+/// Position and size child content in the parent's logical coordinate space.
+/// A newly created child can initially have another display's scale factor;
+/// passing physical coordinates would let that scale shift and enlarge it.
 #[cfg(target_os = "macos")]
-fn reposition(app: &tauri::AppHandle, win: &tauri::WebviewWindow, x: f64, y: f64, w: f64, h: f64) {
-    use tauri::{Manager, PhysicalPosition, PhysicalSize};
+pub(crate) fn reposition(app: &tauri::AppHandle, win: &tauri::WebviewWindow, x: f64, y: f64, w: f64, h: f64) {
+    use tauri::{LogicalPosition, LogicalSize, Manager};
     let Some(main) = app.get_webview_window("main") else {
         return;
     };
@@ -290,12 +289,10 @@ fn reposition(app: &tauri::AppHandle, win: &tauri::WebviewWindow, x: f64, y: f64
     let Ok(origin) = main.inner_position() else {
         return;
     };
-    let phys_x = origin.x as f64 + x * scale;
-    let phys_y = origin.y as f64 + y * scale;
-    let phys_w = (w * scale).max(1.0);
-    let phys_h = (h * scale).max(1.0);
-    let _ = win.set_position(PhysicalPosition::new(phys_x, phys_y));
-    let _ = win.set_size(PhysicalSize::new(phys_w, phys_h));
+    let logical_x = origin.x as f64 / scale + x;
+    let logical_y = origin.y as f64 / scale + y;
+    let _ = win.set_position(LogicalPosition::new(logical_x, logical_y));
+    let _ = win.set_size(LogicalSize::new(w.max(1.0), h.max(1.0)));
     // Re-assert the child-above-parent relationship on every reposition. set_size /
     // set_position drop the child behind the parent — visible on a resize-GROW, where
     // the parent's frame expands over the child's area and never re-orders it above

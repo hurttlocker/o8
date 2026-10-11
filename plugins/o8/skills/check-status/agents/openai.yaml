@@ -1,0 +1,6 @@
+interface:
+  display_name: "Check o8 status"
+  short_description: "See local agent work and pending decisions"
+  default_prompt: "Use $check-status to check o8 and tell me what needs my attention."
+policy:
+  products: ["CODEX"]

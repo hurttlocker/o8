@@ -1,0 +1,33 @@
+[package]
+name = "o8-pi-write"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Approved-write helper for the o8 Pi SDK worker (#3289)"
+
+# A standalone crate, not a member of the desktop shell's package.
+[workspace]
+
+[[bin]]
+name = "o8-pi-write"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.21.7"
+libc = "0.2.183"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+
+[features]
+# Pauses at named points and runs an adjacent `hook` executable, so tests can
+# mutate the workspace or kill the helper at exact boundaries. Never enabled
+# for release builds.
+test-hooks = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# A panic ends the process; the host then runs a recovery pass.
+panic = "abort"
+strip = true

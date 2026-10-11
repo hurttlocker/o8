@@ -1,4 +1,5 @@
 import type { TaskMutationPayload } from './types';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export type TaskExecutionRuntime = 'codex' | 'cloud';
 
@@ -10,6 +11,7 @@ export async function createTaskRequest(input: {
   workerIntent: string;
   requestedRuntime: TaskExecutionRuntime;
   model?: string | null;
+  requestedEffort?: ThinkingEffort | null;
 }, dispatchAfterCreate: boolean): Promise<string> {
   const response = await fetch('/api/tasks', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),

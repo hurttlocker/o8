@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { createTask, TaskMutationError } from '@/lib/tasks/actions';
+import { createTask, readTaskEffortSelection, TaskMutationError } from '@/lib/tasks/actions';
 import { getTaskPool } from '@/lib/tasks/pool';
 
 export const runtime = 'nodejs';
@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
       projectId: optionalString(body.projectId),
       repoPath: optionalString(body.repoPath),
       model: optionalString(body.model),
+      requestedEffort: readTaskEffortSelection(body),
       workerIntent: optionalString(body.workerIntent),
       requestedProvider: optionalString(body.requestedProvider),
       requestedRuntime: optionalString(body.requestedRuntime),

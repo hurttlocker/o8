@@ -1,3 +1,4 @@
+import { errorText } from '@/lib/mcp/operator-handlers/shared';
 import {
   type McpTool,
   type McpToolResult,
@@ -192,7 +193,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         brainCodexModel: {
           type: 'string',
-          enum: ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'],
+          enum: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'],
           description: 'Codex subscription model used for Engineering Brain classification and cited answers.',
         },
         brainCodexEffort: {
@@ -268,7 +269,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         parallelCap: {
           type: 'number',
-          description: 'Max packets running in parallel (1-32).',
+          description: 'Max packets running in parallel (positive safe integer).',
         },
         meteredPacketCostCapUsd: {
           type: 'number',
@@ -457,8 +458,8 @@ export async function handleOperatorDefaults(args: Record<string, unknown>): Pro
     }
     return jsonResult(data);
   } catch (err) {
-    console.error(`[o8-operator] o8_operator_defaults failed: ${err}`);
-    return textResult(`Failed to read/update operator defaults: ${err}`, true);
+    console.error(`[o8-operator] o8_operator_defaults failed: `, err);
+    return textResult(`Failed to read/update operator defaults: ${errorText(err)}`, true);
   }
 }
 
@@ -515,8 +516,8 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
       },
     });
   } catch (err) {
-    console.error(`[o8-operator] o8_send failed: ${err}`);
-    return textResult(`Failed to send: ${err}`, true);
+    console.error(`[o8-operator] o8_send failed: `, err);
+    return textResult(`Failed to send: ${errorText(err)}`, true);
   }
 }
 
@@ -537,8 +538,8 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
     );
     return jsonResult({ ok: true, ...(res.result ?? {}) });
   } catch (err) {
-    console.error(`[o8-operator] steer_packet failed: ${err}`);
-    return textResult(`Failed to steer packet: ${err}`, true);
+    console.error(`[o8-operator] steer_packet failed: `, err);
+    return textResult(`Failed to steer packet: ${errorText(err)}`, true);
   }
 }
 
@@ -583,8 +584,8 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
       },
     });
   } catch (err) {
-    console.error(`[o8-operator] o8_status failed: ${err}`);
-    return textResult(`Failed to fetch status: ${err}`, true);
+    console.error(`[o8-operator] o8_status failed: `, err);
+    return textResult(`Failed to fetch status: ${errorText(err)}`, true);
   }
 }
 
@@ -615,8 +616,8 @@ export async function handleHistory(args: Record<string, unknown>): Promise<McpT
       data: { entryCount: entries.length, transcript: entries },
     });
   } catch (err) {
-    console.error(`[o8-operator] o8_history failed: ${err}`);
-    return textResult(`Failed to read history: ${err}`, true);
+    console.error(`[o8-operator] o8_history failed: `, err);
+    return textResult(`Failed to read history: ${errorText(err)}`, true);
   }
 }
 
@@ -668,8 +669,8 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
       },
     });
   } catch (err) {
-    console.error(`[o8-operator] o8_lane_events failed: ${err}`);
-    return textResult(`Failed to read lane events: ${err}`, true);
+    console.error(`[o8-operator] o8_lane_events failed: `, err);
+    return textResult(`Failed to read lane events: ${errorText(err)}`, true);
   }
 }
 
@@ -735,7 +736,7 @@ export async function handleTranscript(args: Record<string, unknown>): Promise<M
       },
     });
   } catch (err) {
-    console.error(`[o8-operator] o8_packet_transcript failed: ${err}`);
-    return textResult(`Failed to read packet transcript: ${err}`, true);
+    console.error(`[o8-operator] o8_packet_transcript failed: `, err);
+    return textResult(`Failed to read packet transcript: ${errorText(err)}`, true);
   }
 }

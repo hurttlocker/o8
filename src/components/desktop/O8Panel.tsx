@@ -16,6 +16,7 @@ import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8InboxPane } from './O8InboxPane';
+import { O8ThreadsPane } from './o8-panel/O8ThreadsPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { ComparisonMatrix } from './comparison/ComparisonMatrix';
@@ -38,6 +39,8 @@ import { retryingLazy } from '@/lib/react/retrying-lazy';
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
 interface O8PanelProps {
+  /** Mounted panels retain drafts, but hidden panels do not own live previews. */
+  active?: boolean;
   repoPath?: string | null;
   registeredRepos?: RepoRegistryEntry[];
   onRepoPathChange?: (repoPath: string) => void;
@@ -83,6 +86,7 @@ interface O8PanelProps {
 // ── Main Component ──
 
 export function O8Panel({
+  active = true,
   repoPath,
   registeredRepos = [],
   onRepoPathChange,
@@ -129,7 +133,7 @@ export function O8Panel({
     try { window.localStorage.setItem('o8:right-panel:split-ratio', String(splitRatio)); } catch { /* ignore */ }
   }, [splitRatio]);
   const paneStyle = (tab: O8Tab) => panelPaneStyle(tab, activeTab, secondaryTab, splitRatio);
-  const paneVisible = (tab: O8Tab) => panelPaneVisible(tab, activeTab, secondaryTab);
+  const paneVisible = (tab: O8Tab) => panelPaneVisible(tab, activeTab, secondaryTab, active);
   // Browser is EXCLUDED from the utility shell (Q ruling 2026-07-12) — it's
   // a first-class drawer state whose pages render in the header rail, so it
   // never earns a strip row. activeTab === 'browser' renders the dedicated
@@ -403,7 +407,7 @@ export function O8Panel({
           (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
       {/* No Brain chat on the browser — it's a real browser now (Q ruling
           2026-07-12); its header/toolbar carry browser tools instead. */}
-      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' ? (
+      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'threads' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' ? (
         <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
           <O8ScratchChat
             repoPath={repoPath}
@@ -415,6 +419,9 @@ export function O8Panel({
       ) : null}
 
       {/* Tab content — all tabs stay mounted to preserve state */}
+      <div style={paneStyle('threads')}>
+        <O8ThreadsPane active={paneVisible('threads')} repoPath={repoPath ?? null} repos={registeredRepos} allRepos={allRepos} />
+      </div>
       {secondaryTab && onSecondaryTabChange ? (
         <O8PanelSplitDivider
           secondary={secondaryTab}

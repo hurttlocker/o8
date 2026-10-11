@@ -37,7 +37,7 @@ import {
 import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 import { randomUUID } from 'node:crypto';
 import { resolveCloudRemoteSource } from '@/lib/cloud/remote-source';
-import { resolveRemoteManifestHash } from '@/lib/cloud/remote-manifest';
+import { resolveRemoteWorkspaceManifest } from '@/lib/cloud/remote-manifest';
 
 /**
  * Launch, discovery, transcript replay, and interrupt use the durable job
@@ -192,8 +192,8 @@ export const cloudRuntime: AgentRuntime = {
     let remoteSource: Awaited<ReturnType<typeof resolveCloudRemoteSource>>;
     try {
       remoteSource = await resolveCloudRemoteSource(opts);
-      const remoteManifestHash = await resolveRemoteManifestHash(opts.sourceRepoPath!, remoteSource.baseSha);
-      opts = { ...opts, remoteManifestHash };
+      const manifest = await resolveRemoteWorkspaceManifest(opts.sourceRepoPath!, remoteSource.baseSha);
+      opts = { ...opts, remoteManifestHash: manifest.remoteManifestHash, remotePreview: manifest.remotePreview };
     } catch (error) {
       return {
         ok: false,

@@ -26,6 +26,7 @@ import {
 } from '@/lib/auth/desktop-auth-error';
 import { useTheme } from '@/lib/theme/context';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
 import { ThemeContrastGlyph, AppearanceControl } from './settings-quick-drawer/theme-rows';
@@ -86,16 +87,20 @@ function RowButton({
   children,
   onClick,
   ariaExpanded,
+  disabled = false,
 }: {
   children: ReactNode;
   onClick: () => void;
   ariaExpanded?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-expanded={ariaExpanded}
+      disabled={disabled}
+      aria-busy={disabled || undefined}
       style={{
         width: '100%',
         // border-box, or width:100% + the horizontal padding OVERFLOWS the
@@ -112,7 +117,7 @@ function RowButton({
         paddingRight: 7,
         background: 'transparent',
         color: 'inherit',
-        cursor: 'pointer',
+        cursor: disabled ? 'wait' : 'pointer',
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -140,20 +145,16 @@ function separatorStyle(): CSSProperties {
   };
 }
 
-/** Founding Operator mark — founders-only, drawer account row ONLY (Q ruling
- *  2026-07-27: founder identity shows only once settings is opened). Restyled
- *  2026-07-31 (Q: the bordered FOUNDING pill read too loud and sat glued to
- *  the drawer's right edge): now the quiet plain-dot vocabulary — one founding
- *  orange dot + the tabular serial, no box, breathing room from the edge. The
- *  full title lives in the tooltip. Hides while View-as-free is active because
- *  the effective entitlement's `founder` goes null under the override. */
+/** Lifetime mark on the drawer account row: a quiet dot and tabular serial.
+ *  The plan name lives in the tooltip. Hides while View-as-free is active
+ *  because the effective entitlement's `founder` goes null under the override. */
 const FOUNDER_ORANGE = '#ff5a1f';
 
 function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
   const serial = String(operatorNumber).padStart(3, '0');
   return (
     <div
-      title={`Founding Operator · No. ${serial}`}
+      title={`${PLAN_LABELS.founder} · No. ${serial}`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -188,6 +189,27 @@ function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
 function AccountSection({ auth }: { auth: O8AuthState }) {
   const { founder } = useEntitlement();
   const [authError, setAuthError] = useState<DesktopAuthError | null>(() => getDesktopAuthError());
+  const [signingOut, setSigningOut] = useState(false);
+  const [waitingForSignOut, setWaitingForSignOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!signingOut) return;
+    const timer = window.setTimeout(() => setWaitingForSignOut(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [signingOut]);
+
+  const signOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    setWaitingForSignOut(false);
+    setSignOutError(null);
+    try { await auth.signOut(); } catch {
+      setSignOutError('Sign-out could not be saved. Try again.');
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   useEffect(() => {
     return subscribeDesktopAuthError(() => {
@@ -267,10 +289,15 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
 
       <div style={separatorStyle()} />
 
-      <RowButton onClick={() => { void auth.signOut(); }}>
+      <RowButton onClick={() => { void signOut(); }} disabled={signingOut}>
         <IconFrame><LogOut size={13} /></IconFrame>
-        <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign out</span>
+        <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{signingOut ? waitingForSignOut ? 'Waiting for sign-out…' : 'Signing out…' : 'Sign out'}</span>
       </RowButton>
+      {signOutError ? (
+        <div role="alert" style={{ color: MUTED, fontSize: 11, fontWeight: 300, lineHeight: 1.35, paddingTop: 4, paddingBottom: 4, paddingLeft: 7, paddingRight: 7 }}>
+          {signOutError}
+        </div>
+      ) : null}
 
       <div style={separatorStyle()} />
     </>
@@ -311,7 +338,7 @@ export function SettingsQuickDrawer({
   const checkForUpdates = useCallback(async () => {
     setUpdateStatus('checking');
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
+      const { check } = await import('@/lib/app-update/check');
       const update = await check();
       if (update) {
         setUpdateStatus('available');

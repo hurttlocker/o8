@@ -8,6 +8,7 @@ import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
@@ -40,9 +41,10 @@ const MODEL_THINKING_MENU_WIDTH = 200;
 // open; the fixed houses keep their locked 200px geometry.
 const SEARCHABLE_HOUSE_MENU_WIDTH = 300;
 
-// Synthetic model id for the free o8 backend — there is no underlying model name
+// Synthetic model id for the o8 backend — there is no underlying model name
 // exposed in the UI (monetization doctrine: we own the brand, hide the model).
-// This value is what `onModelChange` stores and what `activeModelOption` matches.
+// This value is what `onModelChange` stores and what `activeModelOption` matches,
+// so it keeps its original value for saved selections.
 const O8_FREE_MODEL_ID = 'o8-free';
 
 export type ComposerModelOption = {
@@ -89,7 +91,8 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     label: 'Codex',
     options: [
       { value: MODEL_IDS.raw.openAiGpt6Astra, label: 'GPT-6 Astra', triggerLabel: 'Astra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Astra, sub: 'orchestrator flagship' },
-      { value: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', triggerLabel: '6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Sol, sub: 'everyday orchestrator' },
+      { value: MODEL_IDS.raw.openAiGpt61Sol, label: 'GPT-6.1 Sol', triggerLabel: '6.1 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt61Sol, sub: 'everyday orchestrator' },
+      { value: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', triggerLabel: '6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Sol, sub: 'previous Sol' },
       { value: MODEL_IDS.raw.openAiGpt6Luna, label: 'GPT-6 Luna', triggerLabel: '6 Luna', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Luna, sub: 'fast model for easier tasks' },
       { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', triggerLabel: '5.6 Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
@@ -115,15 +118,15 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   // and either can return when its setup story is one-click. Settings →
   // Operator Defaults still offers Hermes when a HEALTHY binary is present
   // (isHermesAvailable now exec-probes instead of existsSync).
-  // The free house (operator ruling 2026-07-12): one conversational model that
-  // streams with no subscription draw, so the operator can drive the full
-  // orchestrator UI without burning Claude/Codex usage. Named only 'o8' — the
-  // underlying model is never surfaced.
+  // o8's own house (#3408): its built-in agent, bundled Pi with the full o8
+  // command set, on the managed model and the o8 model allowance. Needs no
+  // installed CLI or key, so it draws on no Claude/Codex subscription. It is
+  // the one Pi entry: a separate Pi row would name the same agent twice.
   {
     key: 'o8',
     label: 'o8',
     options: [
-      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
+      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'built-in agent · managed model' },
     ],
   },
 ];
@@ -410,10 +413,10 @@ export function ModelThinkingChip({
   const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? searchableHouseLabel ?? modelLabel;
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
-  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode'>(
+  const [openHouse, setOpenHouse] = useState<ComposerModelGroup['key']>(
     activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
       ? activeBackend
-      : 'claude',
+      : activeBackend === 'pi' ? 'o8' : 'claude',
   );
   // The ACP house needs a wider menu than the fixed drawers (see the width
   // constants) — derived from the open house, not the active backend, so the
@@ -448,7 +451,7 @@ export function ModelThinkingChip({
     effort: option,
     label: THINKING_EFFORT_LABELS[option].long,
     sub: isO8Backend
-      ? option === 'high' ? 'founders' : 'free'
+      ? option === 'high' ? PLAN_LABELS[entitlementPlan] : 'free'
       : option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
   }));
   const currentEffortIndex = Math.max(0, options.indexOf(effort));

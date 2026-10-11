@@ -2,16 +2,6 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/dist/hooks/post-edit-typecheck.js\"",
-            "timeout": 35
-          }
-        ]
-      },
-      {
         "matcher": "Stop|TaskComplete",
         "hooks": [
           {

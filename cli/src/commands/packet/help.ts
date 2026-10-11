@@ -26,6 +26,9 @@ export const PACKET_SUBCOMMANDS = [
 ] as const;
 
 export const OPERATOR_PACKET_SUBCOMMANDS = [
+  'retain',
+  'release-retention',
+  'restore-artifacts',
   'receipt',
   'receipts',
 ] as const;
@@ -55,7 +58,10 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet log [id]      read or follow packet lane events (--follow, --since)
   packet runtime-drift [id] detect and warn when a lane's bound runtime drifted`;
 
-export const OPERATOR_PACKET_COMMAND_LINES = `  packet receipt [id]  operator only: write a signed receipt JSON for a closed packet (--out <path>)
+export const OPERATOR_PACKET_COMMAND_LINES = `  packet retain [id]   hold automatic workspace retirement (--reason <text>)
+  packet release-retention [id] release the exact hold (--hold-id <id>)
+  packet restore-artifacts [id] restore selected retained files into an idle successor (--to <id> --paths-json <array>)
+  packet receipt [id]  operator only: write a signed receipt JSON for a closed packet (--out <path>)
   packet receipts [id] operator only: list stored signed receipts for a packet`;
 
 export function packetGroupUsage(): string {

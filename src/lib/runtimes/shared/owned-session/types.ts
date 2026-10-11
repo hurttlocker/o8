@@ -16,6 +16,8 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { LaneTurnContextUsage } from '@/lib/lane/types';
 import type { ResolvedWorkerMcpServer } from '@/lib/mcp/worker-injection';
 import type { SandboxDenial } from './sandbox-denial';
+import type { OwnedExecutionPolicy } from './execution-policy';
+import type { ControlledTaskBinding } from '@/lib/mcp/task-execution-store';
 
 // ── Run / session primitives ─────────────────────────────────────────────────
 
@@ -72,10 +74,15 @@ export interface OwnedRunRecord {
   /** Persisted so refresh/restart cannot re-emit the same denial event. */
   sandboxDenial?: SandboxDenial;
   childExit?: OwnedChildExitOutcome;
+  /** Compatibility retry receipt, shown once beside the rejected run. */
+  modelFallback?: { fromModel: string; toModel: string; notice: string };
 }
 
 export interface OwnedSessionRecord {
   surfaceId: string;
+  controlledTask?: ControlledTaskBinding;
+  /** Durable limits checked by every spawn and recovery entry point. */
+  executionPolicy?: OwnedExecutionPolicy;
   /** Launch receipt correlation, persisted before the external process starts. */
   launchMutationId?: string;
   /** Lane known at spawn time, so an immediate child exit can reach its audit stream. */
@@ -248,6 +255,8 @@ export type OwnedCodexFleetAdditions = OwnedFleetAdditions;
 
 export interface OwnedLaunchRequest {
   cwd: string;
+  controlledTask?: ControlledTaskBinding;
+  executionPolicy?: 'single-attempt';
   prompt: string;
   taskName?: string;
   clientMutationId?: string;
@@ -413,6 +422,9 @@ export interface OwnedRuntimeAdapter {
     failedRunRaw: string;
     currentModel: string | undefined;
   }): { nextModel: string; reason: string } | null;
+
+  /** One pre-turn model rejection may recover even when general auto-retry is disabled. */
+  modelCompatibilityFallback?(model: string | undefined, diagnostic: string): { nextModel: string; notice: string } | null;
 }
 
 // ── Store contract ───────────────────────────────────────────────────────────

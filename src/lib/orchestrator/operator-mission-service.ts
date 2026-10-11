@@ -38,6 +38,6 @@ export type { SteerPacketInput, SteerPacketResult } from './operator-mission-ser
 
 export {
   buildInlineIssuesFromPrompt,
-  clampSpawnCount,
-  SPAWN_PROMPT_MAX_AGENTS,
+  resolveSpawnCount,
+  assertSpawnBatchMaterializable,
 } from './operator-mission-service/spawn-prompt';

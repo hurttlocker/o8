@@ -22,7 +22,7 @@ function stubReviewerBackend(text: string): OrchestratorBackend {
     ensureSession: () => ({ sessionName: 'test-codex', status: 'ready' }),
     sendTurn: vi.fn(async (_repo: string, _prompt: string, onEvent) => {
       onEvent({ type: 'text', text });
-      onEvent({ type: 'done', cost: null });
+      onEvent({ type: 'done', sessionId: null, cost: null });
     }),
   } as OrchestratorBackend;
 }
@@ -193,6 +193,34 @@ describe('Codex auto-review parse failure is a reviewer failure, not a packet re
     const approvals = orchestratorReviews(lane, packetId);
     expect(approvals).toHaveLength(1);
     expect(approvals[0]?.args?.reviewTurnId).toBe(reviewTurnId);
+  });
+
+  it('preserves a durable tool verdict submitted during the format retry', async () => {
+    const { repoPath, head } = createGitRepo();
+    const packetId = `pkt-codex-retry-tool-${Date.now()}`;
+    const lane = makeReviewLane(repoPath, packetId);
+    const retryBackend = stubReviewerBackend('Verdict submitted through the tool.');
+    vi.mocked(retryBackend.sendTurn).mockImplementation(async (_repo, _prompt, onEvent) => {
+      const { findActiveReviewTurn } = await import('./review-turn-state');
+      const turn = findActiveReviewTurn(lane.id);
+      recordOrchestratorReview(packetId, {
+        findings: [], reviewer: 'codex', approved: true, reviewedHeadSha: head,
+        reviewTurnId: turn!.id, reviewTurnOutcome: 'completed',
+      });
+      onEvent({ type: 'text', text: 'Verdict submitted through the tool.' });
+      onEvent({ type: 'done', sessionId: null, cost: null });
+    });
+    const recorded = await recordCodexAutoReviewVerdict({
+      lane, requiresSecondPass: false, expectedHeadSha: head,
+      reviewTurnId: 'first-prose-turn', rawText: 'Review complete.',
+      retry: {
+        reviewPrompt: 'Review the packet.', threadId: `auto-review-${lane.id}-verdict-retry`,
+        initialBackend: retryBackend, backendResolver: () => retryBackend,
+      },
+    });
+    expect(recorded).toBeNull();
+    expect(orchestratorReviews(lane, packetId)).toHaveLength(1);
+    expect(orchestratorReviews(lane, packetId)[0]?.args?.reviewedHeadSha).toBe(head);
   });
 
   it('records review_unavailable and leaves an existing verdict untouched when both turns are prose', async () => {

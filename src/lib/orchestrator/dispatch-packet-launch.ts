@@ -1,3 +1,4 @@
+import { resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import 'server-only';
 
 import { resolveClaudeCodeWorkerSelection, selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
@@ -38,6 +39,7 @@ import {
 } from './storage-admission';
 import { findExactCommittedLaunch } from './storage-admission-generation';
 import { readOrchestratorControlPlaneState } from './control-plane';
+import { resolvePacketCreationBase } from '@/lib/lane/packet-creation-base';
 import { manualLaunchClaimIsLive } from './manual-launch-claim';
 
 export interface LaunchPacketResult {
@@ -224,8 +226,10 @@ export async function launchPacketWithStorageAdmission(input: {
   const launchContext = bindWorkerLaunchParent(packet.launchContext, {
     threadId: packet.orchestratorThreadId,
   });
-  const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
-  const baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
+  const projectContext = packet.projectId
+    ? await resolveCapturedMissionProject(packet.workspaceTargetPath!, packet.projectId)
+    : await getProjectContext({ repoPath: packet.workspaceTargetPath });
+  let baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
   let carrierPreflight: ExecutionCarrierPreflightEvidence | null = null;
   try {
     if (packet.executionCarrier) {
@@ -251,7 +255,17 @@ export async function launchPacketWithStorageAdmission(input: {
     });
     throw error;
   }
-  const admissionLease = await storageAdmission.reserveForLaunch(packet);
+  const creationInput = {
+    repoPath: packet.workspaceTargetPath!, packetId: packet.id, branch: packet.branchTarget,
+    baseBranch, runtime: workerRouting.selectedRuntime,
+  };
+  const creationBase = storageAdmission.prepareCreationBase
+    ? await storageAdmission.prepareCreationBase(packet, creationInput)
+    : await resolvePacketCreationBase(creationInput);
+  baseBranch = creationBase.baseBranch;
+  const admissionLease = await storageAdmission.reserveForLaunch(packet, 0, {
+    creationBaseCommit: creationBase.baseCommit,
+  });
   // A Hold can land while preflight or storage admission is awaiting I/O. The
   // reservation makes later Holds refuse; this read catches Holds that won
   // before the reservation existed, before any lane or session is opened.
@@ -336,7 +350,7 @@ export async function launchPacketWithStorageAdmission(input: {
         runtime: workerRouting.selectedRuntime,
         label: packet.title,
         actor: 'orchestrator',
-      });
+      }, { packetCreationBase: creationBase });
       if (!laneResult.ok || !laneResult.laneId) throw new Error(laneResult.note || 'Unable to open lane.');
       openedLaneId = laneResult.laneId;
       const launchingLane = setLaneStatus(

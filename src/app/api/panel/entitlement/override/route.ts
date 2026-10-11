@@ -102,7 +102,7 @@ export async function POST(request: Request) {
   if (!founder || founder.operatorNumber !== 1) {
     return NextResponse.json({
       ok: false,
-      reason: 'view-as override is restricted to Founding Operator #1',
+      reason: 'view-as override is restricted to Pro · Lifetime #1',
     });
   }
 

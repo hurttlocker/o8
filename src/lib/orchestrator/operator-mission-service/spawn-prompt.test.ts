@@ -3,21 +3,24 @@ import { describe, expect, it } from 'vitest';
 import { isInlineIssue, slugify } from './shared';
 import {
   buildInlineIssuesFromPrompt,
-  clampSpawnCount,
-  SPAWN_PROMPT_MAX_AGENTS,
+  resolveSpawnCount,
+  assertSpawnBatchMaterializable,
 } from './spawn-prompt';
 
-describe('clampSpawnCount', () => {
-  it('defaults to 1 and floors fractional counts', () => {
-    expect(clampSpawnCount(undefined)).toBe(1);
-    expect(clampSpawnCount(Number.NaN)).toBe(1);
-    expect(clampSpawnCount(2.9)).toBe(2);
+describe('resolveSpawnCount', () => {
+  it('defaults only an omitted count to 1 and preserves explicit counts', () => {
+    expect(resolveSpawnCount(undefined)).toBe(1);
+    expect(resolveSpawnCount(20)).toBe(20);
+    expect(resolveSpawnCount(50)).toBe(50);
   });
 
-  it('clamps to the [1, MAX] spawn range', () => {
-    expect(clampSpawnCount(0)).toBe(1);
-    expect(clampSpawnCount(-3)).toBe(1);
-    expect(clampSpawnCount(99)).toBe(SPAWN_PROMPT_MAX_AGENTS);
+  it.each([null, '2', true, 0, -3, 2.9, Number.NaN, Infinity, 1e100].map((count) => [count]))('rejects malformed count %j', (count) => {
+    expect(() => resolveSpawnCount(count)).toThrow(/positive safe integer/);
+  });
+
+  it('rejects impossible materialization before allocating the array', () => {
+    expect(() => assertSpawnBatchMaterializable('x', 1_000_000_000)).toThrow(/capacity/);
+    expect(() => buildInlineIssuesFromPrompt('x', Number.MAX_SAFE_INTEGER)).toThrow(/capacity/);
   });
 });
 
@@ -72,7 +75,7 @@ describe('buildInlineIssuesFromPrompt', () => {
     issues.forEach((issue) => expect(issue.body).toBe('the auth refactor'));
   });
 
-  it('caps the fleet at SPAWN_PROMPT_MAX_AGENTS', () => {
-    expect(buildInlineIssuesFromPrompt('x', 50)).toHaveLength(SPAWN_PROMPT_MAX_AGENTS);
+  it('preserves counts above five', () => {
+    expect(buildInlineIssuesFromPrompt('x', 50)).toHaveLength(50);
   });
 });

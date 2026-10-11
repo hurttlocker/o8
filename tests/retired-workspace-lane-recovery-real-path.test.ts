@@ -32,7 +32,6 @@ const {
   transitionWorkspaceSnapshot,
 } = await import('@/lib/worktree/snapshot-state');
 const {
-  beginWorkspaceMaterializationRetirement,
   finishWorkspaceMaterializationRetirement,
 } = await import('@/lib/workspace/workspace-materialization-retirement');
 
@@ -261,7 +260,13 @@ function createRetiredSnapshotFixture(
     creationId: `retire:${action}:create`,
     receipt: { terminalBootstrap: true, terminalAction: action },
   });
-  beginWorkspaceMaterializationRetirement(workspacePath, action);
+  // This fixture represents historical terminal truth predating artifact preservation.
+  const snapshot = getWorkspaceSnapshot(repo.id, packetId)!;
+  transitionWorkspaceSnapshot({
+    repositoryUuid: repo.id, packetId, transitionId: `retire:${action}:legacy-begin`,
+    expectedState: 'materialized', expectedVersion: snapshot.version,
+    toState: 'retiring', receipt: { terminalAction: action, laneId: lane.id },
+  });
   return { packetId, laneId: lane.id, workspacePath, action, laneStatus };
 }
 

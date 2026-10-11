@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
   evalJs: vi.fn<(code: string) => Promise<{ result: string }>>(),
   queueEvalJs: vi.fn<(code: string) => Promise<void>>(),
+  spawn: vi.fn<(request: NextRequest) => Promise<Response>>(),
 }));
 
 vi.mock('@/lib/mcp/o8-webview-client', () => ({
@@ -16,6 +17,7 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
 vi.mock('@/lib/panel/api-port', () => ({
   getApiBase: () => 'http://127.0.0.1:47120',
 }));
+vi.mock('@/app/api/orchestrator/spawn-prompt/route', () => ({ POST: mocks.spawn }));
 
 const { POST } = await import('./route');
 
@@ -31,7 +33,17 @@ describe('/api/canvas/intent dispatch acknowledgement', () => {
     mocks.evalJs.mockReset();
     mocks.queueEvalJs.mockReset();
     mocks.queueEvalJs.mockResolvedValue();
+    mocks.spawn.mockReset();
+    mocks.spawn.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 201 }));
     delete (globalThis as { __o8BrowserAgentClient?: unknown }).__o8BrowserAgentClient;
+  });
+
+  it.each([20, 50, '20', null].map((count) => [count]))('preserves count %j when forwarding outside the canvas', async (count) => {
+    mocks.evalJs.mockResolvedValueOnce({ result: JSON.stringify({ ready: false, route: '/dashboard' }) });
+    await POST(request('spawn-agents', { task: 'preserve count', count, repo: '/repo' }));
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    await expect(mocks.spawn.mock.calls[0][0].json()).resolves.toMatchObject({ count });
+    expect(mocks.queueEvalJs).not.toHaveBeenCalled();
   });
 
   it('acknowledges spawn-agents as soon as its separate dispatch is queued', async () => {

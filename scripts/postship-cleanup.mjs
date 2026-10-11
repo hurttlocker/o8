@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Reclaim generated native-release outputs after publication finishes. */
-import { lstat, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, readFile, readdir, readlink, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -8,6 +8,7 @@ export const POSTSHIP_GENERATED_DIRS = [
   '.next',
   'src-tauri/target',
   'src-tauri/sidecars/speech-local/.build',
+  'src-tauri/sidecars/pi-write/target',
 ];
 
 // `out` is the verified release artifact, not disposable scratch space. Its
@@ -28,7 +29,54 @@ async function assertO8RepoRoot(repoRoot) {
   }
 }
 
-async function assertGeneratedTreeHasNoLinks(target, relativePath) {
+async function assertGeneratedAncestors(root, target) {
+  let ancestor = root;
+  for (const segment of path.relative(root, path.dirname(target)).split(path.sep).filter(Boolean)) {
+    ancestor = path.join(ancestor, segment);
+    const metadata = await lstat(ancestor);
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`linked ancestor: ${path.relative(root, ancestor)}`);
+    }
+    if (!metadata.isDirectory()) throw new Error('ancestor is not a real directory');
+  }
+}
+
+async function assertInternalLink(root, rootAlias, link) {
+  // Resolve only path components, never destination contents. Check each hop
+  // before continuing so an external detour cannot return to the checkout.
+  let current = root;
+  let remaining = path.relative(root, link).split(path.sep);
+  let hops = 0;
+  while (remaining.length > 0) {
+    const segment = remaining.shift();
+    if (!segment || segment === '.') continue;
+    const candidate = path.join(current, segment);
+    if (candidate !== root && !isInside(root, candidate)) throw new Error('link escapes repo root');
+    const metadata = await lstat(candidate);
+    if (metadata.isSymbolicLink()) {
+      if (++hops > 40) throw new Error('link resolution is uncertain');
+      const destination = await readlink(candidate);
+      if (path.isAbsolute(destination)) {
+        // Accept the caller's checkout alias (e.g. macOS /var vs /private/var),
+        // but retain unnormalized components to check symlinks before `..`.
+        const prefix = [root, rootAlias].find((base) => destination === base || destination.startsWith(`${base}${path.sep}`));
+        if (!prefix) throw new Error('link escapes repo root');
+        current = root;
+        remaining = [...destination.slice(prefix.length).split(path.sep), ...remaining];
+      } else {
+        remaining = [...destination.split(path.sep), ...remaining];
+      }
+      continue;
+    }
+    if (remaining.length > 0 && !metadata.isDirectory()) throw new Error('link ancestor is not a directory');
+    current = candidate;
+  }
+  // Require agreement with the filesystem's own resolution; failures are
+  // uncertain links and must keep the generated tree intact.
+  if (await realpath(link) !== current) throw new Error('link resolution is uncertain');
+}
+
+async function assertGeneratedTreeHasSafeLinks(root, rootAlias, target, relativePath) {
   const pending = [target];
   while (pending.length > 0) {
     const directory = pending.pop();
@@ -37,7 +85,12 @@ async function assertGeneratedTreeHasNoLinks(target, relativePath) {
       const candidate = path.join(directory, entry.name);
       const metadata = await lstat(candidate);
       if (entry.isSymbolicLink() || metadata.isSymbolicLink()) {
-        throw new Error(`linked entry inside ${relativePath}: ${path.relative(target, candidate)}`);
+        try {
+          await assertInternalLink(root, rootAlias, candidate);
+        } catch {
+          throw new Error(`linked entry inside ${relativePath}: ${path.relative(target, candidate)}`);
+        }
+        continue;
       }
       if (metadata.isDirectory()) pending.push(candidate);
     }
@@ -45,7 +98,8 @@ async function assertGeneratedTreeHasNoLinks(target, relativePath) {
 }
 
 export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
-  const root = await realpath(path.resolve(repoRoot));
+  const rootAlias = path.resolve(repoRoot);
+  const root = await realpath(rootAlias);
   await assertO8RepoRoot(root);
   const result = { removed: [], skipped: [], refused: [] };
 
@@ -58,6 +112,7 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
 
     let metadata;
     try {
+      await assertGeneratedAncestors(root, target);
       metadata = await lstat(target);
     } catch (error) {
       if (error?.code === 'ENOENT') {
@@ -74,7 +129,8 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
     }
 
     try {
-      await assertGeneratedTreeHasNoLinks(target, relativePath);
+      await assertGeneratedTreeHasSafeLinks(root, rootAlias, target, relativePath);
+      // Recursive rm unlinks nested symlinks without removing their destinations.
       await rm(target, { recursive: true, force: false, maxRetries: 0 });
       result.removed.push(relativePath);
     } catch (error) {

@@ -7,6 +7,8 @@ import path from 'node:path';
 import { parseWorkspaceManifest } from '../../src/lib/workspace/manifest/schema';
 import { WORKSPACE_MANIFEST_FILENAME, type WorkspaceManifestService } from '../../src/lib/workspace/manifest/types';
 import type { CloudWorkerJob, EventStream } from './event-stream';
+import { ownsListeningPort } from './preview';
+import { remotePreviewService, type RemotePreviewService } from '../../src/lib/cloud/preview-contract';
 
 const SETUP_TIMEOUT_MS = 45 * 60_000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 30_000;
@@ -147,7 +149,10 @@ async function waitForHealth(service: WorkspaceManifestService, child: ChildProc
   throw new Error('Workspace service health timed out.');
 }
 
-export interface RunningWorkspaceServices { stop: () => Promise<{ healthyUntilStop: boolean }>; }
+export interface RunningWorkspaceServices {
+  stop: () => Promise<{ healthyUntilStop: boolean }>;
+  ownsPreview: (service: RemotePreviewService) => Promise<boolean>;
+}
 
 /** Start only exact-hash, coordinator-authorized commands in the leased clone. */
 export async function startWorkspaceServices(input: {
@@ -168,6 +173,10 @@ export async function startWorkspaceServices(input: {
     throw new Error('Remote workspace manifest differs from the authorized base revision.');
   }
   const manifest = parseWorkspaceManifest(JSON.parse(source.toString('utf8')) as unknown);
+  const preview = remotePreviewService(manifest);
+  if (input.job.launch.remotePreview && JSON.stringify(preview) !== JSON.stringify(input.job.launch.remotePreview)) {
+    throw new Error('Remote preview differs from the authorized manifest.');
+  }
   const children: Array<{ child: ChildProcess; service: WorkspaceManifestService }> = [];
   const failedNames = new Set<string>();
   const event = async (service: WorkspaceManifestService, state: 'healthy' | 'stopped' | 'failed') => {
@@ -225,7 +234,22 @@ export async function startWorkspaceServices(input: {
         input.signal.removeEventListener('abort', abort);
       }
     }
-    return { stop };
+    return { stop, ownsPreview: async (requested) => {
+      if (stopped || input.signal.aborted || !preview || JSON.stringify(requested) !== JSON.stringify(preview)) return false;
+      const item = children.find(({ service }) => service.name === requested.name);
+      if (!item?.child.pid || item.child.exitCode !== null || item.child.signalCode !== null) return false;
+      if (!await ownsListeningPort(item.child.pid, requested.port)) return false;
+      const url = healthUrl(item.service);
+      if (url) {
+        try {
+          const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.any([input.signal, AbortSignal.timeout(1_500)]) });
+          await response.body?.cancel();
+          if (!response.ok) return false;
+        } catch { return false; }
+      }
+      return !stopped && !input.signal.aborted && item.child.exitCode === null && item.child.signalCode === null
+        && await ownsListeningPort(item.child.pid, requested.port);
+    } };
   } catch (error) {
     await stop();
     throw error;

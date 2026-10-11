@@ -169,7 +169,7 @@ describe('View as Free — real path through the entitlement routes (#1517)', ()
     );
     const rejectData = await rejectRes.json();
     expect(rejectData.ok).toBe(false);
-    expect(rejectData.reason).toContain('Founding Operator #1');
+    expect(rejectData.reason).toContain('Pro · Lifetime #1');
     expect(existsSync(overridePath())).toBe(false);
 
     // Re-point the founder record to #1 → the SAME request now succeeds.

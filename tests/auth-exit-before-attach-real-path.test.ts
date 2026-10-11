@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { NextRequest } from 'next/server';
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +13,11 @@ const repoPath = join(dataDir, 'fixture-repo');
 const shimPath = join(root, 'codex-auth-shim.js');
 const execCountPath = join(root, 'exec-count');
 const exitOrderingRace = vi.hoisted(() => ({ enabled: false, injected: false }));
+const inventoryRace = vi.hoisted(() => ({
+  enabled: false,
+  primeStatus: null as number | null,
+  primeAgentStatus: null as string | null,
+}));
 
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -36,6 +42,13 @@ if (args[0] === 'exec') {
   const path = ${JSON.stringify(execCountPath)};
   const count = Number(fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : '0') + 1;
   fs.writeFileSync(path, String(count));
+  if (process.env.O8_TEST_AUTH_SHIM_MODE === 'auth-delay') {
+    setTimeout(() => {
+      process.stderr.write('Failed to refresh token: 401 refresh_token_reused\\n');
+      process.exit(1);
+    }, 5000);
+    return;
+  }
   if (process.env.O8_TEST_AUTH_SHIM_MODE === 'clean-delay') {
     setTimeout(() => process.exit(0), 1000);
     return;
@@ -100,6 +113,19 @@ vi.mock('@/lib/runtime/actions', async (importOriginal) => {
     ...actual,
     launchRuntimeSurface: async (request: Parameters<typeof actual.launchRuntimeSurface>[0]) => {
       const result = await actual.launchRuntimeSurface(request);
+      if (inventoryRace.enabled && result.ok && result.surfaceId) {
+        const { invalidateRuntimeInventoryCache } = await import('@/lib/runtime/inventory');
+        const { GET } = await import('@/app/api/runtime/inventory/route');
+        invalidateRuntimeInventoryCache();
+        const response = await GET(new NextRequest('http://localhost/api/runtime/inventory?fresh=1'));
+        const snapshot = await response.json() as {
+          agents?: Array<{ sessionKey?: string; status?: string }>;
+        };
+        inventoryRace.primeStatus = response.status;
+        inventoryRace.primeAgentStatus = snapshot.agents
+          ?.find((agent) => agent.sessionKey === result.surfaceId)
+          ?.status ?? null;
+      }
       if (!exitOrderingRace.enabled && result.ok && request.existingLaneId && result.surfaceId) {
         await waitForRuntimeExit(request.existingLaneId, result.surfaceId);
       }
@@ -131,6 +157,8 @@ const {
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { runSilentExitTriageForLane } = await import('@/lib/supervisor/silent-exit-detector');
 const { acceptedLaunchAttachmentProvenance } = await import('@/lib/lane/current-auth-exit');
+const { GET: getRuntimeInventory } = await import('@/app/api/runtime/inventory/route');
+const { invalidateRuntimeInventoryCache } = await import('@/lib/runtime/inventory');
 
 await addRepo(repoPath);
 
@@ -179,6 +207,9 @@ async function waitForRuntimeExit(laneId: string, surfaceId: string) {
 beforeEach(() => {
   exitOrderingRace.enabled = false;
   exitOrderingRace.injected = false;
+  inventoryRace.enabled = false;
+  inventoryRace.primeStatus = null;
+  inventoryRace.primeAgentStatus = null;
   delete process.env.O8_TEST_AUTH_SHIM_MODE;
   writeFileSync(execCountPath, '0');
   for (const lane of listLanes()) deleteLane(lane.id);
@@ -232,6 +263,8 @@ describe('Codex authentication exit before launch attachment', () => {
         review: null,
       }],
     });
+    process.env.O8_TEST_AUTH_SHIM_MODE = 'auth-delay';
+    inventoryRace.enabled = true;
 
     const launched = await dispatch({
       verb: 'launch_session',
@@ -244,6 +277,8 @@ describe('Codex authentication exit before launch attachment', () => {
     });
 
     expect(launched.ok, launched.note).toBe(true);
+    expect(inventoryRace.primeStatus).toBe(200);
+    expect(inventoryRace.primeAgentStatus).toBe('running');
     expect(Number(readFileSync(execCountPath, 'utf8'))).toBe(1);
     const eventsAfterLaunch = getLaneEvents(lane.id, 100);
     const exitIndex = eventsAfterLaunch.findIndex((event) => event.verb === 'runtime_process_exit');
@@ -265,6 +300,24 @@ describe('Codex authentication exit before launch attachment', () => {
     ))).toBe(false);
     expect(bookkeepingIndex).toBeGreaterThan(provenanceIndex);
     expect(eventsAfterLaunch[exitIndex]?.payload.authRecoveryRequired).toBe(true);
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'awaiting_input',
+      lastEventLabel: 'codex_auth_recovery_required',
+    });
+
+    invalidateRuntimeInventoryCache();
+    const inventoryResponse = await getRuntimeInventory(
+      new NextRequest('http://localhost/api/runtime/inventory?fresh=1'),
+    );
+    expect(inventoryResponse.status).toBe(200);
+    const inventorySnapshot = await inventoryResponse.json() as {
+      agents?: Array<{ sessionKey?: string; status?: string }>;
+    };
+    const attachedSessionKey = getLane(lane.id)?.sessionKey;
+    expect(attachedSessionKey).toBeTruthy();
+    expect(inventorySnapshot.agents?.find((agent) => (
+      agent.sessionKey === attachedSessionKey
+    ))?.status).toBe('running');
     expect(getLane(lane.id)).toMatchObject({
       status: 'awaiting_input',
       lastEventLabel: 'codex_auth_recovery_required',
@@ -298,6 +351,18 @@ describe('Codex authentication exit before launch attachment', () => {
       queueState: 'held',
       blockedReason: 'Repository policy review required.',
     });
+
+    setLaneStatus(lane.id, 'awaiting_input', 'system', 'awaiting_input');
+    invalidateRuntimeInventoryCache();
+    const ordinaryWaitResponse = await getRuntimeInventory(
+      new NextRequest('http://localhost/api/runtime/inventory?fresh=1'),
+    );
+    expect(ordinaryWaitResponse.status).toBe(200);
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'running',
+      lastEventLabel: 'session_running',
+    });
+    expect(Number(readFileSync(execCountPath, 'utf8'))).toBe(1);
     execFileSync('git', ['-C', repoPath, 'worktree', 'remove', '--force', worktreePath]);
     deleteLane(lane.id);
   }, 30_000);

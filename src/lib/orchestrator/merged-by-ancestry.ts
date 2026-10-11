@@ -12,6 +12,7 @@ import {
   withLockedState,
 } from '@/lib/orchestrator/control-plane';
 import { MergedByAncestryBackoff } from '@/lib/orchestrator/merged-by-ancestry-backoff';
+import { persistReleasedPacketToMission } from '@/lib/orchestrator/mission-registry';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import { packetReleaseGeneration, packetReleaseIdentityIsCurrent, verifyCurrentLaneHead } from './release-ownership';
@@ -584,6 +585,9 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence, gene
       if (packet.lane) {
         packet.lane.lastEventAt = releasedAt;
         packet.lane.lastEventLabel = packet.lastEventLabel;
+      }
+      if (!(await persistReleasedPacketToMission(packet, lane.id, generation))) {
+        throw new Error('Durable packet ownership changed before ancestry release could be persisted.');
       }
       archive();
       return true;

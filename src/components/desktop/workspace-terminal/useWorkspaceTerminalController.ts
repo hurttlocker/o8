@@ -1,6 +1,7 @@
 'use client';
 
 import { retargetWorkspaceTab } from './retarget-workspace-tab';
+import { useTextChatTabs } from './use-text-chat-tabs';
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type MouseEvent as ReactMouseEvent } from 'react';
 import {
@@ -52,7 +53,6 @@ import {
 import {
   buildHistoryChatTab,
   buildNewChatTab,
-  buildNewLlmChatTab,
   buildPersistedState,
   computeCheckpointRestore,
   deferRemoteTerminalLaunch,
@@ -184,7 +184,7 @@ export function useWorkspaceTerminalController(
     }
     tabsRef.current = nextTabs;
   }, []);
-
+  const getTabInventory = useCallback(() => tabsRef.current.map(tab => tab.id), []);
   // A monotonic user-navigation version prevents a late restore from
   // replacing a newer tab selection.
   const userNavVersionRef = useRef(0);
@@ -1198,14 +1198,9 @@ export function useWorkspaceTerminalController(
     setActiveTabIdFromUser(newTab.id);
   }, [setActiveTabIdFromUser]);
 
-  const handleNewLLMChatTab = useCallback((repo?: RegisteredRepo) => {
-    const newTab = buildNewLlmChatTab(repo ?? preferredRepo ?? undefined);
-    const nextTabs = [...tabsRef.current, newTab];
-    tabsRef.current = nextTabs;
-    setTabs(nextTabs);
-    persistTabsNow(nextTabs, newTab.id);
-    setActiveTabIdFromUser(newTab.id);
-  }, [persistTabsNow, preferredRepo, setActiveTabIdFromUser]);
+  const { handleNewLLMChatTab, handleNewChatGPTPlanTab } = useTextChatTabs({
+    preferredRepo, tabsRef, setTabs, persistTabsNow, setActiveTabIdFromUser,
+  });
 
   const handleUpdateChatMessages = useCallback((tabId: string, messages: MobileTranscriptEntry[]) => {
     setTabs((previous) => previous.map((tab) => (
@@ -1424,6 +1419,7 @@ export function useWorkspaceTerminalController(
     handleDragStart,
     handleNewChatTab,
     handleNewLLMChatTab,
+    handleNewChatGPTPlanTab,
     handleNewTab,
     openRemoteTerminalTab,
     handleOpenHistoryChat,
@@ -1454,7 +1450,7 @@ export function useWorkspaceTerminalController(
     spawnFleetCanvasTab,
     handleUpdateTabMode,
     undoCleanup,
-    tabs,
+    tabs, getTabInventory,
     termWsConnected,
     visibleTabs,
   };

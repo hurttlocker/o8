@@ -39,6 +39,8 @@ export interface O8WebviewSocketCommand {
 }
 
 export const O8_WEBVIEW_SOCKET_COMMANDS: readonly O8WebviewSocketCommand[] = [
+  { command: 'inspect_directory_dialog', mutating: false, summary: 'Inspect only the live directory-only native sheet attached to main; returns opaque dialog_id.' },
+  { command: 'resolve_directory_dialog', mutating: true, summary: 'dialog_id and operation: select (absolute existing directory path) or cancel; never auto-retry. Pending requires inspection and normal setup status.' },
   { command: 'ping', mutating: false, summary: 'Liveness probe.' },
   { command: 'take_screenshot', mutating: false, summary: 'Capture a window as base64 PNG/JPEG; works while the JS thread is busy.' },
   { command: 'get_dom', mutating: false, summary: 'Serialized DOM of a window.' },

@@ -20,6 +20,8 @@ const RECIPE_FILES = [
   'src-tauri/tauri.macos.conf.json',
   'scripts/build.mjs',
   'scripts/build-speech-local.mjs',
+  'scripts/build-pi-write.mjs',
+  'src-tauri/sidecars/pi-write/Cargo.lock',
   'scripts/tauri-export.mjs',
   'scripts/tauri-prebuild.mjs',
   'scripts/packaged-server-smoke.mjs',
@@ -32,6 +34,13 @@ const SPEECH_ARTIFACTS = [
   'src-tauri/helpers/speech-local-aarch64-apple-darwin',
   'src-tauri/helpers/speech-local-universal-apple-darwin',
   'src-tauri/helpers/speech-local-x86_64-apple-darwin',
+];
+
+const PI_WRITE_ARTIFACTS = [
+  'src-tauri/helpers/o8-pi-write',
+  'src-tauri/helpers/o8-pi-write-aarch64-apple-darwin',
+  'src-tauri/helpers/o8-pi-write-universal-apple-darwin',
+  'src-tauri/helpers/o8-pi-write-x86_64-apple-darwin',
 ];
 
 function sha256File(path) {
@@ -62,7 +71,7 @@ function commandVersion(root, command, args) {
 function outputRoots(root) {
   return [
     { absolute: join(root, 'out'), relative: 'out' },
-    ...SPEECH_ARTIFACTS.map((path) => ({ absolute: join(root, path), relative: path })),
+    ...[...SPEECH_ARTIFACTS, ...PI_WRITE_ARTIFACTS].map((path) => ({ absolute: join(root, path), relative: path })),
   ];
 }
 
