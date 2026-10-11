@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { createMission, createMissionInline, dispatchMission } from '@/lib/mcp/operator-mission-tools';
 import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
@@ -44,10 +45,10 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       // every inline creator uses the same collision-resistant allocator.
       const syntheticNumbers = nextInlineIssueNumbers(inlineIssues.length);
       const parsed = inlineIssues.map((entry, index) => {
-        if (typeof entry !== 'object' || entry === null) throw new Error('Each inline issue must be an object.');
+        if (typeof entry !== 'object' || entry === null) throw new McpInputError('Each inline issue must be an object.');
         const e = entry as Record<string, unknown>;
         const title = typeof e.title === 'string' ? e.title.trim() : '';
-        if (!title) throw new Error('Each inline issue must have a title.');
+        if (!title) throw new McpInputError('Each inline issue must have a title.');
         const syntheticNumber = syntheticNumbers[index]!;
         return { number: syntheticNumber, title, body: typeof e.body === 'string' ? e.body : '' };
       });

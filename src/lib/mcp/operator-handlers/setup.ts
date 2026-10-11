@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import { apiFetch, errorText, jsonResult, textResult, type McpTool, type McpToolResult } from './shared';
 
 export const SETUP_TOOLS: McpTool[] = [{
@@ -21,8 +22,8 @@ export const SETUP_TOOLS: McpTool[] = [{
 
 export async function handleSetup(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
-    if (!['status', 'configure', 'open', 'cancel'].includes(String(args.action))) throw new Error('Use status, configure, open, or cancel.');
-    if (args.action === 'status' && Object.keys(args).some((key) => key !== 'action')) throw new Error('status takes no mutation fields.');
+    if (!['status', 'configure', 'open', 'cancel'].includes(String(args.action))) throw new McpInputError('Use status, configure, open, or cancel.');
+    if (args.action === 'status' && Object.keys(args).some((key) => key !== 'action')) throw new McpInputError('status takes no mutation fields.');
     return jsonResult(await apiFetch('/api/setup/agent', args.action === 'status' ? undefined : { method: 'POST', body: JSON.stringify(args) }));
   } catch (error) { return textResult(`o8_setup failed: ${errorText(error)}`, true); }
 }

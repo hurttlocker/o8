@@ -11,6 +11,7 @@ PUBLIC_REPO="hurttlocker/o8-releases"
 SOURCE_REF="${O8_CHANGELOG_SOURCE_REF:-origin/main}"
 DRY_RUN=0
 SCRUB_ONLY=0
+FORMAT_ONLY=0
 LATEST_SHIP=""
 OUT_DIR="${PUBLIC_CHANGELOG_OUT_DIR:-${TMPDIR:-/tmp}/o8-public-changelog-out}"
 
@@ -22,6 +23,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --scrub-only)
       SCRUB_ONLY=1
+      shift
+      ;;
+    --format-only)
+      FORMAT_ONLY=1
       shift
       ;;
     --latest-ship)
@@ -92,6 +97,69 @@ scrub_subject() {
   printf '%s\n' "$msg"
 }
 
+# One changelog entry: filter, scrub and format a subject. Prints the published
+# text, or nothing when the subject does not publish. `credit` is the GitHub
+# login of an outside contributor to thank (#3459), or empty.
+format_entry() {
+  local msg="$1" credit="$2" lookup_head="$3"
+  local via_o8="" pr_num="" head_ref=""
+  # A fix publishes only when it carries an outside contributor's credit.
+  if ! echo "$msg" | grep -qE '^(feat|perf|design)(\(.*\))?:'; then
+    if [ -z "$credit" ] || ! echo "$msg" | grep -qE '^fix(\(.*\))?:'; then return 0; fi
+  fi
+  if echo "$msg" | grep -qiE '^Revert'; then return 0; fi
+  if echo "$msg" | grep -qiE '^auto-commit'; then return 0; fi
+  if echo "$msg" | grep -qiE 'injection|race.condition|vulnerability|xss|csrf|exploit|CVE|credential|password'; then return 0; fi
+
+  # --- Strategy / budget / model drop list ---
+  # Drop entire entries that reveal monetization plans, specific model choices,
+  # perf/token/cost budget numbers, or dogfood-specific tooling. These give a
+  # reader too much of our playbook. Losing a handful of entries is fine —
+  # the public changelog is for feature visibility, not architecture reveals.
+  if echo "$msg" | grep -qiE 'monetization|monetiz|pricing|paywall|freemium|subscription|revenue|waitlist|gtm|go-to-market|moat'; then return 0; fi
+  # Model names no longer drop an entry (Q ruling 2026-09-18). What still
+  # drops is our own routing configuration: which effort level runs where
+  # is an operational choice, not a feature anyone outside needs.
+  if echo "$msg" | grep -qiE 'ginsu|xhigh|low.reason|high.reason|reasoning.effort|thinking.effort|chain.of.thought|thinking.x-?ray'; then return 0; fi
+  if echo "$msg" | grep -qiE '\b[0-9]{2,4}\s*ms\b.*budget|\b[0-9]+\s*mb\b.*budget|\b[0-9]+.line.ceiling|\b800.line|budget|ceiling|line.cap|file.size.limit|token.budget|context.budget'; then return 0; fi
+  if echo "$msg" | grep -qiE 'model rate|pricing table'; then return 0; fi
+  if echo "$msg" | grep -qiE 'dogfood|dogfed'; then return 0; fi
+
+  msg=$(scrub_subject "$msg")
+
+  # [via-o8] attribution: preserve an existing marker through the scrubs, and
+  # backfill unmarked PR squash merges whose head branch was a packet branch
+  # (issue/* / inline/*) — those merged through o8's dispatch loop too.
+  via_o8=""
+  if echo "$msg" | grep -qE '\[via-o8\]\s*$'; then
+    via_o8="yes"
+    msg=$(echo "$msg" | sed -E 's/ *\[via-o8\] *//g')
+  elif [ "$lookup_head" = "1" ]; then
+    pr_num=$(echo "$msg" | grep -oE '\(#[0-9]+\)\s*$' | grep -oE '[0-9]+' || true)
+    if [ -n "$pr_num" ]; then
+      head_ref=$(gh api "repos/hurttlocker/o8/pulls/$pr_num" --jq .head.ref 2>/dev/null || true)
+      case "$head_ref" in issue/*|inline/*) via_o8="yes";; esac
+    fi
+  fi
+
+  msg=$(echo "$msg" | sed -E 's/ *\(#[0-9]+\)//g; s/ *#[0-9]+//g')
+  msg=$(echo "$msg" | sed -E 's/ — .{40,}//g')
+  msg=$(echo "$msg" | sed -E 's/ (of|for|via|from|with|in|the) *$//')
+  if [ -n "$via_o8" ]; then msg="$msg [via-o8]"; fi
+  if [ -n "$credit" ]; then msg="$msg — thanks @$credit"; fi
+  printf '%s\n' "$msg"
+}
+
+# --format-only: read `subject<TAB>login` lines on stdin and print each
+# published entry (an empty line when it is dropped). No network: the [via-o8]
+# head-branch lookup is skipped. This is the seam the credit test drives.
+if [ "$FORMAT_ONLY" = "1" ]; then
+  while IFS=$'\t' read -r subject login || [ -n "$subject" ]; do
+    printf '%s\n' "$(format_entry "$subject" "$login" 0)"
+  done
+  exit 0
+fi
+
 # --scrub-only: read subjects on stdin, print the scrubbed form, touch no
 # network and no clone. This is the seam the scrub test drives.
 if [ "$SCRUB_ONLY" = "1" ]; then
@@ -143,50 +211,21 @@ if [ -z "$LAST_SYNCED_DATE" ]; then
 fi
 echo "[sync] mirror resumes at $LAST_SYNCED_DATE from $SOURCE_REF"
 
+CREDITS="$SYNC_WORK_DIR/credits.tsv"
+git -C "$ROOT" log "$SOURCE_REF" --since="$LAST_SYNCED_DATE 00:00:00" --format='%s' --no-merges \
+  | node "$SCRIPT_DIR/lib/contributor-credits.mjs" --repo hurttlocker/o8 --since "$LAST_SYNCED_DATE" > "$CREDITS" \
+  || : > "$CREDITS"
+
 : > "$ADDITIONS"
 while IFS='|' read -r date hash msg; do
-  if ! echo "$msg" | grep -qE '^(feat|perf|design)(\(.*\))?:'; then continue; fi
-  if echo "$msg" | grep -qiE '^Revert'; then continue; fi
-  if echo "$msg" | grep -qiE '^auto-commit'; then continue; fi
-  if echo "$msg" | grep -qiE 'injection|race.condition|vulnerability|xss|csrf|exploit|CVE|credential|password'; then continue; fi
-
-  # --- Strategy / budget / model drop list ---
-  # Drop entire entries that reveal monetization plans, specific model choices,
-  # perf/token/cost budget numbers, or dogfood-specific tooling. These give a
-  # reader too much of our playbook. Losing a handful of entries is fine —
-  # the public changelog is for feature visibility, not architecture reveals.
-  if echo "$msg" | grep -qiE 'monetization|monetiz|pricing|paywall|freemium|subscription|revenue|waitlist|gtm|go-to-market|moat'; then continue; fi
-  # Model names no longer drop an entry (Q ruling 2026-09-18). What still
-  # drops is our own routing configuration: which effort level runs where
-  # is an operational choice, not a feature anyone outside needs.
-  if echo "$msg" | grep -qiE 'ginsu|xhigh|low.reason|high.reason|reasoning.effort|thinking.effort|chain.of.thought|thinking.x-?ray'; then continue; fi
-  if echo "$msg" | grep -qiE '\b[0-9]{2,4}\s*ms\b.*budget|\b[0-9]+\s*mb\b.*budget|\b[0-9]+.line.ceiling|\b800.line|budget|ceiling|line.cap|file.size.limit|token.budget|context.budget'; then continue; fi
-  if echo "$msg" | grep -qiE 'model rate|pricing table'; then continue; fi
-  if echo "$msg" | grep -qiE 'dogfood|dogfed'; then continue; fi
-
-  msg=$(scrub_subject "$msg")
-
-  # [via-o8] attribution: preserve an existing marker through the scrubs, and
-  # backfill unmarked PR squash merges whose head branch was a packet branch
-  # (issue/* / inline/*) — those merged through o8's dispatch loop too.
-  via_o8=""
-  if echo "$msg" | grep -qE '\[via-o8\]\s*$'; then
-    via_o8="yes"
-    msg=$(echo "$msg" | sed -E 's/ *\[via-o8\] *//g')
-  else
-    pr_num=$(echo "$msg" | grep -oE '\(#[0-9]+\)\s*$' | grep -oE '[0-9]+' || true)
-    if [ -n "$pr_num" ]; then
-      head_ref=$(gh api "repos/hurttlocker/o8/pulls/$pr_num" --jq .head.ref 2>/dev/null || true)
-      case "$head_ref" in issue/*|inline/*) via_o8="yes";; esac
-    fi
+  credit=""
+  pr_num=$(echo "$msg" | grep -oE '\(#[0-9]+\)\s*(\[via-o8\])?\s*$' | grep -oE '[0-9]+' || true)
+  if [ -n "$pr_num" ]; then
+    credit=$(awk -F'\t' -v n="$pr_num" '$1 == n { print $2; exit }' "$CREDITS")
   fi
-
-  msg=$(echo "$msg" | sed -E 's/ *\(#[0-9]+\)//g; s/ *#[0-9]+//g')
-  msg=$(echo "$msg" | sed -E 's/ — .{40,}//g')
-  msg=$(echo "$msg" | sed -E 's/ (of|for|via|from|with|in|the) *$//')
-  if [ -n "$via_o8" ]; then msg="$msg [via-o8]"; fi
-
-  printf '%s\t%s\t%s\n' "$date" "$hash" "- \`$hash\` $msg" >> "$ADDITIONS"
+  entry=$(format_entry "$msg" "$credit" 1)
+  if [ -z "$entry" ]; then continue; fi
+  printf '%s\t%s\t%s\n' "$date" "$hash" "- \`$hash\` $entry" >> "$ADDITIONS"
 done < <(git -C "$ROOT" log "$SOURCE_REF" --since="$LAST_SYNCED_DATE 00:00:00" --format='%as|%h|%s' --no-merges)
 
 node "$SCRIPT_DIR/lib/merge-public-changelog.mjs" "$MIRROR_CHANGELOG" "$ADDITIONS" "$OUT_CHANGELOG"
@@ -196,6 +235,10 @@ node "$SCRIPT_DIR/lib/merge-public-changelog.mjs" "$MIRROR_CHANGELOG" "$ADDITION
 # the repository names them all openly, and the substitutions above no
 # longer rewrite them, so blocking them here would only fail the ship.
 BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Ginsu Conductor xhigh monetization "model rate" "pricing table" cortexrules CortexClient ".cortex" ".o8-ide")
+# A contributor's handle is theirs to choose, so the credit suffix is not
+# checked against internal names (#3459).
+BLOCKLIST_INPUT="$SYNC_WORK_DIR/blocklist-input.md"
+sed -E 's/ — thanks @[A-Za-z0-9-]+$//' "$OUT_CHANGELOG" > "$BLOCKLIST_INPUT"
 LEAKED=""
 for term in "${BLOCKLIST[@]}"; do
   # Preserve byte-identical legacy entries while blocking any new occurrence.
@@ -204,7 +247,7 @@ for term in "${BLOCKLIST[@]}"; do
       LEAKED="$LEAKED\n  - '$term'"
       break
     fi
-  done < <(grep -i -- "$term" "$OUT_CHANGELOG" || true)
+  done < <(grep -i -- "$term" "$BLOCKLIST_INPUT" || true)
 done
 if [ -n "$LEAKED" ]; then
   echo "BLOCKED — internal terms found in public changelog:$LEAKED" >&2

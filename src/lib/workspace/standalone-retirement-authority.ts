@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-import { listLanes } from '@/lib/lane/registry';
+import { hasStandaloneWorkspaceLane } from '@/lib/lane/workspace-ownership-query';
 import { materializationAwareExecFile, withWorktreeMaterializationExecution } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
@@ -28,8 +28,7 @@ async function assertStandaloneOwner(repositoryPath: string, worktreeId: string,
     || metadata.materializationIdentity.canonicalPath !== sourcePath
     || !metadata.materializationParentIdentity
     || path.join(metadata.materializationParentIdentity.canonicalPath, worktreeId) !== sourcePath
-    || listLanes().some((lane) => lane.worktreePath && (path.resolve(lane.worktreePath) === sourcePath
-      || (path.basename(lane.worktreePath) === worktreeId && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repositoryPath))))) {
+    || hasStandaloneWorkspaceLane(repositoryPath, sourcePath, worktreeId)) {
     throw new Error('Standalone cleanup requires exact ready manager ownership without a worker or packet lane.');
   }
 }

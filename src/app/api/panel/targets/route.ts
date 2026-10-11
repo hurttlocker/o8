@@ -222,8 +222,9 @@ export async function GET(request: Request) {
       targets: withTier(targets),
     });
   } catch (err) {
+    console.error('[api] panel/targets failed:', err);
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : 'targeting failed' },
+      { ok: false, error: 'targeting failed' },
       { status: 500 },
     );
   }

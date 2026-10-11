@@ -1,5 +1,4 @@
 import type { Lane } from './types';
-import { cleanupLaneWorktree } from './worktree-cleanup';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 import { settleTerminalWorkspaceManifestAndLeases } from '@/lib/workspace/manifest/terminal-release';
 import { laneOwnsWorktree } from './lane-storage-release';
@@ -45,23 +44,10 @@ export function scheduleTerminalLaneCleanup(lane: TerminalCleanupLane): void {
       }
       return;
     }
-    const removed = await cleanupLaneWorktree(lane, { terminal: true });
-    const { appendEvent, getLane, updateLane } = await import('./registry');
-    const current = getLane(lane.id);
-    if (removed && current?.worktreePath === lane.worktreePath) {
-      updateLane(lane.id, { worktreePath: null }, 'system', {
-        phase: 'terminal_cleanup',
-        worktreeRemoved: true,
-      });
-      return;
-    }
-    if (!removed) {
-      appendEvent(lane.id, 'update', 'system', {
-        phase: 'terminal_cleanup',
-        worktreeRemoved: false,
-        worktreePath: lane.worktreePath,
-      });
-    }
+    const { queueTerminalWorktreeMaintenance } = await import('@/lib/worktree/maintenance-discovery');
+    queueTerminalWorktreeMaintenance(lane.id);
+    const { runWorktreeMaintenanceTick } = await import('./worktree-reaper');
+    await runWorktreeMaintenanceTick();
   })().catch((error) => {
     console.error(
       `[lane-worktree] Terminal worktree cleanup failed for ${lane.id}: ${error instanceof Error ? error.message : String(error)}`,

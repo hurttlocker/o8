@@ -1,3 +1,5 @@
+import { controlledProviderConfig, providerFromConfig } from '@/lib/runtimes/shared/owned-session/controlled-provider';
+import { prepareControlledGateway } from './controlled-gateway';
 import { mkdir } from 'node:fs/promises';
 import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
 import path from 'node:path';
@@ -11,18 +13,12 @@ import {
   isReadOnlyRuntimeConfig,
   workModeRuntimeConfig,
 } from '@/lib/runtimes/shared/owned-session/work-mode';
-import {
-  createClaudeCodeStreamJsonParser,
-  type ClaudeCodeStreamJsonParserEvent,
-} from '@/lib/claude-code/stream-json-parser';
+import { parseClaudeOwnedRunLog } from './owned-log';
 import { createOwnedSessionStore } from '@/lib/runtimes/shared/owned-session';
 import { MODEL_IDS } from '@/lib/models';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type {
   OwnedRuntimeAdapter,
-  OwnedRunRecord,
-  OwnedTailEntry,
-  ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session/types';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
@@ -41,190 +37,6 @@ import {
   prepareClaudeCodeWorkerConfig,
   ensureCodexSubscriptionProxyReady,
 } from '@/lib/claude-code/codex-subscription-proxy';
-
-function eventText(event: ClaudeCodeStreamJsonParserEvent): string {
-  switch (event.type) {
-    case 'delta':
-    case 'thinking':
-    case 'plan_step':
-      return event.text;
-    case 'tool_call':
-      return event.preview ?? event.name;
-    case 'tool_result':
-      return event.preview ?? event.output ?? event.name ?? 'Tool result';
-    case 'permission_request':
-      return event.text;
-    case 'usage':
-      return `Usage: ${event.inputTokens} input, ${event.outputTokens} output${event.cacheReadTokens ? `, ${event.cacheReadTokens} cache read` : ''}${event.cacheWriteTokens ? `, ${event.cacheWriteTokens} cache write` : ''}`;
-    case 'done':
-      return event.text;
-  }
-}
-
-function entryKind(event: ClaudeCodeStreamJsonParserEvent): OwnedTailEntry['kind'] {
-  if (event.type === 'tool_call') return 'tool';
-  if (event.type === 'tool_result') return 'tool-output';
-  if (event.type === 'delta' || event.type === 'thinking' || event.type === 'done') return 'message';
-  return 'event';
-}
-
-function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
-  const parser = createClaudeCodeStreamJsonParser();
-  const events = [...parser.pushChunk(raw), ...parser.flush()];
-  const entries: OwnedTailEntry[] = [];
-  const assistantBlocks = new Map<string, OwnedTailEntry>();
-  const thinkingBlocks = new Map<string, OwnedTailEntry>();
-  let eventOrdinal = 0;
-  let hasAssistantText = false;
-
-  for (const event of events) {
-    if (event.type === 'delta') {
-      const blockKey = `${event.messageKey ?? event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
-      let entry = assistantBlocks.get(blockKey);
-      if (!entry) {
-        entry = {
-          id: `${run.id}:message:${blockKey}`,
-          kind: 'message',
-          label: 'claude-assistant',
-          text: '',
-          timestamp: run.startedAt,
-        };
-        assistantBlocks.set(blockKey, entry);
-        entries.push(entry);
-      }
-      // Deltas split Markdown tokens arbitrarily. Preserve every byte so the
-      // renderer receives one complete answer rather than fragment rows.
-      entry.text += event.text;
-      hasAssistantText = hasAssistantText || event.text.length > 0;
-      continue;
-    }
-
-    if (event.type === 'thinking') {
-      const blockKey = `${event.messageKey ?? event.messageIndex ?? 0}:${event.blockIndex ?? 0}`;
-      let entry = thinkingBlocks.get(blockKey);
-      if (!entry) {
-        entry = {
-          id: `${run.id}:thinking:${blockKey}`,
-          kind: 'message',
-          label: 'thinking',
-          text: '',
-          timestamp: run.startedAt,
-          thinking: '',
-          thinkingActive: true,
-        };
-        thinkingBlocks.set(blockKey, entry);
-        entries.push(entry);
-      }
-      entry.thinking = `${entry.thinking ?? ''}${event.text}`;
-      if (event.text) entry.thinkingActive = false;
-      continue;
-    }
-
-    if (event.type === 'done') {
-      // The result is a terminal summary. When stream deltas already built the
-      // answer it is a replay, not another visible assistant message.
-      if (event.isError) {
-        const errorText = event.text || 'Worker reported an error.';
-        if (!entries.some((entry) => entry.text === errorText)) {
-          entries.push({
-            id: `${run.id}:terminal-error`, kind: 'event', label: 'error',
-            text: errorText, timestamp: run.startedAt,
-          });
-        }
-      } else if (!hasAssistantText && event.text) {
-        entries.push({
-          id: `${run.id}:message:result`,
-          kind: 'message',
-          label: 'claude-assistant',
-          text: event.text,
-          timestamp: run.startedAt,
-        });
-      }
-      continue;
-    }
-
-    if (event.type === 'tool_call') {
-      const text = eventText(event);
-      entries.push({
-        id: `${run.id}:tool:${event.id ?? eventOrdinal}`,
-        kind: 'tool',
-        label: event.name,
-        text,
-        timestamp: run.startedAt,
-        toolCall: {
-          ...(event.id ? { id: event.id } : {}),
-          name: event.name,
-          ...(event.args ? { args: event.args } : {}),
-          ...(event.preview ? { preview: event.preview } : {}),
-          status: 'running',
-        },
-      });
-      eventOrdinal += 1;
-      continue;
-    }
-
-    if (event.type === 'tool_result') {
-      const text = eventText(event);
-      entries.push({
-        id: `${run.id}:tool-result:${event.id ?? eventOrdinal}`,
-        kind: 'tool-output',
-        label: event.name ?? 'tool',
-        text,
-        timestamp: run.startedAt,
-        toolCall: {
-          ...(event.id ? { id: event.id } : {}),
-          name: event.name ?? 'tool',
-          ...(event.args ? { args: event.args } : {}),
-          ...(event.preview ? { preview: event.preview } : {}),
-          status: 'done',
-        },
-      });
-      eventOrdinal += 1;
-      continue;
-    }
-
-    const text = eventText(event);
-    if (!text) continue;
-    entries.push({
-      id: `${run.id}:${event.type}:${eventOrdinal}`,
-      kind: entryKind(event),
-      label: event.type,
-      text,
-      timestamp: run.startedAt,
-    });
-    eventOrdinal += 1;
-  }
-  const done = events.find((event): event is Extract<ClaudeCodeStreamJsonParserEvent, { type: 'done' }> =>
-    event.type === 'done');
-  const usage = [...events].reverse().find(
-    (event): event is Extract<ClaudeCodeStreamJsonParserEvent, { type: 'usage' }> => event.type === 'usage',
-  );
-  const inputTokens = done?.inputTokens ?? usage?.inputTokens ?? 0;
-  const cacheReadTokens = done?.cacheReadTokens ?? usage?.cacheReadTokens ?? 0;
-  const contextTokens = inputTokens + cacheReadTokens;
-  const terminalMissing = !done && Boolean(run.childExit || run.finishedAt)
-    && run.outcome !== 'interrupted' && !run.interruptRequestedAt;
-  const providerFailed = done?.isError === true || terminalMissing;
-
-  return {
-    threadId: done?.sessionId,
-    entries,
-    outcome: providerFailed ? 'failed' : done ? 'finished' : 'running',
-    completedTurn: Boolean(done && !providerFailed),
-    ...(providerFailed ? {
-      providerFailure: terminalMissing ? {
-        subtype: 'missing_result',
-        message: 'Worker exited without a terminal result.',
-      } : {
-        ...(done?.subtype ? { subtype: done.subtype } : {}),
-        ...(done?.text.trim() ? { message: done.text.trim() } : {}),
-      },
-    } : {}),
-    ...(contextTokens > 0 ? {
-      turnContextUsage: { inputTokens, cacheReadTokens, contextTokens },
-    } : {}),
-  };
-}
 
 export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   runtimeId: 'claude-code',
@@ -249,6 +61,14 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
     const key = source === 'openrouter' ? await resolveClaudeCodeWorkerGatewayKey() : null;
     if (source === 'openrouter' && !key) {
       throw new Error('This Claude Code worker is pinned to OpenRouter, but its API key is no longer configured. Add the key in Settings > Models > API keys before resuming it.');
+    }
+    if (providerFromConfig(session.runtimeConfig)) {
+      const connection = await prepareControlledGateway(session, key!);
+      return { ...buildClaudeCodeWorkerSpawnEnv('openrouter', session.model, connection.token, connection.baseUrl),
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '0', CLAUDE_CONFIG_DIR: isolatedConfigDir,
+        CLAUDE_CODE_TMPDIR: isolatedScratchDir, TMPDIR: isolatedScratchDir, ...credentialEnv,
+        ANTHROPIC_BASE_URL: connection.baseUrl, ANTHROPIC_API_KEY: connection.token, ANTHROPIC_AUTH_TOKEN: '',
+        CLAUDE_CODE_OAUTH_TOKEN: '' };
     }
     if (source === 'codex-subscription') {
       const connection = await ensureCodexSubscriptionProxyReady();
@@ -286,15 +106,16 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   squadShortName: 'Claude',
   sessionIdPrefix: 'claude-code-owned-',
   defaultModel: MODEL_IDS.claudeWorkerDefault,
-  launchArgs: ({ model, effort, workerMcpConfigPath, runtimeConfig }) => [
-    ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
-    // Read-only packets get a CLI-level deny rule for the native write tools.
-    // The deny fires under bypassPermissions, so a read-only worker literally
-    // cannot call Edit/Write/NotebookEdit/Task — see read-only-args.ts.
-    ...claudeReadOnlyLockoutArgs(isReadOnlyRuntimeConfig(runtimeConfig)),
-    '--disable-slash-commands',
-    ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
-  ],
+  launchArgs: ({ model, effort, workerMcpConfigPath, runtimeConfig }) => providerFromConfig(runtimeConfig)
+    ? ['--print', '--bare', '--restricted', '--tools', 'Read', '--allowedTools', 'Read',
+      '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--max-turns', '4',
+      '--model', model!, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+      ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : [])]
+    : [
+      ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
+      ...claudeReadOnlyLockoutArgs(isReadOnlyRuntimeConfig(runtimeConfig)),
+      '--disable-slash-commands', ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
+    ],
   launchStdin: ({ prompt }) => buildClaudeStreamJsonUserPayload(prompt),
   resumeArgs: ({ threadId, model, effort, workerMcpConfigPath, runtimeConfig }) => {
     // Owned workers must address a saved provider UUID, never a session name,
@@ -344,6 +165,7 @@ export async function launchOwnedClaudeCodeSession(request: {
   cwd: string;
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';
+  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
   prompt: string;
   clientMutationId?: string;
   model?: string;
@@ -356,9 +178,10 @@ export async function launchOwnedClaudeCodeSession(request: {
   /** Durable packet work mode; 'read-only' hardens argv and the OS sandbox. */
   workMode?: WorkerWorkMode;
 }) {
-  createOwnedExecutionPolicy({ ...request, runtimeConfig: { ...(request.workMode ? { workMode: request.workMode } : {}),
+  const controlledConfig = controlledProviderConfig(request.controlledProvider);
+  createOwnedExecutionPolicy({ ...request, runtimeConfig: { ...controlledConfig, ...(request.workMode ? { workMode: request.workMode } : {}),
     ...(request.claudeCodeCarrier ? { modelSource: request.claudeCodeCarrier } : {}) } }, 'claude-code');
-  if (request.executionPolicy !== undefined && (request.claudeCodeCarrier !== 'native'
+  if (request.executionPolicy !== undefined && (request.claudeCodeCarrier !== (request.controlledProvider ? 'openrouter' : 'native')
     || (request.claudeCodeModel !== undefined && request.claudeCodeModel !== request.model))) {
     throw new Error('Single-attempt Claude Code workers require explicit matching native pins.');
   }
@@ -367,10 +190,10 @@ export async function launchOwnedClaudeCodeSession(request: {
     model: request.claudeCodeModel,
   });
   const selectedModel = selection.model ?? request.model;
-  const meteredDefaults = selection.source === 'openrouter' && !request.spendCap
+  const meteredDefaults = selection.source === 'openrouter' && !request.controlledProvider && !request.spendCap
     ? getOperatorDefaultsSync().values
     : null;
-  const spendCap = selection.source === 'openrouter'
+  const spendCap = selection.source === 'openrouter' && !request.controlledProvider
     ? request.spendCap ?? {
         carrier: 'openrouter' as const,
         costUsd: meteredDefaults!.meteredPacketCostCapUsd,
@@ -404,7 +227,7 @@ export async function launchOwnedClaudeCodeSession(request: {
       ...request,
       model: selectedModel ?? undefined,
       runtimeConfig: {
-        modelSource: selection.source,
+        modelSource: selection.source, ...controlledConfig,
         ...(spendCap ? {
           spendCapCostUsd: String(spendCap.costUsd),
           spendCapInputTokens: String(spendCap.inputTokens),

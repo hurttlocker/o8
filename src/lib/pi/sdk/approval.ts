@@ -7,10 +7,17 @@ export function createPiApproval(sessionKey: string, root: string): PiApproval {
     signal.throwIfAborted();
     const { createApproval, getApproval } = await import('@/lib/approvals/store');
     const { resolveApproval } = await import('@/lib/approvals/resolution');
-    const approval = createApproval({ source: 'runtime', runtime: 'pi', agent: 'o8 Pi prototype',
-      sessionKey, title: `Write ${String(call.args.path)}`, summary: `Write ${String(call.args.path)}`, description: 'Approve this exact file content.',
-      toolName: call.name, args: call.args, editable: false, risk: 'medium',
-      diff: { path: String(call.args.path), before: call.before, after: String(call.args.content) },
+    const command = call.name === 'run_command' ? String(call.args.command) : undefined;
+    const approval = createApproval({ source: 'runtime', runtime: 'pi', agent: 'o8 Pi prototype', sessionKey,
+      ...(command !== undefined ? {
+        title: 'Run a command', summary: command, command, risk: call.risk ?? 'medium', policyRuleId: call.policyRuleId,
+        description: 'Approve this exact command. It runs at the workspace root with no credentials in its environment, a time limit and an output limit.',
+      } : {
+        title: `Write ${String(call.args.path)}`, summary: `Write ${String(call.args.path)}`, risk: 'medium' as const,
+        description: 'Approve this exact file content.',
+        diff: { path: String(call.args.path), before: call.before, after: String(call.args.content) },
+      }),
+      toolName: call.name, args: call.args, editable: false,
       metadata: { RepoPath: root, Session: sessionKey } });
     try {
       const expires = Date.now() + 60_000;

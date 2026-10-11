@@ -109,7 +109,7 @@ describe('exact managed directory retirement', () => {
       completeExactManagedDirectoryRetirement(root, 'packet-workspace');
     }
     expect(readdirSync(root)).toEqual([]);
-  }, 15_000);
+  });
 
   it('refuses a replacement retirement root before reading forged receipts', async () => {
     const outer = mkdtempSync(path.join(tmpdir(), 'o8-exact-retire-root-swap-'));
