@@ -60,6 +60,8 @@ it('opens from Settings, contains keyboard focus, and returns focus on Escape', 
   await open();
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.getAttribute('aria-modal')).toBe('true');
+  expect(dialog.textContent).toContain('account or installation credential');
+  expect(dialog.textContent).not.toContain('Anonymous unless');
   expect(document.activeElement?.tagName).toBe('TEXTAREA');
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true })));
   expect(document.activeElement).toBe(button('Cancel'));

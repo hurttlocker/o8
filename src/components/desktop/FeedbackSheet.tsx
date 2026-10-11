@@ -99,7 +99,7 @@ export function FeedbackSheet({ onClose }: { onClose: () => void }) {
           <input type="checkbox" checked={includeMetadata} onChange={(event) => setIncludeMetadata(event.target.checked)} disabled={sending || sent} />
           Include app version and OS
         </label>
-        <p id={`${id}-privacy`} style={{ margin: 0, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Anonymous unless you enter an email. Only your text and selected details are sent. No repository content, file paths, prompts, or screenshots are attached.</p>
+        <p id={`${id}-privacy`} style={{ margin: 0, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Your report includes your message, optional email, and selected version/OS details. No account profile, repository content, paths, prompts, or screenshots are attached. The service receives an account or installation credential and network information to prevent abuse.</p>
         {sharing.status === 'checking' ? <p role="status" style={{ margin: 0 }}>Checking sharing settings…</p> : !sharing.enabled ? <p role="status" style={{ margin: 0 }}>Feedback is disabled while crash &amp; error reports are off. Enable sharing in Settings to send feedback.</p> : null}
         {sharing.error || error ? <p role="alert" style={{ margin: 0, color: 'var(--t-brand-red)' }}>{error || sharing.error}</p> : null}
         {sent ? <p role="status" style={{ margin: 0 }}>Feedback sent. Thank you.</p> : null}

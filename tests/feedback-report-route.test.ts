@@ -170,13 +170,25 @@ describe('text-only feedback through POST /api/feedback/report', () => {
     });
     expect(res.status).toBe(200);
     const payload = captured.json as { embeds: Array<{ fields: DiscordEmbedField[] }> };
-    expect(payload.embeds[0].fields.map((field) => field.name)).toEqual(['Email', 'Version', 'OS']);
-    expect(payload.embeds[0].fields[0].value).toBe('reader@example.test');
+    expect(payload.embeds[0].fields.map((field) => field.name)).toEqual(['Reported by', 'Version', 'OS']);
+    expect(payload.embeds[0].fields[0].value).toBe('Reply email (provided): reader@example.test');
     expect(payload.embeds[0].fields[1].value).toMatch(/^\d+\.\d+\.\d+/);
     expect(payload.embeds[0].fields[2].value).toBeTruthy();
     expect(JSON.stringify(payload)).not.toContain('injected-');
     expect(ledger.written[0]).toMatchObject({ reporter: null });
     expect(JSON.stringify(ledger.written)).not.toContain('reader@example.test');
+  });
+
+  it('keeps maximum-length message and reply contact in separate supported relay fields', async () => {
+    const message = 'm'.repeat(4000);
+    const email = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}`;
+    expect(email).toHaveLength(254);
+    const res = await postReport({ kind: 'feedback', message, email, includeMetadata: false });
+    expect(res.status).toBe(200);
+    expect(captured.json).toMatchObject({ embeds: [{
+      description: message,
+      fields: [{ name: 'Reported by', value: `Reply email (provided): ${email}`, inline: true }],
+    }] });
   });
 
   it('omits empty email and unselected metadata', async () => {
