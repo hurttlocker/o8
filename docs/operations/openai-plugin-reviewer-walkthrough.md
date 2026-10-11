@@ -21,12 +21,48 @@ The desktop's selected runtime must already be installed and authenticated.
    choices and captures the selected clean workspace. Confirm explicit files,
    requirements, evidence and runtime/model/effort, then prepare exactly one
    held draft. Show **no worker before Launch**. In o8, review that contract and
-   click **Launch**. Show one worker with those pins and unchanged source files.
+   click **Launch**. If the host offers separately consented bounded execution,
+   also exercise the hosted path below. Show one worker with those pins and unchanged source files.
    Read its report with `o8_task_result`, using the returned task ID. Repeat the
    exact preparation call and result read; neither starts or retries work.
 
-The fifth case uses separate operator action in the desktop. Do not present
-it as autonomous remote launch from ChatGPT or as added worker allowance.
+The local fifth case uses separate operator action in the desktop. Hosted
+execution requires its own permission and installed support; preparation never
+starts a worker. Neither path adds worker allowance.
+
+## Separately consented bounded hosted execution
+
+Use this additional case only after the supporting desktop and relay feature
+are live and the sample account has explicitly consented to `o8:launch-task`.
+An older read/follow-up/preparation grant must still refuse Launch and Stop.
+
+1. In ordinary conversation, explicitly select the offered OpenRouter worker,
+   disposable project, objective and exact relative files. Copy the returned
+   provider policy and use `provider-default` effort; do not call it High or
+   change saved worker defaults. Confirm the configured API credit and visible
+   request, output, time and reported-cost stopping limits. The last charged
+   request may exceed a reported-cost threshold; no native payer fallback exists.
+2. Prepare one held draft and retain its returned task ID and contract hash.
+   Show zero workers before the explicit request to run it. `o8_launch_task`
+   must name that exact task/hash and admit only the supported read-only worker.
+3. Read `o8_task_result` until there is current bound evidence. Verify the
+   actual provider generation receipts, permitted result, unchanged repository,
+   one permanent attempt and plugin-attributed audit. An accepted call or clean
+   process exit alone is not completion. Retry the exact Launch; it must inspect
+   the same attempt, including after failure or an uncertain response.
+4. On a separate disposable attempt, explicitly request Stop for the exact
+   task/hash using `o8_stop_task`. Verify the process and provider gateway stop
+   and that another Launch cannot create a replacement. Hosted Stop requires
+   current execution consent; retained local Stop follows desktop safety policy.
+5. Show that an unsupported native route, missing provider key, stale contract,
+   foreign account/client/computer, expired or revoked consent, and approval or
+   merge requests refuse before dispatch. Disconnect prevents new remote calls,
+   does not undo an admitted worker, and never creates an offline work queue.
+
+Repeat the clear new-worker path from the real ChatGPT phone app. A browser
+emulating a phone size is layout evidence, not phone-to-desktop acceptance.
+Keep this procedure separate from the recording and live receipts; writing it
+does not prove execution, quota savings, reviewer acceptance or publication.
 
 ## Three negative cases
 

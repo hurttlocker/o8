@@ -1,3 +1,5 @@
+import { CONTROLLED_OPENROUTER_MODEL, CONTROLLED_OPENROUTER_POLICY } from '@/lib/runtimes/shared/owned-session/controlled-provider';
+import { PLUGIN_LAUNCH_TASK_SCOPE } from '@/lib/auth/plugin-token';
 import { randomUUID } from 'node:crypto';
 import type { PluginPrincipal } from '@/lib/auth/plugin-token';
 import { CODEX_MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
@@ -10,23 +12,27 @@ import { contractHash, readTaskDraft, readTaskDraftSnapshot, taskDraftKey, withT
 import { captureTaskDraftWorkspace, taskDraftChoices, verifyFiles } from './task-draft-workspace';
 import { readTaskExecution } from './task-execution-store';
 
-function catalog() {
+async function catalog() {
+  const { resolveClaudeCodeWorkerGatewayKey } = await import('@/lib/claude-code/worker-profile');
+  const configured = !!await resolveClaudeCodeWorkerGatewayKey();
   return (['codex', 'claude-code'] as const).map((runtime) => ({
     runtime,
-    models: (runtime === 'codex' ? CODEX_MODEL_IDS : SUPPORTED_MODEL_IDS.filter((model) => model.startsWith('claude-')))
+    models: [...(runtime === 'codex' ? CODEX_MODEL_IDS : SUPPORTED_MODEL_IDS.filter((model) => model.startsWith('claude-')))
       .map((model) => ({ model, efforts: THINKING_EFFORTS.filter((effort) => {
         const pin = resolveEffortPin({ runtime, model, explicitModel: model, requestedEffort: effort });
         return effort !== 'adaptive' && pin.ok && pin.selectedEffort === effort;
-      }) })),
+      }) })), ...(runtime === 'claude-code' ? [{ model: CONTROLLED_OPENROUTER_MODEL, efforts: ['provider-default'],
+        provider: CONTROLLED_OPENROUTER_POLICY, configured, availability: 'catalog_only_not_execution_proof' }] : [])],
     availability: 'catalog_only_not_execution_proof',
   }));
 }
 
-function receipt(draft: TaskDraftRecord, replayed: boolean) {
+function receipt(draft: TaskDraftRecord, replayed: boolean, principal: PluginPrincipal) {
   const prepared = {
     ok: true, accepted: true, executionEnabled: false,
-    taskId: draft.taskId, replayed, runtime: draft.contract.runtime,
-    model: draft.contract.model, effort: draft.contract.effort, workMode: 'read-only',
+    taskId: draft.taskId, contractHash: draft.contractHash, replayed, runtime: draft.contract.runtime,
+    hostedLaunchPermission: !!draft.contract.provider && principal.scopes.includes(PLUGIN_LAUNCH_TASK_SCOPE),
+    model: draft.contract.model, effort: draft.contract.effort, ...(draft.contract.provider ? { provider: draft.contract.provider } : {}), workMode: 'read-only',
   };
   let execution: ReturnType<typeof readTaskExecution>;
   try { execution = readTaskExecution(draft); }
@@ -48,7 +54,9 @@ function receipt(draft: TaskDraftRecord, replayed: boolean) {
       message: `Task draft exists. Persisted desktop execution state: ${execution.state}. This preparation request did not start or retry a worker.` };
   }
   return { ...prepared, state: 'held', dispatched: false, completed: false,
-    message: 'Task draft prepared and held. No worker has started. Operator review and a separate dispatch capability are required before execution.',
+    message: prepared.hostedLaunchPermission
+      ? 'Task draft prepared and held. No worker has started. An explicit user request may start this exact contract using the separately granted o8_launch_task tool, or review and Launch in o8.'
+      : 'Task draft prepared and held. No worker has started. Operator review and a separate dispatch capability are required before execution.',
   };
 }
 
@@ -62,25 +70,29 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
     if (args.repoId === undefined && args.projectId === undefined) {
       const choices = await taskDraftChoices();
       await requireTaskDraftAccount(principal, account);
-      return { ok: true, choices, selectionRequired: true, executionEnabled: false };
+      return { ok: true, choices, selectionRequired: true, executionEnabled: false,
+        selectionGuidance: 'Use the repository and project labels to ask which workspace the user means. Mentioning the o8 app does not select a repository named o8. Keep routing IDs internal. Ask for the current objective before selecting a workspace.' };
     }
     const repoId = normalizedText(args.repoId);
     const projectId = normalizedText(args.projectId);
     const workspace = await captureTaskDraftWorkspace(repoId, projectId);
     await requireTaskDraftAccount(principal, account);
+    const runtimes = await catalog();
     const snapshot = { ...workspace, ...account, snapshotId: randomUUID(),
       machineId: principal.machineId, clientId: principal.clientId, expiresAt: Date.now() + 300_000 };
-    await withTaskDraftAccountAdmission(principal, account, () => writeTaskDraftSnapshot(snapshot));
-    return { ok: true, repoId, projectId, snapshotId: snapshot.snapshotId, revision: snapshot.revision,
+    return withTaskDraftAccountAdmission(principal, account, () => {
+      writeTaskDraftSnapshot(snapshot);
+      return { ok: true, repoId, projectId, snapshotId: snapshot.snapshotId, revision: snapshot.revision,
       rulesDigest: snapshot.rulesDigest, expiresAt: snapshot.expiresAt,
-      workMode: 'read-only', executionEnabled: false, runtimes: catalog() };
+      workMode: 'read-only', executionEnabled: false, runtimes };
+    });
   }
   if (tool !== 'o8_prepare_task') throw new TaskDraftError('forbidden', 403);
   const contract = parseTaskDraftContract(args);
   const key = taskDraftKey(account.accountId, principal.clientId, principal.machineId, contract.idempotencyKey);
   async function replay(previous: TaskDraftRecord) {
     if (previous.contractHash !== contractHash(contract)) throw new TaskDraftError('idempotency_key_conflict', 409);
-    return withTaskDraftAccountAdmission(principal, previous.account, () => receipt(previous, true));
+    return withTaskDraftAccountAdmission(principal, previous.account, () => receipt(previous, true, principal));
   }
   // An atomic immutable record can be recovered even if its creator crashed
   // after publication while holding the lock. A lock without a record stays held.
@@ -114,7 +126,7 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
     };
     return withTaskDraftAccountAdmission(principal, account, () => {
       writeTaskDraft(key, draft);
-      return receipt(draft, false);
+      return receipt(draft, false, principal);
     });
   });
 }

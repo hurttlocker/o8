@@ -1,3 +1,5 @@
+import { controlledProviderConfig, providerFromConfig } from '@/lib/runtimes/shared/owned-session/controlled-provider';
+import { prepareControlledGateway } from './controlled-gateway';
 import { mkdir } from 'node:fs/promises';
 import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
 import path from 'node:path';
@@ -60,6 +62,14 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
     if (source === 'openrouter' && !key) {
       throw new Error('This Claude Code worker is pinned to OpenRouter, but its API key is no longer configured. Add the key in Settings > Models > API keys before resuming it.');
     }
+    if (providerFromConfig(session.runtimeConfig)) {
+      const connection = await prepareControlledGateway(session, key!);
+      return { ...buildClaudeCodeWorkerSpawnEnv('openrouter', session.model, connection.token, connection.baseUrl),
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '0', CLAUDE_CONFIG_DIR: isolatedConfigDir,
+        CLAUDE_CODE_TMPDIR: isolatedScratchDir, TMPDIR: isolatedScratchDir, ...credentialEnv,
+        ANTHROPIC_BASE_URL: connection.baseUrl, ANTHROPIC_API_KEY: connection.token, ANTHROPIC_AUTH_TOKEN: '',
+        CLAUDE_CODE_OAUTH_TOKEN: '' };
+    }
     if (source === 'codex-subscription') {
       const connection = await ensureCodexSubscriptionProxyReady();
       return {
@@ -96,15 +106,16 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   squadShortName: 'Claude',
   sessionIdPrefix: 'claude-code-owned-',
   defaultModel: MODEL_IDS.claudeWorkerDefault,
-  launchArgs: ({ model, effort, workerMcpConfigPath, runtimeConfig }) => [
-    ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
-    // Read-only packets get a CLI-level deny rule for the native write tools.
-    // The deny fires under bypassPermissions, so a read-only worker literally
-    // cannot call Edit/Write/NotebookEdit/Task — see read-only-args.ts.
-    ...claudeReadOnlyLockoutArgs(isReadOnlyRuntimeConfig(runtimeConfig)),
-    '--disable-slash-commands',
-    ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
-  ],
+  launchArgs: ({ model, effort, workerMcpConfigPath, runtimeConfig }) => providerFromConfig(runtimeConfig)
+    ? ['--print', '--bare', '--restricted', '--tools', 'Read', '--allowedTools', 'Read',
+      '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--max-turns', '4',
+      '--model', model!, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+      ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : [])]
+    : [
+      ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
+      ...claudeReadOnlyLockoutArgs(isReadOnlyRuntimeConfig(runtimeConfig)),
+      '--disable-slash-commands', ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
+    ],
   launchStdin: ({ prompt }) => buildClaudeStreamJsonUserPayload(prompt),
   resumeArgs: ({ threadId, model, effort, workerMcpConfigPath, runtimeConfig }) => {
     // Owned workers must address a saved provider UUID, never a session name,
@@ -154,6 +165,7 @@ export async function launchOwnedClaudeCodeSession(request: {
   cwd: string;
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';
+  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
   prompt: string;
   clientMutationId?: string;
   model?: string;
@@ -166,9 +178,10 @@ export async function launchOwnedClaudeCodeSession(request: {
   /** Durable packet work mode; 'read-only' hardens argv and the OS sandbox. */
   workMode?: WorkerWorkMode;
 }) {
-  createOwnedExecutionPolicy({ ...request, runtimeConfig: { ...(request.workMode ? { workMode: request.workMode } : {}),
+  const controlledConfig = controlledProviderConfig(request.controlledProvider);
+  createOwnedExecutionPolicy({ ...request, runtimeConfig: { ...controlledConfig, ...(request.workMode ? { workMode: request.workMode } : {}),
     ...(request.claudeCodeCarrier ? { modelSource: request.claudeCodeCarrier } : {}) } }, 'claude-code');
-  if (request.executionPolicy !== undefined && (request.claudeCodeCarrier !== 'native'
+  if (request.executionPolicy !== undefined && (request.claudeCodeCarrier !== (request.controlledProvider ? 'openrouter' : 'native')
     || (request.claudeCodeModel !== undefined && request.claudeCodeModel !== request.model))) {
     throw new Error('Single-attempt Claude Code workers require explicit matching native pins.');
   }
@@ -177,10 +190,10 @@ export async function launchOwnedClaudeCodeSession(request: {
     model: request.claudeCodeModel,
   });
   const selectedModel = selection.model ?? request.model;
-  const meteredDefaults = selection.source === 'openrouter' && !request.spendCap
+  const meteredDefaults = selection.source === 'openrouter' && !request.controlledProvider && !request.spendCap
     ? getOperatorDefaultsSync().values
     : null;
-  const spendCap = selection.source === 'openrouter'
+  const spendCap = selection.source === 'openrouter' && !request.controlledProvider
     ? request.spendCap ?? {
         carrier: 'openrouter' as const,
         costUsd: meteredDefaults!.meteredPacketCostCapUsd,
@@ -214,7 +227,7 @@ export async function launchOwnedClaudeCodeSession(request: {
       ...request,
       model: selectedModel ?? undefined,
       runtimeConfig: {
-        modelSource: selection.source,
+        modelSource: selection.source, ...controlledConfig,
         ...(spendCap ? {
           spendCapCostUsd: String(spendCap.costUsd),
           spendCapInputTokens: String(spendCap.inputTokens),

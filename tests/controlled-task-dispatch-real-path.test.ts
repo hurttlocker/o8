@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
-import { existsSync, fstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, fstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -11,6 +11,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 // lease, Git worktree, runtime launch, owned journal and child process are real.
 const ready = vi.hoisted(() => vi.fn(async () => {}));
 const sync = vi.hoisted(() => vi.fn());
+const ruleHome = vi.hoisted(() => ({ path: '' }));
+vi.mock('node:os', async (original) => {
+  const actual = await original<typeof import('node:os')>();
+  return { ...actual, homedir: () => ruleHome.path || actual.homedir() };
+});
 vi.mock('node:fs', async (original) => {
   const actual = await original<typeof import('node:fs')>();
   sync.mockImplementation(actual.fsyncSync);
@@ -115,6 +120,9 @@ beforeEach(async () => {
   sync.mockImplementation(actual.fsyncSync);
   persistent = true;
   fixtureRuntime = 'codex';
+  ruleHome.path = realpathSync(mkdtempSync(join(tmpdir(), 'o8-task-rules-fixture-')));
+  dirs.push(ruleHome.path);
+  writeFileSync(join(ruleHome.path, 'AGENTS.md'), 'Global fixture rule: never invent evidence.\n');
   process.env.O8_LICENSE_PUBKEY = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   rmSync(taskDraftRoot(), { recursive: true, force: true });
   await account();
@@ -175,7 +183,7 @@ afterAll(() => {
   if (oldKey === undefined) delete process.env.O8_LICENSE_PUBKEY; else process.env.O8_LICENSE_PUBKEY = oldKey;
 });
 
-function runs(): Array<{ pid: number; cwd: string; model: string; effort: string }> {
+function runs(): Array<{ pid: number; cwd: string; model: string; effort: string; prompt: string }> {
   try { return readFileSync(output, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)); }
   catch { return []; }
 }
@@ -195,8 +203,8 @@ function adapter(): OwnedRuntimeAdapter {
     rootEnvVar: fixtureRuntime === 'codex' ? 'CORTEX_IDE_OWNED_CODEX_ROOT' : 'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
     rootDefault: join(fixtureRoot, 'sessions'), binaryName: 'node', binaryEnvOverride: 'O8_TASK_DISPATCH_FIXTURE_BIN',
     humanLabel: 'Fixture', squadShortName: 'Fixture', workerMcpInjection: 'config-override',
-    launchArgs: ({ model, effort }) => ['-e',
-      `require('node:fs').appendFileSync(${JSON.stringify(output)}, JSON.stringify({ pid:process.pid,cwd:process.cwd(),model:${JSON.stringify(model)},effort:${JSON.stringify(effort)} })+${JSON.stringify('\n')}); ${persistent ? 'setInterval(()=>{},1000)' : `process.stdout.write(${JSON.stringify(events.map((event) => JSON.stringify(event)).join('\n') + '\n')}); process.exit(0)`}`],
+    launchArgs: ({ model, effort, prompt }) => ['-e',
+      `require('node:fs').appendFileSync(${JSON.stringify(output)}, JSON.stringify({ pid:process.pid,cwd:process.cwd(),model:${JSON.stringify(model)},effort:${JSON.stringify(effort)},prompt:${JSON.stringify(prompt)} })+${JSON.stringify('\n')}); ${persistent ? 'setInterval(()=>{},1000)' : `process.stdout.write(${JSON.stringify(events.map((event) => JSON.stringify(event)).join('\n') + '\n')}); process.exit(0)`}`],
     resumeArgs: () => [], parseRunLog: () => ({ entries: [], outcome: persistent ? 'running' : 'finished', completedTurn: !persistent }) };
 }
 async function prepare() {
@@ -229,6 +237,71 @@ describe('controlled tasks through the operator route, durable intent and owned 
   const taskResult = (taskId: string, bearer = token(accountId, ['o8:read'])) => call('o8_task_result', {
     machineId: 'draft-machine', taskId,
   }, bearer);
+
+  it('delivers admitted applicable rules to the actual child without adding them to hosted receipts', async () => {
+    mkdirSync(join(repo, 'unrelated'));
+    writeFileSync(join(repo, 'unrelated', 'AGENTS.md'), 'Unrelated private rule.\n');
+    git('add', 'unrelated/AGENTS.md');
+    git('-c', 'user.email=fixture@example.invalid', '-c', 'user.name=fixture', 'commit', '-m', 'unrelated scoped rules');
+    const draft = await prepare();
+    await decision(draft);
+    await vi.waitFor(() => expect(runs()).toHaveLength(1));
+    expect(runs()[0]!.prompt).toContain('Global fixture rule: never invent evidence.');
+    expect(runs()[0]!.prompt).toContain('Read only; report evidence.');
+    expect(runs()[0]!.prompt).not.toContain('Unrelated private rule.');
+    expect(savedSession().controlledTask).toMatchObject({ contractHash: draft.contractHash });
+    const hosted = await taskResult(draft.taskId);
+    expect(JSON.stringify(hosted)).not.toContain('Global fixture rule');
+    expect(JSON.stringify(hosted)).not.toContain(ruleHome.path);
+    await decision(draft, 'stop');
+  });
+
+  it('refuses changed global rules before child creation instead of sending stale instruction text', async () => {
+    const draft = await prepare();
+    writeFileSync(join(ruleHome.path, 'AGENTS.md'), 'Changed global instructions.\n');
+    const refused = await decision(draft);
+    expect(refused.status).toBe(409);
+    expect(runs()).toHaveLength(0);
+    expect(readTaskExecution(draft)).toBeNull();
+  });
+
+  it('refuses dangling global instruction links at the actual preparation route', async () => {
+    rmSync(join(ruleHome.path, 'AGENTS.md'));
+    symlinkSync(join(ruleHome.path, 'missing-rules.md'), join(ruleHome.path, 'AGENTS.md'));
+    const result = await call('o8_task_options', { machineId: 'draft-machine', repoId, projectId });
+    expect(result.status).toBe(409);
+    expect(result.result.code).toBe('rules_unavailable');
+    expect(listTaskDrafts(accountId)).toHaveLength(0);
+    expect(runs()).toHaveLength(0);
+  });
+
+  it('delivers directory rules for an admitted nested file and rejects oversized applicable rules before spawn', async () => {
+    mkdirSync(join(repo, 'nested'));
+    writeFileSync(join(repo, 'nested', 'AGENTS.md'), 'Nested applicable fixture rule.\n');
+    writeFileSync(join(repo, 'nested', 'value.txt'), 'nested fixture\n');
+    git('add', 'nested');
+    git('-c', 'user.email=fixture@example.invalid', '-c', 'user.name=fixture', 'commit', '-m', 'nested scoped rules');
+    const args = contract((await options()).snapshotId);
+    args.allowedFiles = ['nested/value.txt'];
+    args.sealedTaskContract.requirements[0]!.productionPath = 'nested/value.txt';
+    args.sealedTaskContract.smallestRoute[0]!.path = 'nested/value.txt';
+    expect((await call('o8_prepare_task', args)).status).toBe(200);
+    const draft = listTaskDrafts(accountId)[0]!;
+    await decision(draft);
+    await vi.waitFor(() => expect(runs()).toHaveLength(1));
+    expect(runs()[0]!.prompt).toContain('Nested applicable fixture rule.');
+    expect(runs()[0]!.prompt.indexOf('Global fixture rule')).toBeLessThan(runs()[0]!.prompt.indexOf('Nested applicable fixture rule'));
+    await decision(draft, 'stop');
+
+    writeFileSync(join(ruleHome.path, 'AGENTS.md'), 'x'.repeat(64_001));
+    const large = await call('o8_prepare_task', { ...contract((await options()).snapshotId), idempotencyKey: 'large-rules' });
+    expect(large.status).toBe(200);
+    const oversized = listTaskDrafts(accountId).find((entry) => entry.contract.idempotencyKey === 'large-rules')!;
+    const refused = await decision(oversized);
+    expect(refused.body.execution.state).toBe('blocked');
+    expect(readTaskExecution(oversized)!.surfaceId).toBeUndefined();
+    expect(runs()).toHaveLength(1);
+  });
 
   it.each(['codex', 'claude-code'] as const)('returns only the bound %s final report through the read-only hosted route', async (runtime) => {
     fixtureRuntime = runtime;
@@ -445,7 +518,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
     expect(existsSync(sentinel)).toBe(false);
   }, 20_000);
 
-  it.each(['sign-out', 'account-switch', 'rules', 'workspace', 'binding'] as const)(
+  it.each(['sign-out', 'account-switch', 'rules', 'global-rules', 'workspace', 'binding'] as const)(
     'refuses %s changes during backend preparation before actual spawn', async (kind) => {
       const draft = await prepare();
       ready.mockImplementationOnce(async () => {
@@ -454,6 +527,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
         });
         if (kind === 'account-switch') await account('user_fixture_foreign');
         if (kind === 'rules') writeFileSync(join(repo, 'AGENTS.md'), 'Changed rules\n');
+        if (kind === 'global-rules') writeFileSync(join(ruleHome.path, 'AGENTS.md'), 'Changed global rules\n');
         if (kind === 'workspace') writeFileSync(join(readTaskExecution(draft)!.workspacePath, 'README.md'), 'Changed checkout\n');
         if (kind === 'binding') {
           const root = join(fixtureRoot, 'sessions');

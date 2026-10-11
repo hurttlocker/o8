@@ -61,15 +61,24 @@ export function withWorktreeMaterializationExecution<T>(
   return materializationContext.run(next, operation);
 }
 
+/** The invocation that refuses a replaced workspace at `cwd`, when one is being materialized there. */
+export function materializationAwareInvocation(
+  command: string,
+  args: readonly string[],
+  cwd: string | URL | undefined,
+): { command: string; args: string[] } {
+  const resolved = typeof cwd === 'string' ? path.resolve(cwd) : null;
+  const identity = resolved ? materializationContext.getStore()?.get(resolved) ?? null : null;
+  return guardedWorkspaceInvocation(command, [...args], identity);
+}
+
 /** Execute against the OS-captured cwd, refusing a replacement before exec. */
 export function materializationAwareExecFile(
   command: string,
   args: readonly string[],
   options: ExecFileOptions & { cwd?: string | URL } = {},
 ): Promise<{ stdout: string; stderr: string }> {
-  const cwd = typeof options.cwd === 'string' ? path.resolve(options.cwd) : null;
-  const identity = cwd ? materializationContext.getStore()?.get(cwd) ?? null : null;
-  const invocation = guardedWorkspaceInvocation(command, [...args], identity);
+  const invocation = materializationAwareInvocation(command, args, options.cwd);
   return new Promise((resolve, reject) => {
     const { signal, ...execOptions } = options;
     let child: ChildProcess | null = null;

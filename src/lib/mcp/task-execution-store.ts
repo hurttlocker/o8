@@ -6,12 +6,15 @@ import { canonical, TaskDraftError } from './task-draft-contract';
 import { atomicWriteTaskState, syncTaskDirectories, taskDraftRoot, type TaskDraftRecord } from './task-draft-store';
 
 export interface ControlledTaskBinding { taskId: string; attemptId: string; contractHash: string }
+export interface PluginTaskLaunchGrant { clientId: string; machineId: string; expiresAt: number }
 export interface TaskExecutionRecord extends ControlledTaskBinding {
   version: 1;
   account: TaskDraftRecord['account'];
   runtime: TaskDraftRecord['contract']['runtime'];
   model: string;
   effort: TaskDraftRecord['contract']['effort'];
+  provider?: TaskDraftRecord['contract']['provider'];
+  pluginLaunchGrant?: PluginTaskLaunchGrant;
   createdAt: string;
   state: 'accepted' | 'spawn_reserved' | 'running' | 'uncertain' | 'blocked' | 'stop_requested' | 'stopped' | 'completed';
   workspacePath: string;
@@ -48,6 +51,14 @@ export function readTaskExecution(draft: TaskDraftRecord): TaskExecutionRecord |
       || value.taskId !== draft.taskId || value.contractHash !== draft.contractHash
       || canonical(value.account) !== canonical(draft.account) || value.runtime !== draft.contract.runtime
       || value.model !== draft.contract.model || value.effort !== draft.contract.effort
+      || canonical(value.provider ?? null) !== canonical(draft.contract.provider ?? null)
+      || (value.pluginLaunchGrant !== undefined && (!value.pluginLaunchGrant || typeof value.pluginLaunchGrant !== 'object'
+        || Object.keys(value.pluginLaunchGrant).some((key) => !['clientId', 'machineId', 'expiresAt'].includes(key))
+        || value.pluginLaunchGrant.clientId !== draft.clientId || value.pluginLaunchGrant.machineId !== draft.snapshot.machineId
+        || !Number.isFinite(Date.parse(value.createdAt))
+        || !Number.isFinite(value.pluginLaunchGrant.expiresAt)
+        || value.pluginLaunchGrant.expiresAt <= Date.parse(value.createdAt)
+        || value.pluginLaunchGrant.expiresAt > Date.parse(value.createdAt) + 60_000))
       || !/^[a-f0-9-]{36}$/.test(value.attemptId) || value.workspacePath !== executionWorkspace(value.attemptId)
       || !['accepted', 'spawn_reserved', 'running', 'uncertain', 'blocked', 'stop_requested', 'stopped', 'completed'].includes(value.state)
       || (value.surfaceId && (!value.surfaceId.startsWith(`${value.runtime}-owned:`) || /[/\\]/.test(value.surfaceId)))) {
@@ -64,12 +75,21 @@ export function withTaskExecutionLock<T>(_taskId: string, action: () => Promise<
 }
 
 /** The reservation is permanent, including a crash before its receipt is published. */
-export async function reserveTaskExecution(draft: TaskDraftRecord): Promise<{ record: TaskExecutionRecord; created: boolean }> {
+export async function reserveTaskExecution(draft: TaskDraftRecord, pluginLaunchGrant?: PluginTaskLaunchGrant): Promise<{ record: TaskExecutionRecord; created: boolean }> {
   const previous = readTaskExecution(draft);
   if (previous) return { record: previous, created: false };
   return withTaskExecutionLock(draft.taskId, async () => {
     const repeated = readTaskExecution(draft);
     if (repeated) return { record: repeated, created: false };
+    const admittedAt = Date.now();
+    if (pluginLaunchGrant && (!Number.isFinite(pluginLaunchGrant.expiresAt)
+      || pluginLaunchGrant.expiresAt <= admittedAt || pluginLaunchGrant.expiresAt > admittedAt + 60_000
+      || pluginLaunchGrant.clientId !== draft.clientId || pluginLaunchGrant.machineId !== draft.snapshot.machineId)) {
+      throw new TaskDraftError('account_changed_or_unavailable', 403);
+    }
+    // Capture the valid admission before synchronous reservation/fsync. A grant
+    // expiring during disk work still produces a readable, permanently held attempt.
+    const createdAt = new Date(admittedAt).toISOString();
     try {
       mkdirSync(reservation(draft.taskId), { mode: 0o700 });
       const fd = openSync(directory('execution-reservations'), 'r');
@@ -78,7 +98,8 @@ export async function reserveTaskExecution(draft: TaskDraftRecord): Promise<{ re
     const attemptId = randomUUID();
     const record: TaskExecutionRecord = { version: 1, taskId: draft.taskId, attemptId,
       contractHash: draft.contractHash, account: { ...draft.account }, runtime: draft.contract.runtime,
-      model: draft.contract.model, effort: draft.contract.effort, createdAt: new Date().toISOString(),
+      model: draft.contract.model, effort: draft.contract.effort, ...(draft.contract.provider ? { provider: draft.contract.provider } : {}), createdAt,
+      ...(pluginLaunchGrant ? { pluginLaunchGrant } : {}),
       state: 'accepted', workspacePath: executionWorkspace(attemptId), reviewRequired: true };
     writeTaskExecution(record);
     return { record, created: true };
@@ -88,6 +109,7 @@ export async function reserveTaskExecution(draft: TaskDraftRecord): Promise<{ re
 export function executionReceipt(record: TaskExecutionRecord, replayed: boolean) {
   return { taskId: record.taskId, attemptId: record.attemptId, contractHash: record.contractHash,
     state: record.state, runtime: record.runtime, model: record.model, effort: record.effort,
+    ...(record.provider ? { provider: record.provider } : {}),
     surfaceId: record.surfaceId ?? null, replayed, reviewRequired: true, retryAllowed: false,
     completed: record.state === 'completed', stopped: record.state === 'stopped', errorCode: record.errorCode ?? null };
 }

@@ -63,6 +63,6 @@ describe('first-run preview route surface', () => {
     stepPicker.value = 'dispatch';
     await act(async () => { stepPicker.dispatchEvent(new Event('change', { bubbles: true })); });
     await settle();
-    expect(document.body.textContent).toContain('Your setup');
+    expect(document.body.textContent).toContain('Choose your agent');
   });
 });

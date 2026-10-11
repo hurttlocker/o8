@@ -12,6 +12,7 @@ export const sharedVitestConfig = {
     globalSetup: ['tests/global-test-data-dir.ts'],
     setupFiles: ['tests/setup-isolated-data-dir.ts'],
     include: [
+      'src/components/desktop/FeedbackSheet.test.tsx',
       'src/**/*.test.ts',
       'src/components/desktop/thoughts/composer-selector/ComposerSelectorFooter.test.tsx',
       'src/components/desktop/thoughts/chat-panel/ComposerContextRow.test.tsx',

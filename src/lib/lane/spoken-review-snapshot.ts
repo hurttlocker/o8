@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 
 import {
   getLaneSpokenDiffFacts,
@@ -12,8 +12,6 @@ import { currentSpokenReviewGovernanceFingerprint } from '@/lib/approvals/spoken
 import { appendEvent, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import type { SpokenReviewResolutionTransition } from '@/lib/orchestrator/spoken-review-governance';
-
-const execFileAsync = materializationAwareExecFile;
 
 export class SpokenReviewSnapshotChangedError extends Error {
   constructor() {
@@ -166,16 +164,6 @@ export async function rejectSpokenReviewSnapshotDrift(input: {
   };
 }
 
-async function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv) {
-  return execFileAsync('git', args, {
-    windowsHide: true,
-    cwd,
-    env,
-    timeout: 30_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-}
-
 async function verifiedSpokenReviewSnapshot(lane: Lane, expectedFingerprint?: string) {
   const current = await getLaneSpokenDiffFacts(lane);
   if (expectedFingerprint && current.fingerprint !== expectedFingerprint) {
@@ -191,11 +179,11 @@ export async function resolveSpokenReviewSnapshotSha(input: {
 }) {
   const cwd = input.lane.worktreePath || input.lane.repoPath;
   if (!input.expectedFingerprint) {
-    const { stdout } = await git(cwd, ['rev-parse', 'HEAD']);
+    const { stdout } = await laneGit(cwd, input.lane.repoPath, ['rev-parse', 'HEAD']);
     return stdout.trim();
   }
   const current = await verifiedSpokenReviewSnapshot(input.lane, input.expectedFingerprint);
-  const { stdout } = await git(cwd, ['rev-parse', `${current.headSha}^{tree}`]);
+  const { stdout } = await laneGit(cwd, input.lane.repoPath, ['rev-parse', `${current.headSha}^{tree}`]);
   if (stdout.trim() !== current.snapshotTreeHash) {
     throw new SpokenReviewSnapshotChangedError();
   }
@@ -218,11 +206,11 @@ export async function commitSpokenReviewSnapshot(input: {
   const cwd = input.lane.worktreePath || input.lane.repoPath;
   const reviewed = await verifiedSpokenReviewSnapshot(input.lane, input.expectedFingerprint);
   const tempDir = await mkdtemp(join(tmpdir(), 'o8-spoken-review-commit-'));
-  const env = { ...process.env, GIT_INDEX_FILE: join(tempDir, 'index') };
+  const options = { indexFile: join(tempDir, 'index') };
   try {
-    await git(cwd, ['read-tree', reviewed.headSha], env);
-    await git(cwd, ['add', '-A', '--', '.'], env);
-    const { stdout: stagedTreeOutput } = await git(cwd, ['write-tree'], env);
+    await laneGit(cwd, input.lane.repoPath, ['read-tree', reviewed.headSha], options);
+    await laneGit(cwd, input.lane.repoPath, ['add', '-A', '--', '.'], options);
+    const { stdout: stagedTreeOutput } = await laneGit(cwd, input.lane.repoPath, ['write-tree'], options);
     const stagedTree = stagedTreeOutput.trim();
     const current = await verifiedSpokenReviewSnapshot(input.lane, input.expectedFingerprint);
     const stagedFingerprint = spokenReviewSnapshotFingerprint(
@@ -239,10 +227,10 @@ export async function commitSpokenReviewSnapshot(input: {
       throw new SpokenReviewSnapshotChangedError();
     }
 
-    const { stdout: headTreeOutput } = await git(cwd, ['rev-parse', `${reviewed.headSha}^{tree}`]);
+    const { stdout: headTreeOutput } = await laneGit(cwd, input.lane.repoPath, ['rev-parse', `${reviewed.headSha}^{tree}`]);
     if (headTreeOutput.trim() === stagedTree) return reviewed.headSha;
 
-    const { stdout: commitOutput } = await git(cwd, [
+    const { stdout: commitOutput } = await laneGit(cwd, input.lane.repoPath, [
       'commit-tree',
       stagedTree,
       '-p',
@@ -251,15 +239,16 @@ export async function commitSpokenReviewSnapshot(input: {
       input.commitMessage,
     ]);
     const commitSha = commitOutput.trim();
-    const { stdout: branchRefOutput } = await git(cwd, ['symbolic-ref', '-q', 'HEAD']);
+    const { stdout: branchRefOutput } = await laneGit(cwd, input.lane.repoPath, ['symbolic-ref', '-q', 'HEAD']);
     const branchRef = branchRefOutput.trim();
     try {
-      await git(cwd, ['update-ref', branchRef, commitSha, reviewed.headSha]);
-    } catch {
+      await laneGit(cwd, input.lane.repoPath, ['update-ref', branchRef, commitSha, reviewed.headSha]);
+    } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
       throw new SpokenReviewSnapshotChangedError();
     }
     try {
-      await git(cwd, ['read-tree', commitSha]);
+      await laneGit(cwd, input.lane.repoPath, ['read-tree', commitSha]);
     } catch (error) {
       console.warn(`[spoken-review] Exact commit landed but the shared index could not be refreshed: ${error instanceof Error ? error.message : String(error)}`);
     }

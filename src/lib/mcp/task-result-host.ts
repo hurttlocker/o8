@@ -1,3 +1,5 @@
+import { CONTROLLED_GATEWAY_RECEIPT } from '@/lib/claude-code/controlled-gateway';
+import { controlledProviderConfig } from '@/lib/runtimes/shared/owned-session/controlled-provider';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PluginPrincipal } from '@/lib/auth/plugin-token';
@@ -51,17 +53,19 @@ function boundSession(record: TaskExecutionRecord) {
   if (session.surfaceId !== record.surfaceId || session.sessionDir !== present[0]
     || session.repoPath !== record.workspacePath || session.cwd !== record.workspacePath
     || session.laneId !== record.laneId || canonical(session.controlledTask) !== canonical(taskBinding(record))
-    || session.launchMutationId !== record.attemptId || session.model !== record.model || session.effort !== record.effort
+    || session.launchMutationId !== record.attemptId || session.model !== record.model || session.effort !== (record.effort === 'provider-default' ? undefined : record.effort)
+    || (record.provider && canonical(session.runtimeConfig) !== canonical({ workMode: 'read-only', ...controlledProviderConfig(record.provider) }))
+    || canonical(session.runtimeConfig) !== canonical(session.executionPolicy?.runtimeConfig)
     || session.runtimeConfig?.workMode !== 'read-only' || session.executionPolicy?.mode !== 'single-attempt'
     || session.executionPolicy.runtime !== record.runtime || session.executionPolicy.model !== record.model
-    || session.executionPolicy.effort !== record.effort || session.runIdentityLedger?.totalRuns !== 1
+    || session.executionPolicy.effort !== (record.effort === 'provider-default' ? undefined : record.effort) || session.runIdentityLedger?.totalRuns !== 1
     || !session.runIdentityLedger.complete || session.recentRuns.length !== 1 || run?.id !== record.runId
     || run.mode !== 'launch' || run.modelFallback || run.spawnState !== 'started'
     || !Number.isSafeInteger(run.pid) || run.pid <= 0 || run.processGroupId !== run.pid || !run.processMarker
     || !directories.some((dir) => run.stdoutPath === join(dir, RUNS_DIR, `${record.runId}.jsonl`))) unavailable();
   const runs = join(directory, RUNS_DIR);
   if (realpathSync(runs) !== runs || !lstatSync(runs).isDirectory()) unavailable();
-  return { session, run, log: join(runs, `${record.runId}.jsonl`) };
+  return { session, run, log: join(runs, `${record.runId}.jsonl`), directory };
 }
 
 function finalOnly(raw: string, runtime: string): string {
@@ -85,7 +89,7 @@ async function resultFor(draft: TaskDraftRecord): Promise<Record<string, unknown
     if (!record) return { ...base, state: 'held', completed: false, completion: { ...empty, reason: 'not_launched' } };
     const receipt = { ...base, attemptId: record.attemptId, state: record.state, completed: false, completion: empty };
     if (!record.runId && !record.surfaceId) return receipt;
-    const { session, run, log } = boundSession(record);
+    const { session, run, log, directory } = boundSession(record);
     if (!await executionRunIsClear(run)) return { ...receipt,
       state: record.state === 'completed' || record.state === 'stopped' ? 'uncertain' : record.state };
     if (record.stopRequestedAt || run.interruptRequestedAt) return { ...receipt, state: 'stopped' };
@@ -103,7 +107,21 @@ async function resultFor(draft: TaskDraftRecord): Promise<Record<string, unknown
     const answer = [...parsed.entries].reverse().find((entry) => entry.kind === 'message'
       && entry.label === (record.runtime === 'codex' ? 'Assistant' : 'claude-assistant') && !entry.thinking)?.text;
     if (!answer?.trim()) unavailable();
-    return { ...receipt, state: 'completed', completed: true,
+    let provider;
+    if (record.provider) {
+      const usage = JSON.parse(boundedRead(join(directory, CONTROLLED_GATEWAY_RECEIPT), 8192));
+      if (usage.version !== 1 || canonical(usage.task) !== canonical(taskBinding(record))
+        || canonical(usage.policy) !== canonical(record.provider) || usage.carrier !== 'openrouter'
+        || usage.model !== record.model || usage.pending !== false || usage.blockedReason !== null
+        || !Number.isInteger(usage.requests) || usage.requests < 1 || usage.requests > record.provider.maxRequests
+        || typeof usage.costUsd !== 'number' || !Number.isFinite(usage.costUsd) || usage.costUsd < 0
+        || usage.costUsd >= record.provider.costUsd || !Array.isArray(usage.generationIds)
+        || usage.generationIds.length > record.provider.maxRequests) unavailable();
+      provider = { carrier: 'openrouter', model: record.model, requests: usage.requests, costUsd: usage.costUsd,
+        costSource: 'gateway', inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+        generationIds: usage.generationIds, policy: record.provider };
+    }
+    return { ...receipt, ...(provider ? { provider } : {}), state: 'completed', completed: true,
       completion: { available: true, source: 'worker_report', summary: pluginResultText(answer), completedAt: run.finishedAt } };
   } catch {
     return { ...base, state: 'uncertain', completed: false, completion: empty, errorCode: 'execution_uncertain' };
