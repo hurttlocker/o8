@@ -63,6 +63,20 @@ export function ProvidersTab({ initialTab = 'models', section, navigationId, onN
   const [showAvailable, setShowAvailable] = useState(false);
   const [revision, setRevision] = useState(0);
   const rail = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const element = panel.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const measure = (width: number) => { if (width > 0) setCompact(width < 650); };
+    measure(element.getBoundingClientRect().width);
+    const observer = new ResizeObserver(entries => measure(entries[0]?.contentRect.width ?? 0));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (compact) rail.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [selected, compact]);
   const [entry, setEntry] = useState({ tab: initialTab, section, navigationId, provider: initialProvider });
   if (entry.tab !== initialTab || entry.section !== section || entry.navigationId !== navigationId || entry.provider !== initialProvider) {
     setEntry({ tab: initialTab, section, navigationId, provider: initialProvider });
@@ -116,14 +130,14 @@ export function ProvidersTab({ initialTab = 'models', section, navigationId, onN
       <RamsButton disabled={checking} onClick={() => { setChecking(true); setDetectionError(false); setKeyError(false); setRevision(value => value + 1); }}>{checking ? 'Checking connections…' : 'Refresh connections'}</RamsButton>
     </div>
     {keyError ? <p role="alert" style={{ fontSize: 13, color: 'var(--t-text-secondary)' }}>Could not load API provider inventory. Refresh connections to retry.</p> : null}
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', border: '1px solid var(--t-panel-border)', borderRadius: 14, overflow: 'hidden', background: 'var(--t-glass-muted)' }}>
-      <div style={{ flex: '1 1 210px', minWidth: 0, padding: 10, boxSizing: 'border-box' }}>
-        <div ref={rail} role="tablist" aria-label="Providers" aria-orientation="vertical">
-        {items.map((item, index) => <div key={item.id}>
-          {index === 0 || items[index - 1].group !== item.group ? <div style={{ paddingTop: index ? 20 : 6, paddingBottom: 8, paddingLeft: 10, fontSize: 11, color: 'var(--t-text-muted)' }}>{item.group}</div> : null}
+    <div ref={panel} style={{ display: 'flex', flexDirection: compact ? 'column' : 'row', alignItems: 'flex-start', border: '1px solid var(--t-panel-border)', borderRadius: 14, overflow: 'hidden', background: 'var(--t-glass-muted)' }}>
+      <div style={{ flex: compact ? 'none' : '1 1 210px', width: compact ? '100%' : undefined, minWidth: 0, padding: 10, boxSizing: 'border-box' }}>
+        <div ref={rail} role="tablist" aria-label="Providers" aria-orientation={compact ? 'horizontal' : 'vertical'} style={{ display: compact ? 'flex' : 'block', gap: 6, overflowX: compact ? 'auto' : undefined, scrollbarWidth: 'none' }}>
+        {items.map((item, index) => <div key={item.id} style={{ flexShrink: 0, minWidth: compact ? 150 : undefined }}>
+          {!compact && (index === 0 || items[index - 1].group !== item.group) ? <div style={{ paddingTop: index ? 20 : 6, paddingBottom: 8, paddingLeft: 10, fontSize: 11, color: 'var(--t-text-muted)' }}>{item.group}</div> : null}
           <button type="button" role="tab" id={`${id}-tab-${item.id}`} aria-label={item.label} aria-controls={`${id}-panel-${item.id}`} aria-selected={selected === item.id} tabIndex={selected === item.id ? 0 : -1}
             onClick={() => select(item.id)} onKeyDown={event => {
-              const offset = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+              const offset = event.key === (compact ? 'ArrowRight' : 'ArrowDown') ? 1 : event.key === (compact ? 'ArrowLeft' : 'ArrowUp') ? -1 : 0;
               if (!offset && !['Home', 'End'].includes(event.key)) return;
               event.preventDefault();
               const target = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + offset + items.length) % items.length;
@@ -141,7 +155,7 @@ export function ProvidersTab({ initialTab = 'models', section, navigationId, onN
           {showAvailable ? 'Hide available agents' : 'Show available agents'}
         </button> : null}
       </div>
-      <div style={{ flex: '3 1 420px', minWidth: 0, padding: 20, borderLeft: '1px solid var(--t-panel-border)', boxSizing: 'border-box' }}>
+      <div style={{ flex: compact ? 'none' : '3 1 420px', width: compact ? '100%' : undefined, minWidth: 0, padding: 20, borderLeft: compact ? undefined : '1px solid var(--t-panel-border)', borderTop: compact ? '1px solid var(--t-panel-border)' : undefined, boxSizing: 'border-box' }}>
         {allItems.filter(item => visited.has(item.id)).map(item => <section key={item.id} role="tabpanel" id={`${id}-panel-${item.id}`} aria-labelledby={`${id}-tab-${item.id}`} hidden={selected !== item.id} style={{ display: selected === item.id ? 'block' : 'none', minWidth: 0 }}>
           <h2 data-settings-section={item.id === selected && section === 'Connected tools' ? section : item.runtimeId ? `${item.label} connection` : item.label === 'Voice keys' ? 'Symon & voice keys' : item.label} style={{ marginTop: 0, marginBottom: 24, fontSize: 17, fontWeight: 300, color: 'var(--t-text)' }}>{item.label}</h2>
           {item.runtimeId ? <ProviderRuntimeDetails runtimeId={item.runtimeId} tool={tools[item.runtimeId]} checking={checking} detectionError={detectionError} settings={settings} /> : null}

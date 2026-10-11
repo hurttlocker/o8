@@ -173,3 +173,29 @@ it('routes runtime and key section menu headings to their owning provider', asyn
   expect(tab('Anthropic').getAttribute('aria-selected')).toBe('true');
   expect(container.querySelector('[role="tabpanel"]:not([hidden]) [data-settings-section="Anthropic key"]')).not.toBeNull();
 });
+
+
+it('keeps provider details below a horizontal keyboard rail in a narrow panel', async () => {
+  let resize: ResizeObserverCallback | undefined;
+  const disconnect = vi.fn();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) { resize = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  await act(async () => root.render(createElement(ProvidersTab)));
+  await act(async () => resize!([{ contentRect: { width: 540 } } as ResizeObserverEntry], {} as ResizeObserver));
+  const list = container.querySelector<HTMLElement>('[role="tablist"]')!;
+  expect(list.getAttribute('aria-orientation')).toBe('horizontal');
+  expect(list.style.overflowX).toBe('auto');
+  expect(list.parentElement?.parentElement?.style.flexDirection).toBe('column');
+  expect(container.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('Codex runtime');
+  await act(async () => tab('Codex').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+  expect(tab('Claude Code').getAttribute('aria-selected')).toBe('true');
+  await act(async () => resize!([{ contentRect: { width: 900 } } as ResizeObserverEntry], {} as ResizeObserver));
+  expect(list.getAttribute('aria-orientation')).toBe('vertical');
+  expect(list.parentElement?.parentElement?.style.flexDirection).toBe('row');
+  await act(async () => root.unmount());
+  expect(disconnect).toHaveBeenCalledTimes(1);
+  root = createRoot(container);
+});
