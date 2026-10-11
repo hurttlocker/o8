@@ -735,7 +735,8 @@ export async function loadInitialTabState(
     || savedRepoPaths.length === 0
     || savedRepoPaths.includes(options.preferredRepoPath);
 
-  const selectedTab = saved?.tabs.find((tab) => tab.id === saved.activeTabId);
+  const selectedTabId = saved?.activeTabId;
+  const selectedTab = saved?.tabs.find((tab) => tab.id === selectedTabId);
   const selectedConversation = selectedTab?.kind === 'orchestrator'
     ? Boolean(selectedTab.orchestratorThreadId || selectedTab.id.startsWith('thoughts-'))
     : selectedTab?.kind === 'chat' && Boolean(selectedTab.chatSessionKey || selectedTab.claudeSessionId);

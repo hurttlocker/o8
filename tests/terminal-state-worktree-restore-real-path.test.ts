@@ -104,7 +104,7 @@ it('prioritizes the selected worktree when an older snapshot exceeds the persist
 it('bounds Git candidate verification even for oversized input', () => {
   const invocation = vi.spyOn(laneGit, 'laneGitInvocation').mockImplementation((candidate) => {
     if (candidate !== registered) throw new Error('Not registered');
-    return { args: [], env: { GIT_COMMON_DIR: '/fixture/common' }, cwd: registered };
+    return { args: [], env: { NODE_ENV: 'test' as const, GIT_COMMON_DIR: '/fixture/common' }, cwd: registered };
   });
   const candidates = Array.from({ length: MAX_PERSISTED_TABS * 2 }, (_, index) => path.join(fixture, `unknown-${index}`));
   expect(includeRegisteredWorktreeRoots(new Set([registered]), candidates)).toEqual(new Set([registered]));
