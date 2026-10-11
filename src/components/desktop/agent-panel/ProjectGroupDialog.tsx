@@ -8,9 +8,10 @@ import { ProjectButton, projectInputStyle } from './project-ui';
 import { ProjectGlyph, ProjectIdentity } from './ProjectIdentity';
 import { removeProjectRepo, saveProjectGroup, type ProjectCreateAttempt } from './project-group-actions';
 
-export function ProjectGroupDialog({ repos, project, onClose, onSaved, onAddRepo }: {
+export function ProjectGroupDialog({ repos, project, projectId, onClose, onSaved, onAddRepo }: {
   repos: RepoRegistryEntry[];
   project?: { id: string; name: string; repoPaths: string[] };
+  projectId?: string;
   onClose: () => void;
   onSaved: (project: ProjectWithRepos) => void | Promise<void>;
   onAddRepo: () => void;
@@ -24,13 +25,15 @@ export function ProjectGroupDialog({ repos, project, onClose, onSaved, onAddRepo
   // Remember a durable create before switching context, so a failed switch never creates a duplicate.
   const created = useRef<ProjectWithRepos | null>(null);
   const createAttempt = useRef<ProjectCreateAttempt>({});
-  const title = project ? 'Organize project' : 'New project';
+  const editTargetId = projectId ?? project?.id;
+  const unavailable = Boolean(editTargetId && !project);
+  const title = editTargetId ? 'Organize project' : 'New project';
   const filtered = repos.filter((repo) => `${repo.name} ${repo.localPath}`.toLowerCase().includes(query.trim().toLowerCase()));
   const submit = async (addAfterSave = false) => {
-    if (!name.trim() || saving.current) return;
+    if (!name.trim() || saving.current || unavailable) return;
     saving.current = true; setBusy(true); setError('');
     try {
-      const saved = created.current ?? await saveProjectGroup({ name, repoIds: [...selected], projectId: project?.id, attempt: createAttempt.current });
+      const saved = created.current ?? await saveProjectGroup({ name, repoIds: [...selected], projectId: editTargetId, attempt: createAttempt.current });
       if (!project) created.current = saved;
       await onSaved(saved); onClose();
       if (addAfterSave) onAddRepo();
@@ -47,7 +50,7 @@ export function ProjectGroupDialog({ repos, project, onClose, onSaved, onAddRepo
     <p style={{ marginTop: 12, marginBottom: 20, fontSize: 12, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>Group the repositories you work on together.</p>
     <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, fontWeight: 300 }}>Project name
-        <input data-dialog-initial-focus aria-label="Project name" value={name} disabled={busy || !!created.current} onChange={(event) => setName(event.currentTarget.value)} placeholder="My project" maxLength={120} style={projectInputStyle} />
+        <input data-dialog-initial-focus aria-label="Project name" value={name} disabled={busy || unavailable || !!created.current} onChange={(event) => setName(event.currentTarget.value)} placeholder="My project" maxLength={120} style={projectInputStyle} />
       </label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 10, fontSize: 12, color: 'var(--t-text-secondary)' }}><span style={{ flex: 1 }}>Repositories</span><span style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>{selected.size} selected</span></div>
       {repos.length > 4 ? <input aria-label="Search connected repositories" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search repositories…" style={{ boxSizing: 'border-box', width: '100%', height: 32, marginBottom: 8, paddingLeft: 10, border: '1px solid var(--t-divider-subtle)', borderRadius: 8, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 12 }} /> : null}
@@ -56,7 +59,7 @@ export function ProjectGroupDialog({ repos, project, onClose, onSaved, onAddRepo
           const checked = selected.has(repo.id);
           const member = project?.repoPaths.includes(repo.localPath);
           return <div key={repo.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <button type="button" role="checkbox" aria-checked={checked} aria-label={repo.name} disabled={busy || !!created.current || member} onClick={() => setSelected((current) => { const next = new Set(current); if (next.has(repo.id)) next.delete(repo.id); else next.add(repo.id); return next; })} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, padding: 9, border: 0, borderRadius: 9, textAlign: 'left', background: checked ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text)', cursor: member ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+            <button type="button" role="checkbox" aria-checked={checked} aria-label={repo.name} disabled={busy || unavailable || !!created.current || member} onClick={() => setSelected((current) => { const next = new Set(current); if (next.has(repo.id)) next.delete(repo.id); else next.add(repo.id); return next; })} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, padding: 9, border: 0, borderRadius: 9, textAlign: 'left', background: checked ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text)', cursor: member ? 'default' : 'pointer', fontFamily: 'inherit' }}>
               <ProjectIdentity name={repo.name} size={24} />
               <span style={{ flex: 1, minWidth: 0 }}><span style={{ display: 'block', fontSize: 13, fontWeight: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.name}</span><span style={{ display: 'block', marginTop: 2, fontSize: 10, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.remoteUrl?.replace(/^https?:\/\/|\.git$/g, '') || 'Local repository'}</span></span>
               <span style={{ width: 16, height: 16, borderRadius: 5, border: checked ? '1px solid var(--t-accent)' : '1px solid var(--t-divider-strong)', background: checked ? 'var(--t-accent-soft)' : 'transparent', color: 'var(--t-accent)' }}>{checked ? <ProjectGlyph kind="check" size={14} /> : null}</span>
@@ -71,12 +74,13 @@ export function ProjectGroupDialog({ repos, project, onClose, onSaved, onAddRepo
         {filtered.length === 0 ? <p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>{repos.length ? 'No matching repositories.' : 'Add a repository, then group it here.'}</p> : null}
       </div>
       {project ? <p style={{ marginTop: 9, marginBottom: 0, fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>Removing a repo from this project keeps its files and conversations.</p> : null}
+      {unavailable ? <p role="alert" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>This project is no longer available. Close this dialog and choose another project.</p> : null}
       {error ? <p role="alert" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-danger, var(--t-text-secondary))' }}>{error}</p> : null}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 22 }}>
-        <ProjectButton disabled={busy || !name.trim()} onClick={() => { void submit(true); }}><ProjectGlyph kind="add" size={14} />{project ? 'Save & add repo' : 'Create & add repo'}</ProjectButton>
+        <ProjectButton disabled={busy || unavailable || !name.trim()} onClick={() => { void submit(true); }}><ProjectGlyph kind="add" size={14} />{editTargetId ? 'Save & add repo' : 'Create & add repo'}</ProjectButton>
         <span style={{ flex: 1 }} />
         <ProjectButton disabled={busy} onClick={close}>Cancel</ProjectButton>
-        <ProjectButton primary busy={busy} disabled={!name.trim()} onClick={() => { void submit(); }}>{busy ? 'Saving…' : created.current ? 'Open project' : project ? 'Save' : 'Create project'}</ProjectButton>
+        <ProjectButton primary busy={busy} disabled={unavailable || !name.trim()} onClick={() => { void submit(); }}>{busy ? 'Saving…' : created.current ? 'Open project' : editTargetId ? 'Save' : 'Create project'}</ProjectButton>
       </div>
     </form>
   </FloatingDialog>;

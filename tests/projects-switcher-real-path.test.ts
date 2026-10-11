@@ -8,11 +8,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { ProjectsSwitcher } from '@/components/desktop/agent-panel/ProjectsSwitcher';
-import { useProjects } from '@/components/desktop/repo-registry/useProjects';
+import { broadcastProjectsUpdated, useProjects } from '@/components/desktop/repo-registry/useProjects';
 import { GET as readLedger } from '@/app/api/panel/projects/route';
 import { POST as activate } from '@/app/api/panel/projects/active/route';
 import { GET as listProjects, POST as createProject } from '@/app/api/projects/route';
-import { GET as readProject, PATCH as editProject } from '@/app/api/projects/[id]/route';
+import { DELETE as deleteProject, GET as readProject, PATCH as editProject } from '@/app/api/projects/[id]/route';
 import { POST as linkRepo } from '@/app/api/projects/[id]/repos/route';
 import { DELETE as unlinkRepo } from '@/app/api/projects/[id]/repos/[repoId]/route';
 import { listReposFresh } from '@/lib/repos/registry';
@@ -158,6 +158,35 @@ it('reconciles a lost create response instead of saving a duplicate group', asyn
   await newGroup('Lost response'); loseCreateResponse = true; await click('Create project');
   await until(() => !document.querySelector('[role="dialog"]'));
   expect(creates).toBe(1); expect(await saved('Lost response')).toHaveLength(1);
+});
+
+it('keeps a deleted organize target unavailable and reserves creation for explicit New project', async () => {
+  await newGroup('Deleted while organizing'); await click('Create project');
+  await until(() => !document.querySelector('[role="dialog"]'));
+  const [project] = await saved('Deleted while organizing');
+  const keeper = await createProject(new NextRequest('http://localhost/api/projects', {
+    method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ name: 'Keep deleted dialog repos', repoIds: [repos[0].id, repos[1].id] }),
+  }));
+  expect(keeper.status).toBe(201);
+  await click('Switch project'); await click('Organize Deleted while organizing');
+  const createsBeforeDelete = creates;
+  await act(async () => {
+    const response = await deleteProject(new NextRequest(`http://localhost/api/projects/${project.id}`, {
+      method: 'DELETE', headers: { host: 'localhost' },
+    }), { params: Promise.resolve({ id: project.id }) });
+    expect(response.status).toBe(200);
+    broadcastProjectsUpdated();
+  });
+  await until(() => !button('Switch project').textContent?.includes(project.name));
+  await act(async () => { document.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  expect(creates).toBe(createsBeforeDelete); expect(await saved(project.name)).toHaveLength(0);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('no longer available');
+  expect(button('Save').disabled).toBe(true);
+  await click('Save'); expect(creates).toBe(createsBeforeDelete);
+  await click('Cancel');
+  await newGroup('Explicit replacement'); await click('Create project');
+  await until(() => !document.querySelector('[role="dialog"]'));
+  expect(creates).toBe(createsBeforeDelete + 1); expect(await saved('Explicit replacement')).toHaveLength(1);
 });
 
 it('saves the named grouping before opening repository sources so an unfinished draft is retained', async () => {
