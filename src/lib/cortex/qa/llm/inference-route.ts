@@ -110,7 +110,10 @@ export function freeAllowanceToken(): string | null {
   const resolved = getEntitlementSync();
   if (resolved.plan !== 'free' || resolved.overrideActive) return null;
   const token = readCachedEntitlement()?.licenseKey?.trim();
-  return token && token.split('.').length === 3 ? token : null;
+  // A local free-plan pin does not change the cached license's claims. Only
+  // forward a free allowance here; retain paid licenses for normal paid use.
+  // Signature and allowance enforcement remain with the relay.
+  return token && tokenPlanClaim(token) === 'free' ? token : null;
 }
 
 function resolveGeminiKey(): string | undefined {
