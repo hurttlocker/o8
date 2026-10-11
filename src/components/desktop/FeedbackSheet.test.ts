@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { NavSection } from '@/app/dashboard/types';
+import { useSettingsOverlayDismiss } from '@/app/dashboard/hooks/useSettingsOverlayDismiss';
 import { FeedbackSettingsEntry } from './FeedbackSheet';
 
 let root: Root;
@@ -120,4 +122,29 @@ it('disables submission immediately and accepts only one click while waiting', a
   expect(document.activeElement).toBe(button('Cancel'));
   await act(async () => resolve(Response.json({ ok: true, reportId: 'one-receipt' })));
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Feedback sent');
+});
+
+function SettingsHarness() {
+  const [nav, setNav] = useState<NavSection>('settings');
+  const panelRef = useRef<HTMLDivElement>(null);
+  useSettingsOverlayDismiss({ activeNavSection: nav, panelRef, setActiveNavSection: setNav });
+  return nav === 'settings'
+    ? createElement('div', { ref: panelRef }, 'Settings remains open', createElement(FeedbackSettingsEntry))
+    : createElement('div', null, 'Workspace');
+}
+
+it('keeps Settings open for pointer input in the portaled sheet and one Escape', async () => {
+  await act(async () => root.render(createElement(SettingsHarness)));
+  button('Send Feedback…').focus();
+  await act(async () => button('Send Feedback…').click());
+  const textarea = document.querySelector('textarea')!;
+  await act(async () => textarea.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+  expect(container.textContent).toContain('Settings remains open');
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.textContent).toContain('Settings remains open');
+  expect(document.activeElement).toBe(button('Send Feedback…'));
+  await act(async () => button('Send Feedback…').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.textContent).toBe('Workspace');
 });

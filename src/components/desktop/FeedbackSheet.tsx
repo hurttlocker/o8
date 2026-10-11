@@ -89,7 +89,7 @@ export function FeedbackSheet({ onClose }: { onClose: () => void }) {
   }
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 2147483600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, boxSizing: 'border-box' }}>
+    <div data-o8-settings-portal data-o8-settings-escape-scope style={{ position: 'fixed', inset: 0, zIndex: 2147483600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, boxSizing: 'border-box' }}>
       <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'rgba(0, 0, 0, 0.05)', ...(!material.isAllGlass ? { backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } : {}) }} />
       <form ref={dialog} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-privacy`} onSubmit={(event) => { void send(event); }}
         style={{ position: 'relative', boxSizing: 'border-box', width: 480, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', scrollbarWidth: 'none', padding: 24, borderRadius: 16, ...material.overlayStyle, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-panel-border)', ...material.textStyle, fontSize: 13, fontWeight: 300, boxShadow: material.shadow, display: 'flex', flexDirection: 'column', gap: 16 }}>
