@@ -536,7 +536,7 @@ async function closePacketUnmergedUnlocked(input: {
         const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
           runtime: candidate.runtime,
           worktreePath: candidate.worktreePath,
-          cleanup: () => removeMergedWorktree(candidate),
+          cleanup: () => removeMergedWorktree(candidate, { preserveUncommittedSource: true }),
           removed: (result) => result.removed || result.reason === 'worktree-equals-repo',
         });
         const cleanup = cleanupAttempt.result;

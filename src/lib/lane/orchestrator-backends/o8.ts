@@ -1,43 +1,32 @@
 /**
- * o8 orchestrator backend — the FREE conversational surface.
+ * o8 orchestrator backend: the composer's "o8" choice (#3408).
  *
- * Routes an orchestrator turn to the DESKTOP free-chat rail — the branded
- * zero-setup `o8-operator` model behind `/api/v2/proxy/llm` (Gemini Flash with
- * an OpenRouter free fallback, resolved server-side). This is the same rail the
- * llm-chat tab's default model rides, so it works on every desktop install with
- * no cloud-only env (the Vercel AI Gateway path needs CLERK_SECRET_KEY, which by
- * policy never ships to the desktop). It lets the operator exercise the full
- * orchestrator UI — token streaming, transcripts, banners, thread restore —
- * without drawing on any Claude / Codex subscription pool. Replaces the
- * experimental llm-chat tab as the free-test surface (operator ruling
- * 2026-07-12).
+ * o8 runs on its built-in agent, the bundled Pi orchestrator (`pi.ts`), on the
+ * managed model: persistent sessions, the o8 command set, and governed file and
+ * command tools. Repo writes and commands keep per-call inbox approval (Pi's
+ * default approval, never lane rules), and a plan-mode turn is read-only.
  *
- * Founders/paid tier (Gemini 3 Flash, "High") gets the file-editing tool loop:
- * read_file/create_file/edit_file/shell scoped to the SELECTED repo's working
- * tree, executed server-side by the proxy's Google tool loop. Edits land in the
- * working tree and surface in the o8 workspace diff for the operator to review +
- * commit — Composer parity, still governed (the model never commits or merges).
- * The free tier ("Low", OpenRouter chain) stays pure conversational streaming
- * (NO tools) — the free models' tool-calling is unproven and that rail is
- * tools-free. NO orchestrator dispatch, NO MCP on either tier (Q ruling
- * 2026-07-14).
+ * Where the built-in agent cannot start (Windows, or Node older than 22.19) the
+ * turn falls back to a text-only reply from the same managed route through
+ * `/api/v2/proxy/llm`, and the reply first says why. That fallback has no tools.
+ * It holds no server session: a "session" there is a deterministic
+ * per-repo+thread name used to route WS broadcasts, and prior turns are rebuilt
+ * from the persisted thread transcript on every send.
  *
- * Stateless: the proxy holds no server session, so a "session" here is just a
- * deterministic per-repo+thread name used to route WS broadcasts. Prior turns
- * are reconstructed from the persisted thread transcript on every send (the user
- * message is already on disk by the time ws-server calls `sendTurn`).
- *
- * The fetch targets the ws-server → Next origin (`buildNextUrl`, honoring
- * NEXT_ORIGIN for the dev-bridge) and carries the ws-token bearer so the gate
- * authorizes by token — the loopback heuristic alone intermittently 401'd.
+ * The fallback fetch targets the ws-server → Next origin (`buildNextUrl`,
+ * honoring NEXT_ORIGIN for the dev-bridge) and carries the ws-token bearer so
+ * the gate authorizes by token — the loopback heuristic alone intermittently 401'd.
  */
 
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
-import { readOrchestratorThreadMessages } from '@/lib/mobile/orchestrator-thread-history';
+import { readFile } from 'node:fs/promises';
+import { readOrchestratorThreadMessages, safeOrchestratorHistoryPath } from '@/lib/mobile/orchestrator-thread-history';
+import { requirePiNode, requirePiPlatform } from '@/lib/pi/sdk/platform';
 import { buildNextUrl } from '@/lib/ws-server/next-fetch';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
+import { piBackend } from './pi';
 import type {
   OrchestratorBackend,
   OrchestratorSessionInfo,
@@ -58,26 +47,10 @@ import type {
  */
 const O8_PROMPT_BASE = [
   'Answer concisely and helpfully.',
-  'You are a chat surface only in this mode: you cannot dispatch agents, run tools,',
-  'edit files, or drive the repo. If the operator asks for real repo work, say plainly',
-  'that the o8 model is conversational only and that they can switch the composer',
+  'o8\'s built-in agent cannot run on this machine, so you are text only: you cannot dispatch',
+  'agents, run tools or o8 commands, edit files, or drive the repo. If the operator asks for real',
+  'repo work, say plainly that this reply is text only and that they can switch the composer',
   'to Claude or Codex to dispatch actual agents. Never claim you dispatched or ran anything.',
-].join(' ');
-
-// Founders/tool-capable base — used ONLY when the file-editing tools are actually
-// attached (paid plan, High rail). The Composer contract: DO the work by calling
-// the tools, don't paste code and ask the operator to save it; edits land in the
-// working tree and surface in the o8 workspace diff for operator review.
-const O8_PROMPT_BASE_CAPABLE = [
-  'Answer concisely and helpfully.',
-  'You have file tools attached and can act on the scoped repository DIRECTLY: read',
-  'files, create new files, and edit existing files. When the operator asks you to',
-  'build, create, edit, or fix something, DO IT by calling the attached tools — never',
-  'paste a code block and tell them to save it themselves. Match each tool\'s schema',
-  'exactly. Your changes are written to the working tree and surface in the o8 workspace',
-  'diff for the operator to review and commit; you never commit, push, or merge anything',
-  'yourself — GitHub stays the operator\'s action. Confirm from the tool result before',
-  'claiming a file was written, and keep prose brief around the actions.',
 ].join(' ');
 
 const O8_PROMPT_RECURSIVE = [
@@ -140,31 +113,13 @@ Answer style:
 - A strict requested output format overrides every style preference. Return only that format, with no preface or afterword.`;
 
 /**
- * Tier + tool-access decision for an o8 turn. Pure + exported so the
- * security-relevant invariant is testable through the real entry point: the
- * FREE tier must never be granted file tools. Mirrors the proxy's own
- * Gemini-routing gate (`paidPlan && !wantsLow`, route.ts) so the prompt we send
- * matches whether tools will actually be attached — the free OpenRouter chain
- * is tools-free, so promising editing there would make the model hallucinate
- * edits. Defense-in-depth: even if this returned the wrong answer, the proxy
- * still fail-closes a free plan to the tools-free chain.
+ * Rail tier for a text-only fallback turn. Mirrors the proxy's own gate
+ * (`paidPlan && !wantsLow`, route.ts) so the prompt matches the rail it picks:
+ * explicit effort wins, absent = plan auto (paid High, free Low).
  */
-export function o8TierAccess(
-  paidPlan: boolean,
-  thinkingEffort: OrchestratorTurnOptions['thinkingEffort'],
-  hasRepo: boolean,
-): { tier: 'low' | 'high'; toolsEnabled: boolean } {
-  const tier: 'low' | 'high' = thinkingEffort === 'high'
-    ? 'high'
-    : thinkingEffort === 'low'
-      ? 'low'
-      : paidPlan ? 'high' : 'low';
-  // Both free and founders edit files (Q ruling 2026-07-14) — tool access gates
-  // on a scoped repo, NOT the plan. `paidPlan` only picks the default rail/tier.
-  // The proxy independently fail-closes when no repo resolves, so this is the
-  // client half of a two-sided gate.
-  const toolsEnabled = hasRepo;
-  return { tier, toolsEnabled };
+export function o8FallbackTier(paidPlan: boolean, thinkingEffort: OrchestratorTurnOptions['thinkingEffort']): 'low' | 'high' {
+  if (thinkingEffort === 'high' || thinkingEffort === 'low') return thinkingEffort;
+  return paidPlan ? 'high' : 'low';
 }
 
 // Brand identity guard (#1575, live-hit 2026-07-17): a founder asked the free
@@ -174,22 +129,11 @@ export function o8TierAccess(
 const O8_IDENTITY_GUARD =
   'You are "the o8 model" for the entire conversation, including summaries and asides — never name, hint at, or compare against the underlying model or provider that powers you.';
 
-export function o8SystemPrompt(tier: 'low' | 'high', toolsEnabled: boolean, repoName = ''): string {
-  const identity = toolsEnabled
-    ? 'You are o8 — the model inside the o8 control plane, able to chat and edit the repo directly.'
-    : tier === 'high'
-      ? 'You are o8 — the conversational model inside the o8 control plane.'
-      : 'You are o8 — the free conversational model inside the o8 control plane.';
-  const base = toolsEnabled ? O8_PROMPT_BASE_CAPABLE : O8_PROMPT_BASE;
-  // Repo-awareness (Q ruling 2026-07-14): name the repo the turn is scoped to so
-  // the model can orient itself — "orchestrator light". With tools it should read
-  // real files rather than guess.
-  const repoLine = toolsEnabled && repoName
-    ? `You are scoped to the "${repoName}" repository; read real files with the file tools before making repo-specific claims — never invent file contents.`
-    : '';
+export function o8SystemPrompt(tier: 'low' | 'high'): string {
+  const identity = 'You are o8 — the model inside the o8 control plane, answering in text only.';
   const parts = tier === 'high'
-    ? [identity, O8_IDENTITY_GUARD, base, repoLine, O8_PROMPT_RECURSIVE, O8_PROMPT_PRINCIPLES].filter(Boolean)
-    : [identity, O8_IDENTITY_GUARD, base, repoLine, O8_PROMPT_RECURSIVE].filter(Boolean);
+    ? [identity, O8_IDENTITY_GUARD, O8_PROMPT_BASE, O8_PROMPT_RECURSIVE, O8_PROMPT_PRINCIPLES]
+    : [identity, O8_IDENTITY_GUARD, O8_PROMPT_BASE, O8_PROMPT_RECURSIVE];
   const envelope = `${parts.join(' ')}\n\n${O8_CONCEPTS}`;
   return tier === 'high' ? `${envelope}\n\n${O8_PROMPT_TUNED_SLOT}` : envelope;
 }
@@ -201,8 +145,7 @@ type ProxyMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 // accepts the request and then hangs (or never returns headers) used to wedge
 // the turn FOREVER: no error, no done, a busy latch that survived the night
 // (2026-07-15 incident — a 6-hour "Working" timer). Five minutes of zero bytes
-// comfortably clears the founders-rail tool loop's longest silent stretch (a
-// server-side run_terminal_command) while still terminalizing a dead stream.
+// still terminalizes a dead stream.
 const O8_TURN_INACTIVITY_TIMEOUT_MS = 300_000;
 
 /** Deterministic-name registry so `peekSession` mirrors an ensured session. */
@@ -212,9 +155,29 @@ function o8SessionName(repoPath: string, threadId?: string | null): string {
   return sessionNameForRepo('o8-free-orchestrator', repoPath, threadId);
 }
 
-async function sendToO8Orchestrator(
+/** Why o8's built-in agent cannot start on this machine, or null when it can. */
+export function o8BuiltInAgentBlocker(): string | null {
+  try {
+    requirePiPlatform();
+  } catch {
+    return 'o8\'s built-in agent runs on macOS and Linux, and Windows support is not available yet';
+  }
+  try {
+    requirePiNode();
+  } catch {
+    return 'o8\'s built-in agent needs Node 22.19 or newer';
+  }
+  return null;
+}
+
+/** The receipt names the o8 model the turn was sent with, the same id ws-server persists for the turn. */
+function o8ReceiptModel(options: OrchestratorTurnOptions): string {
+  return options.model ?? 'o8-free';
+}
+
+async function sendTextOnlyTurn(
   sessionName: string,
-  repoPath: string,
+  blocker: string,
   message: string,
   onEvent: (event: OrchestratorEvent) => void,
   options: OrchestratorTurnOptions,
@@ -230,15 +193,11 @@ async function sendToO8Orchestrator(
     prior.length > 0 && prior[prior.length - 1].role === 'user'
       ? prior
       : [...prior, { role: 'user', content: message }];
-  // Tier mirrors the proxy's own gate: explicit effort wins, absent = plan
-  // auto (founders High, free Low). The prompt must match the rail the proxy
-  // will actually pick, so both resolve the same way.
-  const paidPlan = getEntitlementSync().plan !== 'free';
-  const hasRepo = Boolean(repoPath && repoPath.trim());
-  const repoName = hasRepo ? (repoPath.split('/').filter(Boolean).pop() ?? '') : '';
-  const { tier, toolsEnabled } = o8TierAccess(paidPlan, options.thinkingEffort, hasRepo);
-  onEvent({ type: 'turn_receipt', leadModel: 'o8-operator', effort: tier });
-  const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier, toolsEnabled, repoName) }, ...history];
+  const tier = o8FallbackTier(getEntitlementSync().plan !== 'free', options.thinkingEffort);
+  onEvent({ type: 'turn_receipt', leadModel: o8ReceiptModel(options), effort: tier });
+  // Say why before anything streams, so a text-only answer is never mistaken for the agent.
+  onEvent({ type: 'text', text: `${blocker}, so this reply is text only, without o8 commands, file edits or tools.\n\n` });
+  const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier) }, ...history];
 
   // Inactivity watchdog: every await below (the fetch AND each stream read) is
   // otherwise unbounded. The watchdog aborts the request after
@@ -264,7 +223,7 @@ async function sendToO8Orchestrator(
   const watchdogError = () => {
     onEvent({
       type: 'error',
-      error: `The free o8 model went silent for ${Math.round(O8_TURN_INACTIVITY_TIMEOUT_MS / 60_000)} minutes — the turn was stopped so the chat doesn't hang. Re-send to retry.`,
+      error: `The o8 model went silent for ${Math.round(O8_TURN_INACTIVITY_TIMEOUT_MS / 60_000)} minutes — the turn was stopped so the chat doesn't hang. Re-send to retry.`,
     });
   };
 
@@ -280,7 +239,7 @@ async function sendToO8Orchestrator(
         // called the GATED proxy over loopback with NO bearer, relying purely on
         // the middleware's loopback-socket heuristic — which intermittently
         // failed, returning the gate's own `{error:'Unauthorized'}` and killing
-        // every free turn ("free o8 model unavailable: Unauthorized", root of
+        // every free turn ("o8 model unavailable: Unauthorized", root of
         // the 6-hour-timer + Q's 2026-07-15 screenshot). The ws-token authorizes
         // via the token path regardless of loopback detection.
         Authorization: `Bearer ${getOrCreateWsToken()}`,
@@ -289,16 +248,11 @@ async function sendToO8Orchestrator(
         model: 'o8-operator',
         provider: 'operator',
         messages,
-        // Founders rail edits files directly via the proxy's server-side Google
-        // tool loop; the free rail stays tools-off. `repoPath` scopes write_file/
-        // edit_file/run_terminal_command to THIS repo's working tree (the proxy
-        // resolves it against the registry and sandboxes writes within it). Only
-        // send it when tools are on, so the free path is unchanged.
-        disableTools: !toolsEnabled,
-        ...(toolsEnabled ? { repoPath } : {}),
-        // Tier gate (Q ruling 2026-07-12): High = founders rail, Low = free
-        // rail. Absent = server auto by plan. The proxy enforces the plan
-        // either way — this is a request, not an entitlement.
+        // Text only. The proxy never attaches tools to the operator rail either.
+        disableTools: true,
+        // Tier gate (Q ruling 2026-07-12): High = paid rail, Low = free rail.
+        // Absent = server auto by plan. The proxy enforces the plan either
+        // way — this is a request, not an entitlement.
         ...(options.thinkingEffort
           ? { thinkingEffort: options.thinkingEffort === 'high' ? 'high' : 'low' }
           : {}),
@@ -315,7 +269,7 @@ async function sendToO8Orchestrator(
     } else if (!options.signal?.aborted) {
       onEvent({
         type: 'error',
-        error: `The free o8 model couldn't reach the model service: ${err instanceof Error ? err.message : String(err)}`,
+        error: `The o8 model couldn't reach the model service: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
     done();
@@ -339,17 +293,14 @@ async function sendToO8Orchestrator(
     } finally {
       disarmWatchdog();
     }
-    onEvent({ type: 'error', error: `The free o8 model is unavailable: ${detail}` });
+    onEvent({ type: 'error', error: `The o8 model is unavailable: ${detail}` });
     done();
     return;
   }
 
   // SSE frames: `data: {json}\n\n`, terminated by `data: [DONE]`. We map
-  // `content`→text, `thinking`→thinking, and the founders tool loop's
-  // `tool_use`/`tool_result` frames → the matching OrchestratorEvents so file
-  // edits render as tool pills + the "edited files" card in the transcript.
-  // `error`→error; `usage` / `fallback` / `sources` carry no transcript payload
-  // and are skipped (cost is unmetered on the operator rail).
+  // `content`→text, `thinking`→thinking and `error`→error; `usage` /
+  // `fallback` / `sources` carry no transcript payload and are skipped.
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -365,16 +316,7 @@ async function sendToO8Orchestrator(
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6);
         if (data === '[DONE]' || data.trim() === '') continue;
-        let parsed: {
-          type?: string;
-          text?: unknown;
-          message?: unknown;
-          toolName?: unknown;
-          toolCallId?: unknown;
-          arguments?: unknown;
-          output?: unknown;
-          status?: unknown;
-        };
+        let parsed: { type?: string; text?: unknown; message?: unknown };
         try {
           parsed = JSON.parse(data);
         } catch {
@@ -384,28 +326,12 @@ async function sendToO8Orchestrator(
           if (parsed.text) onEvent({ type: 'text', text: parsed.text });
         } else if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
           if (parsed.text) onEvent({ type: 'thinking', text: parsed.text });
-        } else if (parsed.type === 'tool_use' && typeof parsed.toolName === 'string') {
-          onEvent({
-            type: 'tool_use',
-            id: typeof parsed.toolCallId === 'string' ? parsed.toolCallId : null,
-            name: parsed.toolName,
-            input: parsed.arguments ?? null,
-          });
-        } else if (parsed.type === 'tool_result' && typeof parsed.toolName === 'string') {
-          const output = typeof parsed.output === 'string' ? parsed.output : '';
-          onEvent({
-            type: 'tool_result',
-            id: typeof parsed.toolCallId === 'string' ? parsed.toolCallId : null,
-            name: parsed.toolName,
-            output,
-            ...(parsed.status === 'error' || /^\s*error/i.test(output) ? { isError: true } : {}),
-          });
         } else if (parsed.type === 'error') {
           onEvent({
             type: 'error',
             error: typeof parsed.message === 'string' && parsed.message.trim()
               ? parsed.message
-              : 'The free o8 model hit an error.',
+              : 'The o8 model hit an error.',
           });
         }
       }
@@ -423,28 +349,98 @@ async function sendToO8Orchestrator(
     } else if (!options.signal?.aborted) {
       onEvent({
         type: 'error',
-        error: `The free o8 model hit an error: ${err instanceof Error ? err.message : String(err)}`,
+        error: `The o8 model hit an error: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
     done();
   }
 }
 
-export const o8Backend: OrchestratorBackend = {
-  id: 'o8',
-  label: 'o8',
-  peekSession(repoPath, _agent, threadId): OrchestratorSessionInfo | null {
-    const sessionName = o8SessionName(repoPath, threadId);
-    return ensured.has(sessionName) ? { sessionName, status: 'ready' } : null;
-  },
-  ensureSession(repoPath, _agent, threadId): OrchestratorSessionInfo {
-    const sessionName = o8SessionName(repoPath, threadId);
-    ensured.add(sessionName);
-    return { sessionName, status: 'ready' };
-  },
-  sendTurn(repoPath, message, onEvent, options) {
-    const sessionName = o8SessionName(repoPath, options?.threadId);
-    ensured.add(sessionName);
-    return sendToO8Orchestrator(sessionName, repoPath, message, onEvent, options ?? {});
-  },
-};
+type O8Pi = OrchestratorBackend & { hasSession?(repoPath: string, threadId?: string | null): Promise<boolean> };
+
+/** Trusted seams for tests. Production uses the registered Pi backend and this machine's support. */
+export interface O8BackendDeps {
+  pi?: O8Pi;
+  blocker?: () => string | null;
+}
+
+/**
+ * An o8 thread that began on the text-only rail (or before #3408) has no Pi
+ * session, and ws-server sends no handoff because the backend id is unchanged.
+ * Its first Pi turn carries the earlier turns as the same cold-continuation
+ * packet a backend switch uses, so the model sees what the operator sees. A
+ * packet too large for one Pi prompt is rebuilt with the handoff's compaction.
+ */
+async function carriedThreadPrelude(pi: O8Pi, repoPath: string, message: string,
+  options: OrchestratorTurnOptions): Promise<{ prelude: string } | { lost: true } | null> {
+  const threadId = options.threadId;
+  if (!threadId?.startsWith('thoughts-') || !pi.hasSession || await pi.hasSession(repoPath, threadId)) return null;
+  const [{ backendSwitchRequiresExplicitHandoff, renderBackendSwitchHandoffPrelude }, { buildHandoffPacket, HandoffPacketError },
+    { PI_PROMPT_MAX_BYTES }] = await Promise.all([import('@/lib/orchestrator/backend-switch-carry'),
+    import('@/lib/orchestrator/handoff-packet'), import('@/lib/pi/sdk/session')]);
+  // A real backend switch already gets ws-server's handoff prelude.
+  if (backendSwitchRequiresExplicitHandoff({ threadId, toBackend: 'o8' })) return null;
+  // ws-server persisted this turn's message before calling the backend; the turn itself carries it.
+  const record = await readFile(safeOrchestratorHistoryPath(threadId), 'utf8')
+    .then(raw => JSON.parse(raw) as { messages?: Array<{ id?: unknown; role?: unknown }> }).catch(() => null);
+  const current = record?.messages?.findLast(entry => entry.role === 'user')?.id;
+  const fits = (prelude: string) => Buffer.byteLength(`${prelude}\n\n${message}`) <= PI_PROMPT_MAX_BYTES;
+  try {
+    for (const narrativeMode of ['auto', 'compact'] as const) {
+      const packet = await buildHandoffPacket({ threadId, to: { backend: 'o8', model: options.model ?? null },
+        excludeMessageId: typeof current === 'string' ? current : undefined, narrativeMode });
+      const prelude = renderBackendSwitchHandoffPrelude(packet);
+      if (fits(prelude)) return { prelude };
+    }
+  } catch (error) {
+    // A new thread has no earlier assistant turn, or no persisted record, to carry.
+    if (error instanceof HandoffPacketError && (error.code === 'handoff_thread_empty' || error.code === 'handoff_thread_not_found')) {
+      return null;
+    }
+    console.warn('[o8] Earlier turns could not be carried into Pi:', error);
+  }
+  return { lost: true };
+}
+
+export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
+  const pi = deps.pi ?? piBackend;
+  const blocker = deps.blocker ?? o8BuiltInAgentBlocker;
+  return {
+    id: 'o8',
+    label: 'o8',
+    peekSession(repoPath, agent, threadId): OrchestratorSessionInfo | null {
+      if (!blocker()) return pi.peekSession(repoPath, agent, threadId);
+      const sessionName = o8SessionName(repoPath, threadId);
+      return ensured.has(sessionName) ? { sessionName, status: 'ready' } : null;
+    },
+    ensureSession(repoPath, agent, threadId): OrchestratorSessionInfo {
+      if (!blocker()) return pi.ensureSession(repoPath, agent, threadId);
+      const sessionName = o8SessionName(repoPath, threadId);
+      ensured.add(sessionName);
+      return { sessionName, status: 'ready' };
+    },
+    sendTurn(repoPath, message, onEvent, options) {
+      const reason = blocker();
+      // Pi's own default approval stays in force: repo writes and commands ask in the inbox.
+      if (!reason) {
+        const carried = carriedThreadPrelude(pi, repoPath, message, options ?? {}).catch((error: unknown) => {
+          console.warn('[o8] Earlier turns could not be carried into Pi:', error);
+          return { lost: true as const };
+        });
+        return carried.then((carry) => {
+          // Never let the agent look like it remembers what it was not given.
+          if (carry && 'lost' in carry) {
+            onEvent({ type: 'text', text: 'Earlier turns in this thread could not be carried into o8\'s built-in agent, so it starts without them.\n\n' });
+          }
+          return pi.sendTurn(repoPath, carry && 'prelude' in carry ? `${carry.prelude}\n\n${message}` : message,
+            event => onEvent(event.type === 'turn_receipt' ? { ...event, leadModel: o8ReceiptModel(options ?? {}) } : event), options);
+        });
+      }
+      const sessionName = o8SessionName(repoPath, options?.threadId);
+      ensured.add(sessionName);
+      return sendTextOnlyTurn(sessionName, reason, message, onEvent, options ?? {});
+    },
+  };
+}
+
+export const o8Backend = createO8Backend();

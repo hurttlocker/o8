@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 
+import { ARTIFACT_PROTOCOL_SCRIPT } from '@/lib/workspace/ignored-artifact-protocol';
+import { artifactNodeScript } from '@/lib/workspace/ignored-artifact-worker';
+
 import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 
@@ -38,99 +41,22 @@ export interface ArtifactRestoreEvent extends ArtifactRestoreFileReceipt {
 
 // Work happens in an OS-pinned cwd. Parents are opened without following links,
 // and each file is read/written through its own verified descriptor.
-const ARTIFACT_IO_SCRIPT = String.raw`
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
+const ARTIFACT_IO_SCRIPT = ARTIFACT_PROTOCOL_SCRIPT + String.raw`
 const { execFileSync } = require('node:child_process');
 const mode = process.argv[1];
-const rootCanonical = fs.realpathSync('.');
+const workerScript = process.argv[2];
 const rootFd = fs.openSync('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
-const fdPath = (fd) => (process.platform === 'linux' ? '/proc/self/fd/' : '/dev/fd/') + fd;
-let buffer = '';
-const lines = [];
-let reader = null;
-let ended = false;
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  buffer += chunk;
-  let index;
-  while ((index = buffer.indexOf('\n')) >= 0) {
-    const line = buffer.slice(0, index);
-    buffer = buffer.slice(index + 1);
-    if (reader) { const current = reader; reader = null; current.resolve(line); }
-    else lines.push(line);
-  }
-});
-process.stdin.on('end', () => {
-  ended = true;
-  if (reader) { reader.reject(new Error('Artifact receipt acknowledgement was lost.')); reader = null; }
-});
-function nextLine() {
-  if (lines.length) return Promise.resolve(lines.shift());
-  if (ended) return Promise.reject(new Error('Artifact request input ended.'));
-  return new Promise((resolve, reject) => { reader = { resolve, reject }; });
-}
-function safeRelative(value) {
-  if (typeof value !== 'string' || !value || value.includes('\\') || value.includes('\0')
-    || path.posix.isAbsolute(value) || value.split('/').some((part) => !part || part === '.' || part === '..' || part === '.git')) {
-    throw new Error('Artifact path is unsafe.');
-  }
-  return value;
-}
-function same(before, after) {
-  return before.dev === after.dev && before.ino === after.ino && before.size === after.size
-    && before.mode === after.mode && before.nlink === after.nlink
-    && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs;
-}
-function hash(content) { return crypto.createHash('sha256').update(content).digest('hex'); }
-function readAt(fd, size) {
-  const content = Buffer.alloc(size);
-  let offset = 0;
-  while (offset < size) {
-    const count = fs.readSync(fd, content, offset, size - offset, offset);
-    if (!count) throw new Error('Artifact file changed during descriptor read.');
-    offset += count;
-  }
-  return content;
-}
-function syncCurrentDirectory() {
-  const fd = fs.openSync('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
-  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-}
-function enterParent(relative, create) {
-  const parts = safeRelative(relative).split('/');
-  const leaf = parts.pop();
-  process.chdir(fdPath(rootFd));
-  for (const part of parts) {
-    let stat;
-    try { stat = fs.lstatSync(part); }
-    catch (error) {
-      if (error.code !== 'ENOENT' || !create) throw error;
-      fs.mkdirSync(part, 0o700);
-      syncCurrentDirectory();
-      stat = fs.lstatSync(part);
-    }
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Artifact ancestor is not a regular directory.');
-    const fd = fs.openSync(part, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
-    try {
-      const captured = fs.fstatSync(fd);
-      if (captured.dev !== stat.dev || captured.ino !== stat.ino) throw new Error('Artifact ancestor changed.');
-      process.chdir(fdPath(fd));
-      const canonical = fs.realpathSync('.');
-      const inside = path.relative(rootCanonical, canonical);
-      if (inside.startsWith('..') || path.isAbsolute(inside)) throw new Error('Artifact ancestor escaped its workspace.');
-    } finally { fs.closeSync(fd); }
-  }
-  return leaf;
-}
-function inspect(relative) {
-  try { return fs.lstatSync(enterParent(relative, false)); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+let rootIdentity;
+function verifyRoot() {
+  const actual = fs.lstatSync('.');
+  const pinned = fs.fstatSync(rootFd);
+  if (!actual.isDirectory() || actual.isSymbolicLink() || actual.dev !== rootIdentity.device
+    || actual.ino !== rootIdentity.inode || pinned.dev !== actual.dev || pinned.ino !== actual.ino
+    || fs.realpathSync('.') !== rootIdentity.canonicalPath) throw new Error('Artifact workspace ownership changed.');
 }
 function git(args) {
-  process.chdir(fdPath(rootFd));
-  const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_WORK_TREE: rootCanonical };
+  verifyRoot();
+  const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_WORK_TREE: '.' };
   for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[key];
   return execFileSync('git', args, { encoding: 'utf8', env, timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
 }
@@ -157,7 +83,11 @@ function inspectRestoreRevision() {
   }
   return truth;
 }
-function capture(input) {
+async function receipt(event) {
+  process.stdout.write('O8_ARTIFACT_EVENT ' + Buffer.from(JSON.stringify(event)).toString('base64url') + '\n');
+  if (await nextLine() !== 'ok') throw new Error('Artifact ownership receipt was not persisted.');
+}
+async function capture(input) {
   const truth = verifyGit(input);
   const ignored = [];
   for (const record of git(['status', '--porcelain=v1', '-z', '--ignored=matching', '--untracked-files=all']).split('\0')) {
@@ -174,50 +104,27 @@ function capture(input) {
   const seen = new Set();
   const started = Date.now();
   let bytes = 0;
-  function visit(relative) {
-    if (seen.has(relative) || excluded.some((prefix) => relative === prefix || relative.startsWith(prefix + '/'))) return;
-    seen.add(relative);
-    if (seen.size > 20000 || Date.now() - started > 10000) throw new Error('Artifact capture scan bound was exceeded.');
-    const leaf = enterParent(relative, false);
-    const stat = fs.lstatSync(leaf);
-    if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) throw new Error('Unique ignored content has an unsupported filesystem node.');
-    if (stat.isDirectory()) {
-      const names = fs.readdirSync(leaf).sort();
-      entries.push({ path: relative, kind: 'directory', mode: stat.mode & 0o777, device: stat.dev, inode: stat.ino, bytes: 0, sha256: null, content: null });
-      for (const name of names) visit(safeRelative(relative + '/' + name));
-      const repeated = enterParent(relative, false);
-      const after = fs.lstatSync(repeated);
-      if (!same(stat, after) || JSON.stringify(names) !== JSON.stringify(fs.readdirSync(repeated).sort())) throw new Error('Ignored artifact directory changed during capture.');
-      return;
+  const client = await connectArtifactNode(workerScript, '.', rootIdentity, rootIdentity.canonicalPath,
+    started + 10000, async () => { throw new Error('Capture cannot publish restore receipts.'); });
+  try {
+    async function visit(relative) {
+      if (seen.has(relative) || excluded.some((prefix) => relative === prefix || relative.startsWith(prefix + '/'))) return;
+      seen.add(relative);
+      if (seen.size > 20000 || Date.now() - started > 10000) throw new Error('Artifact capture scan bound was exceeded.');
+      verifyRoot();
+      const copiedBound = Object.prototype.hasOwnProperty.call(copied, relative);
+      const captured = await client.request({ action: 'capture', path: relative, originalPath: relative,
+        copiedBound, copiedHash: copiedBound ? copied[relative] : null, remainingBytes: 32 * 1024 * 1024 - bytes });
+      if (captured.entry) entries.push(captured.entry);
+      if (captured.stat.kind === 'directory') {
+        for (const name of captured.names) await visit(safeRelative(relative + '/' + name));
+        await client.request({ action: 'verify-directory', path: relative, stat: captured.stat, names: captured.names });
+      } else if (captured.entry) bytes += captured.entry.bytes;
     }
-    const copy = Object.prototype.hasOwnProperty.call(copied, relative) ? copied[relative] : undefined;
-    if (copy === undefined && /^\.env(?:\.|$)/.test(path.basename(relative))) throw new Error('An unbound ignored environment file requires a privacy decision.');
-    if (stat.size > 16 * 1024 * 1024 || bytes + stat.size > 32 * 1024 * 1024) throw new Error('Unique ignored artifact bytes exceed the bounded preservation budget.');
-    const fd = fs.openSync(leaf, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try {
-      const opened = fs.fstatSync(fd);
-      if (!same(stat, opened)) throw new Error('Ignored artifact file changed before capture.');
-      const content = readAt(fd, opened.size);
-      const repeated = readAt(fd, opened.size);
-      const after = fs.fstatSync(fd);
-      const named = fs.lstatSync(leaf);
-      if (!same(opened, after) || named.dev !== after.dev || named.ino !== after.ino || !content.equals(repeated)) throw new Error('Ignored artifact file changed during capture.');
-      const sha256 = hash(content);
-      if (copy !== undefined) {
-        if (copy === null || copy !== sha256) throw new Error('Copied environment binding changed; the workspace remains held.');
-        return;
-      }
-      bytes += content.length;
-      entries.push({ path: relative, kind: 'file', mode: stat.mode & 0o777, device: stat.dev, inode: stat.ino, bytes: content.length, sha256, content: content.toString('base64') });
-    } finally { fs.closeSync(fd); }
-  }
-  for (const relative of [...new Set(ignored)].sort()) visit(relative);
+    for (const relative of [...new Set(ignored)].sort()) await visit(relative);
+  } finally { await client.close(); }
   verifyGit(input);
   return { ...truth, entries: entries.sort((a, b) => a.path.localeCompare(b.path)), bytes };
-}
-async function receipt(event) {
-  process.stdout.write('O8_ARTIFACT_EVENT ' + Buffer.from(JSON.stringify(event)).toString('base64url') + '\n');
-  if (await nextLine() !== 'ok') throw new Error('Artifact ownership receipt was not persisted.');
 }
 async function restore(input) {
   verifyGit(input);
@@ -227,89 +134,46 @@ async function restore(input) {
   const owned = new Map(input.ownedFiles.map((entry) => [entry.path, entry]));
   const seen = new Set();
   let totalBytes = 0;
-  for (const entry of input.entries) {
-    safeRelative(entry.path);
-    if (seen.has(entry.path) || !Number.isSafeInteger(entry.mode) || entry.mode < 0 || entry.mode > 0o777) throw new Error('Artifact manifest is invalid.');
-    seen.add(entry.path);
-    if (entry.kind !== 'file' && entry.kind !== 'directory') throw new Error('Artifact kind is unsupported.');
-    if (entry.kind === 'file') {
-      const content = Buffer.from(entry.content, 'base64');
-      totalBytes += content.length;
-      if (content.length !== entry.bytes || content.toString('base64') !== entry.content || hash(content) !== entry.sha256
-        || content.length > 16 * 1024 * 1024 || totalBytes > 32 * 1024 * 1024) throw new Error('Artifact content receipt is invalid.');
-      git(['check-ignore', '--quiet', '--', entry.path]);
-    }
-    const prior = inspect(entry.path);
-    if (!prior) {
-      if (owned.has(entry.path)) throw new Error('A previously owned artifact restore file disappeared.');
-      continue;
-    }
-    if (entry.kind === 'directory') {
-      if (!prior.isDirectory() || prior.isSymbolicLink()) throw new Error('Artifact directory destination is occupied.');
-      continue;
-    }
-    const owner = owned.get(entry.path);
-    if (!owner || !prior.isFile() || prior.isSymbolicLink() || prior.dev !== owner.device || prior.ino !== owner.inode || prior.nlink !== 1) {
-      throw new Error('Artifact restore refuses to overwrite an unowned destination.');
-    }
-  }
-  for (const entry of input.entries.filter((entry) => entry.kind === 'directory').sort((a, b) => a.path.split('/').length - b.path.split('/').length)) {
-    const leaf = enterParent(entry.path, true);
-    if (!fs.existsSync(leaf)) { fs.mkdirSync(leaf, 0o700); syncCurrentDirectory(); }
-    const directory = fs.lstatSync(leaf);
-    if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error('Artifact directory destination changed.');
-  }
-  for (const entry of input.entries.filter((entry) => entry.kind === 'file')) {
-    const leaf = enterParent(entry.path, true);
-    const owner = owned.get(entry.path);
-    const content = Buffer.from(entry.content, 'base64');
-    const flags = owner ? fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-      : fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
-    let fd = fs.openSync(leaf, flags, 0o600);
-    try {
-      const before = fs.fstatSync(fd);
-      const named = fs.lstatSync(leaf);
-      if (!before.isFile() || before.nlink !== 1 || named.dev !== before.dev || named.ino !== before.ino
-        || (owner && (before.dev !== owner.device || before.ino !== owner.inode))) throw new Error('Artifact destination identity changed.');
-      if (before.size > content.length) throw new Error('A previously owned restore file grew beyond its bounded receipt.');
-      const existing = readAt(fd, before.size);
-      if (!same(before, fs.fstatSync(fd)) || !same(before, fs.lstatSync(leaf))) throw new Error('Artifact destination changed during verification.');
-      if (owner && (before.size > content.length || !existing.equals(content.subarray(0, existing.length))
-        || (owner.phase === 'complete' && (hash(existing) !== entry.sha256 || (before.mode & 0o777) !== entry.mode)))) {
-        throw new Error('A previously owned restore file was modified; no overwrite was applied.');
+  if (input.entries.length > 20000) throw new Error('Artifact restore entry bound was exceeded.');
+  const client = await connectArtifactNode(workerScript, '.', rootIdentity, rootIdentity.canonicalPath,
+    Date.now() + 29000, receipt);
+  try {
+    for (const entry of input.entries) {
+      safeRelative(entry.path);
+      if (seen.has(entry.path) || !Number.isSafeInteger(entry.mode) || entry.mode < 0 || entry.mode > 0o777) throw new Error('Artifact manifest is invalid.');
+      seen.add(entry.path);
+      if (entry.kind !== 'file' && entry.kind !== 'directory') throw new Error('Artifact kind is unsupported.');
+      if (entry.kind === 'file') {
+        const content = Buffer.from(entry.content, 'base64');
+        totalBytes += content.length;
+        if (content.length !== entry.bytes || content.toString('base64') !== entry.content || hash(content) !== entry.sha256
+          || content.length > 16 * 1024 * 1024 || totalBytes > 32 * 1024 * 1024) throw new Error('Artifact content receipt is invalid.');
+        git(['check-ignore', '--quiet', '--', entry.path]);
       }
-      if (owner && owner.phase === 'complete') continue;
-      if (owner && existing.equals(content) && (before.mode & 0o777) === entry.mode) {
-        fs.fsyncSync(fd);
-        if (!same(before, fs.fstatSync(fd)) || !same(before, fs.lstatSync(leaf))) throw new Error('Prepared artifact changed during read-only recovery.');
-        await receipt({ path: entry.path, device: before.dev, inode: before.ino, phase: 'complete', sha256: entry.sha256, bytes: entry.bytes });
+      const prior = await client.request({ action: 'inspect', path: entry.path });
+      if (!prior) {
+        if (owned.has(entry.path)) throw new Error('A previously owned artifact restore file disappeared.');
         continue;
       }
-      if (owner) {
-        const writable = fs.openSync(leaf, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW);
-        const captured = fs.fstatSync(writable);
-        if (!same(before, captured) || !same(before, fs.lstatSync(leaf))) {
-          fs.closeSync(writable);
-          throw new Error('Prepared artifact changed before retry publication.');
-        }
-        fs.closeSync(fd);
-        fd = writable;
+      if (entry.kind === 'directory') {
+        if (prior.kind !== 'directory') throw new Error('Artifact directory destination is occupied.');
+        continue;
       }
-      fs.fsyncSync(fd);
-      syncCurrentDirectory();
-      await receipt({ path: entry.path, device: before.dev, inode: before.ino, phase: 'prepared', sha256: entry.sha256, bytes: entry.bytes });
-      let offset = 0;
-      while (offset < content.length) offset += fs.writeSync(fd, content, offset, content.length - offset, offset);
-      fs.ftruncateSync(fd, content.length);
-      fs.fchmodSync(fd, entry.mode);
-      fs.fsyncSync(fd);
-      const after = fs.fstatSync(fd);
-      const published = fs.lstatSync(leaf);
-      if (after.dev !== before.dev || after.ino !== before.ino || after.nlink !== 1
-        || published.dev !== after.dev || published.ino !== after.ino || hash(readAt(fd, after.size)) !== entry.sha256) throw new Error('Artifact publication did not match its receipt.');
-      await receipt({ path: entry.path, device: after.dev, inode: after.ino, phase: 'complete', sha256: entry.sha256, bytes: entry.bytes });
-    } finally { fs.closeSync(fd); }
-  }
+      const owner = owned.get(entry.path);
+      if (!owner || prior.kind !== 'file' || prior.dev !== owner.device || prior.ino !== owner.inode || prior.nlink !== 1) {
+        throw new Error('Artifact restore refuses to overwrite an unowned destination.');
+      }
+    }
+    for (const entry of input.entries.filter((entry) => entry.kind === 'directory').sort((a, b) => a.path.split('/').length - b.path.split('/').length)) {
+      verifyRoot();
+      await client.request({ action: 'create-directory', path: entry.path });
+    }
+    for (const entry of input.entries.filter((entry) => entry.kind === 'file')) {
+      verifyRoot();
+      await client.request({ action: 'restore-file', path: entry.path, originalPath: entry.path,
+        entry, owner: owned.get(entry.path) || null });
+    }
+  } finally { await client.close(); }
   verifyGit(input);
   if (git(['status', '--porcelain=v1', '-z', '--untracked-files=all'])) {
     throw new Error('Artifact restore destination changed source during publication.');
@@ -317,11 +181,16 @@ async function restore(input) {
   return { restoredFiles: input.entries.filter((entry) => entry.kind === 'file').length, bytes: totalBytes };
 }
 (async () => {
-  const input = JSON.parse(await nextLine());
-  const result = mode === 'revision' ? inspectRestoreRevision()
-    : mode === 'capture' ? capture(input) : await restore(input);
-  process.stdout.write('O8_ARTIFACT_RESULT ' + Buffer.from(JSON.stringify(result)).toString('base64url') + '\n');
-  fs.closeSync(rootFd);
+  try {
+    const envelope = JSON.parse(await nextLine());
+    rootIdentity = envelope.identity;
+    verifyRoot();
+    const input = envelope.request;
+    const result = mode === 'revision' ? inspectRestoreRevision()
+      : mode === 'capture' ? await capture(input) : mode === 'restore' ? await restore(input)
+      : (() => { throw new Error('Artifact operation mode is invalid.'); })();
+    process.stdout.write('O8_ARTIFACT_RESULT ' + Buffer.from(JSON.stringify(result)).toString('base64url') + '\n');
+  } finally { fs.closeSync(rootFd); }
   process.exit(0);
 })().catch(() => {
   process.stderr.write('Pinned artifact operation refused; preservation and retention authority remain intact.\n');
@@ -337,7 +206,7 @@ async function runArtifactIo<T>(input: {
   onReceipt?: (event: ArtifactRestoreEvent) => void;
 }): Promise<T> {
   const invocation = guardedWorkspaceInvocation(
-    process.execPath, ['-e', ARTIFACT_IO_SCRIPT, input.mode], input.identity,
+    process.execPath, ['-e', ARTIFACT_IO_SCRIPT, input.mode, artifactNodeScript()], input.identity,
   );
   return new Promise((resolve, reject) => {
     const child = spawn(invocation.command, invocation.args, {
@@ -391,7 +260,7 @@ async function runArtifactIo<T>(input: {
       } else resolve(result);
     });
     child.stdin.on('error', () => {});
-    child.stdin.write(JSON.stringify(input.request) + '\n');
+    child.stdin.write(JSON.stringify({ request: input.request, identity: input.identity }) + '\n');
   });
 }
 

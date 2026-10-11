@@ -119,7 +119,11 @@ export interface LlmApprovalContinuation {
   kind: 'llm-chat';
   tabId: string;
   model: string;
-  provider: 'openai' | 'anthropic' | 'google';
+  provider: 'openai' | 'anthropic' | 'google' | 'chatgpt';
+  planOwner?: string;
+  planAccountId?: string;
+  planGeneration?: number;
+  planDesktopEpoch?: string;
   messages: Array<{ role: string; content: string }>;
   /** Legacy field retained for persisted approvals; never grants authorization. */
   approvedTools?: string[];

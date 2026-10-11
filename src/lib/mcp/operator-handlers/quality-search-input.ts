@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import { PACKET_TASK_CONTRACT_INPUT_SCHEMA, SEALED_TASK_CONTRACT_INPUT_SCHEMA } from '@/lib/orchestrator/sealed-task-contract';
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
@@ -10,7 +11,7 @@ export const TASK_CONTRACT_SETTING_SCHEMA = {
 
 export function parseTaskContractSetting(value: unknown): 'off' | undefined {
   if (value === undefined || value === null || value === '') return undefined;
-  if (value !== 'off') throw new Error('taskContract must be "off" when provided.');
+  if (value !== 'off') throw new McpInputError('taskContract must be "off" when provided.');
   return value;
 }
 

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { withAccountStateLease } from './account-state';
 import { NextResponse } from 'next/server';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
@@ -61,17 +62,18 @@ export async function revokeDeviceToken(token: string): Promise<void> {
 
 export async function revokeDesktopDeviceSession(): Promise<void> {
   // Durable cancellation precedes every network await, including offline revoke.
-  invalidateDesktopAuthHandoff();
-  const session = readDeviceSession();
-  let directRevoke = false;
-  try {
-    if (session?.renewalStartedAt !== undefined) removePendingDeviceRevoke(session.token);
-    else if (session) {
-      try { queueDeviceRevoke(session.token); } catch { directRevoke = true; }
-    }
-  } finally {
-    deleteDeviceSession();
-  }
+  const { session, directRevoke } = await withAccountStateLease(() => {
+    invalidateDesktopAuthHandoff();
+    const session = readDeviceSession();
+    let directRevoke = false;
+    try {
+      if (session?.renewalStartedAt !== undefined) removePendingDeviceRevoke(session.token);
+      else if (session) {
+        try { queueDeviceRevoke(session.token); } catch { directRevoke = true; }
+      }
+    } finally { deleteDeviceSession(); }
+    return { session, directRevoke };
+  });
   if (directRevoke && session) await requestDeviceService('revoke', session.token).catch(() => {});
   else await retryPendingDeviceRevokes();
 }

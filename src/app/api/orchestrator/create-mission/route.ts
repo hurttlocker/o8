@@ -248,7 +248,7 @@ export async function POST(request: NextRequest) {
     if (unsupportedRuntime) {
       return operatorError(
         'invalid_request',
-        `runtime ${unsupportedRuntime} cannot enforce read-only worker execution. Use codex or claude-code.`,
+        `runtime ${unsupportedRuntime} cannot enforce read-only worker execution. Use codex, claude-code or pi-builtin.`,
         400,
       );
     }

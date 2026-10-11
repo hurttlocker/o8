@@ -55,7 +55,8 @@ export async function GET(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Lane touch lookup failed.';
+    console.error('[api] lanes/touches failed:', err);
+    const message = 'Lane touch lookup failed.';
     return NextResponse.json({ ok: false, note: message }, { status: 500 });
   }
 }

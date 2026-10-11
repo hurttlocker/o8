@@ -12,6 +12,7 @@ import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledg
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
+import { readOwnedRecoveryState } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 
 function backendForRuntime(runtime: string): 'codex' | 'claude' | null {
   if (runtime === 'codex') return 'codex';
@@ -125,6 +126,8 @@ export async function handleWorkerQuotaExhaustion(input: {
   prompt: string;
   error: string;
 }): Promise<WorkerQuotaFallbackResult> {
+  const source = await readOwnedRecoveryState(input.surfaceId);
+  if (source.owned && !source.automaticRecoveryAllowed) return { handled: false, action: 'ignored' };
   const backend = backendForRuntime(input.runtime);
   if (!backend) return { handled: false, action: 'ignored' };
 

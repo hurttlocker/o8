@@ -1,3 +1,4 @@
+import { accountRefreshIsBlocked, currentAccountGeneration, requireAccountGeneration, withAccountStateLease, withPreservedAccountState } from '@/lib/auth/account-state';
 import { deviceRequestIsLocal, deviceResponse, requestDeviceService, revokeDeviceToken, validDeviceGrant } from '@/lib/auth/device-session-service';
 import { deviceSessionGeneration, readDeviceSession, writeDeviceSession } from '@/lib/auth/device-session-store';
 import { readAuthSignedOutAt } from '@/lib/auth/sign-out-marker';
@@ -16,22 +17,28 @@ export async function POST(request: Request) {
     if (!body || typeof body.clerkUserId !== 'string' || !body.clerkUserId.trim()) {
       return deviceResponse({ ok: false, reason: 'invalid_owner' }, 400);
     }
-    if (readAuthSignedOutAt() !== null) return deviceResponse({ ok: false, reason: 'signed_out' }, 409);
-    const generation = deviceSessionGeneration();
-    const epoch = readSignInEpoch();
-    const priorToken = readDeviceSession()?.token;
+    const captured = await withAccountStateLease(() => ({
+      accountGeneration: currentAccountGeneration(), signedOut: accountRefreshIsBlocked() || readAuthSignedOutAt() !== null,
+      generation: deviceSessionGeneration(), epoch: readSignInEpoch(), priorToken: readDeviceSession()?.token,
+    }));
+    if (captured.signedOut) return deviceResponse({ ok: false, reason: 'signed_out' }, 409);
     const installId = getOrCreateInstallId();
     const response = await requestDeviceService('enroll', sessionToken, { installId, platform: process.platform, appVersion: version });
     if (!response.ok) return deviceResponse({ ok: false, reason: 'device_enroll_failed' }, response.status === 401 || response.status === 403 ? response.status : 503);
     const data = await response.json();
     if (!data || !validDeviceGrant(data)) return deviceResponse({ ok: false, reason: 'invalid_device_response' }, 502);
     const mismatch = data.clerkUserId !== body.clerkUserId.trim();
-    if (mismatch || generation !== deviceSessionGeneration() || epoch !== readSignInEpoch()
-      || priorToken !== readDeviceSession()?.token || readAuthSignedOutAt() !== null) {
+    const accepted = await withPreservedAccountState(() => {
+      try { requireAccountGeneration(captured.accountGeneration); } catch { return false; }
+      if (mismatch || captured.generation !== deviceSessionGeneration() || captured.epoch !== readSignInEpoch()
+        || captured.priorToken !== readDeviceSession()?.token || accountRefreshIsBlocked() || readAuthSignedOutAt() !== null) return false;
+      writeDeviceSession({ token: data.deviceToken, clerkUserId: data.clerkUserId, installId, idleExpiresAt: data.idleExpiresAt });
+      return true;
+    });
+    if (!accepted) {
       await revokeDeviceToken(data.deviceToken);
       return deviceResponse({ ok: false, reason: mismatch ? 'device_owner_mismatch' : 'device_state_changed' }, 409);
     }
-    writeDeviceSession({ token: data.deviceToken, clerkUserId: data.clerkUserId, installId, idleExpiresAt: data.idleExpiresAt });
     return deviceResponse({ ok: true, clerkUserId: data.clerkUserId });
   } catch {
     return deviceResponse({ ok: false, reason: 'device_enroll_failed' }, 503);

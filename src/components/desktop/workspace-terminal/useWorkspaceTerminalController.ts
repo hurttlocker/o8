@@ -1,6 +1,7 @@
 'use client';
 
 import { retargetWorkspaceTab } from './retarget-workspace-tab';
+import { useTextChatTabs } from './use-text-chat-tabs';
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type MouseEvent as ReactMouseEvent } from 'react';
 import {
@@ -52,7 +53,6 @@ import {
 import {
   buildHistoryChatTab,
   buildNewChatTab,
-  buildNewLlmChatTab,
   buildPersistedState,
   computeCheckpointRestore,
   deferRemoteTerminalLaunch,
@@ -1198,14 +1198,9 @@ export function useWorkspaceTerminalController(
     setActiveTabIdFromUser(newTab.id);
   }, [setActiveTabIdFromUser]);
 
-  const handleNewLLMChatTab = useCallback((repo?: RegisteredRepo) => {
-    const newTab = buildNewLlmChatTab(repo ?? preferredRepo ?? undefined);
-    const nextTabs = [...tabsRef.current, newTab];
-    tabsRef.current = nextTabs;
-    setTabs(nextTabs);
-    persistTabsNow(nextTabs, newTab.id);
-    setActiveTabIdFromUser(newTab.id);
-  }, [persistTabsNow, preferredRepo, setActiveTabIdFromUser]);
+  const { handleNewLLMChatTab, handleNewChatGPTPlanTab } = useTextChatTabs({
+    preferredRepo, tabsRef, setTabs, persistTabsNow, setActiveTabIdFromUser,
+  });
 
   const handleUpdateChatMessages = useCallback((tabId: string, messages: MobileTranscriptEntry[]) => {
     setTabs((previous) => previous.map((tab) => (
@@ -1424,6 +1419,7 @@ export function useWorkspaceTerminalController(
     handleDragStart,
     handleNewChatTab,
     handleNewLLMChatTab,
+    handleNewChatGPTPlanTab,
     handleNewTab,
     openRemoteTerminalTab,
     handleOpenHistoryChat,

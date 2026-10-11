@@ -12,6 +12,7 @@ import { scheduleManagedGithubRefresh } from '@/lib/github-broker/refresh-schedu
 import { desktopAuthTicketExchangeInProgress, invalidateDesktopAuthHandoffs, subscribeDesktopAuthTicketExchange, subscribeDesktopBrowserSignIn, waitForDesktopAuthTicketExchange } from '@/lib/auth/desktop-auth-callback';
 import { completeDesktopSignIn, DEVICE_RETRY_MS, deviceSessionDecision, renewDesktopSession, type DeviceSessionTrigger } from '@/lib/auth/device-session-client';
 import { canUseTauriEvents } from '@/lib/tauri/bridge';
+import { registerPlanAccountToken } from '@/lib/chatgpt-plan/client';
 
 // Survives bridge remounts; explicit sign-out permits a fresh enrollment.
 const enrolledDeviceUsers = new Set<string>();
@@ -97,6 +98,11 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
   const previousUserRef = useRef<string | null>(null);
   const authRef = useRef({ isLoaded, isSignedIn, user, clerk, signIn });
   authRef.current = { isLoaded, isSignedIn, user, clerk, signIn };
+  useEffect(() => registerPlanAccountToken(async () => {
+    const current = authRef.current;
+    if (!current.isSignedIn || explicitSignOutRef.current || !current.user) return null;
+    return await current.clerk.session?.getToken() ?? null;
+  }), [clerk, isSignedIn, user?.id]);
   const provisionedRef = useRef<string | null>(null);
   const syncAbortRef = useRef<AbortController | null>(null);
   // Wall-clock of the last entitlement-sync ATTEMPT. Gates the focus re-sync so

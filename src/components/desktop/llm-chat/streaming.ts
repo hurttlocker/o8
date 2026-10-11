@@ -1,6 +1,8 @@
 import { buildLinkedIssueContext, type LinkedIssueRef } from '../IssueLinkPicker';
 
 import { buildRepoRequestHeaders, type ActiveThinkingState, type LLMMessage, MODELS, type ModelOption, type PendingApprovalState, type PreferredRepoContext, type SourceInfo, type ThinkingStep, type ToolCallInfo } from './shared';
+import { planAccountHeaders } from '@/lib/chatgpt-plan/client';
+import type { PlanSelection } from '@/lib/chatgpt-plan/types';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 
 function normalizeFetchFailure(error: unknown) {
@@ -12,6 +14,7 @@ function normalizeFetchFailure(error: unknown) {
 }
 
 export async function generateFollowUps(lastResponse: string, model: { id: string; label: string; provider: string }, userQuestion: string): Promise<string[]> {
+  if (model.provider === 'chatgpt') return [];
   try {
     const response = await fetchWithLongLivedBudget('/api/v2/proxy/llm', {
       method: 'POST',
@@ -59,6 +62,8 @@ export async function streamAssistantResponse({
   messages,
   model,
   preferredRepo,
+  planSelection,
+  planTextOnly,
   showTypingIndicator,
   tabId,
   onFallback,
@@ -76,6 +81,8 @@ export async function streamAssistantResponse({
   messages: LLMMessage[];
   model: ModelOption;
   preferredRepo?: PreferredRepoContext | null;
+  planSelection?: PlanSelection;
+  planTextOnly?: boolean;
   showTypingIndicator: boolean;
   tabId: string;
   onFallback?: (notice: string) => void;
@@ -101,20 +108,23 @@ export async function streamAssistantResponse({
         ...(repoPath ? { repoPath } : {}),
       })
     : JSON.stringify({
-        model: model.id,
+        model: model.provider === 'chatgpt' ? model.id.replace(/^chatgpt:/, '') : model.id,
         provider: model.provider,
         messages: [...recentMessages, { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') }],
         approvedTools: [...approvedToolsSet],
         ...(disableTools ? { disableTools: true } : {}),
+        ...(model.provider === 'chatgpt' && planSelection ? { planAccountId: planSelection.accountId, planGeneration: planSelection.generation, planDesktopEpoch: planSelection.desktopEpoch } : {}),
+        ...(model.provider === 'chatgpt' && planTextOnly ? { planTextOnly: true } : {}),
       });
 
   let response: Response | null = null;
-  const retryDelays = [800, 1800];
+  const retryDelays = model.provider === 'chatgpt' ? [] : [800, 1800];
+  const accountHeaders = model.provider === 'chatgpt' ? await planAccountHeaders() : {};
   for (let attempt = 0; attempt < retryDelays.length + 1; attempt += 1) {
     try {
       response = await fetchWithLongLivedBudget(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId, ...buildRepoRequestHeaders(preferredRepo ?? null) },
+        headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId, ...accountHeaders, ...buildRepoRequestHeaders(preferredRepo ?? null) },
         body: requestBody,
         signal: controller.signal,
       });
@@ -148,6 +158,8 @@ export async function streamAssistantResponse({
   let recalledFacts = 0;
   let fallbackNotice = '';
   let typingVisible = showTypingIndicator;
+  let completed = false;
+  let buffer = '';
 
   const hideTypingIndicator = () => {
     if (!typingVisible) return;
@@ -155,126 +167,133 @@ export async function streamAssistantResponse({
     onTypingIndicatorChange(false);
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    for (const line of chunk.split('\n')) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed.type === 'thinking') {
-          hideTypingIndicator();
-          thinkingText += parsed.text;
-          if (!isThinking) {
-            isThinking = true;
-            thinkingSteps.push({ type: 'thinking', label: 'Reasoning through the problem...', status: 'active' });
-          }
-          onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
-          continue;
-        }
-        if (parsed.type === 'content') {
-          if (isThinking) {
-            isThinking = false;
-            thinkingSteps.forEach((step) => { if (step.status === 'active') step.status = 'complete'; });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n'); buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') { completed = true; continue; }
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type === 'thinking') {
+            hideTypingIndicator();
+            thinkingText += parsed.text;
+            if (!isThinking) {
+              isThinking = true;
+              thinkingSteps.push({ type: 'thinking', label: 'Reasoning through the problem...', status: 'active' });
+            }
             onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+            continue;
           }
-          hideTypingIndicator();
-          fullContent += parsed.text;
-          onStreamContent(fullContent);
-          continue;
-        }
-        if (parsed.type === 'usage') {
-          tokens = {
-            input: parsed.inputTokens,
-            output: parsed.outputTokens,
-            ...(typeof parsed.cacheReadTokens === 'number' ? { cacheRead: parsed.cacheReadTokens } : {}),
-            ...(typeof parsed.cacheWriteTokens === 'number' ? { cacheWrite: parsed.cacheWriteTokens } : {}),
-          };
-          costUsd = parsed.costUsd;
-          continue;
-        }
-        if (parsed.type === 'tool_call') {
-          hideTypingIndicator();
-          const existing = toolCalls.find((toolCall) => toolCall.name === parsed.name);
-          if (existing) {
-            existing.status = parsed.status;
-            existing.args = parsed.args ?? existing.args;
-          } else {
-            toolCalls.push({ name: parsed.name, status: parsed.status, args: parsed.args });
+          if (parsed.type === 'content') {
+            if (isThinking) {
+              isThinking = false;
+              thinkingSteps.forEach((step) => { if (step.status === 'active') step.status = 'complete'; });
+              onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+            }
+            hideTypingIndicator();
+            fullContent += parsed.text;
+            onStreamContent(fullContent);
+            continue;
           }
-          onToolCalls([...toolCalls]);
-          const toolLabel = parsed.name === 'search_web' ? `Searching "${parsed.args?.query || ''}"` : parsed.name === 'read_file' ? `Reading ${parsed.args?.path?.split('/').pop() || ''}` : parsed.name === 'search_code' ? `Searching code for "${parsed.args?.query || ''}"` : parsed.name === 'list_files' ? `Listing ${parsed.args?.path || '.'}` : parsed.name === 'create_github_issue' ? 'Creating issue' : parsed.name === 'read_github_issue_or_pr' ? `Reading #${parsed.args?.number || ''}` : parsed.name === 'create_pull_request' ? 'Creating PR' : `Running ${parsed.name}`;
-          const existingStep = thinkingSteps.find((step) => step.label === toolLabel);
-          if (!existingStep) {
-            thinkingSteps.push({ type: parsed.name === 'search_web' || parsed.name === 'search_code' ? 'search' : parsed.name === 'read_file' || parsed.name === 'list_files' ? 'reading' : 'tool', label: toolLabel, status: 'active' });
+          if (parsed.type === 'usage') {
+            tokens = {
+              input: parsed.inputTokens,
+              output: parsed.outputTokens,
+              ...(typeof parsed.cacheReadTokens === 'number' ? { cacheRead: parsed.cacheReadTokens } : {}),
+              ...(typeof parsed.cacheWriteTokens === 'number' ? { cacheWrite: parsed.cacheWriteTokens } : {}),
+            };
+            costUsd = typeof parsed.costUsd === 'number' ? parsed.costUsd : undefined;
+            continue;
           }
-          onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
-          continue;
-        }
-        if (parsed.type === 'tool_result') {
-          const existing = toolCalls.find((toolCall) => toolCall.name === parsed.name);
-          if (existing) {
-            existing.status = 'done';
-            existing.preview = parsed.preview;
-          }
-          onToolCalls([...toolCalls]);
-          const toolStep = [...thinkingSteps].reverse().find((step) => step.status === 'active' && step.type !== 'thinking');
-          if (toolStep) toolStep.status = 'complete';
-          onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
-          continue;
-        }
-        if (parsed.type === 'memory_recall') {
-          recalledFacts = parsed.factCount ?? 0;
-          if (recalledFacts > 0) {
-            thinkingSteps.push({ type: 'search', label: `Recalled ${recalledFacts} memor${recalledFacts === 1 ? 'y' : 'ies'} from Cortex`, status: 'complete' });
+          if (parsed.type === 'tool_call') {
+            hideTypingIndicator();
+            const existing = toolCalls.find((toolCall) => toolCall.name === parsed.name);
+            if (existing) {
+              existing.status = parsed.status;
+              existing.args = parsed.args ?? existing.args;
+            } else {
+              toolCalls.push({ name: parsed.name, status: parsed.status, args: parsed.args });
+            }
+            onToolCalls([...toolCalls]);
+            const toolLabel = parsed.name === 'search_web' ? `Searching "${parsed.args?.query || ''}"` : parsed.name === 'read_file' ? `Reading ${parsed.args?.path?.split('/').pop() || ''}` : parsed.name === 'search_code' ? `Searching code for "${parsed.args?.query || ''}"` : parsed.name === 'list_files' ? `Listing ${parsed.args?.path || '.'}` : parsed.name === 'create_github_issue' ? 'Creating issue' : parsed.name === 'read_github_issue_or_pr' ? `Reading #${parsed.args?.number || ''}` : parsed.name === 'create_pull_request' ? 'Creating PR' : `Running ${parsed.name}`;
+            const existingStep = thinkingSteps.find((step) => step.label === toolLabel);
+            if (!existingStep) {
+              thinkingSteps.push({ type: parsed.name === 'search_web' || parsed.name === 'search_code' ? 'search' : parsed.name === 'read_file' || parsed.name === 'list_files' ? 'reading' : 'tool', label: toolLabel, status: 'active' });
+            }
             onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+            continue;
           }
-          continue;
-        }
-        if (parsed.type === 'approval_required') {
-          const isTerminal = parsed.name === 'run_terminal_command';
-          onPendingApproval({
-            id: typeof parsed.id === 'string' ? parsed.id : undefined,
-            name: parsed.name,
-            args: parsed.args,
-            summary: parsed.summary,
-            editable: parsed.editable ?? isTerminal,
-            diff: parsed.diff,
-          }, isTerminal ? String(parsed.args?.command || '') : undefined);
-          continue;
-        }
-        if (parsed.type === 'sources') {
-          sources.push(...(parsed.sources ?? []));
-          continue;
-        }
-        if (parsed.type === 'fallback') {
-          const originalLabel = parsed.originalModelLabel
-            ?? MODELS.find((entry) => entry.id === parsed.originalModel)?.label
-            ?? parsed.originalModel;
-          const fallbackLabel = parsed.fallbackModelLabel
-            ?? MODELS.find((entry) => entry.id === parsed.fallbackModel)?.label
-            ?? parsed.fallbackModel;
-          fallbackNotice = `${originalLabel} unavailable — using ${fallbackLabel}`;
-          onFallback?.(fallbackNotice);
-          continue;
-        }
-        if (parsed.type === 'error') {
-          throw new Error(parsed.message);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name !== 'SyntaxError' && error.message !== 'Unexpected') {
-          throw error;
-        }
-        if (!line.startsWith('data: [') && !line.startsWith('data: {')) {
-          fullContent += data;
-          onStreamContent(fullContent);
+          if (parsed.type === 'tool_result') {
+            const existing = toolCalls.find((toolCall) => toolCall.name === parsed.name);
+            if (existing) {
+              existing.status = 'done';
+              existing.preview = parsed.preview;
+            }
+            onToolCalls([...toolCalls]);
+            const toolStep = [...thinkingSteps].reverse().find((step) => step.status === 'active' && step.type !== 'thinking');
+            if (toolStep) toolStep.status = 'complete';
+            onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+            continue;
+          }
+          if (parsed.type === 'memory_recall') {
+            recalledFacts = parsed.factCount ?? 0;
+            if (recalledFacts > 0) {
+              thinkingSteps.push({ type: 'search', label: `Recalled ${recalledFacts} memor${recalledFacts === 1 ? 'y' : 'ies'} from Cortex`, status: 'complete' });
+              onThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+            }
+            continue;
+          }
+          if (parsed.type === 'approval_required') {
+            const isTerminal = parsed.name === 'run_terminal_command';
+            onPendingApproval({
+              id: typeof parsed.id === 'string' ? parsed.id : undefined,
+              name: parsed.name,
+              args: parsed.args,
+              summary: parsed.summary,
+              editable: parsed.editable ?? isTerminal,
+              diff: parsed.diff,
+            }, isTerminal ? String(parsed.args?.command || '') : undefined);
+            continue;
+          }
+          if (parsed.type === 'sources') {
+            sources.push(...(parsed.sources ?? []));
+            continue;
+          }
+          if (parsed.type === 'fallback') {
+            const originalLabel = parsed.originalModelLabel
+              ?? MODELS.find((entry) => entry.id === parsed.originalModel)?.label
+              ?? parsed.originalModel;
+            const fallbackLabel = parsed.fallbackModelLabel
+              ?? MODELS.find((entry) => entry.id === parsed.fallbackModel)?.label
+              ?? parsed.fallbackModel;
+            fallbackNotice = `${originalLabel} unavailable — using ${fallbackLabel}`;
+            onFallback?.(fallbackNotice);
+            continue;
+          }
+          if (parsed.type === 'error') {
+            throw new Error(parsed.message);
+          }
+        } catch (error) {
+          if (model.provider === 'chatgpt' && error instanceof SyntaxError) throw new Error('The ChatGPT plan response could not be read. No other billing route was used.');
+          if (error instanceof Error && error.name !== 'SyntaxError' && error.message !== 'Unexpected') {
+            throw error;
+          }
+          if (!line.startsWith('data: [') && !line.startsWith('data: {')) {
+            fullContent += data;
+            onStreamContent(fullContent);
+          }
         }
       }
     }
+  } finally {
+    await reader.cancel().catch(() => {});
   }
+  if (model.provider === 'chatgpt' && !completed) throw new Error('The ChatGPT plan response ended before completion. No other billing route was used.');
 
   const cleanContent = fullContent.replace(/^I'll use the \w+ tool[^\n]*\n*/gm, '').replace(/^I'll use the \w+ tool[^\n]*/gm, '').replace(/^Let me use[^\n]*tool[^\n]*\n*/gm, '').trim();
   const seenSources = new Set<string>();
@@ -293,6 +312,7 @@ export async function streamAssistantResponse({
       model: model.label,
       tokens,
       costUsd,
+      ...(model.provider === 'chatgpt' ? { inferenceRoute: { provider: 'chatgpt-plan' as const, billing: 'subscription' as const, allowanceUse: 'unknown' as const, meter: 'provider-tokens' as const } } : {}),
       timestamp: Date.now(),
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       sources: uniqueSources.length > 0 ? uniqueSources : undefined,

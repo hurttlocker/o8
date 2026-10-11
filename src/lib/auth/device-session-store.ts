@@ -3,6 +3,8 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { mutateAccountState, withSynchronousAccountStateLease } from './account-state';
+import { removeAccountFile, writeAccountFile } from './account-state-files';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface DeviceSession {
@@ -58,8 +60,10 @@ function writePrivateRecord(target: string, record: unknown): void {
 }
 
 export function writeDeviceSession(session: DeviceSession): void {
-  writePrivateRecord(sessionPath(), session);
-  generation += 1;
+  mutateAccountState(() => {
+    writeAccountFile(sessionPath(), `${JSON.stringify(session)}\n`);
+    generation += 1;
+  });
 }
 
 function pendingRevokePath(): string {
@@ -97,10 +101,12 @@ export function readPendingDeviceRevokes(): string[] {
  * which the server treats as reuse, so the token is retired instead.
  */
 export function readUsableDeviceSession(): DeviceSession | null {
-  const session = readDeviceSession();
-  if (!session || !readPendingDeviceRevokes().includes(session.token)) return session;
-  deleteDeviceSession();
-  return null;
+  return withSynchronousAccountStateLease(() => {
+    const session = readDeviceSession();
+    if (!session || !readPendingDeviceRevokes().includes(session.token)) return session;
+    deleteDeviceSession();
+    return null;
+  });
 }
 
 export function queueDeviceRevoke(token: string): void {
@@ -114,8 +120,10 @@ export function removePendingDeviceRevoke(token: string): void {
 }
 
 export function deleteDeviceSession(): void {
-  generation += 1;
-  rmSync(sessionPath(), { force: true });
+  mutateAccountState(() => {
+    removeAccountFile(sessionPath());
+    generation += 1;
+  });
 }
 
 function handoffPath(): string {

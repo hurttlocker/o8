@@ -22,6 +22,7 @@ export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSet
   { value: 'openclaw', label: 'OpenClaw', detail: 'Governed openclaw orchestrator — dispatches Codex workers through o8.' },
   { value: 'hermes', label: 'Hermes', detail: 'Hermes via ACP — needs Hermes installed + a model provider configured (hermes setup).' },
   { value: 'collide', label: 'Collide', detail: 'Mixture-of-Agents: Claude + Codex propose independently, Claude synthesizes + does the work — the upgraded Claude.' },
+  { value: 'pi', label: 'Pi (built-in)', detail: 'Bundled Pi on the o8 model allowance, with the full o8 command set. Preview; needs no other agent CLI.' },
 ];
 
 export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'power-user'; label: string; value: number }> = [

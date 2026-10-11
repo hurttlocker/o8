@@ -103,7 +103,8 @@ export async function GET(
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to read packet events.';
+    console.error('[api] lanes/[id]/events failed:', error);
+    const message = 'Unable to read packet events.';
     console.error(`[packet-tail] read failed: ${message}`);
     return NextResponse.json(
       { ok: false, error: { code: 'packet_tail_failed', message } },

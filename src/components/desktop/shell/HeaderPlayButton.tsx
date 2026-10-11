@@ -6,6 +6,7 @@ import { WORKSPACE_TAB_DRAG_TYPE, type WorkspaceTabDragKind } from '@/lib/tiles/
 
 interface HeaderPlayButtonProps {
   onSpawnChat?: () => void;
+  onSpawnChatGPTPlan?: () => void;
   onSpawnTerminal?: () => void;
   onOpenSavedMachines?: () => void;
   onSplitTab?: (kind: 'chat' | 'terminal', direction: 'right' | 'below') => void;
@@ -60,6 +61,7 @@ function HeaderPlayMenuItem({ label, onClick, dragKind, onDragEnd }: {
 
 export function HeaderPlayButton({
   onSpawnChat,
+  onSpawnChatGPTPlan,
   onSpawnTerminal,
   onOpenSavedMachines,
   onSplitTab,
@@ -168,6 +170,9 @@ export function HeaderPlayButton({
       >
         {onSpawnChat ? (
           <HeaderPlayMenuItem label="Chat" onClick={pick(onSpawnChat)} dragKind="chat" onDragEnd={() => setOpen(false)} />
+        ) : null}
+        {onSpawnChatGPTPlan ? (
+          <HeaderPlayMenuItem label="ChatGPT plan chat" onClick={pick(onSpawnChatGPTPlan)} />
         ) : null}
         {onSpawnTerminal ? (
           <HeaderPlayMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} dragKind="terminal" onDragEnd={() => setOpen(false)} />

@@ -1,8 +1,10 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { mutateAccountState } from '@/lib/auth/account-state';
+import { removeAccountFile, writeAccountFile } from '@/lib/auth/account-state-files';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
@@ -26,14 +28,9 @@ import { getDataDir } from '@/lib/data-dir-migration';
  *      left the prior user's token, a missing/legacy owner, a fresh sign-in that
  *      wiped state) FAILS CLOSED.
  *
- * RESIDUAL (documented, not yet closed): the anchor is process-global, not
- * request-bound. o8 in production runs ONE bundled Next server per OS user, with
- * ~/.o8 at 0700, so "the currently signed-in user" is unambiguous. The only way
- * to see A served B's token is TWO Next processes sharing CORTEX_IDE_DATA_DIR
- * with TWO different users signed in at once (a dev-bridge / shared-account
- * oddity, not a real deployment). Fully closing it needs the panel routes to
- * carry the caller's Clerk identity to the broker — a larger change tracked
- * separately. Everything a single-process desktop can hit fails closed.
+ * Account transitions and token refresh commits share the installation account
+ * lease. Broker reads still compare the token owner to the active desktop owner;
+ * request-bound authorization remains the responsibility of each broker route.
  */
 
 export interface ManagedGithubState {
@@ -65,13 +62,8 @@ function signInEpochPath(): string {
   return join(dataDir(), 'github-signin-epoch');
 }
 
-// ── Sign-in generation guard (audit #2, single-process late-response race) ─────
-// A fire-and-forget managed refresh for user B can complete AFTER B signs out
-// and A signs in — and would then blindly write B's identity + token, so the
-// broker serves B's token to A. Each fresh sign-in bumps this epoch; a refresh
-// captures it at start and only writes if it's unchanged, so a stale in-flight
-// refresh is dropped. Node is single-threaded, so the capture→check→write is
-// atomic within the process (the cross-process case stays the documented residual).
+// Fresh sign-in changes this identity generation. Async refresh commits also
+// compare the durable account journal while holding its installation-wide lease.
 
 export function readSignInEpoch(): string | null {
   try {
@@ -83,14 +75,7 @@ export function readSignInEpoch(): string | null {
 }
 
 export function bumpSignInEpoch(): void {
-  try {
-    const p = signInEpochPath();
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, `${randomUUID()}\n`, { mode: 0o600 });
-    hardenPermissions(p);
-  } catch (err) {
-    console.error('[github-managed] failed to bump sign-in epoch:', err);
-  }
+  mutateAccountState(() => writeAccountFile(signInEpochPath(), `${randomUUID()}\n`));
 }
 
 // ── Active-identity anchor: who is signed into this desktop right now ──────────
@@ -108,23 +93,12 @@ export function readActiveIdentity(): string | null {
 }
 
 export function writeActiveIdentity(clerkUserId: string): void {
-  if (!clerkUserId) return;
-  try {
-    const p = activeIdentityPath();
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, `${clerkUserId}\n`, { mode: 0o600 });
-    hardenPermissions(p);
-  } catch (err) {
-    console.error('[github-managed] failed to persist active identity:', err);
-  }
+  if (!clerkUserId.trim()) throw new Error('Active identity is required.');
+  mutateAccountState(() => writeAccountFile(activeIdentityPath(), `${clerkUserId}\n`));
 }
 
 export function clearActiveIdentity(): void {
-  try {
-    rmSync(activeIdentityPath(), { force: true });
-  } catch {
-    /* already gone */
-  }
+  mutateAccountState(() => removeAccountFile(activeIdentityPath()));
 }
 
 // ── Managed token state ───────────────────────────────────────────────────────
@@ -168,38 +142,11 @@ export function readManagedGithubToken(): {
   };
 }
 
-/** Best-effort tighten to 0600 — writeFileSync's mode does NOT repair the perms
- * of a pre-existing looser file (audit #7). chmod does. */
-function hardenPermissions(p: string): void {
-  try {
-    chmodSync(p, 0o600);
-  } catch {
-    /* non-POSIX or race — the create-time mode still applies */
-  }
-}
-
 export function writeManagedGithubState(state: Omit<ManagedGithubState, 'fetchedAt'>): void {
-  try {
-    const p = statePath();
-    mkdirSync(dirname(p), { recursive: true });
-    // Atomic write: a full token write must never be observed half-flushed by a
-    // concurrent reader (two Next processes can race the 15-min focus sync).
-    const tmp = `${p}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ ...state, fetchedAt: new Date().toISOString() }, null, 2), {
-      mode: 0o600,
-    });
-    hardenPermissions(tmp);
-    renameSync(tmp, p);
-    hardenPermissions(p);
-  } catch (err) {
-    console.error('[github-managed] failed to persist state:', err);
-  }
+  mutateAccountState(() => writeAccountFile(statePath(),
+    JSON.stringify({ ...state, fetchedAt: new Date().toISOString() }, null, 2)));
 }
 
 export function clearManagedGithubState(): void {
-  try {
-    rmSync(statePath(), { force: true });
-  } catch {
-    /* already gone */
-  }
+  mutateAccountState(() => removeAccountFile(statePath()));
 }

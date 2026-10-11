@@ -470,6 +470,8 @@ export class WorktreeManager {
 
       await this.saveMeta(taskId, {
         id: taskId,
+        packetId: opts.packetId,
+        laneId: opts.laneId,
         agentType: 'claude-code',
         baseBranch,
         createdAt: now,
@@ -531,6 +533,8 @@ export class WorktreeManager {
     // than an identity-less workspace that cleanup must refuse forever.
     await this.saveMeta(taskId, {
       id: taskId,
+      packetId: opts.packetId,
+      laneId: opts.laneId,
       agentType: opts.agentType,
       baseBranch,
       createdAt: now,
@@ -735,6 +739,8 @@ export class WorktreeManager {
     );
     await this.saveMeta(taskId, {
       id: taskId,
+      packetId: opts.packetId,
+      laneId: opts.laneId,
       agentType: opts.agentType,
       baseBranch,
       createdAt: now,

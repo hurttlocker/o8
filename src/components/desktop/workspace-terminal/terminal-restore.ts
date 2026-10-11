@@ -291,6 +291,13 @@ export async function computeRestoredTabs(
       continue;
     }
 
+    if (tabKind === 'chatgpt-plan') {
+      const tabId = claimWorkspaceTabId('chatgpt-plan', seenTabIds, savedTab.id);
+      restoredTabs.push({ id: tabId, label: savedTab.label || 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null, createdAt: now, lastActivity: now });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
+
     if (tabKind === 'llm-chat') {
       const tabId = claimWorkspaceTabId('llm-chat', seenTabIds, savedTab.id);
       restoredTabs.push({
@@ -668,7 +675,7 @@ export function canPreserveScopedTabs(
   // reconstruction (the badge "doesn't survive" per WorkspaceChatPane). Without
   // this, a scope oscillation cleared the tab and the transcript vanished into
   // the empty picker.
-  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat');
+  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat' || tab.kind === 'chatgpt-plan');
   if (hasChatSessionTabs) return true;
   // Same doctrine for the operator's OWN conversations (GQXEZD, 2026-07-16):
   // an orchestrator tab bound to a thread — or one the user JUST spawned

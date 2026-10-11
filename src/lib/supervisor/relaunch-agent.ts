@@ -58,6 +58,7 @@ export async function relaunchSupervisedAgent(
     root: root.root, surfacePrefix: root.marker, invalidateFleetCache: () => {},
   });
   const session = await io.findSession(retryOfSurfaceId).catch(() => null);
+  if (session?.executionPolicy !== undefined) return hold('this worker has a single-attempt execution limit');
   if (!session || session.laneId !== lane.id || session.packetId !== (lane.packetId ?? undefined)
     || session.cwd !== lane.worktreePath || session.activeRun) {
     return hold('the original stopped session cannot be verified');
