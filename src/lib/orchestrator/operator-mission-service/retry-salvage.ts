@@ -8,6 +8,8 @@ import { MCP_DISPATCH_TILE_SENTINEL, type OrchestratorPacket } from '@/lib/orche
 import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { probeLaneSessionAlive } from '@/lib/lane/owned-session-liveness';
+import { captureRetrySalvageRegistryOwner, publishRetrySalvageRegistryOwner, assertRetrySalvageRegistryOwner, type RetrySalvageRegistryOwner } from './retry-salvage-publication';
+import { ResetRetrySalvagePublicationError, ResetStateChangedError } from './reset-errors';
 import type { Lane } from '@/lib/lane/types';
 
 export interface RetrySalvage {
@@ -20,6 +22,9 @@ export interface RetrySalvage {
 }
 
 interface RetrySalvageGuardFields {
+  registryOwner?: RetrySalvageRegistryOwner | null;
+  storageAdmissionEpoch?: number;
+  attemptCount?: number;
   candidateLane: Lane | null;
   laneIds: string[];
   generation: string;
@@ -46,7 +51,7 @@ export interface RetrySalvageBindCheckpoint {
   worktreePath: string;
 }
 
-export class RetrySalvageStateChangedError extends Error {}
+export class RetrySalvageStateChangedError extends ResetStateChangedError {}
 export class RetrySalvageKillUnconfirmedError extends Error {}
 
 export function retrySalvageGenerationSource(generation: string): string {
@@ -66,6 +71,8 @@ function buildRetrySalvageGuard(
   const generation = requestedGeneration?.trim() || randomUUID();
   return {
     ...location,
+    storageAdmissionEpoch: packet.storageAdmissionEpoch ?? 0,
+    attemptCount: packet.attemptCount ?? 0,
     candidateLane,
     laneIds,
     generation,
@@ -104,7 +111,9 @@ function markPacketRetrySalvageHeld(packet: OrchestratorPacket, guard: RetrySalv
 }
 
 function packetMatchesRetrySalvageGuard(packet: OrchestratorPacket, guard: RetrySalvageGuard): boolean {
-  return packet.queueState === 'held'
+  return (guard.storageAdmissionEpoch === undefined || (packet.storageAdmissionEpoch ?? 0) === guard.storageAdmissionEpoch)
+    && (guard.attemptCount === undefined || (packet.attemptCount ?? 0) === guard.attemptCount)
+    && packet.queueState === 'held'
     && packet.operatorStopped === true
     && packet.releaseStatePayload?.source === retrySalvageGenerationSource(guard.generation)
     && (packet.lane?.laneId ?? null) === guard.laneId
@@ -129,6 +138,7 @@ async function holdPacketForRetrySalvageUnlocked(
     const guardedLane = retrySalvageCandidateForPacket(target, packetLanes);
     const laneIds = packetLanes.map((lane) => lane.id);
     const guard = buildRetrySalvageGuard(target, { store: 'current', missionId }, guardedLane, laneIds, requestedGeneration);
+    guard.registryOwner = captureRetrySalvageRegistryOwner(fresh, target);
     markPacketRetrySalvageHeld(target, guard);
     return guard;
   });
@@ -439,15 +449,28 @@ async function bindCommittedRetryWorkUnlocked(
 
   if (guard.store === 'current') {
     const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-    const { result } = await withLockedState((fresh) => {
+    const { result } = await withLockedState(async (fresh) => {
       if (fresh.missionId !== guard.missionId) return null;
       const target = fresh.packets.find((packet) => packet.id === input.packetId);
       if (!target) {
         throw new RetrySalvageStateChangedError(`Packet ${input.packetId} changed while retry salvage was probing; committed work was left untouched.`);
       }
-      return bind(target);
+      assertRetrySalvageRegistryOwner(guard.missionId, input.packetId, guard.registryOwner);
+      const salvage = bind(target);
+      try {
+        await publishRetrySalvageRegistryOwner(guard.missionId, target, guard.registryOwner);
+        return { salvage };
+      } catch {
+        target.queueState = 'held';
+        target.operatorStopped = true;
+        target.blockedReason = 'retry_salvage_publication_failed';
+        return { error: new ResetRetrySalvagePublicationError(
+          'Committed work is preserved in its review lane, but its durable mission owner could not be published. The packet remains held; reconcile its owner before dispatching.',
+        ) };
+      }
     });
-    if (result) return result;
+    if (result?.error) throw result.error;
+    if (result?.salvage) return result.salvage;
   }
 
   const { result } = await withMissionRegistryState(guard.missionId, (fresh) => {

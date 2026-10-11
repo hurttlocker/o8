@@ -19,3 +19,7 @@ export class ResetCleanupFailedError extends Error {
     this.name = 'ResetCleanupFailedError';
   }
 }
+
+export class ResetStateChangedError extends Error {}
+
+export class ResetRetrySalvagePublicationError extends Error {}

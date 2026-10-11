@@ -664,6 +664,14 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/retry-salvage-publication-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/scheduling.test.ts",
       "reasons": [
         "child-process",
