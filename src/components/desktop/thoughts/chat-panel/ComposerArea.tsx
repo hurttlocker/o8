@@ -10,6 +10,7 @@ import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
+import { transcriptRunningTools } from '../../transcript/activity';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import type { ComposerActivityPacket } from '@/lib/orchestrator/composer-activity';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
@@ -37,6 +38,7 @@ import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
   activeComposer?: boolean;
+  activityContent?: React.ReactNode;
   inputLabel?: string;
   placeholder?: string;
   literalInput?: boolean;
@@ -121,6 +123,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   displayWaiting,
   chatMessages,
   workerPackets,
+  activityContent,
   activeTargetLabel,
   targetAgentExists,
   enhancing,
@@ -205,38 +208,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     onBackendChange,
     onEffortChange,
   });
-  const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
-    if (!isOrchestratorMode) return [];
-    // Scan the latest assistant message for any tool calls still marked as
-    // running. This is what the sticky status bar uses to stay visible even
-    // if orchStream.status flickers — if there are live tool calls, the user
-    // should see the bar regardless of the top-level status flag.
-    for (let i = chatMessages.length - 1; i >= 0; i--) {
-      const msg = chatMessages[i];
-      if (msg.role !== 'assistant') continue;
-      const tools = msg.toolCalls ?? [];
-      const running = tools.filter((t) => t.status === 'running' || t.status === 'calling');
-      if (running.length > 0) {
-        // Stale-turn gate (Q's iMac, 2026-07-17: "225:16 · 1 running" — a
-        // dead turn from a previous app run restores with a tool call whose
-        // completion event never landed, and the bar counted forever while
-        // the composer sat locked in "Queue for next turn"). A genuinely
-        // live turn keeps the stream busy (displayWaiting) — including
-        // durable-turn reattach — and stream flicker gaps are seconds, so an
-        // idle stream plus a message older than the ceiling means the tool
-        // is dead history, not work. Server-authoritative healing (#8) is
-        // the structural fix; this stops the lie at the surface.
-        const STALE_TURN_MS = 30 * 60 * 1000;
-        const stale = !displayWaiting
-          && typeof msg.timestamp === 'number'
-          && now - msg.timestamp > STALE_TURN_MS;
-        return stale ? [] : running;
-      }
-      // Stop at the most recent assistant message — older tool calls are done.
-      break;
-    }
-    return [];
-  }, [chatMessages, displayWaiting, isOrchestratorMode, now]);
+  const runningTools = useMemo<MobileTranscriptToolCall[]>(() => isOrchestratorMode
+    ? transcriptRunningTools(chatMessages, displayWaiting, now) : [], [chatMessages, displayWaiting, isOrchestratorMode, now]);
   const latestUserEntry = useMemo(() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       if (chatMessages[i].role === 'user') return chatMessages[i];
@@ -368,6 +341,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           awaitingReply={awaitingReply}
         />
       ) : null}
+      {activityContent}
       {sendBufferStatus}
       <div style={{ position: 'relative' }}>
         <SlashCommandPicker

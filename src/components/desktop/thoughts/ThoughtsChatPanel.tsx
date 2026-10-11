@@ -52,7 +52,7 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
 import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
-import { packetsForOrchestratorThread, SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
+import { packetsForOrchestratorThread, SwarmStatusCard } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
@@ -83,6 +83,8 @@ import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
+import { TranscriptActivity } from '../transcript/TranscriptActivity';
+import { transcriptScouts } from '../transcript/activity';
 import { useTurnSummaryReceipt } from './chat-panel/useTurnSummaryReceipt';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
@@ -2105,23 +2107,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // under the composer is the number of rows on screen (#2148).
   const threadWorkerPackets = packetsForOrchestratorThread(missionState?.packets ?? [], threadId);
 
-  const orchestratorScouts: SwarmScoutView[] = (() => {
-    if (!isOrchestratorMode) return [];
-    const assistants = displayMessages.filter((message) => message.role === 'assistant');
-    const lastAssistant = assistants[assistants.length - 1];
-    const tasks = (lastAssistant?.toolCalls ?? []).filter(
-      (tool) => tool.name === 'Task' || tool.name.toLowerCase() === 'task',
-    );
-    return tasks.map((tool, index) => {
-      const args = tool.args ?? {};
-      const description = typeof args.description === 'string' ? args.description.trim() : '';
-      const subagentType = typeof args.subagent_type === 'string' ? args.subagent_type.trim() : '';
-      const label = description || subagentType || `Scout ${index + 1}`;
-      const status: SwarmScoutView['status'] =
-        tool.status === 'done' ? 'done' : displayWaiting ? 'running' : 'done';
-      return { id: tool.id ?? `scout-${index}`, label, status };
-    });
-  })();
+  const orchestratorScouts = isOrchestratorMode ? transcriptScouts(displayMessages, displayWaiting) : [];
   const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
   return (
     <div
@@ -2249,6 +2235,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayWaiting={displayWaiting}
         chatMessages={displayMessages}
         workerPackets={threadWorkerPackets}
+        activityContent={isOrchestratorMode ? <TranscriptActivity entries={displayMessages} packets={threadWorkerPackets}
+          busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onLaunchPacket ? packet => { void onLaunchPacket(packet); } : undefined} /> : undefined}
         activeTargetLabel={activeTargetLabel}
         targetAgentExists={Boolean(targetAgent)}
         // Feed the EFFECTIVE transcript (orchestrator streams live into

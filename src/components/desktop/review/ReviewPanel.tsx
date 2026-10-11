@@ -221,9 +221,12 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const denseChangeset = visible.length > BIG_CHANGESET;
 
   useEffect(() => {
-    if (!selectedFile) return;
-    jumpToFile(selectedFile);
-  }, [jumpToFile, selectedFile]);
+    if (!selectedFile || changes.loading) return;
+    const root = diffRepoPath?.replace(/\/$/, '');
+    const path = root && selectedFile.startsWith(`${root}/`) ? selectedFile.slice(root.length + 1) : selectedFile;
+    const row = reviewRowPathForSourcePath(path, changedFilesKey.split('\n'));
+    if (row) jumpToFile(row);
+  }, [changedFilesKey, changes.loading, diffRepoPath, jumpToFile, selectedFile]);
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg)', overflow: 'hidden' }}>
