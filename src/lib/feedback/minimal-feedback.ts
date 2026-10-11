@@ -26,7 +26,8 @@ export async function sendMinimalFeedback(
   const reportId = newReportId();
   const selectedMetadata = body.includeMetadata === true ? metadata : undefined;
   const fields = [
-    ...(email ? [{ name: 'Email', value: email, inline: true }] : []),
+    // The existing relay preserves this contact field; unknown field names are dropped.
+    ...(email ? [{ name: 'Reported by', value: `Reply email (provided): ${email}`, inline: true }] : []),
     ...(selectedMetadata ? [
       { name: 'Version', value: selectedMetadata.version, inline: true },
       { name: 'OS', value: selectedMetadata.os, inline: true },
