@@ -125,7 +125,7 @@ export function PluginTaskReview() {
 
   return (
     <section style={{ marginBottom: 28 }} aria-label="ChatGPT task review">
-      <SettingsGroup header="ChatGPT tasks" footnote="ChatGPT can prepare a task. This desktop starts one native worker only after you review and launch it. Worker usage belongs to the selected provider; savings have not been measured.">
+      <SettingsGroup header="ChatGPT tasks" footnote="ChatGPT can prepare a task. This desktop starts one worker only after you review and launch it. Worker usage belongs to the selected provider; savings have not been measured.">
         <div style={rowStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span>Review held tasks</span>
@@ -144,7 +144,8 @@ export function PluginTaskReview() {
               <RamsButton variant="ghost" disabled={Boolean(busy) || !draft.sessionCurrent || !hasAttempt} onClick={() => { void control('inspect', target); }}>Inspect attempt</RamsButton>
             </div>
             <p>Read only. One attempt. No automatic retry, fallback, setup, or mission replacement. Review is required.</p>
-            <p>{draft.contract.runtime} · {draft.contract.model} · {draft.contract.effort} effort · native provider login</p>
+            <p>{draft.contract.runtime} · {draft.contract.model} · {draft.contract.provider ? 'OpenRouter API · provider default reasoning' : `${draft.contract.effort} effort · native provider login`}</p>
+            {draft.contract.provider ? <p>Up to {draft.contract.provider.maxRequests} model requests, {draft.contract.provider.maxOutputTokens.toLocaleString()} output tokens per request and 90 seconds. Stops after reported cost reaches ${draft.contract.provider.costUsd.toFixed(2)}; the last request can exceed that amount. Unknown cost holds further requests.</p> : null}
             <p>Computer: {draft.contract.machineId}<br />Project: {draft.contract.projectId}<br />Repository: {draft.contract.repoId}</p>
             <p>Allowed files: {draft.contract.allowedFiles.join(', ')}</p>
             <p>Acceptance evidence: {draft.contract.evidence.join('; ')}</p>

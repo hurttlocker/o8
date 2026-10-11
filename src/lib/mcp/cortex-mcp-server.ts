@@ -21,6 +21,7 @@ import './orphan-exit-bootstrap';
 // header for the full rationale.
 import './neutralize-server-only';
 
+import { apiError, McpInputError, O8ApiError, safeErrorText } from '@/lib/mcp/api-error';
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -609,24 +610,26 @@ const TOOLS: McpTool[] = [
 // ── Tool Handlers ──
 
 async function apiFetch(path: string, options?: RequestInit): Promise<unknown> {
-  const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${WS_TOKEN}`,
       ...(options?.headers ?? {}),
     },
-  });
-  const body = await res.text();
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText} from ${path}${body ? `: ${body.slice(0, 500)}` : ''}`);
-  }
-  if (!body) return {};
+  }).catch((error) => { throw apiError(path, null, '', error); });
   try {
-    return JSON.parse(body);
-  } catch {
-    throw new Error(`Non-JSON response from ${path} (HTTP ${res.status}): ${body.slice(0, 200)}`);
+    const body = await res.text();
+    if (!res.ok) throw apiError(path, res.status, body);
+    if (!body) return {};
+    try {
+      return JSON.parse(body);
+    } catch (error) {
+      throw apiError(path, res.status, body, error);
+    }
+  } catch (error) {
+    if (error instanceof O8ApiError) throw error;
+    throw apiError(path, res.status, '', error);
   }
 }
 
@@ -665,7 +668,7 @@ async function handleFleetStatus(args: Record<string, unknown>): Promise<McpTool
     }));
     return jsonResult({ agentCount: agents.length, agents: summary });
   } catch (err) {
-    return textResult(`Failed to fetch fleet status: ${err}`, true);
+    return textResult(`Failed to fetch fleet status: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -687,7 +690,7 @@ async function handleListIssues(args: Record<string, unknown>): Promise<McpToolR
     }));
     return jsonResult({ count: issues.length, returned: summary.length, repo: data.repo, issues: summary });
   } catch (err) {
-    return textResult(`Failed to fetch issues: ${err}`, true);
+    return textResult(`Failed to fetch issues: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -711,7 +714,7 @@ async function handleListPrs(args: Record<string, unknown>): Promise<McpToolResu
     }));
     return jsonResult({ count: prs.length, returned: summary.length, repo: data.repo, prs: summary });
   } catch (err) {
-    return textResult(`Failed to fetch PRs: ${err}`, true);
+    return textResult(`Failed to fetch PRs: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -731,7 +734,7 @@ async function handleCiStatus(args: Record<string, unknown>): Promise<McpToolRes
     }));
     return jsonResult({ count: runs.length, repo: data.repo, runs: summary });
   } catch (err) {
-    return textResult(`Failed to fetch CI status: ${err}`, true);
+    return textResult(`Failed to fetch CI status: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -761,7 +764,7 @@ async function handleReadPackets(): Promise<McpToolResult> {
       updatedAt: mission.updatedAt,
     });
   } catch (err) {
-    return textResult(`Failed to read packets: ${err}`, true);
+    return textResult(`Failed to read packets: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -781,7 +784,7 @@ async function handleLaneTouches(args: Record<string, unknown>): Promise<McpTool
     const data = await apiFetch(`/api/lanes/touches?${qs.toString()}`) as Record<string, unknown>;
     return jsonResult(data);
   } catch (err) {
-    return textResult(`Failed to read lane touches: ${err}`, true);
+    return textResult(`Failed to read lane touches: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -805,7 +808,7 @@ async function handleUpdatePacket(args: Record<string, unknown>): Promise<McpToo
     const packet = packets.find((p) => p.id === packetId);
     return jsonResult({ ok: true, packet, updatedAt: mission.updatedAt });
   } catch (err) {
-    return textResult(`Failed to update packet: ${err}`, true);
+    return textResult(`Failed to update packet: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -827,7 +830,7 @@ async function handleListApprovals(args: Record<string, unknown>): Promise<McpTo
     }));
     return jsonResult({ pendingCount: pending.length, approvals: summary });
   } catch (err) {
-    return textResult(`Failed to fetch approvals: ${err}`, true);
+    return textResult(`Failed to fetch approvals: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -856,11 +859,9 @@ async function handleProposeSpec(args: Record<string, unknown>): Promise<McpTool
         note: 'Spec proposal enqueued. The operator must approve before the spec changes; rejecting leaves the spec untouched. Approved updates apply on the NEXT dispatch of the packet, not in-flight agents.',
       });
     }
-    const error = (result.error as Record<string, unknown> | undefined);
-    const message = (error?.message as string) ?? 'unknown error';
-    return textResult(`Propose spec failed: ${message}`, true);
+    return textResult(`Propose spec failed: ${safeErrorText(result)}`, true);
   } catch (err) {
-    return textResult(`Failed to propose spec: ${err}`, true);
+    return textResult(`Failed to propose spec: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -879,9 +880,9 @@ async function handleResolveApproval(args: Record<string, unknown>): Promise<Mcp
     if (result.ok) {
       return jsonResult({ ok: true, resolved: result.resolved, note: result.note });
     }
-    return textResult(`Failed: ${result.error ?? 'unknown error'}`, true);
+    return textResult(`Failed: ${safeErrorText(result)}`, true);
   } catch (err) {
-    return textResult(`Failed to resolve approval: ${err}`, true);
+    return textResult(`Failed to resolve approval: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -897,6 +898,7 @@ async function handleSteerAgent(args: Record<string, unknown>): Promise<McpToolR
       url: `${API_BASE}/api/runtime/action`,
       authorization: `Bearer ${WS_TOKEN}`,
       body: { action: 'steer', surfaceId, message },
+      parseError: (response, payload) => apiError('/api/runtime/action', response.status, JSON.stringify(payload)),
       correlationField: 'clientMutationId',
     });
 
@@ -907,9 +909,9 @@ async function handleSteerAgent(args: Record<string, unknown>): Promise<McpToolR
         note: result.note,
       });
     }
-    return textResult(`Steer failed: ${result.error ?? result.note ?? 'unknown error'}`, true);
+    return textResult(`Steer failed: ${safeErrorText(result)}`, true);
   } catch (err) {
-    return textResult(`Failed to steer agent: ${err}`, true);
+    return textResult(`Failed to steer agent: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -933,7 +935,7 @@ async function handleReadTranscript(args: Record<string, unknown>): Promise<McpT
 
     return jsonResult({ entryCount: entries.length, transcript: entries });
   } catch (err) {
-    return textResult(`Failed to read transcript: ${err}`, true);
+    return textResult(`Failed to read transcript: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -946,15 +948,16 @@ async function handleInterruptAgent(args: Record<string, unknown>): Promise<McpT
       url: `${API_BASE}/api/runtime/action`,
       authorization: `Bearer ${WS_TOKEN}`,
       body: { action: 'interrupt', surfaceId },
+      parseError: (response, payload) => apiError('/api/runtime/action', response.status, JSON.stringify(payload)),
       correlationField: 'clientMutationId',
     });
 
     if (result.ok) {
       return jsonResult({ ok: true, note: result.note });
     }
-    return textResult(`Interrupt failed: ${result.error ?? result.note ?? 'unknown error'}`, true);
+    return textResult(`Interrupt failed: ${safeErrorText(result)}`, true);
   } catch (err) {
-    return textResult(`Failed to interrupt agent: ${err}`, true);
+    return textResult(`Failed to interrupt agent: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -965,7 +968,7 @@ function serversFromDiscreteArgs(args: Record<string, unknown>): ParsedMcpServer
   const transport: 'stdio' | 'http' = transportRaw === 'http' ? 'http' : 'stdio';
   const name = typeof args.name === 'string' ? args.name.trim() : '';
   if (!name) {
-    throw new Error('name is required when configJson is not provided');
+    throw new McpInputError('name is required when configJson is not provided');
   }
 
   const envRecord: Record<string, string> = {};
@@ -981,7 +984,7 @@ function serversFromDiscreteArgs(args: Record<string, unknown>): ParsedMcpServer
   if (transport === 'http') {
     const url = typeof args.url === 'string' ? args.url.trim() : '';
     if (!url) {
-      throw new Error('url is required for transport="http"');
+      throw new McpInputError('url is required for transport="http"');
     }
     return [{
       name,
@@ -995,7 +998,7 @@ function serversFromDiscreteArgs(args: Record<string, unknown>): ParsedMcpServer
 
   const command = typeof args.command === 'string' ? args.command.trim() : '';
   if (!command) {
-    throw new Error('command is required for transport="stdio"');
+    throw new McpInputError('command is required for transport="stdio"');
   }
   const serverArgs = Array.isArray(args.args)
     ? (args.args as unknown[])
@@ -1061,19 +1064,17 @@ async function handleRegisterMcp(args: Record<string, unknown>): Promise<McpTool
           };
 
       try {
-        const res = await fetch(`${API_BASE}/api/setup/mcp-servers`, {
+        const payload = await apiFetch('/api/setup/mcp-servers', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        });
-        const payload = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
-        if (!res.ok || !payload.ok) {
-          failures.push({ name: server.name, error: payload.error ?? `HTTP ${res.status}` });
+        }) as { ok?: boolean };
+        if (!payload.ok) {
+          failures.push({ name: server.name, error: safeErrorText(payload) });
           continue;
         }
         registered.push(server.name);
       } catch (err) {
-        failures.push({ name: server.name, error: err instanceof Error ? err.message : String(err) });
+        failures.push({ name: server.name, error: safeErrorText(err) });
       }
     }
 
@@ -1095,24 +1096,20 @@ async function handleRegisterMcp(args: Record<string, unknown>): Promise<McpTool
     let reloadScheduled = false;
     let reloadError: string | null = null;
     try {
-      const reloadRes = await fetch(`${API_BASE}/api/orchestrator/reload`, {
+      const reloadBody = await apiFetch('/api/orchestrator/reload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           repoPath: REPO_PATH || undefined,
           registered,
           message: registered.length === 1
-            ? `Registered ${registered[0]}. Reloading so the new tools are available…`
-            : `Registered ${registered.length} MCP servers. Reloading so the new tools are available…`,
+            ? `Registered ${registered[0]}. Reloading so the new tools are available...`
+            : `Registered ${registered.length} MCP servers. Reloading so the new tools are available...`,
         }),
-      });
-      const reloadBody = await reloadRes.json().catch(() => ({})) as { ok?: boolean; error?: { message?: string } };
+      }) as { ok?: boolean };
       reloadScheduled = Boolean(reloadBody.ok);
-      if (!reloadScheduled) {
-        reloadError = reloadBody.error?.message ?? `HTTP ${reloadRes.status}`;
-      }
+      if (!reloadScheduled) reloadError = safeErrorText(reloadBody);
     } catch (err) {
-      reloadError = err instanceof Error ? err.message : String(err);
+      reloadError = safeErrorText(err);
     }
 
     return jsonResult({
@@ -1126,7 +1123,7 @@ async function handleRegisterMcp(args: Record<string, unknown>): Promise<McpTool
         : `Registered ${registered.length} MCP servers: ${registered.join(', ')}. ${reloadScheduled ? 'Reloading so the new tools are available — your transcript will resume automatically.' : 'New tools will be available on the next orchestrator turn.'}`,
     });
   } catch (err) {
-    return textResult(`Failed to register MCP server: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to register MCP server: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1169,7 +1166,7 @@ async function handleCreateProject(args: Record<string, unknown>): Promise<McpTo
 
     return jsonResult({ projectId: project.id, slug: project.slug });
   } catch (err) {
-    return textResult(`Failed to create project: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to create project: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1184,7 +1181,7 @@ async function handleAddRepoToProject(args: Record<string, unknown>): Promise<Mc
     addRepoToProject(projectId, repoId, role, 'manual');
     return jsonResult({ ok: true });
   } catch (err) {
-    return textResult(`Failed to add repo: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to add repo: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1198,7 +1195,7 @@ async function handleRemoveRepoFromProject(args: Record<string, unknown>): Promi
     const removed = removeRepoFromProject(projectId, repoId);
     return jsonResult({ ok: removed });
   } catch (err) {
-    return textResult(`Failed to remove repo: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to remove repo: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1216,7 +1213,7 @@ async function handleSetRepoRole(args: Record<string, unknown>): Promise<McpTool
     }
     return jsonResult({ ok: true });
   } catch (err) {
-    return textResult(`Failed to set role: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to set role: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1225,7 +1222,7 @@ async function handleListProjects(): Promise<McpToolResult> {
     const projects = listProjects();
     return jsonResult({ projects });
   } catch (err) {
-    return textResult(`Failed to list projects: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to list projects: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1236,7 +1233,7 @@ async function handleDeleteProject(args: Record<string, unknown>): Promise<McpTo
     const deleted = deleteProject(projectId);
     return jsonResult({ ok: deleted });
   } catch (err) {
-    return textResult(`Failed to delete project: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to delete project: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1247,7 +1244,7 @@ async function handleSuggestProjects(): Promise<McpToolResult> {
     const result = await suggestProjects();
     return jsonResult(result);
   } catch (err) {
-    return textResult(`Failed to compute suggestions: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to compute suggestions: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1256,7 +1253,7 @@ async function handleRefreshProjectSuggestions(): Promise<McpToolResult> {
     const result = await suggestProjects({ force: true });
     return jsonResult(result);
   } catch (err) {
-    return textResult(`Failed to refresh suggestions: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to refresh suggestions: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1289,7 +1286,7 @@ async function handleCreateProjectFromSuggestion(args: Record<string, unknown>):
       memberCount: suggestion.repoIds.length,
     });
   } catch (err) {
-    return textResult(`Failed to create project from suggestion: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to create project from suggestion: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1302,7 +1299,7 @@ async function handleDismissProjectSuggestion(args: Record<string, unknown>): Pr
     const removed = removeSuggestionFromCache(suggestionId);
     return jsonResult({ ok: true, removedFromCache: removed });
   } catch (err) {
-    return textResult(`Failed to dismiss suggestion: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`Failed to dismiss suggestion: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1331,7 +1328,7 @@ async function handleAsk(args: Record<string, unknown>): Promise<McpToolResult> 
     }) as { ok?: boolean; answer?: string; citations?: unknown[]; class?: string; retrievalMs?: number; classifyMs?: number; error?: string };
 
     if (!data?.ok) {
-      return textResult(`cortex_ask error: ${data?.error ?? 'unknown'}`, true);
+      return textResult(`cortex_ask error: ${safeErrorText(data)}`, true);
     }
 
     return jsonResult({
@@ -1342,7 +1339,7 @@ async function handleAsk(args: Record<string, unknown>): Promise<McpToolResult> 
       classifyMs: data.classifyMs ?? null,
     });
   } catch (err) {
-    return textResult(`cortex_ask failed: ${err instanceof Error ? err.message : String(err)}`, true);
+    return textResult(`cortex_ask failed: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1431,7 +1428,7 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
         const result = await handler(toolArgs);
         send({ jsonrpc: '2.0', id, result });
       } catch (err) {
-        send({ jsonrpc: '2.0', id, result: textResult(`Tool error: ${err}`, true) });
+        send({ jsonrpc: '2.0', id, result: textResult(`Tool error: ${safeErrorText(err)}`, true) });
       }
       break;
     }
@@ -1455,7 +1452,7 @@ rl.on('line', (line) => {
     const msg = JSON.parse(line) as JsonRpcRequest;
     handleMessage(msg).catch((err) => {
       if (msg.id !== undefined) {
-        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: String(err) } });
+        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: safeErrorText(err) } });
       }
     });
   } catch {

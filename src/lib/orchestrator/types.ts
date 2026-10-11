@@ -663,6 +663,13 @@ export interface PacketSelfReview {
 }
 
 export interface PacketContext {
+  /** Current recovery availability; the immutable completion handoff remains historical. */
+  recovery?: {
+    source: 'retained-source' | 'verified-preservation' | 'unavailable';
+    instructions: string;
+    preservationId?: string;
+    bundleSha256?: string;
+  };
   packetId: string;
   projectId?: string | null;
   sessionKey: string;

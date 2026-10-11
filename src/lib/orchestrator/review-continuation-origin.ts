@@ -20,6 +20,11 @@ export interface ReviewChatOrigin {
 export type ReviewOriginResolution = { kind: 'legacy' } | { kind: 'refused'; reason: string }
   | { kind: 'bound'; origin: ReviewChatOrigin };
 
+/** Backends whose review turn resumes the originating thread: Codex, Claude and the built-in agent (Pi, and o8 on Pi). */
+function isThreadedContinuationBackend(backend: unknown): boolean {
+  return backend === 'codex' || backend === 'claude' || backend === 'pi' || backend === 'o8';
+}
+
 /** Read the exact dispatching turn, never the current operator defaults. */
 export function resolveReviewChatOrigin(lane: ReviewContinuationLane): ReviewOriginResolution {
   const packets = [readOrchestratorControlPlaneState(), ...listMissionRegistryEntries({ includeArchived: true }).map(row => row.mission)]
@@ -34,7 +39,7 @@ export function resolveReviewChatOrigin(lane: ReviewContinuationLane): ReviewOri
     return { kind: 'refused', reason: 'Review packet has a missing or conflicting chat origin.' };
   }
   const history = readPersistedLlmChat(threadId)?.history as (NonNullable<ReturnType<typeof readPersistedLlmChat>>['history'] & { archivedAt?: unknown; backend?: unknown; projectId?: unknown }) | undefined;
-  if (history?.archivedAt || (history?.backend && history.backend !== 'codex' && history.backend !== 'claude')) {
+  if (history?.archivedAt || (history?.backend && !isThreadedContinuationBackend(history.backend))) {
     return { kind: 'refused', reason: 'Review chat is archived or its backend is unavailable.' };
   }
   if (history?.projectId && packets.some(row => row.projectId !== history.projectId)) {
@@ -54,7 +59,7 @@ export function resolveReviewChatOrigin(lane: ReviewContinuationLane): ReviewOri
     || (turn.model && turn.model !== receipt.leadModel)) {
     return { kind: 'refused', reason: 'Review originating turn routing receipt is unavailable or conflicting.' };
   }
-  if (turn.backend !== 'codex' && turn.backend !== 'claude') {
+  if (!isThreadedContinuationBackend(turn.backend)) {
     return { kind: 'refused', reason: 'Review origin backend does not support a complete threaded continuation binding.' };
   }
   const latest = history.messages.filter(row => row && row.role === 'assistant' && row.backend).at(-1);

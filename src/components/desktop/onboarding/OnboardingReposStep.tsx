@@ -7,6 +7,7 @@ import { isTauri } from '@/lib/tauri/bridge';
 import type { OnboardingRequest } from './request';
 import { pickFolderPath, SOURCE_WEB_FOLDER_ERROR } from './onboarding-projects';
 import { isOnboardingProject, type OnboardingProject } from './onboarding-progress';
+import { onboardingActionRowStyle, onboardingButtonStyle, onboardingQuietButtonStyle } from './onboarding-style';
 
 const FONT = 'var(--font-sans-system)';
 
@@ -60,23 +61,12 @@ function Spinner({ size = 14 }: { size?: number }) {
 }
 
 const secondaryButtonStyle = (disabled = false): React.CSSProperties => ({
+  ...onboardingButtonStyle,
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   gap: 10,
   minHeight: 44,
-  paddingTop: 11,
-  paddingBottom: 11,
-  paddingLeft: 18,
-  paddingRight: 18,
-  borderRadius: 12,
-  border: '1px solid var(--t-glass-border-strong)',
-  background: 'var(--t-glass-muted-strong)',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  color: 'var(--t-text-strong)',
-  fontSize: 14,
-  fontWeight: 600,
   fontFamily: FONT,
   cursor: disabled ? 'default' : 'pointer',
   letterSpacing: '-0.01em',
@@ -271,8 +261,8 @@ export function OnboardingReposStep({
   const connecting = githubFlow.stage === 'waiting' || githubFlow.stage === 'polling';
 
   return (
-    <div style={{ maxWidth: 640, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, textAlign: 'center' }}>
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.6 }}>
         Start with one project. Choose a folder or reopen a project already in o8. You can add more later.
       </div>
 
@@ -305,8 +295,8 @@ export function OnboardingReposStep({
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
                 <div style={{ fontSize: 12.5, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
                   {deviceFlowEnabled
-                    ? <>Give o8 access to your repositories to clone + manage them &mdash; this is separate from your o8 account sign-in. Connect your repos here, or add a folder from this Mac below.</>
-                    : <>GitHub isn&rsquo;t connected on this machine yet &mdash; your o8 account sign-in doesn&rsquo;t grant repo access. Add a folder from this Mac below; you can connect GitHub later from the dashboard.</>}
+                    ? <>Connect GitHub to browse and clone your repositories. Repository access is separate from your o8 sign-in. You can also choose a local folder.</>
+                    : <>GitHub isn&rsquo;t connected on this machine yet. Choose a local folder, or connect GitHub later from the dashboard.</>}
                 </div>
               </div>
               {deviceFlowEnabled && (
@@ -359,7 +349,6 @@ export function OnboardingReposStep({
                 color: 'var(--t-text)',
                 fontSize: 13,
                 fontFamily: FONT,
-                outline: 'none',
                 boxSizing: 'border-box',
               } as React.CSSProperties}
             />
@@ -433,14 +422,14 @@ export function OnboardingReposStep({
                         )}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.title}</div>
+                        <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.title}</div>
                         {repo.subtitle && (
                           <div style={{ fontSize: 11, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{repo.subtitle}</div>
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                         {rowStatus[repo.key] === 'cloning' && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)' }}>
                             <Spinner size={11} /> Cloning
                           </span>
                         )}
@@ -448,11 +437,11 @@ export function OnboardingReposStep({
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-label="Added"><path d="M20 6L9 17l-5-5" /></svg>
                         )}
                         {rowStatus[repo.key] === 'error' && (
-                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-brand-red, #ef9a9a)' }}>Failed</span>
+                          <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-brand-red, #ef9a9a)' }}>Failed</span>
                         )}
-                        {repo.isLocal && <span style={{ fontSize: 9, fontWeight: 700, paddingTop: 2, paddingBottom: 2, paddingLeft: 6, paddingRight: 6, borderRadius: 999, background: 'var(--t-accent-soft)', color: 'var(--t-accent)' }}>Local</span>}
-                        {repo.language && <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-faint)' }}>{repo.language}</span>}
-                        {repo.isPrivate && <span style={{ fontSize: 9, fontWeight: 700, paddingTop: 2, paddingBottom: 2, paddingLeft: 6, paddingRight: 6, borderRadius: 999, background: 'var(--t-divider)', color: 'var(--t-text-muted)' }}>Private</span>}
+                        {repo.isLocal && <span style={{ fontSize: 9, fontWeight: 300, paddingTop: 2, paddingBottom: 2, paddingLeft: 6, paddingRight: 6, borderRadius: 999, background: 'var(--t-accent-soft)', color: 'var(--t-accent)' }}>Local</span>}
+                        {repo.language && <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)' }}>{repo.language}</span>}
+                        {repo.isPrivate && <span style={{ fontSize: 9, fontWeight: 300, paddingTop: 2, paddingBottom: 2, paddingLeft: 6, paddingRight: 6, borderRadius: 999, background: 'var(--t-divider)', color: 'var(--t-text-muted)' }}>Private</span>}
                       </div>
                     </button>
                   );
@@ -464,8 +453,8 @@ export function OnboardingReposStep({
       )}
 
       {/* Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-        <button type="button" disabled={saving || addingFolder} onClick={onSkip} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Choose later</button>
+      <div style={{ ...onboardingActionRowStyle, marginTop: 8 }}>
+        <button type="button" disabled={saving || addingFolder} onClick={onSkip} style={onboardingQuietButtonStyle}>Choose later</button>
         {renderContinueButton({
           label: saving
             ? 'Cloning project…'

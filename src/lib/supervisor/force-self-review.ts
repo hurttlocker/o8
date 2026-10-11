@@ -40,7 +40,7 @@ export async function forceSelfReviewToReview(
         : 'No reviewable commit remained after preserving the worktree.', preservation.captureRef, guard.check);
       return;
     }
-    const verification = await guard.wait(() => runCompletionVerification(cwd, lane.baseBranch));
+    const verification = await guard.wait(() => runCompletionVerification(cwd, lane.baseBranch, lane.repoPath));
     if (await guard.wait(() => hasFreshSelfReviewTranscriptActivity(surfaceId))) {
       resetSelfReviewStallGuard(surfaceId);
       return;

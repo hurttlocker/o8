@@ -146,10 +146,10 @@ interface RecoveryDispatchContext {
   lane: OrchestratorLaneBinding | null;
   worktreePath: string | null;
   laneId: string | null;
+  repoPath: string | null;
   baseBranch: string;
   runtime: OrchestratorRuntime | null;
 }
-
 function isDispatchReadyStatus(packet: OrchestratorPacket) {
   return packet.status === 'queued' || packet.status === 'recovering';
 }
@@ -225,7 +225,7 @@ async function dispatchOrRecoverPacket(
     if (!reviewable) {
       try {
         const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
-        reviewable = await hasReviewableCompletionDiff(worktreePath, recoveryContext.baseBranch);
+        if (recoveryContext.repoPath) reviewable = await hasReviewableCompletionDiff(worktreePath, recoveryContext.baseBranch, recoveryContext.repoPath);
       } catch { /* probe failed — fall through to redispatch */ }
     }
     if (reviewable) {
@@ -453,12 +453,12 @@ export async function runDispatchTick(
         lane: packet.lane ?? null,
         worktreePath,
         laneId: packet.lane?.laneId ?? row?.id ?? null,
+        repoPath: row?.repoPath ?? null,
         baseBranch: row?.baseBranch ?? 'main',
         runtime: row?.runtime ?? packet.lane?.runtime ?? null,
       } satisfies RecoveryDispatchContext] as const];
     }),
   );
-
   // Compute predicted files for all packets (used by overlap gate + dashboard)
   nextState = {
     ...nextState,

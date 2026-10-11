@@ -77,6 +77,7 @@ export interface RuntimeActionResult {
 export interface RuntimeLaunchRequest {
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';
+  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
   automaticRecoverySurfaceId?: string;
   automaticRecoveryRunId?: string;
   runtime: RuntimeId;
@@ -228,7 +229,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
   }
   const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
   const remoteManagedWorktree = runtimeId === 'cloud';
-  const supportsWorktrees = remoteManagedWorktree || ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'deepseek-harness'].includes(runtimeId)
+  const supportsWorktrees = remoteManagedWorktree || ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'pi-builtin', 'hermes', 'deepseek-harness'].includes(runtimeId)
     || listDeclarativeRuntimes().includes(runtimeId as OrchestratorRuntime);
   const packetNeedsWorktree = packetRequiresWorktree(payload);
 
@@ -436,6 +437,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
     workMode: workModeResolution.workMode,
     executionPolicy: payload.executionPolicy,
     controlledTask: payload.controlledTask,
+    controlledProvider: payload.controlledProvider,
   });
 
   return settleRuntimeLaunchGovernance({

@@ -11,6 +11,8 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', async (importOriginal) => {
 });
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-discovery-no-probe-'));
+vi.stubEnv('PI_CODING_AGENT_DIR', path.join(root, 'absent-user-pi'));
+vi.stubEnv('PI_CODING_AGENT_SESSION_DIR', '');
 process.env.O8_OWNED_PI_ROOT = path.join(root, 'pi');
 process.env.O8_OWNED_PRIME_AGENT_ROOT = path.join(root, 'prime-agent');
 process.env.O8_OWNED_CURSOR_ROOT = path.join(root, 'cursor');
@@ -25,7 +27,10 @@ const { magnitudeRuntime } = await import('@/lib/runtimes/magnitude');
 const { antigravityRuntime } = await import('@/lib/runtimes/antigravity');
 const runtimes = [piRuntime, primeAgentRuntime, cursorRuntime, grokRuntime, magnitudeRuntime, antigravityRuntime];
 
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+afterAll(() => {
+  vi.unstubAllEnvs();
+  rmSync(root, { recursive: true, force: true });
+});
 
 describe('runtime inventory does not probe CLI installation to read owned sessions', () => {
   it('runs repeated fresh discovery through the real aggregator without resolving any CLI', async () => {

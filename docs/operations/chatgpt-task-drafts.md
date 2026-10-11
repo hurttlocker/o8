@@ -201,3 +201,60 @@ that bypass this protocol, installed acceptance or production activation.
 
 Tracked in [#3308](https://github.com/hurttlocker/o8/issues/3308), as a prerequisite
 for controlled worker dispatch in [#3249](https://github.com/hurttlocker/o8/issues/3249).
+
+## Controlled OpenRouter worker
+
+An explicitly selected OpenRouter catalog entry can prepare a held read-only task
+using Claude Code as the CLI carrier. Copy the offered model, `provider-default`
+effort and complete provider policy; native effort presets do not apply. Ordinary
+worker defaults are unchanged. Missing credentials or incompatible pins hold the
+task without native fallback.
+
+The parent gateway owns the provider key; the isolated child receives only a
+revocable local attempt token. The admitted task supplies current applicable
+instructions and relative workspace copies. The child can use only Read, with
+four inference requests, 2,048 output tokens per request and a 90-second lifetime.
+Each request is persisted before forwarding. The reported-cost stopping threshold
+is $0.01; the final charged request can exceed it. Missing billing evidence holds
+further requests. Stop, account changes and worker exit close the attempt.
+
+Completed results expose bound worker evidence and separately attributed provider
+usage. Actual-route tests substitute the CLI and upstream; the native sandbox
+test checks filesystem isolation. A private native source trial also exercised
+the actual CLI and provider. These are separate from installed ChatGPT acceptance,
+production activation, direct hosted launch and subscription allowance savings.
+The preparation grant still requires local review and Launch unless the separate
+hosted launch capability below has been activated and explicitly consented.
+
+## Separate bounded hosted launch
+
+Source for #3376 adds `o8_launch_task` and `o8_stop_task` under the distinct
+`o8:launch-task` scope. Existing read, follow-up and preparation grants cannot
+perform either action. The schema export remains dormant until the reviewed
+relay flag, account-provider scope and host consent are activated. This source
+does not establish installed or live hosted acceptance.
+
+Launch accepts only the exact prepared task ID and contract hash for the current
+account, sign-in epoch, original client and computer. Its first supported route
+is the offered read-only Claude Code carrier with the fixed OpenRouter model,
+provider-default reasoning and immutable bounded policy above. Native providers,
+changed pins and wider permissions are refused. The user must explicitly request
+execution; preparation itself still starts nothing.
+
+The first grant's client, computer and expiry are saved on the permanent attempt.
+Source verification precedes reservation; expiry is checked synchronously before
+the reservation and immediately before actual process creation. Account and task
+admission also surround binding and final workspace checks. Expiry during setup
+holds that attempt without starting a child. Duplicate launch calls inspect it,
+including after failure or Stop; they never create a replacement worker.
+
+Hosted Stop names that same task and hash and requires current scoped account
+authorization. It revokes further provider requests and targets only the bound
+attempt. Local operator Stop remains available under its existing safety policy.
+Neither hosted action grants task writes, approval, merge, release, arbitrary
+process control, saved default changes or automatic fallback.
+
+Actual-route fixtures cover old-scope refusal, client/hash/account/epoch isolation,
+expiry during verification/setup/final spawn, one launch, Stop and replay. The CLI,
+OS sandbox and upstream are substituted in those fixtures; native source trials,
+installed execution and the real ChatGPT consent flow remain distinct evidence.
