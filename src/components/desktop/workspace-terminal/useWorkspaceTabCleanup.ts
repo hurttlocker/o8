@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type {
   LocalhostPreview,
   TerminalTab,
@@ -52,6 +52,8 @@ export function useWorkspaceTabCleanup({
   tabs,
   tabsRef,
 }: UseWorkspaceTabCleanupOptions) {
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const finishedTabCount = useMemo(
     () => tabs.filter((tab) => tab.id !== effectiveActiveTabId && isTabFinishedForCleanup(tab)).length,
     [effectiveActiveTabId, tabs],
@@ -105,7 +107,7 @@ export function useWorkspaceTabCleanup({
     const tab = tabsRef.current.find((entry) => entry.id === tabId);
     if (tab?.kind === 'terminal' && !tab.readOnly) {
       void confirmTerminalClose(tab).then((confirmed) => {
-        if (confirmed && tabsRef.current.find((entry) => entry.id === tabId)?.tmuxSession === tab.tmuxSession) closeTabImmediately(tabId);
+        if (alive.current && confirmed && tabsRef.current.find((entry) => entry.id === tabId)?.tmuxSession === tab.tmuxSession) closeTabImmediately(tabId);
       });
     } else closeTabImmediately(tabId);
   }, [closeTabImmediately, tabsRef]);
