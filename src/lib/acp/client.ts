@@ -194,6 +194,8 @@ export interface AcpClientOptions {
   /** Working directory used to boot the ACP agent and its private service. */
   cwd?: string;
   env?: Record<string, string>;
+  /** Remove inherited credentials for explicitly disconnected providers. */
+  omitEnv?: string[];
   /** Called for every session/update notification's OrchestratorEvent (mapped). */
   onEvent?: (event: OrchestratorEvent) => void;
   /** Raw stderr lines from the agent (logs) — optional, for diagnostics. */
@@ -243,7 +245,7 @@ export class AcpClient {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: opts.cwd,
-      env: { ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) },
+      env: Object.fromEntries(Object.entries({ ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) }).filter(([name]) => !opts.omitEnv?.includes(name))) as NodeJS.ProcessEnv,
     });
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));

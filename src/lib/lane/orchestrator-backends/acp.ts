@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { resolveLocalAcpLaunch, localAcpProcessLaunch, acpLaunchFingerprint } from '@/lib/acp/local-connection';
+import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 /**
  * Generic ACP orchestrator backend.
  *
@@ -48,6 +51,8 @@ interface AcpSession {
   repoPath: string;
   threadId: string | null;
   client: AcpClient;
+  credentialFingerprint: string;
+  launchFingerprint: string;
   sessionId: string | null;
   status: 'ready' | 'busy' | 'dead';
   createdAt: number;
@@ -163,6 +168,7 @@ export interface AcpLaunch {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  omitEnv?: string[];
 }
 
 export interface AcpBackendConfig {
@@ -192,11 +198,14 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       configOptions: [],
       appliedModel: null,
       completedTurns: 0,
+      launchFingerprint: acpLaunchFingerprint(launch),
+      credentialFingerprint: createHash('sha256').update(process.env.OPENROUTER_API_KEY ?? '').digest('hex'),
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
         cwd: repoPath,
         env: launch.env,
+        omitEnv: launch.omitEnv,
         onEvent: (event) => session.onEvent?.(event),
         requestTimeoutMs: config.requestTimeoutMs,
       }),
@@ -208,7 +217,11 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
   function ensureSync(repoPath: string, threadId?: string | null): AcpSession {
     const key = sessionKey(id, repoPath, threadId);
     const existing = sessions.get(key);
-    if (existing && existing.status !== 'dead' && existing.client.alive) return existing;
+    if (existing && existing.status !== 'dead' && existing.client.alive) {
+      const launch = config.resolveLaunch(repoPath);
+      if (existing.sessionId || existing.status === 'busy' || (launch && existing.launchFingerprint === acpLaunchFingerprint(launch))) return existing;
+      existing.client.kill();
+    }
     if (existing) sessions.delete(key);
     return spawnSession(repoPath, threadId);
   }
@@ -278,6 +291,13 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       return { sessionName: session.sessionName, status: session.status };
     },
     async sendTurn(repoPath, message, onEvent, options?: OrchestratorTurnOptions): Promise<void> {
+      if (id === 'opencode' || id === 'hermes' || (id === 'acp' && resolveLocalAcpLaunch()?.useOpenRouter)) {
+        await resolveOpenRouterKey();
+        const cold = sessions.get(sessionKey(id, repoPath, options?.threadId));
+        if (cold && !cold.sessionId && cold.status !== 'busy' && cold.credentialFingerprint !== createHash('sha256').update(process.env.OPENROUTER_API_KEY ?? '').digest('hex')) {
+          cold.client.kill(); cold.status = 'dead';
+        }
+      }
       const session = ensureSync(repoPath, options?.threadId);
       session.status = 'busy';
 
@@ -425,6 +445,7 @@ export const opencodeBackend: OrchestratorBackend = makeAcpBackend({
  * outside a turn (the model-catalogue probe). Null when unavailable.
  */
 export function resolveAcpLaunch(id: OrchestratorBackendId): AcpLaunch | null {
+  if (id === 'acp') return localAcpProcessLaunch();
   if (id === 'opencode') {
     const bin = resolveOpencodeBinary();
     return bin ? { command: bin, args: ['acp'] } : null;
@@ -454,10 +475,7 @@ export const acpBackend: OrchestratorBackend = makeAcpBackend({
   id: 'acp',
   label: 'ACP',
   resolveLaunch: () => {
-    const command = process.env.O8_ACP_COMMAND?.trim();
-    if (!command) return null;
-    const args = (process.env.O8_ACP_ARGS ?? '').split(' ').map((a) => a.trim()).filter(Boolean);
-    return { command, args };
+    return localAcpProcessLaunch();
   },
 });
 

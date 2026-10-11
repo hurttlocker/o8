@@ -30,7 +30,9 @@ export function transcriptTurns(entries: MobileTranscriptEntry[], busy: boolean)
         history.push(index);
       }
     }
-    return { start, end, final, history };
+    const historySet = new Set(history);
+    const lastVisible = final === null ? start : Array.from({ length: final - start }, (_, offset) => start + offset).filter(index => !historySet.has(index)).at(-1) ?? start - 1;
+    return { start, end, final, history: history.filter(index => index > lastVisible) };
   });
 }
 
@@ -53,7 +55,7 @@ export function transcriptTurnFiles(entries: MobileTranscriptEntry[]): TurnFile[
     }
     if (/apply_patch/i.test(call.name)) {
       const patch = call.args?.patch ?? call.args?.input;
-      if (typeof patch === 'string') for (const match of patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
+      if (typeof patch === 'string') for (const match of patch.matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)) {
         const path = match[1].trim();
         if (path) files.set(path, { path });
       }

@@ -99,7 +99,7 @@ function Harness({
         modelLabel={model === 'gpt-5.6-sol' ? 'Sol' : model}
         onModelChange={setModel}
         activeBackend={backend}
-        onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
+        onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel !== undefined) setModel(nextModel); }}
         effort={effort}
         operatorDefaultEffort={initialEffort}
         onEffortChange={setEffort}
@@ -151,7 +151,7 @@ function RealComposerHarness({ initialEffort = 'high', threadId = 'thread-test',
         modelId={model}
         onModelChange={setModel}
         activeBackend={backend}
-        onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel) setModel(nextModel); }}
+        onBackendChange={(next, nextModel) => { setBackend(next); if (nextModel !== undefined) setModel(nextModel); }}
         effort={effort}
         operatorDefaultEffort={operatorDefaultEffort}
         onEffortChange={setEffort}
@@ -218,6 +218,8 @@ describe('ComposerSelectorFooter', () => {
     entitlementState.plan = 'free';
     invalidateOperatorDefaultsValuesSnapshot();
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(_input).includes('/api/setup/orchestrator-backends')) return new Response(JSON.stringify({ acp: true }), { status: 200 });
+      if (String(_input).includes('/api/orchestrator/backend-models?backend=acp')) return new Response(JSON.stringify({ available: true, groups: [], total: 0 }), { status: 200 });
       if (String(_input).includes('/api/runtime/claude-code-profile')) return new Response(JSON.stringify({ profile: { source: 'native', model: null, codexModel: null }, effectiveModel: null, openrouterConfigured: false }), { status: 200 });
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {};
       return new Response(JSON.stringify({
@@ -687,6 +689,14 @@ describe('ComposerSelectorFooter', () => {
       slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
     });
     expect(container.querySelector('[data-testid="composer-selector-effort-word"]')?.textContent).toBe('extra');
+  });
+
+  it('selects a connected local agent without requiring a model catalogue', async () => {
+    await act(async () => root.render(createElement(Harness)));
+    await openLeadHouse('acp');
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="lead-acp-default"]')!.click(); });
+    expect(container.querySelector('[data-testid="composer-selector-popover"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).not.toContain('Sol');
   });
 
   it('shows connected searchable houses directly in the rail', async () => {

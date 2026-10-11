@@ -244,7 +244,7 @@ export function useComposerSelectorState(input: {
   const resolved = useMemo(() => resolveComposerSelectorState({
     mode: mode ?? 'solo',
     leadModelId: modelId ?? '',
-    leadModelLabel: resolvedModelLabel,
+    leadModelLabel: backend === 'acp' && !modelId ? 'Local ACP' : resolvedModelLabel,
     leadBackend: backend ?? 'codex',
     inSessionEffortByModel: currentSessionEfforts,
     threadEffortByModel: storedEfforts,

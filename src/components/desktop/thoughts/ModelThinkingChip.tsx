@@ -59,7 +59,7 @@ export type ComposerModelOption = {
 };
 
 export type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'acp';
   label: string;
   options: ComposerModelOption[];
   /**
@@ -130,6 +130,7 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
       { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'Managed model' },
     ],
   },
+  { key: 'acp', label: 'Local ACP', options: [], searchable: true },
 ];
 
 export interface ComposerModelCatalogue {
@@ -366,16 +367,24 @@ export function ModelThinkingChip({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const tools = useRuntimeInventory(open);
+  const [acpAvailable, setAcpAvailable] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetch('/api/setup/orchestrator-backends').then(response => response.json()).then(data => { if (alive) setAcpAvailable(data.acp === true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
   const [advancedLeads, setAdvancedLeads] = useState(false);
   const installed = visibleRuntimeInventory(tools.inventory ?? []);
   const visibleLead = (key: ComposerModelGroup['key']) => {
     const current = key === activeBackend || (key === 'claude' && activeBackend === 'fable');
     if (current) return true;
+    if (key === 'acp') return acpAvailable;
     if (key === 'o8') return advancedLeads;
     const tool = runtimeForLead(key);
     return installed.some((item) => item.id === tool) && (key !== 'opencode' || advancedLeads);
   };
-  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8'
+  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8' || (key === 'acp' && acpAvailable)
     || tools.inventory?.some((item) => item.id === runtimeForLead(key) && item.available) === true;
   const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
   const ultraEnabled = useUltraEffortPreference();
@@ -644,6 +653,7 @@ export function ModelThinkingChip({
                           models come from the live agent, so it renders a
                           searchable picker instead of a drawer of literals. */}
                       {houseOpen && !leadReady(group.key) ? <div style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>{tools.loading ? 'Checking readiness…' : tools.inventory?.find((item) => item.id === runtimeForLead(group.key))?.fix || 'Connect this tool using Add tools below.'}</div> : null}
+                      {houseOpen && leadReady(group.key) && group.key === 'acp' ? <button type="button" onClick={() => { onBackendChange?.('acp', ''); setOpen(false); }} style={{ border: 0, borderRadius: 8, paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, background: 'var(--t-hover)', color: 'var(--t-text)', cursor: 'pointer', textAlign: 'left' }}>Use agent default</button> : null}
                       {houseOpen && leadReady(group.key) && group.searchable ? (
                         <AcpModelPicker
                           backend={group.key}

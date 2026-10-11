@@ -504,7 +504,7 @@ export function InputButtons({
   const canSubmit = Boolean(input.trim() || hasAttachments);
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
   const selectorReady = Boolean(
-    composerSelectorController && composerMode && modelLabel && modelId && activeBackend && onEffortChange,
+    composerSelectorController && composerMode && (modelLabel || activeBackend === 'acp') && (modelId || activeBackend === 'acp') && activeBackend && onEffortChange,
   );
   const selectorControls = composerSelectorController;
 

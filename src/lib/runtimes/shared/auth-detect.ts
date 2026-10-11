@@ -1,11 +1,9 @@
 import 'server-only';
-
 import { execFile } from 'node:child_process';
 import { access, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   ORCHESTRATOR_RUNTIMES,
@@ -631,6 +629,7 @@ async function refreshNativeWorkerReadiness(snapshot: RuntimeAuthSnapshot): Prom
 }
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
+  await (await import('@/lib/cortex/qa/llm/byok-keys')).resolveOpenRouterKey();
   while (true) {
     const generation = cacheGeneration;
     const cached = cache;

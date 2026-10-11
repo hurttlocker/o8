@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { acpLaunchFingerprint } from '@/lib/acp/local-connection';
 import { AcpClient } from '@/lib/acp/client';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -34,11 +35,12 @@ function cachePath(id: OrchestratorBackendId): string {
   return join(getDataDir(), 'acp-models', `${id}.json`);
 }
 
-function readCache(id: OrchestratorBackendId): AcpModelProbeResult | null {
+function readCache(id: OrchestratorBackendId, fingerprint?: string): AcpModelProbeResult | null {
   try {
     const path = cachePath(id);
     if (!existsSync(path)) return null;
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<AcpModelProbeResult>;
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<AcpModelProbeResult> & { fingerprint?: string };
+    if (fingerprint && parsed.fingerprint !== fingerprint) return null;
     if (!Array.isArray(parsed.models) || typeof parsed.probedAt !== 'number') return null;
     return {
       models: parsed.models,
@@ -51,11 +53,11 @@ function readCache(id: OrchestratorBackendId): AcpModelProbeResult | null {
   }
 }
 
-function writeCache(id: OrchestratorBackendId, result: AcpModelProbeResult): void {
+function writeCache(id: OrchestratorBackendId, result: AcpModelProbeResult, fingerprint: string): void {
   try {
     const path = cachePath(id);
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify({ ...result, source: undefined }, null, 2), 'utf-8');
+    writeFileSync(path, JSON.stringify({ ...result, fingerprint, source: undefined }, null, 2), 'utf-8');
   } catch {
     // A cache miss is slow, not broken — never fail the probe on a write error.
   }
@@ -67,16 +69,17 @@ function writeCache(id: OrchestratorBackendId, result: AcpModelProbeResult): voi
  */
 export async function probeAcpModels(
   id: OrchestratorBackendId,
-  launch: { command: string; args: string[]; env?: Record<string, string> },
+  launch: { command: string; args: string[]; env?: Record<string, string>; omitEnv?: string[] },
   repoPath: string,
   options?: { force?: boolean },
 ): Promise<AcpModelProbeResult> {
+  const fingerprint = acpLaunchFingerprint(launch);
   if (!options?.force) {
-    const cached = readCache(id);
+    const cached = readCache(id, fingerprint);
     if (cached && Date.now() - cached.probedAt < CACHE_TTL_MS) return cached;
   }
 
-  const client = new AcpClient({ command: launch.command, args: launch.args, cwd: repoPath, env: launch.env });
+  const client = new AcpClient({ command: launch.command, args: launch.args, cwd: repoPath, env: launch.env, omitEnv: launch.omitEnv });
   const timeout = setTimeout(() => client.kill(), PROBE_TIMEOUT_MS);
   try {
     await client.initialize();
@@ -90,7 +93,7 @@ export async function probeAcpModels(
     };
     // Don't cache an empty catalogue: an agent that failed to enumerate its
     // providers would otherwise pin "no models" for a full day.
-    if (result.models.length) writeCache(id, result);
+    if (result.models.length) writeCache(id, result, fingerprint);
     return result;
   } finally {
     clearTimeout(timeout);

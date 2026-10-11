@@ -17,6 +17,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 
+import { OpenRouterModelsSection } from './OpenRouterModelsSection';
 import { GroupHeader } from './grouped';
 
 // ── Types ──
@@ -55,7 +56,7 @@ const NATIVE_KEYS: NativeKeyConfig[] = [
     envVar: 'OPENROUTER_API_KEY',
     placeholder: 'sk-or-...',
     docsUrl: 'https://openrouter.ai/keys',
-    description: 'Direct OpenRouter access for Symon and cloud transcription. This is the native Keychain slot, separate from the app-services key above.',
+    description: 'Direct OpenRouter access for Symon and cloud transcription. This is the native Keychain slot, available separately for an existing voice setup. Saving OpenRouter above can also update this slot.',
   },
   {
     id: 'groq_api_key',
@@ -92,6 +93,10 @@ export function ApiKeysProviderList() {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [removingProvider, setRemovingProvider] = useState<string | null>(null);
+  const [syncVoice, setSyncVoice] = useState(true);
+  const nativeKeychain = isTauri() && !isNonMacShell();
+  const mutationRef = useRef(false);
   const [feedback, setFeedback] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(null);
   const mountedRef = useRef(true);
 
@@ -126,7 +131,8 @@ export function ApiKeysProviderList() {
   }, [loadKeys]);
 
   const handleSave = useCallback(async (providerId: string) => {
-    if (!keyInput.trim()) return;
+    if (!keyInput.trim() || mutationRef.current) return;
+    mutationRef.current = true;
     setSaving(true);
     try {
       const res = await fetch('/api/v2/keys', {
@@ -136,7 +142,21 @@ export function ApiKeysProviderList() {
       });
       const data = await res.json();
       if (res.ok) {
-        setFeedback({ provider: providerId, type: 'success', message: 'Saved. Active immediately.' });
+        let partialFailure = false;
+        let message = data.warning || 'Saved. New sessions use this key; running sessions keep their connection.';
+        if (providerId === 'openrouter' && nativeKeychain && syncVoice) {
+          try {
+            await voicePrefsSet('openrouter_api_key', keyInput.trim());
+            const prefs = await voicePrefsGet();
+            if (prefs?.openrouter_api_key_set !== true) throw new Error('Missing readback');
+            window.dispatchEvent(new Event('o8:voice-key-changed'));
+            message += ' Also saved for Symon and voice.';
+          } catch {
+            partialFailure = true;
+            message += ' Symon and voice could not be updated. Retry in the voice key section below.';
+          }
+        }
+        setFeedback({ provider: providerId, type: data.warning || partialFailure ? 'error' : 'success', message });
         setEditingProvider(null);
         setKeyInput('');
         void loadKeys();
@@ -146,11 +166,13 @@ export function ApiKeysProviderList() {
     } catch {
       setFeedback({ provider: providerId, type: 'error', message: 'Network error' });
     }
+    mutationRef.current = false;
     setSaving(false);
-    setTimeout(() => setFeedback(null), 4000);
-  }, [keyInput, loadKeys]);
+  }, [keyInput, loadKeys, nativeKeychain, syncVoice]);
 
   const handleRemove = useCallback(async (providerId: string) => {
+    if (mutationRef.current) return;
+    mutationRef.current = true;
     setSaving(true);
     try {
       const res = await fetch('/api/v2/keys', {
@@ -159,12 +181,15 @@ export function ApiKeysProviderList() {
         body: JSON.stringify({ provider: providerId }),
       });
       if (res.ok) {
-        setFeedback({ provider: providerId, type: 'success', message: 'Removed.' });
+        setRemovingProvider(null);
+        setFeedback({ provider: providerId, type: 'success', message: 'Removed from app storage. Separate voice keys and external environment keys are unchanged.' });
         void loadKeys();
+      } else {
+        setFeedback({ provider: providerId, type: 'error', message: 'Could not remove this key. Try again.' });
       }
-    } catch { /* ignore */ }
+    } catch { setFeedback({ provider: providerId, type: 'error', message: 'Network error. Key removal was not confirmed.' }); }
+    mutationRef.current = false;
     setSaving(false);
-    setTimeout(() => setFeedback(null), 4000);
   }, [loadKeys]);
 
   if (loading) {
@@ -194,7 +219,7 @@ export function ApiKeysProviderList() {
     <div style={{
       borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
     }}>
-      {providers.map((p) => {
+      {[...providers].sort((a, b) => Number(b.id === 'openrouter') - Number(a.id === 'openrouter')).map((p) => {
         const isEditing = editingProvider === p.id;
         const fb = feedback?.provider === p.id ? feedback : null;
 
@@ -230,7 +255,7 @@ export function ApiKeysProviderList() {
                     color: 'var(--t-text)',
                     letterSpacing: '-0.01em',
                   }}>
-                    {p.id === 'openrouter' ? 'OpenRouter (app services)' : p.label}
+                    {p.id === 'openrouter' ? 'OpenRouter' : p.label}
                   </span>
                   <BracketLabel tone={p.configured ? 'quiet' : 'accent'}>
                     {p.configured ? 'configured' : 'missing'}
@@ -252,9 +277,9 @@ export function ApiKeysProviderList() {
                   lineHeight: 1.55,
                   maxWidth: 520,
                 }}>
-                  {p.configured
-                    ? 'Saved for app services on this machine.'
-                    : 'Add a direct provider key for app services on this installation.'}
+                  {p.id === 'openrouter'
+                    ? 'One key for compatible models and tools. Select OpenRouter in Claude Code connections or your runtime’s provider setup. Your CLI subscription stays separate.'
+                    : p.configured ? 'Saved for app services on this machine.' : 'Add a direct provider key for app services on this installation.'}
                 </div>
 
                 <div style={{
@@ -315,7 +340,8 @@ export function ApiKeysProviderList() {
                 }}>
                   <button
                     type="button"
-                    onClick={() => { setEditingProvider(p.id); setKeyInput(''); }}
+                    disabled={saving}
+                    onClick={() => { setEditingProvider(p.id); setRemovingProvider(null); setFeedback(null); setKeyInput(''); }}
                     style={accentLinkStyle(false)}
                   >
                     {p.configured ? 'update key' : 'add key'}
@@ -323,7 +349,7 @@ export function ApiKeysProviderList() {
                   {p.configured ? (
                     <button
                       type="button"
-                      onClick={() => { void handleRemove(p.id); }}
+                      onClick={() => setRemovingProvider(p.id)}
                       disabled={saving}
                       style={quietLinkStyle(saving)}
                     >
@@ -334,6 +360,13 @@ export function ApiKeysProviderList() {
               ) : null}
             </div>
 
+            {removingProvider === p.id ? <div role="alert" style={{ marginTop: 12 }}>
+              <p style={{ fontSize: 12 }}>Remove this saved {p.label} key? New connections may need another credential.</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <RamsButton variant="danger" busy={saving} onClick={() => void handleRemove(p.id)}>Confirm removal</RamsButton>
+                <RamsButton variant="ghost" disabled={saving} onClick={() => setRemovingProvider(null)}>Cancel</RamsButton>
+              </div>
+            </div> : null}
             {/* Inline editor */}
             {isEditing ? (
               <div style={{
@@ -348,6 +381,9 @@ export function ApiKeysProviderList() {
                 <FieldLabel>paste {p.label.toLowerCase()} key</FieldLabel>
                 <input
                   type="password"
+                  aria-label={`${p.label} API key`}
+                  autoComplete="off"
+                  disabled={saving}
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -379,6 +415,10 @@ export function ApiKeysProviderList() {
                     e.currentTarget.style.borderBottomColor = RAMS_HAIRLINE_SOFT;
                   }}
                 />
+                {p.id === 'openrouter' && nativeKeychain ? <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                  <input type="checkbox" checked={syncVoice} disabled={saving} onChange={event => setSyncVoice(event.target.checked)} />
+                  Also use this key for Symon and voice on this Mac
+                </label> : null}
                 <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button
                     type="button"
@@ -390,6 +430,7 @@ export function ApiKeysProviderList() {
                   </button>
                   <button
                     type="button"
+                    disabled={saving}
                     onClick={() => { setEditingProvider(null); setKeyInput(''); }}
                     style={quietLinkStyle(false)}
                   >
@@ -480,6 +521,12 @@ function NativeKeysList() {
       });
     return () => { active = false; };
   }, [nativeKeychain, loadPresence]);
+
+  useEffect(() => {
+    const refresh = () => { void loadPresence().catch(() => {}); };
+    window.addEventListener('o8:voice-key-changed', refresh);
+    return () => window.removeEventListener('o8:voice-key-changed', refresh);
+  }, [loadPresence]);
 
   const saveKey = useCallback(async (key: NativeKeyConfig) => {
     const value = keyInput.trim();
@@ -612,7 +659,7 @@ export function APIKeysTab() {
     }}>
       <TabHeading
         title="API keys"
-        subtitle="Manage keys for AI providers. API usage is billed by the provider; signing into a CLI account is managed separately."
+        subtitle="Start with OpenRouter to choose models across providers. Usage is billed to your API key. Connect your installed coding tools separately."
       />
 
       {/* 01 — PROVIDERS */}
@@ -620,6 +667,8 @@ export function APIKeysTab() {
         <GroupHeader>Provider keys</GroupHeader>
         <ApiKeysProviderList />
       </section>
+
+      <OpenRouterModelsSection />
 
       <section style={{ marginBottom: 32 }}>
         <GroupHeader>Symon &amp; voice keys</GroupHeader>

@@ -64,7 +64,7 @@ it('shows the four app-service keys and five distinct native Keychain slots', as
   try {
     await act(async () => { root.render(createElement(APIKeysTab)); });
     await act(async () => { await Promise.resolve(); });
-    expect(container.textContent).toContain('OpenRouter (app services)');
+    expect(container.textContent).toContain('OpenRouter');
     expect(container.textContent).toContain('DeepSeek');
     expect(container.textContent).toContain('Anthropic');
     expect(container.textContent).toContain('OpenAI');
@@ -73,7 +73,7 @@ it('shows the four app-service keys and five distinct native Keychain slots', as
     expect(container.textContent).toContain('Groq transcription');
     expect(container.textContent).toContain('ElevenLabs voice');
     expect(container.textContent).toContain('Google Cloud TTS');
-    expect(container.textContent).toContain('separate from the app-services key above');
+    expect(container.textContent).toContain('available separately for an existing voice setup');
   } finally {
     act(() => root.unmount());
   }
@@ -123,7 +123,7 @@ it('marks native keys macOS-only without exposing inert editors in a browser', a
     await act(async () => { root.render(createElement(APIKeysTab)); });
     await act(async () => { await Promise.resolve(); });
     expect(container.textContent?.match(/macOS only/g)).toHaveLength(5);
-    expect(rowFor(container, 'OpenRouter (app services)').textContent).toContain('add key');
+    expect(rowFor(container, 'OpenRouter').textContent).toContain('add key');
     const nativeLabel = [...container.querySelectorAll('span')].find((node) => node.textContent === 'Gemini (Symon & voice)')!;
     expect(nativeLabel.parentElement?.parentElement?.parentElement?.querySelector('button')).toBeNull();
   } finally {
@@ -178,9 +178,34 @@ it('shows an unavailable inventory error and retries the provider request', asyn
     expect(container.textContent).toContain('API key inventory returned 503.');
     const retry = [...container.querySelectorAll('button')].find((button) => button.textContent === 'retry')!;
     await act(async () => { retry.click(); });
-    expect(container.textContent).toContain('OpenRouter (app services)');
+    expect(container.textContent).toContain('OpenRouter');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   } finally {
     act(() => root.unmount());
   }
+});
+
+
+it.each([false, true])('saves OpenRouter once and reports native synchronization failure=%s', async (fails) => {
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const request = vi.fn(async (_url: string, options?: RequestInit) => ({ ok: true, status: 200, json: async () => options?.method === 'POST' ? ({ ok: true }) : ({ providers }) }));
+  vi.stubGlobal('fetch', request);
+  try {
+    await act(async () => { root.render(createElement(APIKeysTab)); });
+    let row = rowFor(container, 'OpenRouter');
+    await act(async () => { [...row.querySelectorAll('button')].find(button => button.textContent === 'add key')!.click(); });
+    row = rowFor(container, 'OpenRouter');
+    const input = row.querySelector<HTMLInputElement>('input[type="password"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'fixture-router-key');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    native.prefsReadFails = fails;
+    await act(async () => { [...row.querySelectorAll('button')].find(button => button.textContent === 'save key')!.click(); });
+    expect(request.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+    expect(native.writes).toContainEqual(['openrouter_api_key', 'fixture-router-key']);
+    expect(container.textContent).toContain(fails ? 'Symon and voice could not be updated' : 'Also saved for Symon and voice');
+    expect(container.querySelector('input[type="password"]')).toBeNull();
+  } finally { act(() => root.unmount()); }
 });

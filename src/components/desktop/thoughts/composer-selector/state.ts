@@ -43,6 +43,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     o8: 'o8',
     opencode: 'opencode',
     pi: 'terminal',
+    acp: 'terminal',
   },
   workerRuntimes: {
     codex: 'openai',

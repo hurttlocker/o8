@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import { THOUGHTS_OPERATOR_DEFAULTS_FALLBACK } from './operator-defaults';
-import { useBackendSwitchChoice } from './useBackendSwitchChoice';
+import { useBackendSwitchChoice, resolveFreshComposerTurnOptions } from './useBackendSwitchChoice';
 
 let currentSwitch: ReturnType<typeof useBackendSwitchChoice> | null = null;
 const REPO_PATH = '/repo/backend-switch';
@@ -66,6 +66,16 @@ describe('useBackendSwitchChoice', () => {
     act(() => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
+  });
+
+  it('clears a prior model pin when choosing a local agent default', async () => {
+    await act(async () => { root.render(createElement(Harness, { onBeforeApply: vi.fn(), persistSelection: true })); });
+    writeStoredOrchestratorModel(REPO_PATH, 'gpt-5.6-sol');
+    await act(async () => { currentSwitch!.apply('acp', ''); });
+    expect(host.querySelector('[data-testid="backend-switch-model"]')?.textContent).toBe('');
+    expect(readStoredOrchestratorModel(REPO_PATH)).toBe('');
+    const outgoing = await resolveFreshComposerTurnOptions({ repoPath: REPO_PATH, backend: 'acp', backendSourceRef: { current: 'user' }, setBackend: vi.fn(), setModel: vi.fn(), setOperatorDefaults: vi.fn() });
+    expect(outgoing).toEqual({ backend: 'acp', model: '' });
   });
 
   it('runs the lead-change reset only when a deferred backend switch applies', async () => {

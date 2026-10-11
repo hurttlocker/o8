@@ -10,6 +10,8 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveLocalAcpLaunch } from '@/lib/acp/local-connection';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -45,6 +47,7 @@ export async function GET(request: NextRequest) {
   const sort = (sortParam ?? 'most-popular') as OpenRouterModelSort;
 
   try {
+    if (backend === 'opencode' || (backend === 'acp' && resolveLocalAcpLaunch()?.useOpenRouter)) await resolveOpenRouterKey();
     const probePromise = probeAcpModels(backend, launch, repoPath, {
       force: params.get('refresh') === '1',
     });

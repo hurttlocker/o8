@@ -260,6 +260,12 @@
       ]
     },
     {
+      "path": "src/lib/acp/local-connection-integration.test.ts",
+      "reasons": [
+        "integration"
+      ]
+    },
+    {
       "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
       "reasons": [
         "child-process",
@@ -353,6 +359,12 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/cortex/qa/llm/byok-keys.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {

@@ -27,6 +27,7 @@ import {
   type CatalogueModel,
 } from '@/lib/orchestrator/acp-model-catalogue';
 
+import { useModelVisibility, openRouterModelKey } from './composer-selector/model-visibility';
 import { ModelPickerRow } from './composer-selector/ModelPickerRow';
 import { useModelFavorites, type ModelFavorite } from './composer-selector/model-favorites';
 
@@ -75,6 +76,7 @@ interface AcpModelPickerProps {
   defaultProvider?: string;
   allowEffortVariants?: boolean;
   disabled?: boolean;
+  manageVisibility?: boolean;
   favorites?: ModelFavorite[];
   onToggleFavorite?: (favorite: ModelFavorite) => void;
 }
@@ -108,7 +110,9 @@ function isStealth(model: CatalogueModel): boolean {
   return model.metadata?.stealth === true || model.id.startsWith('openrouter/stealth/');
 }
 
-export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320, catalogueUrl, embedded = false, defaultProvider, allowEffortVariants = true, disabled = false, favorites: suppliedFavorites, onToggleFavorite }: AcpModelPickerProps) {
+export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320, catalogueUrl, embedded = false, defaultProvider, allowEffortVariants = true, disabled = false, favorites: suppliedFavorites, onToggleFavorite, manageVisibility = false }: AcpModelPickerProps) {
+  const visibility = useModelVisibility();
+  const hiddenIds = new Set(visibility.hidden);
   const [groups, setGroups] = useState<CatalogueGroup[]>([]);
   const [state, setState] = useState<LoadState>('loading');
   const [query, setQuery] = useState('');
@@ -169,6 +173,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
   const searching = Boolean(query.trim());
   const scoped = searching || !selectedProvider ? filtered : filtered.filter((group) => group.provider === selectedProvider);
   const visibleGroups = scoped.map((group) => ({ ...group, models: group.models.filter((model) => {
+    if (!manageVisibility && group.provider === 'openrouter' && hiddenIds.has(openRouterModelKey(model.id)) && model.id !== active?.model.id) return false;
     if (freeOnly && model.metadata?.free !== true) return false;
     // Default suggestions are curated; a search always reaches the whole catalogue.
     if (!searching && rankingAvailable && !showAll && group.provider === 'openrouter' && model.metadata?.compatible !== true && model.id !== active?.model.id && !favoriteIds.has(model.id) && !isStealth(model)) return false;
@@ -177,14 +182,14 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
   const showDirectory = !searching && selectedProvider === null;
   const ready = state === 'ready' && loadedCatalogueKey === catalogueKey;
   const total = catalogueSize(groups);
-  const recentModels = recents.map((id) => findCatalogueModel(groups, id)).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  const recentModels = recents.map((id) => findCatalogueModel(groups, id)).filter((entry): entry is NonNullable<typeof entry> => entry !== null && (entry.model.provider !== 'openrouter' || !hiddenIds.has(openRouterModelKey(entry.model.id)) || entry.model.id === active?.model.id));
   const knownFree = groups.some((group) => group.models.some((model) => model.metadata?.free === true));
   const badge = (model: CatalogueModel) => {
     const age = model.metadata?.created ? catalogueTime - model.metadata.created : Infinity;
     return <>{age >= 0 && age < 14 * 86_400 ? <span style={{ flexShrink: 0, fontSize: 8, color: 'var(--t-accent)' }}>NEW</span> : null}{model.metadata?.free ? <span style={{ flexShrink: 0, fontSize: 8, color: 'var(--t-text-muted)' }}>FREE</span> : null}</>;
   };
   const row = (model: CatalogueModel) => <div key={model.id} style={{ paddingRight: 4, paddingLeft: 4 }}>
-    <ModelPickerRow label={stripRedundantProviderPrefix(model.label, model.provider)} detail={modelDetail(model)} title={model.id} selected={active?.model.id === model.id} disabled={disabled} favorite={favoriteIds.has(model.id)} onFavorite={() => toggleFavorite({ house: backend, id: model.id, label: model.label })} onSelect={() => choose(model.id)} badge={badge(model)} />
+    {manageVisibility ? <button type="button" aria-pressed={!hiddenIds.has(openRouterModelKey(model.id))} aria-label={`${hiddenIds.has(openRouterModelKey(model.id)) ? 'Show' : 'Hide'} ${model.label}`} onClick={() => visibility.toggle(model.id)} style={{ ...filterButtonStyle(false), display: 'flex', width: '100%', justifyContent: 'space-between', gap: 12, textAlign: 'left', minHeight: 36 }}><span style={{ overflowWrap: 'anywhere' }}>{model.label}</span><span style={{ color: 'var(--t-text-muted)' }}>{hiddenIds.has(openRouterModelKey(model.id)) ? 'Hidden' : 'Shown'}</span></button> : <ModelPickerRow label={stripRedundantProviderPrefix(model.label, model.provider)} detail={modelDetail(model)} title={model.id} selected={active?.model.id === model.id} disabled={disabled} favorite={favoriteIds.has(model.id)} onFavorite={() => toggleFavorite({ house: backend, id: model.id, label: model.label })} onSelect={() => choose(model.id)} badge={badge(model)} />}
     {allowEffortVariants && model.efforts.length ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, paddingTop: 2, paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}>
       {model.efforts.map((variant) => <button key={variant.id} type="button" title={variant.id} disabled={disabled} onClick={() => choose(variant.id)} style={filterButtonStyle(value === variant.id)}>{variant.effort}</button>)}
     </div> : null}
@@ -203,11 +208,12 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
       {knownFree ? <button type="button" aria-pressed={freeOnly} onClick={() => { setFreeOnly(!freeOnly); setLimit(PAGE_SIZE); }} style={filterButtonStyle(freeOnly)}>Free</button> : null}
     </div> : null}
     {ready && selectedProvider === 'openrouter' && !showDirectory ? <div style={{ fontSize: 9.5, color: 'var(--t-text-muted)', paddingRight: 8, paddingBottom: 3, paddingLeft: 8 }}>Prices per 1M tokens · input / output</div> : null}
+    {visibility.error ? <StatusLine text={visibility.error} /> : null}
     {!ready && state !== 'error' && state !== 'unavailable' ? <StatusLine text="Reading the agent’s model list…" /> : null}
     {state === 'unavailable' ? <StatusLine text={`${backend} is not installed on this machine.`} /> : null}
     {state === 'error' ? <StatusLine text={error ?? 'Could not read the model list.'} onRetry={reload} /> : null}
-    {ready && total === 0 ? <StatusLine text="The agent reported no models. Check its provider auth." onRetry={reload} /> : null}
-    {ready && !showDirectory && !visibleGroups.length ? <StatusLine text={searching ? `No model matches “${query}”.` : 'No models match these filters.'} /> : null}
+    {ready && total === 0 ? <StatusLine text={backend === 'acp' ? 'This agent does not expose a model list. Use its default model.' : 'The agent reported no models. Check its provider auth.'} onRetry={reload} /> : null}
+    {ready && total > 0 && !showDirectory && !visibleGroups.length ? <StatusLine text={searching ? `No model matches “${query}”.` : 'No models match these filters.'} /> : null}
     {ready && !searching && showDirectory && recentModels.length > 0 ? <div style={{ paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}><SectionLabel label="Recent" />
       {recentModels.map(({ model, effort }) => <button key={model.id} type="button" disabled={disabled} title={model.id} onClick={() => choose(allowEffortVariants && effort ? model.efforts.find((variant) => variant.effort === effort)?.id ?? model.id : model.id)} style={{ ...filterButtonStyle(value === model.id), marginRight: 4 }}>{shortModelLabel(model.id)}</button>)}
     </div> : null}

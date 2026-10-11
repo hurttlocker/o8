@@ -14,7 +14,7 @@ export function resolveActiveComposerBackend(defaults: Pick<ThoughtsOperatorDefa
 export function formatComposerBackendLabel(backend: OrchestratorBackendSetting, model: string): string {
   const fixed: Partial<Record<OrchestratorBackendSetting, string>> = {
     codex: 'Codex GPT-5.6', fable: 'Fable 5', openclaw: 'OpenClaw', hermes: 'Hermes',
-    collide: 'Collide', o8: 'o8',
+    collide: 'Collide', o8: 'o8', acp: 'Local ACP',
   };
   return fixed[backend] ?? formatModelLabel(model);
 }
@@ -83,7 +83,7 @@ export function useBackendSwitchChoice(input: {
     onBeforeApply?.();
     backendSourceRef.current = 'user';
     setBackend(backend);
-    if (model) {
+    if (model !== undefined) {
       if (persistSelection) writeStoredOrchestratorModel(repoPath, model);
       setModel(model);
     }
@@ -103,7 +103,7 @@ export function useBackendSwitchChoice(input: {
     }).catch((error) => {
       if (applyGeneration !== applyGenerationRef.current) return;
       console.log('[thoughts] failed to persist orchestrator backend', error);
-      if (model) {
+      if (model !== undefined) {
         writeStoredOrchestratorModel(repoPath, currentModel);
         setModel(currentModel);
       }

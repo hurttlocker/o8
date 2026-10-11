@@ -21,6 +21,10 @@ describe('transcript turns', () => {
     expect(transcriptTurns([sample[0], { ...sample[1], toolCalls: [{ name: 'exec', status: 'running' }] }, sample[3]], false)[0].history).toEqual([]);
     expect(transcriptTurns([{ ...sample[1], claudeCodeEvents: [{ type: 'permission_request' }] as MobileTranscriptEntry['claudeCodeEvents'] }, sample[3]], false)[0].history).toEqual([]);
   });
+  it('keeps activity on the correct side of an exposed error', () => {
+    const entries = [sample[0], sample[1], { ...sample[2], isError: true }, entry('recovery', 'assistant'), sample[3]];
+    expect(transcriptTurns(entries, false)[0].history).toEqual([3]);
+  });
   it('folds ordinary CLI events while preserving a later system message', () => {
     const progress = { ...sample[1], claudeCodeEvents: [{ type: 'thinking' as const, text: 'Inspecting' }] };
     expect(transcriptTurns([sample[0], progress, sample[3], entry('peer', 'system')], false)[0]).toEqual({ start: 0, end: 4, final: 2, history: [1] });

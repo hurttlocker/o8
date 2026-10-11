@@ -168,3 +168,18 @@ describe('AcpModelPicker', () => {
   });
 
 });
+
+it('shares hidden OpenRouter ids across runtime prefixes while keeping the selected model visible', async () => {
+  localStorage.setItem('o8:openrouter-hidden-models', JSON.stringify(['beta/model']));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ groups: rankedGroups, rankingAvailable: true })));
+  const container = document.createElement('div'); const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(AcpModelPicker, { backend: 'opencode', defaultProvider: 'openrouter', value: null, onSelect: () => {} })));
+    expect(container.querySelector('[title="openrouter/beta/model"]')).toBeNull();
+    await act(async () => root.render(createElement(AcpModelPicker, { backend: 'opencode', defaultProvider: 'openrouter', value: 'openrouter/beta/model', onSelect: () => {} })));
+    expect(container.querySelector('[title="openrouter/beta/model"]')).not.toBeNull();
+    await act(async () => root.render(createElement(AcpModelPicker, { backend: 'opencode', defaultProvider: 'openrouter', value: null, onSelect: () => {}, manageVisibility: true })));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show Beta Model"]')!.click());
+    expect(JSON.parse(localStorage.getItem('o8:openrouter-hidden-models')!)).toEqual([]);
+  } finally { act(() => root.unmount()); localStorage.clear(); vi.unstubAllGlobals(); }
+});

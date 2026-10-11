@@ -23,6 +23,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { encryptValue, decryptValue } from '@/lib/db/master-key';
+import { updateManagedOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { invalidateRuntimeAuthCache } from '@/lib/runtimes/shared/auth-detect';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 // Prefix that distinguishes an encrypted value from legacy plaintext.
@@ -54,7 +56,7 @@ const PROVIDERS: ProviderKeyConfig[] = [
     envVar: 'OPENROUTER_API_KEY',
     placeholder: 'sk-or-...',
     docsUrl: 'https://openrouter.ai/keys',
-    validateUrl: 'https://openrouter.ai/api/v1/models',
+    validateUrl: 'https://openrouter.ai/api/v1/key',
   },
   {
     id: 'deepseek',
@@ -165,7 +167,7 @@ async function parseEnvFile(): Promise<Map<string, string>> {
  * Write provider env vars to ~/.o8/.env.local, encrypting each value.
  * Non-provider lines (comments, unrecognised keys) are preserved verbatim.
  */
-async function writeEnvFile(vars: Map<string, string>): Promise<void> {
+async function writeEnvFile(vars: Map<string, string>, removed = new Set<string>()): Promise<void> {
   mkdirSync(CONFIG_DIR, { recursive: true });
 
   let lines: string[] = [];
@@ -189,6 +191,7 @@ async function writeEnvFile(vars: Map<string, string>): Promise<void> {
       continue;
     }
     const k = trimmed.slice(0, eqIdx).trim();
+    if (removed.has(k)) continue;
     if (vars.has(k)) {
       written.add(k);
       const encoded = await encodeStoredValue(vars.get(k)!);
@@ -206,7 +209,7 @@ async function writeEnvFile(vars: Map<string, string>): Promise<void> {
     }
   }
 
-  writeFileSync(ENV_FILE, updated.join('\n'));
+  writeFileSync(ENV_FILE, updated.join('\n'), { mode: 0o600 });
 }
 
 async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ valid: boolean; error?: string }> {
@@ -252,6 +255,7 @@ async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ va
     const res = await fetch(config.validateUrl, { headers, signal: controller.signal });
     clearTimeout(timeout);
     if (res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
+    if (!res.ok) return { valid: true, error: `Provider validation unavailable (${res.status}) — key saved without verification` };
     return { valid: true };
   } catch {
     // Network error — don't block saving, just warn
@@ -293,7 +297,7 @@ export async function POST(request: NextRequest) {
   if (denied) return denied;
 
   const body = await request.json().catch(() => null);
-  if (!body?.provider || !body?.key) {
+  if (typeof body?.provider !== 'string' || typeof body?.key !== 'string') {
     return NextResponse.json({ error: 'provider and key are required' }, { status: 400 });
   }
 
@@ -319,7 +323,9 @@ export async function POST(request: NextRequest) {
   await writeEnvFile(envVars);
 
   // Also set in process.env so it takes effect immediately (no restart needed)
-  process.env[config.envVar] = key;
+  if (config.id === 'openrouter') updateManagedOpenRouterKey(key);
+  else process.env[config.envVar] = key;
+  invalidateRuntimeAuthCache();
 
   return NextResponse.json({
     success: true,
@@ -347,10 +353,12 @@ export async function DELETE(request: NextRequest) {
   // Remove from .env.local (delete key, re-encrypt remaining entries).
   const envVars = await parseEnvFile();
   envVars.delete(config.envVar);
-  await writeEnvFile(envVars);
+  await writeEnvFile(envVars, new Set([config.envVar]));
 
   // Clear from process.env
-  delete process.env[config.envVar];
+  if (config.id === 'openrouter') updateManagedOpenRouterKey(null);
+  else delete process.env[config.envVar];
+  invalidateRuntimeAuthCache();
 
-  return NextResponse.json({ success: true, provider: config.id });
+  return NextResponse.json({ success: true, provider: config.id, warning: 'External environment and project-local keys are managed separately.' });
 }
