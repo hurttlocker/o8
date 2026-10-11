@@ -63,7 +63,7 @@ export function O8RepoSelector({
   const selectedEntry = selectedRepoPath ? repos.find((r) => r.localPath === selectedRepoPath) ?? null : null;
   const chipLabel = allRepos
     ? 'All repos'
-    : selectedEntry ? repoMeta(selectedEntry).label : (repos[0] ? repoMeta(repos[0]).label : 'No repo');
+    : selectedEntry ? repoMeta(selectedEntry).label : (selectedRepoPath?.split(/[\\/]/).filter(Boolean).pop() ?? 'No repo');
 
   const pickAll = useCallback(() => { onSelectAll(); setOpen(false); }, [onSelectAll, setOpen]);
   const pickRepo = useCallback((localPath: string) => { onSelectRepo(localPath); setOpen(false); }, [onSelectRepo, setOpen]);
