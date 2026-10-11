@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createRequire } from 'node:module';
+import * as nodeModule from 'node:module';
 import {
   existsSync,
   mkdtempSync,
@@ -138,7 +138,11 @@ function lintAvailability(cwd: string): { skip: false; eslintScript: string } | 
   }
 
   try {
-    const requireFromRepo = createRequire(path.join(cwd, 'package.json'));
+    // This anchor belongs to the runtime repository, not the app being bundled.
+    // A direct createRequire call is statically rewritten by webpack to an
+    // undefined resolver when its argument cannot be evaluated at build time.
+    const runtimeCreateRequire = Reflect.get(nodeModule, 'createRequire') as typeof nodeModule.createRequire;
+    const requireFromRepo = runtimeCreateRequire(path.join(cwd, 'package.json'));
     const eslintPackage = requireFromRepo.resolve('eslint/package.json');
     const eslintScript = path.join(path.dirname(eslintPackage), 'bin', 'eslint.js');
     if (!existsSync(eslintScript)) {

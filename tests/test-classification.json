@@ -3638,6 +3638,14 @@
       ]
     },
     {
+      "path": "tests/rebase-lint-webpack-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/recovery-tick-log-flood-real-path.test.ts",
       "reasons": [
         "child-process",
