@@ -1,11 +1,12 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({ home: '', selected: '', root: '', mode: 'native', version: '2.0.1', busy: false,
   externalBusy: false, fail: false, wrongVersion: false, changedOwner: false, source: 'which', calls: [] as Array<{ command: string; args: string[] }> }));
-const directory = mkdtempSync(join(tmpdir(), 'o8-stable-cli-route-'));
+// Installation checks resolve executable paths; the mocked home must use the same canonical root.
+const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-stable-cli-route-')));
 fixture.home = join(directory, 'home');
 vi.stubEnv('CORTEX_IDE_DATA_DIR', join(directory, 'data'));
 vi.stubEnv('CLAUDE_CONFIG_DIR', join(fixture.home, '.claude'));
