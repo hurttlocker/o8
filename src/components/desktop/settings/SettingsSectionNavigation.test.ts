@@ -6,6 +6,7 @@ import type { NavSection } from '@/app/dashboard/types';
 import { useSettingsOverlayDismiss } from '@/app/dashboard/hooks/useSettingsOverlayDismiss';
 import { PickerMenu } from './dispatch-shared';
 import { SettingsAdvanced } from './SettingsAdvanced';
+import { renderedSettingsSections } from './settings-sections';
 import { SettingsNavItem } from './SettingsNavItem';
 import { useSettingsSectionNavigation } from './useSettingsSectionNavigation';
 import { VoiceShortcutsSection } from './VoiceShortcutsSection';
@@ -104,4 +105,21 @@ it('Escape closes a body-portaled provider picker before closing Settings', asyn
   expect(document.activeElement).toBe(trigger);
   await act(async () => { trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
   expect(container.textContent).toBe('Workspace');
+});
+
+
+it('jumps to the visible provider section when a visited pane has the same marker', async () => {
+  function ProviderHarness() {
+    const [tab, setTab] = useState<SettingsTab>('models');
+    const { contentRef, navigate } = useSettingsSectionNavigation(tab, setTab);
+    return createElement('div', null,
+      createElement('button', { onClick: () => navigate('models', 'Provider keys') }, 'Find keys'),
+      createElement('div', { ref: contentRef },
+        createElement('section', { hidden: true }, createElement('h2', { 'data-settings-section': 'Provider keys' }, 'Inactive keys')),
+        createElement('section', null, createElement('h2', { 'data-settings-section': 'Provider keys' }, 'Selected keys'))));
+  }
+  await act(async () => root.render(createElement(ProviderHarness)));
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  expect(document.activeElement?.textContent).toBe('Selected keys');
+  expect(renderedSettingsSections(container)).toEqual(['Provider keys']);
 });

@@ -86,7 +86,7 @@ const NATIVE_KEYS: NativeKeyConfig[] = [
 
 // Provider keys use the existing encrypted key store.
 
-export function ApiKeysProviderList() {
+export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
   const [providers, setProviders] = useState<ProviderKeyInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -215,11 +215,18 @@ export function ApiKeysProviderList() {
     );
   }
 
+  if (providerId && !providers.some(provider => provider.id === providerId)) {
+    return <div role="alert" style={{ fontSize: 13, color: 'var(--t-text-secondary)' }}>
+      This provider is not available in the key inventory.
+      <button type="button" onClick={() => { void loadKeys(); }} style={quietLinkStyle(false)}>retry</button>
+    </div>;
+  }
+
   return (
     <div style={{
       borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
     }}>
-      {[...providers].sort((a, b) => Number(b.id === 'openrouter') - Number(a.id === 'openrouter')).map((p) => {
+      {providers.filter(provider => !providerId || provider.id === providerId).sort((a, b) => Number(b.id === 'openrouter') - Number(a.id === 'openrouter')).map((p) => {
         const isEditing = editingProvider === p.id;
         const fb = feedback?.provider === p.id ? feedback : null;
 
@@ -236,7 +243,7 @@ export function ApiKeysProviderList() {
           >
             <div style={{
               display: 'flex',
-              alignItems: 'flex-start',
+              alignItems: 'center',
               justifyContent: 'space-between',
               gap: 14,
               flexWrap: 'wrap',
@@ -362,7 +369,7 @@ export function ApiKeysProviderList() {
 
             {removingProvider === p.id ? <div role="alert" style={{ marginTop: 12 }}>
               <p style={{ fontSize: 12 }}>Remove this saved {p.label} key? New connections may need another credential.</p>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <RamsButton variant="danger" busy={saving} onClick={() => void handleRemove(p.id)}>Confirm removal</RamsButton>
                 <RamsButton variant="ghost" disabled={saving} onClick={() => setRemovingProvider(null)}>Cancel</RamsButton>
               </div>
@@ -415,7 +422,7 @@ export function ApiKeysProviderList() {
                     e.currentTarget.style.borderBottomColor = RAMS_HAIRLINE_SOFT;
                   }}
                 />
-                {p.id === 'openrouter' && nativeKeychain ? <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                {p.id === 'openrouter' && nativeKeychain ? <label style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, fontSize: 12 }}>
                   <input type="checkbox" checked={syncVoice} disabled={saving} onChange={event => setSyncVoice(event.target.checked)} />
                   Also use this key for Symon and voice on this Mac
                 </label> : null}
@@ -476,7 +483,7 @@ export function ApiKeysProviderList() {
   );
 }
 
-function NativeKeysList() {
+export function NativeKeysList() {
   const nativeKeychain = isTauri() && !isNonMacShell();
   const [presence, setPresence] = useState<Record<string, boolean>>({});
   const [removingKey, setRemovingKey] = useState<string | null>(null);
@@ -585,7 +592,7 @@ function NativeKeysList() {
         const rowFeedback = feedback?.key === key.id ? feedback : null;
         return (
           <div key={key.id} style={{ borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`, paddingTop: 16, paddingBottom: 16, paddingLeft: 2, paddingRight: 2 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: '1 1 360px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 15, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>{key.label}</span>
@@ -603,7 +610,7 @@ function NativeKeysList() {
                 <a href={key.docsUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 32, width: 'fit-content', fontSize: 12, color: 'var(--t-text-muted)', textDecoration: 'underline', textDecorationColor: RAMS_HAIRLINE_SOFT, textUnderlineOffset: 3 }}>get key ›</a>
               </div>
               {nativeKeychain && bridgeAvailable && !editing ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => { setRemovingKey(null); setEditingKey(key.id); setKeyInput(''); }} style={accentLinkStyle(false)}>{configured ? 'update key' : 'add key'}</button>
                   {configured ? <RamsButton variant="danger" disabled={busy} onClick={() => setRemovingKey(key.id)}>Remove</RamsButton> : null}
                 </div>
@@ -611,7 +618,7 @@ function NativeKeysList() {
             </div>
             {removingKey === key.id ? <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--t-text-secondary)' }}>Remove the saved {key.label} key from this Mac? You will need to add it again to use this connection.</p>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <RamsButton variant="danger" busy={busy} onClick={() => void removeKey(key)}>Confirm removal</RamsButton>
                 <RamsButton variant="ghost" disabled={busy} onClick={() => setRemovingKey(null)}>Cancel</RamsButton>
               </div>

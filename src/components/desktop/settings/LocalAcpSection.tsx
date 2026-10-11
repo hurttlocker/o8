@@ -67,19 +67,19 @@ export function LocalAcpSection() {
     finally { setBusy(false); }
   };
   return <div style={{ marginTop: 20, color: 'var(--t-text)', fontSize: 12 }}>
-    <p style={{ color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Connect an installed agent that speaks ACP. The agent owns its tools, sign-in, and permissions. Saving does not install or launch software. This connection is for orchestrator conversations.</p>
+    <p style={{ color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Connect an installed ACP agent for conversations. The agent manages its tools, sign-in, and permissions. Saving does not start it.</p>
     <a href="https://agentclientprotocol.com/get-started/registry" target="_blank" rel="noreferrer" style={{ color: 'var(--t-accent)' }}>Browse ACP agents</a>
     {locked ? <p>Controlled by O8_ACP_COMMAND in your environment.</p> : null}
     <fieldset disabled={loading || busy || checking || locked} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 12 }}>
       <label>Name<input style={fieldStyle} value={name} onChange={event => { setName(event.target.value); dirty(); }} /></label>
       <label>Executable<input style={fieldStyle} value={command} placeholder="agent executable or full path" onChange={event => { setCommand(event.target.value); dirty(); }} /></label>
       <label>Arguments, one per line<textarea style={{ ...fieldStyle, minHeight: 76 }} value={args} placeholder="acp" onChange={event => { setArgs(event.target.value); dirty(); }} /></label>
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={useOpenRouter} onChange={event => { setUseOpenRouter(event.target.checked); dirty(); }} />Use the saved OpenRouter key when this agent supports it</label>
-      <p style={{ color: 'var(--t-text-muted)', margin: 0 }}>Arguments are literal; shell expressions are not expanded. Keep credentials out of arguments. Unchecked, OpenRouter credentials are excluded from this agent’s environment. Configure the model provider in the agent if required.</p>
-      <div style={{ display: 'flex', gap: 8 }}><RamsButton variant="primary" busy={busy} disabled={!command.trim() || !name.trim()} onClick={() => void save()}>Save connection</RamsButton><RamsButton variant="ghost" disabled={!saved} onClick={() => void checkModels()}>Check connection</RamsButton></div>
-    {configured ? <div>{confirmRemove ? <><span>Disconnect for new conversations? </span><RamsButton variant="ghost" onClick={() => setConfirmRemove(false)}>Cancel</RamsButton><RamsButton variant="ghost" onClick={() => void remove()}>Disconnect</RamsButton></> : <RamsButton variant="ghost" onClick={() => setConfirmRemove(true)}>Remove connection</RamsButton>}</div> : null}
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={useOpenRouter} onChange={event => { setUseOpenRouter(event.target.checked); dirty(); }} />Share the saved OpenRouter key with this agent</label>
+      <p style={{ color: 'var(--t-text-muted)', margin: 0 }}>Use one literal argument per line. Keep secrets out of arguments. OpenRouter credentials are excluded unless you enable sharing.</p>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><RamsButton variant="primary" busy={busy} disabled={!command.trim() || !name.trim()} onClick={() => void save()}>Save connection</RamsButton><RamsButton variant="ghost" disabled={!saved} onClick={() => void checkModels()}>Check connection</RamsButton></div>
+    {configured ? <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>{confirmRemove ? <><span>Disconnect for new conversations? </span><RamsButton variant="ghost" onClick={() => setConfirmRemove(false)}>Cancel</RamsButton><RamsButton variant="ghost" onClick={() => void remove()}>Disconnect</RamsButton></> : <RamsButton variant="ghost" onClick={() => setConfirmRemove(true)}>Remove connection</RamsButton>}</div> : null}
     </fieldset>
     {notice ? <p role="status">{notice}</p> : null}
-    <p style={{ color: 'var(--t-text-muted)' }}>Checking starts the agent and reads its capabilities. No prompt is sent.</p>
+    <p style={{ color: 'var(--t-text-muted)' }}>Check starts the agent and reads its capabilities without sending a prompt.</p>
   </div>;
 }

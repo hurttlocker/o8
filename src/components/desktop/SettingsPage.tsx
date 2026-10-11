@@ -26,7 +26,6 @@ import {
   RAMS_INK_QUIET,
   SettingsTabSectionHeader as SectionHeader,
   PlugIcon,
-  KeyIcon,
   MobileIcon,
   LayersIcon,
   PaletteIcon,
@@ -43,14 +42,12 @@ import {
 import { SettingsNavItem } from './settings/SettingsNavItem';
 import { useSettingsSectionNavigation } from './settings/useSettingsSectionNavigation';
 import { GeneralTab } from './settings/GeneralTab';
+import { ProvidersTab } from './settings/ProvidersTab';
 import { AccountTab } from './settings/AccountTab';
 import type { GitHubConnectionProps } from './settings/GitHubTab';
 import { GitPrsTab } from './settings/GitPrsTab';
 import { IndexingTab } from './settings/IndexingTab';
 import { WorktreeRetentionSection } from './settings/WorktreeRetentionSection';
-import { LocalModelsTab } from './settings/LocalModelsTab';
-import { ModelsTab } from './settings/ModelsTab';
-import { APIKeysTab } from './settings/APIKeysTab';
 import { MCPTab } from './settings/MCPTab';
 import { ConnectionsTab } from './settings/ConnectionsTab';
 import { OperatorDefaultsTab } from './settings/OperatorDefaultsTab';
@@ -121,7 +118,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [openNavTab, setOpenNavTab] = useState<SettingsTab | null>(null);
-  const { contentRef, navigate, notice } = useSettingsSectionNavigation(activeTab, setActiveTab);
+  const { contentRef, navigate, notice, targetSection, navigationId } = useSettingsSectionNavigation(activeTab, setActiveTab);
   const { founder, plan } = useEntitlement();
   const auth = useO8Auth();
   const searchMatches = useMemo(
@@ -569,9 +566,8 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
 
           <SectionHeader>Agents</SectionHeader>
           <SettingsNavItem label="Dispatch" icon={<SlidersIcon />} active={activeTab === 'operator-defaults'} tab="operator-defaults" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
-          <SettingsNavItem label="Models & providers" icon={<CpuNavIcon />} active={activeTab === 'models'} tab="models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
+          <SettingsNavItem label="Providers" icon={<CpuNavIcon />} active={['models', 'api-keys', 'local-models'].includes(activeTab)} tab="models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
-          <SettingsNavItem label="Local models" icon={<CpuNavIcon />} active={activeTab === 'local-models'} tab="local-models" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>Workspace</SectionHeader>
           <SettingsNavItem label="Worktrees & storage" icon={<LayersIcon />} active={activeTab === 'worktrees'} tab="worktrees" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
@@ -580,7 +576,6 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           <SettingsNavItem label="Indexing" icon={<BrainIcon />} active={activeTab === 'indexing'} tab="indexing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>Connections</SectionHeader>
-            <SettingsNavItem label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} tab="api-keys" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} tab="mcp" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} tab="connections" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
@@ -606,7 +601,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
             overflowY: 'auto', scrollbarWidth: 'none',
             scrollPaddingTop: 8,
             display: 'grid',
-            gridTemplateColumns: `minmax(0, ${activeTab === 'analytics' ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
+            gridTemplateColumns: `minmax(0, ${['analytics', 'models', 'api-keys', 'local-models'].includes(activeTab) ? SETTINGS_WIDE_CONTENT_MAX_WIDTH : SETTINGS_CONTENT_MAX_WIDTH}px)`,
             alignContent: 'start',
             justifyContent: 'center',
           }}
@@ -615,10 +610,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
             <GeneralTab onNavigateTab={setActiveTab} />
           )}
           {activeTab === 'account' && <AccountTab />}
-          {activeTab === 'local-models' && <LocalModelsTab />}
-          {activeTab === 'api-keys' && (
-            <APIKeysTab />
-          )}
+          {['models', 'api-keys', 'local-models'].includes(activeTab) && <ProvidersTab initialTab={activeTab} section={targetSection} navigationId={navigationId} onNavigateTab={navigate} />}
           {activeTab === 'mcp' && (
             <MCPTab />
           )}
@@ -637,9 +629,6 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           )}
           {activeTab === 'indexing' && (
             <IndexingTab />
-          )}
-          {activeTab === 'models' && (
-            <ModelsTab onNavigateTab={navigate} />
           )}
           {activeTab === 'analytics' && (
             <AnalyticsPage embedded />

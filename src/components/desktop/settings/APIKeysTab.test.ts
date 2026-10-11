@@ -24,7 +24,7 @@ vi.mock('@/lib/desktop/host-platform', () => ({
   isNonMacShell: () => native.nonMacShell,
 }));
 
-import { APIKeysTab } from './APIKeysTab';
+import { APIKeysTab, ApiKeysProviderList } from './APIKeysTab';
 
 const providers = [
   { id: 'openrouter', label: 'OpenRouter', envVar: 'OPENROUTER_API_KEY', placeholder: 'sk-or-...', docsUrl: '#', configured: false, maskedKey: null },
@@ -207,5 +207,30 @@ it.each([false, true])('saves OpenRouter once and reports native synchronization
     expect(native.writes).toContainEqual(['openrouter_api_key', 'fixture-router-key']);
     expect(container.textContent).toContain(fails ? 'Symon and voice could not be updated' : 'Also saved for Symon and voice');
     expect(container.querySelector('input[type="password"]')).toBeNull();
+  } finally { act(() => root.unmount()); }
+});
+
+
+it('limits a provider editor to its own key and saves only that provider', async () => {
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const request = vi.fn(async (_url: string, options?: RequestInit) => ({ ok: true, status: 200, json: async () => options?.method === 'POST' ? ({ ok: true }) : ({ providers }) }));
+  vi.stubGlobal('fetch', request);
+  try {
+    await act(async () => root.render(createElement(ApiKeysProviderList, { providerId: 'anthropic' })));
+    expect(container.textContent).toContain('ANTHROPIC_API_KEY');
+    expect(container.textContent).not.toContain('OPENROUTER_API_KEY');
+    expect(container.textContent).not.toContain('OPENAI_API_KEY');
+    await act(async () => rowFor(container, 'Anthropic').querySelector<HTMLButtonElement>('button')!.click());
+    const input = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'fixture-anthropic-key');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'save key')!.click());
+    const writes = request.mock.calls.filter(([, options]) => options?.method === 'POST');
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ provider: 'anthropic', key: 'fixture-anthropic-key' });
+    expect(native.writes).toHaveLength(0);
   } finally { act(() => root.unmount()); }
 });
