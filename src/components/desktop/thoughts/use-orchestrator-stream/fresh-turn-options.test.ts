@@ -1,5 +1,18 @@
 // @vitest-environment jsdom
 
+vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {
+  const { getRuntimeCapability, listDispatchableRuntimes } = await import('@/lib/orchestrator/runtime-capabilities');
+  const runtimes = listDispatchableRuntimes();
+  return { ...await importOriginal<typeof import('@/lib/runtimes/shared/auth-detect')>(),
+    getRuntimeAuthSnapshot: async () => ({ statuses: Object.fromEntries(runtimes.map((runtime) => {
+      const house = getRuntimeCapability(runtime).authHouse;
+      return [house, { house, runtime, installed: true, ready: true, authenticated: true, unavailableReason: null, detail: 'Fixture', fix: '', checkedAt: 0 }];
+    }).filter(([house]) => house)), suggestedSubscriptionProfile: { profile: null, detail: null } }),
+    getDispatchableRuntimeAvailability: async () => runtimes.map((id) => ({ id, label: id, available: true, unavailableReason: null, detail: 'Fixture', fix: '' })),
+    invalidateRuntimeAuthCache: () => {},
+  };
+});
+
 vi.mock('@/components/desktop/onboarding/useRuntimeInventory', async () => {
   const { listDispatchableRuntimes } = await import('@/lib/orchestrator/runtime-capabilities');
   return { useRuntimeInventory: () => ({
@@ -23,6 +36,7 @@ import { THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, type OrchestratorBackendSetting } 
 import { resolveFreshComposerTurnOptions } from '../useBackendSwitchChoice';
 import { useOrchestratorStream } from '../useOrchestratorStream';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
+import { findIdleOrchestratorSession } from '../chat-panel/idle-orchestrator-session';
 
 const transport = vi.hoisted(() => ({ socket: null as WebSocket | null }));
 vi.mock('./shared', async (importOriginal) => ({
@@ -43,6 +57,7 @@ let releaseFreshFetch: (() => void) | null = null;
 let historyResponse: Record<string, unknown> | null = null;
 let useRealHistoryRoute = false;
 let historyPatchGate: Promise<void> | null = null;
+let runtimeInventoryAgents: Array<{ sessionKey: string; runtime: string; status: string; workspace: string }> = [];
 
 interface ComposerTestWindow extends Window {
   interruptComposerTurn?: () => void;
@@ -120,7 +135,7 @@ function ComposerSubmissionHarness() {
   return createElement('output', { 'data-testid': 'displayed-model' }, displayedModel);
 }
 
-function RoutingThoughtsHarness({ panelRef, initialComposerMode }: { panelRef: RefObject<ThoughtsChatPanelHandle | null>; initialComposerMode?: 'moa' | 'fusion' }) {
+function RoutingThoughtsHarness({ panelRef, initialComposerMode, observeIdle = false, visible = false }: { panelRef: RefObject<ThoughtsChatPanelHandle | null>; initialComposerMode?: 'moa' | 'fusion'; observeIdle?: boolean; visible?: boolean }) {
   const [collideEnabled, setCollideEnabled] = useState(initialComposerMode === 'moa');
   const missionState: OrchestratorMissionState = {
     version: 2,
@@ -132,7 +147,7 @@ function RoutingThoughtsHarness({ panelRef, initialComposerMode }: { panelRef: R
   return createElement(ThoughtsChatPanel, {
     ref: panelRef,
     composerModeStorageId: initialComposerMode === 'fusion' ? 'routing-fusion-tab' : undefined,
-    open: false,
+    open: visible,
     agents: [],
     missionState,
     preferredRuntime: 'codex',
@@ -144,7 +159,7 @@ function RoutingThoughtsHarness({ panelRef, initialComposerMode }: { panelRef: R
     collideEnabled,
     onSetCollide: setCollideEnabled,
     suppressAutoRestore: true,
-    suppressRuntimePrewarm: true,
+    suppressRuntimePrewarm: !observeIdle,
     thoughtsBodyBackground: 'var(--t-bg)',
     thoughtsElevatedSurface: 'var(--t-panel)',
     thoughtsElevatedBorder: 'var(--t-border)',
@@ -181,6 +196,10 @@ beforeEach(async () => {
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.startsWith('/api/runtime/inventory')) {
+      return new Response(JSON.stringify({ agents: runtimeInventoryAgents }));
+    }
+    if (url.startsWith('/api/runtime/launch')) return new Promise<Response>(() => {});
     if (url.startsWith('/api/panel/operator-defaults')) {
       if (freshFetchFails) return new Response('unavailable', { status: 503 });
       if (freshFetchGate) await freshFetchGate;
@@ -214,6 +233,7 @@ beforeEach(async () => {
   historyResponse = null;
   useRealHistoryRoute = false;
   historyPatchGate = null;
+  runtimeInventoryAgents = [];
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -230,6 +250,55 @@ afterEach(async () => {
 });
 
 describe('composer fresh operator defaults at the send seam', () => {
+  it('reuses only an idle orchestrator at the exact normalized repository, excluding siblings and descendants', async () => {
+    runtimeInventoryAgents = [
+      { sessionKey: 'sibling', runtime: 'claude-code', status: 'idle', workspace: `${repoPath}-other` },
+      { sessionKey: 'descendant', runtime: 'claude-code', status: 'idle', workspace: `${repoPath}/child` },
+      { sessionKey: 'same', runtime: 'claude-code', status: 'reviewing', workspace: `${repoPath}/` },
+    ];
+    expect(findIdleOrchestratorSession(runtimeInventoryAgents, repoPath)?.sessionKey).toBe('same');
+    expect(findIdleOrchestratorSession(runtimeInventoryAgents.slice(0, 2), repoPath)).toBeNull();
+    await act(async () => root.unmount()); root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    await act(async () => {
+      root.render(createElement(RoutingThoughtsHarness, { panelRef, observeIdle: true, visible: true }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    const requests = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([input]) => String(input));
+    expect(requests.some((url) => url.startsWith('/api/runtime/inventory'))).toBe(true);
+    expect(requests.filter((url) => url.startsWith('/api/runtime/launch'))).toEqual([]);
+    expect(sentTurnPayloads()).toEqual([]);
+  });
+
+  it.each([false, true])('does not launch a ready turn while an empty panel is visible: %s, and sends only the operator request', async (visible) => {
+    await act(async () => root.unmount()); root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    // Two mounts cover the reload lifecycle without an actual runtime.
+    for (let mount = 0; mount < 2; mount += 1) {
+      await act(async () => {
+        root.render(createElement(RoutingThoughtsHarness, { key: mount, panelRef, observeIdle: true, visible }));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(sentTurnPayloads()).toEqual([]);
+      const requests = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([input]) => String(input));
+      expect(requests.filter((url) => url.startsWith('/api/runtime/launch'))).toEqual([]);
+      if (!visible) expect(requests.filter((url) => url.startsWith('/api/runtime/inventory'))).toEqual([]);
+    }
+    await act(async () => {
+      expect(panelRef.current?.sendNow('operator requested work')).toBe(true);
+      await waitForPayload(1);
+    });
+    expect(sentTurnPayloads()).toHaveLength(1);
+    expect(sentTurnPayloads()[0]).toMatchObject({ type: 'orchestrator-send', displayMessage: 'operator requested work', backend: 'codex' });
+    // Let this mount's 800ms history debounce land against its own synthetic
+    // transport before the next test installs a real history-route fixture.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
+  });
+
   it('keeps a new chat on its selected repository through the first send and history reload', async () => {
     const oldRepo = '/repo/old-thread-home';
     const newRepo = '/repo/new-turn-home';

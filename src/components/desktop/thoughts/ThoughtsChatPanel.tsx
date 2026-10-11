@@ -99,6 +99,7 @@ import { isAbortError } from '@/lib/active-long-lived-request';
 import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
 import { contextualOperatorDefaults, contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
 import { useComposerDraftLifecycle } from './chat-panel/useComposerDraftLifecycle';
+import { findIdleOrchestratorSession } from './chat-panel/idle-orchestrator-session';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
 import type {
@@ -411,7 +412,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const orchestratorSessionRef = useRef<string | null>(null);
   const singleRuntimeSessionRef = useRef<string | null>(null);
   const singleRuntimeLaunchPromiseRef = useRef<Promise<string | null> | null>(null);
-  const [orchestratorSpawning, setOrchestratorSpawning] = useState(false);
   const [singleRuntimeSpawning, setSingleRuntimeSpawning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
@@ -695,9 +695,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return sessionKey ? { sessionKey, launched: true } : null;
   }, [resolveRuntimeRepoPath, singleRuntime]);
 
-  // ── Pre-warm orchestrator session on mount ──
+  // ── Reuse an idle orchestrator session on mount ──
   useEffect(() => {
-    if (suppressRuntimePrewarm || !isOrchestratorMode || !orchestrationSettingsLoaded || isChatMode || orchestratorSessionRef.current || orchestratorSpawning) return;
+    if (!open || suppressRuntimePrewarm || !isOrchestratorMode || !orchestrationSettingsLoaded || isChatMode || orchestratorSessionRef.current) return;
 
     let cancelled = false;
     (async () => {
@@ -717,9 +717,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const invRes = await fetch('/api/runtime/inventory?fresh=1');
         if (invRes.ok && !cancelled) {
           const invData = await invRes.json() as { agents?: Array<{ sessionKey: string; runtime: string; status: string; workspace: string }> };
-          const existing = (invData.agents ?? []).find(
-            (a) => a.runtime === 'claude-code' && (a.status === 'idle' || a.status === 'reviewing') && a.workspace?.includes(repoPath!),
-          );
+          const existing = findIdleOrchestratorSession(invData.agents ?? [], repoPath);
           if (existing) {
             orchestratorSessionRef.current = existing.sessionKey;
             return;
@@ -727,28 +725,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         }
       } catch { /* silent */ }
 
-      if (cancelled) return;
-      let receiptUnsettled = false;
-      try {
-        setOrchestratorSpawning(true);
-        const { payload: data } = await fetchRuntimeLaunchReceipt({
-          runtime: 'claude-code',
-          prompt: 'You are the orchestrator for o8. Acknowledge ready.',
-          repoPath,
-          cwd: repoPath,
-          skipSetup: true,
-        });
-        if (data?.ok && data.surfaceId && !cancelled) {
-          orchestratorSessionRef.current = data.surfaceId;
-        }
-      } catch (error) {
-        receiptUnsettled = correlatedActionIsUnsettled(error);
-      } finally {
-        if (!cancelled && !receiptUnsettled) setOrchestratorSpawning(false);
-      }
+      // Opening a conversation is observation. Runtime creation belongs to
+      // the normal send path after the operator submits their request.
     })();
     return () => { cancelled = true; };
-  }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, resolvedRepoPath, suppressRuntimePrewarm]);
+  }, [isChatMode, isOrchestratorMode, open, orchestrationSettingsLoaded, resolvedRepoPath, suppressRuntimePrewarm]);
 
   useEffect(() => {
     openRef.current = open;
