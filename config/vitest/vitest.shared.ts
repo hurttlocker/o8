@@ -12,6 +12,7 @@ export const sharedVitestConfig = {
     globalSetup: ['tests/global-test-data-dir.ts'],
     setupFiles: ['tests/setup-isolated-data-dir.ts'],
     include: [
+      'src/components/desktop/FeedbackSheet.test.tsx',
       'src/components/desktop/transcript/*.test.tsx',
       'src/**/*.test.ts',
       'src/components/desktop/agent-panel/project-dialog-surface.test.tsx',

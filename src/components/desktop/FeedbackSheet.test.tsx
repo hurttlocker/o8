@@ -129,7 +129,7 @@ function SettingsHarness() {
   const panelRef = useRef<HTMLDivElement>(null);
   useSettingsOverlayDismiss({ activeNavSection: nav, panelRef, setActiveNavSection: setNav });
   return nav === 'settings'
-    ? createElement('div', { ref: (node: HTMLDivElement | null) => { panelRef.current = node; } }, 'Settings remains open', createElement(FeedbackSettingsEntry))
+    ? <div ref={panelRef}>Settings remains open<FeedbackSettingsEntry /></div>
     : createElement('div', null, 'Workspace');
 }
 
