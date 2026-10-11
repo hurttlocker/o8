@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { AssistantMessageEvent, Model } from '@earendil-works/pi-ai/compat';
 import { exportSPKI, generateKeyPair, SignJWT, type CryptoKey } from 'jose';
+import { NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: async () => ({ userId: null }) }));
@@ -68,6 +69,26 @@ function expectPersistedLicense(persisted: string) {
   expect(readFileSync(path.join(dataDir, 'entitlement.json'), 'utf8')).toBe(persisted);
 }
 
+async function submitChat() {
+  const { POST } = await import('@/app/api/v2/proxy/llm/route');
+  return POST(new NextRequest('http://localhost/api/v2/proxy/llm', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'operator', model: 'o8-default', disableTools: true,
+      messages: [
+        { role: 'assistant', content: 'Previous turn' },
+        { role: 'user', content: 'Reply through the configured route.' },
+      ],
+    }),
+  }));
+}
+
+function inferenceResponse() {
+  return new Response('data: {"choices":[{"delta":{"content":"Fixture answer"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
 describe('inference callers during free entitlement issuance', () => {
   beforeAll(async () => {
     const pair = await generateKeyPair('EdDSA');
@@ -83,6 +104,9 @@ describe('inference callers during free entitlement issuance', () => {
     vi.stubEnv('O8_PROXY_URL', RELAY);
     vi.stubEnv('O8_LICENSE_PUBKEY', publicKeyPem);
     vi.stubEnv('OPENROUTER_API_KEY', undefined);
+    vi.stubEnv('GOOGLE_AI_API_KEY', undefined);
+    vi.stubEnv('GOOGLE_GENERATIVE_AI_API_KEY', undefined);
+    vi.stubEnv('GEMINI_API_KEY', undefined);
     vi.stubEnv('O8_LOCAL_INFERENCE_BASE_URL', '');
     vi.stubEnv('O8_LOCAL_CHAT_MODEL', '');
   });
@@ -140,9 +164,9 @@ describe('inference callers during free entitlement issuance', () => {
     });
   });
 
-  it('keeps the Pi plan pin from treating a newly applied paid token as a free allowance', async () => {
+  it.each(callers)('keeps the %s plan pin from treating a newly applied paid token as a free allowance', async (caller) => {
     const held = holdFreeResponse(await signedLicense('free'));
-    const pending = resolveRoute('pi');
+    const pending = resolveRoute(caller);
     await held.requested;
     const persisted = await applyLicense(await signedLicense('pro'));
     vi.stubEnv('O8_PLAN', 'free');
@@ -150,6 +174,61 @@ describe('inference callers during free entitlement issuance', () => {
 
     expect(await pending).toBeNull();
     expectPersistedLicense(persisted);
+  });
+
+  describe('real chat POST with persisted licenses', () => {
+    it.each(['pro', 'founder'] as const)('does not forward a cached %s token under the free pin', async (plan) => {
+      const persisted = await applyLicense(await signedLicense(plan));
+      vi.stubEnv('O8_PLAN', 'free');
+      const upstream = vi.fn(async () => inferenceResponse());
+      vi.stubGlobal('fetch', upstream);
+
+      const response = await submitChat();
+      expect(response.status).toBe(503);
+      expect(upstream).not.toHaveBeenCalled();
+      expectPersistedLicense(persisted);
+    });
+
+    it('refuses a paid token arriving while free issuance waits and the plan becomes pinned', async () => {
+      const held = holdFreeResponse(await signedLicense('free'), () => inferenceResponse());
+      const pending = submitChat();
+      await held.requested;
+      const persisted = await applyLicense(await signedLicense('pro'));
+      vi.stubEnv('O8_PLAN', 'free');
+      held.respond();
+
+      expect((await pending).status).toBe(503);
+      expect(held.fetchMock).toHaveBeenCalledOnce();
+      expectPersistedLicense(persisted);
+    });
+
+    it.each(['free', 'pro', 'founder'] as const)('streams normally with an unpinned signed %s token', async (plan) => {
+      const license = await signedLicense(plan);
+      const persisted = await applyLicense(license);
+      const upstream = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(input)).toBe(`${RELAY}/v1/inference`);
+        expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${license}`);
+        return inferenceResponse();
+      });
+      vi.stubGlobal('fetch', upstream);
+
+      const response = await submitChat();
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('Fixture answer');
+      expect(upstream).toHaveBeenCalledOnce();
+      expectPersistedLicense(persisted);
+    });
+
+    it('keeps View as Free offline without changing the paid license', async () => {
+      const persisted = await applyLicense(await signedLicense('founder'));
+      writeFileSync(path.join(dataDir, 'dev-plan-override'), JSON.stringify({ plan: 'free' }));
+      const upstream = vi.fn(async () => inferenceResponse());
+      vi.stubGlobal('fetch', upstream);
+
+      expect((await submitChat()).status).toBe(503);
+      expect(upstream).not.toHaveBeenCalled();
+      expectPersistedLicense(persisted);
+    });
   });
 
   it('completes managed inference through the default Pi transport after the paid license arrives', async () => {
