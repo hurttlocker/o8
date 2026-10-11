@@ -1,7 +1,8 @@
 import 'server-only';
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { mutateAccountState } from '@/lib/auth/account-state';
+import { removeAccountFile, writeAccountFile } from '@/lib/auth/account-state-files';
 
 import { importSPKI, jwtVerify, errors as joseErrors } from 'jose';
 
@@ -235,7 +236,8 @@ interface ReadCachedEntitlementOptions {
 
 /**
  * Read the cached entitlement file. Returns null when the file is missing or
- * unreadable (the common free case). Never throws.
+ * unreadable (the common free case). Subject mismatch is a pure refusal;
+ * the operator GET route performs eviction under the account lease. Never throws.
  */
 export function readCachedEntitlement(options: ReadCachedEntitlementOptions = {}): EntitlementCacheFile | null {
   try {
@@ -245,7 +247,6 @@ export function readCachedEntitlement(options: ReadCachedEntitlementOptions = {}
     if (licenseKey) {
       const { subject } = readJwtIdentityClaims(licenseKey);
       if (shouldDropCachedLicenseForSubject({ licenseSubject: subject, activeSubject: options.activeSubject })) {
-        clearCachedEntitlement();
         return null;
       }
     }
@@ -271,7 +272,6 @@ export function writeCachedEntitlement(input: {
 }): boolean {
   try {
     const filePath = getEntitlementPath();
-    mkdirSync(path.dirname(filePath), { recursive: true });
     const file: EntitlementCacheFile = {
       plan: input.plan,
       status: input.status,
@@ -280,7 +280,7 @@ export function writeCachedEntitlement(input: {
         ? { expiresAt: new Date(input.expiresAt * 1000).toISOString() }
         : {}),
     };
-    writeFileSync(filePath, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
+    mutateAccountState(() => writeAccountFile(filePath, `${JSON.stringify(file, null, 2)}\n`));
     return true;
   } catch (error) {
     console.error('[entitlement] Failed to write entitlement cache:', error);
@@ -289,12 +289,10 @@ export function writeCachedEntitlement(input: {
 }
 
 export function clearCachedEntitlement(): void {
-  try {
-    rmSync(getEntitlementPath(), { force: true });
+  mutateAccountState(() => {
+    removeAccountFile(getEntitlementPath());
     clearFounderRecord();
-  } catch (error) {
-    console.error('[entitlement] Failed to clear entitlement cache:', error);
-  }
+  });
 }
 
 /**

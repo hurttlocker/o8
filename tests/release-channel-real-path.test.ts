@@ -84,7 +84,7 @@ function fixture(version = '0.1.741-preview.1') {
   mkdirSync(join(bundle, 'dmg'), { recursive: true });
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
   writeFileSync(join(bundle, 'dmg', `o8_${version}_universal.dmg`), 'fixture');
-  for (const name of ['o8', 'speech_recognizer', 'speech-local']) {
+  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
     const path = join(bundle, 'macos', 'o8.app', 'Contents', 'MacOS', name);
     mkdirSync(join(path, '..'), { recursive: true });
     writeFileSync(path, universalMachO());

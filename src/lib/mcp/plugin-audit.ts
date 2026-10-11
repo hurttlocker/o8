@@ -14,6 +14,7 @@ export interface PluginAuditEntry {
   outcome?: 'success' | 'refused' | 'unknown';
   missionId?: string;
   packetId?: string;
+  taskId?: string;
   argumentHash: string;
 }
 

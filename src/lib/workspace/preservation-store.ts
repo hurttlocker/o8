@@ -11,6 +11,7 @@ import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materializa
 import type { WorkspaceSnapshotRecord } from '@/lib/worktree/snapshot-state';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { captureIgnoredArtifacts, type IgnoredArtifactCapture } from './ignored-artifact-io';
+import { preserveWorkspaceGitBundle, readWorkspaceGitBundle, type WorkspaceGitBundleReceipt } from './git-bundle-preservation';
 import { readManagedWorkspaceMaterialization } from './managed-materialization-identity';
 import { repoSetupCopyBindingRequirements } from './repo-setup';
 import { acquireWorkspaceRetentionHold } from './retention-holds';
@@ -25,6 +26,7 @@ export interface WorkspacePreservationReceipt {
   sourceInode: number;
   headCommit: string;
   treeSha: string;
+  gitBundle?: WorkspaceGitBundleReceipt;
 }
 
 export interface WorkspacePreservationPayload {
@@ -36,6 +38,8 @@ export interface WorkspacePreservationPayload {
   worktreeId: string;
   identity: WorktreeMaterializationIdentity;
   capture: IgnoredArtifactCapture;
+  /** Historical v1 receipts predate portable source; their immutable manifests stay readable. */
+  gitBundle?: WorkspaceGitBundleReceipt;
   capturePolicy: {
     rebuildablePaths: string[];
     copiedEnvironment: Record<string, string | null>;
@@ -139,6 +143,17 @@ export async function readWorkspacePreservation(preservationId: string): Promise
     || payload.capture.entries.filter((entry) => entry.kind === 'file').length !== row.artifact_count) {
     throw new Error('Private preservation does not match its trusted owner receipt.');
   }
+  if (payload.gitBundle) {
+    const bundle = payload.gitBundle;
+    if (bundle.repositoryUuid !== payload.repositoryUuid || bundle.packetId !== payload.packetId
+      || bundle.snapshotGeneration !== payload.handoff.evidence.snapshotGeneration
+      || bundle.snapshotFingerprint !== payload.handoff.evidence.snapshotFingerprint
+      || bundle.headCommit !== row.head_commit || bundle.treeSha !== row.tree_sha
+      || bundle.recoveryRef !== payload.handoff.recoveryRef) {
+      throw new Error('Portable Git preservation differs from its trusted owner and generation.');
+    }
+    await readWorkspaceGitBundle(bundle);
+  }
   return {
     payload,
     receipt: {
@@ -151,6 +166,7 @@ export async function readWorkspacePreservation(preservationId: string): Promise
       sourceInode: row.source_inode,
       headCommit: row.head_commit,
       treeSha: row.tree_sha,
+      ...(payload.gitBundle ? { gitBundle: payload.gitBundle } : {}),
     },
   };
 }
@@ -168,21 +184,16 @@ export function preservationIdForSnapshot(snapshot: WorkspaceSnapshotRecord): st
   return row?.preservation_id ?? null;
 }
 
-export function preservationReceiptForSnapshot(snapshot: WorkspaceSnapshotRecord): WorkspacePreservationReceipt {
+export async function preservationReceiptForSnapshot(snapshot: WorkspaceSnapshotRecord): Promise<WorkspacePreservationReceipt> {
   const preservationId = preservationIdForSnapshot(snapshot);
   const row = preservationId ? selectPreservation(preservationId) : null;
-  if (!row || !preservationId) throw new Error('Verified ignored-content preservation is required before retirement.');
-  return {
-    preservationId,
-    manifestSha256: row.manifest_sha256,
-    handoffSha256: row.handoff_sha256,
-    artifactCount: row.artifact_count,
-    artifactBytes: row.artifact_bytes,
-    sourceDevice: row.source_device,
-    sourceInode: row.source_inode,
-    headCommit: row.head_commit,
-    treeSha: row.tree_sha,
-  };
+  if (!row || !preservationId) throw new Error('Verified source and ignored-content preservation is required before retirement.');
+  const { receipt } = await readWorkspacePreservation(preservationId);
+  if (!receipt.gitBundle || receipt.gitBundle.snapshotGeneration !== snapshot.snapshotGeneration
+    || receipt.gitBundle.snapshotFingerprint !== snapshot.snapshotFingerprint) {
+    throw new Error('A verified portable Git bundle for this snapshot generation is required before retirement.');
+  }
+  return receipt;
 }
 
 export async function preserveWorkspaceArtifacts(
@@ -212,6 +223,19 @@ export async function preserveWorkspaceArtifacts(
       treeSha: snapshot.treeSha,
       ...capturePolicy,
     });
+    const gitBundle = await preserveWorkspaceGitBundle(snapshot, repo.localPath);
+    // Source, artifacts, and managed ownership must still name the same capture after Git verification.
+    const repeated = await readManagedWorkspaceMaterialization(repo.localPath, snapshot.originalPath);
+    if (repeated.identity.device !== managed.identity.device || repeated.identity.inode !== managed.identity.inode) {
+      throw new Error('Workspace owner changed during portable preservation.');
+    }
+    const observed = await captureIgnoredArtifacts({
+      workspacePath: snapshot.originalPath, identity: managed.identity,
+      headCommit: snapshot.headCommit, treeSha: snapshot.treeSha, ...capturePolicy,
+    });
+    if (sha256(JSON.stringify(observed)) !== sha256(JSON.stringify(capture))) {
+      throw new Error('Source or unique ignored artifacts changed during portable preservation.');
+    }
     const payload: WorkspacePreservationPayload = {
       schema: 'o8/workspace-preservation/v1',
       repositoryUuid: repo.id,
@@ -221,6 +245,7 @@ export async function preserveWorkspaceArtifacts(
       worktreeId: managed.metadata.id,
       identity: managed.identity,
       capture,
+      gitBundle,
       capturePolicy,
       handoff: {
         revision: snapshot.headCommit,
@@ -234,7 +259,7 @@ export async function preserveWorkspaceArtifacts(
           snapshotFingerprint: snapshot.snapshotFingerprint,
         },
         sessionIdentities: snapshot.sessionIdentities,
-        recoveryInstructions: 'Use the preserved Git ref for source, verify required parent objects, then restore selected ignored artifacts into an exactly owned, quiescent successor. Retain the original provider archive.',
+        recoveryInstructions: 'Download the verified portable Git bundle through private workspace preservation, import its recovery ref into an empty repository, and verify the head, tree and required parent objects. Restore selected ignored artifacts into an exactly owned, quiescent successor. Retain the original provider archive.',
       },
     };
     const content = Buffer.from(JSON.stringify(payload));
@@ -280,7 +305,7 @@ export async function preserveWorkspaceArtifacts(
         laneId: snapshot.laneId,
         identity: managed.identity,
         holdId: 'preservation-failed:' + snapshot.snapshotFingerprint,
-        reason: 'Required ignored-content preservation failed or was uncertain; inspect evidence before releasing this hold.',
+        reason: 'Required source or ignored-content preservation failed or was uncertain; verify the portable Git bundle and exact owner before releasing this hold.',
       });
     }
     throw error;

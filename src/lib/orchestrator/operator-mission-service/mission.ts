@@ -41,6 +41,7 @@ import {
 import { recordOutgoingMissionSnapshot } from './mission-handoff';
 import { logBranchPreparation, logDispatchRoutingRecommendations } from './mission-routing-log';
 import { preparePacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-runtime-override';
+import { captureCurrentDispatchRegistry, publishCurrentDispatchRegistry } from './dispatch-registry-publication';
 import { resolveRuntimePresetModel } from './runtime-preset-routing';
 import {
   buildMissionId,
@@ -443,6 +444,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
   // Use locked state to prevent race with headless loop tick
   const { result, state: finalState } = await withLockedState(async (current) => {
     assertOrchestratorRepoPath(current.repoPath);
+    const registryBaseline = captureCurrentDispatchRegistry(current);
     const beforeDispatch = structuredClone(current);
     // #23 — an EXPLICIT dispatch re-arms any packet a prior reset_packet left in
     // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
@@ -464,7 +466,8 @@ export async function dispatchMission(input: DispatchMissionInput) {
     Object.assign(current, afterDispatch);
     writeOrchestratorControlPlaneState(afterDispatch);
 
-    return summarizeDispatchMission(beforeDispatch, afterDispatch);
+    return { ...summarizeDispatchMission(beforeDispatch, afterDispatch),
+      registryPublication: await publishCurrentDispatchRegistry(afterDispatch, registryBaseline) };
   });
 
   const packetIds = new Set(finalState.packets.map((packet) => packet.id));

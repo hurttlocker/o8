@@ -36,8 +36,10 @@ const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 const { getWorkspaceSnapshot, listWorkspaceSnapshotTransitions } = await import('@/lib/worktree/snapshot-state');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { writeOrchestratorControlPlaneState, readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { recordMission } = await import('@/lib/db/missions-store');
+const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 const repoPath = path.join(root, 'repo');
 let server: Server;
 let port = 0;
@@ -174,7 +176,7 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     writeFileSync(path.join(source.workspacePath, '.o8', 'checkpoint.bin'), binary, { mode: 0o400 });
     writeFileSync(path.join(source.workspacePath, '.o8', 'remaining.md'), note);
     setLaneStatus(source.lane.id, 'running');
-    writeOrchestratorControlPlaneState({
+    const mission = writeOrchestratorControlPlaneState({
       ...createEmptyOrchestratorMissionState(),
       missionId: 'mission-close-preservation', repoPath: repo.localPath, runtime: 'codex',
       packets: [{
@@ -186,6 +188,10 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
         lane: { tileId: source.lane.id, tabId: source.lane.id, repoPath: repo.localPath,
           worktreePath: source.workspacePath, runtime: 'codex', laneId: source.lane.id },
       } as OrchestratorPacket], updatedAt: new Date().toISOString(),
+    });
+    recordMission({ id: mission.missionId!, repoPath: repo.localPath, runtime: 'codex',
+      prompt: '', summary: '', constraints: '', totalWaves: 1, missionState: mission,
+      packetMeta: mission.packets.map(({ id, title, referenceLabel }) => ({ id, title, referenceLabel })),
     });
     const hold = await cli(['packet', 'retain', packetId, '--reason', 'Preserve unfinished checkpoint',
       '--idempotency-key', 'close-preservation-hold']);
@@ -203,14 +209,29 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
       '--idempotency-key', 'close-preservation-release']);
     expect(released.exitCode, released.stderr + released.stdout).toBe(0);
     closeArgs[closeArgs.length - 1] = 'close-preservation-released';
+    const beforeClose = [readOrchestratorControlPlaneState(), readMissionRegistryEntry(mission.missionId!)!.mission]
+      .map((state) => {
+        const packet = state.packets.find((candidate) => candidate.id === packetId)!;
+        return { status: packet.status, queueState: packet.queueState, operatorStopped: packet.operatorStopped,
+          source: packet.releaseStatePayload?.source, epoch: packet.storageAdmissionEpoch,
+          attempt: packet.attemptCount, laneId: packet.lane?.laneId };
+      });
     const closed = await cli(closeArgs);
-    expect(closed.exitCode, closed.stderr + closed.stdout).toBe(0);
+    expect(closed.exitCode, JSON.stringify({ beforeClose, stderr: closed.stderr, stdout: closed.stdout })).toBe(0);
     expect(JSON.parse(closed.stdout)).toMatchObject({ packet: { id: packetId, worktreeRemoved: true, worktreeCleanup: 'removed' } });
     expect(existsSync(source.workspacePath)).toBe(false);
     expect(getWorkspaceSnapshot(repo.id, packetId)).toMatchObject({ state: 'retired', headCommit: head });
     const terminal = listWorkspaceSnapshotTransitions(repo.id, packetId).findLast((entry) => entry.toState === 'retired');
     expect(terminal?.receipt?.preservationId).toMatch(/^[a-f0-9]{64}$/);
     closeDb();
+    expect(readMissionRegistryEntry(mission.missionId!, { includeArchived: true })?.mission.packets[0])
+      .toMatchObject({ status: 'archived', lane: null, queueState: 'held', operatorStopped: true });
+    const retiredTransitions = listWorkspaceSnapshotTransitions(repo.id, packetId);
+    const retiredEvents = getLaneEvents(source.lane.id);
+    const replayedClose = await cli(closeArgs);
+    expect(replayedClose.exitCode, replayedClose.stderr + replayedClose.stdout).toBe(0);
+    expect(listWorkspaceSnapshotTransitions(repo.id, packetId)).toEqual(retiredTransitions);
+    expect(getLaneEvents(source.lane.id)).toEqual(retiredEvents);
     const archiveResponse = await fetch('http://127.0.0.1:' + port + '/api/orchestrator/workspace/preservation?packetId=' + packetId, {
       headers: { authorization: 'Bearer ' + token },
     });

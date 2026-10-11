@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { laneGit } from '@/lib/lane/lane-git';
+import { ranUnconfined, runConfinedProcess } from '@/lib/sandbox/run-confined';
 
 const execFileAsync = promisify(execFile);
 
@@ -77,9 +78,16 @@ interface LintSnapshot {
   stderr: string;
 }
 
+/**
+ * `unconfined` is set when ESLint, which loads the lane's config file as code,
+ * ran without the sandbox because confinement is unavailable on this host.
+ */
 export type LaneRebaseLintResult =
-  | { ok: true; skipped?: string; detail?: string }
-  | { ok: false; output: string };
+  | { ok: true; skipped?: string; detail?: string; unconfined?: true }
+  | { ok: false; output: string; unconfined?: true };
+
+/** One line for the merge card when lane lint ran without the sandbox (#3414). */
+export const UNCONFINED_LINT_NOTE = 'The lane\'s lint config ran without the sandbox: command confinement is unavailable on this host.';
 
 class LintTimeoutError extends Error {}
 
@@ -142,13 +150,13 @@ function lintAvailability(cwd: string): { skip: false; eslintScript: string } | 
   }
 }
 
-async function gitOutput(cwd: string, args: string[], deadline: number): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    windowsHide: true,
-    cwd,
+async function gitOutput(cwd: string, args: string[], deadline: number, gitRepoPath?: string): Promise<string> {
+  const execute = gitRepoPath
+    ? (args: string[], options: { timeout: number; maxBuffer: number }) => laneGit(cwd, gitRepoPath, args, options)
+    : (args: string[], options: { timeout: number; maxBuffer: number }) => execFileAsync('git', args, { cwd, windowsHide: true, encoding: 'utf8', ...options });
+  const { stdout } = await execute(args, {
     timeout: remainingTimeout(deadline),
     maxBuffer: LINT_MAX_BUFFER_BYTES,
-    encoding: 'utf8',
   });
   return stdout;
 }
@@ -179,13 +187,15 @@ async function changedLintFiles(
   cwd: string,
   baseRef: string,
   deadline: number,
+  gitRepoPath?: string,
 ): Promise<{ mergeBase: string; files: ChangedLintFile[] }> {
-  const mergeBase = (await gitOutput(cwd, ['merge-base', baseRef, 'HEAD'], deadline)).trim();
+  const mergeBase = (await gitOutput(cwd, ['merge-base', baseRef, 'HEAD'], deadline, gitRepoPath)).trim();
   if (!mergeBase) throw new Error(`Unable to resolve the lint merge base from ${baseRef}.`);
   const output = await gitOutput(
     cwd,
     ['diff', '--name-status', '-z', '--find-renames', `${mergeBase}..HEAD`],
     deadline,
+    gitRepoPath,
   );
   return { mergeBase, files: parseChangedFiles(output, cwd) };
 }
@@ -201,11 +211,14 @@ function parseEslintResults(stdout: string, stderr: string): LintSnapshot {
   }
 }
 
+// ESLint loads the lane's config file, which is code, so it runs confined to
+// the checkout it lints (#3414). Without `--cache` it writes only to TMPDIR.
 async function lintSnapshot(input: {
   cwd: string;
   eslintScript: string;
   files: string[];
   deadline: number;
+  onUnconfined: () => void;
 }): Promise<LintSnapshot> {
   const args = [
     input.eslintScript,
@@ -217,14 +230,15 @@ async function lintSnapshot(input: {
     ...input.files,
   ];
   try {
-    const { stdout, stderr } = await materializationAwareExecFile(process.execPath, args, {
-      windowsHide: true,
+    const run = await runConfinedProcess(input.cwd, process.execPath, args, {
       cwd: input.cwd,
       timeout: remainingTimeout(input.deadline),
       maxBuffer: LINT_MAX_BUFFER_BYTES,
     });
-    return parseEslintResults(stdout, stderr);
+    if (run.unconfined) input.onUnconfined();
+    return parseEslintResults(run.stdout, run.stderr);
   } catch (error) {
+    if (ranUnconfined(error)) input.onUnconfined();
     if (isTimeoutError(error)) throw new LintTimeoutError('ESLint exceeded the 90 s timeout.');
     const stdout = error instanceof Error && 'stdout' in error
       ? String((error as { stdout?: unknown }).stdout ?? '')
@@ -336,6 +350,7 @@ function warningsAbsentFromBase(
  */
 export async function runLaneRebaseLint(input: {
   cwd: string;
+  gitRepoPath?: string;
   baseRef: string;
   actualBranch: string;
   logPrefix: string;
@@ -349,8 +364,11 @@ export async function runLaneRebaseLint(input: {
     return { ok: true, skipped: availability.reason };
   }
 
+  let unconfined = false;
+  const onUnconfined = () => { unconfined = true; };
+  const marked = <T extends LaneRebaseLintResult>(result: T): T => (unconfined ? { ...result, unconfined: true } : result);
   try {
-    const { mergeBase, files } = await changedLintFiles(input.cwd, input.baseRef, deadline);
+    const { mergeBase, files } = await changedLintFiles(input.cwd, input.baseRef, deadline, input.gitRepoPath);
     if (files.length === 0) {
       return { ok: true, detail: 'No changed lintable files.' };
     }
@@ -360,6 +378,7 @@ export async function runLaneRebaseLint(input: {
       eslintScript: availability.eslintScript,
       files: files.map((file) => file.headPath),
       deadline,
+      onUnconfined,
     });
     const errors: string[] = [];
     let warningCount = 0;
@@ -374,11 +393,11 @@ export async function runLaneRebaseLint(input: {
     if (errors.length > 0) {
       const output = formatFailure(errors);
       console.error(`[${input.logPrefix}] Lint failed for ${input.actualBranch}:\n${output}`);
-      return { ok: false, output };
+      return marked({ ok: false, output });
     }
     if (warningCount === 0) {
       console.log(`[${input.logPrefix}] Lint passed for ${input.actualBranch}`);
-      return { ok: true };
+      return marked({ ok: true });
     }
 
     const baseFiles = files.filter((file): file is ChangedLintFile & { basePath: string } => (
@@ -397,6 +416,7 @@ export async function runLaneRebaseLint(input: {
             eslintScript: availability.eslintScript,
             files: baseFiles.map((file) => file.basePath),
             deadline,
+            onUnconfined,
           });
           for (const [file, messages] of warningsByPath(baseDir, base)) {
             baseWarnings.set(file, messages);
@@ -418,19 +438,19 @@ export async function runLaneRebaseLint(input: {
     if (newWarnings.length > 0) {
       const output = formatFailure(newWarnings);
       console.error(`[${input.logPrefix}] Lint introduced warnings for ${input.actualBranch}:\n${output}`);
-      return { ok: false, output };
+      return marked({ ok: false, output });
     }
 
     console.log(`[${input.logPrefix}] Lint passed for ${input.actualBranch}; existing base warnings did not increase.`);
-    return { ok: true };
+    return marked({ ok: true });
   } catch (error) {
     if (isTimeoutError(error)) {
       const reason = `ESLint exceeded the ${Math.ceil(timeoutMs / 1000)} s timeout`;
       console.warn(`[${input.logPrefix}] Skipping lint for ${input.actualBranch}: ${reason}.`);
-      return { ok: true, skipped: reason };
+      return marked({ ok: true, skipped: reason });
     }
     const output = formatFailure([errorOutput(error)]);
     console.error(`[${input.logPrefix}] Lint verification failed for ${input.actualBranch}:\n${output}`);
-    return { ok: false, output };
+    return marked({ ok: false, output });
   }
 }

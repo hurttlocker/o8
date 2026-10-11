@@ -94,9 +94,8 @@ export async function POST(request: NextRequest) {
           () => meteredAnswer,
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'pipeline error';
-        console.error('[qa][ask-route] pipeline error:', message);
-        emit('error', { message, ...(err instanceof ManagedBrainUnavailableError ? { code: err.code } : {}) });
+        console.error('[qa][ask-route] pipeline error:', err);
+        emit('error', { message: 'Unable to answer cortex question.', ...(err instanceof ManagedBrainUnavailableError ? { code: err.code } : {}) });
         emit('done', {});
       } finally {
         try {

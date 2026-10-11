@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { safeErrorText } from '@/lib/mcp/api-error';
 /**
  * o8 Operator MCP Server — stdio JSON-RPC 2.0 server that lets users
  * control o8 from their Claude Code terminal.
@@ -248,7 +249,7 @@ function startStdio(): void {
       .then((resp) => { if (resp) send(resp); })
       .catch((err) => {
         if (msg.id !== undefined && msg.id !== null) {
-          send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: String(err) } });
+          send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: safeErrorText(err) } });
         }
       });
   });
@@ -306,7 +307,7 @@ function startHttp(port: number): void {
             if (resp) responses.push(resp);
           } catch (err) {
             if (message && message.id !== undefined && message.id !== null) {
-              responses.push({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: String(err) } });
+              responses.push({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: safeErrorText(err) } });
             }
           }
         }

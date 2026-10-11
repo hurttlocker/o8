@@ -17,6 +17,7 @@ import { listLanes } from '@/lib/lane/registry';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
+import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,7 @@ function canonicalLaunchRequest(
   return {
     automaticRecoverySurfaceId: payload.automaticRecoverySurfaceId,
     automaticRecoveryRunId: payload.automaticRecoveryRunId,
+    executionPolicy: payload.executionPolicy,
     runtime: runtimeName as RuntimeLaunchRequest['runtime'],
     prompt: payload.prompt?.trim() ?? '',
     model: trimmed(payload.model),
@@ -69,6 +71,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'clientMutationId is required for this launch route' }, { status: 400 });
   }
   if ((payload.claudeCodeModel !== undefined && typeof payload.claudeCodeModel !== 'string')
+    || (payload.executionPolicy !== undefined && payload.executionPolicy !== 'single-attempt')
     || (payload.claudeCodeCarrier !== undefined && !isClaudeCodeModelSource(payload.claudeCodeCarrier))
     || (payload.workMode !== undefined && payload.workMode !== 'edit' && payload.workMode !== 'read-only')
     || (payload.spendCap !== undefined && !normalizePacketSpendCap(payload.spendCap))) {
@@ -82,6 +85,8 @@ export async function POST(request: NextRequest) {
   }
 
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
+  try { assertSingleAttemptLaunch({ ...launchRequest, executionCarrier: payload.executionCarrier }, launchRequest.workMode); }
+  catch { return NextResponse.json({ error: 'Single-attempt workers require exact native runtime, model, effort and read-only pins.' }, { status: 400 }); }
   const canonicalBody = JSON.stringify(launchRequest);
 
   try {

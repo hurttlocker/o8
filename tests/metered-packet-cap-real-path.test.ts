@@ -81,11 +81,13 @@ chmodSync(fakeWorker, 0o755);
 process.env.O8_CLAUDE_CODE_BIN = fakeWorker;
 process.env.O8_TEST_FAKE_WORKER_PID_FILE = fakeWorkerPidFile;
 
+let upstreamCalls = 0;
 const upstream = createServer((request, response) => {
   if (request.url !== '/api/v1/messages') {
     response.writeHead(404).end();
     return;
   }
+  upstreamCalls += 1;
   response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
     id: 'gen-metered-1',
     content: [{ type: 'text', text: 'ok' }],
@@ -98,6 +100,8 @@ if (!address || typeof address === 'string') throw new Error('Fake gateway did n
 process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL = `http://127.0.0.1:${address.port}/api`;
 
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
+const { prepareMeteredGatewaySession } = await import('@/lib/claude-code/metered-gateway');
+import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 const { dispatch } = await import('@/lib/lane/commands');
 const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -230,6 +234,37 @@ async function waitForConfirmedKillEvent(laneId: string) {
 }
 
 describe('metered packet cap real path', () => {
+  it('keeps known cap refusal latched when publishing telemetry fails after upstream inference', async () => {
+    const sessionDir = mkdtempSync(path.join(root, 'cap-persistence-failure-'));
+    mkdirSync(path.join(sessionDir, 'gateway-spend.json'));
+    const gateway = await prepareMeteredGatewaySession({ sessionDir } as OwnedSessionRecord,
+      process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL!, { carrier: 'openrouter', costUsd: 0.05, inputTokens: 700_000 });
+    const before = upstreamCalls;
+    const call = () => fetch(`${gateway}/v1/messages`, { method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+      body: JSON.stringify({ model: 'metered/test', messages: [{ role: 'user', content: 'test' }] }) });
+    expect((await call()).status).toBe(502);
+    expect((await call()).status).toBe(429);
+    expect(upstreamCalls - before).toBe(1);
+  });
+
+  it.each(['sequential', 'concurrent'] as const)('blocks %s post-cap requests before another upstream inference', async (mode) => {
+    const sessionDir = mkdtempSync(path.join(root, 'cap-refusal-'));
+    const gateway = await prepareMeteredGatewaySession({ sessionDir } as OwnedSessionRecord,
+      process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL!, { carrier: 'openrouter', costUsd: 0.05, inputTokens: 700_000 });
+    const before = upstreamCalls;
+    const call = () => fetch(`${gateway}/v1/messages`, { method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+      body: JSON.stringify({ model: 'metered/test', messages: [{ role: 'user', content: 'test' }] }) });
+    const responses = mode === 'concurrent' ? await Promise.all([call(), call(), call()])
+      : [await call(), await call(), await call()];
+    expect(responses.map((response) => response.status)).toEqual([429, 429, 429]);
+    expect(upstreamCalls - before).toBe(1);
+    expect(JSON.parse(readFileSync(path.join(sessionDir, 'gateway-spend.json'), 'utf8'))).toMatchObject({
+      costUsd: 0.09, inputTokens: 653_000, capHit: true,
+    });
+  });
+
   it('uses gateway cost, interrupts the dispatched worker, and surfaces the cap event', async () => {
     await writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'metered/test', codexModel: null });
     await addRepo(repoPath);

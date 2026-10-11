@@ -117,7 +117,7 @@ describe('postship generated-output cleanup', () => {
 
     const { stdout } = await runFile(process.execPath, [cleanupScript, '--best-effort'], { cwd: root });
 
-    expect(stdout).toContain('removed=1 skipped=2 refused=0');
+    expect(stdout).toContain(`removed=1 skipped=${POSTSHIP_GENERATED_DIRS.length - 1} refused=0`);
     await expect(lstat(path.join(root, '.next'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(path.join(root, 'out', 'valuable.txt'), 'utf8')).resolves.toBe('release bytes');
   });

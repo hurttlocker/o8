@@ -713,6 +713,28 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     writePersistedLlmChat(threadId, invalid, {replace: true}); route();
     expect(origin).not.toHaveBeenCalled(); expect(legacy).not.toHaveBeenCalled();
   }
+  // Threads led by the built-in agent bind under the same checks (#3410).
+  for (const [backend, model] of [['o8', 'o8-free'], ['pi', 'pi']] as const) {
+    const agentThreadId = `thoughts-${backend}-origin-${Date.now()}`;
+    const agentBound = await prepared({orchestratorThreadId: agentThreadId, orchestratorTurnId: 'origin-turn'});
+    const agentRoute = () => routeReviewContinuation(agentBound, legacy, () => false, origin);
+    const turn = {...history.messages[0], backend, model, receipt: {...history.messages[0].receipt, leadModel: model}};
+    const agentHistory = {repoPath, backend, messages: [turn]};
+    writePersistedLlmChat(agentThreadId, agentHistory, {replace: true});
+    agentRoute(); expect(origin).toHaveBeenCalledOnce();
+    expect(origin.mock.calls[0][1]).toEqual({threadId: agentThreadId, turnId: 'origin-turn', backend, model, effort: 'medium', mode: 'fleet'});
+    origin.mockClear();
+    for (const invalid of [
+      {...agentHistory, repoPath: seedPath},
+      {...agentHistory, messages: []},
+      {...agentHistory, messages: [{...turn, model: 'gpt-6.1-sol'}]},
+      {...agentHistory, messages: [turn, {...turn, id: 'changed-backend', backend: 'codex' as const}]},
+      {...agentHistory, backend: 'codex'},
+    ]) {
+      writePersistedLlmChat(agentThreadId, invalid, {replace: true}); agentRoute();
+      expect(origin).not.toHaveBeenCalled(); expect(legacy).not.toHaveBeenCalled();
+    }
+  }
   const unbound = await prepared({});
   routeReviewContinuation(unbound, legacy, () => false, origin);
   expect(legacy).toHaveBeenCalledOnce(); expect(origin).not.toHaveBeenCalled();

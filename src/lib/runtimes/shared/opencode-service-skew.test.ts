@@ -26,6 +26,7 @@ vi.mock('node:os', async (importOriginal) => {
 });
 
 vi.mock('./cli-locate', () => ({
+  scanForBinary: vi.fn(() => null),
   scanAndLink: vi.fn((binaryName: string) => (
     binaryName === 'opencode2' ? '/test-bin/opencode2' : null
   )),

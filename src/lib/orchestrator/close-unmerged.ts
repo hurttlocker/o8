@@ -185,14 +185,34 @@ async function confirmedRetiredWorkerBindings(
   return retired;
 }
 
+type PacketCloseFinalization = { closed: true } | {
+  closed: false;
+  store: 'current' | 'registry';
+  reason: 'packet_missing' | 'storage_generation_changed' | 'attempt_changed' | 'lane_binding_changed' | 'lifecycle_guard_changed' | 'terminal_state_changed';
+};
+
+function terminalCloseState(packet: OrchestratorPacket): boolean {
+  return Boolean(packet.archivedAt) || packet.status === 'archived'
+    || packet.status === 'released' || packet.releaseState === 'released';
+}
+
+function closeGenerationRefusal(
+  guard: PacketLifecycleGuard,
+  packet: OrchestratorPacket | undefined,
+  store: 'current' | 'registry',
+): PacketCloseFinalization | null {
+  const reason = !packet ? 'packet_missing'
+    : packet.storageAdmissionEpoch !== guard.previousPacket.storageAdmissionEpoch ? 'storage_generation_changed'
+      : packet.attemptCount !== guard.previousPacket.attemptCount ? 'attempt_changed'
+        : packet.lane?.laneId !== guard.previousPacket.lane?.laneId ? 'lane_binding_changed' : null;
+  return reason ? { closed: false, store, reason } : null;
+}
+
 async function markPacketClosed(
   guard: PacketLifecycleGuard,
   closedAt: string,
   worktreeCleanup: 'missing' | 'removed' | 'preserved',
-): Promise<boolean> {
-  const sameGeneration = (packet: OrchestratorPacket) => packet.storageAdmissionEpoch === guard.previousPacket.storageAdmissionEpoch
-    && packet.attemptCount === guard.previousPacket.attemptCount
-    && packet.lane?.laneId === guard.previousPacket.lane?.laneId;
+): Promise<PacketCloseFinalization> {
   const archive = (packet: OrchestratorPacket) => {
     packet.status = 'archived';
     packet.queueState = 'held';
@@ -208,40 +228,59 @@ async function markPacketClosed(
       : 'closed_unmerged';
   };
   return withMissionHandoffBarrier(async () => {
-    const { result } = await withLockedState<boolean | null>(async (state) => {
+    const { result } = await withLockedState<PacketCloseFinalization | null>(async (state) => {
       if (state.missionId !== guard.missionId) return null;
       const packet = state.packets.find((candidate) => candidate.id === guard.packetId);
-      if (!packet || !sameGeneration(packet) || !packetLifecycleGuardMatches(packet, guard)) return false;
+      const refused = closeGenerationRefusal(guard, packet, 'current');
+      if (refused) return refused;
+      if (packet && terminalCloseState(packet)) {
+        return { closed: false, store: 'current', reason: 'terminal_state_changed' };
+      }
+      if (!packet || !packetLifecycleGuardMatches(packet, guard)) {
+        return { closed: false, store: 'current', reason: 'lifecycle_guard_changed' };
+      }
       if (readMissionRegistryEntry(guard.missionId, { includeArchived: true })) {
-        const { result: mirrored } = await withMissionRegistryState(guard.missionId, (registry) => {
+        const { result: mirrored } = await withMissionRegistryState<PacketCloseFinalization>(guard.missionId, (registry) => {
           const target = registry.packets.find((candidate) => candidate.id === guard.packetId);
-          const previous = guard.previousPacket;
-          // The current hold may not have reached the registry. Accept that
-          // captured lifecycle only; never overwrite a newer owner/generation.
+          const previous = guard.previousRegistryPacket === undefined
+            ? guard.previousPacket : guard.previousRegistryPacket;
+          // The registry may lag the current lifecycle. Compare its own
+          // admission snapshot; never overwrite a later owner/generation.
           const captured = target
+            && previous
             && target.releaseStatePayload?.source === previous.releaseStatePayload?.source
             && target.status === previous.status
             && target.queueState === previous.queueState
             && target.operatorStopped === previous.operatorStopped;
-          if (!target
-            || !sameGeneration(target)
-            || (!packetLifecycleGuardMatches(target, guard) && !captured)) {
-            return { state: registry, result: false };
+          const refused = closeGenerationRefusal(guard, target, 'registry');
+          if (refused) return { state: registry, result: refused };
+          if (target && terminalCloseState(target)) {
+            return { state: registry, result: { closed: false, store: 'registry', reason: 'terminal_state_changed' } };
+          }
+          if (!target || (!packetLifecycleGuardMatches(target, guard) && !captured)) {
+            return { state: registry, result: { closed: false, store: 'registry', reason: 'lifecycle_guard_changed' } };
           }
           archive(target);
-          return { state: registry, result: true };
+          return { state: registry, result: { closed: true } };
         });
-        if (!mirrored) return false;
+        if (!mirrored.closed) return mirrored;
       }
       archive(packet);
-      return true;
+      return { closed: true };
     });
     if (result !== null) return result;
-    const { result: closed } = await withMissionRegistryState(guard.missionId, (state) => {
+    const { result: closed } = await withMissionRegistryState<PacketCloseFinalization>(guard.missionId, (state) => {
       const packet = state.packets.find((candidate) => candidate.id === guard.packetId);
-      if (!packet || !sameGeneration(packet) || !packetLifecycleGuardMatches(packet, guard)) return { state, result: false };
+      const refused = closeGenerationRefusal(guard, packet, 'registry');
+      if (refused) return { state, result: refused };
+      if (packet && terminalCloseState(packet)) {
+        return { state, result: { closed: false, store: 'registry', reason: 'terminal_state_changed' } };
+      }
+      if (!packet || !packetLifecycleGuardMatches(packet, guard)) {
+        return { state, result: { closed: false, store: 'registry', reason: 'lifecycle_guard_changed' } };
+      }
       archive(packet);
-      return { state, result: true };
+      return { state, result: { closed: true } };
     });
     return closed;
   });
@@ -280,6 +319,17 @@ async function closePacketUnmergedUnlocked(input: {
       message: `Packet ${input.packetId} was not found in current or durable mission state.`,
       status: 404,
     } satisfies CloseUnmergedResult;
+  }
+  if (guard.previousRegistryPacket) {
+    const refused = closeGenerationRefusal(guard, guard.previousRegistryPacket, 'registry')
+      ?? (terminalCloseState(guard.previousRegistryPacket) && guard.previousPacket.status !== 'archived'
+        ? { closed: false, store: 'registry', reason: 'terminal_state_changed' } as const : null);
+    if (refused && !refused.closed) {
+      await restorePacketLifecycleGuard(guard);
+      return { ok: false, code: 'packet_state_changed', status: 409,
+        message: `Packet ${input.packetId} close admission refused by registry state (${refused.reason}).`,
+        error: { store: refused.store, reason: refused.reason } };
+    }
   }
   if (guard.previousPacket.status === 'archived') {
     const priorLane = findLatestLaneByPacket(input.packetId);
@@ -486,7 +536,7 @@ async function closePacketUnmergedUnlocked(input: {
         const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
           runtime: candidate.runtime,
           worktreePath: candidate.worktreePath,
-          cleanup: () => removeMergedWorktree(candidate),
+          cleanup: () => removeMergedWorktree(candidate, { preserveUncommittedSource: true }),
           removed: (result) => result.removed || result.reason === 'worktree-equals-repo',
         });
         const cleanup = cleanupAttempt.result;
@@ -583,12 +633,14 @@ async function closePacketUnmergedUnlocked(input: {
     }
 
     const closedAt = new Date().toISOString();
-    if (!await markPacketClosed(guard, closedAt, worktreeCleanup)) {
+    const finalization = await markPacketClosed(guard, closedAt, worktreeCleanup);
+    if (!finalization.closed) {
       await restoreDetachedSessions();
       return {
         ok: false,
         code: 'close_failed',
-        message: `Packet ${input.packetId} disappeared before its closed state could be persisted.`,
+        message: `Packet ${input.packetId} close finalization refused by ${finalization.store} state (${finalization.reason}).`,
+        error: { store: finalization.store, reason: finalization.reason },
         status: 409,
       };
     }

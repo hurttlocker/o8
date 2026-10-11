@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { link, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-w
 import { createPiSdkSession, requirePiNode, requirePiPlatform } from '@/lib/pi/sdk/session';
 import { createManagedPiTransport } from '@/lib/pi/sdk/transport';
 import * as workspaceFiles from '@/lib/fs/workspace-file';
+import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 // These seams exist only in Vitest's module mocks, never in session options.
 const race = vi.hoisted(() => ({ afterLstat: undefined as undefined | ((path: string) => Promise<void>) }));
@@ -22,6 +23,8 @@ vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
   contextWindow: 16000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+// Approved writes go through the native helper from the source checkout's cargo build.
+beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 const roots: string[] = [];
 const clients: Awaited<ReturnType<typeof createPiSdkSession>>[] = [];
 afterEach(async () => { race.afterLstat = undefined; vi.restoreAllMocks();
@@ -63,7 +66,7 @@ describe('managed Pi SDK real worker', () => {
         yield* events(++calls === 1 ? message([{ type: 'toolCall', id: 'write-1', name: 'write_file', arguments: { path: 'note.txt', content: 'hello π' } }], 'toolUse')
           : message([{ type: 'text', text: 'Saved π' }]));
       } });
-    expect(first.tools).toEqual(['read_file', 'write_file']);
+    expect(first.tools).toEqual(['read_file', 'write_file', 'run_command']);
     expect(await first.prompt('Write a note')).toMatchObject({ text: 'Saved π', stopReason: 'stop' });
     expect(await readFile(join(paths.workspace, 'note.txt'), 'utf8')).toBe('hello π');
     expect(approved).toBe(1); expect(seen.at(-1)).toBe('agent_settled');
@@ -243,7 +246,8 @@ describe('managed Pi SDK real worker', () => {
       resolveRoute: async () => ({ via: 'proxy', url: 'https://managed.example/v1/inference', headers: {} }),
       fetch: async () => { attempts++; return new Response('sensitive upstream body', { status }); } });
     const session = await client({ ...paths, model, transport });
-    expect((await session.prompt('Try managed inference')).stopReason).toBe('error');
+    expect(await session.prompt('Try managed inference')).toMatchObject({ stopReason: 'error',
+      errorMessage: `Managed inference rejected request (${status})` });
     expect(attempts).toBe(1);
     expect(await readFile(session.sessionFile, 'utf8')).not.toContain('sensitive upstream body');
   }, 15000);
@@ -264,6 +268,25 @@ describe('managed Pi SDK real worker', () => {
       fetch: async () => new Response('data: {"error":{"message":"synthetic-secret-provider-body"}}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } }) });
     const session = await client({ ...paths, model, transport, onEvent: event => observed.push(event) });
     expect((await session.prompt('Try an SSE error')).stopReason).toBe('error');
+    expect(JSON.stringify(observed)).not.toContain('synthetic-secret-provider-body');
+    expect(await readFile(session.sessionFile, 'utf8')).not.toContain('synthetic-secret-provider-body');
+  }, 15000);
+
+  it('redacts SSE failure text from partial messages queued before the error', async () => {
+    const paths = await fixture(); const observed: unknown[] = []; const forwarded: string[] = [];
+    const managed = createManagedPiTransport({ model,
+      resolveRoute: async () => ({ via: 'proxy', url: 'https://managed.example/v1/inference', headers: {} }),
+      fetch: async () => new Response(['Partial', ' answer', ' before'].map(text => `data: {"choices":[{"delta":{"content":"${text}"},"finish_reason":null}]}\n\n`).join('')
+        + 'data: {"error":{"message":"synthetic-secret-provider-body"}}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } }) });
+    // Serialize each event where the session forwards it to the worker: after the
+    // round-trip for the previous event, so Pi has already parsed the error.
+    const transport: typeof managed = async function* (context, signal) {
+      for await (const event of managed(context, signal)) { forwarded.push(JSON.stringify(event)); yield event; }
+    };
+    const session = await client({ ...paths, model, transport, onEvent: event => observed.push(event) });
+    expect((await session.prompt('Try a late SSE error')).stopReason).toBe('error');
+    expect(forwarded.some(event => event.includes('text_delta'))).toBe(true);
+    expect(forwarded.join('\n')).not.toContain('synthetic-secret-provider-body');
     expect(JSON.stringify(observed)).not.toContain('synthetic-secret-provider-body');
     expect(await readFile(session.sessionFile, 'utf8')).not.toContain('synthetic-secret-provider-body');
   }, 15000);

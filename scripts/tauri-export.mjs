@@ -675,13 +675,14 @@ compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NAT
 
 // ── Bundle the Pi SDK worker (#3255) ──
 // The packaged server runs from Resources/server; piSdkScriptPath() looks for
-// the worker and the approved-write helper in pi-sdk/ there. One file each, so
-// the Pi packages' node_modules never ship. Loaded here, like esbuild above, so
-// the input guards run before any build tooling is resolved.
+// the worker in pi-sdk/ there. One file, so the Pi packages' node_modules never
+// ship. Loaded here, like esbuild above, so the input guards run before any
+// build tooling is resolved. The approved-write helper is native and ships as
+// an externalBin (#3289).
 try {
   const { bundlePiSdk } = await import('./lib/pi-sdk-bundle.mjs');
   bundlePiSdk({ root, outDir: join(server, 'pi-sdk') });
-  console.log('📦 Bundled pi-sdk/worker.mjs + approved-write.mjs');
+  console.log('📦 Bundled pi-sdk/worker.mjs');
 } catch (e) {
   console.error('❌ Pi SDK bundle failed — refusing to ship a broken bundle');
   console.error(`   ${e.message}`);

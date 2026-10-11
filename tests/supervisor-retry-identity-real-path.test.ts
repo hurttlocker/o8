@@ -161,6 +161,24 @@ describe('supervisor retry identity through persisted state and the launch route
     expect(callbacks.broadcastAgentUpdate.mock.calls.filter(([event]) => event.status === 'retrying')).toHaveLength(1);
   });
 
+  it('holds a persisted single-attempt worker before any supervisor retry request', async () => {
+    const f = fixture('codex', { workMode: 'read-only' });
+    f.session.executionPolicy = { version: 1, mode: 'single-attempt', runtime: 'codex',
+      model: f.session.model!, effort: 'high', runtimeConfig: { workMode: 'read-only' } };
+    f.save();
+    closeDb();
+    const transport = serveLaunchRoute();
+    const callbacks = watch(f);
+    await vi.waitFor(() => expect(callbacks.broadcastAgentUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'awaiting_input' }),
+    ));
+    expect(getLane(f.lane.id)?.outcomeNote).toContain('single-attempt');
+    expect(transport).not.toHaveBeenCalled();
+    expect(h.launch).not.toHaveBeenCalled();
+    expect(callbacks.onAgentRetry).not.toHaveBeenCalled();
+    expect(supervisor.getWatchedAgents(f.repo)[0]).toMatchObject({ retryCount: 0, completionReported: true });
+  });
+
   it.each([
     ['claude-code', 'native'],
     ['claude-code', 'codex-subscription'],

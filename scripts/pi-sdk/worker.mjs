@@ -32,7 +32,9 @@ function failedMessage(model, reason, message) {
 }
 async function initialize(params) {
   if (session) throw new Error('Worker already initialized');
-  const { cwd, stateDir, sessionFile, model, tools } = params;
+  const { cwd, stateDir, sessionFile, model, tools, systemPrompt } = params;
+  const prompt = typeof systemPrompt === 'string' ? systemPrompt
+    : 'Help with files in the selected workspace. Use only the declared tools. Do not claim success after denied or failed actions.';
   const runtime = await ModelRuntime.create({ authPath: `${stateDir}/auth.json`, modelsPath: null,
     refreshOnCreate: false, allowModelNetwork: false });
   runtime.registerProvider('o8-managed', {
@@ -57,7 +59,7 @@ async function initialize(params) {
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => 'Help with files in the selected workspace. Use only the declared tools. Do not claim success after denied or failed actions.',
+    getSystemPrompt: () => prompt,
     getSystemPromptSource: () => undefined, getAppendSystemPrompt: () => [],
     getAppendSystemPromptSources: () => [], extendResources: () => {}, reload: async () => {},
   };
@@ -94,7 +96,7 @@ async function command(method, params = {}) {
       await session.waitForIdle();
       const last = session.messages.slice(messageOffset).reverse().find(message => message.role === 'assistant');
       return { text: last?.content.filter(part => part.type === 'text').map(part => part.text).join('') ?? '', stopReason: last?.stopReason,
-        messageCount: session.messages.length };
+        ...(last?.errorMessage ? { errorMessage: last.errorMessage } : {}), messageCount: session.messages.length };
     } finally { active = false; }
   }
   throw new Error('Unsupported worker command');

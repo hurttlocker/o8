@@ -1,4 +1,4 @@
-import type { AcpInboundRequest, AcpInitializeResult, AcpRawNotification } from '@/lib/acp/client';
+import type { AcpClient, AcpInboundRequest, AcpInitializeResult, AcpRawNotification } from '@/lib/acp/client';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type {
   OwnedRunOutcome,
@@ -78,6 +78,7 @@ export interface OwnedAcpRuntimeAdapter {
   validateInitialize?(result: AcpInitializeResult): { version?: string };
   supportsResume?(result: AcpInitializeResult): boolean;
   configureSession?(input: {
+    client: AcpClient;
     sessionId: string;
     model?: string;
     resumed: boolean;

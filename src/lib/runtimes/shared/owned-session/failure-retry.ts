@@ -20,7 +20,7 @@ export function createFailureRetry(options: {
     const run = currentRecoveryRun(session);
     const age = run?.finishedAt ? Date.now() - Date.parse(run.finishedAt) : Infinity;
     const budget = options.adapter.chooseRetryModel ? MAX_AUTO_RETRIES : 1;
-    if (!session.autoRetry || session.activeRun || recoveryInterrupted(session)
+    if (session.executionPolicy !== undefined || !session.autoRetry || session.activeRun || recoveryInterrupted(session)
       || !run || run.outcome !== 'failed' || run.sandboxDenial || (session.retryCount ?? 0) >= budget
       || !Number.isFinite(age) || age >= AUTO_RETRY_FRESHNESS_MS
       || pending.has(session.surfaceId)) return;
@@ -30,7 +30,7 @@ export function createFailureRetry(options: {
         await options.withSurfaceLock(session.surfaceId, async () => {
           const current = await options.io.findSession(session.surfaceId);
           const failed = current && currentRecoveryRun(current);
-          if (!current || current.activeRun || current.detachedAt || current.orphanedAt || !current.autoRetry
+          if (!current || current.executionPolicy !== undefined || current.activeRun || current.detachedAt || current.orphanedAt || !current.autoRetry
             || recoveryInterrupted(current) || failed?.id !== run.id || failed.outcome !== 'failed'
             || (current.retryCount ?? 0) >= budget) return;
           if (options.adapter.chooseRetryModel) {

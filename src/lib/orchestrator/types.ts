@@ -663,6 +663,13 @@ export interface PacketSelfReview {
 }
 
 export interface PacketContext {
+  /** Current recovery availability; the immutable completion handoff remains historical. */
+  recovery?: {
+    source: 'retained-source' | 'verified-preservation' | 'unavailable';
+    instructions: string;
+    preservationId?: string;
+    bundleSha256?: string;
+  };
   packetId: string;
   projectId?: string | null;
   sessionKey: string;
@@ -769,7 +776,7 @@ export type WorkspaceLaneTranscriptState =
 export interface WorkspaceLaneState {
   tileId: string;
   tabId: string | null;
-  kind: 'chat' | 'llm-chat' | 'terminal' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
+  kind: 'chat' | 'llm-chat' | 'chatgpt-plan' | 'terminal' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
   title: string;
   subtitle: string | null;
   repoPath: string | null;

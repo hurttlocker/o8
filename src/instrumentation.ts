@@ -79,6 +79,14 @@ export async function register(): Promise<void> {
       }
     })();
 
+    // #3454 — o8's own Messages receiver for Symon. Off until the operator
+    // enables it; macOS only. Not during builds.
+    if (process.platform === 'darwin' && process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
+      void import('@/lib/symon/messages-receiver/loop')
+        .then(({ startMessagesReceiver }) => startMessagesReceiver())
+        .catch(() => console.warn('[symon] Messages receiver failed to start'));
+    }
+
     // #984 — legacy search ingestion is resumable and deliberately deferred so
     // schema initialization and app boot never scan transcript/history stores.
     setTimeout(() => {

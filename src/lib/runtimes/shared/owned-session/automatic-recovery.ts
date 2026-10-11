@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { ownedRoots } from '../owned-session-index';
 import { createOwnedSessionIo, type OwnedSessionIo } from './session-io';
 import type { OwnedSessionRecord } from './types';
+import { refuseOwnedSingleAttemptResume } from './execution-policy';
 
 export class AutomaticRecoveryRefusedError extends Error {}
 
@@ -30,11 +31,15 @@ export async function readOwnedRecoveryState(surfaceId: string) {
   const io = store?.io ?? createOwnedSessionIo({ root: root.root, surfacePrefix: root.marker, invalidateFleetCache: () => {} });
   const session = await io.findSession(surfaceId).catch(() => null);
   return { owned: true as const, runId: session ? currentRecoveryRun(session)?.id : undefined,
+    automaticRecoveryAllowed: Boolean(session && session.executionPolicy === undefined),
     outcome: session ? currentRecoveryRun(session)?.outcome : undefined,
     interrupted: session ? recoveryInterrupted(session) : false };
 }
 
 export function assertAutomaticRecoveryGeneration(session: OwnedSessionRecord | null, runId: string): void {
+  if (session?.executionPolicy !== undefined) {
+    throw new AutomaticRecoveryRefusedError('Automatic recovery refused: this is a single-attempt worker.');
+  }
   if (!session || session.detachedAt || session.orphanedAt
     || currentRecoveryRun(session)?.id !== runId || recoveryInterrupted(session)) {
     throw new AutomaticRecoveryRefusedError('Automatic recovery refused: the current run changed or was interrupted. Use an explicit resume.');
@@ -60,6 +65,7 @@ export async function withOwnedAutomaticRecovery<T>(surfaceId: string, runId: st
   if (!store) throw new AutomaticRecoveryRefusedError('Automatic recovery refused: the owned session lock is unavailable.');
   return store.lock(surfaceId, async () => {
     const current = await store.io.findSession(surfaceId);
+    refuseOwnedSingleAttemptResume(current);
     assertAutomaticRecoveryGeneration(current, runId);
     return operation();
   });

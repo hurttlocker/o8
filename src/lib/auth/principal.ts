@@ -1,3 +1,4 @@
+import { isReadOnlyWorkerBearer, resolveReadOnlyWorkerToken } from './read-only-worker-token';
 import { isLegacyLocalWorkerToken, isPacketWorkerToken } from './worker-token';
 import { resolvePacketWorkerToken } from './packet-worker-token';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -14,6 +15,7 @@ export type RequestPrincipalContext =
   | PluginPrincipal
   | {
       role: 'worker';
+      readOnly?: true;
       packetId: string | null;
       tokenId: string | null;
       leaseProcessMarker: string | null;
@@ -67,6 +69,11 @@ export function resolveRequestPrincipal(req: Request): RequestPrincipal {
 export function resolveRequestPrincipalContext(req: Request): RequestPrincipalContext {
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (isReadOnlyWorkerBearer(bearer)) {
+    const identity = resolveReadOnlyWorkerToken(bearer);
+    return identity ? { role: 'worker', readOnly: true, packetId: null, tokenId: identity.tokenId,
+      leaseProcessMarker: identity.runId, leaseProcessPid: null, leaseProcessGroupId: null } : { role: 'anonymous' };
+  }
   const plugin = resolvePluginToken(bearer);
   if (plugin) return plugin;
   if (isPacketWorkerToken(bearer)) {

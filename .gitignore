@@ -69,7 +69,10 @@ branding/
 .claude/scheduled_tasks.lock
 src-tauri/helpers/speech-local
 src-tauri/helpers/speech-local-*
+src-tauri/helpers/o8-pi-write
+src-tauri/helpers/o8-pi-write-*
 src-tauri/sidecars/speech-local/.build/
+src-tauri/sidecars/pi-write/target/
 
 # Local scratch output (release cards, one-off renders) — never repo content
 scratch/

@@ -4,6 +4,7 @@ import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { bindIdempotencyClientMutation } from '@/lib/orchestrator/idempotency-store';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import '@/lib/runtimes';
+import { readWorkspaceGitBundle } from '@/lib/workspace/git-bundle-preservation';
 import { inspectRetiredWorkspacePreservation, restoreWorkspacePreservation } from '@/lib/workspace/preservation-restorer';
 import { resolvePacketRecoveryTarget } from '@/lib/workspace/recovery-target';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../../_utils';
@@ -20,15 +21,28 @@ export async function GET(request: NextRequest) {
   const refusal = denied(request);
   if (refusal) return refusal;
   const packetId = request.nextUrl.searchParams.get('packetId')?.trim() ?? '';
+  const format = request.nextUrl.searchParams.get('format');
   if (!packetId || packetId.length > 256) return operatorError('invalid_request', 'packetId is required.', 400);
+  if (format && format !== 'bundle') return operatorError('invalid_request', 'The preservation format is unsupported.', 400);
   try {
     const { repo } = await resolvePacketRecoveryTarget(packetId);
     const { receipt, payload } = await inspectRetiredWorkspacePreservation(repo.id, packetId);
+    if (format === 'bundle') {
+      if (!receipt.gitBundle) return operatorError('bundle_unavailable', 'This historical preservation has no portable Git bundle.', 409);
+      const content = await readWorkspaceGitBundle(receipt.gitBundle);
+      return new Response(new Uint8Array(content), { headers: {
+        'content-type': 'application/octet-stream',
+        'content-disposition': 'attachment; filename="' + receipt.gitBundle.sha256 + '.bundle"',
+        'content-length': String(content.length), 'cache-control': 'private, no-store',
+        'x-content-type-options': 'nosniff',
+      } });
+    }
     return operatorSuccess({
       schema: 'o8/workspace-preservation/v1', packetId,
       preservationId: receipt.preservationId, manifestSha256: receipt.manifestSha256,
       handoffSha256: receipt.handoffSha256, artifactCount: receipt.artifactCount, artifactBytes: receipt.artifactBytes,
       headCommit: receipt.headCommit, treeSha: receipt.treeSha,
+      gitBundle: receipt.gitBundle ?? null,
       artifacts: payload.capture.entries.map(({ path, kind, bytes, sha256 }) => ({ path, kind, bytes, sha256 })),
     });
   } catch {

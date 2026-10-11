@@ -32,14 +32,11 @@
  * `prune_forced` so the override is on the audit trail.
  */
 
-import { execFile } from 'node:child_process';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
+import { laneGit, LaneGitMetadataError } from './lane-git';
 import { isLaneTerminal } from './terminal-states';
-
-const execFileAsync = promisify(execFile);
 
 export const PRUNE_RECENT_MTIME_MS = 30 * 60_000; // 30 min
 const GIT_TIMEOUT_MS = 5_000;
@@ -64,28 +61,28 @@ export interface PruneGateDecision {
   forced?: boolean;
 }
 
-async function gitStatusPorcelain(worktreePath: string): Promise<string | null> {
+async function gitStatusPorcelain(worktreePath: string, repoPath: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'status', '--porcelain'], {
-      windowsHide: true,
+    const { stdout } = await laneGit(worktreePath, repoPath, ['status', '--porcelain'], {
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_MAX_BUFFER,
     });
     return stdout;
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return null; // not a git worktree / git unavailable — no uncommitted signal
   }
 }
 
-async function gitTrackedTopLevel(worktreePath: string): Promise<string[]> {
+async function gitTrackedTopLevel(worktreePath: string, repoPath: string): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'ls-tree', '--name-only', 'HEAD'], {
-      windowsHide: true,
+    const { stdout } = await laneGit(worktreePath, repoPath, ['ls-tree', '--name-only', 'HEAD'], {
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_MAX_BUFFER,
     });
     return stdout.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, MAX_PER_SOURCE);
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     return [];
   }
 }
@@ -110,6 +107,7 @@ async function hasRecentActivity(
   worktreePath: string,
   now: number,
   porcelain: string | null,
+  repoPath: string,
 ): Promise<boolean> {
   const cutoff = now - PRUNE_RECENT_MTIME_MS;
   const candidates = new Set<string>();
@@ -117,7 +115,7 @@ async function hasRecentActivity(
   candidates.add(join(worktreePath, '.git', 'HEAD'));
   candidates.add(join(worktreePath, '.git'));
 
-  for (const name of await gitTrackedTopLevel(worktreePath)) candidates.add(join(worktreePath, name));
+  for (const name of await gitTrackedTopLevel(worktreePath, repoPath)) candidates.add(join(worktreePath, name));
   for (const rel of statusPaths(porcelain)) candidates.add(join(worktreePath, rel));
 
   try {
@@ -197,9 +195,14 @@ export async function checkPruneGate(input: PruneGateInput): Promise<PruneGateDe
   const reasons: string[] = [];
   if (lane && !laneTerminal) reasons.push('lane_non_terminal');
   if (!laneTerminal) {
-    const porcelain = await gitStatusPorcelain(worktreePath);
-    if (porcelain !== null && porcelain.trim().length > 0) reasons.push('uncommitted_work');
-    if (await hasRecentActivity(worktreePath, Date.now(), porcelain)) reasons.push('recent_activity');
+    try {
+      const porcelain = await gitStatusPorcelain(worktreePath, input.repoRoot);
+      if (porcelain !== null && porcelain.trim().length > 0) reasons.push('uncommitted_work');
+      if (await hasRecentActivity(worktreePath, Date.now(), porcelain, input.repoRoot)) reasons.push('recent_activity');
+    } catch (error) {
+      if (!(error instanceof LaneGitMetadataError)) throw error;
+      reasons.push('git_metadata_untrusted');
+    }
   }
 
   if (reasons.length === 0) return { ok: true };
